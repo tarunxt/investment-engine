@@ -14,7 +14,7 @@ export type GenuinePortfolioPoint = {
 type GenuineInrSnapshot = {
   captured_at: string;
   holdings_market_value: number;
-  available_margin: number;
+  available_margin: number | null;
 };
 
 export const MIN_GENUINE_PORTFOLIO_POINTS = 4;
@@ -38,7 +38,7 @@ export function buildGenuineInrPortfolioTrend(
   const points = snapshots
     .map((snapshot) => ({
       timestamp: Date.parse(snapshot.captured_at),
-      value: snapshot.holdings_market_value + snapshot.available_margin,
+      value: snapshot.available_margin == null ? Number.NaN : snapshot.holdings_market_value + snapshot.available_margin,
     }))
     .filter(
       (point) =>

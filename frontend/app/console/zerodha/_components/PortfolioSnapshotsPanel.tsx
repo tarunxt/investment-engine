@@ -26,16 +26,22 @@ import {
   type ZerodhaPortfolioSnapshotSummary,
 } from "@/types/api";
 
-function formatCurrency(value: number) {
+function formatCurrency(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 2,
-  }).format(value || 0);
+  }).format(value);
 }
 
-function formatCount(value: number) {
-  return new Intl.NumberFormat("en-IN").format(value || 0);
+function formatCount(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("en-IN").format(value);
+}
+
+function formatPrice(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "—";
 }
 
 function formatSnapshotDate(value: string) {
@@ -156,7 +162,8 @@ function getSyncButtonTone(lastSyncAt: string | null | undefined, now: Date) {
   };
 }
 
-function toneClass(value: number) {
+function toneClass(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "text-gray-500";
   if (value > 0) return "text-emerald-600";
   if (value < 0) return "text-red-600";
   return "text-gray-500";
@@ -555,10 +562,10 @@ function PositionRow({ position }: { position: ZerodhaPortfolioPosition }) {
         {formatCount(position.quantity)}
       </td>
       <td className="py-2.5 pr-4 text-gray-700">
-        {position.average_price ? position.average_price.toFixed(2) : "—"}
+        {formatPrice(position.average_price)}
       </td>
       <td className="py-2.5 pr-4 text-gray-700">
-        {position.last_price ? position.last_price.toFixed(2) : "—"}
+        {formatPrice(position.last_price)}
       </td>
       <td className={cn("py-2.5 pr-4 font-medium", toneClass(position.pnl))}>
         {formatCurrency(position.pnl)}
@@ -910,10 +917,10 @@ export function PortfolioSnapshotsPanel({
                         {formatCount(holding.quantity)}
                       </td>
                       <td className="py-2.5 pr-4 text-gray-700">
-                        {holding.average_price.toFixed(2)}
+                        {formatPrice(holding.average_price)}
                       </td>
                       <td className="py-2.5 pr-4 text-gray-700">
-                        {holding.last_price.toFixed(2)}
+                        {formatPrice(holding.last_price)}
                       </td>
                       <td className="py-2.5 pr-4 text-gray-700">
                         {formatCurrency(holding.market_value)}

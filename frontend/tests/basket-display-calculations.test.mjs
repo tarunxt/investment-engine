@@ -615,3 +615,14 @@ test('closed-market explanation follows the existing protected Market route with
  for(const [time,open] of [['03:44',false],['03:45',true],['10:00',true],['10:01',false]])assert.equal(out.getIndiaMarketStatus(new Date('2026-10-30T'+time+':00Z')).open,open);
  assert.match(source,/zerodhaExecutionMode !== 'direct_market' \|\| !getIndiaMarketStatus\(\)\.open/);
 });
+
+
+test('nullable Kite exposure cannot become known units or popup asset totals', () => {
+  const base = { captured_at: '2026-10-20T14:49:00Z', holdings_count: 1, available_margin: 0, holdings: [{ tradingsymbol: 'SYNTH', exchange: 'NSE', quantity: 0, t1_quantity: 0, last_price: 0 }] };
+  assert.equal(math.kiteHoldingQuantity(base, 'SYNTH', 'NSE').quantity, 0);
+  for (const field of ['quantity', 't1_quantity', 'last_price']) {
+    const snapshot = { ...base, holdings: [{ ...base.holdings[0], [field]: null }] };
+    assert.equal(math.kiteWeightContext(snapshot).totalAssets, null);
+    if (field !== 'last_price') assert.equal(math.kiteHoldingQuantity(snapshot, 'SYNTH', 'NSE'), null);
+  }
+});

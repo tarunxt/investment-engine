@@ -101,11 +101,12 @@ export function displaySizingPrice(quoted: number | null | undefined, limit: num
   return quote !== null ? { price: quote, basis: 'quoted_ltp', label: 'Quoted LTP shown in this row' } : estimate !== null ? { price: estimate, basis: 'limit_estimate', label: 'Estimate using Limit Price; not live LTP' } : { price: null, basis: 'unavailable', label: 'No valid Quoted LTP or Limit Price is available' };
 }
 
-export function kiteHoldingQuantity(snapshot: { holdings: { exchange: string; tradingsymbol: string; quantity: number; t1_quantity: number }[]; holdings_count: number; captured_at: string } | null, symbol: string, exchange: string) {
+export function kiteHoldingQuantity(snapshot: { holdings: { exchange: string; tradingsymbol: string; quantity: number | null; t1_quantity: number | null }[]; holdings_count: number; captured_at: string } | null, symbol: string, exchange: string) {
   if (!snapshot || !Array.isArray(snapshot.holdings) || snapshot.holdings_count !== snapshot.holdings.length || !Number.isFinite(Date.parse(snapshot.captured_at))) return null;
   const matches = snapshot.holdings.filter(row => stockIdentity(row.tradingsymbol.trim(), row.exchange.trim()) === stockIdentity(symbol.trim(), exchange.trim()));
   let quantity = 0;
   for (const row of matches) {
+    if (row.quantity == null || row.t1_quantity == null) return null;
     if (![row.quantity, row.t1_quantity].every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0)) return null;
     quantity += row.quantity + row.t1_quantity;
   }
@@ -125,11 +126,12 @@ export function sellHoldingDisplay(stock: { action?: string | null; holdingQuant
 }
 
 /** Current Kite exposure includes unsettled T1 units, valued at the saved holding LTP. */
-export function kiteWeightContext(snapshot: { holdings: { exchange: string; tradingsymbol: string; quantity: number; t1_quantity: number; last_price: number }[]; holdings_count: number; captured_at: string; available_margin: number | null } | null) {
+export function kiteWeightContext(snapshot: { holdings: { exchange: string; tradingsymbol: string; quantity: number | null; t1_quantity: number | null; last_price: number | null }[]; holdings_count: number; captured_at: string; available_margin: number | null } | null) {
   const values = new Map<string, number>();
   if (!snapshot || snapshot.holdings_count !== snapshot.holdings.length || !Number.isFinite(Date.parse(snapshot.captured_at)) || snapshot.available_margin === null || !Number.isFinite(snapshot.available_margin)) return { values, portfolioValue: null, totalAssets: null, valid: false };
   let portfolioCents = 0;
   for (const holding of snapshot.holdings) {
+    if (holding.quantity == null || holding.t1_quantity == null || holding.last_price == null) return { values: new Map<string, number>(), portfolioValue: null, totalAssets: null, valid: false };
     const units = holding.quantity + holding.t1_quantity;
     if (![holding.quantity, holding.t1_quantity, holding.last_price].every(Number.isFinite) || holding.quantity < 0 || holding.t1_quantity < 0 || units < 0 || (units > 0 && holding.last_price <= 0) || !["NSE", "BSE"].includes(holding.exchange?.trim().toUpperCase()) || !holding.tradingsymbol?.trim()) return { values: new Map<string, number>(), portfolioValue: null, totalAssets: null, valid: false };
     const cents = Math.round(units * holding.last_price * 100);

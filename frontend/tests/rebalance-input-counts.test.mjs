@@ -36,7 +36,7 @@ for (const link of run.run_jobs) {
   link.stage = 1;
   link.job.prompt = run.prompt;
 }
-const portfolio = { captured_at: '2026-10-30T12:00:00Z', snapshot_date: '2026-10-30', holdings: [] };
+const portfolio = { captured_at: '2026-10-30T12:00:00Z', snapshot_date: '2026-10-30', holdings_count: 0, available_margin: 0, holdings: [], positions: { net: [], day: [] } };
 const close = new Date('2026-10-29T10:00:00Z');
 const pass = ({ children }) => React.createElement('div', null, children);
 function render({ runs = [run], selected = new Set(['41:51', '41:52']), loading = false, error = null, expanded = true } = {}) {

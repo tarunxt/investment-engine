@@ -1357,7 +1357,7 @@ function buildZerodhaHoldingUnitsMap(snapshot?: ZerodhaPortfolioSnapshotDetail |
   const map = new Map<string, number>();
   snapshot?.holdings.forEach((holding) => {
     const symbol = normalizeZerodhaBasketSymbol(holding.tradingsymbol);
-    if (symbol) map.set(symbol, Math.max(0, holding.quantity));
+    if (symbol && holding.quantity != null && Number.isFinite(holding.quantity)) map.set(symbol, Math.max(0, holding.quantity));
   });
   return map;
 }

@@ -41,6 +41,17 @@ export function assertIndmoneyHoldingsSnapshot(snapshot: IndMoneyUsPortfolioSnap
   }
 }
 
+export function assertZerodhaNumericExposure(snapshot: ZerodhaPortfolioSnapshotDetail | null) {
+  if (!snapshot) return; // Existing no-portfolio workflow remains supported.
+  const finite = (value: unknown) => typeof value === "number" && Number.isFinite(value);
+  if (!finite(snapshot.available_margin) || !Array.isArray(snapshot.holdings) || !Array.isArray(snapshot.positions?.net)
+      || snapshot.holdings_count !== snapshot.holdings.length
+      || !snapshot.holdings.every(holding => [holding.quantity, holding.t1_quantity, holding.last_price].every(finite))
+      || !snapshot.positions.net.every(position => [position.quantity, position.last_price, position.value].every(finite))) {
+    throw new Error("Zerodha snapshot has unknown numeric exposure or available margin. Use a complete portfolio snapshot before analysis.");
+  }
+}
+
 const MARKET_COPY: Record<
   SwingTradeMarket,
   {
@@ -404,10 +415,10 @@ function formatPortfolioSnapshot(
     const rows = indiaSnapshot.holdings.map((holding) => [
       holding.exchange,
       holding.tradingsymbol,
-      holding.quantity + holding.t1_quantity,
+      holding.quantity != null && holding.t1_quantity != null ? holding.quantity + holding.t1_quantity : null,
       holding.average_price,
       holding.last_price,
-      (holding.quantity + holding.t1_quantity) * holding.last_price,
+      holding.quantity != null && holding.t1_quantity != null && holding.last_price != null ? (holding.quantity + holding.t1_quantity) * holding.last_price : null,
       holding.pnl,
       holding.day_change_percentage,
       holding.t1_quantity,
@@ -553,6 +564,7 @@ export function buildRebalanceInputBundle({
   swingDisplayMode?: "full" | "summary";
 }) {
   if (market === "us") assertIndmoneyHoldingsSnapshot(portfolio as IndMoneyUsPortfolioSnapshotDetail | null);
+  if (market === "india") assertZerodhaNumericExposure(portfolio as ZerodhaPortfolioSnapshotDetail | null);
   const copy = MARKET_COPY[market];
   const uniqueSwingRuns = deduplicateStageRunInputs(swingRuns, { market, stage: "swing" });
   return `# Inputs considered at current time

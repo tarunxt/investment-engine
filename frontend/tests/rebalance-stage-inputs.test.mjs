@@ -503,3 +503,16 @@ test('starting a stage clears previous run/listing/provider diagnostics without 
  const {mark}=load(`export const mark = ${callback};`,{updateStage:(_portfolio,_stage,info)=>{visible={...visible,...info};},recordAutoRebalanceStage:()=>{}});mark('zerodha','technical',{totalLlms:1});
  assert.equal(visible.state,'running');assert.equal(visible.lastRunId,null);assert.equal(visible.activeRunId,null);assert.equal(visible.recommendedStocks,null);assert.equal(visible.error,null);assert.deepEqual(visible.errorDetails,[]);assert.equal(visible.provider,null);assert.equal(visible.frozenFinal,undefined);assert.equal(visible.totalLlms,1);assert.deepEqual(previous,before);
 });
+
+
+test('Zerodha unknown numeric exposure fails before input generation without inventing zero', () => {
+  const holding = { quantity: 2, t1_quantity: 0, last_price: 10 };
+  const base = { holdings_count: 1, holdings: [holding], available_margin: 0, positions: { net: [], day: [] } };
+  assert.doesNotThrow(() => rebalance.assertZerodhaNumericExposure(base));
+  for (const key of ['quantity', 't1_quantity', 'last_price']) for (const value of [null, undefined, NaN, Infinity]) {
+    const snapshot = { ...base, holdings: [{ ...holding, [key]: value }] };
+    assert.throws(() => rebalance.buildRebalanceInputBundle({ market: 'india', portfolio: snapshot, swingRuns: [], threats: null, previousClose: new Date() }), /unknown numeric exposure/);
+  }
+  assert.throws(() => rebalance.assertZerodhaNumericExposure({ ...base, available_margin: null }), /available margin/);
+  assert.doesNotThrow(() => rebalance.assertZerodhaNumericExposure({ ...base, holdings: [{ quantity: 0, t1_quantity: 0, last_price: 0 }] }));
+});

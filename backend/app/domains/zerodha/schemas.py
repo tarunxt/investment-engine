@@ -248,6 +248,7 @@ class ZerodhaSequencedProtectedMarketResponse(BaseModel):
 
 
 class ZerodhaPortfolioHolding(BaseModel):
+    numeric_input_status: dict[str, str] = Field(default_factory=dict)
     tradingsymbol: str
     exchange: str
     instrument_token: int | None = None
@@ -276,6 +277,7 @@ class ZerodhaPortfolioHolding(BaseModel):
 
 
 class ZerodhaPortfolioPosition(BaseModel):
+    numeric_input_status: dict[str, str] = Field(default_factory=dict)
     tradingsymbol: str
     exchange: str
     instrument_token: int | None = None

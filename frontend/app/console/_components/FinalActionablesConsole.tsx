@@ -432,12 +432,12 @@ function ZerodhaBuyTransactionValue({
   fallbackAveragePrice,
 }: {
   transactions: ZerodhaBuyTransaction[];
-  fallbackAveragePrice: number;
+  fallbackAveragePrice: number | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const latest = transactions[0];
   if (!latest) {
-    return fallbackAveragePrice > 0 ? <span>{formatDisplayAmount(fallbackAveragePrice, "india")} avg holding price</span> : <span>—</span>;
+    return fallbackAveragePrice != null && Number.isFinite(fallbackAveragePrice) && fallbackAveragePrice >= 0 ? <span>{formatDisplayAmount(fallbackAveragePrice, "india")} avg holding price</span> : <span>—</span>;
   }
 
   const renderTransaction = (transaction: ZerodhaBuyTransaction) => {

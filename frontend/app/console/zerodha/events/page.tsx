@@ -240,7 +240,7 @@ export default function ZerodhaEventsPage() {
     latestSnapshot?.holdings_market_value ?? 0,
   );
   const topHoldings = [...(latestSnapshot?.holdings ?? [])]
-    .sort((left, right) => right.market_value - left.market_value)
+    .sort((left, right) => (right.market_value ?? -Infinity) - (left.market_value ?? -Infinity))
     .slice(0, 5);
 
   if (loadingPage) {
