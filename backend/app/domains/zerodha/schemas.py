@@ -253,26 +253,26 @@ class ZerodhaPortfolioHolding(BaseModel):
     instrument_token: int | None = None
     isin: str | None = None
     product: str | None = None
-    quantity: int = 0
-    used_quantity: int = 0
-    t1_quantity: int = 0
-    realised_quantity: int = 0
-    authorised_quantity: int = 0
+    quantity: int | None = None
+    used_quantity: int | None = None
+    t1_quantity: int | None = None
+    realised_quantity: int | None = None
+    authorised_quantity: int | None = None
     authorised_date: str | None = None
-    opening_quantity: int = 0
-    short_quantity: int = 0
-    collateral_quantity: int = 0
+    opening_quantity: int | None = None
+    short_quantity: int | None = None
+    collateral_quantity: int | None = None
     collateral_type: str | None = None
     discrepancy: bool = False
-    average_price: float = 0
-    last_price: float = 0
-    close_price: float = 0
-    pnl: float = 0
-    day_change: float = 0
-    day_change_percentage: float = 0
-    market_value: float = 0
-    invested_value: float = 0
-    day_change_value: float = 0
+    average_price: float | None = None
+    last_price: float | None = None
+    close_price: float | None = None
+    pnl: float | None = None
+    day_change: float | None = None
+    day_change_percentage: float | None = None
+    market_value: float | None = None
+    invested_value: float | None = None
+    day_change_value: float | None = None
 
 
 class ZerodhaPortfolioPosition(BaseModel):
@@ -280,31 +280,31 @@ class ZerodhaPortfolioPosition(BaseModel):
     exchange: str
     instrument_token: int | None = None
     product: str | None = None
-    quantity: int = 0
-    overnight_quantity: int = 0
-    multiplier: float = 0
-    average_price: float = 0
-    close_price: float = 0
-    last_price: float = 0
-    value: float = 0
-    pnl: float = 0
-    m2m: float = 0
-    unrealised: float = 0
-    realised: float = 0
-    buy_quantity: int = 0
-    buy_price: float = 0
-    buy_value: float = 0
-    buy_m2m: float = 0
-    sell_quantity: int = 0
-    sell_price: float = 0
-    sell_value: float = 0
-    sell_m2m: float = 0
-    day_buy_quantity: int = 0
-    day_buy_price: float = 0
-    day_buy_value: float = 0
-    day_sell_quantity: int = 0
-    day_sell_price: float = 0
-    day_sell_value: float = 0
+    quantity: int | None = None
+    overnight_quantity: int | None = None
+    multiplier: float | None = None
+    average_price: float | None = None
+    close_price: float | None = None
+    last_price: float | None = None
+    value: float | None = None
+    pnl: float | None = None
+    m2m: float | None = None
+    unrealised: float | None = None
+    realised: float | None = None
+    buy_quantity: int | None = None
+    buy_price: float | None = None
+    buy_value: float | None = None
+    buy_m2m: float | None = None
+    sell_quantity: int | None = None
+    sell_price: float | None = None
+    sell_value: float | None = None
+    sell_m2m: float | None = None
+    day_buy_quantity: int | None = None
+    day_buy_price: float | None = None
+    day_buy_value: float | None = None
+    day_sell_quantity: int | None = None
+    day_sell_price: float | None = None
+    day_sell_value: float | None = None
 
 
 class ZerodhaPortfolioPositions(BaseModel):
@@ -323,7 +323,7 @@ class ZerodhaPortfolioSnapshotSummaryResponse(BaseModel):
     holdings_invested_value: float | None = None
     holdings_pnl: float
     holdings_day_change_value: float
-    available_margin: float = 0
+    available_margin: float | None = None
     positions_pnl: float
     positions_m2m: float
 

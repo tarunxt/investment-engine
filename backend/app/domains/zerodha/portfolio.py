@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any
+import math
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -17,22 +18,30 @@ def snapshot_date_from_datetime(value: datetime) -> date:
     return value.astimezone(IST).date()
 
 
-def _as_float(value: Any) -> float:
+def _as_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
     try:
-        if value is None or value == "":
-            return 0.0
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+        result = float(value)
+        return result if math.isfinite(result) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
-def _as_int(value: Any) -> int:
-    try:
-        if value is None or value == "":
-            return 0
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
+def _as_int(value: Any) -> int | None:
+    number = _as_float(value)
+    return int(number) if number is not None and number.is_integer() else None
+
+
+def _product(left: float | None, right: float | None) -> float | None:
+    return _as_float(round(left * right, 2)) if left is not None and right is not None else None
+
+
+def _require_numbers(record: dict[str, Any], fields: tuple[str, ...], path: str) -> None:
+    for field in fields:
+        if _as_float(record.get(field)) is None:
+            # Field paths preserve missing/invalid provenance without leaking broker data.
+            raise ValueError(f"Unusable broker numeric input: {path}.{field}")
 
 
 def _as_str(value: Any) -> str | None:
@@ -81,9 +90,9 @@ def normalize_holding(item: dict[str, Any]) -> dict[str, Any]:
         "pnl": _as_float(item.get("pnl")),
         "day_change": day_change,
         "day_change_percentage": _as_float(item.get("day_change_percentage")),
-        "market_value": round(quantity * last_price, 2),
-        "invested_value": round(quantity * average_price, 2),
-        "day_change_value": round(quantity * day_change, 2),
+        "market_value": _product(quantity, last_price),
+        "invested_value": _product(quantity, average_price),
+        "day_change_value": _product(quantity, day_change),
     }
 
 
@@ -134,12 +143,18 @@ def build_portfolio_snapshot(
         captured_at = captured_at.replace(tzinfo=timezone.utc)
 
     holdings = [normalize_holding(item) for item in holdings_payload]
+    for index, holding in enumerate(holdings):
+        _require_numbers(holding, ("quantity", "t1_quantity", "last_price", "average_price", "pnl", "day_change", "market_value", "invested_value", "day_change_value"), f"holdings[{index}]")
     holdings.sort(key=lambda item: item["market_value"], reverse=True)
 
     net_positions = [normalize_position(item) for item in positions_payload.get("net", [])]
+    for index, position in enumerate(net_positions):
+        _require_numbers(position, ("quantity", "last_price", "value", "pnl", "m2m"), f"net_positions[{index}]")
     net_positions.sort(key=lambda item: abs(item["value"]), reverse=True)
 
     day_positions = [normalize_position(item) for item in positions_payload.get("day", [])]
+    for index, position in enumerate(day_positions):
+        _require_numbers(position, ("day_buy_value", "day_sell_value"), f"day_positions[{index}]")
     day_positions.sort(
         key=lambda item: abs(item["day_buy_value"]) + abs(item["day_sell_value"]),
         reverse=True,
@@ -151,6 +166,8 @@ def build_portfolio_snapshot(
         if isinstance(equity_margins.get("available"), dict)
         else equity_margins.get("available_margin")
     )
+
+    _require_numbers({"available_margin": available_margin}, ("available_margin",), "margins.equity")
 
     return {
         "snapshot_date": snapshot_date_from_datetime(captured_at),

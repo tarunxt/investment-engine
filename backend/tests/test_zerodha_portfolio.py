@@ -10,6 +10,7 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
             "tradingsymbol": "SBIN",
             "exchange": "NSE",
             "quantity": 10,
+            "t1_quantity": 0,
             "average_price": 700,
             "last_price": 720,
             "pnl": 200,
@@ -20,6 +21,7 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
             "tradingsymbol": "INFY",
             "exchange": "NSE",
             "quantity": 5,
+            "t1_quantity": 0,
             "average_price": 1500,
             "last_price": 1490,
             "pnl": -50,
@@ -46,6 +48,8 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
                 "tradingsymbol": "NIFTY26JUNFUT",
                 "exchange": "NFO",
                 "day_buy_quantity": 1,
+                "day_buy_value": 25100,
+                "day_sell_value": 0,
                 "day_sell_quantity": 0,
                 "realised": 0,
                 "unrealised": 1200,
@@ -57,6 +61,7 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
     snapshot = build_portfolio_snapshot(
         holdings,
         positions,
+        {"equity": {"available": {"live_balance": 0}}},
         captured_at=captured_at,
         source="scheduled",
     )
