@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
-    
+    deepseek_api_key: Optional[str] = None
+    deepseek_api_base: Optional[str] = None  # e.g., "https://api.deepseek.com/v1"
+
     # Celery
     celery_broker_url: Optional[str] = None
     celery_result_backend: Optional[str] = None

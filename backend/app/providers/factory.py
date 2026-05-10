@@ -3,12 +3,14 @@ from __future__ import annotations
 from app.providers.base import BaseAIProvider
 from app.providers.gemini_provider import GeminiProvider
 from app.providers.openai_provider import OpenAIProvider
+from app.providers.deepseek_provider import DeepSeekProvider
 
 
 class ProviderFactory:
     _providers: dict[str, type[BaseAIProvider]] = {
         GeminiProvider.provider_name: GeminiProvider,
         OpenAIProvider.provider_name: OpenAIProvider,
+        DeepSeekProvider.provider_name: DeepSeekProvider,
     }
 
     @classmethod

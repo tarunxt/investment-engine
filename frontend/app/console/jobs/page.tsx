@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, type ElementType } from 'react';
+import { useEffect, useRef, useState, type ElementType } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Loader2,
   RefreshCw,
@@ -33,9 +35,7 @@ const STATUS_ICONS: Record<string, ElementType> = {
 const ALL_STATUSES = ['all', 'pending', 'processing', 'completed', 'failed'] as const;
 type StatusFilter = (typeof ALL_STATUSES)[number];
 
-function formatTokens(value?: number | null) {
-  return value?.toLocaleString() ?? '0';
-}
+const PAGE_SIZE = 20;
 
 function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
@@ -46,28 +46,36 @@ function normalizeError(error: unknown) {
 export default function JobsPage() {
   const router = useRouter();
   const [jobs, setJobs] = useState<JobResponse[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
 
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasActiveJobs = jobs.some((j) => ['pending', 'processing'].includes(j.status));
 
-  const filtered = jobs.filter((job) => {
-    const matchesStatus = statusFilter === 'all' || job.status === statusFilter;
-    const matchesSearch =
-      search.trim() === '' ||
-      job.prompt.toLowerCase().includes(search.toLowerCase()) ||
-      String(job.id).includes(search.trim());
-    return matchesStatus && matchesSearch;
-  });
-
-  async function loadJobs({ silent = false }: { silent?: boolean } = {}) {
+  async function loadJobs({
+    silent = false,
+    p = page,
+    s = statusFilter,
+    q = search,
+  }: { silent?: boolean; p?: number; s?: StatusFilter; q?: string } = {}) {
     if (!silent) setLoading(true);
     try {
-      const data = await apiService.getJobs();
-      setJobs([...data].sort((a, b) => b.id - a.id));
+      const data = await apiService.getJobs({
+        page: p,
+        page_size: PAGE_SIZE,
+        status: s !== 'all' ? s : undefined,
+        q: q.trim() || undefined,
+      });
+      setJobs(data.items);
+      setTotal(data.total);
+      setPage(data.page);
+      setPages(data.pages);
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
@@ -77,15 +85,40 @@ export default function JobsPage() {
     }
   }
 
+  // Initial load
   useEffect(() => {
-    loadJobs();
+    loadJobs({ p: 1 });
   }, []);
 
+  // Poll active jobs — stay on current page/filters
   useEffect(() => {
     if (!hasActiveJobs) return;
     const interval = window.setInterval(() => loadJobs({ silent: true }), 5000);
     return () => window.clearInterval(interval);
-  }, [hasActiveJobs]);
+  }, [hasActiveJobs, page, statusFilter, search]);
+
+  function handleStatusChange(s: StatusFilter) {
+    setStatusFilter(s);
+    setPage(1);
+    loadJobs({ p: 1, s });
+  }
+
+  function handleSearchChange(q: string) {
+    setSearch(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setPage(1);
+      loadJobs({ p: 1, q });
+    }, 300);
+  }
+
+  function handlePageChange(next: number) {
+    setPage(next);
+    loadJobs({ p: next });
+  }
+
+  const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(page * PAGE_SIZE, total);
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -122,16 +155,16 @@ export default function JobsPage() {
       )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="flex gap-1 flex-wrap">
+        <div className="flex flex-wrap gap-1">
           {ALL_STATUSES.map((s) => (
             <Button
               variant={'secondary'}
               key={s}
-              onClick={() => setStatusFilter(s)}
+              onClick={() => handleStatusChange(s)}
               className={cn(
                 'px-3 py-1.5 text-xs font-semibold capitalize transition-colors',
                 statusFilter === s
-                  ? 'bg-gray-950 text-white hover:bg-gray-800'
+                  ? 'bg-gray-950 text-white hover:bg-gray-950/90'
                   : 'border border-gray-200 bg-white text-gray-600 hover:border-gray-400',
               )}
             >
@@ -142,7 +175,7 @@ export default function JobsPage() {
         <input
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => handleSearchChange(e.target.value)}
           placeholder="Search by prompt or job ID…"
           className="flex-1 border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10 sm:max-w-sm"
         />
@@ -153,13 +186,13 @@ export default function JobsPage() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="w-[60%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Job
                 </th>
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="w-[20%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Provider / Model
                 </th>
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="w-[20%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Status
                 </th>
               </tr>
@@ -167,19 +200,19 @@ export default function JobsPage() {
             <tbody className="divide-y divide-gray-100 bg-white">
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={3} className="px-5 py-12 text-center text-sm text-gray-500">
                     <Loader2 className="mx-auto mb-2 size-5 animate-spin text-gray-400" />
                     Loading jobs…
                   </td>
                 </tr>
-              ) : filtered.length === 0 ? (
+              ) : jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-gray-500">
-                    {jobs.length === 0 ? 'No jobs yet.' : 'No jobs match your filters.'}
+                  <td colSpan={3} className="px-5 py-12 text-center text-sm text-gray-500">
+                    {total === 0 ? 'No jobs yet.' : 'No jobs match your filters.'}
                   </td>
                 </tr>
               ) : (
-                filtered.map((job) => {
+                jobs.map((job) => {
                   const StatusIcon = STATUS_ICONS[job.status] ?? Clock3;
                   return (
                     <tr
@@ -205,10 +238,7 @@ export default function JobsPage() {
                           )}
                         >
                           <StatusIcon
-                            className={cn(
-                              'size-3.5',
-                              job.status === 'processing' && 'animate-spin',
-                            )}
+                            className={cn('size-3.5', job.status === 'processing' && 'animate-spin')}
                           />
                           {job.status}
                         </span>
@@ -220,11 +250,32 @@ export default function JobsPage() {
             </tbody>
           </table>
         </div>
-        {!loading && filtered.length > 0 && (
-          <div className="border-t border-gray-200 px-5 py-3 text-xs text-gray-500">
-            Showing {filtered.length} of {jobs.length} job{jobs.length !== 1 ? 's' : ''}
+
+        {/* Footer: count + pagination */}
+        <div className="flex items-center justify-between border-t border-gray-200 px-5 py-3">
+          <span className="text-xs text-gray-500">
+            {total === 0 ? 'No results' : `${from}–${to} of ${total} job${total !== 1 ? 's' : ''}`}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => handlePageChange(page - 1)}
+              disabled={page <= 1 || loading}
+              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <span className="min-w-16 text-center text-xs text-gray-600">
+              {page} / {pages}
+            </span>
+            <button
+              onClick={() => handlePageChange(page + 1)}
+              disabled={page >= pages || loading}
+              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
+            >
+              <ChevronRight className="size-4" />
+            </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

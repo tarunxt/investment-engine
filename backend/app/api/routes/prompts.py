@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.auth_dependencies import get_current_user
@@ -22,15 +22,21 @@ def _assert_can_write(prompt: Prompt, current_user: User) -> None:
 
 @router.get("", response_model=List[PromptResponse])
 def get_prompts(
+    q: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Return all system prompts plus the current user's own prompts."""
-    return (
+    """Return all system prompts plus the current user's own prompts, optionally filtered by name."""
+    query = (
         db.query(Prompt)
         .filter(
             (Prompt.is_system == True) | (Prompt.user_id == current_user.id)  # noqa: E712
         )
+    )
+    if q:
+        query = query.filter(Prompt.name.ilike(f"%{q}%"))
+    return (
+        query
         .order_by(Prompt.is_system.desc(), Prompt.updated_at.desc())
         .all()
     )

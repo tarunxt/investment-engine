@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import {
   BookOpen,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   FilePlus,
   Loader2,
@@ -46,6 +48,8 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = { name: '', description: '', body: '' };
+
+const PROMPTS_PER_PAGE = 9;
 
 export default function PromptsPage() {
   const { copy } = useClipboard();
@@ -367,6 +371,11 @@ type PromptGridProps = {
 };
 
 function PromptGrid({ prompts, loading, emptyMessage, copiedId, onCopy, onFork, onEdit, onDelete }: PromptGridProps) {
+  const [page, setPage] = useState(1);
+
+  // Reset to page 1 whenever the prompts list changes (e.g. after create/delete)
+  useEffect(() => { setPage(1); }, [prompts.length]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-sm text-gray-500">
@@ -385,19 +394,52 @@ function PromptGrid({ prompts, loading, emptyMessage, copiedId, onCopy, onFork, 
     );
   }
 
+  const totalPages = Math.max(1, Math.ceil(prompts.length / PROMPTS_PER_PAGE));
+  const currentPage = Math.min(page, totalPages);
+  const slice = prompts.slice((currentPage - 1) * PROMPTS_PER_PAGE, currentPage * PROMPTS_PER_PAGE);
+
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {prompts.map((prompt) => (
-        <PromptCard
-          key={prompt.id}
-          prompt={prompt}
-          copiedId={copiedId}
-          onCopy={onCopy}
-          onFork={onFork}
-          onEdit={onEdit}
-          onDelete={onDelete}
-        />
-      ))}
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {slice.map((prompt) => (
+          <PromptCard
+            key={prompt.id}
+            prompt={prompt}
+            copiedId={copiedId}
+            onCopy={onCopy}
+            onFork={onFork}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between border-t border-gray-200 pt-3">
+          <span className="text-xs text-gray-500">
+            {(currentPage - 1) * PROMPTS_PER_PAGE + 1}–{Math.min(currentPage * PROMPTS_PER_PAGE, prompts.length)} of {prompts.length}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage <= 1}
+              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <span className="min-w-16 text-center text-xs text-gray-600">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage >= totalPages}
+              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -446,39 +488,43 @@ function PromptCard({ prompt, copiedId, onCopy, onFork, onEdit, onDelete }: Prom
           <span className="text-xs text-gray-400">Updated {formatDate(prompt.updated_at)}</span>
 
           <div className="flex items-center gap-1">
-            <button
+            <Button
+              variant={'outline'}
               onClick={() => onCopy(prompt)}
               title="Copy prompt body"
-              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              className="h-8 w-8 rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
             >
               {isCopied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
-            </button>
+            </Button>
             {onFork && (
-              <button
+              <Button
+                variant={'outline'}
                 onClick={() => onFork(prompt)}
                 title="Save as my prompt"
-                className="rounded p-1.5 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600"
+                className="h-8 w-8 rounded p-1.5 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600"
               >
                 <FilePlus className="size-3.5" />
-              </button>
+              </Button>
             )}
             {onEdit && (
-              <button
+              <Button
+                variant={'outline'}
                 onClick={() => onEdit(prompt)}
                 title="Edit prompt"
-                className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                className="h-8 w-8 rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               >
                 <Pencil className="size-3.5" />
-              </button>
+              </Button>
             )}
             {onDelete && (
-              <button
+              <Button
                 onClick={() => onDelete(prompt)}
                 title="Delete prompt"
-                className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                variant={'outline'}
+                className="h-8 w-8 rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
               >
                 <Trash2 className="size-3.5" />
-              </button>
+              </Button>
             )}
           </div>
         </div>

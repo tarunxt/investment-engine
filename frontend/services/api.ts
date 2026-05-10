@@ -7,10 +7,10 @@ import {
   RegisterResponse,
   UserResponse,
   JobResponse,
+  PaginatedResponse,
   UpdateProfileRequest,
   UpdatePasswordRequest,
   RefreshTokenResponse,
-  PaginatedResponse,
   FullHealthCheckResponse,
   JobCreate,
   PromptResponse,
@@ -389,10 +389,16 @@ class apiServiceClass implements IApiService {
   }
 
   /**
-   * Get all AI jobs.
+   * Get paginated AI jobs with optional server-side filtering.
    */
-  getJobs(): Promise<JobResponse[]> {
-    return this.get<JobResponse[]>(URLs.jobs.list());
+  getJobs(params?: { page?: number; page_size?: number; status?: string; q?: string }): Promise<PaginatedResponse<JobResponse>> {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.page_size) qs.set("page_size", String(params.page_size));
+    if (params?.status && params.status !== "all") qs.set("status", params.status);
+    if (params?.q?.trim()) qs.set("q", params.q.trim());
+    const query = qs.toString();
+    return this.get<PaginatedResponse<JobResponse>>(`${URLs.jobs.list()}${query ? `?${query}` : ""}`);
   }
 
   /**
@@ -410,8 +416,12 @@ class apiServiceClass implements IApiService {
 
   // ===== Prompt Endpoints =====
 
-  getPrompts(): Promise<PromptResponse[]> {
-    return this.get<PromptResponse[]>(URLs.prompts.list());
+  getPrompts(params?: { q?: string }, signal?: AbortSignal): Promise<PromptResponse[]> {
+    const qs = new URLSearchParams();
+    if (params?.q?.trim()) qs.set("q", params.q.trim());
+    const query = qs.toString();
+    const url = `${URLs.prompts.list()}${query ? `?${query}` : ""}`;
+    return this.fetch<PromptResponse[]>(url, { method: "GET", signal });
   }
 
   getPrompt(id: number): Promise<PromptResponse> {

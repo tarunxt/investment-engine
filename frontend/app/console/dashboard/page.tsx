@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ElementType } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ElementType } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -8,6 +8,7 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  Search,
   Send,
   Sparkles,
 } from 'lucide-react';
@@ -23,11 +24,20 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { apiService, APIError } from '@/services/api';
-import { JobResponse, PromptResponse, ProviderInfo } from '@/types/api';
+import { JobResponse, PromptResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { URLs } from '@/lib/urls';
 import { useRouter } from 'next/navigation';
+import { useJobs } from '@/hooks/useJobs';
+import { useProviders } from '@/hooks/useProviders';
+
+const DASHBOARD_JOB_LIMIT = 5;
+const POLL_INTERVAL_MS = 5000;
+const TEMPLATE_DEBOUNCE_MS = 300;
+const PROMPT_REFRESH_DELAY_MS = 1200;
+const PROMPT_MAX_CHARS = 3000;
+const PROMPT_WARN_CHARS = 2600;
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-amber-50 text-amber-700 ring-amber-200',
@@ -43,145 +53,140 @@ const STATUS_ICONS: Record<string, ElementType> = {
   failed: AlertCircle,
 };
 
-function formatTokens(value?: number | null) {
-  return value?.toLocaleString() ?? '0';
-}
-
-function normalizeError(error: unknown) {
-  if (error instanceof APIError) {
-    return error.message;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
+function normalizeError(error: unknown): string {
+  if (error instanceof APIError) return error.message;
+  if (error instanceof Error) return error.message;
   return 'Something went wrong';
 }
 
-export default function DashboardPage() {
-  const [jobs, setJobs] = useState<JobResponse[]>([]);
-  const [prompt, setPrompt] = useState('');
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [provider, setProvider] = useState('');
-  const [model, setModel] = useState('');
-  const [loadingJobs, setLoadingJobs] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [promptTemplates, setPromptTemplates] = useState<PromptResponse[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+function SelectSkeleton() {
+  return <div className="h-9 w-full animate-pulse rounded border border-gray-200 bg-gray-100" />;
+}
 
+export default function DashboardPage() {
   const router = useRouter();
 
+  const {
+    jobs,
+    setJobs,
+    total: jobsTotal,
+    setTotal: setJobsTotal,
+    loading: loadingJobs,
+    error: jobsError,
+    setError: setJobsError,
+    lastUpdated,
+    hasActiveJobs,
+    refresh: refreshJobs,
+  } = useJobs({ limit: DASHBOARD_JOB_LIMIT, pollInterval: POLL_INTERVAL_MS });
+
+  const { providers, loading: loadingProviders } = useProviders();
+
+  const [prompt, setPrompt] = useState('');
+  const [provider, setProvider] = useState('');
+  const [model, setModel] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [promptTemplates, setPromptTemplates] = useState<PromptResponse[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [templateSearch, setTemplateSearch] = useState('');
+
+  const templateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const templateControllerRef = useRef<AbortController | null>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+
   const models = providers.find((p) => p.name === provider)?.models ?? [];
-  const hasActiveJobs = jobs.some((job) => ['pending', 'processing'].includes(job.status));
 
-  const stats = useMemo(() => {
-    const completed = jobs.filter((job) => job.status === 'completed').length;
-    const active = jobs.filter((job) => ['pending', 'processing'].includes(job.status)).length;
-    const failed = jobs.filter((job) => job.status === 'failed').length;
-    return [
-      { label: 'Total Jobs', value: jobs.length.toString(), icon: Sparkles },
-      { label: 'Active', value: active.toString(), icon: Play },
-      { label: 'Completed', value: completed.toString(), icon: CheckCircle2 },
-      { label: 'Failed', value: failed.toString(), icon: AlertCircle },
-    ];
-  }, [jobs]);
-
-  async function loadJobs({ silent = false }: { silent?: boolean } = {}) {
-    if (!silent) {
-      setLoadingJobs(true);
+  // Set initial provider/model once providers load
+  useEffect(() => {
+    if (providers.length > 0 && !provider) {
+      setProvider(providers[0].name);
+      setModel(providers[0].models[0] ?? '');
     }
+  }, [providers, provider]);
 
+  const fetchTemplates = useCallback(async (q: string) => {
+    templateControllerRef.current?.abort();
+    const controller = new AbortController();
+    templateControllerRef.current = controller;
     try {
-      const data = await apiService.getJobs();
-      const sorted = [...data].sort((a, b) => b.id - a.id);
-      setJobs(sorted);
-      setLastUpdated(new Date());
-      setError(null);
+      const data = await apiService.getPrompts({ q: q.trim() || undefined }, controller.signal);
+      if (!controller.signal.aborted) setPromptTemplates(data);
     } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      if (!silent) {
-        setLoadingJobs(false);
+      if (err instanceof Error && err.name === 'AbortError') return;
+    }
+  }, []);
+
+  // Initial template load; cleanup aborts any in-flight request on unmount
+  useEffect(() => {
+    fetchTemplates('');
+    return () => {
+      templateControllerRef.current?.abort();
+      if (templateDebounceRef.current) clearTimeout(templateDebounceRef.current);
+    };
+  }, [fetchTemplates]);
+
+  const handleTemplateSearch = useCallback(
+    (q: string) => {
+      setTemplateSearch(q);
+      if (templateDebounceRef.current) clearTimeout(templateDebounceRef.current);
+      templateDebounceRef.current = setTimeout(() => fetchTemplates(q), TEMPLATE_DEBOUNCE_MS);
+    },
+    [fetchTemplates],
+  );
+
+  const handleTemplateChange = useCallback(
+    (id: string) => {
+      setSelectedTemplateId(id);
+      const tpl = promptTemplates.find((p) => String(p.id) === id);
+      if (tpl) setPrompt(tpl.body);
+    },
+    [promptTemplates],
+  );
+
+  const handleProviderChange = useCallback(
+    (nextProvider: string) => {
+      setProvider(nextProvider);
+      const info = providers.find((p) => p.name === nextProvider);
+      setModel(info?.models[0] ?? '');
+    },
+    [providers],
+  );
+
+  const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setPrompt(e.target.value);
+    setSelectedTemplateId('');
+  }, []);
+
+  const handleSubmit = useCallback(
+    async (event: { preventDefault(): void }) => {
+      event.preventDefault();
+      const trimmedPrompt = prompt.trim();
+      if (!trimmedPrompt || !model) {
+        setSubmitError('Prompt, provider, and model are required.');
+        return;
       }
-    }
-  }
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      loadJobs();
-    }, 0);
-
-    return () => window.clearTimeout(timeout);
-  }, []);
-
-  useEffect(() => {
-    apiService.getProviders().then((data) => {
-      setProviders(data);
-      if (data.length > 0) {
-        setProvider(data[0].name);
-        setModel(data[0].models[0] ?? '');
+      setSubmitting(true);
+      setSubmitError(null);
+      try {
+        const job = await apiService.createJob({ prompt: trimmedPrompt, provider, model });
+        setJobs((current) => [job, ...current.slice(0, DASHBOARD_JOB_LIMIT - 1)]);
+        setJobsTotal((t) => t + 1);
+        setPrompt('');
+        setSelectedTemplateId('');
+        promptRef.current?.focus();
+        window.setTimeout(() => refreshJobs({ silent: true }), PROMPT_REFRESH_DELAY_MS);
+      } catch (err) {
+        setSubmitError(normalizeError(err));
+      } finally {
+        setSubmitting(false);
       }
-    }).catch(() => {});
-  }, []);
+    },
+    [prompt, model, provider, setJobs, setJobsTotal, refreshJobs],
+  );
 
-  useEffect(() => {
-    apiService.getPrompts().then(setPromptTemplates).catch(() => { });
-  }, []);
-
-  function handleTemplateChange(id: string) {
-    setSelectedTemplateId(id);
-    const tpl = promptTemplates.find((p) => String(p.id) === id);
-    if (tpl) setPrompt(tpl.body);
-  }
-
-  useEffect(() => {
-    if (!hasActiveJobs) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      loadJobs({ silent: true });
-    }, 5000);
-
-    return () => window.clearInterval(interval);
-  }, [hasActiveJobs]);
-
-  function handleProviderChange(nextProvider: string) {
-    setProvider(nextProvider);
-    const info = providers.find((p) => p.name === nextProvider);
-    setModel(info?.models[0] ?? '');
-  }
-
-  async function handleSubmit(event: { preventDefault(): void }) {
-    event.preventDefault();
-
-    const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt || !model) {
-      setError('Prompt, provider, and model are required.');
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const job = await apiService.createJob({
-        prompt: trimmedPrompt,
-        provider,
-        model,
-      });
-      setJobs((currentJobs) => [job, ...currentJobs]);
-      setPrompt('');
-      window.setTimeout(() => loadJobs({ silent: true }), 1200);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  const charCount = prompt.length;
+  const charOverLimit = charCount > PROMPT_MAX_CHARS;
+  const charNearLimit = charCount > PROMPT_WARN_CHARS;
 
   return (
     <div className="mx-auto flex flex-col gap-6">
@@ -195,7 +200,7 @@ export default function DashboardPage() {
         <Button
           type="button"
           variant="outline"
-          onClick={() => loadJobs()}
+          onClick={() => refreshJobs()}
           disabled={loadingJobs}
           className="w-full sm:w-auto"
         >
@@ -204,26 +209,20 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      {error && (
-        <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>{error}</span>
+      {jobsError && (
+        <div className="flex items-start justify-between gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            <span>{jobsError}</span>
+          </div>
+          <button
+            onClick={() => { setJobsError(null); refreshJobs(); }}
+            className="shrink-0 text-xs font-semibold underline hover:no-underline"
+          >
+            Retry
+          </button>
         </div>
       )}
-
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {stats.map((stat) => (
-          <div key={stat.label} className="border border-gray-200 bg-white px-4 py-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                {stat.label}
-              </span>
-              <stat.icon className="size-4 text-gray-400" />
-            </div>
-            <div className="mt-3 text-2xl font-semibold text-gray-950">{stat.value}</div>
-          </div>
-        ))}
-      </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(320px,520px)_1fr]">
         <Card className="border border-gray-200 shadow-sm" size="sm">
@@ -235,48 +234,65 @@ export default function DashboardPage() {
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
                 <div className="space-y-2">
                   <Label htmlFor="provider">Provider</Label>
-                  <Select value={provider} onValueChange={handleProviderChange}>
-                    <SelectTrigger id="provider" className="w-full border-gray-300 px-3">
-                      <SelectValue placeholder="Provider" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {providers.map((p) => (
-                        <SelectItem key={p.name} value={p.name}>
-                          {p.name.charAt(0).toUpperCase() + p.name.slice(1)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {loadingProviders ? (
+                    <SelectSkeleton />
+                  ) : (
+                    <Select value={provider} onValueChange={handleProviderChange}>
+                      <SelectTrigger id="provider" className="w-full border-gray-300 px-3">
+                        <SelectValue placeholder="Provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {providers.map((p) => (
+                          <SelectItem key={p.name} value={p.name}>
+                            {p.name.charAt(0).toUpperCase() + p.name.slice(1)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="model">Model</Label>
-                  <Select value={model} onValueChange={setModel}>
-                    <SelectTrigger id="model" className="w-full border-gray-300 px-3">
-                      <SelectValue placeholder="Model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {models.map((modelName) => (
-                        <SelectItem key={modelName} value={modelName}>
-                          {modelName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {loadingProviders ? (
+                    <SelectSkeleton />
+                  ) : (
+                    <Select value={model} onValueChange={setModel}>
+                      <SelectTrigger id="model" className="w-full border-gray-300 px-3">
+                        <SelectValue placeholder="Model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {models.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </div>
 
-              {promptTemplates.length > 0 && (
-                <div className="space-y-2">
-                  <Label htmlFor="template">Template</Label>
+              <div className="space-y-2">
+                <Label htmlFor="template-search">Template</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-gray-400" />
+                  <input
+                    id="template-search"
+                    type="text"
+                    value={templateSearch}
+                    onChange={(e) => handleTemplateSearch(e.target.value)}
+                    placeholder="Search prompts…"
+                    className="w-full border border-gray-300 bg-white py-1.5 pl-8 pr-3 text-sm text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
+                  />
+                </div>
+                {promptTemplates.length > 0 ? (
                   <Select value={selectedTemplateId} onValueChange={handleTemplateChange}>
                     <SelectTrigger id="template" className="w-full border-gray-300 px-3">
                       <SelectValue placeholder="Load a saved template…" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem key="none" value="none">
-                        None
-                      </SelectItem>
+                      <SelectItem value="none">None</SelectItem>
                       {promptTemplates.map((tpl) => (
                         <SelectItem key={tpl.id} value={String(tpl.id)}>
                           {tpl.name}
@@ -285,25 +301,54 @@ export default function DashboardPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-              )}
+                ) : templateSearch ? (
+                  <p className="text-xs text-gray-400">
+                    No prompts match &ldquo;{templateSearch}&rdquo;
+                  </p>
+                ) : null}
+              </div>
 
               <div className="space-y-2">
-                <Label htmlFor="prompt">Prompt</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prompt">Prompt</Label>
+                  <span
+                    className={cn(
+                      'text-xs tabular-nums',
+                      charOverLimit
+                        ? 'font-semibold text-red-600'
+                        : charNearLimit
+                          ? 'text-amber-600'
+                          : 'text-gray-400',
+                    )}
+                  >
+                    {charCount}/{PROMPT_MAX_CHARS}
+                  </span>
+                </div>
                 <textarea
                   id="prompt"
+                  ref={promptRef}
                   value={prompt}
-                  onChange={(event) => {
-                    setPrompt(event.target.value);
-                    setSelectedTemplateId('');
-                  }}
+                  onChange={handlePromptChange}
                   rows={9}
-                  className="w-full resize-none border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 shadow-sm outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
+                  className={cn(
+                    'w-full resize-none border bg-white px-3 py-2 text-sm text-gray-950 shadow-sm outline-none transition focus:ring-2 focus:ring-gray-950/10',
+                    charOverLimit
+                      ? 'border-red-400 focus:border-red-500'
+                      : 'border-gray-300 focus:border-gray-950',
+                  )}
                   placeholder="Analyze Apple earnings quality, valuation risk, and near-term catalysts."
                 />
               </div>
 
-              <Button type="submit" disabled={submitting || !prompt.trim()} className="w-full">
+              {submitError && (
+                <p className="text-sm text-red-700">{submitError}</p>
+              )}
+
+              <Button
+                type="submit"
+                disabled={submitting || !prompt.trim() || charOverLimit}
+                className="w-full"
+              >
                 {submitting ? (
                   <Loader2 className="mr-2 size-4 animate-spin" />
                 ) : (
@@ -323,13 +368,6 @@ export default function DashboardPage() {
               </h2>
               <p className="text-xs text-gray-500">
                 {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Waiting for data'}
-                {' · '}
-                <Link
-                  href={URLs.routes.console.jobs()}
-                  className="font-medium text-indigo-600 hover:text-indigo-800"
-                >
-                  View all →
-                </Link>
               </p>
             </div>
             {hasActiveJobs && (
@@ -358,27 +396,25 @@ export default function DashboardPage() {
               <tbody className="divide-y divide-gray-100 bg-white">
                 {loadingJobs ? (
                   <tr>
-                    <td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-500">
-                      Loading jobs
+                    <td colSpan={3} className="px-5 py-10 text-center text-sm text-gray-500">
+                      <Loader2 className="mx-auto mb-2 size-5 animate-spin text-gray-400" />
+                      Loading jobs…
                     </td>
                   </tr>
                 ) : jobs.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-500">
+                    <td colSpan={3} className="px-5 py-10 text-center text-sm text-gray-500">
                       No jobs yet
                     </td>
                   </tr>
                 ) : (
                   jobs.map((job) => {
                     const StatusIcon = STATUS_ICONS[job.status] ?? Clock3;
-
                     return (
                       <tr
                         key={job.id}
                         onClick={() => router.push(URLs.routes.console.jobDetail(job.id))}
-                        className={cn(
-                          'align-top cursor-pointer hover:bg-gray-50',
-                        )}
+                        className="cursor-pointer align-top hover:bg-gray-50"
                       >
                         <td className="max-w-90 px-5 py-4">
                           <div className="font-medium text-gray-950">#{job.id}</div>
@@ -412,6 +448,20 @@ export default function DashboardPage() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="flex items-center justify-between border-t border-gray-200 px-5 py-3">
+            <span className="text-xs text-gray-500">
+              {jobsTotal === 0
+                ? 'No jobs yet'
+                : `Showing ${jobs.length} of ${jobsTotal} job${jobsTotal !== 1 ? 's' : ''}`}
+            </span>
+            <Link
+              href={URLs.routes.console.jobs()}
+              className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+            >
+              View all →
+            </Link>
           </div>
         </section>
       </div>

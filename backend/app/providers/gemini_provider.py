@@ -41,10 +41,16 @@ class GeminiProvider(BaseAIProvider):
             ),
         ]
 
+        thinking_config = types.ThinkingConfig(
+            thinking_level=types.ThinkingLevel.MINIMAL,
+        )
+        if(model == "gemini-3.1-pro-preview"):
+            thinking_config = types.ThinkingConfig(
+                thinking_level=types.ThinkingLevel.HIGH,
+            )
+
         generate_content_config = types.GenerateContentConfig(
-            thinking_config=types.ThinkingConfig(
-                thinking_level=types.ThinkingLevel.MINIMAL,
-            ),
+            thinking_config=thinking_config,
             tools=[
                 types.Tool(
                     google_search=types.GoogleSearch()
