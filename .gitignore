@@ -1,0 +1,55 @@
+# =========================
+# ROOT
+# =========================
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+docker-data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node
+node_modules/
+
+# Build
+dist/
+build/
+
+# Coverage
+coverage/
+.coverage
+
+# Temporary
+tmp/
+temp/
+
+# Database
+*.sqlite3
+
+# Misc
+*.swp
+psql
+
+*.md
+graphify-out
+.claude
