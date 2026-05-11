@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ElementType } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
+  CalendarClock,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -19,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 
 const STATUS_STYLES: Record<string, string> = {
+  scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
   pending: 'bg-amber-50 text-amber-700 ring-amber-200',
   processing: 'bg-blue-50 text-blue-700 ring-blue-200',
   completed: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
@@ -26,13 +28,14 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 const STATUS_ICONS: Record<string, ElementType> = {
+  scheduled: CalendarClock,
   pending: Clock3,
   processing: Loader2,
   completed: CheckCircle2,
   failed: AlertCircle,
 };
 
-const ALL_STATUSES = ['all', 'pending', 'processing', 'completed', 'failed'] as const;
+const ALL_STATUSES = ['all', 'scheduled', 'pending', 'processing', 'completed', 'failed'] as const;
 type StatusFilter = (typeof ALL_STATUSES)[number];
 
 const PAGE_SIZE = 20;
@@ -186,28 +189,31 @@ export default function JobsPage() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="w-[60%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="w-[45%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Job
                 </th>
                 <th className="w-[20%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Provider / Model
                 </th>
-                <th className="w-[20%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="w-[15%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Status
+                </th>
+                <th className="w-[20%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Scheduled At
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
               {loading ? (
                 <tr>
-                  <td colSpan={3} className="px-5 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-gray-500">
                     <Loader2 className="mx-auto mb-2 size-5 animate-spin text-gray-400" />
                     Loading jobs…
                   </td>
                 </tr>
               ) : jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="px-5 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-gray-500">
                     {total === 0 ? 'No jobs yet.' : 'No jobs match your filters.'}
                   </td>
                 </tr>
@@ -242,6 +248,11 @@ export default function JobsPage() {
                           />
                           {job.status}
                         </span>
+                      </td>
+                      <td className="px-5 py-4 text-xs text-gray-500">
+                        {job.scheduled_at
+                          ? new Date(job.scheduled_at).toLocaleString()
+                          : <span className="text-gray-300">—</span>}
                       </td>
                     </tr>
                   );

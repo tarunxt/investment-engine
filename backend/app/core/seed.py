@@ -1,9 +1,10 @@
 from pathlib import Path
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.models.prompt import Prompt
+from app.domains.prompts.models import Prompt
 
 logger = get_logger(__name__)
 
@@ -15,10 +16,11 @@ _SYSTEM_PROMPT_DESCRIPTION = (
 )
 
 
-def seed_system_prompts(db: Session) -> None:
-    """Ensure the default system prompt exists in the database."""
-    exists = db.query(Prompt).filter(Prompt.is_system == True).first()  # noqa: E712
-    if exists:
+async def seed_system_prompts(db: AsyncSession) -> None:
+    result = await db.execute(
+        select(Prompt).where(Prompt.is_system == True).limit(1)  # noqa: E712
+    )
+    if result.scalar_one_or_none():
         return
 
     if not _PROMPT_FILE.exists():
@@ -36,5 +38,5 @@ def seed_system_prompts(db: Session) -> None:
             is_active=True,
         )
     )
-    db.commit()
+    await db.commit()
     logger.info("Seeded system prompt: %s", _SYSTEM_PROMPT_NAME)

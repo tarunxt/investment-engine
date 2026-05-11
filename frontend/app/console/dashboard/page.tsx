@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ElementType } from 'react';
 import {
   AlertCircle,
+  CalendarClock,
   CheckCircle2,
   Clock3,
   Loader2,
@@ -40,6 +41,7 @@ const PROMPT_MAX_CHARS = 3000;
 const PROMPT_WARN_CHARS = 2600;
 
 const STATUS_STYLES: Record<string, string> = {
+  scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
   pending: 'bg-amber-50 text-amber-700 ring-amber-200',
   processing: 'bg-blue-50 text-blue-700 ring-blue-200',
   completed: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
@@ -47,6 +49,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 const STATUS_ICONS: Record<string, ElementType> = {
+  scheduled: CalendarClock,
   pending: Clock3,
   processing: Loader2,
   completed: CheckCircle2,
@@ -84,6 +87,7 @@ export default function DashboardPage() {
   const [prompt, setPrompt] = useState('');
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
+  const [scheduledAt, setScheduledAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [promptTemplates, setPromptTemplates] = useState<PromptResponse[]>([]);
@@ -168,10 +172,17 @@ export default function DashboardPage() {
       setSubmitting(true);
       setSubmitError(null);
       try {
-        const job = await apiService.createJob({ prompt: trimmedPrompt, provider, model });
+        const payload: Parameters<typeof apiService.createJob>[0] = {
+          prompt: trimmedPrompt,
+          provider,
+          model,
+          scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+        };
+        const job = await apiService.createJob(payload);
         setJobs((current) => [job, ...current.slice(0, DASHBOARD_JOB_LIMIT - 1)]);
         setJobsTotal((t) => t + 1);
         setPrompt('');
+        setScheduledAt('');
         setSelectedTemplateId('');
         promptRef.current?.focus();
         window.setTimeout(() => refreshJobs({ silent: true }), PROMPT_REFRESH_DELAY_MS);
@@ -181,7 +192,7 @@ export default function DashboardPage() {
         setSubmitting(false);
       }
     },
-    [prompt, model, provider, setJobs, setJobsTotal, refreshJobs],
+    [prompt, model, provider, scheduledAt, setJobs, setJobsTotal, refreshJobs],
   );
 
   const charCount = prompt.length;
@@ -340,6 +351,26 @@ export default function DashboardPage() {
                 />
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="scheduled-at" className="flex items-center gap-1.5">
+                  <CalendarClock className="size-3.5 text-gray-400" />
+                  Schedule (optional)
+                </Label>
+                <input
+                  id="scheduled-at"
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(e) => setScheduledAt(e.target.value)}
+                  min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+                  className="w-full border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
+                />
+                {scheduledAt && (
+                  <p className="text-xs text-violet-600">
+                    Job will run at {new Date(scheduledAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+
               {submitError && (
                 <p className="text-sm text-red-700">{submitError}</p>
               )}
@@ -351,10 +382,12 @@ export default function DashboardPage() {
               >
                 {submitting ? (
                   <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : scheduledAt ? (
+                  <CalendarClock className="mr-2 size-4" />
                 ) : (
                   <Send className="mr-2 size-4" />
                 )}
-                Submit Job
+                {scheduledAt ? 'Schedule Job' : 'Submit Job'}
               </Button>
             </form>
           </CardContent>

@@ -128,6 +128,7 @@ export interface JobCreate {
   prompt: string;
   provider: string;
   model: string;
+  scheduled_at?: string | null;
 }
 
 export interface JobResponse {
@@ -141,6 +142,7 @@ export interface JobResponse {
   tokens_in?: number | null;
   tokens_out?: number | null;
   estimated_cost?: number | null;
+  scheduled_at?: string | null;
 }
 
 export interface JobListResponse {

@@ -1,100 +1,92 @@
+import time
+from contextlib import asynccontextmanager
+from uuid import uuid4
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-import time
 
-from app.db.init_db import init_db
-from app.db.database import SessionLocal
-from app.api.routes.jobs import router as jobs_router
-from app.api.routes.auth import router as auth_router
-from app.api.routes.health import router as health_router
-from app.api.routes.prompts import router as prompts_router
-from app.api.routes.providers import router as providers_router
-from app.core.logging import configure_logging, get_logger
 from app.core.config import settings
-from app.core.exceptions import AppException, exception_to_http
+from app.core.logging import configure_logging, get_logger
 from app.core.seed import seed_system_prompts
+from app.domains.ai_providers.router import router as providers_router
+from app.domains.auth.router import router as auth_router
+from app.domains.health.router import router as health_router
+from app.domains.jobs.router import router as jobs_router
+from app.domains.prompts.router import router as prompts_router
+from app.infrastructure.database.session import AsyncSessionLocal, async_engine
+from app.shared.exceptions import AppException
 
-# Configure logging
+# Ensure all ORM models are registered with the shared metadata
+from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
+from app.domains.jobs.models import Job  # noqa: F401
+from app.domains.prompts.models import Prompt  # noqa: F401
+from app.infrastructure.database.outbox.models import OutboxMessage  # noqa: F401
+
 configure_logging()
 logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic
-    logger.info("🚀 Starting AI Investment Platform Backend")
-    init_db()
-    logger.info(f"✅ Database initialized - {settings.database_url}")
-    logger.info(f"✅ Redis configured - {settings.redis_url}")
+    logger.info("Starting AI Investment Platform Backend")
+    logger.info("Database: %s", settings.database_url.split("@")[-1])
+    logger.info("Redis: %s", settings.redis_url)
 
-    db = SessionLocal()
-    try:
-        seed_system_prompts(db)
-    finally:
-        db.close()
+    # Seed default prompts (idempotent — only inserts if missing)
+    async with AsyncSessionLocal() as db:
+        await seed_system_prompts(db)
 
     yield
 
-    # Shutdown logic
-    logger.info("🛑 Shutting down AI Investment Platform Backend")
+    await async_engine.dispose()
+    logger.info("Shutdown complete")
 
 
-app = FastAPI(
-    title=settings.app_name,
-    version=settings.version,
-    lifespan=lifespan
-)
+app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
 
 
-# Exception handlers
+# ── Exception handlers ────────────────────────────────────────────────────────
+
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException):
-    logger.error(f"Application error: {exc.code} - {exc.message}")
+    logger.error("Application error [%s]: %s", exc.code, exc.message)
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "error": exc.code,
-            "message": exc.message,
-            "details": exc.details
-        }
+        content={"error": exc.code, "message": exc.message, "details": exc.details},
     )
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception: {str(exc)}", exc_info=exc)
+    logger.error("Unhandled exception", exc_info=exc)
     return JSONResponse(
         status_code=500,
-        content={
-            "error": "INTERNAL_SERVER_ERROR",
-            "message": "An unexpected error occurred",
-            "details": {}
-        }
+        content={"error": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred"},
     )
 
 
-# Request/Response logging middleware
+# ── Middleware ────────────────────────────────────────────────────────────────
+
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    
-    # Log request
-    logger.debug(f"→ {request.method} {request.url.path}")
-    
+async def correlation_id_middleware(request: Request, call_next):
+    corr_id = request.headers.get("X-Correlation-ID", str(uuid4()))
+    request.state.correlation_id = corr_id
+    start = time.monotonic()
     response = await call_next(request)
-    
-    # Log response
-    duration_ms = (time.time() - start_time) * 1000
+    duration_ms = (time.monotonic() - start) * 1000
     logger.debug(
-        f"← {request.method} {request.url.path} {response.status_code} ({duration_ms:.2f}ms)"
+        "%s %s %s %.2fms corr=%s",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+        corr_id,
     )
-    
+    response.headers["X-Correlation-ID"] = corr_id
     return response
 
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url],
@@ -103,7 +95,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routes
+
+# ── Routers ───────────────────────────────────────────────────────────────────
+
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(jobs_router)
@@ -113,9 +107,4 @@ app.include_router(providers_router)
 
 @app.get("/")
 async def root():
-    return {
-        "status": "ok",
-        "app": settings.app_name,
-        "version": settings.version,
-        "message": "AI Investment Platform Backend is running"
-    }
+    return {"status": "ok", "app": settings.app_name, "version": settings.version}
