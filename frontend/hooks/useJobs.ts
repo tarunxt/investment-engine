@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiService, APIError } from '@/services/api';
 import { JobResponse } from '@/types/api';
+import { URLs } from '@/lib/urls';
+import { WSClient } from '@/services/websocket';
 
 function normalizeError(error: unknown): string {
   if (error instanceof APIError) return error.message;
@@ -8,9 +10,20 @@ function normalizeError(error: unknown): string {
   return 'Something went wrong';
 }
 
+type JobUpdateMessage = {
+  type: 'job.updated';
+  job_id: number;
+  status: string;
+  response?: string | null;
+  error_message?: string | null;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  estimated_cost?: number | null;
+};
+
 interface UseJobsOptions {
   limit: number;
-  pollInterval?: number;
+  pollInterval?: number; // retained for API compatibility — no longer used
 }
 
 export interface UseJobsReturn {
@@ -23,26 +36,32 @@ export interface UseJobsReturn {
   setError: React.Dispatch<React.SetStateAction<string | null>>;
   lastUpdated: Date | null;
   hasActiveJobs: boolean;
+  wsConnected: boolean;
   refresh: (opts?: { silent?: boolean }) => Promise<void>;
 }
 
-export function useJobs({ limit, pollInterval = 5000 }: UseJobsOptions): UseJobsReturn {
+export function useJobs({ limit }: UseJobsOptions): UseJobsReturn {
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  // Incrementing generation discards stale responses without needing AbortSignal on getJobs
+  const [wsConnected, setWsConnected] = useState(false);
+
+  // Incrementing generation discards stale HTTP responses without needing AbortSignal
   const generationRef = useRef(0);
 
   const hasActiveJobs = jobs.some((j) => ['pending', 'processing'].includes(j.status));
+
+  // Stable ref so the WS message handler can call the latest load without going stale
+  const loadRef = useRef<(opts?: { silent?: boolean }) => Promise<void>>(async () => {});
 
   const load = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
       const gen = ++generationRef.current;
       if (!silent) setLoading(true);
       try {
-        const data = await apiService.getJobs({ page: 1, page_size: limit });
+        const data = await apiService.getJobs({ page: 1, limit });
         if (gen !== generationRef.current) return;
         setJobs(data.items);
         setTotal(data.total);
@@ -58,16 +77,48 @@ export function useJobs({ limit, pollInterval = 5000 }: UseJobsOptions): UseJobs
     [limit],
   );
 
+  // Keep ref current so the WS handler always calls the latest load
+  loadRef.current = load;
+
   useEffect(() => {
     load();
-    return () => { generationRef.current++; };
+
+    const client = new WSClient({
+      url: URLs.jobs.ws(),
+      onMessage: (data) => {
+        if (data.type !== 'job.updated') return;
+        const { type: _t, job_id, ...patch } = data as unknown as JobUpdateMessage;
+        setJobs((prev) => {
+          if (!prev.some((j) => j.id === job_id)) {
+            // Job not in list (created after initial fetch) — reload to surface it
+            setTimeout(() => void loadRef.current({ silent: true }), 0);
+            return prev;
+          }
+          return prev.map((j) => (j.id === job_id ? { ...j, ...patch } : j));
+        });
+        setLastUpdated(new Date());
+      },
+      onStatusChange: setWsConnected,
+    });
+    client.connect();
+
+    return () => {
+      generationRef.current++;
+      client.close();
+    };
   }, [load]);
 
-  useEffect(() => {
-    if (!hasActiveJobs) return;
-    const interval = window.setInterval(() => load({ silent: true }), pollInterval);
-    return () => window.clearInterval(interval);
-  }, [hasActiveJobs, load, pollInterval]);
-
-  return { jobs, setJobs, total, setTotal, loading, error, setError, lastUpdated, hasActiveJobs, refresh: load };
+  return {
+    jobs,
+    setJobs,
+    total,
+    setTotal,
+    loading,
+    error,
+    setError,
+    lastUpdated,
+    hasActiveJobs,
+    wsConnected,
+    refresh: load,
+  };
 }

@@ -13,6 +13,7 @@ from app.domains.ai_providers.router import router as providers_router
 from app.domains.auth.router import router as auth_router
 from app.domains.health.router import router as health_router
 from app.domains.jobs.router import router as jobs_router
+from app.domains.jobs.ws_router import router as jobs_ws_router
 from app.domains.prompts.router import router as prompts_router
 from app.infrastructure.database.session import AsyncSessionLocal, async_engine
 from app.shared.exceptions import AppException
@@ -101,6 +102,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(jobs_router)
+app.include_router(jobs_ws_router)
 app.include_router(prompts_router)
 app.include_router(providers_router)
 

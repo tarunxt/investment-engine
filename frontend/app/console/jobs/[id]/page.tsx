@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState, type ElementType } from 'react';
+import { use, useEffect, useRef, useState, type ElementType } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
@@ -10,12 +10,12 @@ import {
   Loader2,
   RefreshCw,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { apiService, APIError } from '@/services/api';
 import { JobResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
+import { URLs } from '@/lib/urls';
+import { WSClient } from '@/services/websocket';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
 
 const STATUS_STYLES: Record<string, string> = {
@@ -31,6 +31,8 @@ const STATUS_ICONS: Record<string, ElementType> = {
   completed: CheckCircle2,
   failed: AlertCircle,
 };
+
+const TERMINAL_STATUSES = new Set(['completed', 'failed']);
 
 function formatTokens(value?: number | null) {
   return value?.toLocaleString() ?? '0';
@@ -49,7 +51,9 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const isActive = job && ['pending', 'processing'].includes(job.status);
+  const isActive = job && !TERMINAL_STATUSES.has(job.status);
+
+  const wsClientRef = useRef<WSClient | null>(null);
 
   async function loadJob({ silent = false }: { silent?: boolean } = {}) {
     if (!silent) setLoading(true);
@@ -66,13 +70,31 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
 
   useEffect(() => {
     loadJob();
-  }, [id]);
 
-  useEffect(() => {
-    if (!isActive) return;
-    const interval = window.setInterval(() => loadJob({ silent: true }), 3000);
-    return () => window.clearInterval(interval);
-  }, [isActive]);
+    const client = new WSClient({
+      url: URLs.jobs.wsJob(Number(id)),
+      onMessage: (data) => {
+        if (data.type !== 'job.updated') return;
+        const { type: _t, job_id: _jid, ...patch } = data as {
+          type: string;
+          job_id: number;
+          [key: string]: unknown;
+        };
+        setJob((prev) => (prev ? { ...prev, ...patch } : prev));
+        const newStatus = patch.status as string | undefined;
+        if (newStatus && TERMINAL_STATUSES.has(newStatus)) {
+          wsClientRef.current?.close();
+        }
+      },
+    });
+    wsClientRef.current = client;
+    client.connect();
+
+    return () => {
+      wsClientRef.current?.close();
+      wsClientRef.current = null;
+    };
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -143,8 +165,8 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
 
       {isActive && (
         <div className="flex items-center gap-2 border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-medium text-blue-700">
-          <Loader2 className="size-3.5 animate-spin" />
-          This job is active — auto-refreshing every 3 seconds.
+          <span className="inline-block size-1.5 rounded-full bg-blue-500" />
+          Live — updates will appear automatically.
         </div>
       )}
 

@@ -71,13 +71,13 @@ class PostgresJobRepository:
         items_result = await self._session.execute(
             stmt.order_by(Job.id.desc())
             .offset(query.offset)
-            .limit(query.page_size)
+            .limit(query.limit)
         )
         return PagedResult(
             items=list(items_result.scalars()),
             total=total,
             page=query.page,
-            page_size=query.page_size,
+            limit=query.limit,
         )
 
     async def update_status(

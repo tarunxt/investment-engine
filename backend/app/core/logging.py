@@ -21,7 +21,7 @@ LOGGING_CONFIG = {
         "console": {
             "class": "logging.StreamHandler",
             "level": "DEBUG",
-            "formatter": "detailed",
+            "formatter": "standard",
             "stream": "ext://sys.stdout"
         },
         "file": {
@@ -103,7 +103,7 @@ class LoggingMiddlewareHelper:
     """Helper class for request/response logging."""
     
     @staticmethod
-    def log_request(method: str, path: str, user_id: str = None) -> None:
+    def log_request(method: str, path: str, user_id: str = "") -> None:
         """Log incoming request."""
         logger = get_logger("app.api")
         logger.info(
@@ -122,7 +122,7 @@ class LoggingMiddlewareHelper:
         )
     
     @staticmethod
-    def log_error(error_type: str, message: str, traceback: str = None) -> None:
+    def log_error(error_type: str, message: str, traceback: str = "") -> None:
         """Log error."""
         logger = get_logger("app.error")
         logger.error(f"{error_type}: {message}")
@@ -135,19 +135,19 @@ class WorkerLogHelper:
     """Helper class for worker logging."""
     
     @staticmethod
-    def log_task_start(task_name: str, task_id: str, job_id: int = None) -> None:
+    def log_task_start(task_name: str, task_id: str, job_id: int | None = None) -> None:
         """Log task execution start."""
         logger = get_logger("app.workers")
         logger.info(f"Task started: {task_name} (ID: {task_id}, Job: {job_id})")
     
     @staticmethod
-    def log_task_complete(task_name: str, task_id: str, duration_ms: float, job_id: int = None) -> None:
+    def log_task_complete(task_name: str, task_id: str, duration_ms: float, job_id: int | None = None) -> None:
         """Log task execution complete."""
         logger = get_logger("app.workers")
         logger.info(f"Task completed: {task_name} (ID: {task_id}, Job: {job_id}, Duration: {duration_ms:.2f}ms)")
     
     @staticmethod
-    def log_task_error(task_name: str, task_id: str, error: str, job_id: int = None) -> None:
+    def log_task_error(task_name: str, task_id: str, error: str, job_id: int | None = None) -> None:
         """Log task execution error."""
         logger = get_logger("app.workers")
         logger.error(f"Task failed: {task_name} (ID: {task_id}, Job: {job_id}) - Error: {error}")

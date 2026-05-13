@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings
 from typing import Optional
 
@@ -17,6 +19,9 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     deepseek_api_key: Optional[str] = None
     deepseek_api_base: Optional[str] = None  # e.g., "https://api.deepseek.com/v1"
+
+    # Third-party services
+    tavily_api_key: str = ""
 
     # Celery
     celery_broker_url: Optional[str] = None
@@ -44,5 +49,14 @@ class Settings(BaseSettings):
         case_sensitive = False
 
 
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+REDIS_URL = os.getenv("REDIS_URL", "")
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
+
+if not REDIS_URL:
+    raise ValueError("REDIS_URL environment variable is required")
+
 # Global settings instance
-settings = Settings()
+settings = Settings(database_url=os.getenv("DATABASE_URL", ""), redis_url=os.getenv("REDIS_URL", ""))

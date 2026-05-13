@@ -13,6 +13,9 @@ if (!FRONTEND_BASE_URL) {
   throw new Error("NEXT_PUBLIC_FRONTEND_URL is not defined");
 }
 
+// Derive WebSocket base URL: http → ws, https → wss
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, "ws");
+
 /**
  * URL Resolver - Centralized API endpoint management
  */
@@ -61,6 +64,9 @@ export const URLs = {
     update: (id: number) => `${API_BASE_URL}/jobs/${id}`,
     delete: (id: number) => `${API_BASE_URL}/jobs/${id}`,
     getCost: (id: number) => `${API_BASE_URL}/jobs/${id}/cost`,
+    // WebSocket base URLs — WSClient appends ?token= before each connect attempt
+    ws: () => `${WS_BASE_URL}/ws/jobs`,
+    wsJob: (id: number) => `${WS_BASE_URL}/ws/jobs/${id}`,
   },
 
   // Provider endpoints

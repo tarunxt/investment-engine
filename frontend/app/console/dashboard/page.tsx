@@ -7,11 +7,9 @@ import {
   CheckCircle2,
   Clock3,
   Loader2,
-  Play,
   RefreshCw,
   Search,
   Send,
-  Sparkles,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -25,16 +23,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { apiService, APIError } from '@/services/api';
-import { JobResponse, PromptResponse } from '@/types/api';
+import { PromptResponse, ProviderInfo } from '@/types/api';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { URLs } from '@/lib/urls';
 import { useRouter } from 'next/navigation';
 import { useJobs } from '@/hooks/useJobs';
-import { useProviders } from '@/hooks/useProviders';
 
 const DASHBOARD_JOB_LIMIT = 5;
-const POLL_INTERVAL_MS = 5000;
 const TEMPLATE_DEBOUNCE_MS = 300;
 const PROMPT_REFRESH_DELAY_MS = 1200;
 const PROMPT_MAX_CHARS = 3000;
@@ -56,12 +52,6 @@ const STATUS_ICONS: Record<string, ElementType> = {
   failed: AlertCircle,
 };
 
-function normalizeError(error: unknown): string {
-  if (error instanceof APIError) return error.message;
-  if (error instanceof Error) return error.message;
-  return 'Something went wrong';
-}
-
 function SelectSkeleton() {
   return <div className="h-9 w-full animate-pulse rounded border border-gray-200 bg-gray-100" />;
 }
@@ -78,14 +68,14 @@ export default function DashboardPage() {
     error: jobsError,
     setError: setJobsError,
     lastUpdated,
-    hasActiveJobs,
+    wsConnected,
     refresh: refreshJobs,
-  } = useJobs({ limit: DASHBOARD_JOB_LIMIT, pollInterval: POLL_INTERVAL_MS });
-
-  const { providers, loading: loadingProviders } = useProviders();
+  } = useJobs({ limit: DASHBOARD_JOB_LIMIT });
 
   const [prompt, setPrompt] = useState('');
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [provider, setProvider] = useState('');
+  const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -93,50 +83,92 @@ export default function DashboardPage() {
   const [promptTemplates, setPromptTemplates] = useState<PromptResponse[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [templateSearch, setTemplateSearch] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
 
   const templateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const templateControllerRef = useRef<AbortController | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
-  const models = providers.find((p) => p.name === provider)?.models ?? [];
+  const initDashboard = useCallback(async () => {
+    setIsLoading(true);
 
-  // Set initial provider/model once providers load
+    // Create a signal for the initial load
+    const controller = new AbortController();
+
+    const results = await Promise.allSettled([
+      apiService.getProviders({ signal: controller.signal }),
+      apiService.getPrompts({ q: '' }, controller.signal),
+    ]);
+
+    const [providersRes, templatesRes] = results;
+
+    if (providersRes.status === 'fulfilled') {
+      const data = providersRes.value;
+      setProviders(data as ProviderInfo[]);
+      if (data.length > 0 && !provider) {
+        setProvider(data[0].name);
+        setModel(data[0].models[0] ?? '');
+      }
+    } else if (providersRes.reason.name !== 'AbortError') {
+      console.error("Failed to load providers:", providersRes.reason);
+    }
+
+    if (templatesRes.status === 'fulfilled') {
+      setPromptTemplates(templatesRes.value);
+    }
+
+    setIsLoading(false);
+  }, [provider]);
+
+  // --- Effects ---
+
   useEffect(() => {
-    if (providers.length > 0 && !provider) {
-      setProvider(providers[0].name);
-      setModel(providers[0].models[0] ?? '');
+    initDashboard();
+    return () => templateControllerRef.current?.abort("Cleanup");
+  }, []);
+
+  useEffect(() => {
+    const models = providers.find((p) => p.name === provider)?.models ?? [];
+    setModels(models);
+    console.log("Available models for provider", provider, ":", models);
+    if (models.length > 0) {
+      setModel(models[0]);
     }
   }, [providers, provider]);
 
+  // --- Handlers ---
+
   const fetchTemplates = useCallback(async (q: string) => {
-    templateControllerRef.current?.abort();
+    // Abort previous search request
+    templateControllerRef.current?.abort("New search started");
     const controller = new AbortController();
     templateControllerRef.current = controller;
+
     try {
       const data = await apiService.getPrompts({ q: q.trim() || undefined }, controller.signal);
-      if (!controller.signal.aborted) setPromptTemplates(data);
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return;
+      setPromptTemplates(data);
+    } catch (err: any) {
+      if (err.name === 'AbortError') return;
+      console.error("Template search failed:", err);
     }
   }, []);
 
-  // Initial template load; cleanup aborts any in-flight request on unmount
-  useEffect(() => {
-    fetchTemplates('');
-    return () => {
-      templateControllerRef.current?.abort();
-      if (templateDebounceRef.current) clearTimeout(templateDebounceRef.current);
-    };
+  const handleTemplateSearch = useCallback((q: string) => {
+    setTemplateSearch(q);
+    if (templateDebounceRef.current) clearTimeout(templateDebounceRef.current);
+    templateDebounceRef.current = setTimeout(() => fetchTemplates(q), TEMPLATE_DEBOUNCE_MS);
   }, [fetchTemplates]);
 
-  const handleTemplateSearch = useCallback(
-    (q: string) => {
-      setTemplateSearch(q);
-      if (templateDebounceRef.current) clearTimeout(templateDebounceRef.current);
-      templateDebounceRef.current = setTimeout(() => fetchTemplates(q), TEMPLATE_DEBOUNCE_MS);
-    },
-    [fetchTemplates],
-  );
+  const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setPrompt(e.target.value);
+    setSelectedTemplateId('');
+  }, []);
+
+  const handleProviderChange = useCallback((nextProvider: string) => {
+    setProvider(nextProvider);
+    const info = providers.find((p) => p.name === nextProvider);
+    setModel(info?.models[0] ?? '');
+  }, [providers]);
 
   const handleTemplateChange = useCallback(
     (id: string) => {
@@ -147,57 +179,48 @@ export default function DashboardPage() {
     [promptTemplates],
   );
 
-  const handleProviderChange = useCallback(
-    (nextProvider: string) => {
-      setProvider(nextProvider);
-      const info = providers.find((p) => p.name === nextProvider);
-      setModel(info?.models[0] ?? '');
-    },
-    [providers],
-  );
+  const handleSubmit = useCallback(async (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmedPrompt = prompt.trim();
 
-  const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setPrompt(e.target.value);
-    setSelectedTemplateId('');
-  }, []);
+    if (!trimmedPrompt || !model) {
+      setSubmitError('Prompt, provider, and model are required.');
+      return;
+    }
 
-  const handleSubmit = useCallback(
-    async (event: { preventDefault(): void }) => {
-      event.preventDefault();
-      const trimmedPrompt = prompt.trim();
-      if (!trimmedPrompt || !model) {
-        setSubmitError('Prompt, provider, and model are required.');
-        return;
-      }
-      setSubmitting(true);
-      setSubmitError(null);
-      try {
-        const payload: Parameters<typeof apiService.createJob>[0] = {
-          prompt: trimmedPrompt,
-          provider,
-          model,
-          scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
-        };
-        const job = await apiService.createJob(payload);
-        setJobs((current) => [job, ...current.slice(0, DASHBOARD_JOB_LIMIT - 1)]);
-        setJobsTotal((t) => t + 1);
-        setPrompt('');
-        setScheduledAt('');
-        setSelectedTemplateId('');
-        promptRef.current?.focus();
-        window.setTimeout(() => refreshJobs({ silent: true }), PROMPT_REFRESH_DELAY_MS);
-      } catch (err) {
-        setSubmitError(normalizeError(err));
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [prompt, model, provider, scheduledAt, setJobs, setJobsTotal, refreshJobs],
-  );
+    setSubmitting(true);
+    setSubmitError(null);
 
+    try {
+      const payload = {
+        prompt: trimmedPrompt,
+        provider,
+        model,
+        scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+      };
+
+      const job = await apiService.createJob(payload);
+
+      // Reset Form
+      setPrompt('');
+      setScheduledAt('');
+      setSelectedTemplateId('');
+      promptRef.current?.focus();
+
+      // UI Optimistic Update + Background Refresh
+      setJobs((current) => [job, ...current.slice(0, DASHBOARD_JOB_LIMIT - 1)]);
+      setJobsTotal((t) => t + 1);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Submission failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [prompt, model, provider, scheduledAt, initDashboard]);
+
+  // --- Helper calculations ---
   const charCount = prompt.length;
   const charOverLimit = charCount > PROMPT_MAX_CHARS;
-  const charNearLimit = charCount > PROMPT_WARN_CHARS;
+  const charNearLimit = charCount > PROMPT_WARN_CHARS && !charOverLimit;
 
   return (
     <div className="mx-auto flex flex-col gap-6">
@@ -245,7 +268,7 @@ export default function DashboardPage() {
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
                 <div className="space-y-2">
                   <Label htmlFor="provider">Provider</Label>
-                  {loadingProviders ? (
+                  {isLoading ? (
                     <SelectSkeleton />
                   ) : (
                     <Select value={provider} onValueChange={handleProviderChange}>
@@ -265,7 +288,7 @@ export default function DashboardPage() {
 
                 <div className="space-y-2">
                   <Label htmlFor="model">Model</Label>
-                  {loadingProviders ? (
+                  {isLoading ? (
                     <SelectSkeleton />
                   ) : (
                     <Select value={model} onValueChange={setModel}>
@@ -403,10 +426,10 @@ export default function DashboardPage() {
                 {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Waiting for data'}
               </p>
             </div>
-            {hasActiveJobs && (
-              <div className="inline-flex items-center gap-2 text-xs font-medium text-blue-700">
-                <Loader2 className="size-3.5 animate-spin" />
-                Polling active jobs
+            {wsConnected && (
+              <div className="inline-flex items-center gap-2 text-xs font-medium text-emerald-600">
+                <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+                Live
               </div>
             )}
           </div>

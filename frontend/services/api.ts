@@ -48,84 +48,95 @@ class apiServiceClass implements IApiService {
     url: string,
     options: RequestInit & { token?: string; _retry?: boolean } = {},
   ): Promise<T> {
-    this.group(`API Request: ${options.method || "GET"} ${url}`);
-    let token = options.token;
-    if (!token) {
-      token = (await getAuthToken()) || undefined;
-    }
+    const method = options.method || "GET";
+    // Start a collapsed group to keep the console clean
+    this.groupCollapsed(`🚀 API Request: ${method} ${url}`);
 
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...(options.headers as Record<string, string>),
-    };
-
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    this.log("REQUESTING URL: ", url);
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
-
-    if (!response.ok) {
-      if (response.status === 401 && !options._retry) {
-        this.info("Unauthorized response received, attempting token refresh...");
-        
-        // Only start a new refresh if one isn't already in progress
-        if (!isRefreshing) {
-          isRefreshing = true;
-          refreshPromise = this.refreshToken()
-            .then(() => {
-              this.log("Token refreshed successfully");
-              refreshPromise = null;
-              return true;
-            })
-            .catch(async (err) => {
-              this.error("Token refresh failed during API call:", err);
-              refreshPromise = null;
-              if (typeof window !== "undefined") {
-                sessionStorage.clearSession();
-                await signOut({ redirect: true, callbackUrl: "/login" });
-              }
-              return false;
-            })
-            .finally(() => {
-              this.log("Token refresh process completed");
-              isRefreshing = false;
-            });
-        }
-
-        // Wait for the refresh to complete
-        const refreshed = await refreshPromise;
-        if (refreshed) {
-          // Add a small delay to ensure token storage is complete
-          await new Promise(resolve => setTimeout(resolve, 50));
-          
-          // Retry with the new token
-          return this.fetch<T>(url, {
-            ...options,
-            _retry: true,
-            token: undefined,
-          });
-        }
+    try {
+      let token = options.token;
+      if (!token) {
+        token = (await getAuthToken()) || undefined;
       }
 
-      const error = await response.json().catch(() => ({
-        message: response.statusText,
-      }));
-      throw new APIError(response.status, error.message || error.detail, error);
-    }
-    this.log("API Response received:", response);
-    this.groupEnd();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...((options.headers as Record<string, string>) || {}),
+      };
 
-    return response.json();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+        this.log("Auth: Token attached");
+      }
+
+      this.log("Config:", { url, method, headers, body: options.body });
+
+      const response = await fetch(url, { ...options, headers });
+
+      if (!response.ok) {
+        // Handle 401 Unauthorized with Retry Logic
+        if (response.status === 401 && !options._retry) {
+          this.info("⚠️ 401 Unauthorized: Attempting token refresh...");
+
+          if (!isRefreshing) {
+            isRefreshing = true;
+            refreshPromise = this.refreshToken()
+              .then(() => {
+                this.log("✅ Token refreshed successfully");
+                return true;
+              })
+              .catch(async (err) => {
+                this.error("❌ Token refresh failed:", err);
+                if (typeof window !== "undefined") {
+                  sessionStorage.clearSession();
+                  await signOut({ redirect: true, callbackUrl: "/login" });
+                }
+                return false;
+              })
+              .finally(() => {
+                refreshPromise = null;
+                isRefreshing = false;
+              });
+          }
+
+          const refreshed = await refreshPromise;
+          if (refreshed) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+            this.groupEnd(); // Close current group before retrying to prevent nesting
+            return this.fetch<T>(url, { ...options, _retry: true, token: undefined });
+          }
+        }
+
+        // Handle other errors
+        const errorData = await response.json().catch(() => ({
+          message: response.statusText,
+        }));
+
+        this.error(`❌ API Error ${response.status}:`, errorData);
+        throw new APIError(response.status, errorData.message || errorData.detail, errorData);
+      }
+
+      const data = await response.json();
+      this.log("✅ API Response Success:", data);
+      return data;
+
+    } catch (err: any) {
+      if (err.name === 'AbortError' || err.name === 'CanceledError') {
+        this.log("Request canceled:", err.reason || err.message);
+        throw err;
+      }
+
+      if (!(err instanceof APIError)) {
+        this.error("❌ Network or Unexpected Error:", err.message || err);
+      }
+      throw err;
+    } finally {
+      this.groupEnd();
+    }
   }
 
   // HTTP methods
-  get<T>(url: string): Promise<T> {
-    return this.fetch<T>(url, { method: "GET" });
+  get<T>(url: string, options?: RequestInit): Promise<T> {
+    return this.fetch<T>(url, { method: "GET", ...options });
   }
 
   post<T>(url: string, data?: any): Promise<T> {
@@ -156,6 +167,14 @@ class apiServiceClass implements IApiService {
   }
 
   // ===== Log functions =====
+  groupCollapsed(label: string): void {
+    if (typeof console.groupCollapsed === "function") {
+      console.groupCollapsed(label);
+    } else {
+      console.group(label);
+    }
+  }
+
   group(label: string): void {
     if (typeof console.group === "function") {
       console.group(label);
@@ -167,7 +186,7 @@ class apiServiceClass implements IApiService {
       console.groupEnd();
     }
   }
-  
+
   log(...args: any[]): void {
     console.log(...args);
   }
@@ -227,7 +246,7 @@ class apiServiceClass implements IApiService {
 
     this.group("Refreshing access token");
     this.log("Current refresh token:", refreshToken);
-    
+
     // Make refresh call WITHOUT Authorization header since we're using refresh token in body
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -391,14 +410,14 @@ class apiServiceClass implements IApiService {
   /**
    * Get paginated AI jobs with optional server-side filtering.
    */
-  getJobs(params?: { page?: number; page_size?: number; status?: string; q?: string }): Promise<PaginatedResponse<JobResponse>> {
+  getJobs(params?: { page?: number; limit?: number; status?: string; q?: string }, signal?: AbortSignal): Promise<PaginatedResponse<JobResponse>> {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
-    if (params?.page_size) qs.set("page_size", String(params.page_size));
+    if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.status && params.status !== "all") qs.set("status", params.status);
     if (params?.q?.trim()) qs.set("q", params.q.trim());
     const query = qs.toString();
-    return this.get<PaginatedResponse<JobResponse>>(`${URLs.jobs.list()}${query ? `?${query}` : ""}`);
+    return this.get<PaginatedResponse<JobResponse>>(`${URLs.jobs.list()}${query ? `?${query}` : ""}`, { signal });
   }
 
   /**
@@ -410,8 +429,8 @@ class apiServiceClass implements IApiService {
 
   // ===== Provider Endpoints =====
 
-  getProviders(): Promise<ProviderInfo[]> {
-    return this.get<ProviderInfo[]>(URLs.providers.list());
+  getProviders({ signal }: { signal?: AbortSignal }): Promise<ProviderInfo[]> {
+    return this.get<ProviderInfo[]>(URLs.providers.list(), { signal });
   }
 
   // ===== Prompt Endpoints =====

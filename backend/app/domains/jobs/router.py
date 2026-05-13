@@ -15,6 +15,8 @@ from app.shared.types import JobId, JobStatus, UserId
 
 import redis.asyncio as aioredis
 from app.core.config import settings
+from app.domains.auth.dependencies import get_current_user
+from app.domains.auth.models import User
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -28,6 +30,7 @@ async def create_job(
     body: JobCreate,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user)
 ):
     if not ProviderFactory.supports(body.provider):
         raise HTTPException(400, detail=f"Unsupported provider: '{body.provider}'")
@@ -52,6 +55,7 @@ async def create_job(
                 model=body.model,
                 scheduled_at=body.scheduled_at,
                 idempotency_key=idempotency_key,
+                user_id=UserId(current_user.id),
             )
         )
     except AppException as exc:
@@ -66,7 +70,7 @@ async def create_job(
 @router.get("")
 async def list_jobs(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=100),
     status: str | None = Query(None),
     q: str | None = Query(None),
     db: AsyncSession = Depends(get_async_db),
@@ -80,7 +84,7 @@ async def list_jobs(
             raise HTTPException(400, detail=f"Invalid status: '{status}'")
 
     result = await repo.list(
-        PagedQuery(page=page, page_size=page_size),
+        PagedQuery(page=page, limit=limit),
         status=status_filter,
         search=q or None,
     )

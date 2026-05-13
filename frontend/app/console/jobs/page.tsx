@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ElementType } from 'react';
+import { useCallback, useEffect, useRef, useState, type ElementType } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
@@ -18,6 +18,7 @@ import { apiService, APIError } from '@/services/api';
 import { JobResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
+import { WSClient } from '@/services/websocket';
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
@@ -57,9 +58,11 @@ export default function JobsPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
+  const [wsConnected, setWsConnected] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasActiveJobs = jobs.some((j) => ['pending', 'processing'].includes(j.status));
+  const wsClientRef = useRef<WSClient | null>(null);
+  const loadJobsRef = useRef<typeof loadJobs>(loadJobs);
 
   async function loadJobs({
     silent = false,
@@ -71,7 +74,7 @@ export default function JobsPage() {
     try {
       const data = await apiService.getJobs({
         page: p,
-        page_size: PAGE_SIZE,
+        limit: PAGE_SIZE,
         status: s !== 'all' ? s : undefined,
         q: q.trim() || undefined,
       });
@@ -88,17 +91,45 @@ export default function JobsPage() {
     }
   }
 
-  // Initial load
+  // Keep ref current so initWS (memoized with []) can call the latest loadJobs
+  loadJobsRef.current = loadJobs;
+
+  const initWS = useCallback(() => {
+    const client = new WSClient({
+      url: URLs.jobs.ws(),
+      onMessage: (data) => {
+        if (data.type !== 'job.updated') return;
+        const { type: _t, job_id, ...patch } = data as {
+          type: string;
+          job_id: number;
+          [key: string]: unknown;
+        };
+        setJobs((prev) => {
+          if (!prev.some((j) => j.id === job_id)) {
+            // Job created after initial fetch — reload silently to surface it
+            setTimeout(() => loadJobsRef.current({ silent: true }), 0);
+            return prev;
+          }
+          return prev.map((j) => (j.id === job_id ? { ...j, ...patch } : j));
+        });
+        setLastUpdated(new Date());
+      },
+      onStatusChange: setWsConnected,
+    });
+    wsClientRef.current = client;
+    client.connect();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Initial load + WebSocket connection
   useEffect(() => {
     loadJobs({ p: 1 });
-  }, []);
-
-  // Poll active jobs — stay on current page/filters
-  useEffect(() => {
-    if (!hasActiveJobs) return;
-    const interval = window.setInterval(() => loadJobs({ silent: true }), 5000);
-    return () => window.clearInterval(interval);
-  }, [hasActiveJobs, page, statusFilter, search]);
+    initWS();
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      wsClientRef.current?.close();
+      wsClientRef.current = null;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleStatusChange(s: StatusFilter) {
     setStatusFilter(s);
@@ -130,10 +161,10 @@ export default function JobsPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-gray-950">All Jobs</h1>
           <p className="mt-1 text-sm text-gray-600">
             {lastUpdated ? `Last updated ${lastUpdated.toLocaleTimeString()}` : 'Loading…'}
-            {hasActiveJobs && (
-              <span className="ml-3 inline-flex items-center gap-1 text-blue-600">
-                <Loader2 className="size-3 animate-spin" />
-                Polling active jobs
+            {wsConnected && (
+              <span className="ml-3 inline-flex items-center gap-1 text-emerald-600">
+                <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+                Live
               </span>
             )}
           </p>

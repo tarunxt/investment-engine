@@ -38,11 +38,11 @@ export interface IApiService {
 
     // Job endpoints
     createJob(data: JobCreate): Promise<JobResponse>;
-    getJobs(params?: { page?: number; page_size?: number; status?: string; q?: string }): Promise<PaginatedResponse<JobResponse>>;
+    getJobs(params?: { page?: number; limit?: number; status?: string; q?: string }): Promise<PaginatedResponse<JobResponse>>;
     getJob(id: number): Promise<JobResponse>;
 
     // Provider endpoints
-    getProviders(): Promise<ProviderInfo[]>;
+    getProviders({ signal }: { signal?: AbortSignal }): Promise<ProviderInfo[]>;
 
     // Prompt endpoints
     getPrompts(params?: { q?: string }, signal?: AbortSignal): Promise<PromptResponse[]>;

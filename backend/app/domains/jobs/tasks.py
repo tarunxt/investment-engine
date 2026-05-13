@@ -1,16 +1,63 @@
+import json
 from time import monotonic
 
 from celery.exceptions import MaxRetriesExceededError
+import redis as _sync_redis
 
 from app.infrastructure.messaging.celery_app import celery
 from app.infrastructure.database.sync_session import SyncSessionLocal
 import app.infrastructure.database.all_models  # noqa: F401 — registers all ORM models with the mapper
+from app.core.config import settings
 from app.core.logging import WorkerLogHelper, get_logger
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
 from app.shared.types import JobStatus
 
 logger = get_logger("app.domains.jobs.tasks")
+
+
+def _publish_job_update(job: Job) -> None:
+    """Publish job status change to Redis pub/sub for WebSocket relay. Fire-and-forget."""
+    r: _sync_redis.Redis | None = None
+    try:
+        status_val = job.status.value if hasattr(job.status, "value") else str(job.status)
+        payload = json.dumps({
+            "type": "job.updated",
+            "job_id": job.id,
+            "status": status_val,
+            "response": job.response,
+            "error_message": job.error_message,
+            "tokens_in": job.tokens_in,
+            "tokens_out": job.tokens_out,
+            "estimated_cost": job.estimated_cost,
+        })
+        
+        redis_url = settings.redis_url
+        logger.info("Publishing WS update for job_id=%s to Redis at %s", job.id, redis_url)
+        
+        r = _sync_redis.from_url(redis_url, decode_responses=True)
+        
+        # Publish to job-specific channel
+        job_channel = f"job_updates:{job.id}"
+        job_receivers = r.publish(job_channel, payload)
+        logger.info("Published to %s: %s receiver(s)", job_channel, job_receivers)
+        
+        # Publish to user channel if user_id exists
+        if job.user_id:
+            user_channel = f"user_job_updates:{job.user_id}"
+            user_receivers = r.publish(user_channel, payload)
+            logger.info("Published to %s: %s receiver(s)", user_channel, user_receivers)
+        else:
+            logger.warning("job.user_id is None, skipping user_job_updates publish for job_id=%s", job.id)
+            
+    except Exception as e:
+        logger.exception("Failed to publish WS update for job_id=%s: %s", job.id, e)
+    finally:
+        if r is not None:
+            try:
+                r.close()
+            except Exception:
+                pass
 
 # ── Error classification ──────────────────────────────────────────────────────
 
@@ -56,8 +103,8 @@ def _mark_failed(db, repo, job_id: int, error: str) -> None:
         db.rollback()
         job = repo.get(job_id)
         if job:
-            logger.info("Job updated");
             repo.update_status(job, JobStatus.FAILED, error_message=error)
+            _publish_job_update(job)
     except Exception:
         logger.exception("Could not mark job %s as failed", job_id)
 
@@ -86,6 +133,7 @@ def execute_ai_job(self, job_id: int) -> None:
 
         WorkerLogHelper.log_task_start("execute_ai_job", "n/a", job_id)
         repo.update_status(job, JobStatus.PROCESSING)
+        _publish_job_update(job)
 
         provider = ProviderFactory.create(job.provider)
         result = provider.generate(prompt=job.prompt, model=job.model)
@@ -98,6 +146,7 @@ def execute_ai_job(self, job_id: int) -> None:
             tokens_out=result.tokens_out,
             estimated_cost=result.cost,
         )
+        _publish_job_update(job)
         WorkerLogHelper.log_task_complete(
             "execute_ai_job", "n/a", (monotonic() - started_at) * 1000, job_id
         )
@@ -107,8 +156,8 @@ def execute_ai_job(self, job_id: int) -> None:
         logger.error("Job %s exhausted all retries", job_id)
 
     except Exception as exc:
-        WorkerLogHelper.log_task_error("execute_ai_job", "n/a", str(exc), job_id)
-        logger.exception("Failed to execute AI job %s", job_id)
+        error_summary = str(exc).split('\n')[0][:200]
+        WorkerLogHelper.log_task_error("execute_ai_job", "n/a", error_summary, job_id)
 
         retryable, countdown = _classify_exc(exc)
         logger.info("Error classified as retryable=%s with countdown=%s seconds", retryable, countdown)

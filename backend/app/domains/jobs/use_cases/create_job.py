@@ -21,7 +21,7 @@ class CreateJobCommand:
     prompt: str
     provider: str
     model: str
-    user_id: UserId | None = None
+    user_id: UserId
     scheduled_at: datetime | None = None
     idempotency_key: str | None = None
 
