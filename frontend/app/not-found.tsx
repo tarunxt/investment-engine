@@ -33,7 +33,7 @@ export default function NotFound() {
                     </div>
 
                     <div className="space-y-2">
-                        <Link href={isAuthenticated ? URLs.routes.dashboard.root() : URLs.routes.home()}>
+                        <Link href={isAuthenticated ? URLs.routes.console.dashboard() : URLs.routes.home()}>
                             <Button className="w-full bg-purple-600 hover:bg-purple-700">
                                 {
                                     loading ? "Loading..." : (isAuthenticated ? "Go to Dashboard" : "Go to Home")

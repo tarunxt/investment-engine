@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     deepseek_api_key: Optional[str] = None
     deepseek_api_base: Optional[str] = None  # e.g., "https://api.deepseek.com/v1"
 
+    # Zerodha Kite Connect
+    zerodha_api_key: Optional[str] = None
+    zerodha_api_secret: Optional[str] = None
+    zerodha_token_encryption_key: Optional[str] = None  # Fernet key for access_token at-rest encryption
+
     # Third-party services
     tavily_api_key: str = ""
 

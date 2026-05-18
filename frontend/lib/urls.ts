@@ -69,6 +69,24 @@ export const URLs = {
     wsJob: (id: number) => `${WS_BASE_URL}/ws/jobs/${id}`,
   },
 
+  // Run endpoints (multi-LLM fan-out)
+  runs: {
+    create: () => `${API_BASE_URL}/runs`,
+    list: () => `${API_BASE_URL}/runs`,
+    get: (id: number) => `${API_BASE_URL}/runs/${id}`,
+    ws: () => `${WS_BASE_URL}/ws/runs`,
+    wsRun: (id: number) => `${WS_BASE_URL}/ws/runs/${id}`,
+  },
+
+  // Zerodha endpoints
+  zerodha: {
+    loginUrl: () => `${API_BASE_URL}/zerodha/login-url`,
+    callback: () => `${API_BASE_URL}/zerodha/callback`,
+    status: () => `${API_BASE_URL}/zerodha/status`,
+    orders: () => `${API_BASE_URL}/zerodha/orders`,
+    disconnect: () => `${API_BASE_URL}/zerodha/disconnect`,
+  },
+
   // Provider endpoints
   providers: {
     list: () => `${API_BASE_URL}/providers`,
@@ -121,10 +139,12 @@ export const URLs = {
       overview: () => "/console/dashboard",
       jobs: () => "/console/jobs",
       jobDetail: (id: number) => `/console/jobs/${id}`,
+      runDetail: (id: number) => `/console/runs/${id}`,
       prompts: () => "/console/prompts",
       schedules: () => "/console/schedules",
       scheduleDetail: (id: number) => `/console/schedules/${id}`,
       apiKeys: () => "/console/api-keys",
+      zerodha: () => "/console/zerodha",
     },
 
     profile: {
@@ -150,7 +170,7 @@ export const URLs = {
  */
 export const buildURL = (
   baseUrl: string,
-  params?: Record<string, string | number>,
+  _params?: Record<string, string | number>,
   query?: Record<string, string | number | boolean>,
 ): string => {
   let url = baseUrl;

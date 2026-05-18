@@ -14,7 +14,7 @@ Build a fully automated, multi-LLM research pipeline that gathers fresh Indian m
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  STAGE 1 — Independent Research  (8 LLMs in parallel)   │
-│                                                          │
+│                                                         │
 │  GPT Thinking · GPT Extended Thinking                   │
 │  Gemini Flash · Gemini Pro                              │
 │  DeepSeek Chat · DeepSeek Reasoner                      │
@@ -24,7 +24,7 @@ Build a fully automated, multi-LLM research pipeline that gathers fresh Indian m
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │  STAGE 2 — Cross-LLM Synthesis  (GPT Extended Thinking) │
-│  Consensus picks · filter weak ideas · ranked shortlist  │
+│  Consensus picks · filter weak ideas · ranked shortlist │
 └────────────────────────┬────────────────────────────────┘
                          │ consolidated table
                          ▼
@@ -33,18 +33,18 @@ Build a fully automated, multi-LLM research pipeline that gathers fresh Indian m
               └──────────┬──────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  STAGE 3 — Portfolio Review  (4 LLMs in parallel)        │
-│                                                          │
+│  STAGE 3 — Portfolio Review  (4 LLMs in parallel)       │
+│                                                         │
 │  GPT Extended Thinking · Gemini Pro                     │
 │  Claude Sonnet Adaptive · DeepSeek Reasoner             │
-│                                                          │
-│  → hold / add / trim / exit / rotate decisions           │
+│                                                         │
+│  → hold / add / trim / exit / rotate decisions          │
 └────────────────────────┬────────────────────────────────┘
                          │ 4 decision tables
                          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  STAGE 4 — Meta-Decision  (GPT Extended Thinking)        │
-│  Final rebalance plan · conviction ranking · risk notes  │
+│  STAGE 4 — Meta-Decision  (GPT Extended Thinking)       │
+│  Final rebalance plan · conviction ranking · risk notes │
 └─────────────────────────────────────────────────────────┘
                          │
                          ▼

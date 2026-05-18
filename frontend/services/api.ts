@@ -17,6 +17,13 @@ import {
   PromptCreate,
   PromptUpdate,
   ProviderInfo,
+  RunCreate,
+  RunResponse,
+  ZerodhaLoginUrlResponse,
+  ZerodhaOrder,
+  ZerodhaPlaceOrderRequest,
+  ZerodhaPlaceOrderResponse,
+  ZerodhaStatusResponse,
 } from "@/types/api";
 import { IApiService } from "./api.types";
 
@@ -231,7 +238,7 @@ class apiServiceClass implements IApiService {
   /**
    * Logout user
    */
-  logout(token?: string): Promise<void> {
+  logout(): Promise<void> {
     return this.post<void>(URLs.auth.logout(), {});
   }
 
@@ -281,14 +288,14 @@ class apiServiceClass implements IApiService {
   /**
    * Get current user info
    */
-  getCurrentUser(token?: string): Promise<UserResponse> {
+  getCurrentUser(): Promise<UserResponse> {
     return this.get<UserResponse>(URLs.auth.me());
   }
 
   /**
    * Update password
    */
-  updatePassword(data: UpdatePasswordRequest, token?: string): Promise<void> {
+  updatePassword(data: UpdatePasswordRequest): Promise<void> {
     return this.put<void>(URLs.auth.updatePassword(), data);
   }
 
@@ -302,7 +309,7 @@ class apiServiceClass implements IApiService {
   /**
    * Update user profile
    */
-  updateProfile(data: UpdateProfileRequest, token?: string): Promise<void> {
+  updateProfile(data: UpdateProfileRequest): Promise<void> {
     return this.put<void>(URLs.auth.updateProfile(), data);
   }
 
@@ -329,14 +336,14 @@ class apiServiceClass implements IApiService {
   /**
    * Get user list (admin only)
    */
-  getUsers(token?: string): Promise<PaginatedResponse<UserResponse>> {
+  getUsers(): Promise<PaginatedResponse<UserResponse>> {
     return this.get<PaginatedResponse<UserResponse>>(URLs.users.list());
   }
 
   /**
    * Get specific user
    */
-  getUser(id: number, token?: string): Promise<UserResponse> {
+  getUser(id: number): Promise<UserResponse> {
     return this.get<UserResponse>(URLs.users.get(id));
   }
 
@@ -345,8 +352,7 @@ class apiServiceClass implements IApiService {
    */
   updateUser(
     id: number,
-    data: Partial<UserResponse>,
-    token?: string,
+    data: Partial<UserResponse>
   ): Promise<UserResponse> {
     return this.put<UserResponse>(URLs.users.update(id), data);
   }
@@ -354,7 +360,7 @@ class apiServiceClass implements IApiService {
   /**
    * Delete user (admin only)
    */
-  deleteUser(id: number, token?: string): Promise<void> {
+  deleteUser(id: number): Promise<void> {
     return this.delete<void>(URLs.users.delete(id));
   }
 
@@ -362,8 +368,7 @@ class apiServiceClass implements IApiService {
    * Get user's jobs
    */
   getUserJobs(
-    id: number,
-    token?: string,
+    id: number
   ): Promise<PaginatedResponse<JobResponse>> {
     return this.get<PaginatedResponse<JobResponse>>(URLs.users.getJobs(id));
   }
@@ -405,6 +410,27 @@ class apiServiceClass implements IApiService {
    */
   createJob(data: JobCreate): Promise<JobResponse> {
     return this.post<JobResponse>(URLs.jobs.create(), data);
+  }
+
+  // ===== Run Endpoints (Multi-LLM Fan-Out) =====
+
+  /**
+   * Create a Research Run — fans out the prompt to all selected (provider, model) pairs as Stage 1 jobs.
+   */
+  createRun(data: RunCreate): Promise<RunResponse> {
+    return this.post<RunResponse>(URLs.runs.create(), data);
+  }
+
+  getRuns(params?: { page?: number; limit?: number }): Promise<PaginatedResponse<RunResponse>> {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return this.get<PaginatedResponse<RunResponse>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
+  }
+
+  getRun(id: number): Promise<RunResponse> {
+    return this.get<RunResponse>(URLs.runs.get(id));
   }
 
   /**
@@ -457,6 +483,32 @@ class apiServiceClass implements IApiService {
 
   deletePrompt(id: number): Promise<void> {
     return this.delete<void>(URLs.prompts.delete(id));
+  }
+
+  // ===== Zerodha Endpoints =====
+
+  zerodhaLoginUrl(): Promise<ZerodhaLoginUrlResponse> {
+    return this.get<ZerodhaLoginUrlResponse>(URLs.zerodha.loginUrl());
+  }
+
+  zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse> {
+    return this.post<ZerodhaStatusResponse>(URLs.zerodha.callback(), { request_token });
+  }
+
+  zerodhaStatus(): Promise<ZerodhaStatusResponse> {
+    return this.get<ZerodhaStatusResponse>(URLs.zerodha.status());
+  }
+
+  zerodhaOrders(): Promise<{ data: ZerodhaOrder[] }> {
+    return this.get<{ data: ZerodhaOrder[] }>(URLs.zerodha.orders());
+  }
+
+  zerodhaPlaceOrder(data: ZerodhaPlaceOrderRequest): Promise<ZerodhaPlaceOrderResponse> {
+    return this.post<ZerodhaPlaceOrderResponse>(URLs.zerodha.orders(), data);
+  }
+
+  zerodhaDisconnect(): Promise<{ message: string }> {
+    return this.delete<{ message: string }>(URLs.zerodha.disconnect());
   }
 }
 

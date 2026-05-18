@@ -11,6 +11,7 @@ import {
     HiOutlineUser,
     HiOutlineBriefcase,
     HiOutlineBookOpen,
+    HiOutlineTrendingUp,
 } from 'react-icons/hi';
 import { URLs } from '@/lib/urls';
 import { FullLoader } from '@/components/shared/Loader';
@@ -48,6 +49,11 @@ export default function DashboardLayout({
             name: 'Prompts',
             href: URLs.routes.console.prompts(),
             icon: HiOutlineBookOpen,
+        },
+        {
+            name: 'Zerodha',
+            href: URLs.routes.console.zerodha(),
+            icon: HiOutlineTrendingUp,
         },
         {
             name: 'Profile',

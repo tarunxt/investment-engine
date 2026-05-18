@@ -69,8 +69,6 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
     Everything else retries after 30 s.
     """
 
-    return False, 0  # TEMP: disable retries while debugging
-
     if attempt >= 3:
         return False, 0  # don't retry after max attempts
 
@@ -98,6 +96,108 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
     return True, 30  # default: retryable
 
 
+def _redis_publish(channel: str, payload: dict) -> None:
+    """Publish a single message to a Redis pub/sub channel. Fire-and-forget."""
+    r: _sync_redis.Redis | None = None
+    try:
+        r = _sync_redis.from_url(settings.redis_url, decode_responses=True)
+        r.publish(channel, json.dumps(payload))
+    except Exception:
+        logger.exception("Failed to publish to channel %s", channel)
+    finally:
+        if r is not None:
+            try:
+                r.close()
+            except Exception:
+                pass
+
+
+def _publish_run_update(run_id: int, user_id: int | None, status: JobStatus, current_stage: int) -> None:
+    """Broadcast a run status change to the user-level and per-run Redis channels."""
+    status_val = status.value if hasattr(status, "value") else str(status)
+    payload = {
+        "type": "run.updated",
+        "run_id": run_id,
+        "status": status_val,
+        "current_stage": current_stage,
+    }
+    # Per-run channel — consumed by the run detail page
+    _redis_publish(f"run_updates:{run_id}", payload)
+    # User-level channel — consumed by the dashboard list
+    if user_id:
+        _redis_publish(f"user_run_updates:{user_id}", payload)
+
+
+def _refresh_run_status(db, job_id: int) -> None:
+    """Recalculate and persist Run.status when a child job reaches a terminal state."""
+    try:
+        from sqlalchemy import select as sa_select
+        from app.domains.runs.models import RunJob
+        from app.domains.runs.repository import SyncRunRepository
+
+        run_repo = SyncRunRepository(db)
+
+        rj_rows = db.execute(
+            sa_select(RunJob).where(RunJob.job_id == job_id)
+        ).scalars().all()
+
+        for rj in rj_rows:
+            run = run_repo.get(rj.run_id)
+            if not run:
+                continue
+
+            pairs = run_repo.get_stage_run_jobs(rj.run_id, rj.stage)
+            if not pairs:
+                continue
+
+            stage_jobs = [job for _, job in pairs]
+
+            # Push the triggering job's full data to the per-run channel so the
+            # detail page can update response text, tokens, and cost in real-time.
+            updated_job = next((j for j in stage_jobs if j.id == job_id), None)
+            if updated_job is not None:
+                status_val = (
+                    updated_job.status.value
+                    if hasattr(updated_job.status, "value")
+                    else str(updated_job.status)
+                )
+                _redis_publish(f"run_updates:{rj.run_id}", {
+                    "type": "job.updated",
+                    "run_id": rj.run_id,
+                    "job_id": updated_job.id,
+                    "status": status_val,
+                    "response": updated_job.response,
+                    "error_message": updated_job.error_message,
+                    "tokens_in": updated_job.tokens_in,
+                    "tokens_out": updated_job.tokens_out,
+                    "estimated_cost": updated_job.estimated_cost,
+                })
+
+            statuses = {j.status for j in stage_jobs}
+            active = {JobStatus.PENDING, JobStatus.PROCESSING, JobStatus.SCHEDULED}
+
+            if statuses & active:
+                # At least one child job is still running
+                new_status = JobStatus.PROCESSING
+            elif any(j.status == JobStatus.COMPLETED for j in stage_jobs):
+                # All terminal, at least one succeeded
+                new_status = JobStatus.COMPLETED
+            else:
+                # All terminal, all failed
+                new_status = JobStatus.FAILED
+
+            if run.status != new_status:
+                # Snapshot before commit expires the ORM object
+                run_id = run.id
+                user_id = run.user_id
+                current_stage = run.current_stage
+                run_repo.update_status(run, new_status)
+                _publish_run_update(run_id, user_id, new_status, current_stage)
+                logger.info("Run %s status → %s", run_id, new_status.value)
+    except Exception:
+        logger.exception("Failed to refresh run status for job %s", job_id)
+
+
 def _mark_failed(db, repo, job_id: int, error: str) -> None:
     try:
         db.rollback()
@@ -105,6 +205,7 @@ def _mark_failed(db, repo, job_id: int, error: str) -> None:
         if job:
             repo.update_status(job, JobStatus.FAILED, error_message=error)
             _publish_job_update(job)
+            _refresh_run_status(db, job_id)
     except Exception:
         logger.exception("Could not mark job %s as failed", job_id)
 
@@ -147,6 +248,7 @@ def execute_ai_job(self, job_id: int) -> None:
             estimated_cost=result.cost,
         )
         _publish_job_update(job)
+        _refresh_run_status(db, job_id)
         WorkerLogHelper.log_task_complete(
             "execute_ai_job", "n/a", (monotonic() - started_at) * 1000, job_id
         )
@@ -159,14 +261,14 @@ def execute_ai_job(self, job_id: int) -> None:
         error_summary = str(exc).split('\n')[0][:200]
         WorkerLogHelper.log_task_error("execute_ai_job", "n/a", error_summary, job_id)
 
-        retryable, countdown = _classify_exc(exc)
+        retryable, countdown = _classify_exc(exc, attempt=self.request.retries)
         logger.info("Error classified as retryable=%s with countdown=%s seconds", retryable, countdown)
         if not retryable:
             _mark_failed(db, repo, job_id, str(exc))
             return
 
         try:
-            raise self.retry(exc=exc, countdown=countdown)
+            raise self.retry(exc=exc, countdown=countdown, max_retries=self.max_retries)
         except MaxRetriesExceededError:
             _mark_failed(db, repo, job_id, str(exc))
             logger.error("Job %s exhausted all retries after: %s", job_id, exc)

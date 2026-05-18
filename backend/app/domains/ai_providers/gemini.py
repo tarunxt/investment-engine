@@ -10,13 +10,13 @@ from app.domains.ai_providers.base import (
 )
 
 MODEL_PRICING_PER_1M_TOKENS = {
-    "gemini-3.1-flash-lite": {
-        "input": 0.25,
-        "output": 1.50,
+    "gemini-2.5-flash": {
+        "input": 0.5,
+        "output": 3.00,
     },
-    "gemini-3.1-pro-preview": {
-        "input": 1.25,
-        "output": 5.00,
+    "gemini-3-flash-preview": {
+        "input": 0.50,
+        "output": 3.00,
     },
 }
 
@@ -47,29 +47,27 @@ class GeminiProvider(BaseAIProvider):
         *,
         prompt: str,
         model: str,
-        use_search: bool = True,
     ) -> AIProviderResponse:
         tools: list[types.Tool] = []
 
-        thinking_level = (
-            types.ThinkingLevel.HIGH
-            if model == "gemini-3.1-pro-preview"
-            else types.ThinkingLevel.MINIMAL
-        )
+        # thinking_level = (
+        #     types.ThinkingLevel.HIGH
+        #     if model == "gemini-3.1-pro-preview"
+        #     else types.ThinkingLevel.MINIMAL
+        # )
 
         tools: list[types.Tool] = []
 
-        if use_search:
-            tools.append(
-                types.Tool(
-                    google_search=types.GoogleSearch()
-                )
+        tools.append(
+            types.Tool(
+                google_search=types.GoogleSearch()
             )
+        )
 
         config = types.GenerateContentConfig(
-            thinking_config=types.ThinkingConfig(
-                thinking_level=thinking_level,
-            ),
+            # thinking_config=types.ThinkingConfig(
+            #     thinking_level=thinking_level,
+            # ),
             temperature=0.7,
             tools=tools if tools else None,
         )

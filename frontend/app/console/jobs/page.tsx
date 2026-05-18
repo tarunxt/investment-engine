@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ElementType } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
   CalendarClock,
@@ -49,20 +49,59 @@ function normalizeError(error: unknown) {
 
 export default function JobsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
+    () => (searchParams.get('status') as StatusFilter) || 'all'
+  );
+  const [page, setPage] = useState(
+    () => Number(searchParams.get('page')) || 1
+  );
+  const [search, setSearch] = useState(
+    () => searchParams.get('search') || ''
+  );
   const [wsConnected, setWsConnected] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsClientRef = useRef<WSClient | null>(null);
   const loadJobsRef = useRef<typeof loadJobs>(loadJobs);
+
+  const updateURLParams = useCallback((params: { status?: string; page?: number; search?: string }) => {
+    const newParams = new URLSearchParams(searchParams);
+
+    if (params.status !== undefined) {
+      if (params.status === 'all') {
+        newParams.delete('status');
+      } else {
+        newParams.set('status', params.status);
+      }
+    }
+
+    if (params.page !== undefined) {
+      if (params.page === 1) {
+        newParams.delete('page');
+      } else {
+        newParams.set('page', params.page.toString());
+      }
+    }
+
+    if (params.search !== undefined) {
+      if (!params.search) {
+        newParams.delete('search');
+      } else {
+        newParams.set('search', params.search);
+      }
+    }
+
+    const queryString = newParams.toString();
+    const newURL = queryString ? `/console/jobs?${queryString}` : '/console/jobs';
+    router.replace(newURL, { scroll: false });
+  }, [router, searchParams]);
 
   async function loadJobs({
     silent = false,
@@ -91,7 +130,6 @@ export default function JobsPage() {
     }
   }
 
-  // Keep ref current so initWS (memoized with []) can call the latest loadJobs
   loadJobsRef.current = loadJobs;
 
   const initWS = useCallback(() => {
@@ -120,10 +158,19 @@ export default function JobsPage() {
     client.connect();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Initial load + WebSocket connection
+  // Initial load - read from URL params
   useEffect(() => {
-    loadJobs({ p: 1 });
+    const initialStatus = (searchParams.get('status') as StatusFilter) || 'all';
+    const initialPage = Number(searchParams.get('page')) || 1;
+    const initialSearch = searchParams.get('search') || '';
+
+    setStatusFilter(initialStatus);
+    setPage(initialPage);
+    setSearch(initialSearch);
+
+    loadJobs({ p: initialPage, s: initialStatus, q: initialSearch });
     initWS();
+
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       wsClientRef.current?.close();
@@ -134,6 +181,7 @@ export default function JobsPage() {
   function handleStatusChange(s: StatusFilter) {
     setStatusFilter(s);
     setPage(1);
+    updateURLParams({ status: s, page: 1 });
     loadJobs({ p: 1, s });
   }
 
@@ -142,12 +190,14 @@ export default function JobsPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setPage(1);
+      updateURLParams({ search: q, page: 1 });
       loadJobs({ p: 1, q });
     }, 300);
   }
 
   function handlePageChange(next: number) {
     setPage(next);
+    updateURLParams({ page: next });
     loadJobs({ p: next });
   }
 

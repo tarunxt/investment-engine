@@ -150,6 +150,41 @@ export interface JobListResponse {
   [key: string]: any;
 }
 
+// ==================== Run Types (Multi-LLM Fan-Out) ====================
+
+export interface RunModelTarget {
+  provider: string;
+  model: string;
+}
+
+export interface RunCreate {
+  prompt: string;
+  targets: RunModelTarget[];
+  prompt_id?: number | null;
+  scheduled_at?: string | null;
+}
+
+export interface RunJobResponse {
+  id: number;
+  run_id: number;
+  job_id: number;
+  stage: number;
+  job: JobResponse;
+}
+
+export interface RunResponse {
+  id: number;
+  prompt: string;
+  prompt_id: number | null;
+  status: string;
+  current_stage: number;
+  run_jobs: RunJobResponse[];
+  synthesis_response: string | null;
+  decision_response: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ==================== Validation Error Types ====================
 
 export interface ValidationError {
@@ -162,6 +197,55 @@ export interface ValidationError {
 
 export interface HTTPValidationError {
   detail?: ValidationError[];
+}
+
+// ==================== Zerodha Types ====================
+
+export interface ZerodhaLoginUrlResponse {
+  login_url: string;
+  configured: boolean;
+}
+
+export interface ZerodhaStatusResponse {
+  connected: boolean;
+  login_time: string | null;
+  expires_at: string | null;
+}
+
+export interface ZerodhaOrder {
+  order_id: string;
+  tradingsymbol: string;
+  exchange: string;
+  transaction_type: string;
+  order_type: string;
+  quantity: number;
+  status: string;
+  price: number;
+  average_price: number;
+  product: string;
+  validity: string;
+  placed_by: string;
+  tag: string | null;
+  order_timestamp: string | null;
+  filled_quantity: number;
+  pending_quantity: number;
+}
+
+export interface ZerodhaPlaceOrderRequest {
+  tradingsymbol: string;
+  exchange: string;
+  transaction_type: 'BUY' | 'SELL';
+  order_type: 'MARKET' | 'LIMIT' | 'SL' | 'SL-M';
+  quantity: number;
+  product: string;
+  validity?: string;
+  price?: number;
+  trigger_price?: number;
+  market_protection?: number;
+}
+
+export interface ZerodhaPlaceOrderResponse {
+  order_id: string;
 }
 
 // ==================== API Response Wrapper Types ====================

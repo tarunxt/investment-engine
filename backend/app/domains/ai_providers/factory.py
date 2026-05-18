@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.domains.ai_providers.anthropic import AnthropicProvider
 from app.domains.ai_providers.base import BaseAIProvider
 from app.domains.ai_providers.deepseek import DeepSeekProvider
 from app.domains.ai_providers.gemini import GeminiProvider
@@ -8,6 +9,7 @@ from app.domains.ai_providers.openai import OpenAIProvider
 
 class ProviderFactory:
     _providers: dict[str, type[BaseAIProvider]] = {
+        AnthropicProvider.provider_name: AnthropicProvider,
         GeminiProvider.provider_name: GeminiProvider,
         OpenAIProvider.provider_name: OpenAIProvider,
         DeepSeekProvider.provider_name: DeepSeekProvider,

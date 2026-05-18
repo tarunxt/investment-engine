@@ -13,7 +13,6 @@ import { AuthRedirect } from "@/components/AuthRedirect";
 import { apiService } from "@/services/api";
 
 export default function ForgotPasswordPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

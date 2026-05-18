@@ -1,9 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
-import Link from 'next/link';
 
 export default function AuthLayout({
     children,
@@ -27,9 +26,9 @@ export default function AuthLayout({
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+        <div className="min-h-screen bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50">
             {/* Main Content */}
-            <main className="flex-grow">
+            <main className="grow">
                 {children}
             </main>
         </div>

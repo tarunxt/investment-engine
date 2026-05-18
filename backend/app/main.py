@@ -15,12 +15,17 @@ from app.domains.health.router import router as health_router
 from app.domains.jobs.router import router as jobs_router
 from app.domains.jobs.ws_router import router as jobs_ws_router
 from app.domains.prompts.router import router as prompts_router
+from app.domains.runs.router import router as runs_router
+from app.domains.runs.ws_router import router as runs_ws_router
+from app.domains.zerodha.router import router as zerodha_router
 from app.infrastructure.database.session import AsyncSessionLocal, async_engine
 from app.shared.exceptions import AppException
 
 # Ensure all ORM models are registered with the shared metadata
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
 from app.domains.jobs.models import Job  # noqa: F401
+from app.domains.runs.models import Run, RunJob  # noqa: F401
+from app.domains.zerodha.models import ZerodhaCredential  # noqa: F401
 from app.domains.prompts.models import Prompt  # noqa: F401
 from app.infrastructure.database.outbox.models import OutboxMessage  # noqa: F401
 
@@ -105,6 +110,9 @@ app.include_router(jobs_router)
 app.include_router(jobs_ws_router)
 app.include_router(prompts_router)
 app.include_router(providers_router)
+app.include_router(runs_router)
+app.include_router(runs_ws_router)
+app.include_router(zerodha_router)
 
 
 @app.get("/")
