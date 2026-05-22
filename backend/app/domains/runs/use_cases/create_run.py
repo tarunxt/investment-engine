@@ -27,6 +27,11 @@ class CreateRunCommand:
     user_id: UserId
     prompt_id: int | None = None
     scheduled_at: datetime | None = None
+    auto_export_enabled: bool = False
+    export_spreadsheet_url: str | None = None
+    export_sheet_name: str | None = None
+    export_investment_amount: str | None = None
+    export_title: str | None = None
 
 
 class CreateRunUseCase:
@@ -47,6 +52,23 @@ class CreateRunUseCase:
         is_future = scheduled_at is not None and scheduled_at > now
         initial_status = JobStatus.SCHEDULED if is_future else JobStatus.PENDING
 
+        # Auto-generate Google Sheets settings if auto-export is enabled
+        export_url = cmd.export_spreadsheet_url
+        export_sheet_name = cmd.export_sheet_name or now.strftime("%b %d")  # e.g., "May 22"
+
+        if cmd.auto_export_enabled and not export_url:
+            # Try to get user's master sheet, if available
+            from sqlalchemy import select
+            from app.domains.auth.models import UserProfile
+
+            user_profile_result = await self._session.execute(
+                select(UserProfile).where(UserProfile.user_id == cmd.user_id)
+            )
+            user_profile = user_profile_result.scalar_one_or_none()
+
+            if user_profile and user_profile.google_sheets_master_url:
+                export_url = user_profile.google_sheets_master_url
+
         lock_key = f"run:create:{cmd.user_id}:{cmd.prompt[:40]}"
         try:
             async with self._lock.acquire(lock_key, ttl=15, timeout=5):
@@ -56,6 +78,11 @@ class CreateRunUseCase:
                     prompt_id=cmd.prompt_id,
                     status=initial_status,
                     current_stage=1,
+                    auto_export_enabled=cmd.auto_export_enabled,
+                    export_spreadsheet_url=export_url,
+                    export_sheet_name=export_sheet_name,
+                    export_investment_amount=cmd.export_investment_amount,
+                    export_title=cmd.export_title,
                 )
                 await self._run_repo.create(run)  # flush → run.id populated
 
@@ -87,9 +114,11 @@ class CreateRunUseCase:
 
         for job in jobs:
             if is_future:
-                execute_ai_job.apply_async(args=[job.id], eta=scheduled_at)
+                execute_ai_job.apply_async(args=[job.id], eta=scheduled_at)  # type: ignore
             else:
-                execute_ai_job.delay(job.id)
+                execute_ai_job.delay(job.id)  # type: ignore
 
         # Re-fetch with all relationships loaded for the response
-        return await self._run_repo.get(run.id)
+        result = await self._run_repo.get(run.id)
+        assert result is not None, f"Run {run.id} not found after creation"
+        return result

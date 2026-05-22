@@ -191,9 +191,31 @@ def _refresh_run_status(db, job_id: int) -> None:
                 run_id = run.id
                 user_id = run.user_id
                 current_stage = run.current_stage
+                auto_export_enabled = run.auto_export_enabled
+                export_spreadsheet_url = run.export_spreadsheet_url
+                export_sheet_name = run.export_sheet_name
+                export_investment_amount = run.export_investment_amount
+                export_title = run.export_title
+
                 run_repo.update_status(run, new_status)
                 _publish_run_update(run_id, user_id, new_status, current_stage)
                 logger.info("Run %s status → %s", run_id, new_status.value)
+
+                # Trigger auto-export if run completed and auto-export is enabled
+                if new_status == JobStatus.COMPLETED and auto_export_enabled and export_spreadsheet_url:
+                    try:
+                        from app.domains.google_sheets.tasks import export_run_to_sheets_task
+                        export_run_to_sheets_task.delay(  # type: ignore
+                            user_id,
+                            run_id,
+                            export_spreadsheet_url,
+                            export_sheet_name or "Sheet1",
+                            export_title or f"Run {run_id}",
+                            export_investment_amount or "0",
+                        )
+                        logger.info("Queued auto-export for run %d", run_id)
+                    except Exception as e:
+                        logger.warning("Failed to queue auto-export for run %d: %s", run_id, str(e))
     except Exception:
         logger.exception("Failed to refresh run status for job %s", job_id)
 

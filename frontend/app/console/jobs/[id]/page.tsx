@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { WSClient } from '@/services/websocket';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
+import ExportToSheetsModal from './_components/ExportToSheetsModal';
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-amber-50 text-amber-700 ring-amber-200',
@@ -151,16 +152,21 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             {job.status}
           </span>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => loadJob()}
-          disabled={loading}
-        >
-          <RefreshCw className={cn('mr-2 size-3.5', loading && 'animate-spin')} />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => loadJob()}
+            disabled={loading}
+          >
+            <RefreshCw className={cn('mr-2 size-3.5', loading && 'animate-spin')} />
+            Refresh
+          </Button>
+          {job.status === 'completed' && (
+            <ExportToSheetsModal job={job} />
+          )}
+        </div>
       </div>
 
       {isActive && (

@@ -87,6 +87,17 @@ export const URLs = {
     disconnect: () => `${API_BASE_URL}/zerodha/disconnect`,
   },
 
+  // Google Sheets endpoints
+  googleSheets: {
+    authUrl: () => `${API_BASE_URL}/google-sheets/auth-url`,
+    exchangeCode: () => `${API_BASE_URL}/google-sheets/exchange-code`,
+    status: () => `${API_BASE_URL}/google-sheets/status`,
+    disconnect: () => `${API_BASE_URL}/google-sheets/disconnect`,
+    exportJob: () => `${API_BASE_URL}/google-sheets/export/job`,
+    exportRun: () => `${API_BASE_URL}/google-sheets/export/run`,
+    import: () => `${API_BASE_URL}/google-sheets/import`,
+  },
+
   // Provider endpoints
   providers: {
     list: () => `${API_BASE_URL}/providers`,
@@ -138,6 +149,7 @@ export const URLs = {
       dashboard: () => "/console/dashboard",
       overview: () => "/console/dashboard",
       jobs: () => "/console/jobs",
+      runs: () => "/console/runs",
       jobDetail: (id: number) => `/console/jobs/${id}`,
       runDetail: (id: number) => `/console/runs/${id}`,
       prompts: () => "/console/prompts",
@@ -145,6 +157,7 @@ export const URLs = {
       scheduleDetail: (id: number) => `/console/schedules/${id}`,
       apiKeys: () => "/console/api-keys",
       zerodha: () => "/console/zerodha",
+      googleSheets: () => "/console/google-sheets",
     },
 
     profile: {

@@ -17,6 +17,12 @@ class RunCreate(BaseModel):
     targets: list[RunModelTarget]
     prompt_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
+    # Auto-export settings
+    auto_export_enabled: bool = False
+    export_spreadsheet_url: Optional[str] = None
+    export_sheet_name: Optional[str] = None
+    export_investment_amount: Optional[str] = None
+    export_title: Optional[str] = None
 
     @field_validator("targets")
     @classmethod
@@ -45,6 +51,11 @@ class RunResponse(BaseModel):
     run_jobs: list[RunJobResponse]
     synthesis_response: Optional[str] = None
     decision_response: Optional[str] = None
+    auto_export_enabled: bool = False
+    export_spreadsheet_url: Optional[str] = None
+    export_sheet_name: Optional[str] = None
+    export_investment_amount: Optional[str] = None
+    export_title: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -366,8 +366,6 @@ export default function ZerodhaPage() {
   const [error, setError] = useState<string | null>(null);
   const [showOrderForm, setShowOrderForm] = useState(false);
 
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-
   const fetchStatus = useCallback(async () => {
     try {
       const [s, urlRes] = await Promise.all([
@@ -513,33 +511,26 @@ export default function ZerodhaPage() {
         )}
       </div>
 
-      {/* Login iframe (shown when not connected and configured) */}
+      {/* Login (shown when not connected and configured) */}
       {!status?.connected && configured && (
-        <div className="border border-gray-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Login with Zerodha Kite
-            </span>
-            <a
-              href={loginUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
-            >
-              Open in new tab <ExternalLink className="size-3" />
-            </a>
-          </div>
-          <div className="p-2">
-            <iframe
-              ref={iframeRef}
-              src={loginUrl}
-              className="h-130 w-full border-0"
-              title="Zerodha Kite Login"
-              sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation allow-popups"
-            />
+        <>
+          <div className="border border-gray-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                Login with Zerodha Kite
+              </span>
+              <a
+                href={loginUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+              >
+                Open in new tab <ExternalLink className="size-3" />
+              </a>
+            </div>
           </div>
           <ManualTokenForm onConnected={() => fetchStatus().then(() => fetchOrders())} />
-        </div>
+        </>
       )}
 
       {/* Connected — orders + place order */}

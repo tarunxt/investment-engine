@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     zerodha_api_secret: Optional[str] = None
     zerodha_token_encryption_key: Optional[str] = None  # Fernet key for access_token at-rest encryption
 
+    # Google Sheets OAuth
+    google_client_id: Optional[str] = None
+    google_client_secret: Optional[str] = None
+    google_redirect_uri: str = "http://localhost:3000/console/google-sheets/callback"
+    google_sheets_encryption_key: Optional[str] = None  # Fernet key for token encryption
+
     # Third-party services
     tavily_api_key: str = ""
 

@@ -105,6 +105,7 @@ class PostgresJobRepository:
             job.tokens_out = tokens_out
         if estimated_cost is not None:
             job.estimated_cost = estimated_cost
+        await self._session.flush()
 
 
 # ── Sync repository (for Celery workers) ────────────────────────────────────

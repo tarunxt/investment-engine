@@ -17,7 +17,7 @@ import { WSClient } from '@/services/websocket';
 import { URLs } from '@/lib/urls';
 import { type RunResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
-import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
+import InvestmentRecommendationTable from '@/components/InvestmentRecommendationTable';
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
@@ -311,7 +311,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
                       {job.error_message}
                     </p>
                   ) : job.response ? (
-                    <MarkdownRenderer content={job.response} />
+                    <InvestmentRecommendationTable content={job.response} />
                   ) : (
                     <p className="text-sm italic text-gray-400">
                       {jobIsActive ? 'Waiting for response…' : 'No response.'}

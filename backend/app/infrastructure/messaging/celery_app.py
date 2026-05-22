@@ -38,5 +38,6 @@ celery.conf.task_reject_on_worker_lost = True  # requeue if worker crashes mid-t
 celery.autodiscover_tasks([
     "app.domains.jobs",
     "app.domains.auth",
+    "app.domains.google_sheets",
     "app.infrastructure.database.outbox",
 ])

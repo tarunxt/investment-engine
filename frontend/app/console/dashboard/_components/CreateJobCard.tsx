@@ -8,6 +8,7 @@ import { RunModeFields } from './RunModeFields';
 import { TemplateField } from './TemplateField';
 import { PromptField } from './PromptField';
 import { ScheduleField } from './ScheduleField';
+import { GoogleSheetsField } from './GoogleSheetsField';
 
 export function CreateJobCard() {
   const {
@@ -31,6 +32,7 @@ export function CreateJobCard() {
           <TemplateField />
           <PromptField />
           <ScheduleField />
+          <GoogleSheetsField />
 
           {submitError && <p className="text-sm text-red-700">{submitError}</p>}
 

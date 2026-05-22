@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.database.base import Base, TimestampMixin
@@ -32,6 +32,13 @@ class Run(Base, TimestampMixin):
     current_stage: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     synthesis_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     decision_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Auto-export settings
+    auto_export_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    export_spreadsheet_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    export_sheet_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    export_investment_amount: Mapped[str | None] = mapped_column(Text, nullable=True)
+    export_title: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     run_jobs: Mapped[list[RunJob]] = relationship(
         back_populates="run", cascade="all, delete-orphan"

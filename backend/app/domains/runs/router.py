@@ -51,6 +51,11 @@ async def create_run(
                 user_id=UserId(current_user.id),
                 prompt_id=body.prompt_id,
                 scheduled_at=body.scheduled_at,
+                auto_export_enabled=body.auto_export_enabled,
+                export_spreadsheet_url=body.export_spreadsheet_url,
+                export_sheet_name=body.export_sheet_name,
+                export_investment_amount=body.export_investment_amount,
+                export_title=body.export_title,
             )
         )
     except AppException as exc:

@@ -162,6 +162,11 @@ export interface RunCreate {
   targets: RunModelTarget[];
   prompt_id?: number | null;
   scheduled_at?: string | null;
+  auto_export_enabled?: boolean;
+  export_spreadsheet_url?: string | null;
+  export_sheet_name?: string | null;
+  export_investment_amount?: string | null;
+  export_title?: string | null;
 }
 
 export interface RunJobResponse {
@@ -181,6 +186,11 @@ export interface RunResponse {
   run_jobs: RunJobResponse[];
   synthesis_response: string | null;
   decision_response: string | null;
+  auto_export_enabled: boolean;
+  export_spreadsheet_url: string | null;
+  export_sheet_name: string | null;
+  export_investment_amount: string | null;
+  export_title: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -246,6 +256,46 @@ export interface ZerodhaPlaceOrderRequest {
 
 export interface ZerodhaPlaceOrderResponse {
   order_id: string;
+}
+
+// ==================== Google Sheets Types ====================
+
+export interface GoogleSheetsAuthUrlResponse {
+  auth_url: string;
+  configured: boolean;
+}
+
+export interface GoogleSheetsStatusResponse {
+  connected: boolean;
+  token_expiry: string | null;
+}
+
+export interface GoogleSheetsExportJobRequest {
+  job_id: number;
+  spreadsheet_url?: string | null;
+  sheet_name?: string;
+  title?: string;
+  investment_amount?: string;
+}
+
+export interface GoogleSheetsExportRunRequest {
+  run_id: number;
+  spreadsheet_url?: string | null;
+  sheet_name?: string;
+  title?: string;
+  investment_amount?: string;
+}
+
+export interface GoogleSheetsImportRequest {
+  spreadsheet_url: string;
+  sheet_name?: string;
+}
+
+export interface GoogleSheetsExportResponse {
+  status: string;
+  message: string;
+  spreadsheet_url?: string | null;
+  task_id?: string | null;
 }
 
 // ==================== API Response Wrapper Types ====================

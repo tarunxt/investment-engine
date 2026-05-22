@@ -41,8 +41,8 @@ export default function DashboardLayout({
             icon: HiOutlineViewGrid,
         },
         {
-            name: 'Jobs',
-            href: URLs.routes.console.jobs(),
+            name: 'Runs',
+            href: URLs.routes.console.runs(),
             icon: HiOutlineBriefcase,
         },
         {
@@ -54,6 +54,11 @@ export default function DashboardLayout({
             name: 'Zerodha',
             href: URLs.routes.console.zerodha(),
             icon: HiOutlineTrendingUp,
+        },
+        {
+            name: 'Google Sheets',
+            href: URLs.routes.console.googleSheets(),
+            icon: HiOutlineViewGrid,
         },
         {
             name: 'Profile',

@@ -3,22 +3,28 @@ import { sessionStorage } from "@/services/session";
 import { syncTokenToCookie } from "@/services/cookies";
 import { signOut } from "next-auth/react";
 import {
-  LoginResponse,
-  RegisterResponse,
-  UserResponse,
-  JobResponse,
-  PaginatedResponse,
-  UpdateProfileRequest,
-  UpdatePasswordRequest,
-  RefreshTokenResponse,
-  FullHealthCheckResponse,
+  GoogleSheetsAuthUrlResponse,
+  GoogleSheetsExportJobRequest,
+  GoogleSheetsExportResponse,
+  GoogleSheetsExportRunRequest,
+  GoogleSheetsImportRequest,
+  GoogleSheetsStatusResponse,
   JobCreate,
-  PromptResponse,
+  JobResponse,
+  LoginResponse,
   PromptCreate,
+  PromptResponse,
   PromptUpdate,
   ProviderInfo,
+  PaginatedResponse,
+  RegisterResponse,
+  RefreshTokenResponse,
   RunCreate,
   RunResponse,
+  UpdatePasswordRequest,
+  UpdateProfileRequest,
+  FullHealthCheckResponse,
+  UserResponse,
   ZerodhaLoginUrlResponse,
   ZerodhaOrder,
   ZerodhaPlaceOrderRequest,
@@ -509,6 +515,34 @@ class apiServiceClass implements IApiService {
 
   zerodhaDisconnect(): Promise<{ message: string }> {
     return this.delete<{ message: string }>(URLs.zerodha.disconnect());
+  }
+
+  googleSheetsAuthUrl(): Promise<GoogleSheetsAuthUrlResponse> {
+    return this.get<GoogleSheetsAuthUrlResponse>(URLs.googleSheets.authUrl());
+  }
+
+  googleSheetsExchangeCode(code: string): Promise<{ status: string; message: string }> {
+    return this.post<{ status: string; message: string }>(URLs.googleSheets.exchangeCode(), { code });
+  }
+
+  googleSheetsStatus(): Promise<GoogleSheetsStatusResponse> {
+    return this.get<GoogleSheetsStatusResponse>(URLs.googleSheets.status());
+  }
+
+  googleSheetsDisconnect(): Promise<{ message: string }> {
+    return this.delete<{ message: string }>(URLs.googleSheets.disconnect());
+  }
+
+  googleSheetsExportJob(data: GoogleSheetsExportJobRequest): Promise<GoogleSheetsExportResponse> {
+    return this.post<GoogleSheetsExportResponse>(URLs.googleSheets.exportJob(), data);
+  }
+
+  googleSheetsExportRun(data: GoogleSheetsExportRunRequest): Promise<GoogleSheetsExportResponse> {
+    return this.post<GoogleSheetsExportResponse>(URLs.googleSheets.exportRun(), data);
+  }
+
+  googleSheetsImport(data: GoogleSheetsImportRequest): Promise<GoogleSheetsExportResponse> {
+    return this.post<GoogleSheetsExportResponse>(URLs.googleSheets.import(), data);
   }
 }
 

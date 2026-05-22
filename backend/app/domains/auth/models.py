@@ -67,6 +67,7 @@ class UserProfile(Base, TimestampMixin):
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
     notification_preferences: Mapped[str] = mapped_column(String(500), default="all", nullable=False)
     theme_preference: Mapped[str] = mapped_column(String(20), default="light", nullable=False)
+    google_sheets_master_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="profile")
 
