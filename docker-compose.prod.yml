@@ -26,13 +26,14 @@ services:
       retries: 3
       start_period: 40s
 
-    resources:
-      limits:
-        cpus: '2'
-        memory: 2G
-      reservations:
-        cpus: '1'
-        memory: 1G
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
 
     logging:
       driver: "json-file"
@@ -66,13 +67,14 @@ services:
       retries: 3
       start_period: 40s
 
-    resources:
-      limits:
-        cpus: '4'
-        memory: 4G
-      reservations:
-        cpus: '2'
-        memory: 2G
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
 
     logging:
       driver: "json-file"
@@ -105,13 +107,15 @@ services:
       redis:
         condition: service_healthy
 
-    resources:
-      limits:
-        cpus: '8'
-        memory: 8G
-      reservations:
-        cpus: '4'
-        memory: 4G
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '8'
+          memory: 8G
+        reservations:
+          cpus: '4'
+          memory: 4G
 
     logging:
       driver: "json-file"
@@ -121,9 +125,6 @@ services:
 
     networks:
       - app_network
-
-    deploy:
-      replicas: 2
 
   celery_beat:
     build: ./backend
@@ -143,13 +144,14 @@ services:
       redis:
         condition: service_healthy
 
-    resources:
-      limits:
-        cpus: '2'
-        memory: 2G
-      reservations:
-        cpus: '1'
-        memory: 1G
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
 
     logging:
       driver: "json-file"
@@ -184,13 +186,14 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - postgres_backups:/backups
 
-    resources:
-      limits:
-        cpus: '4'
-        memory: 4G
-      reservations:
-        cpus: '2'
-        memory: 2G
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
 
     logging:
       driver: "json-file"
@@ -220,13 +223,14 @@ services:
     volumes:
       - redis_data:/data
 
-    resources:
-      limits:
-        cpus: '2'
-        memory: 2G
-      reservations:
-        cpus: '1'
-        memory: 1G
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
 
     logging:
       driver: "json-file"

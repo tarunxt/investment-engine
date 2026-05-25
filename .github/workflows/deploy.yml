@@ -28,7 +28,7 @@ jobs:
             set -euo pipefail
 
             APP="${{ secrets.APP_PATH }}"
-            COMPOSE="docker compose -f $APP/docker-compose.prod.yml"
+            COMPOSE="docker compose -f $APP/docker-compose.prod.yml --env-file $APP/.env.prod"
 
             echo "==> Pulling latest code"
             cd "$APP"
