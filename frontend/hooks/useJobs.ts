@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { apiService, APIError } from '@/services/api';
 import { JobResponse } from '@/types/api';
 import { URLs } from '@/lib/urls';
@@ -78,16 +78,19 @@ export function useJobs({ limit }: UseJobsOptions): UseJobsReturn {
   );
 
   // Keep ref current so the WS handler always calls the latest load
-  loadRef.current = load;
+  useLayoutEffect(() => {
+    loadRef.current = load;
+  });
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
 
     const client = new WSClient({
       url: URLs.jobs.ws(),
       onMessage: (data) => {
         if (data.type !== 'job.updated') return;
-        const { type: _t, job_id, ...patch } = data as unknown as JobUpdateMessage;
+        const { job_id, ...patch } = data as unknown as JobUpdateMessage;
         setJobs((prev) => {
           if (!prev.some((j) => j.id === job_id)) {
             // Job not in list (created after initial fetch) — reload to surface it
@@ -103,7 +106,7 @@ export function useJobs({ limit }: UseJobsOptions): UseJobsReturn {
     client.connect();
 
     return () => {
-      generationRef.current++;
+      generationRef.current += 1;
       client.close();
     };
   }, [load]);

@@ -30,7 +30,7 @@ export default function RegisterPage() {
     confirmPassword: "",
   });
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [password, setPassword] = useState<Boolean>(true);
+  const [password, setPassword] = useState<boolean>(true);
 
   const validatePassword = (password: string): string[] => {
     const errors: string[] = [];

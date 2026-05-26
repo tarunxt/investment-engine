@@ -1,6 +1,6 @@
 "use client";
 
-import { AuthContextType, AuthContext } from "@/hooks/useAuth";
+import { AuthContextType, AuthContext, type User } from "@/hooks/useAuth";
 import { syncTokenToCookie, clearAuthCookies } from "@/services/cookies";
 import { useState, useEffect, useCallback } from "react";
 import { sessionStorage as customSessionStorage } from "@/services/session";
@@ -18,21 +18,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isTokenExpired = useCallback((): boolean => {
     const expiryTime = customSessionStorage.getSessionExpiry();
     if (!expiryTime) return true;
-    
+
     const now = Date.now();
     const isExpired = now >= expiryTime;
-    
+
     if (isExpired) {
       console.warn("Access token has expired");
     }
-    
+
     return isExpired;
   }, []);
 
   // Refresh token or logout if expired
   const handleTokenExpiry = useCallback(async () => {
     const refreshToken = customSessionStorage.getRefreshToken();
-    
+
     if (!refreshToken) {
       // No refresh token, must logout
       await nextSignOut({ redirect: false });
@@ -45,9 +45,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       // Try to refresh the token
       console.log("Token expired, attempting refresh...");
-      
+
       const data = await apiService.refreshToken();
-      
+
       if (data.access_token && data.refresh_token) {
         // Update NextAuth session
         await update();
@@ -74,26 +74,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (status === "authenticated" && session) {
       // Get user data from session
       const userData = session.userData || session.user;
-      
+
       if (userData) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setUser(userData as UserResponse);
-        
+
         // Sync to existing session storage for backward compatibility
         if (session.accessToken) {
           customSessionStorage.setTokens(
             session.accessToken as string,
             session.refreshToken as string || ""
           );
-          customSessionStorage.setUserData(userData as any);
-          
+          customSessionStorage.setUserData(userData as UserResponse);
+
           // Store expiry time: now + expiresIn seconds
-          const expiryTime = Date.now() + ((session as any).expiresIn || 900) * 1000;
+          const expiryTime = Date.now() + (session.userData?.expiresIn || 900) * 1000;
           customSessionStorage.setSessionExpiry(expiryTime);
-          
+
           syncTokenToCookie(session.accessToken as string);
         }
       }
-    } 
+    }
     // Clear session when unauthenticated
     else if (status === "unauthenticated") {
       setUser(null);
@@ -108,7 +109,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Check token expiry on mount and when user changes
   useEffect(() => {
     if (user && isTokenExpired()) {
-      handleTokenExpiry();
+      queueMicrotask(() => {
+        handleTokenExpiry();
+      });
     }
   }, [user, isTokenExpired, handleTokenExpiry]);
 
@@ -131,7 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       // Determine if input is email or username
       const isEmail = emailOrUsername.includes("@");
-      
+
       const result = await signIn("credentials", {
         [isEmail ? "email" : "username"]: emailOrUsername,
         password,
@@ -211,7 +214,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const clearError = useCallback(() => setError(null), []);
 
   const value: AuthContextType = {
-    user: user as any,
+    user: user ? ({
+      ...user,
+      full_name: user.full_name ?? undefined,
+    } as User) : null,
     loading,
     isAuthenticated: !!user,
     error,

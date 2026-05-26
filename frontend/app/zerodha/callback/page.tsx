@@ -22,6 +22,7 @@ export default function ZerodhaCallbackPage({
 
     if (status !== 'success' || !request_token) {
       const reason = message ?? 'Login was cancelled or failed.';
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setErrorMsg(reason);
       setState('error');
       if (window.parent !== window) {

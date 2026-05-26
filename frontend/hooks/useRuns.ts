@@ -58,6 +58,7 @@ export function useRuns({ limit }: UseRunsOptions): UseRunsReturn {
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
 
     const client = new WSClient({
@@ -77,7 +78,7 @@ export function useRuns({ limit }: UseRunsOptions): UseRunsReturn {
     client.connect();
 
     return () => {
-      generationRef.current++;
+      generationRef.current += 1;
       wsClientRef.current?.close();
       wsClientRef.current = null;
     };

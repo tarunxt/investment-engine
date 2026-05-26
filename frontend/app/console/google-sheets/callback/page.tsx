@@ -16,7 +16,9 @@ export default function GoogleSheetsCallbackPage() {
     const error = searchParams.get('error');
 
     if (error) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus('error');
+       
       setMessage(`Google authorization failed: ${error}`);
       // Notify parent window of error
       if (window.opener) {
@@ -30,7 +32,9 @@ export default function GoogleSheetsCallbackPage() {
     }
 
     if (!code) {
+       
       setStatus('error');
+       
       setMessage('No authorization code received from Google');
       if (window.opener) {
         window.opener.postMessage(
@@ -45,11 +49,14 @@ export default function GoogleSheetsCallbackPage() {
     // Exchange code for tokens
     const exchangeCode = async () => {
       try {
+         
         setMessage('Exchanging authorization code...');
 
         await apiService.googleSheetsExchangeCode(code);
 
+         
         setStatus('success');
+         
         setMessage('Successfully connected to Google Sheets!');
 
         // Notify parent window of success
@@ -67,7 +74,9 @@ export default function GoogleSheetsCallbackPage() {
         }
       } catch (err) {
         const errorMsg = err instanceof APIError ? err.message : 'Failed to connect Google Sheets';
+         
         setStatus('error');
+         
         setMessage(errorMsg);
 
         if (window.opener) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ElementType } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ElementType } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
@@ -130,14 +130,16 @@ export default function JobsPage() {
     }
   }
 
-  loadJobsRef.current = loadJobs;
+  useLayoutEffect(() => {
+    loadJobsRef.current = loadJobs;
+  });
 
   const initWS = useCallback(() => {
     const client = new WSClient({
       url: URLs.jobs.ws(),
       onMessage: (data) => {
         if (data.type !== 'job.updated') return;
-        const { type: _t, job_id, ...patch } = data as {
+        const { job_id, ...patch } = data as {
           type: string;
           job_id: number;
           [key: string]: unknown;
@@ -156,19 +158,12 @@ export default function JobsPage() {
     });
     wsClientRef.current = client;
     client.connect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  
 
-  // Initial load - read from URL params
+  // Initial load and setup
   useEffect(() => {
-    const initialStatus = (searchParams.get('status') as StatusFilter) || 'all';
-    const initialPage = Number(searchParams.get('page')) || 1;
-    const initialSearch = searchParams.get('search') || '';
-
-    setStatusFilter(initialStatus);
-    setPage(initialPage);
-    setSearch(initialSearch);
-
-    loadJobs({ p: initialPage, s: initialStatus, q: initialSearch });
+     
+    loadJobs({ p: page, s: statusFilter, q: search });
     initWS();
 
     return () => {

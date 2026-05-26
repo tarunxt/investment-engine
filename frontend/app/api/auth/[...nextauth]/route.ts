@@ -1,7 +1,9 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import type { NextAuthConfig } from "next-auth";
+import type { NextAuthConfig, Session } from "next-auth";
+import type { JWT } from "next-auth/jwt";
 import { apiService } from "@/services/api";
+import { User } from "@/types/next-auth";
 
 export const authConfig: NextAuthConfig = {
   providers: [
@@ -30,14 +32,14 @@ export const authConfig: NextAuthConfig = {
           throw new Error("Password is required");
         }
 
-        const loginData: any = {
-          password: credentials.password,
+        const loginData: { password: string; email?: string; username?: string } = {
+          password: credentials.password.toString(),
         };
 
         if (credentials.email) {
-          loginData.email = credentials.email;
+          loginData.email = credentials.email.toString();
         } else if (credentials.username) {
-          loginData.username = credentials.username;
+          loginData.username = credentials.username.toString();
         } else {
           throw new Error("Email or username is required");
         }
@@ -76,29 +78,31 @@ export const authConfig: NextAuthConfig = {
   ],
 
   callbacks: {
-    async jwt({ token, user }: any) {
-      if (user) {
-        token.id = user.id;
-        token.accessToken = user.accessToken;
-        token.refreshToken = user.refreshToken;
-        token.userData = user.userData;
-        token.username = user.username;
-        token.role = user.role;
+    async jwt({ token, user }: { token: JWT; user?: unknown }) {
+      const userObj = user as Record<string, unknown> | undefined;
+      if (userObj) {
+        token.id = userObj.id as string;
+        token.accessToken = userObj.accessToken as string;
+        token.refreshToken = userObj.refreshToken as string;
+        token.userData = userObj.userData as User;
+        token.username = userObj.username as string;
+        token.role = userObj.role as string;
       }
 
       return token;
     },
 
-    async session({ session, token }: any) {
+    async session({ session, token }: { session: Session; token: JWT }) {
       if (session.user) {
-        session.user.id = token.id;
-        session.user.username = token.username;
-        session.user.role = token.role;
+        session.user.id = token.id as string;
+        session.user.username = token.username as string;
+        session.user.role = token.role as string;
       }
 
-      session.accessToken = token.accessToken;
-      session.refreshToken = token.refreshToken;
-      session.userData = token.userData;
+      const sessionObj = session as unknown as Record<string, unknown>;
+      sessionObj.accessToken = token.accessToken;
+      sessionObj.refreshToken = token.refreshToken;
+      sessionObj.userData = token.userData;
 
       return session;
     },

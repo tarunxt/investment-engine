@@ -122,19 +122,15 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   // Google Sheets export state (auto-generated with day-wise tabs)
   const [autoExportEnabled, setAutoExportEnabled] = useState(true);
   const [exportSpreadsheetUrl, setExportSpreadsheetUrl] = useState('');
-  const [exportSheetName, setExportSheetName] = useState('');
-  const [exportInvestmentAmount, setExportInvestmentAmount] = useState('');
-  const [exportTitle, setExportTitle] = useState('');
-
-  // Initialize Google Sheets auto-export settings on mount
-  useEffect(() => {
+  const [exportSheetName, setExportSheetName] = useState(() => {
     const today = new Date();
-    const dayName = today.toLocaleDateString('en-US', {
+    return today.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
     });
-    setExportSheetName(dayName);
-  }, []);
+  });
+  const [exportInvestmentAmount, setExportInvestmentAmount] = useState('');
+  const [exportTitle, setExportTitle] = useState('');
 
   const templateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const templateControllerRef = useRef<AbortController | null>(null);
@@ -167,9 +163,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     initDashboard();
     return () => templateControllerRef.current?.abort('Cleanup');
-  }, []);
+  }, [initDashboard]);
 
   const fetchTemplates = useCallback(async (q: string) => {
     templateControllerRef.current?.abort('New search started');
@@ -178,8 +175,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     try {
       const data = await apiService.getPrompts({ q: q.trim() || undefined }, controller.signal);
       setPromptTemplates(data);
-    } catch (err: any) {
-      if (err.name === 'AbortError') return;
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       console.error('Template search failed:', err);
     }
   }, []);
@@ -230,11 +227,18 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     [selectedTargets],
   );
 
-  const parseTargets = (): RunModelTarget[] =>
-    Array.from(selectedTargets).map((key) => {
-      const [p, m] = key.split('::');
-      return { provider: p, model: m };
-    });
+  const parseTargets = useCallback(
+    (): RunModelTarget[] =>
+      Array.from(selectedTargets).map((key) => {
+        const [p, m] = key.split('::');
+
+        return {
+          provider: p,
+          model: m,
+        };
+      }),
+    [selectedTargets]
+  );
 
   const handleSubmit = useCallback(
     async (event: React.SubmitEvent<HTMLFormElement>) => {
@@ -273,16 +277,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setSubmitting(false);
       }
     },
-    [
-      prompt,
-      selectedTargets,
-      scheduledAt,
-      autoExportEnabled,
-      exportSpreadsheetUrl,
-      exportSheetName,
-      exportInvestmentAmount,
-      exportTitle,
-    ],
+    [prompt, parseTargets, scheduledAt, autoExportEnabled, exportInvestmentAmount, exportTitle, setRuns, setRunsTotal],
   );
 
   const charCount = prompt.length;

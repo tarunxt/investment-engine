@@ -409,10 +409,12 @@ export default function ZerodhaPage() {
   }, [fetchStatus, fetchOrders]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchStatus();
   }, [fetchStatus]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (status?.connected) fetchOrders();
   }, [status?.connected, fetchOrders]);
 
@@ -562,7 +564,7 @@ export default function ZerodhaPage() {
           <div className="border border-gray-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
               <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Today's Orders
+                Today&apos;s Orders
               </span>
               <Button
                 variant="ghost"

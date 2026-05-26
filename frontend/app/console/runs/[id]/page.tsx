@@ -84,6 +84,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadRun();
 
     const client = new WSClient({
@@ -127,7 +128,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
     client.connect();
 
     return () => {
-      generationRef.current++;
+      generationRef.current += 1;
       wsClientRef.current?.close();
       wsClientRef.current = null;
     };

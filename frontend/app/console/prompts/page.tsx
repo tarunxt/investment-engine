@@ -89,6 +89,7 @@ export default function PromptsPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPrompts();
   }, []);
 
@@ -334,7 +335,7 @@ export default function PromptsPage() {
               <h2 className="text-sm font-semibold text-gray-950">Delete Prompt</h2>
               <p className="mt-2 text-sm text-gray-600">
                 Are you sure you want to delete{' '}
-                <span className="font-medium text-gray-950">"{deleteTarget.name}"</span>? This
+                <span className="font-medium text-gray-950">&quot;{deleteTarget.name}&quot;</span>? This
                 cannot be undone.
               </p>
             </div>
@@ -372,9 +373,13 @@ type PromptGridProps = {
 
 function PromptGrid({ prompts, loading, emptyMessage, copiedId, onCopy, onFork, onEdit, onDelete }: PromptGridProps) {
   const [page, setPage] = useState(1);
+  const [prevLength, setPrevLength] = useState(prompts.length);
 
   // Reset to page 1 whenever the prompts list changes (e.g. after create/delete)
-  useEffect(() => { setPage(1); }, [prompts.length]);
+  if (prevLength !== prompts.length) {
+    setPrevLength(prompts.length);
+    setPage(1);
+  }
 
   if (loading) {
     return (

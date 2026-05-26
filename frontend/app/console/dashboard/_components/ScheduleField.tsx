@@ -1,11 +1,16 @@
 'use client';
 
+import { useState } from 'react';
 import { CalendarClock } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { useDashboard } from '../_context';
 
 export function ScheduleField() {
   const { scheduledAt, setScheduledAt } = useDashboard();
+
+  const [minScheduledAt] = useState(
+    () => new Date(Date.now() + 60_000).toISOString().slice(0, 16)
+  );
 
   return (
     <div className="space-y-2">
@@ -18,7 +23,7 @@ export function ScheduleField() {
         type="datetime-local"
         value={scheduledAt}
         onChange={(e) => setScheduledAt(e.target.value)}
-        min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+        min={minScheduledAt}
         className="w-full border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-950 outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
       />
       {scheduledAt && (

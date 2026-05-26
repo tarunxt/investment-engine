@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { URLs } from '@/lib/urls';
+import Image from 'next/image';
 
 interface User {
   full_name?: string;
@@ -85,7 +86,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout, className })
         aria-haspopup="true"
       >
         {user?.avatar ? (
-          <img 
+          <Image
             src={user.avatar} 
             alt={displayName}
             className="h-8 w-8 rounded-full object-cover"

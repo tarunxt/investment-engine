@@ -22,7 +22,7 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [passwordVisible, setPasswordVisible] = useState<Boolean>(true);
+  const [passwordVisible, setPasswordVisible] = useState<boolean>(true);
 
   const validateForm = () => {
     if (!password) {

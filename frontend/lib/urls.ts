@@ -1,3 +1,6 @@
+import { UserResponse } from "@/types/api";
+import { sessionStorage } from '@/services/session';
+
 /**
  * API Base URL Configuration
  * Adjusts based on environment
@@ -212,7 +215,7 @@ export const apiRequest = async (
   endpoint: string,
   options: RequestOptions = {},
 ): Promise<Response> => {
-  const { token, params, query, headers = {}, ...init } = options;
+  const { token, query, headers = {}, ...init } = options;
 
   // Build URL with query parameters
   let url = endpoint;
@@ -248,7 +251,6 @@ export const apiRequest = async (
  * Delegates to centralized session storage service
  */
 export const getAccessToken = (): string | null => {
-  const { sessionStorage } = require("@/services/session");
   return sessionStorage.getAccessToken();
 };
 
@@ -257,7 +259,6 @@ export const getAccessToken = (): string | null => {
  * Delegates to centralized session storage service
  */
 export const getRefreshToken = (): string | null => {
-  const { sessionStorage } = require("@/services/session");
   return sessionStorage.getRefreshToken();
 };
 
@@ -269,7 +270,6 @@ export const storeTokens = (
   accessToken: string,
   refreshToken: string,
 ): void => {
-  const { sessionStorage } = require("@/services/session");
   sessionStorage.setTokens(accessToken, refreshToken);
 };
 
@@ -278,7 +278,6 @@ export const storeTokens = (
  * Delegates to centralized session storage service
  */
 export const clearTokens = (): void => {
-  const { sessionStorage } = require("@/services/session");
   sessionStorage.clearSession();
 };
 
@@ -286,8 +285,7 @@ export const clearTokens = (): void => {
  * Helper to store user data
  * Delegates to centralized session storage service
  */
-export const storeUser = (user: any): void => {
-  const { sessionStorage } = require("@/services/session");
+export const storeUser = (user: UserResponse): void => {
   sessionStorage.setUserData(user);
 };
 
@@ -295,8 +293,7 @@ export const storeUser = (user: any): void => {
  * Helper to get stored user data
  * Delegates to centralized session storage service
  */
-export const getUser = (): any => {
-  const { sessionStorage } = require("@/services/session");
+export const getUser = (): UserResponse | null => {
   return sessionStorage.getUserData();
 };
 
@@ -305,6 +302,5 @@ export const getUser = (): any => {
  * Delegates to centralized session storage service
  */
 export const clearUser = (): void => {
-  const { sessionStorage } = require("@/services/session");
   sessionStorage.setUserData(null);
 };

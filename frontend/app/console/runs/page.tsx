@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ElementType } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ElementType } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
@@ -36,8 +36,7 @@ const STATUS_ICONS: Record<string, ElementType> = {
   failed: AlertCircle,
 };
 
-const ALL_STATUSES = ['all', 'scheduled', 'pending', 'processing', 'completed', 'failed'] as const;
-type StatusFilter = (typeof ALL_STATUSES)[number];
+type StatusFilter = 'all' | 'scheduled' | 'pending' | 'processing' | 'completed' | 'failed';
 
 const PAGE_SIZE = 20;
 
@@ -56,14 +55,8 @@ export default function RunsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
-    () => (searchParams.get('status') as StatusFilter) || 'all'
-  );
   const [page, setPage] = useState(
     () => Number(searchParams.get('page')) || 1
-  );
-  const [search, setSearch] = useState(
-    () => searchParams.get('search') || ''
   );
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -106,8 +99,6 @@ export default function RunsPage() {
   async function loadRuns({
     silent = false,
     p = page,
-    s = statusFilter,
-    q = search,
   }: { silent?: boolean; p?: number; s?: StatusFilter; q?: string } = {}) {
     if (!silent) setLoading(true);
     try {
@@ -128,14 +119,16 @@ export default function RunsPage() {
     }
   }
 
-  loadRunsRef.current = loadRuns;
+  useLayoutEffect(() => {
+    loadRunsRef.current = loadRuns;
+  });
 
   const initWS = useCallback(() => {
     const client = new WSClient({
       url: URLs.runs.ws(),
       onMessage: (data) => {
         if (data.type !== 'run.updated') return;
-        const { type: _t, run_id, ...patch } = data as {
+        const { run_id, ...patch } = data as {
           type: string;
           run_id: number;
           [key: string]: unknown;
@@ -154,44 +147,23 @@ export default function RunsPage() {
     });
     wsClientRef.current = client;
     client.connect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Initial load - read from URL params
+  // Initial load and setup
   useEffect(() => {
-    const initialStatus = (searchParams.get('status') as StatusFilter) || 'all';
-    const initialPage = Number(searchParams.get('page')) || 1;
-    const initialSearch = searchParams.get('search') || '';
+    const debounceTimer = debounceRef.current;
 
-    setStatusFilter(initialStatus);
-    setPage(initialPage);
-    setSearch(initialSearch);
-
-    loadRuns({ p: initialPage, s: initialStatus, q: initialSearch });
+    loadRuns({ p: page });
     initWS();
 
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
       wsClientRef.current?.close();
       wsClientRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function handleStatusChange(s: StatusFilter) {
-    setStatusFilter(s);
-    setPage(1);
-    updateURLParams({ status: s, page: 1 });
-    loadRuns({ p: 1, s });
-  }
-
-  function handleSearchChange(q: string) {
-    setSearch(q);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setPage(1);
-      updateURLParams({ search: q, page: 1 });
-      loadRuns({ p: 1, q });
-    }, 300);
-  }
 
   function handlePageChange(next: number) {
     setPage(next);

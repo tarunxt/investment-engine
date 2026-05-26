@@ -35,10 +35,6 @@ const STATUS_ICONS: Record<string, ElementType> = {
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed']);
 
-function formatTokens(value?: number | null) {
-  return value?.toLocaleString() ?? '0';
-}
-
 function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
   if (error instanceof Error) return error.message;
@@ -70,13 +66,14 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadJob();
 
     const client = new WSClient({
       url: URLs.jobs.wsJob(Number(id)),
       onMessage: (data) => {
         if (data.type !== 'job.updated') return;
-        const { type: _t, job_id: _jid, ...patch } = data as {
+        const { ...patch } = data as {
           type: string;
           job_id: number;
           [key: string]: unknown;

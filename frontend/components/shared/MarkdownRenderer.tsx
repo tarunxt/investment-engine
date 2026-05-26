@@ -1,8 +1,10 @@
 import React from 'react';
 import ReactMarkdown, { ExtraProps } from 'react-markdown';
+import type { Element } from 'hast';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import Image from 'next/image';
 
 interface MarkdownRendererProps {
     content: string;
@@ -14,13 +16,12 @@ interface MarkdownRendererProps {
 type CodeProps = React.ComponentProps<'code'> &
     ExtraProps & {
         inline?: boolean;
-        node?: any;
+        node?: Element;
     };
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     content,
     className = '',
-    enableCodeHighlighting = true,
     enableTableStyling = true,
 }) => {
     if (!content) {
@@ -112,14 +113,14 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     ),
 
                     // Code blocks with syntax highlighting
-                    code({ node, inline, className, children, ...props }: CodeProps) {
+                    code({ inline, className, children, ...props }: CodeProps) {
                         const match = /language-(\w+)/.exec(className || '');
                         const code = String(children).replace(/\n$/, '');
 
                         if (!inline && match) {
                             return (
                                 <SyntaxHighlighter
-                                    style={vscDarkPlus as any}
+                                    style={vscDarkPlus as { [key: string]: React.CSSProperties }}
                                     language={match[1]}
                                     PreTag="div"
                                     className="rounded-lg my-4 text-sm"
@@ -186,15 +187,21 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     ),
 
                     // Images
-                    img: ({ src, alt, ...props }) => (
-                        <img
-                            src={src}
-                            alt={alt}
-                            className="my-4 max-w-full rounded-lg shadow-md"
-                            loading="lazy"
-                            {...props}
-                        />
-                    ),
+                    img: ({ src, alt }) => {
+                        if (typeof src !== "string") {
+                            return null;
+                        }
+
+                        return (
+                            <Image
+                                src={src}
+                                alt={alt ?? ""}
+                                width={1200}
+                                height={800}
+                                className="my-4 max-w-full rounded-lg shadow-md"
+                            />
+                        );
+                    },
 
                     // Horizontal rule
                     hr: () => (
