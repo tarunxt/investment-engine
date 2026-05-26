@@ -11,7 +11,7 @@ export function AuthRedirect({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && isAuthenticated) {
-      router.push(URLs.routes.dashboard.root());
+      router.push(URLs.routes.console.dashboard());
     }
   }, [isAuthenticated, loading, router]);
 
