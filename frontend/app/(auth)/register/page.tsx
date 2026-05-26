@@ -114,7 +114,7 @@ export default function RegisterPage() {
         formData.password,
         formData.fullName
       );
-      router.push(URLs.routes.dashboard.root());
+      router.push(URLs.routes.console.dashboard());
     } catch (err) {
       console.error("Registration error:", err);
     }
