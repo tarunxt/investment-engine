@@ -14,63 +14,63 @@ jobs:
     name: Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
-steps:
-  - name: Deploy via SSH
-    uses: appleboy/ssh-action@v1.2.0
-    with:
-      host: ${{ secrets.EC2_HOST }}
-      username: ${{ secrets.EC2_USER }}
-      key: ${{ secrets.EC2_SSH_KEY }}
-      timeout: 1800s
-      command_timeout: 1800s
-
-      script: |
-        set -euo pipefail
-
-        APP="${{ secrets.APP_PATH }}"
-        COMPOSE="docker compose --parallel 1 -f $APP/docker-compose.prod.yml --env-file $APP/.env.prod"
-
-        echo "==> Go to app directory"
-        cd "$APP"
-
-        echo "==> Pull latest code"
-        git fetch origin main
-        git reset --hard origin/main
-
-        echo "==> Ensure swap exists"
-        if ! swapon --show | grep -q swapfile; then
-          sudo fallocate -l 2G /swapfile || true
-          sudo chmod 600 /swapfile || true
-          sudo mkswap /swapfile || true
-          sudo swapon /swapfile || true
-        fi
-
-        echo "==> Docker cleanup"
-        docker system prune -af || true
-
-        echo "==> Build backend first"
-        $COMPOSE build backend
-
-        echo "==> Build frontend second"
-        $COMPOSE build frontend
-
-        echo "==> Build celery services"
-        $COMPOSE build celery_worker celery_beat
-
-        echo "==> Start/update containers"
-        $COMPOSE up -d --remove-orphans
-
-        echo "==> Run migrations"
-        $COMPOSE exec -T backend alembic upgrade head
-
-        echo "==> Wait for services"
-        sleep 15
-
-        echo "==> Container status"
-        $COMPOSE ps
-
-        echo "==> Cleanup unused images"
-        docker image prune -af || true
-
-        echo "==> Deploy complete"
+    
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 1800s
+          command_timeout: 1800s
+    
+          script: |
+            set -euo pipefail
+    
+            APP="${{ secrets.APP_PATH }}"
+            COMPOSE="docker compose --parallel 1 -f $APP/docker-compose.prod.yml --env-file $APP/.env.prod"
+    
+            echo "==> Go to app directory"
+            cd "$APP"
+    
+            echo "==> Pull latest code"
+            git fetch origin main
+            git reset --hard origin/main
+    
+            echo "==> Ensure swap exists"
+            if ! swapon --show | grep -q swapfile; then
+              sudo fallocate -l 2G /swapfile || true
+              sudo chmod 600 /swapfile || true
+              sudo mkswap /swapfile || true
+              sudo swapon /swapfile || true
+            fi
+    
+            echo "==> Docker cleanup"
+            docker system prune -af || true
+    
+            echo "==> Build backend first"
+            $COMPOSE build backend
+    
+            echo "==> Build frontend second"
+            $COMPOSE build frontend
+    
+            echo "==> Build celery services"
+            $COMPOSE build celery_worker celery_beat
+    
+            echo "==> Start/update containers"
+            $COMPOSE up -d --remove-orphans
+    
+            echo "==> Run migrations"
+            $COMPOSE exec -T backend alembic upgrade head
+    
+            echo "==> Wait for services"
+            sleep 15
+    
+            echo "==> Container status"
+            $COMPOSE ps
+    
+            echo "==> Cleanup unused images"
+            docker image prune -af || true
+    
+            echo "==> Deploy complete"
