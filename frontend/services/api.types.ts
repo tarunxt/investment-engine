@@ -31,9 +31,9 @@ export interface IApiService {
     resetPassword(data: { token: string; new_password: string; confirm_password: string }): Promise<{ message: string }>;
     
     // Health endpoints
-    healthCheck(): Promise<Record<string, any>>;
-    healthCheckDB(): Promise<Record<string, any>>;
-    healthCheckRedis(): Promise<Record<string, any>>;
+    healthCheck(): Promise<Record<string, unknown>>;
+    healthCheckDB(): Promise<Record<string, unknown>>;
+    healthCheckRedis(): Promise<Record<string, unknown>>;
     healthCheckFull(): Promise<FullHealthCheckResponse>;
 
     // Job endpoints

@@ -14,7 +14,7 @@ export function useProviders(): UseProvidersReturn {
   useEffect(() => {
     let cancelled = false;
     apiService
-      .getProviders()
+      .getProviders({})
       .then((data) => {
         if (!cancelled) {
           setProviders(data);

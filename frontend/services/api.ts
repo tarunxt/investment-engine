@@ -37,7 +37,7 @@ export class APIError extends Error {
   constructor(
     public status: number,
     public message: string,
-    public details?: any,
+    public details?: unknown,
   ) {
     super(message);
     this.name = "APIError";
@@ -132,14 +132,15 @@ class apiServiceClass implements IApiService {
       this.log("✅ API Response Success:", data);
       return data;
 
-    } catch (err: any) {
-      if (err.name === 'AbortError' || err.name === 'CanceledError') {
-        this.log("Request canceled:", err.reason || err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError')) {
+        this.log("Request canceled:", (err as { reason?: string }).reason || err.message);
         throw err;
       }
 
       if (!(err instanceof APIError)) {
-        this.error("❌ Network or Unexpected Error:", err.message || err);
+        const message = err instanceof Error ? err.message : String(err);
+        this.error("❌ Network or Unexpected Error:", message);
       }
       throw err;
     } finally {
@@ -152,21 +153,21 @@ class apiServiceClass implements IApiService {
     return this.fetch<T>(url, { method: "GET", ...options });
   }
 
-  post<T>(url: string, data?: any): Promise<T> {
+  post<T>(url: string, data?: unknown): Promise<T> {
     return this.fetch<T>(url, {
       method: "POST",
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  put<T>(url: string, data?: any): Promise<T> {
+  put<T>(url: string, data?: unknown): Promise<T> {
     return this.fetch<T>(url, {
       method: "PUT",
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  patch<T>(url: string, data?: any): Promise<T> {
+  patch<T>(url: string, data?: unknown): Promise<T> {
     return this.fetch<T>(url, {
       method: "PATCH",
       body: data ? JSON.stringify(data) : undefined,
@@ -200,19 +201,19 @@ class apiServiceClass implements IApiService {
     }
   }
 
-  log(...args: any[]): void {
+  log(...args: unknown[]): void {
     console.log(...args);
   }
 
-  info(...args: any[]): void {
+  info(...args: unknown[]): void {
     console.info(...args);
   }
 
-  warn(...args: any[]): void {
+  warn(...args: unknown[]): void {
     console.warn(...args);
   }
 
-  error(...args: any[]): void {
+  error(...args: unknown[]): void {
     console.error(...args);
   }
 
@@ -384,22 +385,22 @@ class apiServiceClass implements IApiService {
   /**
    * Ping health endpoint
    */
-  healthCheck(): Promise<Record<string, any>> {
-    return this.get<Record<string, any>>(URLs.health.ping());
+  healthCheck(): Promise<Record<string, unknown>> {
+    return this.get<Record<string, unknown>>(URLs.health.ping());
   }
 
   /**
    * Check database health
    */
-  healthCheckDB(): Promise<Record<string, any>> {
-    return this.get<Record<string, any>>(URLs.health.db());
+  healthCheckDB(): Promise<Record<string, unknown>> {
+    return this.get<Record<string, unknown>>(URLs.health.db());
   }
 
   /**
    * Check Redis health
    */
-  healthCheckRedis(): Promise<Record<string, any>> {
-    return this.get<Record<string, any>>(URLs.health.redis());
+  healthCheckRedis(): Promise<Record<string, unknown>> {
+    return this.get<Record<string, unknown>>(URLs.health.redis());
   }
 
   /**

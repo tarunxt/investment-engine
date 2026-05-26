@@ -1,7 +1,7 @@
 // ==================== Health Check Types ====================
 
 export interface HealthCheckResponse {
-  [key: string]: any; // Dynamic status object
+  [key: string]: unknown;
 }
 
 // ==================== Auth Types ====================
@@ -147,7 +147,7 @@ export interface JobResponse {
 
 export interface JobListResponse {
   jobs?: JobResponse[];
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // ==================== Run Types (Multi-LLM Fan-Out) ====================
@@ -201,8 +201,8 @@ export interface ValidationError {
   loc: (string | number)[];
   msg: string;
   type: string;
-  input?: any;
-  ctx?: Record<string, any>;
+  input?: unknown;
+  ctx?: Record<string, unknown>;
 }
 
 export interface HTTPValidationError {
@@ -300,14 +300,14 @@ export interface GoogleSheetsExportResponse {
 
 // ==================== API Response Wrapper Types ====================
 
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
   status: number;
   message?: string;
 }
 
-export interface PaginatedResponse<T = any> {
+export interface PaginatedResponse<T = unknown> {
   items: T[];
   total: number;
   page: number;
@@ -343,30 +343,30 @@ export interface FullHealthCheckResponse {
 
 // ==================== Type Guards ====================
 
-export function isLoginResponse(response: any): response is LoginResponse {
+export function isLoginResponse(response: unknown): response is LoginResponse {
   return (
-    response &&
     typeof response === 'object' &&
+    response !== null &&
     'access_token' in response &&
     'refresh_token' in response &&
     'user' in response
   );
 }
 
-export function isRegisterResponse(response: any): response is RegisterResponse {
+export function isRegisterResponse(response: unknown): response is RegisterResponse {
   return (
-    response &&
     typeof response === 'object' &&
+    response !== null &&
     'id' in response &&
     'email' in response &&
     'username' in response
   );
 }
 
-export function isJobResponse(response: any): response is JobResponse {
+export function isJobResponse(response: unknown): response is JobResponse {
   return (
-    response &&
     typeof response === 'object' &&
+    response !== null &&
     'id' in response &&
     'prompt' in response &&
     'provider' in response &&
@@ -375,10 +375,10 @@ export function isJobResponse(response: any): response is JobResponse {
   );
 }
 
-export function isUserResponse(response: any): response is UserResponse {
+export function isUserResponse(response: unknown): response is UserResponse {
   return (
-    response &&
     typeof response === 'object' &&
+    response !== null &&
     'id' in response &&
     'email' in response &&
     'username' in response &&
@@ -386,6 +386,11 @@ export function isUserResponse(response: any): response is UserResponse {
   );
 }
 
-export function isHTTPValidationError(response: any): response is HTTPValidationError {
-  return response && typeof response === 'object' && 'detail' in response && Array.isArray(response.detail);
+export function isHTTPValidationError(response: unknown): response is HTTPValidationError {
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    'detail' in response &&
+    Array.isArray((response as Record<string, unknown>).detail)
+  );
 }
