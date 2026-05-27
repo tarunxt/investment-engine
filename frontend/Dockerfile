@@ -38,7 +38,7 @@ RUN npm ci --omit=dev --prefer-offline --no-audit && \
 # Copy built application from builder
 COPY --from=builder /frontend/.next ./.next
 COPY --from=builder /frontend/public ./public
-COPY --from=builder /frontend/next.config.js ./next.config.js
+COPY --from=builder /frontend/next.config.ts ./next.config.ts
 
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--max-old-space-size=4096"
