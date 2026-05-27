@@ -153,6 +153,7 @@ async def place_order(
         "quantity": str(body.quantity),
         "product": body.product,
         "validity": body.validity,
+        "market_protection": "1"
     }
     if body.price:
         order_data["price"] = str(body.price)

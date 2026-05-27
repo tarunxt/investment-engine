@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -31,6 +32,10 @@ router = APIRouter(prefix="/google-sheets", tags=["google-sheets"])
 _svc = GoogleSheetsService()
 
 
+class ExchangeCodeRequest(BaseModel):
+    code: str
+
+
 @router.get("/auth-url", response_model=GoogleSheetsAuthUrlResponse)
 async def get_auth_url(current_user: User = Depends(get_current_user)):
     try:
@@ -45,7 +50,7 @@ async def get_auth_url(current_user: User = Depends(get_current_user)):
 
 @router.post("/exchange-code")
 async def exchange_code(
-    body: dict,
+    body: ExchangeCodeRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -53,12 +58,8 @@ async def exchange_code(
     if not _svc.is_configured:
         raise HTTPException(503, detail="Google Sheets is not configured")
 
-    code = body.get("code")
-    if not code:
-        raise HTTPException(400, detail="Authorization code is required")
-
     try:
-        token_data = _svc.exchange_code(code)
+        token_data = _svc.exchange_code(body.code)
 
         access_token_enc = encrypt_token(token_data["access_token"])
         refresh_token_enc = (
