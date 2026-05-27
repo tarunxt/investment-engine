@@ -8,16 +8,8 @@ import { sessionStorage } from '@/services/session';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 const FRONTEND_BASE_URL = process.env.NEXT_PUBLIC_FRONTEND_URL;
 
-if (!API_BASE_URL) {
-  throw new Error("NEXT_PUBLIC_API_URL is not defined");
-}
-
-if (!FRONTEND_BASE_URL) {
-  throw new Error("NEXT_PUBLIC_FRONTEND_URL is not defined");
-}
-
 // Derive WebSocket base URL: http → ws, https → wss
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, "ws");
+const WS_BASE_URL = API_BASE_URL!.replace(/^http/, "ws");
 
 /**
  * URL Resolver - Centralized API endpoint management
