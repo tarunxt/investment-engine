@@ -143,6 +143,8 @@ export interface JobResponse {
   tokens_out?: number | null;
   estimated_cost?: number | null;
   scheduled_at?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface JobListResponse {

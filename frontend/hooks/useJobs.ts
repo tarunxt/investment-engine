@@ -19,6 +19,7 @@ type JobUpdateMessage = {
   tokens_in?: number | null;
   tokens_out?: number | null;
   estimated_cost?: number | null;
+  updated_at?: string;
 };
 
 interface UseJobsOptions {

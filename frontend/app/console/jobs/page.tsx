@@ -47,6 +47,17 @@ function normalizeError(error: unknown) {
   return 'Something went wrong';
 }
 
+function formatTimestamp(value?: string | null) {
+  if (!value) return null;
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 export default function JobsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -265,16 +276,19 @@ export default function JobsPage() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="w-[45%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="w-[34%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Job
                 </th>
-                <th className="w-[20%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="w-[18%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Provider / Model
                 </th>
-                <th className="w-[15%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="w-[16%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Status
                 </th>
-                <th className="w-[20%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <th className="w-[16%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Run At
+                </th>
+                <th className="w-[16%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Scheduled At
                 </th>
               </tr>
@@ -282,20 +296,23 @@ export default function JobsPage() {
             <tbody className="divide-y divide-gray-100 bg-white">
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={5} className="px-5 py-12 text-center text-sm text-gray-500">
                     <Loader2 className="mx-auto mb-2 size-5 animate-spin text-gray-400" />
                     Loading jobs…
                   </td>
                 </tr>
               ) : jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={5} className="px-5 py-12 text-center text-sm text-gray-500">
                     {total === 0 ? 'No jobs yet.' : 'No jobs match your filters.'}
                   </td>
                 </tr>
               ) : (
                 jobs.map((job) => {
                   const StatusIcon = STATUS_ICONS[job.status] ?? Clock3;
+                  const runAt = formatTimestamp(job.created_at);
+                  const updatedAt = formatTimestamp(job.updated_at);
+                  const scheduledAt = formatTimestamp(job.scheduled_at);
                   return (
                     <tr
                       key={job.id}
@@ -324,11 +341,17 @@ export default function JobsPage() {
                           />
                           {job.status}
                         </span>
+                        {updatedAt && (
+                          <div className="mt-1 text-[11px] leading-4 text-gray-400">
+                            Updated {updatedAt}
+                          </div>
+                        )}
                       </td>
-                      <td className="px-5 py-4 text-xs text-gray-500">
-                        {job.scheduled_at
-                          ? new Date(job.scheduled_at).toLocaleString()
-                          : <span className="text-gray-300">—</span>}
+                      <td className="px-5 py-4 text-xs leading-5 text-gray-500">
+                        {runAt ?? <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-5 py-4 text-xs leading-5 text-gray-500">
+                        {scheduledAt ?? <span className="text-gray-300">—</span>}
                       </td>
                     </tr>
                   );
