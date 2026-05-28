@@ -179,6 +179,15 @@ export function RecentJobsTable() {
                             </Link>
                           ) : null}
                         </div>
+                        {exportStatus === 'failed' && run.export_error ? (
+                          <div
+                            className="max-w-[680px] truncate text-[11px] text-red-600"
+                            title={run.export_error}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {run.export_error}
+                          </div>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

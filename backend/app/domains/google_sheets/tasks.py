@@ -185,8 +185,18 @@ def export_run_to_sheets_task(
                     access_token, refresh_token, formatted_title
                 )
 
-            _, sheet_gid = _svc.write_sheet(
-                access_token, refresh_token, spreadsheet_id, headers, rows, sheet_name
+            section_title = (
+                f"Run #{run.id} | {run.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                f" | {title}"
+            )
+            _, sheet_gid = _svc.append_sheet(
+                access_token,
+                refresh_token,
+                spreadsheet_id,
+                headers,
+                rows,
+                sheet_name,
+                section_title=section_title,
             )
 
             sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit#gid={sheet_gid}"

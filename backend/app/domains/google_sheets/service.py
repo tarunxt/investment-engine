@@ -127,7 +127,7 @@ class GoogleSheetsService:
         rows: list[list[str]],
         sheet_name: str = "Sheet1",
     ) -> tuple[int, int]:
-        """Write data to a Google Sheet."""
+        """Overwrite data in a Google Sheet from A1."""
         service = self._build_service(access_token, refresh_token)
         sheet_id = self.ensure_sheet(service, spreadsheet_id, sheet_name)
         values = [headers] + rows
@@ -136,6 +136,48 @@ class GoogleSheetsService:
             spreadsheetId=spreadsheet_id,
             range=f"{sheet_name}!A1",
             valueInputOption="RAW",
+            body={"values": values},
+        ).execute()
+
+        return len(rows), sheet_id
+
+    def append_sheet(
+        self,
+        access_token: str,
+        refresh_token: str | None,
+        spreadsheet_id: str,
+        headers: list[str],
+        rows: list[list[str]],
+        sheet_name: str = "Sheet1",
+        section_title: str | None = None,
+    ) -> tuple[int, int]:
+        """Append rows to a sheet; create the tab and header if missing/empty."""
+        service = self._build_service(access_token, refresh_token)
+        sheet_id = self.ensure_sheet(service, spreadsheet_id, sheet_name)
+
+        # Read existing data to decide whether to include headers.
+        existing = (
+            service.spreadsheets()
+            .values()
+            .get(spreadsheetId=spreadsheet_id, range=f"{sheet_name}!A:Z")
+            .execute()
+            .get("values", [])
+        )
+
+        values: list[list[str]] = []
+        if existing:
+            values.append([])
+        if section_title:
+            values.append([section_title])
+        if not existing:
+            values.append(headers)
+        values.extend(rows)
+
+        service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=f"{sheet_name}!A1",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
             body={"values": values},
         ).execute()
 
