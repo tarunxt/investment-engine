@@ -18,11 +18,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('prompts', sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True))
-    op.add_column('prompts', sa.Column('description', sa.Text(), nullable=True))
-    op.add_column('prompts', sa.Column('is_system', sa.Boolean(), nullable=False, server_default='false'))
-    op.add_column('prompts', sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'))
-    op.create_index(op.f('ix_prompts_user_id'), 'prompts', ['user_id'], unique=False)
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("prompts")}
+    indexes = {index["name"] for index in inspector.get_indexes("prompts")}
+
+    if "user_id" not in columns:
+        op.add_column('prompts', sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True))
+    if "description" not in columns:
+        op.add_column('prompts', sa.Column('description', sa.Text(), nullable=True))
+    if "is_system" not in columns:
+        op.add_column('prompts', sa.Column('is_system', sa.Boolean(), nullable=False, server_default='false'))
+    if "is_active" not in columns:
+        op.add_column('prompts', sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'))
+    if op.f('ix_prompts_user_id') not in indexes:
+        op.create_index(op.f('ix_prompts_user_id'), 'prompts', ['user_id'], unique=False)
 
 
 def downgrade() -> None:

@@ -78,9 +78,6 @@ services:
     ports:
       - "5432:5432"
 
-    healthcheck:
-      disable: true
-
   redis:
     ports:
       - "6379:6379"
