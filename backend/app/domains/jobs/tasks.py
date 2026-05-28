@@ -30,6 +30,7 @@ def _publish_job_update(job: Job) -> None:
             "tokens_in": job.tokens_in,
             "tokens_out": job.tokens_out,
             "estimated_cost": job.estimated_cost,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
         })
         
         redis_url = settings.redis_url
@@ -85,10 +86,26 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
         pass
 
     try:
-        from openai import RateLimitError as OpenAIRateLimit, BadRequestError as OpenAIBadRequest
+        from openai import (
+            AuthenticationError as OpenAIAuthenticationError,
+            BadRequestError as OpenAIBadRequest,
+            NotFoundError as OpenAINotFoundError,
+            PermissionDeniedError as OpenAIPermissionDeniedError,
+            RateLimitError as OpenAIRateLimit,
+        )
         if isinstance(exc, OpenAIRateLimit):
+            if getattr(exc, "code", None) == "insufficient_quota" or "insufficient_quota" in str(exc):
+                return False, 0
             return True, 60 * (2 ** attempt)
-        if isinstance(exc, OpenAIBadRequest):
+        if isinstance(
+            exc,
+            (
+                OpenAIAuthenticationError,
+                OpenAIBadRequest,
+                OpenAINotFoundError,
+                OpenAIPermissionDeniedError,
+            ),
+        ):
             return False, 0
     except ImportError:
         pass

@@ -9,13 +9,13 @@ from app.domains.ai_providers.base import (
 )
 
 MODEL_PRICING_PER_1M_TOKENS = {
-    "gpt-5.5": {
-        "input": 5.00,
-        "output": 30.00,
+    "gpt-4o-mini": {
+        "input": 0.15,
+        "output": 0.60,
     },
-    "gpt-5.5-pro": {
-        "input": 30.00,
-        "output": 180.00,
+    "gpt-4o": {
+        "input": 2.50,
+        "output": 10.00,
     },
 }
 
