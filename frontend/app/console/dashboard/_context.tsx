@@ -15,10 +15,13 @@ import { apiService } from '@/services/api';
 import { type PromptResponse, type ProviderInfo, type RunModelTarget, type RunResponse } from '@/types/api';
 import { useRuns } from '@/hooks/useRuns';
 
-export const DASHBOARD_RUN_LIMIT = 5;
+export const DASHBOARD_RUN_LIMIT = 50;
 export const TEMPLATE_DEBOUNCE_MS = 300;
 export const PROMPT_MAX_CHARS = 3000;
 export const PROMPT_WARN_CHARS = 2600;
+export const INDIA_TIMEZONE = 'Asia/Kolkata';
+export const DEFAULT_EXPORT_SPREADSHEET_URL =
+  'https://docs.google.com/spreadsheets/d/1aVPXUl5h8aSZcmOwKHvnuJqyCHqanmnrcmFOijcWYp4/edit?gid=0#gid=0';
 
 export const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
@@ -71,6 +74,7 @@ interface DashboardContextValue {
   setExportInvestmentAmount: (val: string) => void;
   exportTitle: string;
   setExportTitle: (val: string) => void;
+  googleSheetsConnected: boolean;
 
   // Derived
   charCount: number;
@@ -85,6 +89,8 @@ interface DashboardContextValue {
   handleTemplateSearch: (q: string) => void;
   toggleTarget: (key: string) => void;
   toggleAllForProvider: (providerName: string, providerModels: string[]) => void;
+  selectAllTargets: () => void;
+  unselectAllTargets: () => void;
 }
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
@@ -121,16 +127,18 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   // Google Sheets export state (auto-generated with day-wise tabs)
   const [autoExportEnabled, setAutoExportEnabled] = useState(true);
-  const [exportSpreadsheetUrl, setExportSpreadsheetUrl] = useState('');
+  const [exportSpreadsheetUrl, setExportSpreadsheetUrl] = useState(DEFAULT_EXPORT_SPREADSHEET_URL);
   const [exportSheetName, setExportSheetName] = useState(() => {
     const today = new Date();
-    return today.toLocaleDateString('en-US', {
+    return today.toLocaleDateString('en-IN', {
+      timeZone: INDIA_TIMEZONE,
       month: 'short',
       day: 'numeric',
     });
   });
   const [exportInvestmentAmount, setExportInvestmentAmount] = useState('');
   const [exportTitle, setExportTitle] = useState('');
+  const [googleSheetsConnected, setGoogleSheetsConnected] = useState(false);
 
   const templateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const templateControllerRef = useRef<AbortController | null>(null);
@@ -140,9 +148,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     const controller = new AbortController();
 
-    const [providersRes, templatesRes] = await Promise.allSettled([
+    const [providersRes, templatesRes, sheetsStatusRes] = await Promise.allSettled([
       apiService.getProviders({ signal: controller.signal }),
       apiService.getPrompts({ q: '' }, controller.signal),
+      apiService.googleSheetsStatus(),
     ]);
 
     if (providersRes.status === 'fulfilled') {
@@ -157,6 +166,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
     if (templatesRes.status === 'fulfilled') {
       setPromptTemplates(templatesRes.value);
+    }
+
+    if (sheetsStatusRes.status === 'fulfilled') {
+      setGoogleSheetsConnected(Boolean(sheetsStatusRes.value.connected));
+    } else {
+      setGoogleSheetsConnected(false);
     }
 
     setIsLoading(false);
@@ -227,6 +242,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     [selectedTargets],
   );
 
+  const selectAllTargets = useCallback(() => {
+    setSelectedTargets(
+      new Set(providers.flatMap((provider) => provider.models.map((model) => `${provider.name}::${model}`))),
+    );
+  }, [providers]);
+
+  const unselectAllTargets = useCallback(() => {
+    setSelectedTargets(new Set());
+  }, []);
+
   const parseTargets = useCallback(
     (): RunModelTarget[] =>
       Array.from(selectedTargets).map((key) => {
@@ -253,6 +278,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setSubmitError('Select at least one model for Stage 1.');
         return;
       }
+      if (autoExportEnabled && !googleSheetsConnected) {
+        setSubmitError('Connect Google Sheets first, then run with auto-export enabled.');
+        return;
+      }
       setSubmitting(true);
       setSubmitError(null);
       try {
@@ -261,6 +290,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           targets,
           scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
           auto_export_enabled: autoExportEnabled,
+          export_spreadsheet_url:
+            autoExportEnabled ? (exportSpreadsheetUrl.trim() || DEFAULT_EXPORT_SPREADSHEET_URL) : undefined,
           export_investment_amount: autoExportEnabled ? exportInvestmentAmount || undefined : undefined,
           export_title: autoExportEnabled ? exportTitle || undefined : undefined,
         });
@@ -277,7 +308,18 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setSubmitting(false);
       }
     },
-    [prompt, parseTargets, scheduledAt, autoExportEnabled, exportInvestmentAmount, exportTitle, setRuns, setRunsTotal],
+    [
+      prompt,
+      parseTargets,
+      scheduledAt,
+      autoExportEnabled,
+      exportSpreadsheetUrl,
+      exportInvestmentAmount,
+      exportTitle,
+      googleSheetsConnected,
+      setRuns,
+      setRunsTotal,
+    ],
   );
 
   const charCount = prompt.length;
@@ -321,12 +363,15 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setExportInvestmentAmount,
         exportTitle,
         setExportTitle,
+        googleSheetsConnected,
         handleSubmit,
         handlePromptChange,
         handleTemplateChange,
         handleTemplateSearch,
         toggleTarget,
         toggleAllForProvider,
+        selectAllTargets,
+        unselectAllTargets,
       }}
     >
       {children}

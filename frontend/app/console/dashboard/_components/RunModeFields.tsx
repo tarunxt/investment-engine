@@ -19,6 +19,8 @@ export function RunModeFields() {
     totalAvailableTargets,
     toggleTarget,
     toggleAllForProvider,
+    selectAllTargets,
+    unselectAllTargets,
   } = useDashboard();
 
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(providers.map(p => p.name)));
@@ -45,20 +47,22 @@ export function RunModeFields() {
           <div className="flex h-6 items-center rounded-full bg-indigo-50 px-2 text-xs font-medium text-indigo-700">
             {selectedCount} / {totalAvailableTargets}
           </div>
-          {selectedCount > 0 && selectedCount < totalAvailableTargets && (
-            <button
-              onClick={() => {
-                providers.forEach(p => {
-                  if (p.models.some(m => !selectedTargets.has(`${p.name}::${m}`))) {
-                    toggleAllForProvider(p.name, p.models);
-                  }
-                });
-              }}
-              className="text-xs text-indigo-600 hover:text-indigo-700"
-            >
-              Select all
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={selectAllTargets}
+            disabled={totalAvailableTargets === 0 || selectedCount === totalAvailableTargets}
+            className="text-xs text-indigo-600 hover:text-indigo-700 disabled:cursor-not-allowed disabled:text-gray-400"
+          >
+            Select all
+          </button>
+          <button
+            type="button"
+            onClick={unselectAllTargets}
+            disabled={selectedCount === 0}
+            className="text-xs text-indigo-600 hover:text-indigo-700 disabled:cursor-not-allowed disabled:text-gray-400"
+          >
+            Unselect all
+          </button>
         </div>
       </div>
 

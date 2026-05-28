@@ -83,6 +83,7 @@ class CreateRunUseCase:
                     export_sheet_name=export_sheet_name,
                     export_investment_amount=cmd.export_investment_amount,
                     export_title=cmd.export_title,
+                    export_status="pending" if cmd.auto_export_enabled else "disabled",
                 )
                 await self._run_repo.create(run)  # flush → run.id populated
 

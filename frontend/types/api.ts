@@ -193,6 +193,10 @@ export interface RunResponse {
   export_sheet_name: string | null;
   export_investment_amount: string | null;
   export_title: string | null;
+  export_status: string | null;
+  export_error: string | null;
+  exported_at: string | null;
+  exported_sheet_url: string | null;
   created_at: string;
   updated_at: string;
 }

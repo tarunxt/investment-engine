@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
@@ -70,4 +72,19 @@ class SyncRunRepository:
 
     def update_status(self, run: Run, status: JobStatus) -> None:
         run.status = status
+        self._session.commit()
+
+    def update_export_state(
+        self,
+        run: Run,
+        *,
+        export_status: str,
+        export_error: str | None = None,
+        exported_at: datetime | None = None,
+        exported_sheet_url: str | None = None,
+    ) -> None:
+        run.export_status = export_status
+        run.export_error = export_error
+        run.exported_at = exported_at
+        run.exported_sheet_url = exported_sheet_url
         self._session.commit()

@@ -126,9 +126,10 @@ class GoogleSheetsService:
         headers: list[str],
         rows: list[list[str]],
         sheet_name: str = "Sheet1",
-    ) -> int:
+    ) -> tuple[int, int]:
         """Write data to a Google Sheet."""
         service = self._build_service(access_token, refresh_token)
+        sheet_id = self.ensure_sheet(service, spreadsheet_id, sheet_name)
         values = [headers] + rows
 
         service.spreadsheets().values().update(
@@ -138,7 +139,28 @@ class GoogleSheetsService:
             body={"values": values},
         ).execute()
 
-        return len(rows)
+        return len(rows), sheet_id
+
+    @staticmethod
+    def ensure_sheet(service, spreadsheet_id: str, sheet_name: str) -> int:
+        metadata = service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            fields="sheets(properties(sheetId,title))",
+        ).execute()
+        for sheet in metadata.get("sheets", []):
+            props = sheet.get("properties", {})
+            if props.get("title") == sheet_name:
+                return int(props["sheetId"])
+
+        created = service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={
+                "requests": [
+                    {"addSheet": {"properties": {"title": sheet_name}}},
+                ]
+            },
+        ).execute()
+        return int(created["replies"][0]["addSheet"]["properties"]["sheetId"])
 
     def create_spreadsheet(
         self, access_token: str, refresh_token: str | None, title: str

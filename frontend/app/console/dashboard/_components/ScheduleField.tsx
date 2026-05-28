@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { CalendarClock } from 'lucide-react';
 import { Label } from '@/components/ui/label';
-import { useDashboard } from '../_context';
+import { INDIA_TIMEZONE, useDashboard } from '../_context';
 
 export function ScheduleField() {
   const { scheduledAt, setScheduledAt } = useDashboard();
@@ -28,7 +28,7 @@ export function ScheduleField() {
       />
       {scheduledAt && (
         <p className="text-xs text-violet-600">
-          Job will run at {new Date(scheduledAt).toLocaleString()}
+          Job will run at {new Date(scheduledAt).toLocaleString('en-IN', { timeZone: INDIA_TIMEZONE })}
         </p>
       )}
     </div>

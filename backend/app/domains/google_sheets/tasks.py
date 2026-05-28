@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -13,6 +13,7 @@ from app.domains.google_sheets.stock_service import (
 )
 from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob
+from app.domains.runs.repository import SyncRunRepository
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
 
@@ -114,6 +115,7 @@ def export_run_to_sheets_task(
 ):
     with SyncSessionLocal() as db:
         try:
+            run_repo = SyncRunRepository(db)
             cred = db.execute(
                 select(GoogleSheetsCredential).where(
                     GoogleSheetsCredential.user_id == user_id
@@ -121,6 +123,13 @@ def export_run_to_sheets_task(
             ).scalar_one_or_none()
 
             if not cred:
+                run = run_repo.get(run_id)
+                if run:
+                    run_repo.update_export_state(
+                        run,
+                        export_status="failed",
+                        export_error="Google Sheets not connected",
+                    )
                 return {"status": "failed", "error": "Google Sheets not connected"}
 
             run = db.execute(
@@ -155,6 +164,11 @@ def export_run_to_sheets_task(
                     model_names.add(f"{job.provider} ({job.model})")
 
             if not all_stocks:
+                run_repo.update_export_state(
+                    run,
+                    export_status="failed",
+                    export_error="No stock recommendations found in run response",
+                )
                 return {
                     "status": "failed",
                     "error": "No stock recommendations found in any run job response",
@@ -171,11 +185,18 @@ def export_run_to_sheets_task(
                     access_token, refresh_token, formatted_title
                 )
 
-            _svc.write_sheet(
+            _, sheet_gid = _svc.write_sheet(
                 access_token, refresh_token, spreadsheet_id, headers, rows, sheet_name
             )
 
-            sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+            sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit#gid={sheet_gid}"
+            run_repo.update_export_state(
+                run,
+                export_status="completed",
+                export_error=None,
+                exported_at=datetime.now(timezone.utc),
+                exported_sheet_url=sheet_url,
+            )
             logger.info(
                 "Exported run %d (%d stocks from %d models) to Google Sheets for user %d",
                 run_id,
@@ -192,6 +213,14 @@ def export_run_to_sheets_task(
             }
 
         except Exception as exc:
+            run_repo = SyncRunRepository(db)
+            run = run_repo.get(run_id)
+            if run:
+                run_repo.update_export_state(
+                    run,
+                    export_status="failed",
+                    export_error=str(exc)[:500],
+                )
             logger.exception(
                 "Export run %d to Sheets failed for user %d", run_id, user_id
             )

@@ -14,7 +14,9 @@ RUN npm ci --prefer-offline --no-audit
 COPY . .
 
 ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_FRONTEND_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_FRONTEND_URL=${NEXT_PUBLIC_FRONTEND_URL}
 ENV NODE_OPTIONS="--max-old-space-size=8192"
 ENV NODE_ENV=production
 
@@ -31,8 +33,8 @@ RUN apk add --no-cache dumb-init
 # Copy package.json for runtime dependencies
 COPY package*.json ./
 
-# Install only production dependencies
-RUN npm ci --omit=dev --prefer-offline --no-audit && \
+# Install dependencies (dev deps needed for local `next dev` with bind mounts)
+RUN npm ci --prefer-offline --no-audit && \
     npm cache clean --force
 
 # Copy built application from builder

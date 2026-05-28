@@ -54,6 +54,59 @@ def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
     except Exception:
         pass
 
+    # Fallback: Parse markdown table output
+    try:
+        import re
+
+        lines = [line.strip() for line in response_text.splitlines() if line.strip()]
+        table_lines = [line for line in lines if line.count("|") >= 3]
+        if table_lines:
+            header_line = table_lines[0].strip("|")
+            headers = [h.strip() for h in header_line.split("|")]
+            rows = []
+            for line in table_lines[1:]:
+                # Skip markdown separator rows like |---|---|
+                if re.fullmatch(r"\|?[\s:\-|\t]+\|?", line):
+                    continue
+                cols = [c.strip() for c in line.strip("|").split("|")]
+                if len(cols) < len(headers):
+                    cols += [""] * (len(headers) - len(cols))
+                rows.append(cols[: len(headers)])
+
+            if rows:
+                key_map = {
+                    "stock name": "stock_name",
+                    "technical setup": "technical_setup",
+                    "entry range": "entry_range",
+                    "stop loss": "stop_loss",
+                    "target": "target",
+                    "analyst/source": "analyst_source",
+                    "analyst source": "analyst_source",
+                    "units to buy": "units_to_buy",
+                    "price per unit": "price_per_unit",
+                    "total buy amount": "total_buy_amount",
+                    "upside horizon (%) return in weeks": "upside_horizon",
+                    "upside horizon": "upside_horizon",
+                    "confidence score (0-100)": "confidence_score",
+                    "confidence score": "confidence_score",
+                    "rationale remarks": "rationale_remarks",
+                    "rationale/remarks": "rationale_remarks",
+                }
+
+                normalized_headers = [
+                    key_map.get(" ".join(h.lower().split()), " ".join(h.lower().split()))
+                    for h in headers
+                ]
+                parsed_rows: list[dict[str, Any]] = []
+                for row in rows:
+                    item = {normalized_headers[i]: row[i] for i in range(len(normalized_headers))}
+                    if item.get("stock_name"):
+                        parsed_rows.append(item)
+                if parsed_rows:
+                    return parsed_rows
+    except Exception:
+        pass
+
     logger.warning("Could not parse stock recommendations from response")
     return []
 

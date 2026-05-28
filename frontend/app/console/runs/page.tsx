@@ -19,6 +19,7 @@ import { RunResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { WSClient } from '@/services/websocket';
+import { INDIA_TIMEZONE } from '../dashboard/_context';
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
@@ -44,6 +45,20 @@ function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
   if (error instanceof Error) return error.message;
   return 'Something went wrong';
+}
+
+function formatTimestamp(value?: string | null) {
+  if (!value) return null;
+  return new Date(value).toLocaleString('en-IN', {
+    timeZone: INDIA_TIMEZONE,
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 export default function RunsPage() {
@@ -180,7 +195,9 @@ export default function RunsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-gray-950">All Runs</h1>
           <p className="mt-1 text-sm text-gray-600">
-            {lastUpdated ? `Last updated ${lastUpdated.toLocaleTimeString()}` : 'Loading…'}
+            {lastUpdated
+              ? `Last updated ${lastUpdated.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })}`
+              : 'Loading…'}
             {wsConnected && (
               <span className="ml-3 inline-flex items-center gap-1 text-emerald-600">
                 <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
@@ -266,19 +283,8 @@ export default function RunsPage() {
                           {run.status}
                         </span>
                       </td>
-                      <td className='px-5 py-4'>
-                        {
-                          new Date(run.created_at).toLocaleString("en-GB", {
-                            timeZone: "UTC",
-                            weekday: "short",
-                            year: "numeric",
-                            month: "short",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            second: "2-digit",
-                          })
-                        }
+                      <td className="px-5 py-4">
+                        {formatTimestamp(run.created_at)}
                       </td>
                     </tr>
                   );

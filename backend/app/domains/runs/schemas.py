@@ -56,6 +56,10 @@ class RunResponse(BaseModel):
     export_sheet_name: Optional[str] = None
     export_investment_amount: Optional[str] = None
     export_title: Optional[str] = None
+    export_status: Optional[str] = None
+    export_error: Optional[str] = None
+    exported_at: Optional[datetime] = None
+    exported_sheet_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -67,6 +71,9 @@ class RunListItem(BaseModel):
     prompt: str
     status: JobStatus
     current_stage: int
+    export_status: Optional[str] = None
+    exported_at: Optional[datetime] = None
+    exported_sheet_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

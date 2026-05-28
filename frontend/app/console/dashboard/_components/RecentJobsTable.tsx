@@ -5,10 +5,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
-import { useDashboard, STATUS_ICONS, STATUS_STYLES } from '../_context';
+import { INDIA_TIMEZONE, useDashboard, STATUS_ICONS, STATUS_STYLES } from '../_context';
+
+const parseApiTimestamp = (value: string) =>
+  /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? new Date(value) : new Date(`${value}Z`);
 
 const formatTimestamp = (value: string) =>
-  new Date(value).toLocaleString(undefined, {
+  parseApiTimestamp(value).toLocaleString('en-IN', {
+    timeZone: INDIA_TIMEZONE,
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -18,6 +22,14 @@ const formatTimestamp = (value: string) =>
 
 const formatModelName = (provider: string, model: string) =>
   `${provider} / ${model}`.replace(/\b\w/g, (char) => char.toUpperCase());
+
+const EXPORT_STYLES: Record<string, string> = {
+  pending: 'bg-amber-50 text-amber-700 ring-amber-200',
+  queued: 'bg-blue-50 text-blue-700 ring-blue-200',
+  completed: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  failed: 'bg-red-50 text-red-700 ring-red-200',
+  disabled: 'bg-gray-50 text-gray-600 ring-gray-200',
+};
 
 export function RecentJobsTable() {
   const { runs, runsTotal, loadingRuns, lastUpdated } = useDashboard();
@@ -31,7 +43,9 @@ export function RecentJobsTable() {
             Recent Jobs
           </h2>
           <p className="text-xs text-gray-500">
-            {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Waiting for data'}
+            {lastUpdated
+              ? `Updated ${lastUpdated.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })}`
+              : 'Waiting for data'}
           </p>
         </div>
       </div>
@@ -72,6 +86,7 @@ export function RecentJobsTable() {
                   a.job.provider.localeCompare(b.job.provider) ||
                   a.job.model.localeCompare(b.job.model)
                 );
+                const exportStatus = (run.export_status ?? (run.auto_export_enabled ? 'pending' : 'disabled')).toLowerCase();
                 return (
                   <tr
                     key={run.id}
@@ -89,58 +104,82 @@ export function RecentJobsTable() {
                       <div className="mt-1 text-xs text-gray-500">Stage S{run.current_stage}</div>
                     </td>
                     <td className="px-5 py-4">
-                      {runJobs.length > 0 ? (
-                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                          {runJobs.map((runJob) => {
-                            const job = runJob.job;
-                            const JobStatusIcon = STATUS_ICONS[job.status] ?? Clock3;
-                            return (
-                              <div
-                                key={runJob.id}
-                                className="min-w-0 rounded-md border border-gray-200 bg-white px-2.5 py-2"
-                              >
-                                <div className="truncate text-xs font-medium capitalize text-gray-900">
-                                  {formatModelName(job.provider, job.model)}
-                                </div>
-                                <div className="mt-1 flex flex-wrap items-center gap-2">
-                                  <span
-                                    className={cn(
-                                      'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold capitalize ring-1',
-                                      STATUS_STYLES[job.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
-                                    )}
-                                  >
-                                    <JobStatusIcon
+                      <div className="space-y-2">
+                        {runJobs.length > 0 ? (
+                          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                            {runJobs.map((runJob) => {
+                              const job = runJob.job;
+                              const JobStatusIcon = STATUS_ICONS[job.status] ?? Clock3;
+                              return (
+                                <div
+                                  key={runJob.id}
+                                  className="min-w-0 rounded-md border border-gray-200 bg-white px-2.5 py-2"
+                                >
+                                  <div className="truncate text-xs font-medium capitalize text-gray-900">
+                                    {formatModelName(job.provider, job.model)}
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                                    <span
                                       className={cn(
-                                        'size-3',
-                                        job.status === 'processing' && 'animate-spin',
+                                        'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold capitalize ring-1',
+                                        STATUS_STYLES[job.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
                                       )}
-                                    />
-                                    {job.status}
-                                  </span>
-                                  <span className="text-[11px] text-gray-400">
-                                    {formatTimestamp(job.created_at)}
-                                  </span>
+                                    >
+                                      <JobStatusIcon
+                                        className={cn(
+                                          'size-3',
+                                          job.status === 'processing' && 'animate-spin',
+                                        )}
+                                      />
+                                      {job.status}
+                                    </span>
+                                    <span className="text-[11px] text-gray-400">
+                                      {formatTimestamp(job.created_at)}
+                                    </span>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <span
-                          className={cn(
-                            'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold capitalize ring-1',
-                            STATUS_STYLES[run.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
-                          )}
-                        >
-                          <StatusIcon
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span
                             className={cn(
-                              'size-3.5',
-                              run.status === 'processing' && 'animate-spin',
+                              'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold capitalize ring-1',
+                              STATUS_STYLES[run.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
                             )}
-                          />
-                          {run.status}
-                        </span>
-                      )}
+                          >
+                            <StatusIcon
+                              className={cn(
+                                'size-3.5',
+                                run.status === 'processing' && 'animate-spin',
+                              )}
+                            />
+                            {run.status}
+                          </span>
+                        )}
+
+                        <div className="flex items-center gap-2 text-xs" onClick={(e) => e.stopPropagation()}>
+                          <span className="text-gray-500">Sheets Export:</span>
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1.5 px-2 py-0.5 font-semibold capitalize ring-1',
+                              EXPORT_STYLES[exportStatus] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
+                            )}
+                          >
+                            {exportStatus}
+                          </span>
+                          {run.exported_sheet_url ? (
+                            <Link
+                              href={run.exported_sheet_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                            >
+                              Open tab
+                            </Link>
+                          ) : null}
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 );

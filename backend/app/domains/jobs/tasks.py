@@ -244,8 +244,22 @@ def _refresh_run_status(db, job_id: int) -> None:
                             export_title or f"Run {run_id}",
                             export_investment_amount or "0",
                         )
+                        run_after_queue = run_repo.get(run_id)
+                        if run_after_queue:
+                            run_repo.update_export_state(
+                                run_after_queue,
+                                export_status="queued",
+                                export_error=None,
+                            )
                         logger.info("Queued auto-export for run %d", run_id)
                     except Exception as e:
+                        run_after_queue = run_repo.get(run_id)
+                        if run_after_queue:
+                            run_repo.update_export_state(
+                                run_after_queue,
+                                export_status="failed",
+                                export_error=f"Failed to queue export: {str(e)}",
+                            )
                         logger.warning("Failed to queue auto-export for run %d: %s", run_id, str(e))
     except Exception:
         logger.exception("Failed to refresh run status for job %s", job_id)
