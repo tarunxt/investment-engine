@@ -33,7 +33,10 @@ class PostgresRunRepository:
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total: int = (await self._session.execute(count_stmt)).scalar_one()
         items_result = await self._session.execute(
-            stmt.order_by(Run.id.desc()).offset(query.offset).limit(query.limit)
+            stmt.options(selectinload(Run.run_jobs).selectinload(RunJob.job))
+            .order_by(Run.id.desc())
+            .offset(query.offset)
+            .limit(query.limit)
         )
         return PagedResult(
             items=list(items_result.scalars()),

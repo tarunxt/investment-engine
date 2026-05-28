@@ -7,7 +7,7 @@ from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.runs.repository import PostgresRunRepository
-from app.domains.runs.schemas import RunCreate, RunListItem, RunResponse
+from app.domains.runs.schemas import RunCreate, RunResponse
 from app.domains.runs.use_cases.create_run import (
     CreateRunCommand,
     CreateRunUseCase,
@@ -73,7 +73,10 @@ async def list_runs(
 ):
     repo = PostgresRunRepository(db)
     result = await repo.list(PagedQuery(page=page, limit=limit))
-    return result.to_dict()
+    return {
+        **result.to_dict(),
+        "items": [RunResponse.model_validate(run) for run in result.items],
+    }
 
 
 @router.get("/{run_id}", response_model=RunResponse)
