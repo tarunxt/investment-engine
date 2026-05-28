@@ -8,10 +8,37 @@ import { useSession, signIn, signOut as nextSignOut } from "next-auth/react";
 import { UserResponse } from "@/types/api";
 import { apiService } from "@/services/api";
 
+const devAuthDisabled =
+  process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
+  process.env.NODE_ENV === "development";
+
+const devUser: UserResponse = {
+  id: 1,
+  email: "dev@localhost",
+  username: "dev",
+  full_name: "Local Developer",
+  role: "admin",
+  is_active: true,
+  is_verified: true,
+  created_at: new Date(0).toISOString(),
+  updated_at: new Date(0).toISOString(),
+  last_login: null,
+  profile: {
+    user_id: 1,
+    avatar_url: null,
+    bio: null,
+    timezone: "UTC",
+    notification_preferences: "all",
+    theme_preference: "light",
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+  },
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status, update } = useSession();
-  const [user, setUser] = useState<UserResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<UserResponse | null>(devAuthDisabled ? devUser : null);
+  const [loading, setLoading] = useState(!devAuthDisabled);
   const [error, setError] = useState<string | null>(null);
 
   // Check if token is expired
@@ -65,6 +92,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Sync NextAuth session with custom storage
   useEffect(() => {
+    if (devAuthDisabled) {
+      return;
+    }
+
     // Only sync when status is no longer loading
     if (status === "loading") {
       return;
@@ -128,6 +159,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, isTokenExpired, handleTokenExpiry]);
 
   const login = useCallback(async (emailOrUsername: string, password: string) => {
+    if (devAuthDisabled) {
+      setUser(devUser);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     setError(null);
     setLoading(true);
 
@@ -162,6 +200,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     password: string,
     fullName?: string
   ) => {
+    if (devAuthDisabled) {
+      setUser(devUser);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     setError(null);
     setLoading(true);
 
@@ -186,6 +231,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [login]);
 
   const logout = useCallback(async () => {
+    if (devAuthDisabled) {
+      setUser(devUser);
+      setError(null);
+      setLoading(false);
+      window.location.href = "/console/dashboard";
+      return;
+    }
+
     setError(null);
     setLoading(true);
 

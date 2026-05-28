@@ -4,19 +4,59 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.security import JWTUtils
+from app.core.config import settings
+from app.core.security import JWTUtils, PasswordUtils
 from app.core.logging import get_logger
 from app.domains.auth.models import User, UserRole, UserProfile
 from app.infrastructure.database.session import get_async_db
 
 logger = get_logger(__name__)
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+
+
+def is_auth_disabled() -> bool:
+    return settings.auth_disabled or settings.environment.lower() == "development"
+
+
+async def get_or_create_dev_user(db: AsyncSession) -> User:
+    result = await db.execute(
+        select(User).where(User.email == "dev@localhost").options(selectinload(User.profile))
+    )
+    user = result.scalar_one_or_none()
+    if user:
+        return user
+
+    user = User(
+        email="dev@localhost",
+        username="dev",
+        password_hash=PasswordUtils.hash_password("DevPassword123"),
+        full_name="Local Developer",
+        role=UserRole.ADMIN,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(user)
+    await db.flush()
+    db.add(UserProfile(user_id=user.id))
+    await db.commit()
+    await db.refresh(user)
+    logger.info("Created local development auth-bypass user")
+    return user
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_async_db),
 ) -> User:
+    if not credentials and is_auth_disabled():
+        return await get_or_create_dev_user(db)
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     token = credentials.credentials
     payload = JWTUtils.verify_token(token)
     if not payload:

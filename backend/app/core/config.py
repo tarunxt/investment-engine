@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     
     # Application
     debug: bool = False
+    environment: str = "production"
+    auth_disabled: bool = False
     app_name: str = "AI Investment Platform"
     version: str = "0.1.0"
     frontend_url: str = "http://localhost:3000"

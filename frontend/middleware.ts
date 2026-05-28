@@ -4,6 +4,13 @@ import type { NextRequest } from "next/server";
 import type { Session } from "next-auth";
 
 export default auth((req: NextRequest & { auth: Session | null }) => {
+  if (
+    process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
+    process.env.NODE_ENV === "development"
+  ) {
+    return NextResponse.next();
+  }
+
   const token = req.auth;
   const path = req.nextUrl.pathname;
 
