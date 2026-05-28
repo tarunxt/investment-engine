@@ -139,6 +139,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Check token expiry on mount and when user changes
   useEffect(() => {
+    if (devAuthDisabled) {
+      return;
+    }
+
     if (user && isTokenExpired()) {
       queueMicrotask(() => {
         handleTokenExpiry();
@@ -148,6 +152,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Set up visibility change listener to check token on tab focus
   useEffect(() => {
+    if (devAuthDisabled) {
+      return;
+    }
+
     const handleVisibilityChange = () => {
       if (!document.hidden && user && isTokenExpired()) {
         handleTokenExpiry();
@@ -261,6 +269,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshAuth = useCallback(async () => {
+    if (devAuthDisabled) {
+      setUser(devUser);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     await update();
   }, [update]);
 

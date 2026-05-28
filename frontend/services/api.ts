@@ -33,6 +33,10 @@ import {
 } from "@/types/api";
 import { IApiService } from "./api.types";
 
+const devAuthDisabled =
+  process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
+  process.env.NODE_ENV === "development";
+
 export class APIError extends Error {
   constructor(
     public status: number,
@@ -87,7 +91,7 @@ class apiServiceClass implements IApiService {
 
       if (!response.ok) {
         // Handle 401 Unauthorized with Retry Logic
-        if (response.status === 401 && !options._retry) {
+        if (response.status === 401 && !options._retry && !devAuthDisabled) {
           this.info("⚠️ 401 Unauthorized: Attempting token refresh...");
 
           if (!isRefreshing) {
