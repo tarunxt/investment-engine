@@ -81,6 +81,7 @@ export default function JobsPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsClientRef = useRef<WSClient | null>(null);
   const loadJobsRef = useRef<typeof loadJobs>(loadJobs);
+  const statusFilterRef = useRef<StatusFilter>(statusFilter);
 
   const updateURLParams = useCallback((params: { status?: string; page?: number; search?: string }) => {
     const newParams = new URLSearchParams(searchParams);
@@ -143,6 +144,7 @@ export default function JobsPage() {
 
   useLayoutEffect(() => {
     loadJobsRef.current = loadJobs;
+    statusFilterRef.current = statusFilter;
   });
 
   const initWS = useCallback(() => {
@@ -156,9 +158,16 @@ export default function JobsPage() {
           [key: string]: unknown;
         };
         setJobs((prev) => {
+          const nextStatus = patch.status as string | undefined;
+          const activeFilter = statusFilterRef.current;
+          if (nextStatus && activeFilter !== 'all' && nextStatus !== activeFilter) {
+            return prev.filter((j) => j.id !== job_id);
+          }
           if (!prev.some((j) => j.id === job_id)) {
             // Job created after initial fetch — reload silently to surface it
-            setTimeout(() => loadJobsRef.current({ silent: true }), 0);
+            if (activeFilter === 'all' || !nextStatus || nextStatus === activeFilter) {
+              setTimeout(() => loadJobsRef.current({ silent: true }), 0);
+            }
             return prev;
           }
           return prev.map((j) => (j.id === job_id ? { ...j, ...patch } : j));

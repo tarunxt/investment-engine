@@ -6,9 +6,13 @@ import logging
 
 from fastapi import WebSocket, WebSocketDisconnect
 import redis.asyncio as aioredis
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.security import JWTUtils
+from app.domains.auth.dependencies import get_or_create_dev_user, is_auth_disabled
+from app.domains.auth.models import User
+from app.infrastructure.database.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,24 @@ def user_id_from_token(token: str) -> int | None:
         return int(payload["sub"])
     except (KeyError, ValueError, TypeError):
         return None
+
+
+async def user_id_from_ws_token(token: str | None) -> int | None:
+    if is_auth_disabled() and (not token or token == "dev"):
+        async with AsyncSessionLocal() as db:
+            user = await get_or_create_dev_user(db)
+            return user.id
+
+    if not token:
+        return None
+
+    user_id = user_id_from_token(token)
+    if user_id is None:
+        return None
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(User.id).where(User.id == user_id, User.is_active.is_(True)))
+        return result.scalar_one_or_none()
 
 
 async def relay_channel(websocket: WebSocket, channel: str) -> None:

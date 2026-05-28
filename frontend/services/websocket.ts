@@ -12,6 +12,9 @@ export interface WSClientOptions {
 }
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
+const devAuthDisabled =
+  process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true' ||
+  process.env.NODE_ENV === 'development';
 
 /**
  * Decode the stored JWT and proactively refresh it if it expires within 60 s.
@@ -19,7 +22,7 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
  */
 async function getFreshToken(): Promise<string | null> {
   const token = sessionStorage.getAccessToken();
-  if (!token) return null;
+  if (!token) return devAuthDisabled ? 'dev' : null;
 
   try {
     const [, payload] = token.split('.');

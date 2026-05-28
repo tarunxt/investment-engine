@@ -188,7 +188,21 @@ def _refresh_run_status(db, job_id: int) -> None:
                     "tokens_in": updated_job.tokens_in,
                     "tokens_out": updated_job.tokens_out,
                     "estimated_cost": updated_job.estimated_cost,
+                    "updated_at": updated_job.updated_at.isoformat() if updated_job.updated_at else None,
                 })
+                if updated_job.user_id:
+                    _redis_publish(f"user_run_updates:{updated_job.user_id}", {
+                        "type": "job.updated",
+                        "run_id": rj.run_id,
+                        "job_id": updated_job.id,
+                        "status": status_val,
+                        "response": updated_job.response,
+                        "error_message": updated_job.error_message,
+                        "tokens_in": updated_job.tokens_in,
+                        "tokens_out": updated_job.tokens_out,
+                        "estimated_cost": updated_job.estimated_cost,
+                        "updated_at": updated_job.updated_at.isoformat() if updated_job.updated_at else None,
+                    })
 
             statuses = {j.status for j in stage_jobs}
             active = {JobStatus.PENDING, JobStatus.PROCESSING, JobStatus.SCHEDULED}
@@ -274,6 +288,7 @@ def execute_ai_job(self, job_id: int) -> None:
         WorkerLogHelper.log_task_start("execute_ai_job", "n/a", job_id)
         repo.update_status(job, JobStatus.PROCESSING)
         _publish_job_update(job)
+        _refresh_run_status(db, job_id)
 
         provider = ProviderFactory.create(job.provider)
         result = provider.generate(prompt=job.prompt, model=job.model)

@@ -109,6 +109,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
                       tokens_in: (data.tokens_in as number | null) ?? rj.job.tokens_in,
                       tokens_out: (data.tokens_out as number | null) ?? rj.job.tokens_out,
                       estimated_cost: (data.estimated_cost as number | null) ?? rj.job.estimated_cost,
+                      updated_at: (data.updated_at as string | undefined) ?? rj.job.updated_at,
                     },
                   }
                   : rj,

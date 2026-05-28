@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from app.shared.types import JobId
-from app.shared.ws_relay import relay_channel, user_id_from_token
+from app.shared.ws_relay import relay_channel, user_id_from_ws_token
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +13,9 @@ router = APIRouter(tags=["websocket"])
 
 
 @router.websocket("/ws/runs")
-async def ws_run_list(websocket: WebSocket, token: str = Query(...)):
+async def ws_run_list(websocket: WebSocket, token: str | None = Query(None)):
     """Stream real-time run status updates for the authenticated user."""
-    user_id = user_id_from_token(token)
+    user_id = await user_id_from_ws_token(token)
     if user_id is None:
         await websocket.close(code=4001, reason="Unauthorized")
         return
@@ -33,9 +33,9 @@ async def ws_run_list(websocket: WebSocket, token: str = Query(...)):
 
 
 @router.websocket("/ws/runs/{run_id}")
-async def ws_run_detail(websocket: WebSocket, run_id: JobId, token: str = Query(...)):
+async def ws_run_detail(websocket: WebSocket, run_id: JobId, token: str | None = Query(None)):
     """Stream per-job updates and run status changes for a specific run."""
-    user_id = user_id_from_token(token)
+    user_id = await user_id_from_ws_token(token)
     if user_id is None:
         await websocket.close(code=4001, reason="Unauthorized")
         return

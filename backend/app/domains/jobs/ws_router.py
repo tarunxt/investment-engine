@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from app.infrastructure.database.session import AsyncSessionLocal
 from app.domains.jobs.repository import PostgresJobRepository
 from app.shared.types import JobId
-from app.shared.ws_relay import relay_channel, user_id_from_token
+from app.shared.ws_relay import relay_channel, user_id_from_ws_token
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +15,9 @@ router = APIRouter(tags=["websocket"])
 
 
 @router.websocket("/ws/jobs")
-async def ws_job_list(websocket: WebSocket, token: str = Query(...)):
+async def ws_job_list(websocket: WebSocket, token: str | None = Query(None)):
     """Stream real-time status updates for all jobs of the authenticated user."""
-    user_id = user_id_from_token(token)
+    user_id = await user_id_from_ws_token(token)
     if user_id is None:
         await websocket.close(code=4001, reason="Unauthorized")
         return
@@ -35,9 +35,9 @@ async def ws_job_list(websocket: WebSocket, token: str = Query(...)):
 
 
 @router.websocket("/ws/jobs/{job_id}")
-async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str = Query(...)):
+async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None = Query(None)):
     """Stream real-time status updates for a specific job."""
-    user_id = user_id_from_token(token)
+    user_id = await user_id_from_ws_token(token)
     if user_id is None:
         await websocket.close(code=4001, reason="Unauthorized")
         return
@@ -64,6 +64,7 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str = Query(
                         "tokens_in": job.tokens_in,
                         "tokens_out": job.tokens_out,
                         "estimated_cost": job.estimated_cost,
+                        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
                     }
                 )
     except Exception:
