@@ -17,6 +17,8 @@ import { URLs } from '@/lib/urls';
 import { FullLoader } from '@/components/shared/Loader';
 import { UserMenu } from '@/components/dashboard/UserMenu';
 
+const devAuthEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
+
 export default function DashboardLayout({
     children,
 }: {
@@ -28,6 +30,7 @@ export default function DashboardLayout({
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     useEffect(() => {
+        if (devAuthEnabled) return;
         if (loading) return;
         if (!isAuthenticated) {
             router.push('/login');

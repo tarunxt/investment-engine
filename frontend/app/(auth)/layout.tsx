@@ -4,6 +4,8 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 
+const devAuthEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
+
 export default function AuthLayout({
     children,
 }: {
@@ -14,14 +16,14 @@ export default function AuthLayout({
 
     useEffect(() => {
         // Redirect to dashboard if already authenticated
-        if (isAuthenticated) {
+        if (devAuthEnabled || isAuthenticated) {
             console.log('User is authenticated, redirecting to dashboard...');
             router.push('/console/dashboard');
         }
     }, [isAuthenticated, router]);
 
     // Don't render anything while checking auth or redirecting
-    if (isAuthenticated) {
+    if (devAuthEnabled || isAuthenticated) {
         return null;
     }
 

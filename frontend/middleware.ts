@@ -4,15 +4,24 @@ import type { NextRequest } from "next/server";
 import type { Session } from "next-auth";
 
 export default auth((req: NextRequest & { auth: Session | null }) => {
+  const path = req.nextUrl.pathname;
+
   if (
     process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
     process.env.NODE_ENV === "development"
   ) {
+    if (
+      path === "/login" ||
+      path === "/register" ||
+      path === "/forgot-password" ||
+      path.startsWith("/reset-password")
+    ) {
+      return NextResponse.redirect(new URL("/console/dashboard", req.url));
+    }
     return NextResponse.next();
   }
 
   const token = req.auth;
-  const path = req.nextUrl.pathname;
 
   // Not logged in
   if (!token) {
@@ -36,6 +45,10 @@ export default auth((req: NextRequest & { auth: Session | null }) => {
 
 export const config = {
   matcher: [
+    "/login",
+    "/register",
+    "/forgot-password",
+    "/reset-password/:path*",
     "/console/:path*",
     "/dashboard/:path*",
     "/profile/:path*",

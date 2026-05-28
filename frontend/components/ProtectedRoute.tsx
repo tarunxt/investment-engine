@@ -5,17 +5,20 @@ import { URLs } from "@/lib/urls";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+const devAuthEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
+
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { isAuthenticated, loading } = useAuth();
 
   useEffect(() => {
+    if (devAuthEnabled) return;
     if (!loading && !isAuthenticated) {
       router.push(URLs.routes.login());
     }
   }, [isAuthenticated, loading, router]);
 
-  if (loading) {
+  if (!devAuthEnabled && loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
@@ -23,7 +26,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!devAuthEnabled && !isAuthenticated) {
     return null;
   }
 
