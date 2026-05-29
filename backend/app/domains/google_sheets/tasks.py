@@ -24,6 +24,20 @@ _svc = GoogleSheetsService()
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def _with_run_metadata_columns(
+    headers: list[str],
+    rows: list[list[object]],
+    run_number: int,
+    run_dt_ist: datetime,
+    llm_label: str,
+) -> tuple[list[str], list[list[object]]]:
+    meta_headers = ["Run #", "Run Date", "Run Time", "LLM"]
+    run_date = run_dt_ist.strftime("%Y-%m-%d")
+    run_time = run_dt_ist.strftime("%H:%M:%S")
+    meta = [run_number, run_date, run_time, llm_label]
+    return headers + meta_headers, [row + meta for row in rows]
+
+
 @celery.task(bind=True, max_retries=3, soft_time_limit=120, time_limit=180)
 def export_job_to_sheets_task(
     self,
@@ -113,9 +127,14 @@ def export_job_to_sheets_task(
                     access_token, refresh_token, formatted_title
                 )
 
-            section_title = (
-                f"Run #{run_id}" if run_id else f"Job #{job_id}"
-            ) + f" | {now_ist.strftime('%Y-%m-%d %H:%M:%S IST')} | {job.provider}/{job.model}"
+            meta_run_number = run_id if run_id else job_id
+            headers, rows = _with_run_metadata_columns(
+                headers=headers,
+                rows=rows,
+                run_number=meta_run_number,
+                run_dt_ist=now_ist,
+                llm_label=f"{job.provider}/{job.model}",
+            )
 
             _, sheet_gid = _svc.append_sheet(
                 access_token,
@@ -124,7 +143,6 @@ def export_job_to_sheets_task(
                 headers,
                 rows,
                 sheet_name,
-                section_title=section_title,
             )
 
             sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit#gid={sheet_gid}"
@@ -165,10 +183,11 @@ def export_job_to_sheets_task(
         except Exception as exc:
             job_repo = SyncJobRepository(db)
             job = db.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none()
+            is_last_attempt = self.request.retries >= self.max_retries
             if job:
                 job_repo.update_export_state(
                     job,
-                    export_status="failed",
+                    export_status="failed" if is_last_attempt else "queued",
                     export_error=str(exc)[:500],
                 )
                 _publish_job_update(job)
@@ -176,6 +195,8 @@ def export_job_to_sheets_task(
             logger.exception(
                 "Export job %d to Sheets failed for user %d", job_id, user_id
             )
+            if is_last_attempt:
+                return {"status": "failed", "error": str(exc)[:500]}
             raise self.retry(exc=exc, countdown=10)
 
 
@@ -262,9 +283,12 @@ def export_run_to_sheets_task(
                     access_token, refresh_token, formatted_title
                 )
 
-            section_title = (
-                f"Run #{run.id} | {run.created_at.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S IST')}"
-                f" | {title}"
+            headers, rows = _with_run_metadata_columns(
+                headers=headers,
+                rows=rows,
+                run_number=run.id,
+                run_dt_ist=run.created_at.astimezone(IST),
+                llm_label="multi-llm",
             )
             _, sheet_gid = _svc.append_sheet(
                 access_token,
@@ -273,7 +297,6 @@ def export_run_to_sheets_task(
                 headers,
                 rows,
                 sheet_name,
-                section_title=section_title,
             )
 
             sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit#gid={sheet_gid}"

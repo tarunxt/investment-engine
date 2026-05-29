@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+import logging
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
+import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +20,10 @@ router = APIRouter(prefix="/api-usage", tags=["api-usage"])
 
 
 IST = ZoneInfo("Asia/Kolkata")
+logger = logging.getLogger(__name__)
+
+USD_INR_FALLBACK = 83.50
+FX_SOURCE = "https://open.er-api.com/v6/latest/USD"
 
 
 @dataclass
@@ -29,8 +35,10 @@ class ApiUsageItem:
     daily_tokens_in: int
     daily_tokens_out: int
     daily_estimated_cost: float
+    daily_estimated_cost_inr: float
     daily_limit_requests: int | None
     notes: str | None
+    console_url: str | None
 
 
 def _day_window_utc() -> tuple[datetime, datetime]:
@@ -45,12 +53,27 @@ def _day_window_utc() -> tuple[datetime, datetime]:
     return start_utc, end_utc
 
 
+async def _fetch_usd_inr_rate() -> tuple[float, str]:
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(FX_SOURCE)
+            resp.raise_for_status()
+            payload = resp.json()
+            inr_rate = float((payload.get("rates") or {}).get("INR"))
+            if inr_rate > 0:
+                return inr_rate, FX_SOURCE
+    except Exception as exc:  # pragma: no cover - fallback is expected in outages
+        logger.warning("USD/INR live rate fetch failed, using fallback: %s", exc)
+    return USD_INR_FALLBACK, "fallback"
+
+
 @router.get("/summary")
 async def api_usage_summary(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     start_utc, end_utc = _day_window_utc()
+    usd_inr_rate, fx_source = await _fetch_usd_inr_rate()
 
     rows = (
         await db.execute(
@@ -81,15 +104,36 @@ async def api_usage_summary(
     }
 
     providers = [
-        ("OpenAI", "openai", bool(settings.openai_api_key)),
-        ("Anthropic", "anthropic", bool(settings.anthropic_api_key)),
-        ("Gemini", "gemini", bool(settings.gemini_api_key)),
-        ("DeepSeek", "deepseek", bool(settings.deepseek_api_key)),
+        (
+            "OpenAI",
+            "openai",
+            bool(settings.openai_api_key),
+            "https://platform.openai.com/usage",
+        ),
+        (
+            "Anthropic",
+            "anthropic",
+            bool(settings.anthropic_api_key),
+            "https://console.anthropic.com/settings/usage",
+        ),
+        (
+            "Gemini",
+            "gemini",
+            bool(settings.gemini_api_key),
+            "https://aistudio.google.com/usage?timeRange=last-28-days",
+        ),
+        (
+            "DeepSeek",
+            "deepseek",
+            bool(settings.deepseek_api_key),
+            "https://platform.deepseek.com/usage",
+        ),
     ]
 
     items: list[ApiUsageItem] = []
-    for label, key, configured in providers:
+    for label, key, configured, console_url in providers:
         usage = usage_by_provider.get(key, {})
+        usd_cost = round(usage.get("cost", 0.0), 6)
         items.append(
             ApiUsageItem(
                 name=label,
@@ -98,9 +142,11 @@ async def api_usage_summary(
                 daily_requests=usage.get("requests", 0),
                 daily_tokens_in=usage.get("tokens_in", 0),
                 daily_tokens_out=usage.get("tokens_out", 0),
-                daily_estimated_cost=round(usage.get("cost", 0.0), 6),
+                daily_estimated_cost=usd_cost,
+                daily_estimated_cost_inr=round(usd_cost * usd_inr_rate, 4),
                 daily_limit_requests=None,
                 notes="Daily request limit depends on provider plan/quota.",
+                console_url=console_url,
             )
         )
 
@@ -114,8 +160,10 @@ async def api_usage_summary(
                 daily_tokens_in=0,
                 daily_tokens_out=0,
                 daily_estimated_cost=0.0,
+                daily_estimated_cost_inr=0.0,
                 daily_limit_requests=None,
                 notes="Usage from Google console quotas; app-side token metrics not tracked.",
+                console_url="https://console.cloud.google.com/apis/api/sheets.googleapis.com/quotas",
             ),
             ApiUsageItem(
                 name="Zerodha API",
@@ -125,8 +173,10 @@ async def api_usage_summary(
                 daily_tokens_in=0,
                 daily_tokens_out=0,
                 daily_estimated_cost=0.0,
+                daily_estimated_cost_inr=0.0,
                 daily_limit_requests=None,
                 notes="Kite limits are account-specific.",
+                console_url="https://kite.trade/docs/connect/v3/exceptions/#api-rate-limit",
             ),
             ApiUsageItem(
                 name="Tavily Search API",
@@ -136,8 +186,10 @@ async def api_usage_summary(
                 daily_tokens_in=0,
                 daily_tokens_out=0,
                 daily_estimated_cost=0.0,
+                daily_estimated_cost_inr=0.0,
                 daily_limit_requests=None,
                 notes="Used by DeepSeek tool-calling for live web search.",
+                console_url="https://app.tavily.com/home",
             ),
         ]
     )
@@ -145,5 +197,7 @@ async def api_usage_summary(
     return {
         "timezone": "Asia/Kolkata",
         "date": datetime.now(IST).date().isoformat(),
+        "usd_inr_rate": round(usd_inr_rate, 4),
+        "fx_source": fx_source,
         "items": [asdict(item) for item in items],
     }

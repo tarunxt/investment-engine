@@ -69,6 +69,7 @@ export const URLs = {
     create: () => `${API_BASE_URL}/runs`,
     list: () => `${API_BASE_URL}/runs`,
     get: (id: number) => `${API_BASE_URL}/runs/${id}`,
+    cancel: (id: number) => `${API_BASE_URL}/runs/${id}/cancel`,
     ws: () => `${WS_BASE_URL}/ws/runs`,
     wsRun: (id: number) => `${WS_BASE_URL}/ws/runs/${id}`,
   },

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from openai import OpenAI
 
 from app.core.config import settings
@@ -19,11 +21,23 @@ MODEL_PRICING_PER_1M_TOKENS = {
     },
 }
 
+SUPPORTED_MODELS = [
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.5-preview",
+    "o4-mini",
+    "o3",
+    "o3-mini",
+]
+
 
 class OpenAIProvider(BaseAIProvider):
     provider_name = "openai"
 
-    supported_models = list(MODEL_PRICING_PER_1M_TOKENS.keys())
+    supported_models = SUPPORTED_MODELS
 
     @classmethod
     def is_configured(cls) -> bool:
@@ -85,5 +99,16 @@ class OpenAIProvider(BaseAIProvider):
         return round(
             (tokens_in / 1_000_000) * pricing["input"]
             + (tokens_out / 1_000_000) * pricing["output"],
+            6,
+        )
+
+    @staticmethod
+    def estimate_prompt_cost_usd(model: str, prompt: str) -> float:
+        pricing = MODEL_PRICING_PER_1M_TOKENS.get(model, {"input": 0.15, "output": 0.60})
+        prompt_tokens = max(1, math.ceil(len(prompt) / 4))
+        expected_output_tokens = 1800
+        return round(
+            (prompt_tokens / 1_000_000) * pricing["input"]
+            + (expected_output_tokens / 1_000_000) * pricing["output"],
             6,
         )

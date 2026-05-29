@@ -27,19 +27,23 @@ export function CreateJobCard() {
         <CardTitle>Create Job</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <RunModeFields />
-          <TemplateField />
-          <PromptField />
-          <ScheduleField />
-          <GoogleSheetsField />
+        <form onSubmit={handleSubmit} className="grid gap-5 xl:grid-cols-2">
+          <div className="space-y-5">
+            <RunModeFields />
+            <TemplateField />
+            <PromptField />
+          </div>
+          <div className="space-y-5">
+            <ScheduleField />
+            <GoogleSheetsField />
+          </div>
 
-          {submitError && <p className="text-sm text-red-700">{submitError}</p>}
+          {submitError && <p className="text-sm text-red-700 xl:col-span-2">{submitError}</p>}
 
           <Button
             type="submit"
             disabled={submitting || !prompt.trim() || charOverLimit || selectedTargets.size === 0}
-            className="w-full"
+            className="w-full xl:col-span-2"
           >
             {submitting ? (
               <Loader2 className="mr-2 size-4 animate-spin" />

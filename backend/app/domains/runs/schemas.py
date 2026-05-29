@@ -23,6 +23,7 @@ class RunCreate(BaseModel):
     export_sheet_name: Optional[str] = None
     export_investment_amount: Optional[str] = None
     export_title: Optional[str] = None
+    allow_parallel: bool = False
 
     @field_validator("targets")
     @classmethod

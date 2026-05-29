@@ -62,6 +62,8 @@ interface DashboardContextValue {
   templateSearch: string;
   isLoading: boolean;
   selectedTargets: Set<string>;
+  savedModelMixes: ModelMix[];
+  selectedModelMixId: string;
   promptRef: React.RefObject<HTMLTextAreaElement>;
 
   // Google Sheets export
@@ -92,9 +94,22 @@ interface DashboardContextValue {
   toggleAllForProvider: (providerName: string, providerModels: string[]) => void;
   selectAllTargets: () => void;
   unselectAllTargets: () => void;
+  applyModelMix: (id: string) => void;
+  saveModelMix: (name: string) => string | null;
+  renameModelMix: (id: string, name: string) => void;
+  deleteModelMix: (id: string) => void;
 }
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
+
+const MODEL_MIX_STORAGE_KEY = 'investor:model-mixes:v1';
+
+interface ModelMix {
+  id: string;
+  name: string;
+  targets: string[];
+  updated_at: string;
+}
 
 export function useDashboard(): DashboardContextValue {
   const ctx = useContext(DashboardContext);
@@ -125,6 +140,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [templateSearch, setTemplateSearch] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTargets, setSelectedTargets] = useState<Set<string>>(new Set());
+  const [savedModelMixes, setSavedModelMixes] = useState<ModelMix[]>([]);
+  const [selectedModelMixId, setSelectedModelMixId] = useState('');
 
   // Google Sheets export state (auto-generated with day-wise tabs)
   const [autoExportEnabled, setAutoExportEnabled] = useState(true);
@@ -143,14 +160,44 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const templateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const templateControllerRef = useRef<AbortController | null>(null);
+  const providerControllerRef = useRef<AbortController | null>(null);
+  const providerDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null!);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(MODEL_MIX_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      const sanitized: ModelMix[] = parsed
+        .filter((m) => m && typeof m.id === 'string' && typeof m.name === 'string' && Array.isArray(m.targets))
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          targets: m.targets.filter((t: unknown) => typeof t === 'string'),
+          updated_at: typeof m.updated_at === 'string' ? m.updated_at : new Date().toISOString(),
+        }));
+      setSavedModelMixes(sanitized);
+    } catch (err) {
+      console.warn('Failed to load saved model mixes:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MODEL_MIX_STORAGE_KEY, JSON.stringify(savedModelMixes));
+    } catch (err) {
+      console.warn('Failed to persist model mixes:', err);
+    }
+  }, [savedModelMixes]);
 
   const initDashboard = useCallback(async () => {
     setIsLoading(true);
     const controller = new AbortController();
 
     const [providersRes, templatesRes, sheetsStatusRes] = await Promise.allSettled([
-      apiService.getProviders({ signal: controller.signal }),
+      apiService.getProviders({ signal: controller.signal, prompt }),
       apiService.getPrompts({ q: '' }, controller.signal),
       apiService.googleSheetsStatus(),
     ]);
@@ -189,6 +236,27 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     initDashboard();
     return () => templateControllerRef.current?.abort('Cleanup');
   }, [initDashboard]);
+
+  useEffect(() => {
+    if (!prompt.trim()) return;
+    if (providerDebounceRef.current) clearTimeout(providerDebounceRef.current);
+    providerDebounceRef.current = setTimeout(async () => {
+      providerControllerRef.current?.abort('New provider cost request started');
+      const controller = new AbortController();
+      providerControllerRef.current = controller;
+      try {
+        const data = await apiService.getProviders({ signal: controller.signal, prompt });
+        setProviders(data);
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        console.error('Failed to refresh provider costs:', err);
+      }
+    }, 450);
+
+    return () => {
+      if (providerDebounceRef.current) clearTimeout(providerDebounceRef.current);
+    };
+  }, [prompt]);
 
   const fetchTemplates = useCallback(async (q: string) => {
     templateControllerRef.current?.abort('New search started');
@@ -259,6 +327,63 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setSelectedTargets(new Set());
   }, []);
 
+  const applyModelMix = useCallback(
+    (id: string) => {
+      if (!id || id === 'none') {
+        setSelectedModelMixId('');
+        return;
+      }
+      const mix = savedModelMixes.find((m) => m.id === id);
+      if (!mix) return;
+      const allowed = new Set(providers.flatMap((provider) => provider.models.map((model) => `${provider.name}::${model}`)));
+      const filtered = mix.targets.filter((target) => allowed.has(target));
+      setSelectedTargets(new Set(filtered));
+      setSelectedModelMixId(id);
+    },
+    [providers, savedModelMixes],
+  );
+
+  const saveModelMix = useCallback(
+    (name: string) => {
+      const cleaned = name.trim();
+      if (!cleaned) return null;
+      const targets = Array.from(selectedTargets);
+      if (targets.length === 0) return null;
+      const now = new Date().toISOString();
+
+      const existing = savedModelMixes.find((m) => m.name.toLowerCase() === cleaned.toLowerCase());
+      if (existing) {
+        const updated: ModelMix = { ...existing, targets, updated_at: now, name: cleaned };
+        setSavedModelMixes((prev) => prev.map((m) => (m.id === existing.id ? updated : m)));
+        setSelectedModelMixId(existing.id);
+        return existing.id;
+      }
+
+      const id = `mix_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+      const created: ModelMix = { id, name: cleaned, targets, updated_at: now };
+      setSavedModelMixes((prev) => [created, ...prev]);
+      setSelectedModelMixId(id);
+      return id;
+    },
+    [savedModelMixes, selectedTargets],
+  );
+
+  const renameModelMix = useCallback((id: string, name: string) => {
+    const cleaned = name.trim();
+    if (!cleaned) return;
+    setSavedModelMixes((prev) =>
+      prev.map((mix) => (mix.id === id ? { ...mix, name: cleaned, updated_at: new Date().toISOString() } : mix)),
+    );
+  }, []);
+
+  const deleteModelMix = useCallback(
+    (id: string) => {
+      setSavedModelMixes((prev) => prev.filter((mix) => mix.id !== id));
+      if (selectedModelMixId === id) setSelectedModelMixId('');
+    },
+    [selectedModelMixId],
+  );
+
   const parseTargets = useCallback(
     (): RunModelTarget[] =>
       Array.from(selectedTargets).map((key) => {
@@ -292,10 +417,25 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setSubmitting(true);
       setSubmitError(null);
       try {
+        const hasActiveRun = runs.some((run) =>
+          ['scheduled', 'pending', 'processing'].includes((run.status || '').toLowerCase()),
+        );
+        let allowParallel = false;
+        if (hasActiveRun) {
+          allowParallel = window.confirm(
+            'A job is already running. Do you want to run another job in parallel?',
+          );
+          if (!allowParallel) {
+            setSubmitting(false);
+            return;
+          }
+        }
+
         const run = await apiService.createRun({
           prompt: trimmedPrompt,
           targets,
           scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          allow_parallel: allowParallel,
           auto_export_enabled: autoExportEnabled,
           export_spreadsheet_url:
             autoExportEnabled ? (exportSpreadsheetUrl.trim() || DEFAULT_EXPORT_SPREADSHEET_URL) : undefined,
@@ -315,6 +455,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     },
     [
       prompt,
+      runs,
       parseTargets,
       scheduledAt,
       autoExportEnabled,
@@ -333,13 +474,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const totalAvailableTargets = providers.reduce((n, p) => n + p.models.length, 0);
 
   useEffect(() => {
-    if (selectedTemplateId) return;
     const defaultTemplate = promptTemplates.find((tpl) => tpl.name === DEFAULT_TEMPLATE_NAME);
     if (!defaultTemplate) return;
-    setSelectedTemplateId(String(defaultTemplate.id));
-    if (!prompt.trim()) {
-      setPrompt(defaultTemplate.body);
+    if (!selectedTemplateId || selectedTemplateId === 'none') {
+      setSelectedTemplateId(String(defaultTemplate.id));
     }
+    if (!prompt.trim()) setPrompt(defaultTemplate.body);
   }, [selectedTemplateId, promptTemplates, prompt]);
 
   useEffect(() => {
@@ -378,6 +518,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         templateSearch,
         isLoading,
         selectedTargets,
+        savedModelMixes,
+        selectedModelMixId,
         promptRef,
         charCount,
         charOverLimit,
@@ -402,6 +544,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         toggleAllForProvider,
         selectAllTargets,
         unselectAllTargets,
+        applyModelMix,
+        saveModelMix,
+        renameModelMix,
+        deleteModelMix,
       }}
     >
       {children}

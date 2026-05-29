@@ -60,6 +60,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
   const [error, setError] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [usdInrRate, setUsdInrRate] = useState(83.5);
 
   const generationRef = useRef(0);
   const wsClientRef = useRef<WSClient | null>(null);
@@ -86,6 +87,14 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadRun();
+    apiService
+      .getApiUsageSummary()
+      .then((summary) => {
+        if (summary.usd_inr_rate && summary.usd_inr_rate > 0) {
+          setUsdInrRate(summary.usd_inr_rate);
+        }
+      })
+      .catch(() => {});
 
     const client = new WSClient({
       url: URLs.runs.wsRun(Number(id)),
@@ -167,6 +176,11 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
   const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
   const isActive = ACTIVE_STATUSES.has(run.status);
   const totalCost = run.run_jobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
+  const formatCostWithInr = (value?: number | null) => {
+    const usd = value ?? 0;
+    const inr = usd * usdInrRate;
+    return `${formatCost(usd)} (₹${inr.toFixed(2)})`;
+  };
   const totalTokensIn = run.run_jobs.reduce((sum, rj) => sum + (rj.job.tokens_in ?? 0), 0);
   const totalTokensOut = run.run_jobs.reduce((sum, rj) => sum + (rj.job.tokens_out ?? 0), 0);
 
@@ -241,7 +255,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
           <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">
             Est. Cost
           </div>
-          <div className="mt-2 font-medium text-gray-950">{formatCost(totalCost)}</div>
+          <div className="mt-2 font-medium text-gray-950">{formatCostWithInr(totalCost)}</div>
           <div className="mt-0.5 text-xs text-gray-500">across all models</div>
         </div>
       </div>
@@ -294,7 +308,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
                       </span>
                     ) : null}
                     {job.estimated_cost ? (
-                      <span className="text-xs text-gray-400">{formatCost(job.estimated_cost)}</span>
+                      <span className="text-xs text-gray-400">{formatCostWithInr(job.estimated_cost)}</span>
                     ) : null}
                     <span
                       className={cn(

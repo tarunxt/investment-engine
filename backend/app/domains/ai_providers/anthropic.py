@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import anthropic
 from anthropic.types import TextBlock
 
@@ -11,10 +13,21 @@ MODEL_PRICING_PER_1M_TOKENS = {
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
 }
 
+SUPPORTED_MODELS = [
+    "claude-opus-4-7",
+    "claude-sonnet-4-6",
+    "claude-3-7-sonnet-latest",
+    "claude-3-5-sonnet-latest",
+    "claude-3-5-haiku-latest",
+    "claude-3-opus-latest",
+    "claude-3-sonnet-20240229",
+    "claude-3-haiku-20240307",
+]
+
 
 class AnthropicProvider(BaseAIProvider):
     provider_name = "anthropic"
-    supported_models = list(MODEL_PRICING_PER_1M_TOKENS.keys())
+    supported_models = SUPPORTED_MODELS
 
     @classmethod
     def is_configured(cls) -> bool:
@@ -60,5 +73,16 @@ class AnthropicProvider(BaseAIProvider):
         return round(
             (tokens_in / 1_000_000) * pricing["input"]
             + (tokens_out / 1_000_000) * pricing["output"],
+            6,
+        )
+
+    @staticmethod
+    def estimate_prompt_cost_usd(model: str, prompt: str) -> float:
+        pricing = MODEL_PRICING_PER_1M_TOKENS.get(model, {"input": 3.00, "output": 15.00})
+        prompt_tokens = max(1, math.ceil(len(prompt) / 4))
+        expected_output_tokens = 1800
+        return round(
+            (prompt_tokens / 1_000_000) * pricing["input"]
+            + (expected_output_tokens / 1_000_000) * pricing["output"],
             6,
         )

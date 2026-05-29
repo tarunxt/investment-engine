@@ -445,6 +445,10 @@ class apiServiceClass implements IApiService {
     return this.get<RunResponse>(URLs.runs.get(id));
   }
 
+  cancelRun(id: number): Promise<RunResponse> {
+    return this.post<RunResponse>(URLs.runs.cancel(id), {});
+  }
+
   /**
    * Get paginated AI jobs with optional server-side filtering.
    */
@@ -467,8 +471,12 @@ class apiServiceClass implements IApiService {
 
   // ===== Provider Endpoints =====
 
-  getProviders({ signal }: { signal?: AbortSignal }): Promise<ProviderInfo[]> {
-    return this.get<ProviderInfo[]>(URLs.providers.list(), { signal });
+  getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]> {
+    const qs = new URLSearchParams();
+    if (prompt?.trim()) qs.set("prompt", prompt.trim());
+    const query = qs.toString();
+    const url = `${URLs.providers.list()}${query ? `?${query}` : ""}`;
+    return this.get<ProviderInfo[]>(url, { signal });
   }
 
   getApiUsageSummary(): Promise<ApiUsageSummaryResponse> {

@@ -42,7 +42,7 @@ export interface IApiService {
     getJob(id: number): Promise<JobResponse>;
 
     // Provider endpoints
-    getProviders({ signal }: { signal?: AbortSignal }): Promise<ProviderInfo[]>;
+    getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]>;
 
     // Prompt endpoints
     getPrompts(params?: { q?: string }, signal?: AbortSignal): Promise<PromptResponse[]>;

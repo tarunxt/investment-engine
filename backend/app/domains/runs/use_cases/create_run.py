@@ -32,6 +32,7 @@ class CreateRunCommand:
     export_sheet_name: str | None = None
     export_investment_amount: str | None = None
     export_title: str | None = None
+    allow_parallel: bool = False
 
 
 class CreateRunUseCase:
@@ -72,6 +73,12 @@ class CreateRunUseCase:
         lock_key = f"run:create:{cmd.user_id}:{cmd.prompt[:40]}"
         try:
             async with self._lock.acquire(lock_key, ttl=15, timeout=5):
+                if not cmd.allow_parallel:
+                    active_run = await self._run_repo.get_latest_active_for_user(int(cmd.user_id))
+                    if active_run is not None:
+                        raise ConflictException(
+                            f"Run #{active_run.id} is already in progress. Confirm to run multiple jobs."
+                        )
                 run = Run(
                     user_id=cmd.user_id,
                     prompt=cmd.prompt,

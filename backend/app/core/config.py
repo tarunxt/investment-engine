@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # API Keys
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
+    gemini_api_key_fallback: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     deepseek_api_key: Optional[str] = None
     deepseek_api_base: Optional[str] = None  # e.g., "https://api.deepseek.com/v1"

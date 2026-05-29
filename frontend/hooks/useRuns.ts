@@ -211,20 +211,12 @@ export function useRuns({ limit }: UseRunsOptions): UseRunsReturn {
   }, []);
 
   useEffect(() => {
-    const hasActive = runs.some((run) =>
-      run.run_jobs.some((runJob) => {
-        const status = runJob.job.status;
-        const exportStatus = (runJob.job.export_status ?? 'pending').toLowerCase();
-        return (
-          status === 'pending' ||
-          status === 'processing' ||
-          status === 'scheduled' ||
-          exportStatus === 'queued' ||
-          exportStatus === 'processing' ||
-          exportStatus === 'pending'
-        );
-      }),
-    );
+    const hasActive = runs.some((run) => {
+      const runStatus = (run.status || '').toLowerCase();
+      if (runStatus === 'pending' || runStatus === 'processing' || runStatus === 'scheduled') return true;
+      const exportStatus = (run.export_status || '').toLowerCase();
+      return exportStatus === 'queued' || exportStatus === 'processing' || exportStatus === 'pending' || exportStatus === 'partial';
+    });
     if (!hasActive) return;
     const timer = window.setInterval(() => {
       void loadRef.current({ silent: true });

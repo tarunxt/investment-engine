@@ -35,6 +35,11 @@ export default function ApisPage() {
           <p className="text-sm text-gray-600">
             Per-API daily usage summary ({data?.date ?? 'today'}) in {data?.timezone ?? 'Asia/Kolkata'}.
           </p>
+          {data?.usd_inr_rate ? (
+            <p className="text-xs text-gray-500">
+              USD/INR: {data.usd_inr_rate.toFixed(4)}
+            </p>
+          ) : null}
         </div>
         <button
           onClick={() => void load()}
@@ -74,7 +79,20 @@ export default function ApisPage() {
             ) : data && data.items.length > 0 ? (
               data.items.map((item) => (
                 <tr key={item.name}>
-                  <td className="px-4 py-3 font-medium text-gray-950">{item.name}</td>
+                  <td className="px-4 py-3 font-medium text-gray-950">
+                    {item.console_url ? (
+                      <a
+                        href={item.console_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                      >
+                        {item.name}
+                      </a>
+                    ) : (
+                      item.name
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-gray-700">{item.category}</td>
                   <td className="px-4 py-3">
                     <span
@@ -88,7 +106,10 @@ export default function ApisPage() {
                   <td className="px-4 py-3 text-gray-800">{item.daily_requests}</td>
                   <td className="px-4 py-3 text-gray-800">{item.daily_tokens_in}</td>
                   <td className="px-4 py-3 text-gray-800">{item.daily_tokens_out}</td>
-                  <td className="px-4 py-3 text-gray-800">${item.daily_estimated_cost.toFixed(6)}</td>
+                  <td className="px-4 py-3 text-gray-800">
+                    <div>${item.daily_estimated_cost.toFixed(6)}</div>
+                    <div className="text-xs text-gray-500">₹{item.daily_estimated_cost_inr.toFixed(4)}</div>
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{item.daily_limit_requests ?? 'Provider plan'}</td>
                   <td className="px-4 py-3 text-gray-600">{item.notes ?? '-'}</td>
                 </tr>
@@ -106,4 +127,3 @@ export default function ApisPage() {
     </div>
   );
 }
-

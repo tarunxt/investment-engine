@@ -1,11 +1,13 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Clock3, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { INDIA_TIMEZONE, useDashboard, STATUS_ICONS, STATUS_STYLES } from '../_context';
+import { apiService } from '@/services/api';
 
 const parseApiTimestamp = (value: string) =>
   /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? new Date(value) : new Date(`${value}Z`);
@@ -28,18 +30,53 @@ const EXPORT_STYLES: Record<string, string> = {
   queued: 'bg-blue-50 text-blue-700 ring-blue-200',
   completed: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   failed: 'bg-red-50 text-red-700 ring-red-200',
+  partial: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
   disabled: 'bg-gray-50 text-gray-600 ring-gray-200',
+};
+
+const PROVIDER_CONSOLE_URL: Record<string, string> = {
+  openai: 'https://platform.openai.com/usage',
+  anthropic: 'https://console.anthropic.com/settings/usage',
+  gemini: 'https://aistudio.google.com/usage',
+  deepseek: 'https://platform.deepseek.com/usage',
 };
 
 export function RecentJobsTable() {
   const { runs, runsTotal, loadingRuns, lastUpdated } = useDashboard();
   const router = useRouter();
+  const [usdInrRate, setUsdInrRate] = useState(83.5);
+
+  useEffect(() => {
+    let mounted = true;
+    void apiService
+      .getApiUsageSummary()
+      .then((res) => {
+        if (mounted && Number(res.usd_inr_rate) > 0) {
+          setUsdInrRate(Number(res.usd_inr_rate));
+        }
+      })
+      .catch(() => {
+        // keep fallback
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const copyError = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
       // ignore
+    }
+  };
+
+  const cancelRun = async (runId: number) => {
+    try {
+      await apiService.cancelRun(runId);
+    } catch {
+      // ignore here, websocket/poll will surface current state
     }
   };
 
@@ -95,6 +132,24 @@ export function RecentJobsTable() {
                   a.job.model.localeCompare(b.job.model)
                 );
                 const exportStatus = (run.export_status ?? (run.auto_export_enabled ? 'pending' : 'disabled')).toLowerCase();
+                const totalCost = runJobs.reduce((sum, rj) => sum + Number(rj.job.estimated_cost || 0), 0);
+                const modelExportStates = runJobs.map((rj) => {
+                  const j = rj.job;
+                  const explicit = (j.export_status ?? '').toLowerCase();
+                  if (explicit) return explicit;
+                  if (!run.auto_export_enabled) return 'disabled';
+                  if (j.status === 'failed') return 'failed';
+                  if (j.status === 'completed') return 'processing';
+                  return 'pending';
+                });
+                const doneExports = modelExportStates.filter((s) => s === 'completed').length;
+                const eligibleExports = modelExportStates.filter((s) => s !== 'disabled').length;
+                const failedExports = modelExportStates.filter((s) => s === 'failed').length;
+                const isPartiallyExported = failedExports > 0 && doneExports > 0;
+                const derivedOverallExportStatus = isPartiallyExported ? 'partial' : exportStatus;
+                const derivedOverallExportLabel = isPartiallyExported
+                  ? `Partially exported (${doneExports}/${eligibleExports})`
+                  : exportStatus;
                 const getModelExportStatus = (jobStatus: string, modelExportStatus?: string | null) => {
                   const explicit = (modelExportStatus ?? '').toLowerCase();
                   if (explicit) return explicit;
@@ -121,73 +176,118 @@ export function RecentJobsTable() {
                     <td className="px-5 py-4">
                       <div className="font-medium text-gray-950">{formatTimestamp(run.created_at)}</div>
                       <div className="mt-1 text-xs text-gray-500">Stage S{run.current_stage}</div>
+                      {['scheduled', 'pending', 'processing'].includes((run.status || '').toLowerCase()) ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void cancelRun(run.id);
+                          }}
+                          className="mt-2 text-xs text-red-600 hover:text-red-800 hover:underline"
+                        >
+                          Kill job
+                        </button>
+                      ) : null}
                     </td>
                     <td className="px-5 py-4">
                       <div className="space-y-2">
                         {runJobs.length > 0 ? (
-                          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                            {runJobs.map((runJob) => {
-                              const job = runJob.job;
-                              const JobStatusIcon = STATUS_ICONS[job.status] ?? Clock3;
-                              return (
-                                <div
-                                  key={runJob.id}
-                                  className="min-w-0 rounded-md border border-gray-200 bg-white px-2.5 py-2"
-                                >
-                                  <div className="truncate text-xs font-medium capitalize text-gray-900">
-                                    {formatModelName(job.provider, job.model)}
-                                  </div>
-                                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                                    <span
-                                      className={cn(
-                                        'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold capitalize ring-1',
-                                        STATUS_STYLES[job.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
-                                      )}
-                                    >
-                                      <JobStatusIcon
-                                        className={cn(
-                                          'size-3',
-                                          job.status === 'processing' && 'animate-spin',
+                          <div className="overflow-x-auto rounded-md border border-gray-200">
+                            <table className="min-w-full text-xs">
+                              <thead className="bg-gray-50 text-left uppercase tracking-wide text-gray-500">
+                                <tr>
+                                  <th className="px-2 py-2 font-semibold">LLM</th>
+                                  <th className="px-2 py-2 font-semibold">Status</th>
+                                  <th className="px-2 py-2 font-semibold">Run At</th>
+                                  <th className="px-2 py-2 font-semibold">Sheets</th>
+                                  <th className="px-2 py-2 font-semibold">Cost (USD / INR)</th>
+                                  <th className="px-2 py-2 font-semibold">Error</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 bg-white">
+                                {runJobs.map((runJob) => {
+                                  const job = runJob.job;
+                                  const JobStatusIcon = STATUS_ICONS[job.status] ?? Clock3;
+                                  const modelExportStatus = getModelExportStatus(
+                                    job.status,
+                                    job.export_status,
+                                  );
+                                  return (
+                                    <tr key={runJob.id}>
+                                      <td className="px-2 py-2 text-gray-900">
+                                        {formatModelName(job.provider, job.model)}
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <span
+                                          className={cn(
+                                            'inline-flex items-center gap-1.5 px-2 py-0.5 font-semibold capitalize ring-1',
+                                            STATUS_STYLES[job.status] ??
+                                              'bg-gray-50 text-gray-700 ring-gray-200',
+                                          )}
+                                        >
+                                          <JobStatusIcon
+                                            className={cn(
+                                              'size-3',
+                                              job.status === 'processing' && 'animate-spin',
+                                            )}
+                                          />
+                                          {job.status}
+                                        </span>
+                                      </td>
+                                      <td className="px-2 py-2 text-gray-500">
+                                        {formatTimestamp(job.created_at)}
+                                      </td>
+                                      <td className="px-2 py-2">
+                                        <span
+                                          className={cn(
+                                            'inline-flex items-center gap-1 px-1.5 py-0.5 font-semibold capitalize ring-1',
+                                            EXPORT_STYLES[modelExportStatus] ??
+                                              'bg-gray-50 text-gray-700 ring-gray-200',
+                                          )}
+                                        >
+                                          {modelExportStatus}
+                                        </span>
+                                      </td>
+                                      <td className="px-2 py-2 text-gray-700">
+                                        ${Number(job.estimated_cost || 0).toFixed(4)} / ₹
+                                        {(Number(job.estimated_cost || 0) * usdInrRate).toFixed(2)}
+                                      </td>
+                                      <td className="max-w-[340px] px-2 py-2 text-red-700">
+                                        {job.status === 'failed' && job.error_message ? (
+                                          <div>
+                                            <div className="line-clamp-1" title={job.error_message}>
+                                              Provider error: {job.error_message}
+                                            </div>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                void copyError(job.error_message || '');
+                                              }}
+                                              className="mt-0.5 text-indigo-600 hover:text-indigo-800 hover:underline"
+                                            >
+                                              Copy error
+                                            </button>
+                                            <div>
+                                              <Link
+                                                href={PROVIDER_CONSOLE_URL[(job.provider || '').toLowerCase()] || '#'}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="mt-0.5 inline-block text-indigo-600 hover:text-indigo-800 hover:underline"
+                                              >
+                                                Open provider console
+                                              </Link>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <span className="text-gray-400">-</span>
                                         )}
-                                      />
-                                      {job.status}
-                                    </span>
-                                    <span className="text-[11px] text-gray-400">
-                                      {formatTimestamp(job.created_at)}
-                                    </span>
-                                  </div>
-                                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
-                                    <span className="text-gray-500">Sheets:</span>
-                                    <span
-                                      className={cn(
-                                        'inline-flex items-center gap-1 px-1.5 py-0.5 font-semibold capitalize ring-1',
-                                        EXPORT_STYLES[getModelExportStatus(job.status, job.export_status)] ??
-                                          'bg-gray-50 text-gray-700 ring-gray-200',
-                                      )}
-                                    >
-                                      {getModelExportStatus(job.status, job.export_status)}
-                                    </span>
-                                  </div>
-                                  {job.status === 'failed' && job.error_message ? (
-                                    <div className="mt-1.5 text-[11px] text-red-700">
-                                      <div className="line-clamp-1" title={job.error_message}>
-                                        Provider error: {job.error_message}
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          void copyError(job.error_message || '');
-                                        }}
-                                        className="mt-0.5 text-indigo-600 hover:text-indigo-800 hover:underline"
-                                      >
-                                        Copy error
-                                      </button>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
                         ) : (
                           <span
@@ -211,10 +311,13 @@ export function RecentJobsTable() {
                           <span
                             className={cn(
                               'inline-flex items-center gap-1.5 px-2 py-0.5 font-semibold capitalize ring-1',
-                              EXPORT_STYLES[exportStatus] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
+                              EXPORT_STYLES[derivedOverallExportStatus] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
                             )}
                           >
-                            {exportStatus}
+                            {derivedOverallExportLabel}
+                          </span>
+                          <span className="text-gray-500">
+                            Total cost: ${totalCost.toFixed(4)} / ₹{(totalCost * usdInrRate).toFixed(2)}
                           </span>
                           {run.exported_sheet_url ? (
                             <Link

@@ -1,4 +1,5 @@
 import json
+import re
 from time import monotonic
 
 from celery.exceptions import MaxRetriesExceededError
@@ -14,6 +15,46 @@ from app.domains.jobs.models import Job
 from app.shared.types import JobStatus
 
 logger = get_logger("app.domains.jobs.tasks")
+
+
+def _count_markdown_table_data_rows(content: str) -> int:
+    """Count probable markdown table data rows (excluding header + separator)."""
+    lines = [line.strip() for line in (content or "").splitlines() if line.strip()]
+    pipe_lines = [line for line in lines if line.count("|") >= 2]
+    if not pipe_lines:
+        return 0
+
+    def _is_separator(line: str) -> bool:
+        normalized = line.replace("|", "").replace(":", "").replace("-", "").replace(" ", "")
+        return normalized == ""
+
+    data_rows = 0
+    for idx, line in enumerate(pipe_lines):
+        if idx == 0:
+            continue  # header row
+        if _is_separator(line):
+            continue
+        # Skip repeated header-like rows
+        lower = line.lower()
+        if "stock symbol" in lower and "technical setup" in lower:
+            continue
+        data_rows += 1
+    return data_rows
+
+
+def _requires_strict_table_output(prompt: str) -> bool:
+    text = (prompt or "").lower()
+    return (
+        "return only one markdown table" in text
+        or "table columns:" in text
+        or "stock name" in text and "units to buy" in text
+    )
+
+
+def _has_excessive_placeholder_noise(content: str) -> bool:
+    text = content or ""
+    dash_runs = re.findall(r"-{40,}", text)
+    return len(dash_runs) >= 3
 
 
 def _publish_job_update(job: Job) -> None:
@@ -276,7 +317,7 @@ def _refresh_run_status(db, job_id: int) -> None:
                 and updated_job.status == JobStatus.COMPLETED
                 and auto_export_enabled
                 and export_spreadsheet_url
-                and updated_job.export_status not in {"queued", "processing", "completed"}
+                and (updated_job.export_status or "").lower() not in {"queued", "processing", "completed", "failed"}
             ):
                 try:
                     from app.domains.google_sheets.tasks import export_job_to_sheets_task
@@ -336,29 +377,36 @@ def _refresh_run_status(db, job_id: int) -> None:
                     stage_pairs = run_repo.get_stage_run_jobs(rj.run_id, rj.stage)
                     stage_jobs_after = [job for _, job in stage_pairs]
                     terminal = {JobStatus.COMPLETED, JobStatus.FAILED}
-                    terminal_jobs = [j for j in stage_jobs_after if j.status in terminal]
-                    exports = [str((j.export_status or "pending")).lower() for j in terminal_jobs]
-                    has_active_jobs = any(j.status not in terminal for j in stage_jobs_after)
+                    eligible_jobs = [j for j in stage_jobs_after if j.status in terminal]
+                    exports = [str((j.export_status or "pending")).lower() for j in eligible_jobs]
+                    completed_count = sum(1 for s in exports if s == "completed")
+                    failed_count = sum(1 for s in exports if s == "failed")
+                    inflight_count = sum(1 for s in exports if s in {"pending", "queued", "processing", ""})
+                    total_count = len(exports)
 
                     export_state = "pending"
                     export_error = None
-                    if has_active_jobs:
-                        if any(s == "failed" for s in exports):
-                            export_state = "processing"
-                        elif any(s in {"processing", "queued", "pending"} for s in exports):
-                            export_state = "processing"
-                        elif exports:
-                            export_state = "processing"
-                    elif exports and any(s == "failed" for s in exports):
-                        export_state = "failed"
-                        failed = next((j for j in terminal_jobs if (j.export_status or "").lower() == "failed"), None)
-                        export_error = failed.export_error if failed else None
-                    elif exports and all(s == "completed" for s in exports):
+                    if total_count == 0:
+                        export_state = "pending"
+                    elif completed_count == total_count:
                         export_state = "completed"
-                    elif exports and any(s in {"processing", "queued"} for s in exports):
+                    elif failed_count == total_count:
+                        export_state = "failed"
+                        failed = next(
+                            (j for j in eligible_jobs if (j.export_status or "").lower() == "failed"),
+                            None,
+                        )
+                        export_error = failed.export_error if failed else None
+                    elif completed_count > 0 and (failed_count > 0 or inflight_count > 0):
+                        export_state = "partial"
+                        export_error = f"{completed_count}/{total_count} exported"
+                    else:
                         export_state = "processing"
+                        if failed_count > 0:
+                            export_error = f"{completed_count}/{total_count} exported"
 
                     prev_export_status = (run_after.export_status or "").lower()
+                    prev_export_error = run_after.export_error
                     run_repo.update_export_state(
                         run_after,
                         export_status=export_state,
@@ -366,7 +414,7 @@ def _refresh_run_status(db, job_id: int) -> None:
                         exported_at=run_after.exported_at,
                         exported_sheet_url=run_after.exported_sheet_url,
                     )
-                    if prev_export_status != export_state:
+                    if prev_export_status != export_state or prev_export_error != export_error:
                         _publish_run_update(
                             run_after.id,
                             run_after.user_id,
@@ -414,6 +462,9 @@ def execute_ai_job(self, job_id: int) -> None:
         if not job:
             logger.warning("Job %s not found", job_id)
             return
+        if job.status == JobStatus.FAILED and (job.error_message or "").lower().find("cancelled") >= 0:
+            logger.info("Skipping cancelled job %s", job_id)
+            return
 
         WorkerLogHelper.log_task_start("execute_ai_job", "n/a", job_id)
         repo.update_status(job, JobStatus.PROCESSING)
@@ -427,6 +478,20 @@ def execute_ai_job(self, job_id: int) -> None:
             raise RuntimeError(
                 f"{job.provider}/{job.model} returned empty output after generation"
             )
+        if _requires_strict_table_output(job.prompt):
+            data_rows = _count_markdown_table_data_rows(content)
+            if data_rows < 1:
+                raise RuntimeError(
+                    f"{job.provider}/{job.model} returned malformed table output (no data rows)"
+                )
+            if _has_excessive_placeholder_noise(content):
+                raise RuntimeError(
+                    f"{job.provider}/{job.model} returned malformed table output (placeholder noise)"
+                )
+        latest = repo.get(job_id)
+        if latest and latest.status == JobStatus.FAILED and (latest.error_message or "").lower().find("cancelled") >= 0:
+            logger.info("Skipping completion update for cancelled job %s", job_id)
+            return
 
         repo.update_status(
             job,

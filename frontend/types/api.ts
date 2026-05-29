@@ -120,6 +120,8 @@ export interface ProviderInfo {
   name: string;
   models: string[];
   configured: boolean;
+  model_estimated_cost_usd?: Record<string, number>;
+  model_estimated_cost_inr?: Record<string, number>;
 }
 
 export interface ApiUsageItem {
@@ -130,13 +132,17 @@ export interface ApiUsageItem {
   daily_tokens_in: number;
   daily_tokens_out: number;
   daily_estimated_cost: number;
+  daily_estimated_cost_inr: number;
   daily_limit_requests: number | null;
   notes: string | null;
+  console_url: string | null;
 }
 
 export interface ApiUsageSummaryResponse {
   timezone: string;
   date: string;
+  usd_inr_rate?: number;
+  fx_source?: string;
   items: ApiUsageItem[];
 }
 
@@ -191,6 +197,7 @@ export interface RunCreate {
   export_sheet_name?: string | null;
   export_investment_amount?: string | null;
   export_title?: string | null;
+  allow_parallel?: boolean;
 }
 
 export interface RunJobResponse {

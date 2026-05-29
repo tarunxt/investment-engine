@@ -141,7 +141,7 @@ class GoogleSheetsService:
         refresh_token: str | None,
         spreadsheet_id: str,
         headers: list[str],
-        rows: list[list[str]],
+        rows: list[list[Any]],
         sheet_name: str = "Sheet1",
     ) -> tuple[int, int]:
         """Overwrite data in a Google Sheet from A1."""
@@ -164,7 +164,7 @@ class GoogleSheetsService:
         refresh_token: str | None,
         spreadsheet_id: str,
         headers: list[str],
-        rows: list[list[str]],
+        rows: list[list[Any]],
         sheet_name: str = "Sheet1",
         section_title: str | None = None,
     ) -> tuple[int, int]:
@@ -186,9 +186,12 @@ class GoogleSheetsService:
 
         header_norm = _norm_row(headers)
         has_rows = len(existing) > 0
-        header_exists = has_rows and _norm_row(existing[0][: len(headers)]) == header_norm
+        top_row_is_header = has_rows and _norm_row(existing[0][: len(headers)]) == header_norm
+        any_header_row = any(
+            _norm_row((row or [])[: len(headers)]) == header_norm for row in existing
+        )
 
-        # Guarantee header row exists once at the top of each tab.
+        # Guarantee header row exists once, and only once, at row 1 for new/empty sheets.
         if not has_rows:
             service.spreadsheets().values().update(
                 spreadsheetId=spreadsheet_id,
@@ -197,8 +200,9 @@ class GoogleSheetsService:
                 body={"values": [headers]},
             ).execute()
             existing = [headers]
-            header_exists = True
-        elif not header_exists:
+            top_row_is_header = True
+            any_header_row = True
+        elif not top_row_is_header and not any_header_row:
             service.spreadsheets().batchUpdate(
                 spreadsheetId=spreadsheet_id,
                 body={
@@ -224,6 +228,7 @@ class GoogleSheetsService:
                 body={"values": [headers]},
             ).execute()
             existing = [headers] + existing
+            top_row_is_header = True
 
         values: list[list[str]] = []
         if existing:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import math
 
 from openai import OpenAI
 
@@ -16,6 +17,16 @@ DEEPSEEK_PRICING_PER_1M_TOKENS = {
     "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
     "deepseek-v4-pro": {"input": 0.435, "output": 0.87},
 }
+
+SUPPORTED_MODELS = [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-reasoner",
+    "deepseek-chat",
+    "deepseek-coder",
+    "deepseek-r1",
+    "deepseek-v3",
+]
 
 current_date = datetime.datetime.now().strftime("%Y-%m-%d")
 
@@ -55,7 +66,7 @@ def _looks_like_valid_markdown_table(text: str) -> bool:
 
 class DeepSeekProvider(BaseAIProvider):
     provider_name = "deepseek"
-    supported_models = list(DEEPSEEK_PRICING_PER_1M_TOKENS.keys())
+    supported_models = SUPPORTED_MODELS
 
     @classmethod
     def is_configured(cls) -> bool:
@@ -219,5 +230,16 @@ class DeepSeekProvider(BaseAIProvider):
         return round(
             (tokens_in / 1_000_000) * pricing["input"]
             + (tokens_out / 1_000_000) * pricing["output"],
+            6,
+        )
+
+    @staticmethod
+    def estimate_prompt_cost_usd(model: str, prompt: str) -> float:
+        pricing = DEEPSEEK_PRICING_PER_1M_TOKENS.get(model, {"input": 0.14, "output": 0.28})
+        prompt_tokens = max(1, math.ceil(len(prompt) / 4))
+        expected_output_tokens = 1800
+        return round(
+            (prompt_tokens / 1_000_000) * pricing["input"]
+            + (expected_output_tokens / 1_000_000) * pricing["output"],
             6,
         )

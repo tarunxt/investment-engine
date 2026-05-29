@@ -1,11 +1,14 @@
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.jobs.models import Job
+from app.domains.runs.models import RunJob
 from app.domains.runs.repository import PostgresRunRepository
 from app.domains.runs.schemas import RunCreate, RunResponse
 from app.domains.runs.use_cases.create_run import (
@@ -17,7 +20,7 @@ from app.infrastructure.database.session import get_async_db
 from app.infrastructure.locks.redis_lock import RedisLock
 from app.shared.exceptions import AppException
 from app.shared.pagination import PagedQuery
-from app.shared.types import UserId
+from app.shared.types import JobStatus, UserId
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -56,6 +59,7 @@ async def create_run(
                 export_sheet_name=body.export_sheet_name,
                 export_investment_amount=body.export_investment_amount,
                 export_title=body.export_title,
+                allow_parallel=body.allow_parallel,
             )
         )
     except AppException as exc:
@@ -86,6 +90,49 @@ async def get_run(
     current_user: User = Depends(get_current_user),
 ):
     repo = PostgresRunRepository(db)
+    run = await repo.get(run_id)
+    if not run:
+        raise HTTPException(404, detail="Run not found")
+    return run
+
+
+@router.post("/{run_id}/cancel", response_model=RunResponse)
+async def cancel_run(
+    run_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    repo = PostgresRunRepository(db)
+    run = await repo.get(run_id)
+    if not run:
+        raise HTTPException(404, detail="Run not found")
+    if run.user_id != current_user.id:
+        raise HTTPException(403, detail="Not allowed")
+
+    if run.status in {JobStatus.COMPLETED, JobStatus.FAILED}:
+        return run
+
+    run.status = JobStatus.FAILED
+    run.export_status = "failed"
+    run.export_error = "Cancelled by user"
+
+    run_job_rows = await db.execute(
+        select(RunJob).where(RunJob.run_id == run_id)
+    )
+    run_jobs = run_job_rows.scalars().all()
+    if run_jobs:
+        job_ids = [rj.job_id for rj in run_jobs]
+        jobs_rows = await db.execute(select(Job).where(Job.id.in_(job_ids)))
+        jobs = jobs_rows.scalars().all()
+        for job in jobs:
+            if job.status in {JobStatus.SCHEDULED, JobStatus.PENDING, JobStatus.PROCESSING}:
+                job.status = JobStatus.FAILED
+                job.error_message = "Cancelled by user"
+                if run.auto_export_enabled:
+                    job.export_status = "failed"
+                    job.export_error = "Cancelled by user"
+
+    await db.commit()
     run = await repo.get(run_id)
     if not run:
         raise HTTPException(404, detail="Run not found")

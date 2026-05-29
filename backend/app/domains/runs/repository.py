@@ -47,6 +47,18 @@ class PostgresRunRepository:
             limit=query.limit,
         )
 
+    async def get_latest_active_for_user(self, user_id: int) -> Run | None:
+        result = await self._session.execute(
+            select(Run)
+            .where(
+                Run.user_id == user_id,
+                Run.status.in_([JobStatus.SCHEDULED, JobStatus.PENDING, JobStatus.PROCESSING]),
+            )
+            .order_by(Run.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
 
 class SyncRunRepository:
     """For Celery workers — sync session only."""
