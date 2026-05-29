@@ -105,7 +105,22 @@ async def get_status(
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=timezone.utc)
         if expiry <= datetime.now(tz=timezone.utc):
-            return GoogleSheetsStatusResponse(connected=False)
+            try:
+                refresh_token = (
+                    decrypt_token(cred.refresh_token_enc)
+                    if cred.refresh_token_enc
+                    else None
+                )
+                if not refresh_token:
+                    return GoogleSheetsStatusResponse(connected=False)
+                refreshed = _svc.refresh_access_token(refresh_token)
+                cred.access_token_enc = encrypt_token(refreshed["access_token"])
+                cred.token_expiry = refreshed["token_expiry"]
+                await db.commit()
+                await db.refresh(cred)
+            except Exception:
+                logger.exception("Google Sheets token refresh failed for user %d", current_user.id)
+                return GoogleSheetsStatusResponse(connected=False)
 
     return GoogleSheetsStatusResponse(
         connected=True, token_expiry=cred.token_expiry

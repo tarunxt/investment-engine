@@ -40,7 +40,6 @@ export function TemplateField() {
             <SelectValue placeholder="Load a saved template…" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">None</SelectItem>
             {promptTemplates.map((tpl) => (
               <SelectItem key={tpl.id} value={String(tpl.id)}>
                 {tpl.name}

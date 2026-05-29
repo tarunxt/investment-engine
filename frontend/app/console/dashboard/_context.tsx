@@ -17,9 +17,10 @@ import { useRuns } from '@/hooks/useRuns';
 
 export const DASHBOARD_RUN_LIMIT = 50;
 export const TEMPLATE_DEBOUNCE_MS = 300;
-export const PROMPT_MAX_CHARS = 3000;
-export const PROMPT_WARN_CHARS = 2600;
+export const PROMPT_MAX_CHARS = 10000;
+export const PROMPT_WARN_CHARS = 9000;
 export const INDIA_TIMEZONE = 'Asia/Kolkata';
+export const DEFAULT_TEMPLATE_NAME = 'India Swing-Trade Research';
 export const DEFAULT_EXPORT_SPREADSHEET_URL =
   'https://docs.google.com/spreadsheets/d/1aVPXUl5h8aSZcmOwKHvnuJqyCHqanmnrcmFOijcWYp4/edit?gid=0#gid=0';
 
@@ -165,7 +166,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
 
     if (templatesRes.status === 'fulfilled') {
-      setPromptTemplates(templatesRes.value);
+      const templates = templatesRes.value;
+      setPromptTemplates(templates);
+      const defaultTemplate = templates.find((tpl) => tpl.name === DEFAULT_TEMPLATE_NAME);
+      if (defaultTemplate) {
+        setSelectedTemplateId(String(defaultTemplate.id));
+        setPrompt(defaultTemplate.body);
+      }
     }
 
     if (sheetsStatusRes.status === 'fulfilled') {
@@ -207,11 +214,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setPrompt(e.target.value);
-    setSelectedTemplateId('');
   }, []);
 
   const handleTemplateChange = useCallback(
     (id: string) => {
+      if (id === 'none') return;
       setSelectedTemplateId(id);
       const tpl = promptTemplates.find((p) => String(p.id) === id);
       if (tpl) setPrompt(tpl.body);
@@ -295,9 +302,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           export_investment_amount: autoExportEnabled ? exportInvestmentAmount || undefined : undefined,
           export_title: autoExportEnabled ? exportTitle || undefined : undefined,
         });
-        setPrompt('');
         setScheduledAt('');
-        setSelectedTemplateId('');
         promptRef.current?.focus();
         // Prepend the new run as a single entry — one row per job submission
         setRuns((current) => [run, ...current].slice(0, DASHBOARD_RUN_LIMIT));
@@ -326,6 +331,31 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const charOverLimit = charCount > PROMPT_MAX_CHARS;
   const charNearLimit = charCount > PROMPT_WARN_CHARS && !charOverLimit;
   const totalAvailableTargets = providers.reduce((n, p) => n + p.models.length, 0);
+
+  useEffect(() => {
+    if (selectedTemplateId) return;
+    const defaultTemplate = promptTemplates.find((tpl) => tpl.name === DEFAULT_TEMPLATE_NAME);
+    if (!defaultTemplate) return;
+    setSelectedTemplateId(String(defaultTemplate.id));
+    if (!prompt.trim()) {
+      setPrompt(defaultTemplate.body);
+    }
+  }, [selectedTemplateId, promptTemplates, prompt]);
+
+  useEffect(() => {
+    if (!submitError) return;
+    if (submitError === 'Prompt is required.' && prompt.trim()) {
+      setSubmitError(null);
+      return;
+    }
+    if (submitError.includes('Select at least one model') && selectedTargets.size > 0) {
+      setSubmitError(null);
+      return;
+    }
+    if (submitError.includes('Connect Google Sheets first') && googleSheetsConnected) {
+      setSubmitError(null);
+    }
+  }, [submitError, prompt, selectedTargets, googleSheetsConnected]);
 
   return (
     <DashboardContext.Provider

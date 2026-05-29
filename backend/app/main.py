@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.core.seed import seed_system_prompts
 from app.domains.ai_providers.router import router as providers_router
+from app.domains.api_usage.router import router as api_usage_router
 from app.domains.auth.router import router as auth_router
 from app.domains.google_sheets.router import router as google_sheets_router
 from app.domains.health.router import router as health_router
@@ -113,6 +114,7 @@ app.include_router(jobs_router)
 app.include_router(jobs_ws_router)
 app.include_router(prompts_router)
 app.include_router(providers_router)
+app.include_router(api_usage_router)
 app.include_router(runs_router)
 app.include_router(runs_ws_router)
 app.include_router(zerodha_router)

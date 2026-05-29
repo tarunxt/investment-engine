@@ -35,6 +35,14 @@ export function RecentJobsTable() {
   const { runs, runsTotal, loadingRuns, lastUpdated } = useDashboard();
   const router = useRouter();
 
+  const copyError = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <section className="min-w-0 border border-gray-200 bg-white shadow-sm">
       <div className="flex flex-col gap-1 border-b border-gray-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -87,6 +95,17 @@ export function RecentJobsTable() {
                   a.job.model.localeCompare(b.job.model)
                 );
                 const exportStatus = (run.export_status ?? (run.auto_export_enabled ? 'pending' : 'disabled')).toLowerCase();
+                const getModelExportStatus = (jobStatus: string, modelExportStatus?: string | null) => {
+                  const explicit = (modelExportStatus ?? '').toLowerCase();
+                  if (explicit) return explicit;
+                  if (!run.auto_export_enabled) return 'disabled';
+                  if (jobStatus === 'failed') return 'failed';
+                  if (jobStatus === 'completed') return 'processing';
+                  if (jobStatus === 'pending' || jobStatus === 'processing' || jobStatus === 'scheduled') return 'pending';
+                  if (exportStatus === 'failed') return 'failed';
+                  if (exportStatus === 'completed') return 'completed';
+                  return 'pending';
+                };
                 return (
                   <tr
                     key={run.id}
@@ -137,6 +156,35 @@ export function RecentJobsTable() {
                                       {formatTimestamp(job.created_at)}
                                     </span>
                                   </div>
+                                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+                                    <span className="text-gray-500">Sheets:</span>
+                                    <span
+                                      className={cn(
+                                        'inline-flex items-center gap-1 px-1.5 py-0.5 font-semibold capitalize ring-1',
+                                        EXPORT_STYLES[getModelExportStatus(job.status, job.export_status)] ??
+                                          'bg-gray-50 text-gray-700 ring-gray-200',
+                                      )}
+                                    >
+                                      {getModelExportStatus(job.status, job.export_status)}
+                                    </span>
+                                  </div>
+                                  {job.status === 'failed' && job.error_message ? (
+                                    <div className="mt-1.5 text-[11px] text-red-700">
+                                      <div className="line-clamp-1" title={job.error_message}>
+                                        Provider error: {job.error_message}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          void copyError(job.error_message || '');
+                                        }}
+                                        className="mt-0.5 text-indigo-600 hover:text-indigo-800 hover:underline"
+                                      >
+                                        Copy error
+                                      </button>
+                                    </div>
+                                  ) : null}
                                 </div>
                               );
                             })}

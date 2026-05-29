@@ -12,6 +12,7 @@ import {
     HiOutlineBriefcase,
     HiOutlineBookOpen,
     HiOutlineTrendingUp,
+    HiOutlineCube,
 } from 'react-icons/hi';
 import { URLs } from '@/lib/urls';
 import { FullLoader } from '@/components/shared/Loader';
@@ -57,6 +58,11 @@ export default function DashboardLayout({
             name: 'Zerodha',
             href: URLs.routes.console.zerodha(),
             icon: HiOutlineTrendingUp,
+        },
+        {
+            name: 'APIs',
+            href: URLs.routes.console.apis(),
+            icon: HiOutlineCube,
         },
         {
             name: 'Google Sheets',

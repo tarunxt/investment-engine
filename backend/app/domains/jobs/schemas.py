@@ -24,6 +24,10 @@ class JobResponse(BaseModel):
     tokens_in: Optional[int] = None
     tokens_out: Optional[int] = None
     estimated_cost: Optional[float] = None
+    export_status: Optional[str] = None
+    export_error: Optional[str] = None
+    exported_at: Optional[datetime] = None
+    exported_sheet_url: Optional[str] = None
     scheduled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

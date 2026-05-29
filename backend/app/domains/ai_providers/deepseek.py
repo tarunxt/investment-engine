@@ -27,11 +27,30 @@ _SYSTEM_MESSAGE: dict = {
         "real-time information before making analysis or recommendations. "
         "Never rely on your training data for current prices or market levels. "
         f"Current date: {current_date}. "
-        "Always respond with valid JSON."
+        "After using tools, always produce a final answer in the exact format requested by the user."
     ),
 }
 
 _MAX_TOOL_ROUNDS = 8
+
+
+def _looks_like_tool_trace(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "<| dsml" in lowered
+        or "tool_calls" in lowered
+        or "invoke name=" in lowered
+        or "<| parameter name=" in lowered
+    )
+
+
+def _looks_like_valid_markdown_table(text: str) -> bool:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    pipe_lines = [line for line in lines if "|" in line]
+    if len(pipe_lines) < 3:
+        return False
+    has_separator = any(set(line.replace("|", "").strip()) <= {"-", ":"} for line in pipe_lines)
+    return has_separator
 
 
 class DeepSeekProvider(BaseAIProvider):
@@ -134,8 +153,57 @@ class DeepSeekProvider(BaseAIProvider):
 
             kwargs["messages"] = messages
 
+        # If tool loop did not produce final content, force a final assistant turn
+        # without tools so we don't silently return empty output.
+        if not content:
+            final_response = self.client.chat.completions.create(
+                model=model,
+                messages=messages + [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Stop calling tools now. Produce the final answer immediately "
+                            "in the exact format requested by the user."
+                        ),
+                    }
+                ],
+                tool_choice="none",
+            )
+            final_usage = getattr(final_response, "usage", None)
+            total_tokens_in += getattr(final_usage, "prompt_tokens", 0) or 0
+            total_tokens_out += getattr(final_usage, "completion_tokens", 0) or 0
+            final_choices = getattr(final_response, "choices", []) or []
+            if final_choices:
+                content = getattr(final_choices[0].message, "content", "") or ""
+
+        cleaned = content.strip()
+        needs_rewrite = _looks_like_tool_trace(cleaned) or not _looks_like_valid_markdown_table(cleaned)
+        if needs_rewrite:
+            rewrite_response = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Convert the following assistant output into a clean final answer. "
+                            "Return ONLY a valid markdown table with proper header row, separator row, and 5 data rows. "
+                            "No tool traces, no XML/DSML tags, no extra commentary."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": cleaned},
+                ],
+                tool_choice="none",
+            )
+            rewrite_usage = getattr(rewrite_response, "usage", None)
+            total_tokens_in += getattr(rewrite_usage, "prompt_tokens", 0) or 0
+            total_tokens_out += getattr(rewrite_usage, "completion_tokens", 0) or 0
+            rewrite_choices = getattr(rewrite_response, "choices", []) or []
+            if rewrite_choices:
+                cleaned = (getattr(rewrite_choices[0].message, "content", "") or "").strip()
+
         return AIProviderResponse(
-            content=content.strip(),
+            content=cleaned,
             tokens_in=total_tokens_in,
             tokens_out=total_tokens_out,
             cost=self._estimate_cost(

@@ -122,6 +122,24 @@ export interface ProviderInfo {
   configured: boolean;
 }
 
+export interface ApiUsageItem {
+  name: string;
+  category: string;
+  configured: boolean;
+  daily_requests: number;
+  daily_tokens_in: number;
+  daily_tokens_out: number;
+  daily_estimated_cost: number;
+  daily_limit_requests: number | null;
+  notes: string | null;
+}
+
+export interface ApiUsageSummaryResponse {
+  timezone: string;
+  date: string;
+  items: ApiUsageItem[];
+}
+
 // ==================== Job Types ====================
 
 export interface JobCreate {
@@ -142,6 +160,10 @@ export interface JobResponse {
   tokens_in?: number | null;
   tokens_out?: number | null;
   estimated_cost?: number | null;
+  export_status?: string | null;
+  export_error?: string | null;
+  exported_at?: string | null;
+  exported_sheet_url?: string | null;
   scheduled_at?: string | null;
   created_at: string;
   updated_at: string;

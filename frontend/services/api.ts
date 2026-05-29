@@ -3,6 +3,7 @@ import { sessionStorage } from "@/services/session";
 import { syncTokenToCookie } from "@/services/cookies";
 import { signOut } from "next-auth/react";
 import {
+  ApiUsageSummaryResponse,
   GoogleSheetsAuthUrlResponse,
   GoogleSheetsExportJobRequest,
   GoogleSheetsExportResponse,
@@ -468,6 +469,10 @@ class apiServiceClass implements IApiService {
 
   getProviders({ signal }: { signal?: AbortSignal }): Promise<ProviderInfo[]> {
     return this.get<ProviderInfo[]>(URLs.providers.list(), { signal });
+  }
+
+  getApiUsageSummary(): Promise<ApiUsageSummaryResponse> {
+    return this.get<ApiUsageSummaryResponse>(URLs.apiUsage.summary());
   }
 
   // ===== Prompt Endpoints =====

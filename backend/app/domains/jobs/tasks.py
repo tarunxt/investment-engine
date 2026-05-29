@@ -24,12 +24,18 @@ def _publish_job_update(job: Job) -> None:
         payload = json.dumps({
             "type": "job.updated",
             "job_id": job.id,
+            "provider": job.provider,
+            "model": job.model,
             "status": status_val,
             "response": job.response,
             "error_message": job.error_message,
             "tokens_in": job.tokens_in,
             "tokens_out": job.tokens_out,
             "estimated_cost": job.estimated_cost,
+            "export_status": job.export_status,
+            "export_error": job.export_error,
+            "exported_at": job.exported_at.isoformat() if job.exported_at else None,
+            "exported_sheet_url": job.exported_sheet_url,
             "updated_at": job.updated_at.isoformat() if job.updated_at else None,
         })
         
@@ -129,7 +135,16 @@ def _redis_publish(channel: str, payload: dict) -> None:
                 pass
 
 
-def _publish_run_update(run_id: int, user_id: int | None, status: JobStatus, current_stage: int) -> None:
+def _publish_run_update(
+    run_id: int,
+    user_id: int | None,
+    status: JobStatus,
+    current_stage: int,
+    export_status: str | None = None,
+    export_error: str | None = None,
+    exported_at: str | None = None,
+    exported_sheet_url: str | None = None,
+) -> None:
     """Broadcast a run status change to the user-level and per-run Redis channels."""
     status_val = status.value if hasattr(status, "value") else str(status)
     payload = {
@@ -137,6 +152,10 @@ def _publish_run_update(run_id: int, user_id: int | None, status: JobStatus, cur
         "run_id": run_id,
         "status": status_val,
         "current_stage": current_stage,
+        "export_status": export_status,
+        "export_error": export_error,
+        "exported_at": exported_at,
+        "exported_sheet_url": exported_sheet_url,
     }
     # Per-run channel — consumed by the run detail page
     _redis_publish(f"run_updates:{run_id}", payload)
@@ -162,6 +181,14 @@ def _refresh_run_status(db, job_id: int) -> None:
             run = run_repo.get(rj.run_id)
             if not run:
                 continue
+            run_id = run.id
+            user_id = run.user_id
+            current_stage = run.current_stage
+            auto_export_enabled = run.auto_export_enabled
+            export_spreadsheet_url = run.export_spreadsheet_url
+            export_sheet_name = run.export_sheet_name
+            export_investment_amount = run.export_investment_amount
+            export_title = run.export_title
 
             pairs = run_repo.get_stage_run_jobs(rj.run_id, rj.stage)
             if not pairs:
@@ -182,12 +209,18 @@ def _refresh_run_status(db, job_id: int) -> None:
                     "type": "job.updated",
                     "run_id": rj.run_id,
                     "job_id": updated_job.id,
+                    "provider": updated_job.provider,
+                    "model": updated_job.model,
                     "status": status_val,
                     "response": updated_job.response,
                     "error_message": updated_job.error_message,
                     "tokens_in": updated_job.tokens_in,
                     "tokens_out": updated_job.tokens_out,
                     "estimated_cost": updated_job.estimated_cost,
+                    "export_status": updated_job.export_status,
+                    "export_error": updated_job.export_error,
+                    "exported_at": updated_job.exported_at.isoformat() if updated_job.exported_at else None,
+                    "exported_sheet_url": updated_job.exported_sheet_url,
                     "updated_at": updated_job.updated_at.isoformat() if updated_job.updated_at else None,
                 })
                 if updated_job.user_id:
@@ -195,12 +228,18 @@ def _refresh_run_status(db, job_id: int) -> None:
                         "type": "job.updated",
                         "run_id": rj.run_id,
                         "job_id": updated_job.id,
+                        "provider": updated_job.provider,
+                        "model": updated_job.model,
                         "status": status_val,
                         "response": updated_job.response,
                         "error_message": updated_job.error_message,
                         "tokens_in": updated_job.tokens_in,
                         "tokens_out": updated_job.tokens_out,
                         "estimated_cost": updated_job.estimated_cost,
+                        "export_status": updated_job.export_status,
+                        "export_error": updated_job.export_error,
+                        "exported_at": updated_job.exported_at.isoformat() if updated_job.exported_at else None,
+                        "exported_sheet_url": updated_job.exported_sheet_url,
                         "updated_at": updated_job.updated_at.isoformat() if updated_job.updated_at else None,
                     })
 
@@ -218,49 +257,126 @@ def _refresh_run_status(db, job_id: int) -> None:
                 new_status = JobStatus.FAILED
 
             if run.status != new_status:
-                # Snapshot before commit expires the ORM object
-                run_id = run.id
-                user_id = run.user_id
-                current_stage = run.current_stage
-                auto_export_enabled = run.auto_export_enabled
-                export_spreadsheet_url = run.export_spreadsheet_url
-                export_sheet_name = run.export_sheet_name
-                export_investment_amount = run.export_investment_amount
-                export_title = run.export_title
-
                 run_repo.update_status(run, new_status)
-                _publish_run_update(run_id, user_id, new_status, current_stage)
+                _publish_run_update(
+                    run_id,
+                    user_id,
+                    new_status,
+                    current_stage,
+                    run.export_status,
+                    run.export_error,
+                    run.exported_at.isoformat() if run.exported_at else None,
+                    run.exported_sheet_url,
+                )
                 logger.info("Run %s status → %s", run_id, new_status.value)
 
-                # Trigger auto-export if run completed and auto-export is enabled
-                if new_status == JobStatus.COMPLETED and auto_export_enabled and export_spreadsheet_url:
-                    try:
-                        from app.domains.google_sheets.tasks import export_run_to_sheets_task
-                        export_run_to_sheets_task.delay(  # type: ignore
-                            user_id,
-                            run_id,
-                            export_spreadsheet_url,
-                            export_sheet_name or "Sheet1",
-                            export_title or f"Run {run_id}",
-                            export_investment_amount or "0",
+            # Trigger auto-export per model as soon as a model completes
+            if (
+                updated_job is not None
+                and updated_job.status == JobStatus.COMPLETED
+                and auto_export_enabled
+                and export_spreadsheet_url
+                and updated_job.export_status not in {"queued", "processing", "completed"}
+            ):
+                try:
+                    from app.domains.google_sheets.tasks import export_job_to_sheets_task
+                    repo = SyncJobRepository(db)
+                    repo.update_export_state(
+                        updated_job,
+                        export_status="queued",
+                        export_error=None,
+                    )
+                    _publish_job_update(updated_job)
+                    _publish_run_update(
+                        run_id,
+                        user_id,
+                        run.status,
+                        current_stage,
+                        run.export_status,
+                        run.export_error,
+                        run.exported_at.isoformat() if run.exported_at else None,
+                        run.exported_sheet_url,
+                    )
+                    export_job_to_sheets_task.delay(  # type: ignore
+                        user_id,
+                        updated_job.id,
+                        export_spreadsheet_url,
+                        export_sheet_name or "Sheet1",
+                        export_title or f"Run {run_id}",
+                        export_investment_amount or "0",
+                        run_id,
+                        rj.stage,
+                    )
+                    logger.info("Queued model export for run %d job %d", run_id, updated_job.id)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to queue model export for run %d job %d: %s",
+                        run_id,
+                        updated_job.id,
+                        str(e),
+                    )
+            elif (
+                updated_job is not None
+                and updated_job.status == JobStatus.FAILED
+                and auto_export_enabled
+                and (updated_job.export_status or "").lower() in {"", "pending"}
+            ):
+                repo = SyncJobRepository(db)
+                repo.update_export_state(
+                    updated_job,
+                    export_status="failed",
+                    export_error=updated_job.error_message or "Model failed before export",
+                )
+                _publish_job_update(updated_job)
+
+            # Keep run-level export badge in sync with per-model export progress
+            if auto_export_enabled:
+                run_after = run_repo.get(rj.run_id)
+                if run_after:
+                    stage_pairs = run_repo.get_stage_run_jobs(rj.run_id, rj.stage)
+                    stage_jobs_after = [job for _, job in stage_pairs]
+                    terminal = {JobStatus.COMPLETED, JobStatus.FAILED}
+                    terminal_jobs = [j for j in stage_jobs_after if j.status in terminal]
+                    exports = [str((j.export_status or "pending")).lower() for j in terminal_jobs]
+                    has_active_jobs = any(j.status not in terminal for j in stage_jobs_after)
+
+                    export_state = "pending"
+                    export_error = None
+                    if has_active_jobs:
+                        if any(s == "failed" for s in exports):
+                            export_state = "processing"
+                        elif any(s in {"processing", "queued", "pending"} for s in exports):
+                            export_state = "processing"
+                        elif exports:
+                            export_state = "processing"
+                    elif exports and any(s == "failed" for s in exports):
+                        export_state = "failed"
+                        failed = next((j for j in terminal_jobs if (j.export_status or "").lower() == "failed"), None)
+                        export_error = failed.export_error if failed else None
+                    elif exports and all(s == "completed" for s in exports):
+                        export_state = "completed"
+                    elif exports and any(s in {"processing", "queued"} for s in exports):
+                        export_state = "processing"
+
+                    prev_export_status = (run_after.export_status or "").lower()
+                    run_repo.update_export_state(
+                        run_after,
+                        export_status=export_state,
+                        export_error=export_error,
+                        exported_at=run_after.exported_at,
+                        exported_sheet_url=run_after.exported_sheet_url,
+                    )
+                    if prev_export_status != export_state:
+                        _publish_run_update(
+                            run_after.id,
+                            run_after.user_id,
+                            run_after.status,
+                            run_after.current_stage,
+                            run_after.export_status,
+                            run_after.export_error,
+                            run_after.exported_at.isoformat() if run_after.exported_at else None,
+                            run_after.exported_sheet_url,
                         )
-                        run_after_queue = run_repo.get(run_id)
-                        if run_after_queue:
-                            run_repo.update_export_state(
-                                run_after_queue,
-                                export_status="queued",
-                                export_error=None,
-                            )
-                        logger.info("Queued auto-export for run %d", run_id)
-                    except Exception as e:
-                        run_after_queue = run_repo.get(run_id)
-                        if run_after_queue:
-                            run_repo.update_export_state(
-                                run_after_queue,
-                                export_status="failed",
-                                export_error=f"Failed to queue export: {str(e)}",
-                            )
-                        logger.warning("Failed to queue auto-export for run %d: %s", run_id, str(e))
     except Exception:
         logger.exception("Failed to refresh run status for job %s", job_id)
 
@@ -306,11 +422,16 @@ def execute_ai_job(self, job_id: int) -> None:
 
         provider = ProviderFactory.create(job.provider)
         result = provider.generate(prompt=job.prompt, model=job.model)
+        content = (result.content or "").strip()
+        if not content:
+            raise RuntimeError(
+                f"{job.provider}/{job.model} returned empty output after generation"
+            )
 
         repo.update_status(
             job,
             JobStatus.COMPLETED,
-            response=result.content,
+            response=content,
             tokens_in=result.tokens_in,
             tokens_out=result.tokens_out,
             estimated_cost=result.cost,

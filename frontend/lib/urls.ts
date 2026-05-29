@@ -106,6 +106,9 @@ export const URLs = {
     update: (id: number) => `${API_BASE_URL}/prompts/${id}`,
     delete: (id: number) => `${API_BASE_URL}/prompts/${id}`,
   },
+  apiUsage: {
+    summary: () => `${API_BASE_URL}/api-usage/summary`,
+  },
 
   // Schedule endpoints
   schedules: {
@@ -153,6 +156,7 @@ export const URLs = {
       apiKeys: () => "/console/api-keys",
       zerodha: () => "/console/zerodha",
       googleSheets: () => "/console/google-sheets",
+      apis: () => "/console/apis",
     },
 
     profile: {

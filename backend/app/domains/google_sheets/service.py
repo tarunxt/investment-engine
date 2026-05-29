@@ -2,6 +2,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -73,6 +74,22 @@ class GoogleSheetsService:
             scopes=SCOPES,
         )
         return build("sheets", "v4", credentials=creds)
+
+    def refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
+        creds = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=settings.google_client_id,
+            client_secret=settings.google_client_secret,
+            scopes=SCOPES,
+        )
+        creds.refresh(Request())
+        expiry = creds.expiry or datetime.now(tz=timezone.utc) + timedelta(hours=1)
+        return {
+            "access_token": creds.token,
+            "token_expiry": expiry,
+        }
 
     @staticmethod
     def extract_spreadsheet_id(url_or_id: str) -> str:
@@ -164,13 +181,55 @@ class GoogleSheetsService:
             .get("values", [])
         )
 
+        def _norm_row(values: list[str]) -> list[str]:
+            return [" ".join(str(v).strip().lower().split()) for v in values]
+
+        header_norm = _norm_row(headers)
+        has_rows = len(existing) > 0
+        header_exists = has_rows and _norm_row(existing[0][: len(headers)]) == header_norm
+
+        # Guarantee header row exists once at the top of each tab.
+        if not has_rows:
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"{sheet_name}!A1",
+                valueInputOption="RAW",
+                body={"values": [headers]},
+            ).execute()
+            existing = [headers]
+            header_exists = True
+        elif not header_exists:
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={
+                    "requests": [
+                        {
+                            "insertDimension": {
+                                "range": {
+                                    "sheetId": sheet_id,
+                                    "dimension": "ROWS",
+                                    "startIndex": 0,
+                                    "endIndex": 1,
+                                },
+                                "inheritFromBefore": False,
+                            }
+                        }
+                    ]
+                },
+            ).execute()
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"{sheet_name}!A1",
+                valueInputOption="RAW",
+                body={"values": [headers]},
+            ).execute()
+            existing = [headers] + existing
+
         values: list[list[str]] = []
         if existing:
             values.append([])
         if section_title:
             values.append([section_title])
-        if not existing:
-            values.append(headers)
         values.extend(rows)
 
         service.spreadsheets().values().append(

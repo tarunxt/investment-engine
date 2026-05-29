@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
@@ -12,6 +13,7 @@ from app.domains.google_sheets.stock_service import (
     parse_stock_recommendations,
 )
 from app.domains.jobs.models import Job
+from app.domains.jobs.repository import SyncJobRepository
 from app.domains.runs.models import Run, RunJob
 from app.domains.runs.repository import SyncRunRepository
 from app.infrastructure.database.sync_session import SyncSessionLocal
@@ -19,6 +21,7 @@ from app.infrastructure.messaging.celery_app import celery
 
 logger = logging.getLogger(__name__)
 _svc = GoogleSheetsService()
+IST = ZoneInfo("Asia/Kolkata")
 
 
 @celery.task(bind=True, max_retries=3, soft_time_limit=120, time_limit=180)
@@ -30,9 +33,14 @@ def export_job_to_sheets_task(
     sheet_name: str = "Investment Ideas",
     title: str = "Investment Analysis Export",
     investment_amount: str = "INR 10,000",
+    run_id: int | None = None,
+    stage: int | None = None,
 ):
     with SyncSessionLocal() as db:
         try:
+            run_repo = SyncRunRepository(db)
+            job_repo = SyncJobRepository(db)
+            from app.domains.jobs.tasks import _publish_job_update, _refresh_run_status
             cred = db.execute(
                 select(GoogleSheetsCredential).where(
                     GoogleSheetsCredential.user_id == user_id
@@ -40,6 +48,15 @@ def export_job_to_sheets_task(
             ).scalar_one_or_none()
 
             if not cred:
+                job = db.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none()
+                if job:
+                    job_repo.update_export_state(
+                        job,
+                        export_status="failed",
+                        export_error="Google Sheets not connected",
+                    )
+                    _publish_job_update(job)
+                    _refresh_run_status(db, job.id)
                 return {"status": "failed", "error": "Google Sheets not connected"}
 
             job = db.execute(
@@ -48,8 +65,18 @@ def export_job_to_sheets_task(
 
             if not job:
                 return {"status": "failed", "error": "Job not found"}
+            job_repo.update_export_state(job, export_status="processing", export_error=None)
+            _publish_job_update(job)
+            _refresh_run_status(db, job.id)
 
             if not job.response:
+                job_repo.update_export_state(
+                    job,
+                    export_status="failed",
+                    export_error="Job has no response yet",
+                )
+                _publish_job_update(job)
+                _refresh_run_status(db, job.id)
                 return {"status": "failed", "error": "Job has no response yet"}
 
             access_token = decrypt_token(cred.access_token_enc)
@@ -62,12 +89,20 @@ def export_job_to_sheets_task(
             stocks = parse_stock_recommendations(job.response)
 
             if not stocks:
+                job_repo.update_export_state(
+                    job,
+                    export_status="failed",
+                    export_error="No stock recommendations found in job response",
+                )
+                _publish_job_update(job)
+                _refresh_run_status(db, job.id)
                 return {
                     "status": "failed",
                     "error": "No stock recommendations found in job response",
                 }
 
-            formatted_title = format_sheet_title(datetime.utcnow(), investment_amount)
+            now_ist = datetime.now(IST)
+            formatted_title = format_sheet_title(now_ist, investment_amount)
 
             headers, rows = format_stocks_for_sheet(stocks)
 
@@ -78,11 +113,42 @@ def export_job_to_sheets_task(
                     access_token, refresh_token, formatted_title
                 )
 
-            _svc.write_sheet(
-                access_token, refresh_token, spreadsheet_id, headers, rows, sheet_name
+            section_title = (
+                f"Run #{run_id}" if run_id else f"Job #{job_id}"
+            ) + f" | {now_ist.strftime('%Y-%m-%d %H:%M:%S IST')} | {job.provider}/{job.model}"
+
+            _, sheet_gid = _svc.append_sheet(
+                access_token,
+                refresh_token,
+                spreadsheet_id,
+                headers,
+                rows,
+                sheet_name,
+                section_title=section_title,
             )
 
-            sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+            sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit#gid={sheet_gid}"
+            job_repo.update_export_state(
+                job,
+                export_status="completed",
+                export_error=None,
+                exported_at=datetime.now(timezone.utc),
+                exported_sheet_url=sheet_url,
+            )
+            _publish_job_update(job)
+            _refresh_run_status(db, job.id)
+
+            if run_id:
+                run = run_repo.get(run_id)
+                if run:
+                    run_repo.update_export_state(
+                        run,
+                        export_status=run.export_status or "processing",
+                        export_error=run.export_error,
+                        exported_at=datetime.now(timezone.utc),
+                        exported_sheet_url=sheet_url,
+                    )
+                    _refresh_run_status(db, job.id)
             logger.info(
                 "Exported job %d (%d stocks) to Google Sheets for user %d",
                 job_id,
@@ -97,6 +163,16 @@ def export_job_to_sheets_task(
             }
 
         except Exception as exc:
+            job_repo = SyncJobRepository(db)
+            job = db.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none()
+            if job:
+                job_repo.update_export_state(
+                    job,
+                    export_status="failed",
+                    export_error=str(exc)[:500],
+                )
+                _publish_job_update(job)
+                _refresh_run_status(db, job.id)
             logger.exception(
                 "Export job %d to Sheets failed for user %d", job_id, user_id
             )
@@ -174,7 +250,8 @@ def export_run_to_sheets_task(
                     "error": "No stock recommendations found in any run job response",
                 }
 
-            formatted_title = format_sheet_title(datetime.utcnow(), investment_amount)
+            now_ist = datetime.now(IST)
+            formatted_title = format_sheet_title(now_ist, investment_amount)
 
             headers, rows = format_stocks_for_sheet(all_stocks)
 
@@ -186,7 +263,7 @@ def export_run_to_sheets_task(
                 )
 
             section_title = (
-                f"Run #{run.id} | {run.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                f"Run #{run.id} | {run.created_at.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S IST')}"
                 f" | {title}"
             )
             _, sheet_gid = _svc.append_sheet(

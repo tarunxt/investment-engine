@@ -58,6 +58,10 @@ class Job(Base, TimestampMixin):
     tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
     estimated_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    export_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    export_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exported_sheet_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

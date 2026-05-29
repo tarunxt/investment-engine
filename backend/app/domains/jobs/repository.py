@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.domains.jobs.models import Job
 from app.shared.pagination import PagedQuery, PagedResult
 from app.shared.types import JobId, JobStatus
+from datetime import datetime
 
 
 class JobRepository(Protocol):
@@ -141,4 +142,19 @@ class SyncJobRepository:
             job.tokens_out = tokens_out
         if estimated_cost is not None:
             job.estimated_cost = estimated_cost
+        self._session.commit()
+
+    def update_export_state(
+        self,
+        job: Job,
+        *,
+        export_status: str,
+        export_error: str | None = None,
+        exported_at: datetime | None = None,
+        exported_sheet_url: str | None = None,
+    ) -> None:
+        job.export_status = export_status
+        job.export_error = export_error
+        job.exported_at = exported_at
+        job.exported_sheet_url = exported_sheet_url
         self._session.commit()

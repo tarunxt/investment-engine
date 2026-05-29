@@ -8,6 +8,24 @@ import json5
 logger = logging.getLogger(__name__)
 
 
+def _normalize_header(value: str) -> str:
+    cleaned = (
+        value.replace("’", "'")
+        .replace("%", " percent ")
+        .replace("+", " plus ")
+        .replace("/", " ")
+        .replace("-", " ")
+        .replace("(", " ")
+        .replace(")", " ")
+    )
+    return " ".join(cleaned.lower().split())
+
+
+def _is_separator_token(value: str) -> bool:
+    stripped = value.replace(":", "").replace("-", "").strip()
+    return stripped == ""
+
+
 def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
     """
     Parse AI-generated investment advice response to extract stock recommendations.
@@ -75,32 +93,92 @@ def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
 
             if rows:
                 key_map = {
+                    "llm name model": "llm_name_model",
+                    "exchange symbol": "exchange_symbol",
+                    "stock symbol": "stock_symbol",
                     "stock name": "stock_name",
                     "technical setup": "technical_setup",
                     "entry range": "entry_range",
                     "stop loss": "stop_loss",
                     "target": "target",
-                    "analyst/source": "analyst_source",
                     "analyst source": "analyst_source",
                     "units to buy": "units_to_buy",
                     "price per unit": "price_per_unit",
                     "total buy amount": "total_buy_amount",
-                    "upside horizon (%) return in weeks": "upside_horizon",
+                    "upside horizon percent return in weeks": "upside_horizon",
+                    "upside horizon return in weeks": "upside_horizon",
                     "upside horizon": "upside_horizon",
-                    "confidence score (0-100)": "confidence_score",
+                    "confidence score 0 100": "confidence_score",
                     "confidence score": "confidence_score",
                     "rationale remarks": "rationale_remarks",
-                    "rationale/remarks": "rationale_remarks",
+                    "rationale technical setup short term 1 3 months": "rationale_technical_short_term",
+                    "rationale technical setup medium term": "rationale_technical_medium_term",
+                    "rationale technical setup long term term": "rationale_technical_long_term",
+                    "rationale technical setup long term": "rationale_technical_long_term",
+                    "rationale fundamentals short term": "rationale_fundamentals_short_term",
+                    "rationale fundamentals medium long term": "rationale_fundamentals_medium_long_term",
                 }
 
-                normalized_headers = [
-                    key_map.get(" ".join(h.lower().split()), " ".join(h.lower().split()))
-                    for h in headers
-                ]
+                normalized_headers = [key_map.get(_normalize_header(h), _normalize_header(h).replace(" ", "_")) for h in headers]
                 parsed_rows: list[dict[str, Any]] = []
                 for row in rows:
                     item = {normalized_headers[i]: row[i] for i in range(len(normalized_headers))}
-                    if item.get("stock_name"):
+                    if not item.get("stock_name") and item.get("stock_symbol"):
+                        item["stock_name"] = item["stock_symbol"]
+                    if item.get("stock_name") or item.get("stock_symbol"):
+                        parsed_rows.append(item)
+                if parsed_rows:
+                    return parsed_rows
+    except Exception:
+        pass
+
+    # Fallback: Parse single-line pipe table output
+    try:
+        line = " ".join(response_text.split())
+        if "|" in line and "llm name + model" in line.lower():
+            tokens = [token.strip() for token in line.split("|") if token.strip()]
+            sep_idx = next((i for i, token in enumerate(tokens) if _is_separator_token(token)), -1)
+            if sep_idx > 0:
+                headers = tokens[:sep_idx]
+                data_tokens = tokens[sep_idx:]
+                while data_tokens and _is_separator_token(data_tokens[0]):
+                    data_tokens.pop(0)
+
+                key_map = {
+                    "llm name model": "llm_name_model",
+                    "exchange symbol": "exchange_symbol",
+                    "stock symbol": "stock_symbol",
+                    "stock name": "stock_name",
+                    "technical setup": "technical_setup",
+                    "entry range": "entry_range",
+                    "stop loss": "stop_loss",
+                    "target": "target",
+                    "analyst source": "analyst_source",
+                    "units to buy": "units_to_buy",
+                    "price per unit": "price_per_unit",
+                    "total buy amount": "total_buy_amount",
+                    "upside horizon percent return in weeks": "upside_horizon",
+                    "upside horizon return in weeks": "upside_horizon",
+                    "upside horizon": "upside_horizon",
+                    "confidence score 0 100": "confidence_score",
+                    "confidence score": "confidence_score",
+                    "rationale remarks": "rationale_remarks",
+                    "rationale technical setup short term 1 3 months": "rationale_technical_short_term",
+                    "rationale technical setup medium term": "rationale_technical_medium_term",
+                    "rationale technical setup long term term": "rationale_technical_long_term",
+                    "rationale technical setup long term": "rationale_technical_long_term",
+                    "rationale fundamentals short term": "rationale_fundamentals_short_term",
+                    "rationale fundamentals medium long term": "rationale_fundamentals_medium_long_term",
+                }
+                normalized_headers = [key_map.get(_normalize_header(h), _normalize_header(h).replace(" ", "_")) for h in headers]
+                n_cols = len(normalized_headers)
+                rows = [data_tokens[i : i + n_cols] for i in range(0, len(data_tokens), n_cols) if len(data_tokens[i : i + n_cols]) == n_cols]
+                parsed_rows: list[dict[str, Any]] = []
+                for row in rows:
+                    item = {normalized_headers[i]: row[i] for i in range(n_cols)}
+                    if not item.get("stock_name") and item.get("stock_symbol"):
+                        item["stock_name"] = item["stock_symbol"]
+                    if item.get("stock_name") or item.get("stock_symbol"):
                         parsed_rows.append(item)
                 if parsed_rows:
                     return parsed_rows
@@ -124,35 +202,60 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
     """
     # Include Stage column if any stock has stage info
     has_stage = any(stock.get("stage") is not None for stock in stocks)
+    present_keys = {key for stock in stocks for key in stock.keys() if key != "stage"}
 
-    headers = [
-        "Stage",
-        "Stock Name",
-        "Technical Setup",
-        "Entry Range",
-        "Stop Loss",
-        "Target",
-        "Analyst Source",
-        "Units to Buy",
-        "Price per Unit",
-        "Total Buy Amount",
-        "Upside Horizon",
-        "Confidence Score",
-        "Rationale/Remarks",
-    ] if has_stage else [
-        "Stock Name",
-        "Technical Setup",
-        "Entry Range",
-        "Stop Loss",
-        "Target",
-        "Analyst Source",
-        "Units to Buy",
-        "Price per Unit",
-        "Total Buy Amount",
-        "Upside Horizon",
-        "Confidence Score",
-        "Rationale/Remarks",
+    preferred_key_order = [
+        "llm_name_model",
+        "exchange_symbol",
+        "stock_symbol",
+        "stock_name",
+        "technical_setup",
+        "entry_range",
+        "stop_loss",
+        "target",
+        "analyst_source",
+        "units_to_buy",
+        "price_per_unit",
+        "total_buy_amount",
+        "upside_horizon",
+        "confidence_score",
+        "rationale_remarks",
+        "rationale_technical_short_term",
+        "rationale_technical_medium_term",
+        "rationale_technical_long_term",
+        "rationale_fundamentals_short_term",
+        "rationale_fundamentals_medium_long_term",
     ]
+
+    header_labels = {
+        "llm_name_model": "LLM Name + Model",
+        "exchange_symbol": "Exchange Symbol",
+        "stock_symbol": "Stock Symbol",
+        "stock_name": "Stock Name",
+        "technical_setup": "Technical Setup",
+        "entry_range": "Entry Range",
+        "stop_loss": "Stop Loss",
+        "target": "Target",
+        "analyst_source": "Analyst Source",
+        "units_to_buy": "Units to Buy",
+        "price_per_unit": "Price per Unit",
+        "total_buy_amount": "Total Buy Amount",
+        "upside_horizon": "Upside Horizon (% Return in Weeks)",
+        "confidence_score": "Confidence Score (0-100)",
+        "rationale_remarks": "Rationale Remarks",
+        "rationale_technical_short_term": "Rationale - Technical Setup (Short Term 1-3 Months)",
+        "rationale_technical_medium_term": "Rationale - Technical Setup (Medium Term)",
+        "rationale_technical_long_term": "Rationale - Technical Setup (Long Term)",
+        "rationale_fundamentals_short_term": "Rationale - Fundamentals Short Term",
+        "rationale_fundamentals_medium_long_term": "Rationale - Fundamentals Medium/Long Term",
+    }
+
+    selected_keys = [key for key in preferred_key_order if key in present_keys]
+    extra_keys = [key for key in sorted(present_keys) if key not in selected_keys]
+    selected_keys.extend(extra_keys)
+
+    headers = ["Stage"] if has_stage else []
+    headers.extend(header_labels.get(key, key.replace("_", " ").title()) for key in selected_keys)
 
     rows: list[list[str]] = []
 
@@ -161,20 +264,7 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
         if has_stage:
             row_data.append(str(stock.get("stage", "")).strip())
 
-        row_data.extend([
-            str(stock.get("stock_name", "")).strip(),
-            str(stock.get("technical_setup", "")).strip(),
-            str(stock.get("entry_range", "")).strip(),
-            str(stock.get("stop_loss", "")).strip(),
-            str(stock.get("target", "")).strip(),
-            str(stock.get("analyst_source", "")).strip(),
-            str(stock.get("units_to_buy", "")).strip(),
-            str(stock.get("price_per_unit", "")).strip(),
-            str(stock.get("total_buy_amount", "")).strip(),
-            str(stock.get("upside_horizon", "")).strip(),
-            str(stock.get("confidence_score", "")).strip(),
-            str(stock.get("rationale_remarks", "")).strip(),
-        ])
+        row_data.extend([str(stock.get(key, "")).strip() for key in selected_keys])
         rows.append(row_data)
 
     return headers, rows
