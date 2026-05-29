@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 from openai import OpenAI
 
@@ -68,10 +69,29 @@ class OpenAIProvider(BaseAIProvider):
         tokens_in = getattr(usage, "input_tokens", 0) or 0
         tokens_out = getattr(usage, "output_tokens", 0) or 0
 
-        content = response.output_text or ""
+        content = (response.output_text or "").strip()
+
+        needs_table = self._requires_table_output(prompt)
+        if needs_table and not self._looks_like_markdown_table(content):
+            rewrite = self.client.responses.create(
+                model=model,
+                input=(
+                    "Return ONLY one valid markdown table. "
+                    "No preamble, no explanation, no code fences. "
+                    "Include header row, separator row, and at least 5 data rows.\n\n"
+                    f"Original user request:\n{prompt}\n\n"
+                    f"Previous assistant output:\n{content}"
+                ),
+            )
+            rewrite_usage = getattr(rewrite, "usage", None)
+            tokens_in += getattr(rewrite_usage, "input_tokens", 0) or 0
+            tokens_out += getattr(rewrite_usage, "output_tokens", 0) or 0
+            rewritten = (rewrite.output_text or "").strip()
+            if rewritten:
+                content = rewritten
 
         return AIProviderResponse(
-            content=content.strip(),
+            content=content,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost=self._estimate_cost(
@@ -82,6 +102,24 @@ class OpenAIProvider(BaseAIProvider):
             provider=self.provider_name,
             model=model,
         )
+
+    @staticmethod
+    def _requires_table_output(prompt: str) -> bool:
+        text = (prompt or "").lower()
+        return (
+            "return only one markdown table" in text
+            or "table columns:" in text
+            or ("stock name" in text and "units to buy" in text)
+        )
+
+    @staticmethod
+    def _looks_like_markdown_table(content: str) -> bool:
+        lines = [line.strip() for line in (content or "").splitlines() if line.strip()]
+        pipe_lines = [line for line in lines if line.count("|") >= 2]
+        if len(pipe_lines) < 3:
+            return False
+        has_sep = any(re.fullmatch(r"\|?[\s:\-|\t]+\|?", line) for line in pipe_lines)
+        return has_sep
 
     @staticmethod
     def _estimate_cost(

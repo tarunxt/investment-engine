@@ -103,12 +103,14 @@ interface DashboardContextValue {
 const DashboardContext = createContext<DashboardContextValue | null>(null);
 
 const MODEL_MIX_STORAGE_KEY = 'investor:model-mixes:v1';
+const COMPATIBLE_MODEL_MIX_ID = 'compatible-models-system';
 
 interface ModelMix {
   id: string;
   name: string;
   targets: string[];
   updated_at: string;
+  locked?: boolean;
 }
 
 export function useDashboard(): DashboardContextValue {
@@ -178,6 +180,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           targets: m.targets.filter((t: unknown) => typeof t === 'string'),
           updated_at: typeof m.updated_at === 'string' ? m.updated_at : new Date().toISOString(),
         }));
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSavedModelMixes(sanitized);
     } catch (err) {
       console.warn('Failed to load saved model mixes:', err);
@@ -191,6 +194,27 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       console.warn('Failed to persist model mixes:', err);
     }
   }, [savedModelMixes]);
+
+  useEffect(() => {
+    if (providers.length === 0) return;
+    const compatibleTargets = providers.flatMap((provider) =>
+      provider.models
+        .filter((model) => provider.model_compatibility?.[model]?.compatible !== false)
+        .map((model) => `${provider.name}::${model}`),
+    );
+    const systemMix: ModelMix = {
+      id: COMPATIBLE_MODEL_MIX_ID,
+      name: 'Compatible models',
+      targets: compatibleTargets,
+      updated_at: new Date().toISOString(),
+      locked: true,
+    };
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSavedModelMixes((prev) => {
+      const withoutSystem = prev.filter((mix) => mix.id !== COMPATIBLE_MODEL_MIX_ID);
+      return [systemMix, ...withoutSystem];
+    });
+  }, [providers]);
 
   const initDashboard = useCallback(async () => {
     setIsLoading(true);
@@ -206,7 +230,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       const data = providersRes.value as ProviderInfo[];
       setProviders(data);
       setSelectedTargets(
-        new Set(data.flatMap((p) => p.models.map((m) => `${p.name}::${m}`))),
+        new Set(
+          data.flatMap((p) =>
+            p.models
+              .filter((m) => p.model_compatibility?.[m]?.compatible !== false)
+              .map((m) => `${p.name}::${m}`),
+          ),
+        ),
       );
     } else if (providersRes.reason?.name !== 'AbortError') {
       console.error('Failed to load providers:', providersRes.reason);
@@ -229,7 +259,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
 
     setIsLoading(false);
-  }, []);
+  }, [prompt]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -305,7 +335,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const toggleAllForProvider = useCallback(
     (providerName: string, providerModels: string[]) => {
-      const keys = providerModels.map((m) => `${providerName}::${m}`);
+      const provider = providers.find((p) => p.name === providerName);
+      const keys = providerModels
+        .filter((m) => provider?.model_compatibility?.[m]?.compatible !== false)
+        .map((m) => `${providerName}::${m}`);
       const allChecked = keys.every((k) => selectedTargets.has(k));
       setSelectedTargets((prev) => {
         const next = new Set(prev);
@@ -314,12 +347,18 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         return next;
       });
     },
-    [selectedTargets],
+    [providers, selectedTargets],
   );
 
   const selectAllTargets = useCallback(() => {
     setSelectedTargets(
-      new Set(providers.flatMap((provider) => provider.models.map((model) => `${provider.name}::${model}`))),
+      new Set(
+        providers.flatMap((provider) =>
+          provider.models
+            .filter((model) => provider.model_compatibility?.[model]?.compatible !== false)
+            .map((model) => `${provider.name}::${model}`),
+        ),
+      ),
     );
   }, [providers]);
 
@@ -336,7 +375,17 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       const mix = savedModelMixes.find((m) => m.id === id);
       if (!mix) return;
       const allowed = new Set(providers.flatMap((provider) => provider.models.map((model) => `${provider.name}::${model}`)));
-      const filtered = mix.targets.filter((target) => allowed.has(target));
+      const compatible = new Set(
+        providers.flatMap((provider) =>
+          provider.models
+            .filter((model) => provider.model_compatibility?.[model]?.compatible !== false)
+            .map((model) => `${provider.name}::${model}`),
+        ),
+      );
+      const filtered = mix.targets.filter((target) => allowed.has(target) && compatible.has(target));
+      if (filtered.length < mix.targets.length) {
+        window.alert('Some models in this mix are incompatible with current API access and were skipped.');
+      }
       setSelectedTargets(new Set(filtered));
       setSelectedModelMixId(id);
     },
@@ -477,6 +526,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     const defaultTemplate = promptTemplates.find((tpl) => tpl.name === DEFAULT_TEMPLATE_NAME);
     if (!defaultTemplate) return;
     if (!selectedTemplateId || selectedTemplateId === 'none') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedTemplateId(String(defaultTemplate.id));
     }
     if (!prompt.trim()) setPrompt(defaultTemplate.body);
@@ -485,6 +535,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!submitError) return;
     if (submitError === 'Prompt is required.' && prompt.trim()) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSubmitError(null);
       return;
     }

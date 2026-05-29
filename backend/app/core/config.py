@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 
 from pydantic_settings import BaseSettings
 from typing import Optional
@@ -17,6 +18,8 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
     gemini_api_key_fallback: Optional[str] = None
+    gemini_api_key_fallback_2: Optional[str] = None
+    gemini_api_key_fallback_3: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     deepseek_api_key: Optional[str] = None
     deepseek_api_base: Optional[str] = None  # e.g., "https://api.deepseek.com/v1"
@@ -74,3 +77,33 @@ if not REDIS_URL:
 
 # Global settings instance
 settings = Settings(database_url=os.getenv("DATABASE_URL", ""), redis_url=os.getenv("REDIS_URL", ""))
+settings_loaded_at_utc = datetime.now(timezone.utc).isoformat()
+
+
+def _clean_env_value(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def get_gemini_api_keys() -> list[str]:
+    """Resolve Gemini API keys with stable slot order and env alias support."""
+    slot_1 = _clean_env_value(os.getenv("GEMINI_API_KEY")) or _clean_env_value(os.getenv("GEMINI_API_KEY_1")) or _clean_env_value(getattr(settings, "gemini_api_key", None))
+    slot_2 = _clean_env_value(os.getenv("GEMINI_API_KEY_FALLBACK")) or _clean_env_value(os.getenv("GEMINI_API_KEY_2")) or _clean_env_value(getattr(settings, "gemini_api_key_fallback", None))
+    slot_3 = _clean_env_value(os.getenv("GEMINI_API_KEY_FALLBACK_2")) or _clean_env_value(os.getenv("GEMINI_API_KEY_3")) or _clean_env_value(getattr(settings, "gemini_api_key_fallback_2", None))
+    slot_4 = _clean_env_value(os.getenv("GEMINI_API_KEY_FALLBACK_3")) or _clean_env_value(os.getenv("GEMINI_API_KEY_4")) or _clean_env_value(getattr(settings, "gemini_api_key_fallback_3", None))
+
+    resolved: list[str] = []
+    for key in (slot_1, slot_2, slot_3, slot_4):
+        if key and key not in resolved:
+            resolved.append(key)
+
+    # Optional list-style key input for docker/env convenience.
+    extra_keys_raw = _clean_env_value(os.getenv("GEMINI_API_KEYS"))
+    if extra_keys_raw:
+        for key in [part.strip() for part in extra_keys_raw.split(",")]:
+            if key and key not in resolved:
+                resolved.append(key)
+
+    return resolved

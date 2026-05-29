@@ -8,6 +8,45 @@ import json5
 
 logger = logging.getLogger(__name__)
 
+KEY_MAP = {
+    "llm name model": "llm_name_model",
+    "llm name plus model": "llm_name_model",
+    "exchange symbol": "exchange_symbol",
+    "stock symbol": "stock_symbol",
+    "stock name": "stock_name",
+    "technical setup": "technical_setup",
+    "entry range": "entry_range",
+    "stop loss": "stop_loss",
+    "stop loss inr": "stop_loss",
+    "target": "target",
+    "target inr": "target",
+    "analyst source": "analyst_source",
+    "analyst/source": "analyst_source",
+    "units to buy": "units_to_buy",
+    "price per unit": "price_per_unit",
+    "price per unit inr": "price_per_unit",
+    "total buy amount": "total_buy_amount",
+    "total buy amount inr": "total_buy_amount",
+    "upside horizon percent return in weeks": "upside_horizon",
+    "upside horizon return in weeks": "upside_horizon",
+    "upside horizon percent": "upside_horizon",
+    "upside horizon": "upside_horizon",
+    "weeks": "weeks",
+    "confidence score 0 100": "confidence_score",
+    "confidence score": "confidence_score",
+    "rationale remarks": "rationale_remarks",
+    "rationale technical setup short term 1 3 months": "rationale_technical_short_term",
+    "rationale technical setup medium term": "rationale_technical_medium_term",
+    "rationale technical setup long term term": "rationale_technical_long_term",
+    "rationale technical setup long term": "rationale_technical_long_term",
+    "rationale fundamentals short term": "rationale_fundamentals_short_term",
+    "rationale fundamentals medium long term": "rationale_fundamentals_medium_long_term",
+    "run #": "run_number",
+    "run number": "run_number",
+    "run date": "run_date",
+    "run time": "run_time",
+}
+
 
 def _normalize_header(value: str) -> str:
     cleaned = (
@@ -16,6 +55,8 @@ def _normalize_header(value: str) -> str:
         .replace("+", " plus ")
         .replace("/", " ")
         .replace("-", " ")
+        .replace("–", " ")
+        .replace("—", " ")
         .replace("(", " ")
         .replace(")", " ")
     )
@@ -25,6 +66,21 @@ def _normalize_header(value: str) -> str:
 def _is_separator_token(value: str) -> bool:
     stripped = value.replace(":", "").replace("-", "").strip()
     return stripped == ""
+
+
+def _looks_like_stock_table_header_tokens(tokens: list[str]) -> bool:
+    normalized = [_normalize_header(t) for t in tokens]
+    required_markers = {"stock symbol", "stock name", "entry range"}
+    optional_markers = {"llm name model", "llm name plus model", "technical setup", "units to buy"}
+    marker_hits = set()
+    for token in normalized:
+        if token in required_markers or token in optional_markers:
+            marker_hits.add(token)
+    # Require at least core markers + one extra table marker.
+    return (
+        len(required_markers.intersection(marker_hits)) >= 2
+        and len(marker_hits) >= 3
+    )
 
 
 def _is_header_like_row(row: list[str], headers: list[str]) -> bool:
@@ -38,6 +94,7 @@ def _is_header_like_row(row: list[str], headers: list[str]) -> bool:
 
 def _looks_like_data_row(item: dict[str, Any]) -> bool:
     symbol = str(item.get("stock_symbol", "")).strip()
+    exchange_symbol = str(item.get("exchange_symbol", "")).strip()
     name = str(item.get("stock_name", "")).strip()
     technical = str(item.get("technical_setup", "")).strip()
     # Avoid accepting duplicated header/separator rows as data.
@@ -47,7 +104,36 @@ def _looks_like_data_row(item: dict[str, Any]) -> bool:
         return False
     if technical and set(technical.replace("-", "").replace(" ", "")) == set():
         return False
-    return bool(symbol)
+    return bool(symbol or exchange_symbol or name)
+
+
+def normalize_stock_rows(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize keys and drop non-stock/preamble rows before Sheet export."""
+    normalized: list[dict[str, Any]] = []
+    for stock in stocks:
+        item: dict[str, Any] = {}
+        for key, value in stock.items():
+            canonical_key = KEY_MAP.get(_normalize_header(str(key)), _normalize_header(str(key)).replace(" ", "_"))
+            item[canonical_key] = value
+
+        llm_name_model = str(item.get("llm_name_model", "")).strip().lower()
+        if llm_name_model in {"llm name + model", "llm name model"}:
+            item["llm_name_model"] = ""
+
+        # Preamble rows usually have no stock identity and no entry details.
+        if not _looks_like_data_row(item):
+            continue
+        if not str(item.get("entry_range", "")).strip() and not str(item.get("technical_setup", "")).strip():
+            continue
+
+        upside, weeks = _parse_upside_horizon_and_weeks(item.get("upside_horizon"))
+        if upside is not None:
+            item["upside_horizon"] = upside
+        if weeks is not None and not item.get("weeks"):
+            item["weeks"] = weeks
+
+        normalized.append(item)
+    return normalized
 
 
 def _to_number(value: Any) -> int | float | None:
@@ -161,45 +247,11 @@ def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
                 rows.append(cols[: len(headers)])
 
             if rows:
-                key_map = {
-                    "llm name model": "llm_name_model",
-                    "exchange symbol": "exchange_symbol",
-                    "stock symbol": "stock_symbol",
-                    "stock name": "stock_name",
-                    "technical setup": "technical_setup",
-                    "entry range": "entry_range",
-                    "stop loss": "stop_loss",
-                    "target": "target",
-                    "analyst source": "analyst_source",
-                    "units to buy": "units_to_buy",
-                    "price per unit": "price_per_unit",
-                    "total buy amount": "total_buy_amount",
-                    "upside horizon percent return in weeks": "upside_horizon",
-                    "upside horizon return in weeks": "upside_horizon",
-                    "upside horizon": "upside_horizon",
-                    "weeks": "weeks",
-                    "confidence score 0 100": "confidence_score",
-                    "confidence score": "confidence_score",
-                    "rationale remarks": "rationale_remarks",
-                    "rationale technical setup short term 1 3 months": "rationale_technical_short_term",
-                    "rationale technical setup medium term": "rationale_technical_medium_term",
-                    "rationale technical setup long term term": "rationale_technical_long_term",
-                    "rationale technical setup long term": "rationale_technical_long_term",
-                    "rationale fundamentals short term": "rationale_fundamentals_short_term",
-                    "rationale fundamentals medium long term": "rationale_fundamentals_medium_long_term",
-                }
-
-                normalized_headers = [key_map.get(_normalize_header(h), _normalize_header(h).replace(" ", "_")) for h in headers]
+                normalized_headers = [KEY_MAP.get(_normalize_header(h), _normalize_header(h).replace(" ", "_")) for h in headers]
                 parsed_rows: list[dict[str, Any]] = []
                 for row in rows:
                     item = {normalized_headers[i]: row[i] for i in range(len(normalized_headers))}
-                    upside, weeks = _parse_upside_horizon_and_weeks(item.get("upside_horizon"))
-                    if upside is not None:
-                        item["upside_horizon"] = upside
-                    if weeks is not None and not item.get("weeks"):
-                        item["weeks"] = weeks
-                    if _looks_like_data_row(item):
-                        parsed_rows.append(item)
+                    parsed_rows.extend(normalize_stock_rows([item]))
                 if parsed_rows:
                     return parsed_rows
     except Exception:
@@ -208,8 +260,12 @@ def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
     # Fallback: Parse single-line pipe table output
     try:
         line = " ".join(response_text.split())
-        if "|" in line and "llm name + model" in line.lower():
+        if "|" in line:
             tokens = [token.strip() for token in line.split("|") if token.strip()]
+            if len(tokens) < 10:
+                return []
+            if not _looks_like_stock_table_header_tokens(tokens[:16]):
+                return []
             sep_idx = next((i for i, token in enumerate(tokens) if _is_separator_token(token)), -1)
             if sep_idx > 0:
                 headers = tokens[:sep_idx]
@@ -217,34 +273,7 @@ def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
                 while data_tokens and _is_separator_token(data_tokens[0]):
                     data_tokens.pop(0)
 
-                key_map = {
-                    "llm name model": "llm_name_model",
-                    "exchange symbol": "exchange_symbol",
-                    "stock symbol": "stock_symbol",
-                    "stock name": "stock_name",
-                    "technical setup": "technical_setup",
-                    "entry range": "entry_range",
-                    "stop loss": "stop_loss",
-                    "target": "target",
-                    "analyst source": "analyst_source",
-                    "units to buy": "units_to_buy",
-                    "price per unit": "price_per_unit",
-                    "total buy amount": "total_buy_amount",
-                    "upside horizon percent return in weeks": "upside_horizon",
-                    "upside horizon return in weeks": "upside_horizon",
-                    "upside horizon": "upside_horizon",
-                    "weeks": "weeks",
-                    "confidence score 0 100": "confidence_score",
-                    "confidence score": "confidence_score",
-                    "rationale remarks": "rationale_remarks",
-                    "rationale technical setup short term 1 3 months": "rationale_technical_short_term",
-                    "rationale technical setup medium term": "rationale_technical_medium_term",
-                    "rationale technical setup long term term": "rationale_technical_long_term",
-                    "rationale technical setup long term": "rationale_technical_long_term",
-                    "rationale fundamentals short term": "rationale_fundamentals_short_term",
-                    "rationale fundamentals medium long term": "rationale_fundamentals_medium_long_term",
-                }
-                normalized_headers = [key_map.get(_normalize_header(h), _normalize_header(h).replace(" ", "_")) for h in headers]
+                normalized_headers = [KEY_MAP.get(_normalize_header(h), _normalize_header(h).replace(" ", "_")) for h in headers]
                 n_cols = len(normalized_headers)
                 rows = [data_tokens[i : i + n_cols] for i in range(0, len(data_tokens), n_cols) if len(data_tokens[i : i + n_cols]) == n_cols]
                 parsed_rows: list[dict[str, Any]] = []
@@ -252,13 +281,7 @@ def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
                     if _is_header_like_row(row, headers):
                         continue
                     item = {normalized_headers[i]: row[i] for i in range(n_cols)}
-                    upside, weeks = _parse_upside_horizon_and_weeks(item.get("upside_horizon"))
-                    if upside is not None:
-                        item["upside_horizon"] = upside
-                    if weeks is not None and not item.get("weeks"):
-                        item["weeks"] = weeks
-                    if _looks_like_data_row(item):
-                        parsed_rows.append(item)
+                    parsed_rows.extend(normalize_stock_rows([item]))
                 if parsed_rows:
                     return parsed_rows
     except Exception:
@@ -300,11 +323,14 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
         "weeks",
         "confidence_score",
         "rationale_remarks",
-        "rationale_technical_short_term",
         "rationale_technical_medium_term",
         "rationale_technical_long_term",
         "rationale_fundamentals_short_term",
         "rationale_fundamentals_medium_long_term",
+        "rationale_technical_short_term",
+        "run_number",
+        "run_date",
+        "run_time",
     ]
 
     header_labels = {
@@ -324,14 +350,19 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
         "weeks": "Weeks",
         "confidence_score": "Confidence Score (0-100)",
         "rationale_remarks": "Rationale Remarks",
-        "rationale_technical_short_term": "Rationale - Technical Setup (Short Term 1-3 Months)",
+        "rationale_technical_short_term": "Rationale Technical Setup Short Term 1–3 Months",
         "rationale_technical_medium_term": "Rationale - Technical Setup (Medium Term)",
         "rationale_technical_long_term": "Rationale - Technical Setup (Long Term)",
         "rationale_fundamentals_short_term": "Rationale - Fundamentals Short Term",
         "rationale_fundamentals_medium_long_term": "Rationale - Fundamentals Medium/Long Term",
+        "run_number": "Run #",
+        "run_date": "Run Date",
+        "run_time": "Run Time",
     }
 
-    selected_keys = [key for key in preferred_key_order if key in present_keys]
+    # Keep a stable, exact column sequence across all exports.
+    # Missing fields are exported as blank cells rather than dropping headers.
+    selected_keys = list(preferred_key_order)
     extra_keys = [key for key in sorted(present_keys) if key not in selected_keys]
     selected_keys.extend(extra_keys)
 

@@ -17,6 +17,79 @@ from app.shared.types import JobStatus
 logger = get_logger("app.domains.jobs.tasks")
 
 
+def _to_markdown_table_from_stocks(stocks: list[dict]) -> str:
+    """Build a sheet-safe markdown table from normalized stock rows."""
+    if not stocks:
+        return ""
+    key_order = [
+        "llm_name_model",
+        "exchange_symbol",
+        "stock_symbol",
+        "stock_name",
+        "technical_setup",
+        "entry_range",
+        "stop_loss",
+        "target",
+        "analyst_source",
+        "units_to_buy",
+        "price_per_unit",
+        "total_buy_amount",
+        "upside_horizon",
+        "weeks",
+        "confidence_score",
+        "rationale_remarks",
+        "rationale_technical_medium_term",
+        "rationale_technical_long_term",
+        "rationale_fundamentals_short_term",
+        "rationale_fundamentals_medium_long_term",
+        "rationale_technical_short_term",
+        "run_number",
+        "run_date",
+        "run_time",
+    ]
+    headers = [k for k in key_order if any(str(row.get(k, "")).strip() for row in stocks)]
+    if not headers:
+        return ""
+
+    def _label(key: str) -> str:
+        labels = {
+            "llm_name_model": "LLM Name + Model",
+            "upside_horizon": "Upside Horizon (%)",
+            "confidence_score": "Confidence Score (0-100)",
+            "rationale_technical_medium_term": "Rationale - Technical Setup (Medium Term)",
+            "rationale_technical_long_term": "Rationale - Technical Setup (Long Term)",
+            "rationale_fundamentals_short_term": "Rationale - Fundamentals Short Term",
+            "rationale_fundamentals_medium_long_term": "Rationale - Fundamentals Medium/Long Term",
+            "rationale_technical_short_term": "Rationale Technical Setup Short Term 1–3 Months",
+            "run_number": "Run #",
+            "run_date": "Run Date",
+            "run_time": "Run Time",
+        }
+        return labels.get(key, key.replace("_", " ").title())
+
+    def _cell(value: object) -> str:
+        return str(value if value is not None else "").replace("\n", " ").replace("|", "/").strip()
+
+    lines = [
+        f"| {' | '.join(_label(h) for h in headers)} |",
+        f"| {' | '.join('---' for _ in headers)} |",
+    ]
+    for row in stocks:
+        lines.append(f"| {' | '.join(_cell(row.get(h, '')) for h in headers)} |")
+    return "\n".join(lines)
+
+
+def _repair_stock_table_content(content: str) -> tuple[str, int]:
+    """Try to salvage malformed LLM output into valid markdown stock table."""
+    from app.domains.google_sheets.stock_service import normalize_stock_rows, parse_stock_recommendations
+
+    parsed_stocks = normalize_stock_rows(parse_stock_recommendations(content))
+    if not parsed_stocks:
+        return content, 0
+    repaired = _to_markdown_table_from_stocks(parsed_stocks)
+    return (repaired or content), len(parsed_stocks)
+
+
 def _count_markdown_table_data_rows(content: str) -> int:
     """Count probable markdown table data rows (excluding header + separator)."""
     lines = [line.strip() for line in (content or "").splitlines() if line.strip()]
@@ -481,6 +554,11 @@ def execute_ai_job(self, job_id: int) -> None:
         if _requires_strict_table_output(job.prompt):
             data_rows = _count_markdown_table_data_rows(content)
             if data_rows < 1:
+                repaired_content, repaired_rows = _repair_stock_table_content(content)
+                if repaired_rows > 0:
+                    content = repaired_content.strip()
+                    data_rows = _count_markdown_table_data_rows(content)
+            if data_rows < 1:
                 raise RuntimeError(
                     f"{job.provider}/{job.model} returned malformed table output (no data rows)"
                 )
@@ -488,6 +566,23 @@ def execute_ai_job(self, job_id: int) -> None:
                 raise RuntimeError(
                     f"{job.provider}/{job.model} returned malformed table output (placeholder noise)"
                 )
+            try:
+                from app.domains.google_sheets.stock_service import normalize_stock_rows, parse_stock_recommendations
+                parsed_stocks = normalize_stock_rows(parse_stock_recommendations(content))
+                if len(parsed_stocks) >= 5:
+                    repaired_content = _to_markdown_table_from_stocks(parsed_stocks)
+                    if repaired_content:
+                        content = repaired_content.strip()
+                if len(parsed_stocks) < 5:
+                    raise RuntimeError(
+                        f"{job.provider}/{job.model} returned insufficient recommendations "
+                        f"(expected 5, got {len(parsed_stocks)})"
+                    )
+            except RuntimeError:
+                raise
+            except Exception:
+                # Keep primary output validation resilient even if parser has issues.
+                logger.warning("Stock parser validation skipped for job_id=%s", job_id, exc_info=True)
         latest = repo.get(job_id)
         if latest and latest.status == JobStatus.FAILED and (latest.error_message or "").lower().find("cancelled") >= 0:
             logger.info("Skipping completion update for cancelled job %s", job_id)

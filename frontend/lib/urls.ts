@@ -5,11 +5,17 @@ import { sessionStorage } from '@/services/session';
  * API Base URL Configuration
  * Adjusts based on environment
  */
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
-const FRONTEND_BASE_URL = process.env.NEXT_PUBLIC_FRONTEND_URL;
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.API_URL ||
+  "http://localhost:8000";
+const FRONTEND_BASE_URL =
+  process.env.NEXT_PUBLIC_FRONTEND_URL ||
+  process.env.NEXTAUTH_URL ||
+  "http://localhost:3000";
 
 // Derive WebSocket base URL: http → ws, https → wss
-const WS_BASE_URL = API_BASE_URL!.replace(/^http/, "ws");
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, "ws");
 
 /**
  * URL Resolver - Centralized API endpoint management

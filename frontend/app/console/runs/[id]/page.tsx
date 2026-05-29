@@ -36,6 +36,10 @@ const STATUS_ICONS: Record<string, ElementType> = {
 };
 
 const ACTIVE_STATUSES = new Set(['pending', 'processing']);
+const TERMINAL_STATUSES = new Set(['completed', 'failed']);
+
+const parseApiTimestamp = (value: string) =>
+  /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? new Date(value) : new Date(`${value}Z`);
 
 function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
@@ -50,6 +54,22 @@ function formatTokens(value?: number | null) {
 function formatCost(value?: number | null) {
   if (!value) return '$0.0000';
   return `$${value.toFixed(4)}`;
+}
+
+function formatDuration(createdAt: string, updatedAt?: string) {
+  if (!updatedAt) return null;
+  const start = parseApiTimestamp(createdAt).getTime();
+  const end = parseApiTimestamp(updatedAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+
+  const totalSeconds = Math.floor((end - start) / 1000);
+  if (totalSeconds < 60) return `${totalSeconds} sec`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return `${minutes} min ${seconds} sec`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return `${hours} hr ${remMinutes} min ${seconds} sec`;
 }
 
 export default function RunDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -310,15 +330,22 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
                     {job.estimated_cost ? (
                       <span className="text-xs text-gray-400">{formatCostWithInr(job.estimated_cost)}</span>
                     ) : null}
-                    <span
-                      className={cn(
-                        'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold capitalize ring-1',
-                        STATUS_STYLES[job.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
-                      )}
-                    >
-                      <JobStatusIcon className={cn('size-3', jobIsActive && 'animate-spin')} />
-                      {job.status}
-                    </span>
+                    <div className="flex flex-col items-start">
+                      <span
+                        className={cn(
+                          'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold capitalize ring-1',
+                          STATUS_STYLES[job.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
+                        )}
+                      >
+                        <JobStatusIcon className={cn('size-3', jobIsActive && 'animate-spin')} />
+                        {job.status}
+                      </span>
+                      {TERMINAL_STATUSES.has((job.status || '').toLowerCase()) ? (
+                        <span className="mt-1 text-[11px] text-gray-500">
+                          {formatDuration(job.created_at, job.updated_at) ?? '-'}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
                 <div className="max-w-full p-5">

@@ -32,11 +32,82 @@ interface ParsedMarkdownTable {
   rows: string[][];
 }
 
+const EXACT_HEADER_ORDER = [
+  'LLM Name + Model',
+  'Exchange Symbol',
+  'Stock Symbol',
+  'Stock Name',
+  'Technical Setup',
+  'Entry Range',
+  'Stop Loss',
+  'Target',
+  'Analyst Source',
+  'Units to Buy',
+  'Price per Unit',
+  'Total Buy Amount',
+  'Upside Horizon (%)',
+  'Weeks',
+  'Confidence Score (0-100)',
+  'Rationale Remarks',
+  'Rationale - Technical Setup (Medium Term)',
+  'Rationale - Technical Setup (Long Term)',
+  'Rationale - Fundamentals Short Term',
+  'Rationale - Fundamentals Medium/Long Term',
+  'Rationale Technical Setup Short Term 1–3 Months',
+  'Run #',
+  'Run Date',
+  'Run Time',
+  'LLM',
+] as const;
+
+const HEADER_ALIAS_TO_EXACT: Record<string, (typeof EXACT_HEADER_ORDER)[number]> = {
+  'llm name model': 'LLM Name + Model',
+  'llm name plus model': 'LLM Name + Model',
+  'exchange symbol': 'Exchange Symbol',
+  'stock symbol': 'Stock Symbol',
+  'stock name': 'Stock Name',
+  'technical setup': 'Technical Setup',
+  'entry range': 'Entry Range',
+  'stop loss': 'Stop Loss',
+  'target': 'Target',
+  'analyst source': 'Analyst Source',
+  'analyst/source': 'Analyst Source',
+  'units to buy': 'Units to Buy',
+  'price per unit': 'Price per Unit',
+  'total buy amount': 'Total Buy Amount',
+  'upside horizon': 'Upside Horizon (%)',
+  'upside horizon percent': 'Upside Horizon (%)',
+  'upside horizon (%)': 'Upside Horizon (%)',
+  'weeks': 'Weeks',
+  'confidence score': 'Confidence Score (0-100)',
+  'confidence score (0-100)': 'Confidence Score (0-100)',
+  'rationale remarks': 'Rationale Remarks',
+  'rationale - technical setup (medium term)': 'Rationale - Technical Setup (Medium Term)',
+  'rationale technical setup medium term': 'Rationale - Technical Setup (Medium Term)',
+  'rationale - technical setup (long term)': 'Rationale - Technical Setup (Long Term)',
+  'rationale technical setup long term': 'Rationale - Technical Setup (Long Term)',
+  'rationale - fundamentals short term': 'Rationale - Fundamentals Short Term',
+  'rationale fundamentals short term': 'Rationale - Fundamentals Short Term',
+  'rationale - fundamentals medium/long term': 'Rationale - Fundamentals Medium/Long Term',
+  'rationale fundamentals medium long term': 'Rationale - Fundamentals Medium/Long Term',
+  'rationale technical setup short term 1 3 months': 'Rationale Technical Setup Short Term 1–3 Months',
+  'run #': 'Run #',
+  'run number': 'Run #',
+  'run date': 'Run Date',
+  'run time': 'Run Time',
+  'llm': 'LLM',
+};
+
 function normalizeHeader(value: string): string {
   return value
     .toLowerCase()
     .replace(/\*\*/g, '')
     .replace(/[`_*]/g, '')
+    .replace(/[–—]/g, '-')
+    .replace(/\+/g, ' plus ')
+    .replace(/[()]/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\//g, '/')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -147,18 +218,52 @@ export default function InvestmentRecommendationTable({ content }: Props) {
     return parseMarkdownTable(content);
   }, [content, data]);
 
+  const normalizedMarkdownTable = useMemo(() => {
+    if (!markdownTable) return null;
+
+    const sourceIndexByTarget: Partial<Record<(typeof EXACT_HEADER_ORDER)[number], number>> = {};
+    markdownTable.headers.forEach((header, idx) => {
+      const key = normalizeHeader(header);
+      const mapped = HEADER_ALIAS_TO_EXACT[key];
+      if (mapped && sourceIndexByTarget[mapped] === undefined) {
+        sourceIndexByTarget[mapped] = idx;
+      }
+    });
+
+    const llmNameModelIndex = sourceIndexByTarget['LLM Name + Model'];
+    const llmIndex = sourceIndexByTarget.LLM;
+
+    const rows = markdownTable.rows.map((row) => {
+      const normalizedRow = EXACT_HEADER_ORDER.map((target) => {
+        const idx = sourceIndexByTarget[target];
+        return idx !== undefined ? (row[idx] ?? '') : '';
+      });
+
+      if (!normalizedRow[EXACT_HEADER_ORDER.indexOf('LLM')]) {
+        const llmNameModel = llmNameModelIndex !== undefined ? String(row[llmNameModelIndex] ?? '').trim() : '';
+        const llmValue = llmIndex !== undefined ? String(row[llmIndex] ?? '').trim() : '';
+        const derivedLlm = llmValue || (llmNameModel ? llmNameModel.split(/\s+/)[0] : '');
+        normalizedRow[EXACT_HEADER_ORDER.indexOf('LLM')] = derivedLlm;
+      }
+
+      return normalizedRow;
+    });
+
+    return { headers: [...EXACT_HEADER_ORDER], rows };
+  }, [markdownTable]);
+
   const cleanStocks = useMemo(() => {
     if (!data) return [];
     return data.stocks.filter((stock) => !isLikelyInvalidRow(stock));
   }, [data]);
 
-  if (markdownTable) {
+  if (normalizedMarkdownTable) {
     return (
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-300 bg-gray-50">
-              {markdownTable.headers.map((header, index) => (
+              {normalizedMarkdownTable.headers.map((header, index) => (
                 <th key={`${header}-${index}`} className="px-3 py-2 text-left font-semibold text-gray-700">
                   {header}
                 </th>
@@ -166,7 +271,7 @@ export default function InvestmentRecommendationTable({ content }: Props) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {markdownTable.rows.map((row, rowIdx) => (
+            {normalizedMarkdownTable.rows.map((row, rowIdx) => (
               <tr key={rowIdx} className="hover:bg-gray-50">
                 {row.map((cell, colIdx) => (
                   <td key={`${rowIdx}-${colIdx}`} className="px-3 py-2 align-top text-gray-700">

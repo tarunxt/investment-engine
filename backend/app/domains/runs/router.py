@@ -43,6 +43,15 @@ async def create_run(
                 400,
                 detail=f"Provider '{t.provider}' is not configured. Set the API key in your environment.",
             )
+        is_compatible, reason = ProviderFactory.model_compatibility(t.provider, t.model)
+        if not is_compatible:
+            raise HTTPException(
+                400,
+                detail=(
+                    f"Model '{t.model}' for provider '{t.provider}' is currently incompatible. "
+                    f"{reason or ''}".strip()
+                ),
+            )
 
     redis = _get_redis()
     uc = CreateRunUseCase(session=db, lock=RedisLock(redis))

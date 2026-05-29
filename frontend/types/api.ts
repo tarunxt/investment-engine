@@ -122,6 +122,8 @@ export interface ProviderInfo {
   configured: boolean;
   model_estimated_cost_usd?: Record<string, number>;
   model_estimated_cost_inr?: Record<string, number>;
+  model_compatibility?: Record<string, { compatible: boolean; reason?: string | null }>;
+  compatible_models?: string[];
 }
 
 export interface ApiUsageItem {
@@ -136,11 +138,20 @@ export interface ApiUsageItem {
   daily_limit_requests: number | null;
   notes: string | null;
   console_url: string | null;
+  gemini_key_index?: number | null;
+  gemini_key_masked?: string | null;
+  gemini_key_in_use?: boolean;
+  gemini_key_consumed?: boolean;
+  gemini_key_hidden_default?: boolean;
 }
 
 export interface ApiUsageSummaryResponse {
   timezone: string;
   date: string;
+  period?: 'today' | 'week' | 'month' | 'custom' | string;
+  period_label?: string;
+  from_date?: string | null;
+  to_date?: string | null;
   usd_inr_rate?: number;
   fx_source?: string;
   items: ApiUsageItem[];

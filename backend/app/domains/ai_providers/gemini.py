@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 from google import genai
 from google.genai import types
 
-from app.core.config import settings
+from app.core.config import get_gemini_api_keys
 from app.domains.ai_providers.base import (
     AIProviderResponse,
     BaseAIProvider,
@@ -27,11 +28,49 @@ SUPPORTED_MODELS = [
     "gemini-2.5-pro",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
-    "gemini-1.5-pro",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
     "gemini-3-flash-preview",
 ]
+
+
+def _error_attr(exc: Exception, name: str) -> Any:
+    for candidate in (name, name.lower(), name.upper(), "".join(part.capitalize() for part in name.split("_"))):
+        if hasattr(exc, candidate):
+            return getattr(exc, candidate)
+    return None
+
+
+def _should_rotate_key(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    status_code = (
+        _error_attr(exc, "status_code")
+        or _error_attr(exc, "code")
+        or _error_attr(exc, "http_status")
+    )
+    try:
+        status_int = int(status_code) if status_code is not None else None
+    except (TypeError, ValueError):
+        status_int = None
+
+    if status_int in {429, 500, 502, 503, 504}:
+        return True
+
+    transient_markers = [
+        "429",
+        "503",
+        "quota",
+        "rate limit",
+        "rate-limit",
+        "resource_exhausted",
+        "resource exhausted",
+        "unavailable",
+        "temporarily unavailable",
+        "try again later",
+        "deadline exceeded",
+        "timed out",
+        "timeout",
+        "internal",
+    ]
+    return any(marker in msg for marker in transient_markers)
 
 
 class GeminiProvider(BaseAIProvider):
@@ -41,15 +80,18 @@ class GeminiProvider(BaseAIProvider):
 
     @classmethod
     def is_configured(cls) -> bool:
-        return bool(settings.gemini_api_key or settings.gemini_api_key_fallback)
+        return bool(get_gemini_api_keys())
 
     def __init__(self) -> None:
-        self._api_keys = [k for k in [settings.gemini_api_key, settings.gemini_api_key_fallback] if k]
+        self._api_keys = get_gemini_api_keys()
         if not self._api_keys:
             raise ValueError(
                 "GEMINI_API_KEY is not configured"
             )
-        self.client = genai.Client(api_key=self._api_keys[0])
+        self.client = genai.Client(
+            api_key=self._api_keys[0],
+            http_options={"api_version": "v1alpha"},
+        )
 
     def generate(
         self,
@@ -58,17 +100,24 @@ class GeminiProvider(BaseAIProvider):
         model: str,
     ) -> AIProviderResponse:
         last_error: Exception | None = None
-        for api_key in self._api_keys:
-            try:
-                self.client = genai.Client(api_key=api_key)
-                return self._generate_once(prompt=prompt, model=model)
-            except Exception as exc:
-                last_error = exc
-                msg = str(exc).lower()
-                should_fallback = any(code in msg for code in ["429", "quota", "rate limit", "resource_exhausted"])
-                if not should_fallback:
-                    raise
-                continue
+        requested_model = (model or "").strip()
+        model_candidates = [requested_model] if requested_model else []
+        model_candidates.extend([m for m in SUPPORTED_MODELS if m != requested_model])
+
+        for model_name in model_candidates:
+            for api_key in self._api_keys:
+                try:
+                    self.client = genai.Client(
+                        api_key=api_key,
+                        http_options={"api_version": "v1alpha"},
+                    )
+                    return self._generate_once(prompt=prompt, model=model_name)
+                except Exception as exc:
+                    last_error = exc
+                    should_fallback = _should_rotate_key(exc)
+                    if not should_fallback:
+                        raise
+                    continue
         if last_error:
             raise last_error
         raise RuntimeError("Gemini generation failed.")

@@ -479,8 +479,19 @@ class apiServiceClass implements IApiService {
     return this.get<ProviderInfo[]>(url, { signal });
   }
 
-  getApiUsageSummary(): Promise<ApiUsageSummaryResponse> {
-    return this.get<ApiUsageSummaryResponse>(URLs.apiUsage.summary());
+  getApiUsageSummary(params?: {
+    period?: 'today' | 'week' | 'month' | 'custom';
+    custom_start?: string;
+    custom_end?: string;
+  }): Promise<ApiUsageSummaryResponse> {
+    const qs = new URLSearchParams();
+    if (params?.period) qs.set('period', params.period);
+    if (params?.custom_start) qs.set('custom_start', params.custom_start);
+    if (params?.custom_end) qs.set('custom_end', params.custom_end);
+    const query = qs.toString();
+    return this.get<ApiUsageSummaryResponse>(
+      `${URLs.apiUsage.summary()}${query ? `?${query}` : ''}`,
+    );
   }
 
   // ===== Prompt Endpoints =====

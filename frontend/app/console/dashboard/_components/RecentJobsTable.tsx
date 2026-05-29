@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Clock3, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -9,11 +9,19 @@ import { URLs } from '@/lib/urls';
 import { INDIA_TIMEZONE, useDashboard, STATUS_ICONS, STATUS_STYLES } from '../_context';
 import { apiService } from '@/services/api';
 
-const parseApiTimestamp = (value: string) =>
-  /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? new Date(value) : new Date(`${value}Z`);
+const parseApiTimestamp = (value?: string | null) => {
+  if (!value || typeof value !== 'string') return null;
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const parsed = /[zZ]|[+-]\d{2}:\d{2}$/.test(normalized)
+    ? new Date(normalized)
+    : new Date(`${normalized}Z`);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+};
 
-const formatTimestamp = (value: string) =>
-  parseApiTimestamp(value).toLocaleString('en-IN', {
+const formatTimestamp = (value?: string | null) => {
+  const parsed = parseApiTimestamp(value);
+  if (!parsed) return '-';
+  return parsed.toLocaleString('en-IN', {
     timeZone: INDIA_TIMEZONE,
     month: 'short',
     day: 'numeric',
@@ -21,9 +29,36 @@ const formatTimestamp = (value: string) =>
     minute: '2-digit',
     second: '2-digit',
   });
+};
 
-const formatModelName = (provider: string, model: string) =>
-  `${provider} / ${model}`.replace(/\b\w/g, (char) => char.toUpperCase());
+const formatModelName = (provider?: string | null, model?: string | null) =>
+  `${provider || 'Unknown'} / ${model || 'Unknown'}`.replace(/\b\w/g, (char) => char.toUpperCase());
+
+const TERMINAL_STATUSES = new Set(['completed', 'failed']);
+const PROCESSING_STATUS = 'processing';
+const ACTIVE_TIMER_STATUSES = new Set(['processing', 'completed', 'failed']);
+
+type JobTimer = {
+  startedAtMs: number | null;
+  endedAtMs: number | null;
+};
+
+const toMs = (value?: string | null) => {
+  const parsed = parseApiTimestamp(value);
+  if (!parsed) return null;
+  const ms = parsed.getTime();
+  return Number.isFinite(ms) ? ms : null;
+};
+
+const formatHMS = (durationMs: number) => {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((v) => String(v).padStart(2, '0')).join(':');
+};
+
+const normalizeStatus = (value?: string | null) => (value || '').trim().toLowerCase();
 
 const EXPORT_STYLES: Record<string, string> = {
   pending: 'bg-amber-50 text-amber-700 ring-amber-200',
@@ -45,6 +80,9 @@ export function RecentJobsTable() {
   const { runs, runsTotal, loadingRuns, lastUpdated } = useDashboard();
   const router = useRouter();
   const [usdInrRate, setUsdInrRate] = useState(83.5);
+  const [tickNow, setTickNow] = useState(() => Date.now());
+  const [jobTimers, setJobTimers] = useState<Record<number, JobTimer>>({});
+  const previousStatusesRef = useRef<Record<number, string>>({});
 
   useEffect(() => {
     let mounted = true;
@@ -64,6 +102,54 @@ export function RecentJobsTable() {
     };
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(() => setTickNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    setJobTimers((prev) => {
+      const next = { ...prev };
+      const currentStatuses: Record<number, string> = {};
+
+      for (const run of runs) {
+        for (const runJob of run.run_jobs ?? []) {
+          const job = runJob.job;
+          const jobId = job.id;
+          const status = normalizeStatus(job.status);
+          const prevStatus = previousStatusesRef.current[jobId];
+          const existing = next[jobId] ?? { startedAtMs: null, endedAtMs: null };
+          const updatedAtMs = toMs(job.updated_at);
+          const createdAtMs = toMs(job.created_at);
+
+          currentStatuses[jobId] = status;
+
+          if (status === PROCESSING_STATUS) {
+            // Start stopwatch when processing begins.
+            if (prevStatus !== PROCESSING_STATUS || existing.startedAtMs === null) {
+              existing.startedAtMs = updatedAtMs ?? Date.now();
+              existing.endedAtMs = null;
+            }
+          } else if (TERMINAL_STATUSES.has(status)) {
+            // Freeze stopwatch on terminal state.
+            if (existing.startedAtMs === null) {
+              // Fallback for older rows loaded after completion.
+              existing.startedAtMs = createdAtMs;
+            }
+            if (existing.endedAtMs === null) {
+              existing.endedAtMs = updatedAtMs ?? Date.now();
+            }
+          }
+
+          next[jobId] = existing;
+        }
+      }
+
+      previousStatusesRef.current = currentStatuses;
+      return next;
+    });
+  }, [runs]);
+
   const copyError = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -78,6 +164,17 @@ export function RecentJobsTable() {
     } catch {
       // ignore here, websocket/poll will surface current state
     }
+  };
+
+  const getTimerLabel = (job: { id: number; status: string; created_at?: string }) => {
+    const status = normalizeStatus(job.status);
+    const timer = jobTimers[job.id];
+    const fallbackStart = toMs(job.created_at) ?? tickNow;
+    const startMs = timer?.startedAtMs ?? fallbackStart;
+    const endMs =
+      status === PROCESSING_STATUS ? tickNow : (timer?.endedAtMs ?? tickNow);
+    if (!Number.isFinite(endMs) || endMs < startMs) return '00:00:00';
+    return formatHMS(endMs - startMs);
   };
 
   return (
@@ -207,9 +304,10 @@ export function RecentJobsTable() {
                               <tbody className="divide-y divide-gray-100 bg-white">
                                 {runJobs.map((runJob) => {
                                   const job = runJob.job;
-                                  const JobStatusIcon = STATUS_ICONS[job.status] ?? Clock3;
+                                  const normalizedJobStatus = normalizeStatus(job.status);
+                                  const JobStatusIcon = STATUS_ICONS[normalizedJobStatus] ?? Clock3;
                                   const modelExportStatus = getModelExportStatus(
-                                    job.status,
+                                    normalizedJobStatus,
                                     job.export_status,
                                   );
                                   return (
@@ -218,21 +316,28 @@ export function RecentJobsTable() {
                                         {formatModelName(job.provider, job.model)}
                                       </td>
                                       <td className="px-2 py-2">
-                                        <span
-                                          className={cn(
-                                            'inline-flex items-center gap-1.5 px-2 py-0.5 font-semibold capitalize ring-1',
-                                            STATUS_STYLES[job.status] ??
-                                              'bg-gray-50 text-gray-700 ring-gray-200',
-                                          )}
-                                        >
-                                          <JobStatusIcon
+                                        <div className="flex flex-col items-start">
+                                          <span
                                             className={cn(
-                                              'size-3',
-                                              job.status === 'processing' && 'animate-spin',
+                                              'inline-flex items-center gap-1.5 px-2 py-0.5 font-semibold capitalize ring-1',
+                                              STATUS_STYLES[normalizedJobStatus] ??
+                                                'bg-gray-50 text-gray-700 ring-gray-200',
                                             )}
-                                          />
-                                          {job.status}
-                                        </span>
+                                          >
+                                            <JobStatusIcon
+                                              className={cn(
+                                                'size-3',
+                                                normalizedJobStatus === PROCESSING_STATUS && 'animate-spin',
+                                              )}
+                                            />
+                                            {job.status}
+                                          </span>
+                                          <span className="mt-1 block text-[11px] font-medium text-gray-600">
+                                            {ACTIVE_TIMER_STATUSES.has(normalizedJobStatus)
+                                              ? getTimerLabel(job)
+                                              : ''}
+                                          </span>
+                                        </div>
                                       </td>
                                       <td className="px-2 py-2 text-gray-500">
                                         {formatTimestamp(job.created_at)}

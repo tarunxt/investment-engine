@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -117,14 +117,23 @@ class CreateRunUseCase:
         except LockAcquisitionError:
             raise ConflictException("Another run creation is in progress. Retry shortly.")
 
-        # Fan out one Celery task per job
+        # Fan out one Celery task per job.
+        # Stagger Gemini launches to reduce burst quota/rate-limit collisions.
         from app.domains.jobs.tasks import execute_ai_job
 
+        gemini_offset = 0
         for job in jobs:
+            countdown = 0
+            eta = scheduled_at
+            if job.provider.strip().lower() == "gemini":
+                countdown = gemini_offset
+                gemini_offset += 20
+                if eta is not None:
+                    eta = eta + timedelta(seconds=countdown)
             if is_future:
-                execute_ai_job.apply_async(args=[job.id], eta=scheduled_at)  # type: ignore
+                execute_ai_job.apply_async(args=[job.id], eta=eta)  # type: ignore
             else:
-                execute_ai_job.delay(job.id)  # type: ignore
+                execute_ai_job.apply_async(args=[job.id], countdown=countdown)  # type: ignore
 
         # Re-fetch with all relationships loaded for the response
         result = await self._run_repo.get(run.id)

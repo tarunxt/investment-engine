@@ -201,7 +201,7 @@ export function useRuns({ limit }: UseRunsOptions): UseRunsReturn {
       wsClientRef.current?.close();
       wsClientRef.current = null;
     };
-  }, [load]);
+  }, [load, maybeNotify]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) return;

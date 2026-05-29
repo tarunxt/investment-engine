@@ -10,6 +10,7 @@ from app.domains.google_sheets.service import GoogleSheetsService
 from app.domains.google_sheets.stock_service import (
     format_sheet_title,
     format_stocks_for_sheet,
+    normalize_stock_rows,
     parse_stock_recommendations,
 )
 from app.domains.jobs.models import Job
@@ -22,6 +23,14 @@ from app.infrastructure.messaging.celery_app import celery
 logger = logging.getLogger(__name__)
 _svc = GoogleSheetsService()
 IST = ZoneInfo("Asia/Kolkata")
+MIN_EXPECTED_STOCK_ROWS = 5
+
+
+def _error_text(exc: Exception) -> str:
+    text = str(exc).strip()
+    if text:
+        return text[:500]
+    return f"{exc.__class__.__name__}: unknown export error"
 
 
 def _with_run_metadata_columns(
@@ -100,20 +109,45 @@ def export_job_to_sheets_task(
                 else None
             )
 
-            stocks = parse_stock_recommendations(job.response)
+            stocks = normalize_stock_rows(parse_stock_recommendations(job.response))
 
             if not stocks:
+                response_preview = " ".join((job.response or "").split())[:220]
+                response_hint = (
+                    f" Response preview: {response_preview}"
+                    if response_preview
+                    else ""
+                )
                 job_repo.update_export_state(
                     job,
                     export_status="failed",
-                    export_error="No stock recommendations found in job response",
+                    export_error=(
+                        "No stock recommendations found in job response."
+                        f"{response_hint}"
+                    )[:500],
                 )
                 _publish_job_update(job)
                 _refresh_run_status(db, job.id)
                 return {
                     "status": "failed",
-                    "error": "No stock recommendations found in job response",
+                    "error": (
+                        "No stock recommendations found in job response. "
+                        f"Parsed rows: {len(stocks)}."
+                    )[:500],
                 }
+            if len(stocks) < MIN_EXPECTED_STOCK_ROWS:
+                reason = (
+                    f"Insufficient stock recommendations for export: expected at least "
+                    f"{MIN_EXPECTED_STOCK_ROWS}, got {len(stocks)}."
+                )
+                job_repo.update_export_state(
+                    job,
+                    export_status="failed",
+                    export_error=reason[:500],
+                )
+                _publish_job_update(job)
+                _refresh_run_status(db, job.id)
+                return {"status": "failed", "error": reason[:500]}
 
             now_ist = datetime.now(IST)
             formatted_title = format_sheet_title(now_ist, investment_amount)
@@ -188,7 +222,7 @@ def export_job_to_sheets_task(
                 job_repo.update_export_state(
                     job,
                     export_status="failed" if is_last_attempt else "queued",
-                    export_error=str(exc)[:500],
+                    export_error=_error_text(exc),
                 )
                 _publish_job_update(job)
                 _refresh_run_status(db, job.id)
@@ -196,7 +230,7 @@ def export_job_to_sheets_task(
                 "Export job %d to Sheets failed for user %d", job_id, user_id
             )
             if is_last_attempt:
-                return {"status": "failed", "error": str(exc)[:500]}
+                return {"status": "failed", "error": _error_text(exc)}
             raise self.retry(exc=exc, countdown=10)
 
 
@@ -253,7 +287,7 @@ def export_run_to_sheets_task(
             for run_job in run_jobs:
                 job = run_job.job
                 if job.response:
-                    stocks = parse_stock_recommendations(job.response)
+                    stocks = normalize_stock_rows(parse_stock_recommendations(job.response))
                     # Add stage info to each stock
                     for stock in stocks:
                         stock["stage"] = f"Stage {run_job.stage}"
@@ -261,15 +295,40 @@ def export_run_to_sheets_task(
                     model_names.add(f"{job.provider} ({job.model})")
 
             if not all_stocks:
+                terminal_jobs = [
+                    rj.job
+                    for rj in run_jobs
+                    if rj.job
+                    and (
+                        (getattr(rj.job.status, "value", str(rj.job.status)).lower())
+                        in {"completed", "failed"}
+                    )
+                ]
+                sample = next((j for j in terminal_jobs if j.response), None)
+                response_preview = " ".join((sample.response or "").split())[:220] if sample else ""
+                reason = "No stock recommendations found in run response"
+                if response_preview:
+                    reason = f"{reason}. Sample response preview: {response_preview}"
                 run_repo.update_export_state(
                     run,
                     export_status="failed",
-                    export_error="No stock recommendations found in run response",
+                    export_error=reason[:500],
                 )
                 return {
                     "status": "failed",
-                    "error": "No stock recommendations found in any run job response",
+                    "error": reason[:500],
                 }
+            if len(all_stocks) < MIN_EXPECTED_STOCK_ROWS:
+                reason = (
+                    f"Insufficient total stock recommendations for export: expected at least "
+                    f"{MIN_EXPECTED_STOCK_ROWS}, got {len(all_stocks)}."
+                )
+                run_repo.update_export_state(
+                    run,
+                    export_status="failed",
+                    export_error=reason[:500],
+                )
+                return {"status": "failed", "error": reason[:500]}
 
             now_ist = datetime.now(IST)
             formatted_title = format_sheet_title(now_ist, investment_amount)
@@ -325,15 +384,18 @@ def export_run_to_sheets_task(
         except Exception as exc:
             run_repo = SyncRunRepository(db)
             run = run_repo.get(run_id)
+            is_last_attempt = self.request.retries >= self.max_retries
             if run:
                 run_repo.update_export_state(
                     run,
-                    export_status="failed",
-                    export_error=str(exc)[:500],
+                    export_status="failed" if is_last_attempt else "queued",
+                    export_error=_error_text(exc),
                 )
             logger.exception(
                 "Export run %d to Sheets failed for user %d", run_id, user_id
             )
+            if is_last_attempt:
+                return {"status": "failed", "error": _error_text(exc)}
             raise self.retry(exc=exc, countdown=10)
 
 

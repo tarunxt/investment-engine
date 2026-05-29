@@ -69,10 +69,11 @@ export function RunModeFields() {
           </button>
           <button
             type="button"
-            disabled={!selectedModelMixId}
+            disabled={!selectedModelMixId || selectedModelMixId === 'compatible-models-system'}
             className="h-8 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400"
             onClick={() => {
               if (!selectedModelMixId) return;
+              if (selectedModelMixId === 'compatible-models-system') return;
               const current = savedModelMixes.find((mix) => mix.id === selectedModelMixId);
               const name = window.prompt('Edit model mix name:', current?.name || '');
               if (!name) return;
@@ -83,10 +84,11 @@ export function RunModeFields() {
           </button>
           <button
             type="button"
-            disabled={!selectedModelMixId}
+            disabled={!selectedModelMixId || selectedModelMixId === 'compatible-models-system'}
             className="h-8 rounded-md border border-red-300 bg-white px-2 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400"
             onClick={() => {
               if (!selectedModelMixId) return;
+              if (selectedModelMixId === 'compatible-models-system') return;
               const current = savedModelMixes.find((mix) => mix.id === selectedModelMixId);
               const ok = window.confirm(
                 `Delete model mix "${current?.name || selectedModelMixId}"?`,
@@ -174,24 +176,35 @@ export function RunModeFields() {
                     {p.models.map((m) => {
                       const key = `${p.name}::${m}`;
                       const isSelected = selectedTargets.has(key);
+                      const compatibility = p.model_compatibility?.[m];
+                      const isCompatible = compatibility?.compatible !== false;
+                      const reason = compatibility?.reason || 'Not compatible with current API/project access';
                       const estimatedInr = p.model_estimated_cost_inr?.[m];
                       const costLabel =
                         typeof estimatedInr === 'number' ? ` (₹${estimatedInr.toFixed(2)})` : '';
                       return (
                         <label
                           key={key}
-                          className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${isSelected
+                          title={!isCompatible ? reason : undefined}
+                          className={`flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${isCompatible ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'} ${isSelected
                             ? 'bg-indigo-50 text-indigo-700'
-                            : 'hover:bg-gray-100'
+                            : isCompatible ? 'hover:bg-gray-100' : 'bg-gray-100'
                             }`}
                         >
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => toggleTarget(key)}
+                            disabled={!isCompatible}
+                            onChange={() => {
+                              if (!isCompatible) {
+                                window.alert(`${p.name}/${m} cannot be selected: ${reason}`);
+                                return;
+                              }
+                              toggleTarget(key);
+                            }}
                             className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                           />
-                          <span className="flex-1 truncate text-xs text-gray-700">
+                          <span className={`flex-1 truncate text-xs ${isCompatible ? 'text-gray-700' : 'text-gray-500'}`}>
                             {m}{costLabel}
                           </span>
                           {isSelected && (

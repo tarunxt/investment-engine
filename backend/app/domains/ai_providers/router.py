@@ -64,6 +64,8 @@ async def list_providers(
         "deepseek": DeepSeekProvider.estimate_prompt_cost_usd,
     }
     for provider in base:
+        compatibility: dict[str, dict[str, str | bool | None]] = {}
+        compatible_models: list[str] = []
         model_estimated_cost_inr: dict[str, float] = {}
         model_estimated_cost_usd: dict[str, float] = {}
         provider_recent_costs: list[float] = []
@@ -98,6 +100,14 @@ async def list_providers(
         )
 
         for model in provider["models"]:
+            is_compatible, reason = ProviderFactory.model_compatibility(provider["name"], model)
+            compatibility[model] = {
+                "compatible": is_compatible,
+                "reason": reason,
+            }
+            if is_compatible:
+                compatible_models.append(model)
+
             # Primary source of truth: latest successful run for this exact model.
             # This keeps estimate badges aligned to actual recent behavior.
             latest_model_stmt = (
@@ -139,4 +149,6 @@ async def list_providers(
             model_estimated_cost_inr[model] = round(usd * usd_inr_rate, 2)
         provider["model_estimated_cost_usd"] = model_estimated_cost_usd
         provider["model_estimated_cost_inr"] = model_estimated_cost_inr
+        provider["model_compatibility"] = compatibility
+        provider["compatible_models"] = compatible_models
     return base

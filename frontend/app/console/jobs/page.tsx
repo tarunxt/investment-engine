@@ -84,6 +84,7 @@ export default function JobsPage() {
   const wsClientRef = useRef<WSClient | null>(null);
   const loadJobsRef = useRef<typeof loadJobs>(loadJobs);
   const statusFilterRef = useRef<StatusFilter>(statusFilter);
+  const notifiedRef = useRef<Set<string>>(new Set());
 
   const updateURLParams = useCallback((params: { status?: string; page?: number; search?: string }) => {
     const newParams = new URLSearchParams(searchParams);
@@ -160,8 +161,28 @@ export default function JobsPage() {
           [key: string]: unknown;
         };
         setJobs((prev) => {
+          const previous = prev.find((j) => j.id === job_id);
           const nextStatus = patch.status as string | undefined;
           const activeFilter = statusFilterRef.current;
+          if (
+            nextStatus &&
+            (nextStatus === 'completed' || nextStatus === 'failed') &&
+            previous?.status !== nextStatus &&
+            typeof window !== 'undefined' &&
+            'Notification' in window &&
+            Notification.permission === 'granted'
+          ) {
+            const notifyKey = `${job_id}:${nextStatus}`;
+            if (!notifiedRef.current.has(notifyKey)) {
+              notifiedRef.current.add(notifyKey);
+              const title = nextStatus === 'completed' ? 'Job Completed' : 'Job Failed';
+              const provider = (patch.provider as string) || previous?.provider || 'model';
+              const model = (patch.model as string) || previous?.model || '';
+              new Notification(title, {
+                body: `${provider}/${model} is ${nextStatus}.`,
+              });
+            }
+          }
           if (nextStatus && activeFilter !== 'all' && nextStatus !== activeFilter) {
             return prev.filter((j) => j.id !== job_id);
           }
@@ -194,6 +215,13 @@ export default function JobsPage() {
       wsClientRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => undefined);
+    }
+  }, []);
 
   function handleStatusChange(s: StatusFilter) {
     setStatusFilter(s);
