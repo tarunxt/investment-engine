@@ -48,6 +48,49 @@ def _is_likely_valid_run_output(response: str | None) -> bool:
     return True
 
 
+def _normalize_prompt_for_cost_match(prompt: str | None) -> str:
+    return re.sub(r"\s+", " ", (prompt or "").strip())
+
+
+def _coerce_cost(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_recent_model_costs(
+    rows: list[tuple[object, str | None, str | None, int]],
+    *,
+    prompt_text: str,
+    current_user_id: int,
+) -> tuple[float | None, float | None]:
+    normalized_prompt = _normalize_prompt_for_cost_match(prompt_text)
+    exact_prompt_cost: float | None = None
+    latest_model_cost: float | None = None
+
+    for estimated_cost, response, row_prompt, row_user_id in rows:
+        if not _is_likely_valid_run_output(response):
+            continue
+
+        cost = _coerce_cost(estimated_cost)
+        if cost is None:
+            continue
+
+        if latest_model_cost is None:
+            latest_model_cost = cost
+
+        if (
+            normalized_prompt
+            and row_user_id == current_user_id
+            and _normalize_prompt_for_cost_match(row_prompt) == normalized_prompt
+        ):
+            exact_prompt_cost = cost
+            break
+
+    return exact_prompt_cost, latest_model_cost
+
+
 @router.get("")
 async def list_providers(
     prompt: str = Query(default="", max_length=10000),
@@ -57,6 +100,7 @@ async def list_providers(
     base = ProviderFactory.list_providers()
     usd_inr_rate, _ = await _fetch_usd_inr_rate()
     prompt_text = (prompt or "").strip()
+    recent_model_limit = 80 if prompt_text else 20
     estimators = {
         "openai": OpenAIProvider.estimate_prompt_cost_usd,
         "anthropic": AnthropicProvider.estimate_prompt_cost_usd,
@@ -111,7 +155,7 @@ async def list_providers(
             # Primary source of truth: latest successful run for this exact model.
             # This keeps estimate badges aligned to actual recent behavior.
             latest_model_stmt = (
-                select(Job.estimated_cost, Job.response)
+                select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id)
                 .where(
                     and_(
                         Job.provider == provider["name"],
@@ -122,20 +166,18 @@ async def list_providers(
                     )
                 )
                 .order_by(desc(Job.id))
-                .limit(20)
+                .limit(recent_model_limit)
             )
             latest_model_rows = (await db.execute(latest_model_stmt)).all()
-            latest_model_cost: float | None = None
-            for estimated_cost, response in latest_model_rows:
-                if not _is_likely_valid_run_output(response):
-                    continue
-                try:
-                    latest_model_cost = float(estimated_cost)
-                    break
-                except (TypeError, ValueError):
-                    continue
+            exact_prompt_cost, latest_model_cost = _resolve_recent_model_costs(
+                latest_model_rows,
+                prompt_text=prompt_text,
+                current_user_id=current_user.id,
+            )
 
-            if latest_model_cost is not None:
+            if exact_prompt_cost is not None:
+                usd = exact_prompt_cost
+            elif latest_model_cost is not None:
                 usd = latest_model_cost
             else:
                 # Fallback 1: estimator by prompt + model.

@@ -19,6 +19,7 @@ interface EventScanRunControlsProps {
   buttonLabel?: string;
   defaultTarget?: ProviderModelTarget | null;
   disabled?: boolean;
+  historicalEstimatedCostInrByTarget?: Record<string, number>;
   onRun: (target: ProviderModelTarget | null) => void | Promise<void>;
   pickerButtonClassName?: string;
   running?: boolean;
@@ -95,6 +96,7 @@ export function EventScanRunControls({
   buttonLabel = 'Run Events Scan',
   defaultTarget,
   disabled,
+  historicalEstimatedCostInrByTarget,
   onRun,
   pickerButtonClassName,
   running,
@@ -208,8 +210,20 @@ export function EventScanRunControls({
   const selectedCount = activeTarget ? 1 : 0;
   const totalModelCount = providers.reduce((total, provider) => total + provider.models.length, 0);
   const selectedProvider = providers.find((provider) => provider.name === activeTarget?.provider);
+  const getEstimatedCostInr = useCallback(
+    (providerName: string, model: string) => {
+      const override = historicalEstimatedCostInrByTarget?.[`${providerName}::${model}`];
+      if (typeof override === 'number' && Number.isFinite(override)) {
+        return override;
+      }
+      return selectedProvider?.name === providerName
+        ? selectedProvider.model_estimated_cost_inr?.[model]
+        : providers.find((provider) => provider.name === providerName)?.model_estimated_cost_inr?.[model];
+    },
+    [historicalEstimatedCostInrByTarget, providers, selectedProvider],
+  );
   const selectedEstimatedCostInr = selectedProvider && activeTarget
-    ? selectedProvider.model_estimated_cost_inr?.[activeTarget.model] ?? 0
+    ? getEstimatedCostInr(selectedProvider.name, activeTarget.model) ?? 0
     : 0;
 
   return (
@@ -324,7 +338,7 @@ export function EventScanRunControls({
                               const isCompatible = compatibility?.compatible !== false;
                               const isSelected = activeTarget?.provider === provider.name
                                 && activeTarget.model === model;
-                              const estimatedInr = provider.model_estimated_cost_inr?.[model];
+                              const estimatedInr = getEstimatedCostInr(provider.name, model);
                               const costLabel = typeof estimatedInr === 'number'
                                 ? ` (₹${estimatedInr.toFixed(2)})`
                                 : '';

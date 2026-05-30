@@ -19,6 +19,7 @@ from app.domains.ai_providers.deepseek import DeepSeekProvider
 from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.ai_providers.gemini import GeminiProvider
 from app.domains.ai_providers.openai import OpenAIProvider
+from app.domains.ai_providers.router import _resolve_recent_model_costs
 from app.domains.jobs import tasks
 from app.shared.types import JobStatus
 
@@ -90,6 +91,54 @@ class ProviderFactoryTests(unittest.TestCase):
     def test_create_rejects_unsupported_provider(self):
         with self.assertRaises(ValueError):
             ProviderFactory.create("unsupported-provider")
+
+
+class ProviderCostSelectionTests(unittest.TestCase):
+    def test_prefers_latest_exact_prompt_cost_for_current_user(self):
+        rows = [
+            (0.0007, "latest valid output", "Different prompt", 41),
+            (0.0005, "older valid output", "Analyze   AMD   \n earnings", 7),
+            (0.0004, "even older valid output", "Analyze AMD earnings", 7),
+        ]
+
+        exact_prompt_cost, latest_model_cost = _resolve_recent_model_costs(
+            rows,
+            prompt_text="Analyze AMD earnings",
+            current_user_id=7,
+        )
+
+        self.assertEqual(exact_prompt_cost, 0.0005)
+        self.assertEqual(latest_model_cost, 0.0007)
+
+    def test_falls_back_to_latest_valid_model_cost_when_prompt_does_not_match(self):
+        rows = [
+            (0.0009, "latest valid output", "Different prompt", 12),
+            (0.0006, "", "Analyze AMD earnings", 12),
+        ]
+
+        exact_prompt_cost, latest_model_cost = _resolve_recent_model_costs(
+            rows,
+            prompt_text="Analyze AMD earnings",
+            current_user_id=12,
+        )
+
+        self.assertIsNone(exact_prompt_cost)
+        self.assertEqual(latest_model_cost, 0.0009)
+
+    def test_ignores_unparseable_cost_rows(self):
+        rows = [
+            ("bad-cost", "latest valid output", "Analyze AMD earnings", 7),
+            (0.0008, "older valid output", "Analyze AMD earnings", 7),
+        ]
+
+        exact_prompt_cost, latest_model_cost = _resolve_recent_model_costs(
+            rows,
+            prompt_text="Analyze AMD earnings",
+            current_user_id=7,
+        )
+
+        self.assertEqual(exact_prompt_cost, 0.0008)
+        self.assertEqual(latest_model_cost, 0.0008)
 
 
 class ExecuteAIJobTests(unittest.TestCase):

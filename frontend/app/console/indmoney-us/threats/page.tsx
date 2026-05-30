@@ -17,6 +17,7 @@ import { EventScanRunControls } from '@/components/shared/EventScanRunControls';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
 import { ScanHistoryButton } from '@/components/shared/ScanHistoryButton';
 import { Button } from '@/components/ui/button';
+import { useHistoricalAnalysisCosts } from '@/hooks/useHistoricalAnalysisCosts';
 import { useUsdInrRate } from '@/hooks/useUsdInrRate';
 import { URLs } from '@/lib/urls';
 import { apiService, APIError } from '@/services/api';
@@ -197,6 +198,11 @@ export default function IndMoneyUsThreatsPage() {
   }, [analysis?.job_id, analysis?.status, loadAnalysisJob]);
 
   const latestSnapshot = overview?.latest ?? null;
+  const historicalEstimatedCostInrByTarget = useHistoricalAnalysisCosts({
+    analysis,
+    loadHistory: loadAnalysisHistory,
+    usdInrRate,
+  });
   const topHoldings = [...(latestSnapshot?.holdings ?? [])]
     .sort((left, right) => (right.current_value ?? 0) - (left.current_value ?? 0))
     .slice(0, 5);
@@ -245,6 +251,7 @@ export default function IndMoneyUsThreatsPage() {
                 running={runningAnalysis}
                 buttonLabel="Run Threat Scan"
                 defaultTarget={analysis ? { provider: analysis.provider, model: analysis.model } : undefined}
+                historicalEstimatedCostInrByTarget={historicalEstimatedCostInrByTarget}
                 buttonClassName="rounded-full bg-sky-300 px-5 text-slate-950 hover:bg-sky-200"
               />
               <ScanHistoryButton
