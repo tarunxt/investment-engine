@@ -80,6 +80,7 @@ class ZerodhaThreatsTests(unittest.TestCase):
         self.assertIn("HAL", prompt)
         self.assertIn("TCS", prompt)
         self.assertIn("Table 10: Urgent Actionables / Immediate Risk-Control Actions", prompt)
+        self.assertIn("For every table row about a single stock, always include Exchange, Stock Symbol, and Stock Name.", prompt)
         self.assertIn("Exact Date / Timing", prompt)
         self.assertIn("Exact Date / Deadline", prompt)
         self.assertIn('do not write only "Before Earnings" or "Soon"', prompt)
@@ -104,9 +105,9 @@ class ZerodhaThreatsTests(unittest.TestCase):
 | Sector concentration | Defence and heavy industry are overweight | Correlated profit booking could hit multiple names at once | High |
 
 ## Table 10: Urgent Actionables / Immediate Risk-Control Actions
-| Stock | Urgent Action Needed | Why Action Is Needed Now | Trigger / Condition | Exact Date / Deadline | Suggested Action Size | Priority | Time Sensitivity |
-|---|---|---|---|---|---|---|---|
-| HAL | Tighten Stop-Loss | Position is extended after a vertical move | Close below 20-DMA | 14 Aug 2026 | 25% trim on trigger | High | Before earnings on 14 Aug 2026 |
+| Exchange | Stock Symbol | Stock Name | Urgent Action Needed | Why Action Is Needed Now | Trigger / Condition | Exact Date / Deadline | Suggested Action Size | Priority | Time Sensitivity |
+|---|---|---|---|---|---|---|---|---|---|
+| NSE | HAL | Hindustan Aeronautics Limited | Tighten Stop-Loss | Position is extended after a vertical move | Close below 20-DMA | 14 Aug 2026 | 25% trim on trigger | High | Before earnings on 14 Aug 2026 |
 
 ## Bottom Line
 | Point | Conclusion |
@@ -125,7 +126,9 @@ class ZerodhaThreatsTests(unittest.TestCase):
         self.assertEqual(len(parsed["tables"]), 2)
         self.assertEqual(parsed["tables"][0]["title"], "Table 1: Portfolio-Level Risk Snapshot")
         self.assertEqual(parsed["tables"][1]["key"], "urgent_actionables")
-        self.assertEqual(parsed["tables"][1]["rows"][0]["Stock"], "HAL")
+        self.assertEqual(parsed["tables"][1]["rows"][0]["Exchange"], "NSE")
+        self.assertEqual(parsed["tables"][1]["rows"][0]["Stock Symbol"], "HAL")
+        self.assertEqual(parsed["tables"][1]["rows"][0]["Stock Name"], "Hindustan Aeronautics Limited")
         self.assertEqual(parsed["tables"][1]["rows"][0]["Exact Date / Deadline"], "14 Aug 2026")
         self.assertEqual(parsed["bottom_line"][0]["label"], "The biggest short-term danger is")
         self.assertEqual(parsed["bottom_line"][1]["value"], "HAL, RELIANCE")

@@ -34,28 +34,6 @@ type NavigationGroup = {
 
 type NavigationEntry = NavigationItem | NavigationGroup;
 
-type PortfolioHeader = {
-    title: string;
-    subtitle: string;
-};
-
-const PORTFOLIO_HEADERS: Array<{ prefix: string; header: PortfolioHeader }> = [
-    {
-        prefix: URLs.routes.console.zerodha(),
-        header: {
-            title: 'Zerodha',
-            subtitle: 'Kite Connect integration — save daywise portfolio history and manage orders',
-        },
-    },
-    {
-        prefix: URLs.routes.console.indmoneyUs(),
-        header: {
-            title: 'IndMoney US',
-            subtitle: 'Manual US portfolio tracking for INDmoney when no direct API is available.',
-        },
-    },
-];
-
 export default function DashboardLayout({
     children,
 }: {
@@ -147,9 +125,6 @@ export default function DashboardLayout({
     const isPortfolioActive =
         pathname.startsWith('/console/zerodha') || pathname.startsWith('/console/indmoney-us');
     const isPortfolioExpanded = portfolioOpen || isPortfolioActive;
-    const activePortfolioHeader =
-        PORTFOLIO_HEADERS.find(({ prefix }) => pathname === prefix || pathname.startsWith(`${prefix}/`))?.header ?? null;
-
     if (loading) {
         return (
             <div className='w-full h-screen flex items-center justify-center'>
@@ -287,7 +262,7 @@ export default function DashboardLayout({
                 {/* Top header */}
                 <header className="bg-white shadow-sm sticky top-0 z-10">
                     <div className="flex h-16 items-center justify-between gap-4 px-4 sm:px-6">
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <div className="flex min-w-0 flex-1 items-center">
                             <button
                                 type="button"
                                 onClick={() => setSidebarOpen(true)}
@@ -295,19 +270,6 @@ export default function DashboardLayout({
                             >
                                 <HiOutlineMenu />
                             </button>
-
-                            {activePortfolioHeader ? (
-                                <div className="min-w-0 leading-tight">
-                                    <div className="truncate text-base font-semibold tracking-tight text-gray-950">
-                                        {activePortfolioHeader.title}
-                                    </div>
-                                    <div className="truncate text-xs text-gray-500">
-                                        {activePortfolioHeader.subtitle}
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="flex-1" />
-                            )}
                         </div>
 
                         <UserMenu

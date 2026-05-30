@@ -104,6 +104,7 @@ export const URLs = {
   indmoneyUs: {
     portfolio: () => `${API_BASE_URL}/indmoney-us/portfolio`,
     portfolioSnapshot: (snapshotId: number) => `${API_BASE_URL}/indmoney-us/portfolio/${snapshotId}`,
+    currentPrices: () => `${API_BASE_URL}/indmoney-us/prices/current`,
     eventsLatest: () => `${API_BASE_URL}/indmoney-us/events/latest`,
     eventsHistory: () => `${API_BASE_URL}/indmoney-us/events/history`,
     eventJob: (jobId: number) => `${API_BASE_URL}/indmoney-us/events/${jobId}`,

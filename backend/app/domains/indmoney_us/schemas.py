@@ -91,3 +91,54 @@ class IndMoneyUsPortfolioSnapshotDetailResponse(IndMoneyUsPortfolioSnapshotSumma
 class IndMoneyUsPortfolioOverviewResponse(BaseModel):
     latest: IndMoneyUsPortfolioSnapshotDetailResponse | None = None
     history: list[IndMoneyUsPortfolioSnapshotSummaryResponse]
+
+
+class IndMoneyUsCurrentPriceQuoteRequest(BaseModel):
+    exchange: str
+    symbol: str
+
+    @field_validator("exchange", "symbol")
+    @classmethod
+    def validate_market_identifier(cls, value: str) -> str:
+        cleaned = value.strip().upper()
+        if not cleaned:
+            raise ValueError("value is required")
+        if len(cleaned) > 24:
+            raise ValueError("value is too long")
+        if not all(char.isalnum() or char in {".", "-", "_"} for char in cleaned):
+            raise ValueError("value contains unsupported characters")
+        return cleaned
+
+
+class IndMoneyUsCurrentPricesRequest(BaseModel):
+    quotes: list[IndMoneyUsCurrentPriceQuoteRequest]
+
+    @field_validator("quotes")
+    @classmethod
+    def validate_quotes(cls, value: list[IndMoneyUsCurrentPriceQuoteRequest]) -> list[IndMoneyUsCurrentPriceQuoteRequest]:
+        if not value:
+            raise ValueError("at least one quote is required")
+        if len(value) > 50:
+            raise ValueError("too many quotes requested")
+        return value
+
+
+class IndMoneyUsCurrentPriceQuoteResponse(BaseModel):
+    exchange: str
+    symbol: str
+    company_name: str | None = None
+    currency: str | None = None
+    current_price: float | None = None
+    previous_close: float | None = None
+    change_value: float | None = None
+    change_percent: float | None = None
+    market_open: bool = False
+    session_open_at: datetime | None = None
+    session_close_at: datetime | None = None
+    error_message: str | None = None
+
+
+class IndMoneyUsCurrentPricesResponse(BaseModel):
+    quotes: list[IndMoneyUsCurrentPriceQuoteResponse]
+    market_open: bool = False
+    fetched_at: datetime

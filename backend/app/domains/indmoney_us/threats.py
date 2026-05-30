@@ -79,6 +79,8 @@ def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> st
         "If an exact upcoming event date cannot be verified, write 'Not found' or the closest verified timing window instead of guessing.",
         "In Table 5, use the `Exact Date / Timing` column for verified dates.",
         "In Table 10, use the `Exact Date / Deadline` column and never leave it vague when a public event date exists.",
+        "For every table row about a single stock, always include Exchange, Stock Symbol, and Stock Name.",
+        "Use the pasted stock symbol as authoritative when searching, and determine the verified primary listed exchange in a TradingView-compatible form such as NASDAQ, NYSE, or AMEX.",
         "",
         "Current INDmoney US portfolio snapshot:",
         f"- Snapshot id: {snapshot.id}",
@@ -182,8 +184,9 @@ def _build_holdings_markdown_table(snapshot: IndMoneyUsPortfolioSnapshot) -> str
         reverse=True,
     )
     headers = [
-        "Company",
-        "Ticker",
+        "Exchange",
+        "Stock Symbol",
+        "Stock Name",
         "Quantity",
         "Avg Buy",
         "Market Price",
@@ -201,7 +204,7 @@ def _build_holdings_markdown_table(snapshot: IndMoneyUsPortfolioSnapshot) -> str
     ]
 
     if not holdings:
-        lines.append("| None | - | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |")
+        lines.append("| - | None | None | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |")
         return "\n".join(lines)
 
     current_value = snapshot.current_value or 0.0
@@ -212,8 +215,9 @@ def _build_holdings_markdown_table(snapshot: IndMoneyUsPortfolioSnapshot) -> str
             "| "
             + " | ".join(
                 [
-                    str(holding.get("company_name") or ""),
+                    "-",
                     str(holding.get("symbol") or ""),
+                    str(holding.get("company_name") or holding.get("symbol") or ""),
                     _fmt_num(holding.get("quantity")),
                     _fmt_num(holding.get("average_price")),
                     _fmt_num(holding.get("market_price")),

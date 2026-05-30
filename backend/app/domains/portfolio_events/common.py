@@ -9,7 +9,9 @@ EVENT_ANALYSIS_MODEL = "gpt-4o-mini"
 
 EVENT_TABLE_COLUMNS = [
     "Date",
-    "Holding",
+    "Exchange",
+    "Stock Symbol",
+    "Stock Name",
     "Event",
     "Why it may matter",
     "Expected Outcome",
@@ -60,15 +62,18 @@ Source rules:
 
 1. Use the latest available online information.
 2. Do not rely on stale memory.
-3. Treat the pasted `Ticker` / symbol as authoritative and use it in searches.
+3. Treat the pasted exchange + stock symbol pair as authoritative when available and use it in searches.
 4. For Indian stocks, prefer NSE corporate announcements, BSE corporate announcements, company investor relations pages, exchange filings, SEBI/NCLT disclosures, and reputable market calendar sources.
 5. For US stocks, prefer company IR pages, SEC filings, Nasdaq/NYSE calendars, press releases, and reputable market calendar sources.
-6. If a date is company-confirmed or exchange-confirmed, write “Confirmed” in Status / Source.
-7. If a date is only estimated by third-party calendars, write “Estimated / not company-confirmed”.
-8. If sources conflict, mention the conflict briefly in Status / Source.
-9. Include source name and link/citation in Status / Source.
-10. Before concluding there are no events, check at least these categories for every holding, with extra care on the most material holdings: earnings/results date, dividend/ex-date, AGM/shareholder meeting, investor conference / analyst day / product event.
-11. Do not treat failure to find one event type as proof that no scheduled event exists.
+6. For Indian stocks, return the exchange as exactly `NSE` or `BSE` using the pasted portfolio data.
+7. For US stocks, return the primary listed exchange in a TradingView-compatible form such as `NASDAQ`, `NYSE`, or `AMEX` when it can be verified from current public sources.
+8. Always return both the stock symbol and the stock name. If the pasted stock name is only a ticker-like placeholder, replace it with the proper listed company name when verified.
+9. If a date is company-confirmed or exchange-confirmed, write “Confirmed” in Status / Source.
+10. If a date is only estimated by third-party calendars, write “Estimated / not company-confirmed”.
+11. If sources conflict, mention the conflict briefly in Status / Source.
+12. Include source name and link/citation in Status / Source.
+13. Before concluding there are no events, check at least these categories for every holding, with extra care on the most material holdings: earnings/results date, dividend/ex-date, AGM/shareholder meeting, investor conference / analyst day / product event.
+14. Do not treat failure to find one event type as proof that no scheduled event exists.
 
 Strict output rules:
 
@@ -79,25 +84,37 @@ Strict output rules:
 5. Do not invent any event, date, source, explanation, or expected outcome.
 6. Return at least one row for every holding in the portfolio.
 7. If a holding has multiple distinct material upcoming events, include multiple rows for that holding.
-8. If no scheduled event is found for a holding after checking the required categories, include exactly one fallback row for that holding with Date `Not found`, Event `No upcoming scheduled price-sensitive event found`, Why it may matter `No scheduled catalyst found in checked sources`, Expected Outcome `Neutral`, and Status / Source `Checked latest available sources`.
-9. Use the pasted holding name / ticker for fallback rows so every portfolio holding remains visible in the final table.
+8. If no scheduled event is found for a holding after checking the required categories, include exactly one fallback row for that holding with Date `Not found`, the best available Exchange / Stock Symbol / Stock Name for that holding, Event `No upcoming scheduled price-sensitive event found`, Why it may matter `No scheduled catalyst found in checked sources`, Expected Outcome `Neutral`, and Status / Source `Checked latest available sources`.
+9. Every row must include Exchange, Stock Symbol, and Stock Name. For fallback rows, use the pasted exchange and stock symbol where available so every portfolio holding remains visible in the final table.
 10. Sort rows by date from nearest to farthest, placing any `Not found` fallback rows after dated rows.
 11. Date format must be: DD Mon YYYY.
 12. Keep wording concise but meaningful inside cells.
 13. Use the exact column structure below.
 14. Standardize holding names/tickers where required.
-15. If a holding is ambiguous, use the ticker/symbol from the pasted portfolio.
+15. If a holding is ambiguous, use the pasted exchange + stock symbol pair as the tie-breaker.
 16. If both Indian and US holdings are provided, combine them into the same table and do not create separate tables.
 17. Use exact absolute dates whenever available; avoid vague text like “next week”, “soon”, or “upcoming”.
 
 Return only this table:
 
-| Date | Holding | Event | Why it may matter | Expected Outcome | Status / Source |
-| ---- | ------- | ----- | ----------------- | ---------------- | --------------- |"""
+| Date | Exchange | Stock Symbol | Stock Name | Event | Why it may matter | Expected Outcome | Status / Source |
+| ---- | -------- | ------------ | ---------- | ----- | ----------------- | ---------------- | --------------- |"""
 
 _HEADER_ALIASES = {
     "date": "Date",
-    "holding": "Holding",
+    "exchange": "Exchange",
+    "exchange_name": "Exchange",
+    "market": "Exchange",
+    "market_exchange": "Exchange",
+    "stock_symbol": "Stock Symbol",
+    "symbol": "Stock Symbol",
+    "ticker": "Stock Symbol",
+    "ticker_symbol": "Stock Symbol",
+    "tradingsymbol": "Stock Symbol",
+    "stock_name": "Stock Name",
+    "holding": "Stock Name",
+    "company": "Stock Name",
+    "company_name": "Stock Name",
     "event": "Event",
     "why_it_may_matter": "Why it may matter",
     "why_it_matter": "Why it may matter",
@@ -158,11 +175,13 @@ def ensure_event_table_covers_prompt_holdings(
         if any(_row_matches_expected_holding(row, expected) for row in rows):
             continue
 
-        label = expected["holding"] or expected["ticker"] or "Unknown holding"
+        label = expected["stock_name"] or expected["stock_symbol"] or "Unknown holding"
         missing_rows.append(
             {
                 "Date": "Not found",
-                "Holding": label,
+                "Exchange": expected["exchange"],
+                "Stock Symbol": expected["stock_symbol"],
+                "Stock Name": label,
                 "Event": "No upcoming scheduled price-sensitive event found",
                 "Why it may matter": "No scheduled catalyst found in checked sources",
                 "Expected Outcome": "Neutral",
@@ -207,25 +226,33 @@ def _extract_prompt_holdings(prompt: str) -> list[dict[str, str]]:
         return []
 
     headers = {_normalize_header(column): column for column in parsed["columns"]}
-    holding_column = headers.get("holding")
-    ticker_column = headers.get("ticker") or headers.get("symbol") or headers.get("tradingsymbol")
-    if not holding_column and not ticker_column:
+    exchange_column = headers.get("exchange") or headers.get("market")
+    stock_name_column = headers.get("stock_name") or headers.get("holding") or headers.get("company")
+    stock_symbol_column = headers.get("stock_symbol") or headers.get("ticker") or headers.get("symbol") or headers.get("tradingsymbol")
+    if not stock_name_column and not stock_symbol_column:
         return []
 
     holdings: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
 
     for row in parsed["rows"]:
-        holding = _clean_prompt_holding_value(row.get(holding_column or "", ""))
-        ticker = _clean_prompt_holding_value(row.get(ticker_column or "", ""))
-        if not holding and not ticker:
+        exchange = _clean_prompt_holding_value(row.get(exchange_column or "", ""))
+        stock_name = _clean_prompt_holding_value(row.get(stock_name_column or "", ""))
+        stock_symbol = _clean_prompt_holding_value(row.get(stock_symbol_column or "", ""))
+        if not stock_name and not stock_symbol:
             continue
 
-        key = (holding.lower(), ticker.lower())
+        key = (exchange.lower(), stock_symbol.lower(), stock_name.lower())
         if key in seen:
             continue
         seen.add(key)
-        holdings.append({"holding": holding, "ticker": ticker})
+        holdings.append(
+            {
+                "exchange": exchange,
+                "stock_symbol": stock_symbol,
+                "stock_name": stock_name,
+            }
+        )
 
     return holdings
 
@@ -265,6 +292,8 @@ def _normalize_rows(columns: list[str], rows: list[dict[str, str]]) -> list[dict
                 value = _normalize_outcome(value)
             normalized_row[canonical] = value
 
+        _backfill_structured_stock_fields(normalized_row)
+
         if any(value for value in normalized_row.values()):
             normalized_rows.append(normalized_row)
 
@@ -279,18 +308,27 @@ def _clean_prompt_holding_value(value: str) -> str:
 
 
 def _row_matches_expected_holding(row: dict[str, str], expected: dict[str, str]) -> bool:
-    row_holding = _normalize_holding_token(row.get("Holding", ""))
-    if not row_holding:
-        return False
+    row_symbol = _normalize_holding_token(row.get("Stock Symbol", ""))
+    row_name = _normalize_holding_token(row.get("Stock Name", ""))
+    row_exchange = _normalize_holding_token(row.get("Exchange", ""))
 
-    aliases = [expected.get("holding", ""), expected.get("ticker", "")]
-    return any(_holding_alias_matches(row_holding, alias) for alias in aliases)
+    if row_symbol and _holding_alias_matches(row_symbol, expected.get("stock_symbol", "")):
+        if row_exchange and expected.get("exchange"):
+            return _holding_alias_matches(row_exchange, expected.get("exchange", ""))
+        return True
+
+    aliases = [expected.get("stock_name", ""), expected.get("stock_symbol", "")]
+    return any(_holding_alias_matches(row_name, alias) for alias in aliases)
 
 
 def _is_portfolio_wide_placeholder_row(row: dict[str, str]) -> bool:
-    holding = _normalize_holding_token(row.get("Holding", ""))
+    stock_name = _normalize_holding_token(row.get("Stock Name", ""))
+    stock_symbol = _normalize_holding_token(row.get("Stock Symbol", ""))
     event = _normalize_holding_token(row.get("Event", ""))
-    return holding == "allholdings" and "noupcomingscheduledpricesensitiveeventfound" in event
+    return (
+        "noupcomingscheduledpricesensitiveeventfound" in event
+        and (stock_name == "allholdings" or stock_symbol == "allholdings")
+    )
 
 
 def _holding_alias_matches(row_holding: str, alias: str) -> bool:
@@ -325,3 +363,35 @@ def _normalize_outcome(value: str) -> str:
         if key == normalized or key in normalized:
             return label
     return value
+
+
+def _backfill_structured_stock_fields(row: dict[str, str]) -> None:
+    stock_name = row.get("Stock Name", "").strip()
+    stock_symbol = row.get("Stock Symbol", "").strip()
+
+    if stock_name and not stock_symbol:
+        extracted_name, extracted_symbol = _split_legacy_holding_value(stock_name)
+        if extracted_symbol:
+            row["Stock Name"] = extracted_name or stock_name
+            row["Stock Symbol"] = extracted_symbol
+            stock_name = row["Stock Name"]
+            stock_symbol = row["Stock Symbol"]
+
+    if stock_symbol and not stock_name:
+        row["Stock Name"] = stock_symbol
+        stock_name = stock_symbol
+
+    if stock_name and not stock_symbol and _looks_like_symbol(stock_name):
+        row["Stock Symbol"] = stock_name
+
+
+def _split_legacy_holding_value(value: str) -> tuple[str, str]:
+    text = value.strip()
+    match = re.match(r"^(?P<name>.+?)\s*\((?P<symbol>[A-Z0-9.&_-]{1,24})\)$", text)
+    if match:
+        return match.group("name").strip(), match.group("symbol").strip()
+    return text, ""
+
+
+def _looks_like_symbol(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Z0-9][A-Z0-9.&_-]{0,24}", value.strip()))

@@ -45,8 +45,10 @@ def build_indmoney_us_events_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> st
         f"Use exactly these columns in this order: | {' | '.join(EVENT_TABLE_COLUMNS)} |",
         "The `Expected Outcome` column must contain only Bullish, Bearish, or Neutral.",
         "Date format must be DD Mon YYYY.",
-        "Use the pasted ticker / symbol as authoritative when searching for events.",
-        "If no upcoming scheduled event is found for the entire portfolio, still return exactly one data row with Date `Not found`, Holding `All holdings`, Event `No upcoming scheduled price-sensitive event found`, Why it may matter `No scheduled catalyst found in checked sources`, Expected Outcome `Neutral`, and Status / Source `Checked latest available sources`.",
+        "Every output row must include Exchange, Stock Symbol, and Stock Name in addition to the event details.",
+        "Use the pasted stock symbol as authoritative when searching for events, and determine the correct primary listed exchange from current public sources when it is missing from the snapshot.",
+        "For US stocks, return the exchange in a TradingView-compatible form such as NASDAQ, NYSE, or AMEX when verified.",
+        "If no upcoming scheduled event is found for the entire portfolio, still return exactly one data row with Date `Not found`, Exchange `Not found`, Stock Symbol `All holdings`, Stock Name `All holdings`, Event `No upcoming scheduled price-sensitive event found`, Why it may matter `No scheduled catalyst found in checked sources`, Expected Outcome `Neutral`, and Status / Source `Checked latest available sources`.",
         "",
         "Current INDmoney US portfolio snapshot:",
         f"- Snapshot id: {snapshot.id}",
@@ -108,7 +110,7 @@ def _build_holdings_markdown_table(snapshot: IndMoneyUsPortfolioSnapshot) -> str
         key=lambda holding: float(holding.get("current_value") or 0.0),
         reverse=True,
     )
-    headers = ["Holding", "Ticker", "Quantity", "Avg Buy", "Market Price", "Current Value"]
+    headers = ["Exchange", "Stock Symbol", "Stock Name", "Quantity", "Avg Buy", "Market Price", "Current Value"]
     lines = [
         f"| {' | '.join(headers)} |",
         f"| {' | '.join('---' for _ in headers)} |",
@@ -119,8 +121,9 @@ def _build_holdings_markdown_table(snapshot: IndMoneyUsPortfolioSnapshot) -> str
             "| "
             + " | ".join(
                 [
-                    str(holding.get("company_name") or holding.get("symbol") or ""),
+                    "-",
                     str(holding.get("symbol") or ""),
+                    str(holding.get("company_name") or holding.get("symbol") or ""),
                     _fmt_num(holding.get("quantity")),
                     _fmt_num(holding.get("average_price")),
                     _fmt_num(holding.get("market_price")),
@@ -131,7 +134,7 @@ def _build_holdings_markdown_table(snapshot: IndMoneyUsPortfolioSnapshot) -> str
         )
 
     if len(lines) == 2:
-        lines.append("| None | None | 0.00 | 0.00 | 0.00 | 0.00 |")
+        lines.append("| - | None | None | 0.00 | 0.00 | 0.00 | 0.00 |")
 
     return "\n".join(lines)
 

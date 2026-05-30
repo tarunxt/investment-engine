@@ -26,10 +26,10 @@ class PortfolioEventsTests(unittest.TestCase):
         markdown = """
 Intro line that should be ignored.
 
-| Date | Holding | Event | Why it may matter | Expected Outcome | Status / Source |
-| ---- | ------- | ----- | ----------------- | ---------------- | --------------- |
-| 14 Aug 2026 | AMD | Q2 earnings | Guidance may move semis | bullish | Confirmed - [AMD IR](https://example.com/amd) |
-| 21 Sep 2026 | RELIANCE | AGM | Commentary may affect sentiment | Neutral | Confirmed - NSE |
+| Date | Exchange | Stock Symbol | Stock Name | Event | Why it may matter | Expected Outcome | Status / Source |
+| ---- | -------- | ------------ | ---------- | ----- | ----------------- | ---------------- | --------------- |
+| 14 Aug 2026 | NASDAQ | AMD | Advanced Micro Devices Inc. | Q2 earnings | Guidance may move semis | bullish | Confirmed - [AMD IR](https://example.com/amd) |
+| 21 Sep 2026 | NSE | RELIANCE | Reliance Industries Limited | AGM | Commentary may affect sentiment | Neutral | Confirmed - NSE |
 """.strip()
 
         parsed = parse_event_calendar_table(markdown)
@@ -38,7 +38,9 @@ Intro line that should be ignored.
         self.assertEqual(parsed["columns"], EVENT_TABLE_COLUMNS)
         self.assertEqual(len(parsed["rows"]), 2)
         self.assertEqual(parsed["rows"][0]["Expected Outcome"], "Bullish")
-        self.assertEqual(parsed["rows"][0]["Holding"], "AMD")
+        self.assertEqual(parsed["rows"][0]["Exchange"], "NASDAQ")
+        self.assertEqual(parsed["rows"][0]["Stock Symbol"], "AMD")
+        self.assertEqual(parsed["rows"][0]["Stock Name"], "Advanced Micro Devices Inc.")
         self.assertEqual(parsed["rows"][1]["Status / Source"], "Confirmed - NSE")
 
     def test_indmoney_events_prompt_emphasizes_reference_date_and_ticker_search(self):
@@ -76,7 +78,8 @@ Intro line that should be ignored.
         self.assertIn("Treat 2026-05-30 as the reference 'today' date", prompt)
         self.assertIn("Return at least one row for every holding in the portfolio.", prompt)
         self.assertIn("If no scheduled event is found for a holding after checking the required categories", prompt)
-        self.assertIn("Use the pasted ticker / symbol as authoritative", prompt)
+        self.assertIn("Every output row must include Exchange, Stock Symbol, and Stock Name", prompt)
+        self.assertIn("Use the pasted stock symbol as authoritative", prompt)
         self.assertIn("Prioritize the **nearest 60 calendar days first**", prompt)
         self.assertIn("Before concluding there are no events, check at least these categories for every holding", prompt)
 
@@ -106,7 +109,8 @@ Intro line that should be ignored.
         self.assertIn("Treat 2026-05-30 as the reference 'today' date", prompt)
         self.assertIn("Return at least one row for every holding in the portfolio.", prompt)
         self.assertIn("If no scheduled event is found for a holding after checking the required categories", prompt)
-        self.assertIn("Use the pasted tradingsymbol / ticker as authoritative", prompt)
+        self.assertIn("Every output row must include Exchange, Stock Symbol, and Stock Name", prompt)
+        self.assertIn("Use the pasted exchange + tradingsymbol pair as authoritative", prompt)
         self.assertIn("Prioritize the **nearest 60 calendar days first**", prompt)
         self.assertIn("Before concluding there are no events, check at least these categories for every holding", prompt)
 
@@ -161,9 +165,9 @@ Intro line that should be ignored.
         prompt = build_indmoney_us_events_prompt(snapshot)
         parsed = parse_event_calendar_table(
             """
-| Date | Holding | Event | Why it may matter | Expected Outcome | Status / Source |
-| ---- | ------- | ----- | ----------------- | ---------------- | --------------- |
-| 11 Jun 2026 | Microsoft Corporation | Dividend Payment Date | Cash return signal | Bullish | Confirmed |
+| Date | Exchange | Stock Symbol | Stock Name | Event | Why it may matter | Expected Outcome | Status / Source |
+| ---- | -------- | ------------ | ---------- | ----- | ----------------- | ---------------- | --------------- |
+| 11 Jun 2026 | NASDAQ | MSFT | Microsoft Corporation | Dividend Payment Date | Cash return signal | Bullish | Confirmed |
 """.strip()
         )
 
@@ -171,7 +175,8 @@ Intro line that should be ignored.
 
         assert completed is not None
         self.assertEqual(len(completed["rows"]), 2)
-        self.assertEqual(completed["rows"][1]["Holding"], "NVIDIA Corporation")
+        self.assertEqual(completed["rows"][1]["Stock Symbol"], "NVDA")
+        self.assertEqual(completed["rows"][1]["Stock Name"], "NVIDIA Corporation")
         self.assertEqual(completed["rows"][1]["Date"], "Not found")
         self.assertEqual(
             completed["rows"][1]["Event"],

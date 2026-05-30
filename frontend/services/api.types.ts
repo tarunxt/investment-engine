@@ -19,6 +19,8 @@ import {
     ZerodhaEventsHistoryResponse,
     ZerodhaEventsLatestResponse,
     ZerodhaEventsRunResponse,
+    IndMoneyUsCurrentPricesRequest,
+    IndMoneyUsCurrentPricesResponse,
     IndMoneyUsPortfolioOverviewResponse,
     IndMoneyUsPortfolioSnapshotCreateRequest,
     IndMoneyUsPortfolioSnapshotDetail,
@@ -106,6 +108,7 @@ export interface IApiService {
     indmoneyUsCreatePortfolioSnapshot(
         data: IndMoneyUsPortfolioSnapshotCreateRequest,
     ): Promise<IndMoneyUsPortfolioSnapshotDetail>;
+    indmoneyUsCurrentPrices(data: IndMoneyUsCurrentPricesRequest): Promise<IndMoneyUsCurrentPricesResponse>;
     indmoneyUsEventsLatest(): Promise<IndMoneyUsEventsLatestResponse>;
     indmoneyUsEventsHistory(params?: { limit?: number }): Promise<IndMoneyUsEventsHistoryResponse>;
     indmoneyUsEventJob(jobId: number): Promise<IndMoneyUsEventsAnalysis>;

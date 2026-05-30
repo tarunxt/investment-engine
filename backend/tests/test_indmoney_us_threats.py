@@ -83,6 +83,7 @@ class IndMoneyUsThreatsTests(unittest.TestCase):
         self.assertIn("NVIDIA Corporation", prompt)
         self.assertIn("AMD", prompt)
         self.assertIn("Table 10: Urgent Actionables / Immediate Risk-Control Actions", prompt)
+        self.assertIn("For every table row about a single stock, always include Exchange, Stock Symbol, and Stock Name.", prompt)
         self.assertIn("Exact Date / Timing", prompt)
         self.assertIn("Exact Date / Deadline", prompt)
         self.assertIn('do not write only "Before Earnings" or "Soon"', prompt)
@@ -103,9 +104,9 @@ class IndMoneyUsThreatsTests(unittest.TestCase):
 - Biggest weak/drag position: GM due to weak momentum.
 
 ## Table 10: Urgent Actionables / Immediate Risk-Control Actions
-| Stock | Urgent Action Needed | Why Action Is Needed Now | Trigger / Condition | Exact Date / Deadline | Suggested Action Size | Priority | Time Sensitivity |
-|---|---|---|---|---|---|---|---|
-| MU | Tighten Stop-Loss | Gains are large and semis are extended | Close below support | 14 Aug 2026 | 20% trim on trigger | High | Before earnings on 14 Aug 2026 |
+| Exchange | Stock Symbol | Stock Name | Urgent Action Needed | Why Action Is Needed Now | Trigger / Condition | Exact Date / Deadline | Suggested Action Size | Priority | Time Sensitivity |
+|---|---|---|---|---|---|---|---|---|---|
+| NASDAQ | MU | Micron Technology Inc. | Tighten Stop-Loss | Gains are large and semis are extended | Close below support | 14 Aug 2026 | 20% trim on trigger | High | Before earnings on 14 Aug 2026 |
 
 ## Bottom Line
 | Point | Conclusion |
@@ -118,7 +119,9 @@ class IndMoneyUsThreatsTests(unittest.TestCase):
         assert parsed is not None
         self.assertEqual(parsed["summary"]["main_portfolio_risk"], "AI concentration is the key swing risk.")
         self.assertEqual(parsed["tables"][0]["key"], "urgent_actionables")
-        self.assertEqual(parsed["tables"][0]["rows"][0]["Stock"], "MU")
+        self.assertEqual(parsed["tables"][0]["rows"][0]["Exchange"], "NASDAQ")
+        self.assertEqual(parsed["tables"][0]["rows"][0]["Stock Symbol"], "MU")
+        self.assertEqual(parsed["tables"][0]["rows"][0]["Stock Name"], "Micron Technology Inc.")
         self.assertEqual(parsed["tables"][0]["rows"][0]["Exact Date / Deadline"], "14 Aug 2026")
         self.assertEqual(parsed["bottom_line"][0]["value"], "MU, AMD")
 

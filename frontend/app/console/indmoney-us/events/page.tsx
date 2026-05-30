@@ -10,7 +10,7 @@ import {
   Radar,
 } from 'lucide-react';
 
-import { EventCalendarTable } from '@/components/shared/EventCalendarTable';
+import { EventCalendarTable, type EventHoldingMetric } from '@/components/shared/EventCalendarTable';
 import { EventScanRunControls } from '@/components/shared/EventScanRunControls';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
 import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
@@ -61,6 +61,56 @@ function formatInrCost(value: number, usdInrRate: number) {
 
 function hasKnownCost(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function resolvePortfolioPercentage({
+  amountInvested,
+  totalAmountInvested,
+  positionValue,
+  totalPositionValue,
+  preferredPercentage,
+}: {
+  amountInvested: number | null;
+  totalAmountInvested: number;
+  positionValue: number | null;
+  totalPositionValue: number;
+  preferredPercentage: number | null;
+}) {
+  if (preferredPercentage !== null) {
+    return preferredPercentage;
+  }
+
+  if (totalPositionValue > 0) {
+    if (positionValue === null) {
+      return null;
+    }
+    return (positionValue / totalPositionValue) * 100;
+  }
+
+  if (totalAmountInvested > 0) {
+    if (amountInvested === null) {
+      return null;
+    }
+    return (amountInvested / totalAmountInvested) * 100;
+  }
+
+  return null;
+}
+
+function buildHoldingMetrics(holdings: IndMoneyUsHolding[], totalPositionValue: number) {
+  const totalAmountInvested = holdings.reduce((sum, holding) => sum + (holding.invested_value || 0), 0);
+
+  return holdings.map<EventHoldingMetric>((holding) => ({
+    stockSymbol: holding.symbol,
+    amountInvested: holding.invested_value,
+    portfolioPercentage: resolvePortfolioPercentage({
+      amountInvested: holding.invested_value,
+      totalAmountInvested,
+      positionValue: holding.current_value,
+      totalPositionValue,
+      preferredPercentage: holding.portfolio_weight_percent,
+    }),
+  }));
 }
 
 function isJobActive(status: string | null | undefined) {
@@ -153,6 +203,10 @@ export default function IndMoneyUsEventsPage() {
     loadHistory: loadAnalysisHistory,
     usdInrRate,
   });
+  const holdingMetrics = buildHoldingMetrics(
+    latestSnapshot?.holdings ?? [],
+    latestSnapshot?.current_value ?? 0,
+  );
   const topHoldings = [...(latestSnapshot?.holdings ?? [])]
     .sort((left, right) => (right.current_value ?? 0) - (left.current_value ?? 0))
     .slice(0, 5);
@@ -327,7 +381,12 @@ export default function IndMoneyUsEventsPage() {
 
       {analysis?.table && analysis.table.rows.length > 0 ? (
         <>
-	          <EventCalendarTable table={analysis.table} market="us" title="Table 1: Portfolio Events Calendar" />
+	          <EventCalendarTable
+	            table={analysis.table}
+	            market="us"
+	            holdingMetrics={holdingMetrics}
+	            title="Table 1: Portfolio Events Calendar"
+	          />
           <details className="rounded-[24px] border border-slate-200 bg-white px-5 py-4 shadow-sm">
             <summary className="cursor-pointer text-sm font-semibold text-slate-900">
               Raw model response

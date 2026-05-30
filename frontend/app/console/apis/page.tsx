@@ -1,20 +1,74 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { apiService } from '@/services/api';
 import { ApiUsageSummaryResponse } from '@/types/api';
 
-type Period = 'today' | 'week' | 'month' | 'custom';
+type Period = 'day' | 'week' | 'month' | 'custom';
+
+const API_TIMEZONE = 'Asia/Kolkata';
+
+function getDateParts(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
+  const parts = formatter.formatToParts(date);
+  const day = parts.find((part) => part.type === 'day')?.value ?? '01';
+  const month = parts.find((part) => part.type === 'month')?.value ?? '01';
+  const year = parts.find((part) => part.type === 'year')?.value ?? '1970';
+
+  return { day, month, year };
+}
+
+function getTodayIso(timeZone: string) {
+  const { day, month, year } = getDateParts(new Date(), timeZone);
+  return `${year}-${month}-${day}`;
+}
+
+function shiftIsoDate(isoDate: string, days: number) {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day));
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+
+  const nextYear = shifted.getUTCFullYear();
+  const nextMonth = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const nextDay = String(shifted.getUTCDate()).padStart(2, '0');
+
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function formatCalendarDate(isoDate: string) {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const utcDate = new Date(Date.UTC(year, month - 1, day));
+  const monthLabel = utcDate.toLocaleString('en-GB', {
+    month: 'short',
+    timeZone: 'UTC',
+  });
+
+  return `${day} ${monthLabel}, ${year}`;
+}
+
+function formatSelectedDayLabel(isoDate: string, todayIso: string) {
+  return `${formatCalendarDate(isoDate)}${isoDate === todayIso ? ' (Today)' : ''}`;
+}
 
 export default function ApisPage() {
   const [data, setData] = useState<ApiUsageSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [period, setPeriod] = useState<Period>('today');
+  const [period, setPeriod] = useState<Period>('day');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [showAllGeminiKeys, setShowAllGeminiKeys] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(() => getTodayIso(API_TIMEZONE));
+
+  const todayIso = getTodayIso(API_TIMEZONE);
+  const isViewingToday = selectedDate >= todayIso;
 
   const load = useCallback(async () => {
     if (period === 'custom' && (!customStart || !customEnd)) {
@@ -25,10 +79,22 @@ export default function ApisPage() {
     setLoading(true);
     setError(null);
     try {
+      const request =
+        period === 'day'
+          ? {
+              period: 'custom' as const,
+              custom_start: selectedDate,
+              custom_end: selectedDate,
+            }
+          : {
+              period: period === 'custom' ? 'custom' as const : period,
+              custom_start: period === 'custom' ? customStart || undefined : undefined,
+              custom_end: period === 'custom' ? customEnd || undefined : undefined,
+            };
       const res = await apiService.getApiUsageSummary({
-        period,
-        custom_start: period === 'custom' ? customStart || undefined : undefined,
-        custom_end: period === 'custom' ? customEnd || undefined : undefined,
+        period: request.period,
+        custom_start: request.custom_start,
+        custom_end: request.custom_end,
       });
       setData(res);
     } catch (err) {
@@ -36,12 +102,21 @@ export default function ApisPage() {
     } finally {
       setLoading(false);
     }
-  }, [period, customStart, customEnd]);
+  }, [customEnd, customStart, period, selectedDate]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  const summaryLabel =
+    period === 'day'
+      ? formatSelectedDayLabel(selectedDate, todayIso)
+      : period === 'custom' && customStart && customEnd
+        ? customStart === customEnd
+          ? formatSelectedDayLabel(customStart, todayIso)
+          : `${formatCalendarDate(customStart)} to ${formatCalendarDate(customEnd)}`
+        : data?.period_label ?? formatSelectedDayLabel(todayIso, todayIso);
 
   return (
     <div className="space-y-4">
@@ -49,7 +124,7 @@ export default function ApisPage() {
         <div>
           <h1 className="text-2xl font-semibold text-gray-950">APIs</h1>
           <p className="text-sm text-gray-600">
-            Per-API usage summary: {data?.period_label ?? 'Today'} ({data?.date ?? 'today'}) in {data?.timezone ?? 'Asia/Kolkata'}.
+            Per-API usage summary: {summaryLabel} in {data?.timezone ?? API_TIMEZONE}.
           </p>
           {data?.usd_inr_rate ? (
             <p className="text-xs text-gray-500">
@@ -69,16 +144,38 @@ export default function ApisPage() {
       <div className="flex flex-wrap items-end gap-3">
         <label className="text-sm">
           <span className="mb-1 block text-xs text-gray-600">Duration</span>
-          <select
-            className="h-9 border border-gray-300 bg-white px-2"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value as Period)}
-          >
-            <option value="today">Today</option>
-            <option value="week">This week</option>
-            <option value="month">This month</option>
-            <option value="custom">Custom range</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedDate((current) => shiftIsoDate(current, -1))}
+              disabled={period !== 'day'}
+              aria-label="Show previous day"
+              title="Show previous day"
+              className="inline-flex size-9 items-center justify-center border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <select
+              className="h-9 min-w-[16rem] border border-gray-300 bg-white px-2"
+              value={period}
+              onChange={(e) => setPeriod(e.target.value as Period)}
+            >
+              <option value="day">{formatSelectedDayLabel(selectedDate, todayIso)}</option>
+              <option value="week">This week</option>
+              <option value="month">This month</option>
+              <option value="custom">Custom range</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => setSelectedDate((current) => shiftIsoDate(current, 1))}
+              disabled={period !== 'day' || isViewingToday}
+              aria-label="Show next day"
+              title="Show next day"
+              className="inline-flex size-9 items-center justify-center border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
         </label>
         {period === 'custom' ? (
           <>

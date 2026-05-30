@@ -496,6 +496,36 @@ export interface IndMoneyUsPortfolioOverviewResponse {
   history: IndMoneyUsPortfolioSnapshotSummary[];
 }
 
+export interface IndMoneyUsCurrentPriceQuoteRequest {
+  exchange: string;
+  symbol: string;
+}
+
+export interface IndMoneyUsCurrentPricesRequest {
+  quotes: IndMoneyUsCurrentPriceQuoteRequest[];
+}
+
+export interface IndMoneyUsCurrentPriceQuote {
+  exchange: string;
+  symbol: string;
+  company_name: string | null;
+  currency: string | null;
+  current_price: number | null;
+  previous_close: number | null;
+  change_value: number | null;
+  change_percent: number | null;
+  market_open: boolean;
+  session_open_at: string | null;
+  session_close_at: string | null;
+  error_message: string | null;
+}
+
+export interface IndMoneyUsCurrentPricesResponse {
+  quotes: IndMoneyUsCurrentPriceQuote[];
+  market_open: boolean;
+  fetched_at: string;
+}
+
 export interface PortfolioEventTable {
   columns: string[];
   rows: Record<string, string>[];

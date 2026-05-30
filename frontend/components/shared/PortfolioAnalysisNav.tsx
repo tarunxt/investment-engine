@@ -20,6 +20,12 @@ const ROUTES = {
   },
 } satisfies Record<PortfolioKey, Record<Exclude<ActiveTab, null>, string>>;
 
+const TABS = [
+  { key: 'portfolio', label: 'Portfolio' },
+  { key: 'events', label: 'Events' },
+  { key: 'threats', label: 'Threats' },
+] as const;
+
 export function PortfolioAnalysisNav({
   portfolio,
   active = null,
@@ -29,30 +35,50 @@ export function PortfolioAnalysisNav({
   active?: ActiveTab;
   className?: string;
 }) {
-  const routes = ROUTES[portfolio];
-
   return (
-    <div className={cn('flex flex-wrap items-center gap-2', className)}>
-      {([
-        { key: 'portfolio', label: 'Portfolio' },
-        { key: 'events', label: 'Events' },
-        { key: 'threats', label: 'Threats' },
-      ] as const).map((item) => (
-        <Button
-          key={item.key}
-          asChild
-          variant="outline"
-          size="sm"
-          className={cn(
-            active === item.key
-              ? 'bg-gray-950 text-white hover:bg-gray-900 hover:text-white'
-              : '',
-          )}
-        >
-          <Link href={routes[item.key]}>
-            {item.label}
-          </Link>
-        </Button>
+    <div className={cn('flex flex-wrap items-start gap-3', className)}>
+      {TABS.map((item) => (
+        <div key={item.key} className="flex min-w-[112px] flex-col items-stretch gap-1.5">
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            className={cn(
+              'w-full justify-center',
+              active === item.key
+                ? 'bg-gray-950 text-white hover:bg-gray-900 hover:text-white'
+                : '',
+            )}
+          >
+            <Link href={ROUTES[portfolio][item.key]}>
+              {item.label}
+            </Link>
+          </Button>
+
+          <div className="flex items-center justify-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em]">
+            <Link
+              href={ROUTES.zerodha[item.key]}
+              aria-current={portfolio === 'zerodha' ? 'page' : undefined}
+              className={cn(
+                'border-b border-transparent pb-0.5 text-gray-400 transition-colors hover:text-gray-700',
+                portfolio === 'zerodha' ? 'border-gray-950 text-gray-950' : '',
+              )}
+            >
+              Ind
+            </Link>
+            <span className="text-gray-300">|</span>
+            <Link
+              href={ROUTES.indmoneyUs[item.key]}
+              aria-current={portfolio === 'indmoneyUs' ? 'page' : undefined}
+              className={cn(
+                'border-b border-transparent pb-0.5 text-gray-400 transition-colors hover:text-gray-700',
+                portfolio === 'indmoneyUs' ? 'border-gray-950 text-gray-950' : '',
+              )}
+            >
+              US
+            </Link>
+          </div>
+        </div>
       ))}
     </div>
   );

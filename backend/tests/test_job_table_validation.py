@@ -248,10 +248,10 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         provider.generate.side_effect = [
             AIProviderResponse(
                 content=(
-                    "| Date | Holding | Event | Why it may matter | Expected Outcome | Status / Source |\n"
-                    "| ---- | ------- | ----- | ----------------- | ---------------- | --------------- |\n"
-                    "| 05 May 2026 | AMD | Earnings Announcement | Old event | Bullish | Confirmed |\n"
-                    "| Not found | All holdings | No upcoming scheduled price-sensitive event found | No scheduled catalyst found in checked sources | Neutral | Checked latest available sources |"
+                    "| Date | Exchange | Stock Symbol | Stock Name | Event | Why it may matter | Expected Outcome | Status / Source |\n"
+                    "| ---- | -------- | ------------ | ---------- | ----- | ----------------- | ---------------- | --------------- |\n"
+                    "| 05 May 2026 | NASDAQ | AMD | Advanced Micro Devices Inc. | Earnings Announcement | Old event | Bullish | Confirmed |\n"
+                    "| Not found | Not found | All holdings | All holdings | No upcoming scheduled price-sensitive event found | No scheduled catalyst found in checked sources | Neutral | Checked latest available sources |"
                 ),
                 tokens_in=600,
                 tokens_out=120,
@@ -261,10 +261,10 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             ),
             AIProviderResponse(
                 content=(
-                    "| Date | Holding | Event | Why it may matter | Expected Outcome | Status / Source |\n"
-                    "| ---- | ------- | ----- | ----------------- | ---------------- | --------------- |\n"
-                    "| 24 Jun 2026 | MU | Fiscal Q3 2026 earnings call | HBM demand and guidance may move memory sentiment | Bullish | Confirmed - Micron IR |\n"
-                    "| 30 Jun 2026 | VST | Dividend payment / record cycle | Utility yield event may affect near-term flows | Neutral | Confirmed - Vistra IR |"
+                    "| Date | Exchange | Stock Symbol | Stock Name | Event | Why it may matter | Expected Outcome | Status / Source |\n"
+                    "| ---- | -------- | ------------ | ---------- | ----- | ----------------- | ---------------- | --------------- |\n"
+                    "| 24 Jun 2026 | NASDAQ | MU | Micron Technology Inc. | Fiscal Q3 2026 earnings call | HBM demand and guidance may move memory sentiment | Bullish | Confirmed - Micron IR |\n"
+                    "| 30 Jun 2026 | NYSE | VST | Vistra Corp. | Dividend payment / record cycle | Utility yield event may affect near-term flows | Neutral | Confirmed - Vistra IR |"
                 ),
                 tokens_in=650,
                 tokens_out=180,

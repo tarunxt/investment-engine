@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.indmoney_us.price_service import IndMoneyUsCurrentPriceService
 from app.domains.indmoney_us.repository import IndMoneyUsPortfolioSnapshotRepository
 from app.domains.indmoney_us.schemas import (
+    IndMoneyUsCurrentPricesRequest,
+    IndMoneyUsCurrentPricesResponse,
     IndMoneyUsPortfolioOverviewResponse,
     IndMoneyUsPortfolioSnapshotCreateRequest,
     IndMoneyUsPortfolioSnapshotDetailResponse,
@@ -22,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/indmoney-us", tags=["indmoney-us"])
 service = IndMoneyUsPortfolioService()
+price_service = IndMoneyUsCurrentPriceService()
 
 
 @router.get("/portfolio", response_model=IndMoneyUsPortfolioOverviewResponse)
@@ -82,3 +87,24 @@ async def get_portfolio_snapshot(
     if not snapshot:
         raise NotFoundException("INDmoney US portfolio snapshot not found")
     return IndMoneyUsPortfolioSnapshotDetailResponse(**service.serialize_detail(snapshot))
+
+
+@router.post("/prices/current", response_model=IndMoneyUsCurrentPricesResponse)
+async def get_current_prices(
+    request: IndMoneyUsCurrentPricesRequest,
+    _current_user: User = Depends(get_current_user),
+):
+    quotes = await price_service.fetch_quotes(
+        [
+            {
+                "exchange": quote.exchange,
+                "symbol": quote.symbol,
+            }
+            for quote in request.quotes
+        ]
+    )
+    return IndMoneyUsCurrentPricesResponse(
+        quotes=quotes,
+        market_open=any(quote.get("market_open") for quote in quotes),
+        fetched_at=datetime.now(timezone.utc),
+    )

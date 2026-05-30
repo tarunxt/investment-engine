@@ -618,29 +618,33 @@ export default function ZerodhaPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight text-gray-950">Zerodha</h1>
+          <div className="inline-flex items-start gap-1">
+            <h1 className="text-lg font-semibold tracking-tight text-gray-950">Zerodha</h1>
+            {status?.connected && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={handleDisconnect}
+                disabled={disconnecting}
+                aria-label="Disconnect Zerodha"
+                title="Disconnect Zerodha"
+                className="-mt-1 text-red-600 hover:text-red-700"
+              >
+                {disconnecting ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Unplug className="size-3" />
+                )}
+                <span className="sr-only">Disconnect</span>
+              </Button>
+            )}
+          </div>
           <p className="text-sm text-gray-500">
             Kite Connect integration — save daywise portfolio history and manage orders
           </p>
         </div>
         <div className="flex items-center gap-2">
           <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" />
-          {status?.connected && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDisconnect}
-              disabled={disconnecting}
-              className="text-red-600 hover:text-red-700"
-            >
-              {disconnecting ? (
-                <Loader2 className="mr-2 size-3.5 animate-spin" />
-              ) : (
-                <Unplug className="mr-2 size-3.5" />
-              )}
-              Disconnect
-            </Button>
-          )}
         </div>
       </div>
 

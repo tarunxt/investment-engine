@@ -158,11 +158,13 @@ def _extract_portfolio_event_reference_date(prompt: str) -> date | None:
 
 def _is_portfolio_event_fallback_row(row: dict[str, str]) -> bool:
     row_date = (row.get("Date") or "").strip().lower()
-    row_holding = (row.get("Holding") or "").strip().lower()
+    row_stock_name = (row.get("Stock Name") or row.get("Holding") or "").strip().lower()
+    row_stock_symbol = (row.get("Stock Symbol") or "").strip().lower()
     row_event = (row.get("Event") or "").strip().lower()
     return (
         row_date == "not found"
-        or row_holding == "all holdings"
+        or row_stock_name == "all holdings"
+        or row_stock_symbol == "all holdings"
         or "no upcoming scheduled price-sensitive event found" in row_event
     )
 
@@ -268,7 +270,7 @@ def _build_portfolio_event_repair_prompt(prompt: str, previous_output: str, reas
         f"Re-check live web sources and return ONLY events {reference_text}. "
         "Remove any past-dated rows. "
         "If you find one or more upcoming events, do not include the `Not found` / `All holdings` fallback row. "
-        "Use the ticker/symbol as authoritative, search exact scheduled dates, and sort rows nearest to farthest. "
+        "Use the exchange + stock symbol pair as authoritative when available, search exact scheduled dates, and sort rows nearest to farthest. "
         "Only use the fallback row if there are truly zero upcoming events after checking earnings/results, dividend/ex-date, AGM/shareholder meeting, and investor conference / product event sources.\n\n"
         "Previous assistant output:\n"
         f"{previous_output}"

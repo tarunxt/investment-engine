@@ -10,6 +10,8 @@ import {
   GoogleSheetsExportRunRequest,
   GoogleSheetsImportRequest,
   GoogleSheetsStatusResponse,
+  IndMoneyUsCurrentPricesRequest,
+  IndMoneyUsCurrentPricesResponse,
   IndMoneyUsEventsAnalysis,
   IndMoneyUsEventsHistoryResponse,
   IndMoneyUsEventsLatestResponse,
@@ -644,6 +646,12 @@ class apiServiceClass implements IApiService {
     data: IndMoneyUsPortfolioSnapshotCreateRequest,
   ): Promise<IndMoneyUsPortfolioSnapshotDetail> {
     return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data);
+  }
+
+  indmoneyUsCurrentPrices(
+    data: IndMoneyUsCurrentPricesRequest,
+  ): Promise<IndMoneyUsCurrentPricesResponse> {
+    return this.post<IndMoneyUsCurrentPricesResponse>(URLs.indmoneyUs.currentPrices(), data);
   }
 
   indmoneyUsEventsLatest(): Promise<IndMoneyUsEventsLatestResponse> {

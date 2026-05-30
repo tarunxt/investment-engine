@@ -23,6 +23,8 @@ import { useUsdInrRate } from '@/hooks/useUsdInrRate';
 import { URLs } from '@/lib/urls';
 import { apiService, APIError } from '@/services/api';
 import type {
+  IndMoneyUsCurrentPriceQuote,
+  IndMoneyUsCurrentPriceQuoteRequest,
   IndMoneyUsHolding,
   IndMoneyUsPortfolioOverviewResponse,
   IndMoneyUsThreatAnalysis,
@@ -31,7 +33,11 @@ import type {
   ProviderModelTarget,
 } from '@/types/api';
 
-import { ThreatsReportTable } from '../../zerodha/threats/_components/ThreatsReportTable';
+import {
+  ThreatsReportTable,
+  type ThreatCurrentPriceMetric,
+  type ThreatHoldingMetric,
+} from '../../zerodha/threats/_components/ThreatsReportTable';
 import { ThreatsSummaryCards } from '../../zerodha/threats/_components/ThreatsSummaryCards';
 
 function normalizeError(err: unknown) {
@@ -69,6 +75,56 @@ function hasKnownCost(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function resolvePortfolioPercentage({
+  amountInvested,
+  totalAmountInvested,
+  positionValue,
+  totalPositionValue,
+  preferredPercentage,
+}: {
+  amountInvested: number | null;
+  totalAmountInvested: number;
+  positionValue: number | null;
+  totalPositionValue: number;
+  preferredPercentage: number | null;
+}) {
+  if (preferredPercentage !== null) {
+    return preferredPercentage;
+  }
+
+  if (totalPositionValue > 0) {
+    if (positionValue === null) {
+      return null;
+    }
+    return (positionValue / totalPositionValue) * 100;
+  }
+
+  if (totalAmountInvested > 0) {
+    if (amountInvested === null) {
+      return null;
+    }
+    return (amountInvested / totalAmountInvested) * 100;
+  }
+
+  return null;
+}
+
+function buildHoldingMetrics(holdings: IndMoneyUsHolding[], totalPositionValue: number) {
+  const totalAmountInvested = holdings.reduce((sum, holding) => sum + (holding.invested_value || 0), 0);
+
+  return holdings.map<ThreatHoldingMetric>((holding) => ({
+    stockSymbol: holding.symbol,
+    amountInvested: holding.invested_value,
+    portfolioPercentage: resolvePortfolioPercentage({
+      amountInvested: holding.invested_value,
+      totalAmountInvested,
+      positionValue: holding.current_value,
+      totalPositionValue,
+      preferredPercentage: holding.portfolio_weight_percent,
+    }),
+  }));
+}
+
 function isJobActive(status: string | null | undefined) {
   return status === 'pending' || status === 'processing' || status === 'scheduled';
 }
@@ -84,16 +140,110 @@ function countSeverities(tables: IndMoneyUsThreatTableSection[]) {
     for (const row of table.rows) {
       for (const [column, value] of Object.entries(row)) {
         if (!/severity|risk|priority/i.test(column)) continue;
-        const normalized = value.trim().toLowerCase();
-        if (normalized === 'very high') counts.veryHigh += 1;
-        if (normalized === 'high') counts.high += 1;
-        if (normalized === 'medium') counts.medium += 1;
-        if (normalized === 'low') counts.low += 1;
+        const normalizedValues = value
+          .split('\n')
+          .map((item) => item.trim().toLowerCase())
+          .filter(Boolean);
+        for (const normalized of normalizedValues) {
+          if (normalized === 'very high') counts.veryHigh += 1;
+          if (normalized === 'high') counts.high += 1;
+          if (normalized === 'medium') counts.medium += 1;
+          if (normalized === 'low') counts.low += 1;
+        }
       }
     }
   }
 
   return counts;
+}
+
+function normalizeColumnLabel(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[–—]/g, '-')
+    .replace(/[()]/g, '')
+    .replace(/_/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\//g, ' / ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getRowValueByNormalizedColumn(row: Record<string, string>, targetColumn: string) {
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizeColumnLabel(key) === targetColumn) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function buildCurrentPriceRequests(
+  section: IndMoneyUsThreatTableSection | null,
+): IndMoneyUsCurrentPriceQuoteRequest[] {
+  if (!section) {
+    return [];
+  }
+
+  const quotes: IndMoneyUsCurrentPriceQuoteRequest[] = [];
+  const seen = new Set<string>();
+
+  for (const row of section.rows) {
+    const exchange = getRowValueByNormalizedColumn(row, 'exchange').trim().toUpperCase();
+    const symbol = (
+      getRowValueByNormalizedColumn(row, 'stock symbol')
+      || getRowValueByNormalizedColumn(row, 'ticker')
+      || getRowValueByNormalizedColumn(row, 'symbol')
+    ).trim().toUpperCase();
+    if (!exchange || !symbol) {
+      continue;
+    }
+
+    const key = `${exchange}:${symbol}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    quotes.push({ exchange, symbol });
+  }
+
+  return quotes;
+}
+
+function buildCurrentPriceMetrics(quotes: IndMoneyUsCurrentPriceQuote[]): ThreatCurrentPriceMetric[] {
+  return quotes.map((quote) => ({
+    exchange: quote.exchange,
+    stockSymbol: quote.symbol,
+    currentPrice: quote.current_price,
+    currency: quote.currency,
+  }));
+}
+
+function isUsMarketLikelyOpen(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  );
+
+  if (values.weekday === 'Sat' || values.weekday === 'Sun') {
+    return false;
+  }
+
+  const hour = Number(values.hour ?? 0);
+  const minute = Number(values.minute ?? 0);
+  const totalMinutes = (hour * 60) + minute;
+  return totalMinutes >= 570 && totalMinutes < 960;
 }
 
 function BottomLineCards({ items }: { items: IndMoneyUsThreatKeyValueItem[] }) {
@@ -121,6 +271,9 @@ function BottomLineCards({ items }: { items: IndMoneyUsThreatKeyValueItem[] }) {
 export default function IndMoneyUsThreatsPage() {
   const [overview, setOverview] = useState<IndMoneyUsPortfolioOverviewResponse | null>(null);
   const [analysis, setAnalysis] = useState<IndMoneyUsThreatAnalysis | null>(null);
+  const [lastReportAnalysis, setLastReportAnalysis] = useState<IndMoneyUsThreatAnalysis | null>(null);
+  const [currentPriceQuotes, setCurrentPriceQuotes] = useState<IndMoneyUsCurrentPriceQuote[]>([]);
+  const [currentPricesLoading, setCurrentPricesLoading] = useState(false);
   const [loadingPage, setLoadingPage] = useState(true);
   const [runningAnalysis, setRunningAnalysis] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,16 +287,58 @@ export default function IndMoneyUsThreatsPage() {
   const loadLatestAnalysis = useCallback(async () => {
     const response = await apiService.indmoneyUsThreatsLatest();
     setAnalysis(response.analysis);
+    if (response.analysis?.report) {
+      setLastReportAnalysis(response.analysis);
+      return;
+    }
+
+    if (!response.analysis || !isJobActive(response.analysis.status)) {
+      return;
+    }
+
+    const history = await apiService.indmoneyUsThreatsHistory({ limit: 100 });
+    const previousCompleted = history.history.find(
+      (item) => item.status === 'completed' && item.job_id !== response.analysis?.job_id,
+    );
+    if (!previousCompleted) {
+      return;
+    }
+
+    const fallbackAnalysis = await apiService.indmoneyUsThreatJob(previousCompleted.job_id);
+    if (fallbackAnalysis.report) {
+      setLastReportAnalysis(fallbackAnalysis);
+    }
   }, []);
 
   const loadAnalysisJob = useCallback(async (jobId: number) => {
     const response = await apiService.indmoneyUsThreatJob(jobId);
     setAnalysis(response);
+    if (response.report) {
+      setLastReportAnalysis(response);
+    }
   }, []);
 
   const loadAnalysisHistory = useCallback(async () => {
     const response = await apiService.indmoneyUsThreatsHistory({ limit: 100 });
     return response.history;
+  }, []);
+
+  const loadCurrentPrices = useCallback(async (quotes: IndMoneyUsCurrentPriceQuoteRequest[]) => {
+    if (quotes.length === 0) {
+      setCurrentPriceQuotes([]);
+      setCurrentPricesLoading(false);
+      return;
+    }
+
+    setCurrentPricesLoading(true);
+    try {
+      const response = await apiService.indmoneyUsCurrentPrices({ quotes });
+      setCurrentPriceQuotes(response.quotes);
+    } catch (err) {
+      console.error('Failed to load current prices', err);
+    } finally {
+      setCurrentPricesLoading(false);
+    }
   }, []);
 
   const handleRunAnalysis = useCallback(async (target: ProviderModelTarget | null) => {
@@ -199,22 +394,79 @@ export default function IndMoneyUsThreatsPage() {
   }, [analysis?.job_id, analysis?.status, loadAnalysisJob]);
 
   const latestSnapshot = overview?.latest ?? null;
+  const displayedAnalysis = analysis?.report ? analysis : lastReportAnalysis;
+  const technicalRiskSection = findSection(displayedAnalysis, 'technical_risk_map');
+  const currentPriceRequestEntries = buildCurrentPriceRequests(technicalRiskSection);
+  const currentPriceMetrics = buildCurrentPriceMetrics(currentPriceQuotes);
+  const currentPriceRequestKey = currentPriceRequestEntries
+    .map((quote) => `${quote.exchange}:${quote.symbol}`)
+    .join('|');
   const historicalEstimatedCostInrByTarget = useHistoricalAnalysisCosts({
     analysis,
     loadHistory: loadAnalysisHistory,
     usdInrRate,
   });
+  const holdingMetrics = buildHoldingMetrics(
+    latestSnapshot?.holdings ?? [],
+    latestSnapshot?.current_value ?? 0,
+  );
   const topHoldings = [...(latestSnapshot?.holdings ?? [])]
     .sort((left, right) => (right.current_value ?? 0) - (left.current_value ?? 0))
     .slice(0, 5);
-  const severityCounts = countSeverities(analysis?.report?.tables ?? []);
-  const urgentSection = findSection(analysis, 'urgent_actionables');
+  const severityCounts = countSeverities(displayedAnalysis?.report?.tables ?? []);
+  const urgentSection = findSection(displayedAnalysis, 'urgent_actionables');
   const firstAction = urgentSection?.rows[0]?.['Urgent Action Needed']?.toLowerCase() ?? '';
   const hasUrgentActions = Boolean(
     urgentSection
     && urgentSection.rows.length > 0
     && !firstAction.includes('no urgent action required'),
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const quotes = currentPriceRequestKey
+      ? currentPriceRequestKey.split('|').reduce<IndMoneyUsCurrentPriceQuoteRequest[]>((items, value) => {
+        const [exchange, symbol] = value.split(':');
+        if (!exchange || !symbol) {
+          return items;
+        }
+
+        items.push({ exchange, symbol });
+        return items;
+      }, [])
+      : [];
+
+    if (quotes.length === 0) {
+      setCurrentPriceQuotes([]);
+      setCurrentPricesLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const refreshPrices = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      await loadCurrentPrices(quotes);
+    };
+
+    void refreshPrices();
+
+    const intervalId = window.setInterval(() => {
+      if (!isUsMarketLikelyOpen()) {
+        return;
+      }
+
+      void refreshPrices();
+    }, 5 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [currentPriceRequestKey, loadCurrentPrices]);
 
   if (loadingPage) {
     return (
@@ -239,7 +491,7 @@ export default function IndMoneyUsThreatsPage() {
               Threat Radar
             </div>
             <h1 className="mt-4 font-serif text-3xl tracking-tight text-white md:text-4xl">
-              Short-term risk intelligence for your pasted INDmoney US book
+              IndMoney US: Threats and Weakenss
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-200/90">
               This screen sends your latest pasted INDmoney US snapshot through the selected AI model with live web-search context,
@@ -415,26 +667,40 @@ export default function IndMoneyUsThreatsPage() {
         </div>
       )}
 
-      {analysis?.report && (
+      {displayedAnalysis?.report && (
         <>
-          <ThreatsSummaryCards summary={analysis.report.summary} />
+          <ThreatsSummaryCards summary={displayedAnalysis.report.summary} />
 
           {hasUrgentActions && urgentSection && (
             <section className="rounded-[30px] border border-rose-200 bg-linear-to-br from-rose-50 to-white p-1 shadow-sm">
-	              <ThreatsReportTable section={urgentSection} market="us" className="bg-transparent ring-0 shadow-none" />
+	              <ThreatsReportTable
+	                section={urgentSection}
+	                market="us"
+	                holdingMetrics={holdingMetrics}
+	                currentPrices={currentPriceMetrics}
+	                currentPricesLoading={currentPricesLoading}
+	                className="bg-transparent ring-0 shadow-none"
+	              />
             </section>
           )}
 
-          {analysis.report.tables
+          {displayedAnalysis.report.tables
 	            .filter((section) => section.key !== 'urgent_actionables')
 	            .map((section) => (
-	              <ThreatsReportTable key={section.key} section={section} market="us" />
+	              <ThreatsReportTable
+	                key={section.key}
+	                section={section}
+	                market="us"
+	                holdingMetrics={holdingMetrics}
+	                currentPrices={currentPriceMetrics}
+	                currentPricesLoading={currentPricesLoading}
+	              />
 	            ))}
 
           <section className="rounded-[30px] border border-slate-200 bg-white px-6 py-6 shadow-sm">
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Bottom Line</div>
             <div className="mt-4">
-              <BottomLineCards items={analysis.report.bottom_line} />
+              <BottomLineCards items={displayedAnalysis.report.bottom_line} />
             </div>
           </section>
 
@@ -443,7 +709,7 @@ export default function IndMoneyUsThreatsPage() {
               Raw model response
             </summary>
             <div className="mt-4 prose max-w-none prose-slate">
-              <MarkdownRenderer content={analysis.report.raw_markdown} />
+              <MarkdownRenderer content={displayedAnalysis.report.raw_markdown} />
             </div>
           </details>
         </>
