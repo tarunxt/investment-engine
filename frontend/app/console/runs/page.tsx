@@ -15,7 +15,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { apiService, APIError } from '@/services/api';
-import { RunResponse } from '@/types/api';
+import { RunListItem } from '@/types/api';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { WSClient } from '@/services/websocket';
@@ -64,7 +64,7 @@ function formatTimestamp(value?: string | null) {
 export default function RunsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [runs, setRuns] = useState<RunResponse[]>([]);
+  const [runs, setRuns] = useState<RunListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -120,6 +120,7 @@ export default function RunsPage() {
       const data = await apiService.getRuns({
         page: p,
         limit: PAGE_SIZE,
+        summary: true,
       });
       setRuns(data.items);
       setTotal(data.total);
@@ -267,7 +268,7 @@ export default function RunsPage() {
                       <td className="max-w-90 px-5 py-4">
                         <div className="font-medium text-gray-950">#{run.id}</div>
                         <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">
-                          {run.prompt}
+                          {run.prompt_preview}
                         </div>
                       </td>
                       <td className="px-5 py-4">

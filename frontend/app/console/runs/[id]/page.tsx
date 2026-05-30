@@ -52,8 +52,12 @@ function formatTokens(value?: number | null) {
 }
 
 function formatCost(value?: number | null) {
-  if (!value) return '$0.0000';
+  if (value == null || !Number.isFinite(value)) return 'Not captured';
   return `$${value.toFixed(4)}`;
+}
+
+function hasKnownCost(value?: number | null): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function formatDuration(createdAt: string, updatedAt?: string) {
@@ -195,9 +199,13 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
 
   const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
   const isActive = ACTIVE_STATUSES.has(run.status);
-  const totalCost = run.run_jobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
+  const knownCostJobs = run.run_jobs.filter((rj) => hasKnownCost(rj.job.estimated_cost));
+  const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
+  const missingCostCount = run.run_jobs.length - knownCostJobs.length;
+  const hasAnyKnownCost = knownCostJobs.length > 0;
   const formatCostWithInr = (value?: number | null) => {
-    const usd = value ?? 0;
+    if (!hasKnownCost(value)) return 'Not captured';
+    const usd = value;
     const inr = usd * usdInrRate;
     return `${formatCost(usd)} (₹${inr.toFixed(2)})`;
   };
@@ -275,8 +283,20 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
           <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">
             Est. Cost
           </div>
-          <div className="mt-2 font-medium text-gray-950">{formatCostWithInr(totalCost)}</div>
-          <div className="mt-0.5 text-xs text-gray-500">across all models</div>
+          <div className="mt-2 font-medium text-gray-950">
+            {missingCostCount > 0
+              ? hasAnyKnownCost
+                ? `At least ${formatCostWithInr(totalKnownCost)}`
+                : 'Not captured'
+              : formatCostWithInr(totalKnownCost)}
+          </div>
+          <div className="mt-0.5 text-xs text-gray-500">
+            {missingCostCount > 0
+              ? hasAnyKnownCost
+                ? `${missingCostCount} model cost${missingCostCount === 1 ? '' : 's'} not captured`
+                : `No model cost${missingCostCount === 1 ? '' : 's'} captured`
+              : 'across all models'}
+          </div>
         </div>
       </div>
 
@@ -312,6 +332,8 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
             const job = rj.job;
             const JobStatusIcon = STATUS_ICONS[job.status] ?? Clock3;
             const jobIsActive = ACTIVE_STATUSES.has(job.status);
+            const hasResponse = Boolean(job.response?.trim());
+            const showJobCost = hasKnownCost(job.estimated_cost) || TERMINAL_STATUSES.has((job.status || '').toLowerCase());
             return (
               <div key={rj.id} className="border border-gray-200 bg-white shadow-sm max-w-full overflow-auto">
                 <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
@@ -327,8 +349,10 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
                         {formatTokens(job.tokens_in)}↑ {formatTokens(job.tokens_out)}↓
                       </span>
                     ) : null}
-                    {job.estimated_cost ? (
-                      <span className="text-xs text-gray-400">{formatCostWithInr(job.estimated_cost)}</span>
+                    {showJobCost ? (
+                      <span className={cn('text-xs', hasKnownCost(job.estimated_cost) ? 'text-gray-400' : 'text-gray-300')}>
+                        {formatCostWithInr(job.estimated_cost)}
+                      </span>
                     ) : null}
                     <div className="flex flex-col items-start">
                       <span
@@ -350,12 +374,20 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
                 </div>
                 <div className="max-w-full p-5">
                   {job.status === 'failed' && job.error_message ? (
-                    <p className="whitespace-pre-wrap text-sm leading-6 text-red-700">
-                      {job.error_message}
-                    </p>
-                  ) : job.response ? (
-                    <InvestmentRecommendationTable content={job.response} />
-                  ) : (
+                    <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      <p className="whitespace-pre-wrap leading-6">{job.error_message}</p>
+                    </div>
+                  ) : null}
+
+                  {hasResponse ? (
+                    <InvestmentRecommendationTable
+                      content={job.response ?? ''}
+                      provider={job.provider}
+                      model={job.model}
+                      runNumber={run.id}
+                      runCreatedAt={run.created_at}
+                    />
+                  ) : job.status === 'failed' && job.error_message ? null : (
                     <p className="text-sm italic text-gray-400">
                       {jobIsActive ? 'Waiting for response…' : 'No response.'}
                     </p>

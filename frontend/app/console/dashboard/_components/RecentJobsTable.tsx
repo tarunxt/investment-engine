@@ -34,6 +34,15 @@ const formatTimestamp = (value?: string | null) => {
 const formatModelName = (provider?: string | null, model?: string | null) =>
   `${provider || 'Unknown'} / ${model || 'Unknown'}`.replace(/\b\w/g, (char) => char.toUpperCase());
 
+const hasKnownCost = (value?: number | null): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+const formatCostWithInr = (usd: number, usdInrRate: number) =>
+  `$${usd.toFixed(4)} / ₹${(usd * usdInrRate).toFixed(2)}`;
+
+const formatNullableCostWithInr = (value: number | null | undefined, usdInrRate: number) =>
+  hasKnownCost(value) ? formatCostWithInr(value, usdInrRate) : 'Not captured';
+
 const TERMINAL_STATUSES = new Set(['completed', 'failed']);
 const PROCESSING_STATUS = 'processing';
 const ACTIVE_TIMER_STATUSES = new Set(['processing', 'completed', 'failed']);
@@ -229,7 +238,10 @@ export function RecentJobsTable() {
                   a.job.model.localeCompare(b.job.model)
                 );
                 const exportStatus = (run.export_status ?? (run.auto_export_enabled ? 'pending' : 'disabled')).toLowerCase();
-                const totalCost = runJobs.reduce((sum, rj) => sum + Number(rj.job.estimated_cost || 0), 0);
+                const knownCostJobs = runJobs.filter((rj) => hasKnownCost(rj.job.estimated_cost));
+                const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
+                const missingCostCount = runJobs.length - knownCostJobs.length;
+                const hasAnyKnownCost = knownCostJobs.length > 0;
                 const modelExportStates = runJobs.map((rj) => {
                   const j = rj.job;
                   const explicit = (j.export_status ?? '').toLowerCase();
@@ -267,7 +279,7 @@ export function RecentJobsTable() {
                     <td className="max-w-90 px-5 py-4">
                       <div className="font-medium text-gray-950">#{run.id}</div>
                       <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">
-                        {run.prompt}
+                        {run.prompt_preview}
                       </div>
                     </td>
                     <td className="px-5 py-4">
@@ -310,6 +322,11 @@ export function RecentJobsTable() {
                                     normalizedJobStatus,
                                     job.export_status,
                                   );
+                                  const costLabel = hasKnownCost(job.estimated_cost)
+                                    ? formatNullableCostWithInr(job.estimated_cost, usdInrRate)
+                                    : TERMINAL_STATUSES.has(normalizedJobStatus)
+                                      ? 'Not captured'
+                                      : '-';
                                   return (
                                     <tr key={runJob.id}>
                                       <td className="px-2 py-2 text-gray-900">
@@ -354,8 +371,9 @@ export function RecentJobsTable() {
                                         </span>
                                       </td>
                                       <td className="px-2 py-2 text-gray-700">
-                                        ${Number(job.estimated_cost || 0).toFixed(4)} / ₹
-                                        {(Number(job.estimated_cost || 0) * usdInrRate).toFixed(2)}
+                                        <span className={costLabel === 'Not captured' ? 'text-gray-400' : undefined}>
+                                          {costLabel}
+                                        </span>
                                       </td>
                                       <td className="max-w-[340px] px-2 py-2 text-red-700">
                                         {job.status === 'failed' && job.error_message ? (
@@ -422,7 +440,11 @@ export function RecentJobsTable() {
                             {derivedOverallExportLabel}
                           </span>
                           <span className="text-gray-500">
-                            Total cost: ${totalCost.toFixed(4)} / ₹{(totalCost * usdInrRate).toFixed(2)}
+                            {missingCostCount > 0 ? 'Known cost:' : 'Total cost:'}{' '}
+                            {hasAnyKnownCost ? formatCostWithInr(totalKnownCost, usdInrRate) : 'Not captured'}
+                            {missingCostCount > 0 && hasAnyKnownCost
+                              ? ` + ${missingCostCount} not captured`
+                              : ''}
                           </span>
                           {run.exported_sheet_url ? (
                             <Link

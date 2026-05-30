@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+import json
 import math
 import re
 
@@ -10,6 +12,7 @@ from app.domains.ai_providers.base import (
     AIProviderResponse,
     BaseAIProvider,
 )
+from app.domains.ai_providers.tools import web_search as web_search_tool
 
 MODEL_PRICING_PER_1M_TOKENS = {
     "gpt-4o-mini": {
@@ -39,6 +42,7 @@ class OpenAIProvider(BaseAIProvider):
     provider_name = "openai"
 
     supported_models = SUPPORTED_MODELS
+    _max_tool_rounds = 8
 
     @classmethod
     def is_configured(cls) -> bool:
@@ -58,6 +62,17 @@ class OpenAIProvider(BaseAIProvider):
         prompt: str,
         model: str,
     ) -> AIProviderResponse:
+        if self._requires_live_web_context(prompt):
+            return self._generate_with_tools(prompt=prompt, model=model)
+
+        return self._generate_simple(prompt=prompt, model=model)
+
+    def _generate_simple(
+        self,
+        *,
+        prompt: str,
+        model: str,
+    ) -> AIProviderResponse:
 
         response = self.client.responses.create(
             model=model,
@@ -72,13 +87,135 @@ class OpenAIProvider(BaseAIProvider):
         content = (response.output_text or "").strip()
 
         needs_table = self._requires_table_output(prompt)
+        needs_stock_recommendation_table = self._requires_stock_recommendation_output(prompt)
         if needs_table and not self._looks_like_markdown_table(content):
+            minimum_rows = 5 if needs_stock_recommendation_table else 1
             rewrite = self.client.responses.create(
                 model=model,
                 input=(
                     "Return ONLY one valid markdown table. "
                     "No preamble, no explanation, no code fences. "
-                    "Include header row, separator row, and at least 5 data rows.\n\n"
+                    f"Include header row, separator row, and at least {minimum_rows} data row"
+                    f"{'' if minimum_rows == 1 else 's'}.\n\n"
+                    f"Original user request:\n{prompt}\n\n"
+                    f"Previous assistant output:\n{content}"
+                ),
+            )
+            rewrite_usage = getattr(rewrite, "usage", None)
+            tokens_in += getattr(rewrite_usage, "input_tokens", 0) or 0
+            tokens_out += getattr(rewrite_usage, "output_tokens", 0) or 0
+            rewritten = (rewrite.output_text or "").strip()
+            if rewritten:
+                content = rewritten
+
+        return AIProviderResponse(
+            content=content,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost=self._estimate_cost(
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+            ),
+            provider=self.provider_name,
+            model=model,
+        )
+
+    def _generate_with_tools(
+        self,
+        *,
+        prompt: str,
+        model: str,
+    ) -> AIProviderResponse:
+        current_date = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+        messages: list[dict] = [
+            {
+                "role": "system",
+                "content": (
+                    "You have access to a web_search tool that fetches live information from the web. "
+                    "When the user asks for current, latest, live, or fresh market context, you must use "
+                    "the tool before finalizing the answer. Do not rely on stale training-data memory for "
+                    "current prices, earnings dates, market breadth, or macro levels. "
+                    "If search results are empty, generic, or weak, reformulate the query with the ticker/symbol, "
+                    "official company or investor-relations wording, and event-specific keywords before concluding "
+                    "that no data exists. Current UTC date: "
+                    f"{current_date}."
+                ),
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ]
+
+        tokens_in = 0
+        tokens_out = 0
+        content = ""
+
+        for _round in range(self._max_tool_rounds):
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=web_search_tool.TOOL_DEFINITIONS,
+                tool_choice="auto",
+            )
+            usage = getattr(response, "usage", None)
+            tokens_in += getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
+            tokens_out += getattr(usage, "completion_tokens", 0) or getattr(usage, "output_tokens", 0) or 0
+
+            choices = getattr(response, "choices", []) or []
+            if not choices:
+                break
+
+            message = choices[0].message
+            tool_calls = getattr(message, "tool_calls", None) or []
+            if not tool_calls:
+                content = (getattr(message, "content", "") or "").strip()
+                break
+
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": getattr(message, "content", "") or "",
+                    "tool_calls": [
+                        {
+                            "id": tool_call.id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_call.function.name,
+                                "arguments": tool_call.function.arguments,
+                            },
+                        }
+                        for tool_call in tool_calls
+                    ],
+                }
+            )
+
+            for tool_call in tool_calls:
+                arguments = self._safe_tool_arguments(tool_call.function.arguments)
+                result = web_search_tool.execute(tool_call.function.name, arguments)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result,
+                    }
+                )
+
+        if not content:
+            raise RuntimeError(f"{self.provider_name}/{model} returned empty output after tool-assisted generation")
+
+        needs_table = self._requires_table_output(prompt)
+        needs_stock_recommendation_table = self._requires_stock_recommendation_output(prompt)
+        if needs_table and not self._looks_like_markdown_table(content):
+            minimum_rows = 5 if needs_stock_recommendation_table else 1
+            rewrite = self.client.responses.create(
+                model=model,
+                input=(
+                    "Return ONLY one valid markdown table. "
+                    "No preamble, no explanation, no code fences. "
+                    f"Include header row, separator row, and at least {minimum_rows} data row"
+                    f"{'' if minimum_rows == 1 else 's'}.\n\n"
                     f"Original user request:\n{prompt}\n\n"
                     f"Previous assistant output:\n{content}"
                 ),
@@ -108,9 +245,36 @@ class OpenAIProvider(BaseAIProvider):
         text = (prompt or "").lower()
         return (
             "return only one markdown table" in text
-            or "table columns:" in text
-            or ("stock name" in text and "units to buy" in text)
+            or OpenAIProvider._requires_stock_recommendation_output(prompt)
         )
+
+    @staticmethod
+    def _requires_stock_recommendation_output(prompt: str) -> bool:
+        text = (prompt or "").lower()
+        return "table columns:" in text or ("stock name" in text and "units to buy" in text)
+
+    @staticmethod
+    def _requires_live_web_context(prompt: str) -> bool:
+        text = (prompt or "").lower()
+        if "[enable_web_search]" in text:
+            return True
+        keywords = (
+            "latest available market data",
+            "latest market data",
+            "latest available",
+            "latest data",
+            "latest news",
+            "live price",
+            "earnings updates",
+            "market breadth",
+            "sector rotation",
+            "macro conditions",
+            "institutional flow",
+            "current portfolio",
+            "current market",
+            "today",
+        )
+        return any(keyword in text for keyword in keywords)
 
     @staticmethod
     def _looks_like_markdown_table(content: str) -> bool:
@@ -120,6 +284,16 @@ class OpenAIProvider(BaseAIProvider):
             return False
         has_sep = any(re.fullmatch(r"\|?[\s:\-|\t]+\|?", line) for line in pipe_lines)
         return has_sep
+
+    @staticmethod
+    def _safe_tool_arguments(arguments: str | None) -> dict:
+        if not arguments:
+            return {}
+        try:
+            parsed = json.loads(arguments)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
 
     @staticmethod
     def _estimate_cost(

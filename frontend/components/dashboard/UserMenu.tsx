@@ -75,6 +75,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout, className })
   return (
     <div className={cn("relative", className)} ref={menuRef}>
       <Button
+        type="button"
         variant="outline"
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
@@ -149,6 +150,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout, className })
             <hr className="my-1 border-gray-100" />
             
             <button
+              type="button"
               onClick={() => {
                 setIsOpen(false);
                 onLogout();

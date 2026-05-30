@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { isClientAuthBypassed, resolveAuthRedirectTarget } from "@/lib/authRedirect";
 import { URLs } from "@/lib/urls";
 import { AuthRedirect } from "@/components/AuthRedirect";
 import { Button } from "@/components/ui/button";
@@ -12,14 +13,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { FormAlert } from "@/components/auth/FormAlert";
 import { Loader2 } from "lucide-react";
 
-const devAuthEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
-
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { login, loading, error, clearError } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const redirectTo = resolveAuthRedirectTarget(searchParams.get("redirectTo"));
 
   const validateForm = () => {
     if (!email) {
@@ -69,12 +70,12 @@ export default function LoginPage() {
                 />
               )}
 
-              {devAuthEnabled && (
+              {isClientAuthBypassed && (
                 <Button
                   type="button"
                   variant="outline"
                   className="w-full border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100"
-                  onClick={() => router.push(URLs.routes.console.dashboard())}
+                  onClick={() => router.replace(redirectTo || URLs.routes.console.dashboard())}
                 >
                   Continue to Dashboard
                 </Button>

@@ -13,6 +13,9 @@ from app.domains.ai_providers.router import router as providers_router
 from app.domains.api_usage.router import router as api_usage_router
 from app.domains.auth.router import router as auth_router
 from app.domains.google_sheets.router import router as google_sheets_router
+from app.domains.indmoney_us.events_router import router as indmoney_us_events_router
+from app.domains.indmoney_us.router import router as indmoney_us_router
+from app.domains.indmoney_us.threats_router import router as indmoney_us_threats_router
 from app.domains.health.router import router as health_router
 from app.domains.jobs.router import router as jobs_router
 from app.domains.jobs.ws_router import router as jobs_ws_router
@@ -20,16 +23,20 @@ from app.domains.prompts.router import router as prompts_router
 from app.domains.runs.router import router as runs_router
 from app.domains.runs.ws_router import router as runs_ws_router
 from app.domains.zerodha.router import router as zerodha_router
+from app.domains.zerodha.events_router import router as zerodha_events_router
+from app.domains.zerodha.threats_router import router as zerodha_threats_router
 from app.infrastructure.database.session import AsyncSessionLocal, async_engine
 from app.shared.exceptions import AppException
 
 # Ensure all ORM models are registered with the shared metadata
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
 from app.domains.google_sheets.models import GoogleSheetsCredential  # noqa: F401
+from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
 from app.domains.jobs.models import Job  # noqa: F401
 from app.domains.prompts.models import Prompt  # noqa: F401
 from app.domains.runs.models import Run, RunJob  # noqa: F401
-from app.domains.zerodha.models import ZerodhaCredential  # noqa: F401
+from app.domains.zerodha.audit import ZerodhaAuditLog  # noqa: F401
+from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot  # noqa: F401
 from app.infrastructure.database.outbox.models import OutboxMessage  # noqa: F401
 
 configure_logging()
@@ -110,6 +117,9 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(google_sheets_router)
+app.include_router(indmoney_us_events_router)
+app.include_router(indmoney_us_router)
+app.include_router(indmoney_us_threats_router)
 app.include_router(jobs_router)
 app.include_router(jobs_ws_router)
 app.include_router(prompts_router)
@@ -117,7 +127,9 @@ app.include_router(providers_router)
 app.include_router(api_usage_router)
 app.include_router(runs_router)
 app.include_router(runs_ws_router)
+app.include_router(zerodha_events_router)
 app.include_router(zerodha_router)
+app.include_router(zerodha_threats_router)
 
 
 @app.get("/")

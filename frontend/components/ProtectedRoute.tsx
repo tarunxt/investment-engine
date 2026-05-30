@@ -1,24 +1,24 @@
 "use client";
 
 import { useAuth } from "@/hooks/useAuth";
-import { URLs } from "@/lib/urls";
-import { useRouter } from "next/navigation";
+import { buildLoginRedirectHref, isClientAuthBypassed } from "@/lib/authRedirect";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
-
-const devAuthEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { isAuthenticated, loading } = useAuth();
 
   useEffect(() => {
-    if (devAuthEnabled) return;
+    if (isClientAuthBypassed) return;
     if (!loading && !isAuthenticated) {
-      router.push(URLs.routes.login());
+      router.replace(buildLoginRedirectHref(pathname, searchParams.toString()));
     }
-  }, [isAuthenticated, loading, router]);
+  }, [isAuthenticated, loading, pathname, router, searchParams]);
 
-  if (!devAuthEnabled && loading) {
+  if (!isClientAuthBypassed && loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
@@ -26,7 +26,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!devAuthEnabled && !isAuthenticated) {
+  if (!isClientAuthBypassed && !isAuthenticated) {
     return null;
   }
 

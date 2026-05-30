@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  Link2,
   Loader2,
   LogOut,
   RefreshCw,
@@ -15,10 +16,15 @@ import {
   Unplug,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import { apiService, APIError } from '@/services/api';
 import { cn } from '@/lib/utils';
+import { URLs } from '@/lib/urls';
+import { PortfolioSnapshotsPanel } from './_components/PortfolioSnapshotsPanel';
 import {
   type ZerodhaOrder,
+  type ZerodhaPortfolioOverviewResponse,
+  type ZerodhaPortfolioSnapshotDetail,
   type ZerodhaPlaceOrderRequest,
   type ZerodhaStatusResponse,
 } from '@/types/api';
@@ -38,6 +44,10 @@ function formatTs(iso: string | null) {
   });
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 const STATUS_COLORS: Record<string, string> = {
   COMPLETE: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   REJECTED: 'bg-red-50 text-red-700 ring-red-200',
@@ -45,6 +55,36 @@ const STATUS_COLORS: Record<string, string> = {
   OPEN: 'bg-blue-50 text-blue-700 ring-blue-200',
   TRIGGER_PENDING: 'bg-amber-50 text-amber-700 ring-amber-200',
 };
+
+function StatusRevealButton({
+  active,
+  label,
+  onClick,
+  className,
+  children,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon-sm"
+      aria-expanded={active}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={className}
+    >
+      {children}
+      <span className="sr-only">{label}</span>
+    </Button>
+  );
+}
 
 // ─── Place-order form ────────────────────────────────────────────────────────
 
@@ -359,12 +399,21 @@ export default function ZerodhaPage() {
   const [loginUrl, setLoginUrl] = useState('');
   const [configured, setConfigured] = useState(true);
   const [orders, setOrders] = useState<ZerodhaOrder[]>([]);
+  const [portfolioOverview, setPortfolioOverview] = useState<ZerodhaPortfolioOverviewResponse | null>(null);
+  const [selectedSnapshot, setSelectedSnapshot] = useState<ZerodhaPortfolioSnapshotDetail | null>(null);
+  const [selectedSnapshotDate, setSelectedSnapshotDate] = useState<string | null>(null);
 
   const [loadingStatus, setLoadingStatus] = useState(true);
+  const [loadingPortfolio, setLoadingPortfolio] = useState(true);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [selectingSnapshot, setSelectingSnapshot] = useState(false);
+  const [syncingPortfolio, setSyncingPortfolio] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [showOrderForm, setShowOrderForm] = useState(false);
+  const [showConnectionDetails, setShowConnectionDetails] = useState(false);
+  const [showRedirectDetails, setShowRedirectDetails] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -382,6 +431,37 @@ export default function ZerodhaPage() {
     }
   }, []);
 
+  const applyPortfolioOverview = useCallback(
+    (overview: ZerodhaPortfolioOverviewResponse) => {
+      setPortfolioOverview(overview);
+
+      const availableDates = new Set(overview.history.map((snapshot) => snapshot.snapshot_date));
+      if (!selectedSnapshotDate || !availableDates.has(selectedSnapshotDate)) {
+        setSelectedSnapshotDate(overview.latest?.snapshot_date ?? null);
+        setSelectedSnapshot(overview.latest);
+        return;
+      }
+
+      if (overview.latest?.snapshot_date === selectedSnapshotDate) {
+        setSelectedSnapshot(overview.latest);
+      }
+    },
+    [selectedSnapshotDate],
+  );
+
+  const fetchPortfolioOverview = useCallback(async () => {
+    setLoadingPortfolio(true);
+    setPortfolioError(null);
+    try {
+      const overview = await apiService.zerodhaPortfolioOverview();
+      applyPortfolioOverview(overview);
+    } catch (err) {
+      setPortfolioError(normalizeError(err));
+    } finally {
+      setLoadingPortfolio(false);
+    }
+  }, [applyPortfolioOverview]);
+
   const fetchOrders = useCallback(async () => {
     setLoadingOrders(true);
     try {
@@ -394,35 +474,120 @@ export default function ZerodhaPage() {
     }
   }, []);
 
+  const pollPortfolioOverview = useCallback(
+    async (baselineCapturedAt: string | null) => {
+      setSyncingPortfolio(true);
+      setPortfolioError(null);
+
+      try {
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          await sleep(attempt === 0 ? 1500 : 2000);
+          const overview = await apiService.zerodhaPortfolioOverview();
+          applyPortfolioOverview(overview);
+
+          const latestCapturedAt = overview.latest?.captured_at ?? null;
+          if (latestCapturedAt && latestCapturedAt !== baselineCapturedAt) {
+            return;
+          }
+        }
+      } catch (err) {
+        setPortfolioError(normalizeError(err));
+      } finally {
+        setSyncingPortfolio(false);
+      }
+    },
+    [applyPortfolioOverview],
+  );
+
+  const handleSyncPortfolio = useCallback(async () => {
+    const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
+    setPortfolioError(null);
+
+    try {
+      await apiService.zerodhaSyncPortfolio();
+    } catch (err) {
+      setPortfolioError(normalizeError(err));
+      return;
+    }
+
+    await pollPortfolioOverview(baselineCapturedAt);
+  }, [pollPortfolioOverview, portfolioOverview?.latest?.captured_at]);
+
+  const handleSelectSnapshot = useCallback(
+    async (snapshotDate: string) => {
+      if (snapshotDate === selectedSnapshotDate && selectedSnapshot) {
+        return;
+      }
+
+      setSelectingSnapshot(true);
+      setPortfolioError(null);
+      setSelectedSnapshotDate(snapshotDate);
+
+      try {
+        if (portfolioOverview?.latest?.snapshot_date === snapshotDate && portfolioOverview.latest) {
+          setSelectedSnapshot(portfolioOverview.latest);
+          return;
+        }
+
+        const snapshot = await apiService.zerodhaPortfolioSnapshot(snapshotDate);
+        setSelectedSnapshot(snapshot);
+      } catch (err) {
+        setPortfolioError(normalizeError(err));
+      } finally {
+        setSelectingSnapshot(false);
+      }
+    },
+    [portfolioOverview, selectedSnapshot, selectedSnapshotDate],
+  );
+
   // Handle postMessage from callback iframe
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
       if (ev.origin !== window.location.origin) return;
       if (ev.data?.type === 'zerodha_connected') {
-        fetchStatus().then(() => fetchOrders());
+        const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
+        fetchStatus().then(() => {
+          fetchOrders();
+          pollPortfolioOverview(baselineCapturedAt);
+        });
       } else if (ev.data?.type === 'zerodha_error') {
         setError(ev.data.message ?? 'Zerodha login failed');
       }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [fetchStatus, fetchOrders]);
+  }, [fetchOrders, fetchStatus, pollPortfolioOverview, portfolioOverview?.latest?.captured_at]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchStatus();
-  }, [fetchStatus]);
+    const load = async () => {
+      await fetchStatus();
+      await fetchPortfolioOverview();
+    };
+
+    void load();
+  }, [fetchPortfolioOverview, fetchStatus]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (status?.connected) fetchOrders();
+    if (!status?.connected) return;
+
+    const loadOrders = async () => {
+      await fetchOrders();
+    };
+
+    void loadOrders();
   }, [status?.connected, fetchOrders]);
 
   const handleDisconnect = async () => {
     setDisconnecting(true);
     try {
       await apiService.zerodhaDisconnect();
-      setStatus({ connected: false, login_time: null, expires_at: null });
+      setStatus((current) => ({
+        connected: false,
+        login_time: null,
+        expires_at: null,
+        last_portfolio_sync_at: current?.last_portfolio_sync_at ?? null,
+        last_portfolio_snapshot_date: current?.last_portfolio_snapshot_date ?? null,
+      }));
       setOrders([]);
     } catch (err) {
       setError(normalizeError(err));
@@ -446,24 +611,29 @@ export default function ZerodhaPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold tracking-tight text-gray-950">Zerodha</h1>
-          <p className="text-sm text-gray-500">Kite Connect integration — view and place orders</p>
+          <p className="text-sm text-gray-500">
+            Kite Connect integration — save daywise portfolio history and manage orders
+          </p>
         </div>
-        {status?.connected && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDisconnect}
-            disabled={disconnecting}
-            className="text-red-600 hover:text-red-700"
-          >
-            {disconnecting ? (
-              <Loader2 className="mr-2 size-3.5 animate-spin" />
-            ) : (
-              <Unplug className="mr-2 size-3.5" />
-            )}
-            Disconnect
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <PortfolioAnalysisNav portfolio="zerodha" />
+          {status?.connected && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="text-red-600 hover:text-red-700"
+            >
+              {disconnecting ? (
+                <Loader2 className="mr-2 size-3.5 animate-spin" />
+              ) : (
+                <Unplug className="mr-2 size-3.5" />
+              )}
+              Disconnect
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Not configured warning */}
@@ -486,32 +656,78 @@ export default function ZerodhaPage() {
         </div>
       )}
 
-      {/* Connection status banner */}
-      <div
-        className={cn(
-          'flex items-center gap-3 border px-4 py-3',
-          status?.connected
-            ? 'border-emerald-200 bg-emerald-50'
-            : 'border-gray-200 bg-gray-50',
-        )}
-      >
-        {status?.connected ? (
-          <>
-            <CheckCircle2 className="size-4 text-emerald-600" />
-            <div className="text-sm">
-              <span className="font-medium text-emerald-800">Connected to Zerodha</span>
-              <span className="ml-2 text-emerald-600 text-xs">
-                Session expires {formatTs(status.expires_at)}
-              </span>
-            </div>
-          </>
-        ) : (
-          <>
-            <LogOut className="size-4 text-gray-400" />
-            <span className="text-sm text-gray-600">Not connected — log in below to get started.</span>
-          </>
-        )}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <StatusRevealButton
+          active={showConnectionDetails}
+          label={status?.connected ? 'Show Zerodha connection details' : 'Show Zerodha login status'}
+          onClick={() => setShowConnectionDetails((current) => !current)}
+          className={cn(
+            status?.connected
+              ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+              : 'border-gray-200 text-gray-600 hover:bg-gray-100',
+          )}
+        >
+          {status?.connected ? <CheckCircle2 className="size-4" /> : <LogOut className="size-4" />}
+        </StatusRevealButton>
+        {configured ? (
+          <StatusRevealButton
+            active={showRedirectDetails}
+            label="Show Zerodha redirect URL details"
+            onClick={() => setShowRedirectDetails((current) => !current)}
+            className="border-blue-200 text-blue-700 hover:bg-blue-50"
+          >
+            <Link2 className="size-4" />
+          </StatusRevealButton>
+        ) : null}
       </div>
+
+      {showConnectionDetails ? (
+        <div
+          className={cn(
+            'flex items-center gap-3 border px-4 py-3 text-sm',
+            status?.connected
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border-gray-200 bg-gray-50 text-gray-600',
+          )}
+        >
+          {status?.connected ? (
+            <>
+              <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+              <div>
+                <span className="font-medium">Connected to Zerodha</span>
+                <span className="ml-2 text-xs text-emerald-600">
+                  Session expires {formatTs(status.expires_at)}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <LogOut className="size-4 shrink-0 text-gray-400" />
+              <span>Not connected — log in below to get started.</span>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {configured && showRedirectDetails ? (
+        <div className="border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          Register this redirect URL in your Kite app:{' '}
+          <code className="font-mono text-xs">{`${URLs.frontend}/zerodha/callback`}</code>
+        </div>
+      ) : null}
+
+      <PortfolioSnapshotsPanel
+        connected={Boolean(status?.connected)}
+        overview={portfolioOverview}
+        selectedSnapshot={selectedSnapshot}
+        selectedSnapshotDate={selectedSnapshotDate}
+        loading={loadingPortfolio}
+        selecting={selectingSnapshot}
+        syncing={syncingPortfolio}
+        error={portfolioError}
+        onSelectSnapshot={handleSelectSnapshot}
+        onSync={handleSyncPortfolio}
+      />
 
       {/* Login (shown when not connected and configured) */}
       {!status?.connected && configured && (
@@ -531,7 +747,15 @@ export default function ZerodhaPage() {
               </a>
             </div>
           </div>
-          <ManualTokenForm onConnected={() => fetchStatus().then(() => fetchOrders())} />
+          <ManualTokenForm
+            onConnected={() => {
+              const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
+              fetchStatus().then(() => {
+                fetchOrders();
+                pollPortfolioOverview(baselineCapturedAt);
+              });
+            }}
+          />
         </>
       )}
 

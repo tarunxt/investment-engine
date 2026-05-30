@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { URLs } from "@/lib/urls";
@@ -20,7 +19,6 @@ const PASSWORD_REQUIREMENTS = {
 };
 
 export default function RegisterPage() {
-  const router = useRouter();
   const { register, loading, error, clearError } = useAuth();
   const [formData, setFormData] = useState({
     email: "",
@@ -114,7 +112,6 @@ export default function RegisterPage() {
         formData.password,
         formData.fullName
       );
-      router.push(URLs.routes.console.dashboard());
     } catch (err) {
       console.error("Registration error:", err);
     }

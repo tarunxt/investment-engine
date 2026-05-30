@@ -47,6 +47,76 @@ KEY_MAP = {
     "run time": "run_time",
 }
 
+HEADERLESS_CANONICAL_KEYS = [
+    "llm_name_model",
+    "exchange_symbol",
+    "stock_symbol",
+    "stock_name",
+    "technical_setup",
+    "entry_range",
+    "stop_loss",
+    "target",
+    "analyst_source",
+    "units_to_buy",
+    "price_per_unit",
+    "total_buy_amount",
+    "upside_horizon",
+    "weeks",
+    "confidence_score",
+    "rationale_remarks",
+    "rationale_technical_medium_term",
+    "rationale_technical_long_term",
+    "rationale_fundamentals_short_term",
+    "rationale_fundamentals_medium_long_term",
+    "rationale_technical_short_term",
+    "run_number",
+    "run_date",
+    "run_time",
+]
+
+HEADERLESS_CANONICAL_KEYS_WITH_LLM = [
+    *HEADERLESS_CANONICAL_KEYS,
+    "llm",
+]
+
+HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER = [
+    "llm_name_model",
+    "exchange_symbol",
+    "stock_symbol",
+    "stock_name",
+    "technical_setup",
+    "entry_range",
+    "stop_loss",
+    "target",
+    "analyst_source",
+    "units_to_buy",
+    "price_per_unit",
+    "total_buy_amount",
+    "upside_horizon",
+    "weeks",
+    "confidence_score",
+    "rationale_remarks",
+    "rationale_technical_medium_term",
+    "rationale_fundamentals_short_term",
+    "rationale_fundamentals_medium_long_term",
+    "rationale_technical_short_term",
+    "run_number",
+    "run_date",
+    "run_time",
+]
+
+HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_WITH_LLM = [
+    *HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER,
+    "llm",
+]
+
+HEADERLESS_CANONICAL_KEY_VARIANTS = (
+    HEADERLESS_CANONICAL_KEYS_WITH_LLM,
+    HEADERLESS_CANONICAL_KEYS,
+    HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_WITH_LLM,
+    HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER,
+)
+
 
 def _normalize_header(value: str) -> str:
     cleaned = (
@@ -105,6 +175,64 @@ def _looks_like_data_row(item: dict[str, Any]) -> bool:
     if technical and set(technical.replace("-", "").replace(" ", "")) == set():
         return False
     return bool(symbol or exchange_symbol or name)
+
+
+def _looks_like_headerless_canonical_row(tokens: list[str], keys: list[str]) -> bool:
+    if len(tokens) != len(keys):
+        return False
+
+    exchange_symbol = tokens[keys.index("exchange_symbol")].strip().upper()
+    stock_symbol = tokens[keys.index("stock_symbol")].strip()
+    stock_name = tokens[keys.index("stock_name")].strip()
+    entry_range = tokens[keys.index("entry_range")].strip()
+    run_date = tokens[keys.index("run_date")].strip()
+    run_time = tokens[keys.index("run_time")].strip()
+
+    if exchange_symbol not in {"NSE", "BSE"}:
+        return False
+    if not stock_symbol or len(stock_symbol) > 20:
+        return False
+    if not stock_name:
+        return False
+    if not re.search(r"\d", entry_range):
+        return False
+    if not run_date or not re.search(r"\d{2,4}", run_date):
+        return False
+    if not run_time or ":" not in run_time:
+        return False
+
+    numeric_hits = sum(
+        1
+        for field in (
+            "units_to_buy",
+            "price_per_unit",
+            "total_buy_amount",
+            "upside_horizon",
+            "weeks",
+            "confidence_score",
+        )
+        if _to_number(tokens[keys.index(field)]) is not None
+    )
+    return numeric_hits >= 5
+
+
+def _parse_headerless_canonical_items(tokens: list[str]) -> list[dict[str, str]]:
+    for keys in HEADERLESS_CANONICAL_KEY_VARIANTS:
+        if len(tokens) < len(keys) or len(tokens) % len(keys) != 0:
+            continue
+
+        items: list[dict[str, str]] = []
+        for offset in range(0, len(tokens), len(keys)):
+            chunk = tokens[offset : offset + len(keys)]
+            if not _looks_like_headerless_canonical_row(chunk, keys):
+                items = []
+                break
+            items.append({keys[i]: chunk[i] for i in range(len(keys))})
+
+        if items:
+            return items
+
+    return []
 
 
 def normalize_stock_rows(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -262,28 +390,42 @@ def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
         line = " ".join(response_text.split())
         if "|" in line:
             tokens = [token.strip() for token in line.split("|") if token.strip()]
-            if len(tokens) < 10:
-                return []
-            if not _looks_like_stock_table_header_tokens(tokens[:16]):
-                return []
-            sep_idx = next((i for i, token in enumerate(tokens) if _is_separator_token(token)), -1)
-            if sep_idx > 0:
-                headers = tokens[:sep_idx]
-                data_tokens = tokens[sep_idx:]
-                while data_tokens and _is_separator_token(data_tokens[0]):
-                    data_tokens.pop(0)
+            if len(tokens) >= 10 and _looks_like_stock_table_header_tokens(tokens[:16]):
+                sep_idx = next((i for i, token in enumerate(tokens) if _is_separator_token(token)), -1)
+                if sep_idx > 0:
+                    headers = tokens[:sep_idx]
+                    data_tokens = tokens[sep_idx:]
+                    while data_tokens and _is_separator_token(data_tokens[0]):
+                        data_tokens.pop(0)
 
-                normalized_headers = [KEY_MAP.get(_normalize_header(h), _normalize_header(h).replace(" ", "_")) for h in headers]
-                n_cols = len(normalized_headers)
-                rows = [data_tokens[i : i + n_cols] for i in range(0, len(data_tokens), n_cols) if len(data_tokens[i : i + n_cols]) == n_cols]
-                parsed_rows: list[dict[str, Any]] = []
-                for row in rows:
-                    if _is_header_like_row(row, headers):
-                        continue
-                    item = {normalized_headers[i]: row[i] for i in range(n_cols)}
-                    parsed_rows.extend(normalize_stock_rows([item]))
-                if parsed_rows:
-                    return parsed_rows
+                    normalized_headers = [KEY_MAP.get(_normalize_header(h), _normalize_header(h).replace(" ", "_")) for h in headers]
+                    n_cols = len(normalized_headers)
+                    rows = [data_tokens[i : i + n_cols] for i in range(0, len(data_tokens), n_cols) if len(data_tokens[i : i + n_cols]) == n_cols]
+                    parsed_rows: list[dict[str, Any]] = []
+                    for row in rows:
+                        if _is_header_like_row(row, headers):
+                            continue
+                        item = {normalized_headers[i]: row[i] for i in range(n_cols)}
+                        parsed_rows.extend(normalize_stock_rows([item]))
+                    if parsed_rows:
+                        return parsed_rows
+    except Exception:
+        pass
+
+    # Fallback: Parse headerless pipe rows already emitted in canonical column order
+    try:
+        parsed_rows = []
+        for line in [line.strip() for line in response_text.splitlines() if line.strip()]:
+            if line.count("|") < min(len(keys) for keys in HEADERLESS_CANONICAL_KEY_VARIANTS) - 2:
+                continue
+            tokens = [token.strip() for token in line.strip("|").split("|")]
+            if len(tokens) < min(len(keys) for keys in HEADERLESS_CANONICAL_KEY_VARIANTS):
+                continue
+
+            for item in _parse_headerless_canonical_items(tokens):
+                parsed_rows.extend(normalize_stock_rows([item]))
+        if parsed_rows:
+            return parsed_rows
     except Exception:
         pass
 
@@ -328,10 +470,9 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
         "rationale_fundamentals_short_term",
         "rationale_fundamentals_medium_long_term",
         "rationale_technical_short_term",
-        "run_number",
-        "run_date",
-        "run_time",
     ]
+
+    reserved_metadata_keys = {"run_number", "run_date", "run_time", "llm"}
 
     header_labels = {
         "llm_name_model": "LLM Name + Model",
@@ -363,7 +504,9 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
     # Keep a stable, exact column sequence across all exports.
     # Missing fields are exported as blank cells rather than dropping headers.
     selected_keys = list(preferred_key_order)
-    extra_keys = [key for key in sorted(present_keys) if key not in selected_keys]
+    extra_keys = [
+        key for key in sorted(present_keys) if key not in selected_keys and key not in reserved_metadata_keys
+    ]
     selected_keys.extend(extra_keys)
 
     headers = ["Stage"] if has_stage else []

@@ -14,6 +14,35 @@ import {
     PromptCreate,
     PromptUpdate,
     ProviderInfo,
+    PortfolioEventRunRequest,
+    ZerodhaEventsAnalysis,
+    ZerodhaEventsHistoryResponse,
+    ZerodhaEventsLatestResponse,
+    ZerodhaEventsRunResponse,
+    IndMoneyUsPortfolioOverviewResponse,
+    IndMoneyUsPortfolioSnapshotCreateRequest,
+    IndMoneyUsPortfolioSnapshotDetail,
+    IndMoneyUsEventsAnalysis,
+    IndMoneyUsEventsHistoryResponse,
+    IndMoneyUsEventsLatestResponse,
+    IndMoneyUsEventsRunResponse,
+    IndMoneyUsThreatAnalysis,
+    IndMoneyUsThreatHistoryResponse,
+    IndMoneyUsThreatLatestResponse,
+    IndMoneyUsThreatRunResponse,
+    ZerodhaLoginUrlResponse,
+    ZerodhaOrder,
+    ZerodhaPlaceOrderRequest,
+    ZerodhaPlaceOrderResponse,
+    ZerodhaThreatAnalysis,
+    ZerodhaThreatHistoryResponse,
+    ZerodhaThreatLatestResponse,
+    ZerodhaThreatRunResponse,
+    ZerodhaPortfolioOverviewResponse,
+    ZerodhaPortfolioSnapshotDetail,
+    ZerodhaPortfolioSyncResponse,
+    ZerodhaStatusResponse,
+    RunListItem,
 } from '@/types/api';
 
 // Define the API service interface with proper types
@@ -40,6 +69,7 @@ export interface IApiService {
     createJob(data: JobCreate): Promise<JobResponse>;
     getJobs(params?: { page?: number; limit?: number; status?: string; q?: string }): Promise<PaginatedResponse<JobResponse>>;
     getJob(id: number): Promise<JobResponse>;
+    getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>>;
 
     // Provider endpoints
     getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]>;
@@ -50,6 +80,40 @@ export interface IApiService {
     createPrompt(data: PromptCreate): Promise<PromptResponse>;
     updatePrompt(id: number, data: PromptUpdate): Promise<PromptResponse>;
     deletePrompt(id: number): Promise<void>;
+
+    // Zerodha endpoints
+    zerodhaLoginUrl(): Promise<ZerodhaLoginUrlResponse>;
+    zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse>;
+    zerodhaStatus(): Promise<ZerodhaStatusResponse>;
+    zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse>;
+    zerodhaPortfolioSnapshot(snapshotDate: string): Promise<ZerodhaPortfolioSnapshotDetail>;
+    zerodhaSyncPortfolio(): Promise<ZerodhaPortfolioSyncResponse>;
+    zerodhaOrders(): Promise<{ data: ZerodhaOrder[] }>;
+    zerodhaPlaceOrder(data: ZerodhaPlaceOrderRequest): Promise<ZerodhaPlaceOrderResponse>;
+    zerodhaDisconnect(): Promise<{ message: string }>;
+    zerodhaEventsLatest(): Promise<ZerodhaEventsLatestResponse>;
+    zerodhaEventsHistory(params?: { limit?: number }): Promise<ZerodhaEventsHistoryResponse>;
+    zerodhaEventJob(jobId: number): Promise<ZerodhaEventsAnalysis>;
+    zerodhaRunEvents(data?: PortfolioEventRunRequest): Promise<ZerodhaEventsRunResponse>;
+    zerodhaThreatsLatest(): Promise<ZerodhaThreatLatestResponse>;
+    zerodhaThreatsHistory(params?: { limit?: number }): Promise<ZerodhaThreatHistoryResponse>;
+    zerodhaThreatJob(jobId: number): Promise<ZerodhaThreatAnalysis>;
+    zerodhaRunThreats(data?: PortfolioEventRunRequest): Promise<ZerodhaThreatRunResponse>;
+
+    // INDmoney US endpoints
+    indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse>;
+    indmoneyUsPortfolioSnapshot(snapshotId: number): Promise<IndMoneyUsPortfolioSnapshotDetail>;
+    indmoneyUsCreatePortfolioSnapshot(
+        data: IndMoneyUsPortfolioSnapshotCreateRequest,
+    ): Promise<IndMoneyUsPortfolioSnapshotDetail>;
+    indmoneyUsEventsLatest(): Promise<IndMoneyUsEventsLatestResponse>;
+    indmoneyUsEventsHistory(params?: { limit?: number }): Promise<IndMoneyUsEventsHistoryResponse>;
+    indmoneyUsEventJob(jobId: number): Promise<IndMoneyUsEventsAnalysis>;
+    indmoneyUsRunEvents(data?: PortfolioEventRunRequest): Promise<IndMoneyUsEventsRunResponse>;
+    indmoneyUsThreatsLatest(): Promise<IndMoneyUsThreatLatestResponse>;
+    indmoneyUsThreatsHistory(params?: { limit?: number }): Promise<IndMoneyUsThreatHistoryResponse>;
+    indmoneyUsThreatJob(jobId: number): Promise<IndMoneyUsThreatAnalysis>;
+    indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse>;
 }
 
 // Type for API error handling

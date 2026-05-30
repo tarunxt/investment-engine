@@ -1,29 +1,32 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
-
-const devAuthEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
+import { isClientAuthBypassed, resolveAuthRedirectTarget } from '@/lib/authRedirect';
 
 export default function AuthLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    const { isAuthenticated } = useAuth();
+    const { isAuthenticated, loading } = useAuth();
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const redirectTo = resolveAuthRedirectTarget(searchParams.get('redirectTo'));
 
     useEffect(() => {
-        // Redirect to dashboard if already authenticated
-        if (devAuthEnabled || isAuthenticated) {
-            console.log('User is authenticated, redirecting to dashboard...');
-            router.push('/console/dashboard');
+        if (loading) return;
+        if (isClientAuthBypassed || isAuthenticated) {
+            router.replace(redirectTo);
         }
-    }, [isAuthenticated, router]);
+    }, [isAuthenticated, loading, redirectTo, router]);
 
-    // Don't render anything while checking auth or redirecting
-    if (devAuthEnabled || isAuthenticated) {
+    if (loading) {
+        return null;
+    }
+
+    if (isClientAuthBypassed || isAuthenticated) {
         return null;
     }
 

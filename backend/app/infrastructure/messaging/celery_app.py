@@ -1,5 +1,6 @@
 from celery import Celery
 from kombu import Queue
+from celery.schedules import crontab
 
 from app.core.config import settings
 
@@ -20,6 +21,7 @@ celery.conf.task_default_queue = "ai"
 celery.conf.task_routes = {
     "app.domains.jobs.tasks.*": {"queue": "ai"},
     "app.domains.auth.tasks.*": {"queue": "email"},
+    "app.domains.zerodha.tasks.*": {"queue": "ai"},
     "app.infrastructure.database.outbox.tasks.*": {"queue": "beat"},
 }
 
@@ -30,6 +32,13 @@ celery.conf.update(
     timezone="UTC",
     enable_utc=True
 )
+celery.conf.beat_schedule = {
+    # 10:40 UTC == 16:10 IST, shortly after Indian market close.
+    "zerodha-daily-portfolio-sync": {
+        "task": "app.domains.zerodha.tasks.enqueue_daily_portfolio_sync",
+        "schedule": crontab(minute=40, hour=10),
+    },
+}
 
 # Retry failed tasks with exponential backoff + jitter
 celery.conf.task_acks_late = True          # ack only after task completes
@@ -39,5 +48,6 @@ celery.autodiscover_tasks([
     "app.domains.jobs",
     "app.domains.auth",
     "app.domains.google_sheets",
+    "app.domains.zerodha",
     "app.infrastructure.database.outbox",
 ])

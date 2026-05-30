@@ -1,10 +1,33 @@
 import { auth } from "@/app/api/auth/[...nextauth]/route";
+import {
+  buildLoginRedirectHref,
+  resolveAuthRedirectTarget,
+  stripRedirectToFromCurrentUrl,
+} from "@/lib/authRedirect";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type { Session } from "next-auth";
 
 export default auth((req: NextRequest & { auth: Session | null }) => {
   const path = req.nextUrl.pathname;
+  const isProtectedAppRoute =
+    path.startsWith("/console") ||
+    path.startsWith("/dashboard") ||
+    path.startsWith("/profile");
+
+  if (isProtectedAppRoute && req.nextUrl.searchParams.has("redirectTo")) {
+    const cleanedPath = stripRedirectToFromCurrentUrl(
+      req.nextUrl.pathname,
+      req.nextUrl.searchParams.toString(),
+    );
+    const currentPath = req.nextUrl.search
+      ? `${req.nextUrl.pathname}${req.nextUrl.search}`
+      : req.nextUrl.pathname;
+
+    if (cleanedPath !== currentPath) {
+      return NextResponse.redirect(new URL(cleanedPath, req.url));
+    }
+  }
 
   if (
     process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
@@ -16,7 +39,10 @@ export default auth((req: NextRequest & { auth: Session | null }) => {
       path === "/forgot-password" ||
       path.startsWith("/reset-password")
     ) {
-      return NextResponse.redirect(new URL("/console/dashboard", req.url));
+      const redirectTo = resolveAuthRedirectTarget(
+        req.nextUrl.searchParams.get("redirectTo"),
+      );
+      return NextResponse.redirect(new URL(redirectTo, req.url));
     }
     return NextResponse.next();
   }
@@ -25,9 +51,11 @@ export default auth((req: NextRequest & { auth: Session | null }) => {
 
   // Not logged in
   if (!token) {
-    return NextResponse.redirect(
-      new URL("/login", req.url)
+    const loginHref = buildLoginRedirectHref(
+      req.nextUrl.pathname,
+      req.nextUrl.searchParams.toString(),
     );
+    return NextResponse.redirect(new URL(loginHref, req.url));
   }
 
   // Admin route protection

@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import type { IconType } from 'react-icons';
 import { useAuth } from '@/hooks/useAuth';
 import {
     HiOutlineViewGrid,
@@ -15,30 +16,62 @@ import {
     HiOutlineCube,
 } from 'react-icons/hi';
 import { URLs } from '@/lib/urls';
+import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
 import { FullLoader } from '@/components/shared/Loader';
 import { UserMenu } from '@/components/dashboard/UserMenu';
 
-const devAuthEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
+type NavigationItem = {
+    name: string;
+    href: string;
+    icon: IconType;
+};
+
+type NavigationGroup = {
+    name: string;
+    icon: IconType;
+    children: NavigationItem[];
+};
+
+type NavigationEntry = NavigationItem | NavigationGroup;
 
 export default function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    const { isAuthenticated, user, logout, loading } = useAuth();
+    const { user, logout, loading } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
+    const searchParams = useSearchParams();
+    const searchParamString = searchParams.toString();
+    const hasRedirectToParam = searchParams.has('redirectTo');
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [portfolioOpen, setPortfolioOpen] = useState(false);
 
     useEffect(() => {
-        if (devAuthEnabled) return;
-        if (loading) return;
-        if (!isAuthenticated) {
-            router.push('/login');
+        if (!hasRedirectToParam) return;
+        const cleanedUrl = stripRedirectToFromCurrentUrl(pathname, searchParamString);
+        const currentUrl = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+        if (cleanedUrl !== currentUrl) {
+            // Keep the App Router's internal state aligned with the cleaned URL.
+            router.replace(cleanedUrl, { scroll: false });
         }
-    }, [isAuthenticated, router, loading]);
+    }, [hasRedirectToParam, pathname, router, searchParamString]);
 
-    const navigation = [
+    const portfolioChildren: NavigationItem[] = [
+        {
+            name: 'Zerodha',
+            href: URLs.routes.console.zerodha(),
+            icon: HiOutlineTrendingUp,
+        },
+        {
+            name: 'IndMoney US',
+            href: URLs.routes.console.indmoneyUs(),
+            icon: HiOutlineTrendingUp,
+        },
+    ];
+
+    const navigation: NavigationEntry[] = [
         {
             name: 'Dashboard',
             href: URLs.routes.console.dashboard(),
@@ -55,8 +88,8 @@ export default function DashboardLayout({
             icon: HiOutlineBookOpen,
         },
         {
-            name: 'Zerodha',
-            href: URLs.routes.console.zerodha(),
+            name: 'Portfolio',
+            children: portfolioChildren,
             icon: HiOutlineTrendingUp,
         },
         {
@@ -80,8 +113,18 @@ export default function DashboardLayout({
         if (href === '/dashboard') {
             return pathname === href;
         }
+        if (href === URLs.routes.console.zerodha()) {
+            return pathname === href || pathname.startsWith(`${href}/`);
+        }
+        if (href === URLs.routes.console.indmoneyUs()) {
+            return pathname === href || pathname.startsWith(`${href}/`);
+        }
         return pathname.startsWith(href);
     };
+
+    const isPortfolioActive =
+        pathname.startsWith('/console/zerodha') || pathname.startsWith('/console/indmoney-us');
+    const isPortfolioExpanded = portfolioOpen || isPortfolioActive;
 
     if (loading) {
         return (
@@ -112,15 +155,22 @@ export default function DashboardLayout({
             >
                 <div className="flex flex-col h-full">
                     {/* Logo */}
-                    <div className="flex items-center justify-between h-16 px-4 border-b">
-                        <Link href={URLs.routes.console.dashboard()} className="flex items-center w-full justify-center space-x-2">
-                            <div className="w-8 h-8 bg-linear-to-r from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center">
-                                <span className="text-white font-bold text-lg">AI</span>
+                    <div className="relative flex h-20 items-center justify-center border-b px-4">
+                        <Link href={URLs.routes.console.dashboard()} className="flex flex-col items-center gap-2 text-center">
+                            <div className="rounded-2xl bg-linear-to-r from-indigo-600 via-violet-600 to-fuchsia-600 px-3 py-2 shadow-sm">
+                                <span className="text-xs font-bold uppercase tracking-[0.28em] text-white">TIE</span>
+                            </div>
+                            <div className="leading-tight">
+                                <div className="text-sm font-semibold text-gray-900">Tarun&apos;s</div>
+                                <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">
+                                    Investment Engine
+                                </div>
                             </div>
                         </Link>
                         <button
+                            type="button"
                             onClick={() => setSidebarOpen(false)}
-                            className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 lg:hidden"
+                            className="absolute right-4 p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 lg:hidden"
                         >
                             <HiOutlineX />
                         </button>
@@ -129,20 +179,63 @@ export default function DashboardLayout({
                     {/* Navigation */}
                     <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
                         {navigation.map((item) => (
-                            <Link
-                                key={item.name}
-                                href={item.href}
-                                className={`flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors ${isActive(item.href)
-                                    ? 'bg-indigo-50 text-indigo-600'
-                                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                                    }`}
-                            >
-                                <item.icon
-                                    className={`mr-3 h-5 w-5 ${isActive(item.href) ? 'text-indigo-600' : 'text-gray-400'
+                            'children' in item ? (
+                                <div key={item.name} className="space-y-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPortfolioOpen((current) => !current)}
+                                        className={`flex w-full items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors ${isPortfolioActive
+                                            ? 'bg-indigo-50 text-indigo-600'
+                                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                                            }`}
+                                    >
+                                        <item.icon
+                                            className={`mr-3 h-5 w-5 ${isPortfolioActive ? 'text-indigo-600' : 'text-gray-400'
+                                                }`}
+                                        />
+                                        <span>Portfolio</span>
+                                        <span className="ml-auto text-xs text-gray-400">
+                                            {isPortfolioExpanded ? 'v' : '>'}
+                                        </span>
+                                    </button>
+                                    {isPortfolioExpanded && (
+                                        <div className="ml-6 space-y-1 border-l border-gray-200 pl-3">
+                                            {item.children.map((child) => (
+                                                <Link
+                                                    key={child.name}
+                                                    href={child.href}
+                                                    onClick={() => setSidebarOpen(false)}
+                                                    className={`flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isActive(child.href)
+                                                        ? 'bg-indigo-50 text-indigo-600'
+                                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                                                        }`}
+                                                >
+                                                    <span className={`mr-2 text-xs ${isActive(child.href) ? 'text-indigo-500' : 'text-gray-300'}`}>
+                                                        •
+                                                    </span>
+                                                    {child.name}
+                                                </Link>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <Link
+                                    key={item.name}
+                                    href={item.href}
+                                    onClick={() => setSidebarOpen(false)}
+                                    className={`flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors ${isActive(item.href)
+                                        ? 'bg-indigo-50 text-indigo-600'
+                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                                         }`}
-                                />
-                                {item.name}
-                            </Link>
+                                >
+                                    <item.icon
+                                        className={`mr-3 h-5 w-5 ${isActive(item.href) ? 'text-indigo-600' : 'text-gray-400'
+                                            }`}
+                                    />
+                                    {item.name}
+                                </Link>
+                            )
                         ))}
                     </nav>
 
@@ -171,6 +264,7 @@ export default function DashboardLayout({
                 <header className="bg-white shadow-sm sticky top-0 z-10">
                     <div className="flex items-center justify-between h-16 px-4 sm:px-6">
                         <button
+                            type="button"
                             onClick={() => setSidebarOpen(true)}
                             className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 lg:hidden"
                         >

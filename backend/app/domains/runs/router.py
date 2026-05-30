@@ -10,7 +10,7 @@ from app.domains.auth.models import User
 from app.domains.jobs.models import Job
 from app.domains.runs.models import RunJob
 from app.domains.runs.repository import PostgresRunRepository
-from app.domains.runs.schemas import RunCreate, RunResponse
+from app.domains.runs.schemas import RunCreate, RunListItem, RunResponse
 from app.domains.runs.use_cases.create_run import (
     CreateRunCommand,
     CreateRunUseCase,
@@ -23,10 +23,36 @@ from app.shared.pagination import PagedQuery
 from app.shared.types import JobStatus, UserId
 
 router = APIRouter(prefix="/runs", tags=["runs"])
+RUN_PROMPT_PREVIEW_CHARS = 280
 
 
 def _get_redis() -> aioredis.Redis:
     return aioredis.from_url(settings.redis_url, decode_responses=True)
+
+
+def _preview_prompt(prompt: str) -> str:
+    normalized = " ".join(prompt.split())
+    if len(normalized) <= RUN_PROMPT_PREVIEW_CHARS:
+        return normalized
+    return f"{normalized[:RUN_PROMPT_PREVIEW_CHARS].rstrip()}..."
+
+
+def _serialize_run_list_item(run) -> RunListItem:
+    return RunListItem(
+        id=run.id,
+        prompt_preview=_preview_prompt(run.prompt),
+        prompt_id=run.prompt_id,
+        status=run.status,
+        current_stage=run.current_stage,
+        run_jobs=run.run_jobs,
+        auto_export_enabled=run.auto_export_enabled,
+        export_status=run.export_status,
+        export_error=run.export_error,
+        exported_at=run.exported_at,
+        exported_sheet_url=run.exported_sheet_url,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
 
 
 @router.post("", response_model=RunResponse)
@@ -81,14 +107,20 @@ async def create_run(
 async def list_runs(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    summary: bool = Query(False),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     repo = PostgresRunRepository(db)
-    result = await repo.list(PagedQuery(page=page, limit=limit))
+    result = await repo.list(PagedQuery(page=page, limit=limit), summary=summary)
+    items = (
+        [_serialize_run_list_item(run) for run in result.items]
+        if summary
+        else [RunResponse.model_validate(run) for run in result.items]
+    )
     return {
         **result.to_dict(),
-        "items": [RunResponse.model_validate(run) for run in result.items],
+        "items": items,
     }
 
 

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob
@@ -30,15 +30,52 @@ class PostgresRunRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list(self, query: PagedQuery) -> PagedResult[Run]:
+    async def list(self, query: PagedQuery, *, summary: bool = False) -> PagedResult[Run]:
         stmt = select(Run)
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total: int = (await self._session.execute(count_stmt)).scalar_one()
+        if summary:
+            stmt = stmt.options(
+                load_only(
+                    Run.id,
+                    Run.prompt,
+                    Run.prompt_id,
+                    Run.status,
+                    Run.current_stage,
+                    Run.auto_export_enabled,
+                    Run.export_status,
+                    Run.export_error,
+                    Run.exported_at,
+                    Run.exported_sheet_url,
+                    Run.created_at,
+                    Run.updated_at,
+                ),
+                selectinload(Run.run_jobs)
+                .load_only(RunJob.id, RunJob.run_id, RunJob.job_id, RunJob.stage)
+                .selectinload(RunJob.job)
+                .load_only(
+                    Job.id,
+                    Job.provider,
+                    Job.model,
+                    Job.status,
+                    Job.error_message,
+                    Job.tokens_in,
+                    Job.tokens_out,
+                    Job.estimated_cost,
+                    Job.export_status,
+                    Job.export_error,
+                    Job.exported_at,
+                    Job.exported_sheet_url,
+                    Job.scheduled_at,
+                    Job.created_at,
+                    Job.updated_at,
+                ),
+            )
+        else:
+            stmt = stmt.options(selectinload(Run.run_jobs).selectinload(RunJob.job))
+
         items_result = await self._session.execute(
-            stmt.options(selectinload(Run.run_jobs).selectinload(RunJob.job))
-            .order_by(Run.id.desc())
-            .offset(query.offset)
-            .limit(query.limit)
+            stmt.order_by(Run.id.desc()).offset(query.offset).limit(query.limit)
         )
         return PagedResult(
             items=list(items_result.scalars()),

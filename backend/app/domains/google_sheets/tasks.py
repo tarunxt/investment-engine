@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _svc = GoogleSheetsService()
 IST = ZoneInfo("Asia/Kolkata")
 MIN_EXPECTED_STOCK_ROWS = 5
+MALFORMED_TABLE_ERROR_MARKER = "returned malformed table output"
 
 
 def _error_text(exc: Exception) -> str:
@@ -31,6 +32,21 @@ def _error_text(exc: Exception) -> str:
     if text:
         return text[:500]
     return f"{exc.__class__.__name__}: unknown export error"
+
+
+def _job_export_block_reason(job: Job) -> str | None:
+    error_message = (job.error_message or "").lower()
+    if MALFORMED_TABLE_ERROR_MARKER in error_message:
+        return (
+            "This response is marked as malformed table output and will not be "
+            "exported to Google Sheets."
+        )
+    return None
+
+
+def _job_status_value(job: Job) -> str:
+    status = getattr(job.status, "value", job.status)
+    return str(status).lower()
 
 
 def _with_run_metadata_columns(
@@ -92,6 +108,20 @@ def export_job_to_sheets_task(
             _publish_job_update(job)
             _refresh_run_status(db, job.id)
 
+            if _job_status_value(job) != "completed":
+                export_block_reason = (
+                    _job_export_block_reason(job)
+                    or "Only completed job responses can be exported to Google Sheets."
+                )
+                job_repo.update_export_state(
+                    job,
+                    export_status="failed",
+                    export_error=export_block_reason[:500],
+                )
+                _publish_job_update(job)
+                _refresh_run_status(db, job.id)
+                return {"status": "failed", "error": export_block_reason[:500]}
+
             if not job.response:
                 job_repo.update_export_state(
                     job,
@@ -101,6 +131,17 @@ def export_job_to_sheets_task(
                 _publish_job_update(job)
                 _refresh_run_status(db, job.id)
                 return {"status": "failed", "error": "Job has no response yet"}
+
+            export_block_reason = _job_export_block_reason(job)
+            if export_block_reason:
+                job_repo.update_export_state(
+                    job,
+                    export_status="failed",
+                    export_error=export_block_reason[:500],
+                )
+                _publish_job_update(job)
+                _refresh_run_status(db, job.id)
+                return {"status": "failed", "error": export_block_reason[:500]}
 
             access_token = decrypt_token(cred.access_token_enc)
             refresh_token = (
@@ -283,16 +324,25 @@ def export_run_to_sheets_task(
 
             all_stocks: list[dict] = []
             model_names = set()
+            skipped_malformed_jobs = 0
 
             for run_job in run_jobs:
                 job = run_job.job
-                if job.response:
-                    stocks = normalize_stock_rows(parse_stock_recommendations(job.response))
-                    # Add stage info to each stock
-                    for stock in stocks:
-                        stock["stage"] = f"Stage {run_job.stage}"
-                    all_stocks.extend(stocks)
-                    model_names.add(f"{job.provider} ({job.model})")
+                if not job.response:
+                    continue
+                if _job_status_value(job) != "completed":
+                    if _job_export_block_reason(job):
+                        skipped_malformed_jobs += 1
+                    continue
+                if _job_export_block_reason(job):
+                    skipped_malformed_jobs += 1
+                    continue
+                stocks = normalize_stock_rows(parse_stock_recommendations(job.response))
+                # Add stage info to each stock
+                for stock in stocks:
+                    stock["stage"] = f"Stage {run_job.stage}"
+                all_stocks.extend(stocks)
+                model_names.add(f"{job.provider} ({job.model})")
 
             if not all_stocks:
                 terminal_jobs = [
@@ -306,7 +356,12 @@ def export_run_to_sheets_task(
                 ]
                 sample = next((j for j in terminal_jobs if j.response), None)
                 response_preview = " ".join((sample.response or "").split())[:220] if sample else ""
-                reason = "No stock recommendations found in run response"
+                reason = "No exportable stock recommendations found in run response"
+                if skipped_malformed_jobs:
+                    reason = (
+                        f"{reason}. Skipped {skipped_malformed_jobs} malformed model "
+                        f"output{'s' if skipped_malformed_jobs != 1 else ''}"
+                    )
                 if response_preview:
                     reason = f"{reason}. Sample response preview: {response_preview}"
                 run_repo.update_export_state(
@@ -323,6 +378,11 @@ def export_run_to_sheets_task(
                     f"Insufficient total stock recommendations for export: expected at least "
                     f"{MIN_EXPECTED_STOCK_ROWS}, got {len(all_stocks)}."
                 )
+                if skipped_malformed_jobs:
+                    reason = (
+                        f"{reason} Skipped {skipped_malformed_jobs} malformed model "
+                        f"output{'s' if skipped_malformed_jobs != 1 else ''}."
+                    )
                 run_repo.update_export_state(
                     run,
                     export_status="failed",

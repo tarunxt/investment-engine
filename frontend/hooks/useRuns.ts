@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { apiService, APIError } from '@/services/api';
 import { WSClient } from '@/services/websocket';
 import { URLs } from '@/lib/urls';
-import { RunResponse } from '@/types/api';
+import { RunListItem } from '@/types/api';
 
 function normalizeError(error: unknown): string {
   if (error instanceof APIError) return error.message;
@@ -45,8 +45,8 @@ type RunJobUpdatedMessage = {
 };
 
 export interface UseRunsReturn {
-  runs: RunResponse[];
-  setRuns: React.Dispatch<React.SetStateAction<RunResponse[]>>;
+  runs: RunListItem[];
+  setRuns: React.Dispatch<React.SetStateAction<RunListItem[]>>;
   total: number;
   setTotal: React.Dispatch<React.SetStateAction<number>>;
   loading: boolean;
@@ -57,7 +57,7 @@ export interface UseRunsReturn {
 }
 
 export function useRuns({ limit }: UseRunsOptions): UseRunsReturn {
-  const [runs, setRuns] = useState<RunResponse[]>([]);
+  const [runs, setRuns] = useState<RunListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export function useRuns({ limit }: UseRunsOptions): UseRunsReturn {
   const generationRef = useRef(0);
   const wsClientRef = useRef<WSClient | null>(null);
   const loadRef = useRef<(opts?: { silent?: boolean }) => Promise<void>>(async () => {});
-  const runsRef = useRef<RunResponse[]>([]);
+  const runsRef = useRef<RunListItem[]>([]);
   const notifiedRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(
@@ -74,7 +74,7 @@ export function useRuns({ limit }: UseRunsOptions): UseRunsReturn {
       const gen = ++generationRef.current;
       if (!silent) setLoading(true);
       try {
-        const data = await apiService.getRuns({ page: 1, limit });
+        const data = await apiService.getRuns({ page: 1, limit, summary: true });
         if (gen !== generationRef.current) return;
         setRuns(data.items);
         setTotal(data.total);
@@ -159,7 +159,6 @@ export function useRuns({ limit }: UseRunsOptions): UseRunsReturn {
                             job: {
                               ...runJob.job,
                               status: message.status ?? runJob.job.status,
-                              response: message.response ?? runJob.job.response,
                               error_message: message.error_message ?? runJob.job.error_message,
                               tokens_in: message.tokens_in ?? runJob.job.tokens_in,
                               tokens_out: message.tokens_out ?? runJob.job.tokens_out,

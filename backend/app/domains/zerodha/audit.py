@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, select
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.infrastructure.database.base import Base
 
@@ -58,3 +59,27 @@ class ZerodhaAuditRepository:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+
+class SyncZerodhaAuditRepository:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def log(
+        self,
+        user_id: int,
+        action: str,
+        ip_address: str | None = None,
+        details: dict | None = None,
+    ) -> None:
+        try:
+            entry = ZerodhaAuditLog(
+                user_id=user_id,
+                action=action,
+                ip_address=ip_address,
+                details=details,
+            )
+            self._db.add(entry)
+            self._db.flush()
+        except Exception:
+            logger.exception("Zerodha audit log failed — action=%s user_id=%s", action, user_id)

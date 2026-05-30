@@ -10,26 +10,50 @@ import {
   GoogleSheetsExportRunRequest,
   GoogleSheetsImportRequest,
   GoogleSheetsStatusResponse,
+  IndMoneyUsEventsAnalysis,
+  IndMoneyUsEventsHistoryResponse,
+  IndMoneyUsEventsLatestResponse,
+  IndMoneyUsEventsRunResponse,
+  IndMoneyUsPortfolioOverviewResponse,
+  IndMoneyUsPortfolioSnapshotCreateRequest,
+  IndMoneyUsPortfolioSnapshotDetail,
+  IndMoneyUsThreatAnalysis,
+  IndMoneyUsThreatHistoryResponse,
+  IndMoneyUsThreatLatestResponse,
+  IndMoneyUsThreatRunResponse,
   JobCreate,
   JobResponse,
   LoginResponse,
   PromptCreate,
   PromptResponse,
   PromptUpdate,
+  PortfolioEventRunRequest,
   ProviderInfo,
   PaginatedResponse,
   RegisterResponse,
   RefreshTokenResponse,
   RunCreate,
+  RunListItem,
   RunResponse,
   UpdatePasswordRequest,
   UpdateProfileRequest,
   FullHealthCheckResponse,
   UserResponse,
+  ZerodhaEventsAnalysis,
+  ZerodhaEventsHistoryResponse,
+  ZerodhaEventsLatestResponse,
+  ZerodhaEventsRunResponse,
   ZerodhaLoginUrlResponse,
+  ZerodhaPortfolioOverviewResponse,
+  ZerodhaPortfolioSnapshotDetail,
+  ZerodhaPortfolioSyncResponse,
   ZerodhaOrder,
   ZerodhaPlaceOrderRequest,
   ZerodhaPlaceOrderResponse,
+  ZerodhaThreatAnalysis,
+  ZerodhaThreatHistoryResponse,
+  ZerodhaThreatLatestResponse,
+  ZerodhaThreatRunResponse,
   ZerodhaStatusResponse,
 } from "@/types/api";
 import { IApiService } from "./api.types";
@@ -37,6 +61,7 @@ import { IApiService } from "./api.types";
 const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
   process.env.NODE_ENV === "development";
+const apiDebugEnabled = process.env.NEXT_PUBLIC_API_DEBUG === "true";
 
 export class APIError extends Error {
   constructor(
@@ -187,6 +212,7 @@ class apiServiceClass implements IApiService {
 
   // ===== Log functions =====
   groupCollapsed(label: string): void {
+    if (!apiDebugEnabled) return;
     if (typeof console.groupCollapsed === "function") {
       console.groupCollapsed(label);
     } else {
@@ -195,26 +221,31 @@ class apiServiceClass implements IApiService {
   }
 
   group(label: string): void {
+    if (!apiDebugEnabled) return;
     if (typeof console.group === "function") {
       console.group(label);
     }
   }
 
   groupEnd(): void {
+    if (!apiDebugEnabled) return;
     if (typeof console.groupEnd === "function") {
       console.groupEnd();
     }
   }
 
   log(...args: unknown[]): void {
+    if (!apiDebugEnabled) return;
     console.log(...args);
   }
 
   info(...args: unknown[]): void {
+    if (!apiDebugEnabled) return;
     console.info(...args);
   }
 
   warn(...args: unknown[]): void {
+    if (!apiDebugEnabled) return;
     console.warn(...args);
   }
 
@@ -433,12 +464,13 @@ class apiServiceClass implements IApiService {
     return this.post<RunResponse>(URLs.runs.create(), data);
   }
 
-  getRuns(params?: { page?: number; limit?: number }): Promise<PaginatedResponse<RunResponse>> {
+  getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>> {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.summary) qs.set("summary", "true");
     const query = qs.toString();
-    return this.get<PaginatedResponse<RunResponse>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
+    return this.get<PaginatedResponse<RunListItem>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
   }
 
   getRun(id: number): Promise<RunResponse> {
@@ -534,6 +566,18 @@ class apiServiceClass implements IApiService {
     return this.get<ZerodhaStatusResponse>(URLs.zerodha.status());
   }
 
+  zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse> {
+    return this.get<ZerodhaPortfolioOverviewResponse>(URLs.zerodha.portfolio());
+  }
+
+  zerodhaPortfolioSnapshot(snapshotDate: string): Promise<ZerodhaPortfolioSnapshotDetail> {
+    return this.get<ZerodhaPortfolioSnapshotDetail>(URLs.zerodha.portfolioSnapshot(snapshotDate));
+  }
+
+  zerodhaSyncPortfolio(): Promise<ZerodhaPortfolioSyncResponse> {
+    return this.post<ZerodhaPortfolioSyncResponse>(URLs.zerodha.portfolioSync(), {});
+  }
+
   zerodhaOrders(): Promise<{ data: ZerodhaOrder[] }> {
     return this.get<{ data: ZerodhaOrder[] }>(URLs.zerodha.orders());
   }
@@ -544,6 +588,104 @@ class apiServiceClass implements IApiService {
 
   zerodhaDisconnect(): Promise<{ message: string }> {
     return this.delete<{ message: string }>(URLs.zerodha.disconnect());
+  }
+
+  zerodhaEventsLatest(): Promise<ZerodhaEventsLatestResponse> {
+    return this.get<ZerodhaEventsLatestResponse>(URLs.zerodha.eventsLatest());
+  }
+
+  zerodhaEventsHistory(params?: { limit?: number }): Promise<ZerodhaEventsHistoryResponse> {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return this.get<ZerodhaEventsHistoryResponse>(
+      `${URLs.zerodha.eventsHistory()}${query ? `?${query}` : ''}`,
+    );
+  }
+
+  zerodhaEventJob(jobId: number): Promise<ZerodhaEventsAnalysis> {
+    return this.get<ZerodhaEventsAnalysis>(URLs.zerodha.eventJob(jobId));
+  }
+
+  zerodhaRunEvents(data?: PortfolioEventRunRequest): Promise<ZerodhaEventsRunResponse> {
+    return this.post<ZerodhaEventsRunResponse>(URLs.zerodha.eventsRun(), data ?? {});
+  }
+
+  zerodhaThreatsLatest(): Promise<ZerodhaThreatLatestResponse> {
+    return this.get<ZerodhaThreatLatestResponse>(URLs.zerodha.threatsLatest());
+  }
+
+  zerodhaThreatsHistory(params?: { limit?: number }): Promise<ZerodhaThreatHistoryResponse> {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return this.get<ZerodhaThreatHistoryResponse>(
+      `${URLs.zerodha.threatsHistory()}${query ? `?${query}` : ''}`,
+    );
+  }
+
+  zerodhaThreatJob(jobId: number): Promise<ZerodhaThreatAnalysis> {
+    return this.get<ZerodhaThreatAnalysis>(URLs.zerodha.threatJob(jobId));
+  }
+
+  zerodhaRunThreats(data?: PortfolioEventRunRequest): Promise<ZerodhaThreatRunResponse> {
+    return this.post<ZerodhaThreatRunResponse>(URLs.zerodha.threatsRun(), data ?? {});
+  }
+
+  indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
+    return this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio());
+  }
+
+  indmoneyUsPortfolioSnapshot(snapshotId: number): Promise<IndMoneyUsPortfolioSnapshotDetail> {
+    return this.get<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolioSnapshot(snapshotId));
+  }
+
+  indmoneyUsCreatePortfolioSnapshot(
+    data: IndMoneyUsPortfolioSnapshotCreateRequest,
+  ): Promise<IndMoneyUsPortfolioSnapshotDetail> {
+    return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data);
+  }
+
+  indmoneyUsEventsLatest(): Promise<IndMoneyUsEventsLatestResponse> {
+    return this.get<IndMoneyUsEventsLatestResponse>(URLs.indmoneyUs.eventsLatest());
+  }
+
+  indmoneyUsEventsHistory(params?: { limit?: number }): Promise<IndMoneyUsEventsHistoryResponse> {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return this.get<IndMoneyUsEventsHistoryResponse>(
+      `${URLs.indmoneyUs.eventsHistory()}${query ? `?${query}` : ''}`,
+    );
+  }
+
+  indmoneyUsEventJob(jobId: number): Promise<IndMoneyUsEventsAnalysis> {
+    return this.get<IndMoneyUsEventsAnalysis>(URLs.indmoneyUs.eventJob(jobId));
+  }
+
+  indmoneyUsRunEvents(data?: PortfolioEventRunRequest): Promise<IndMoneyUsEventsRunResponse> {
+    return this.post<IndMoneyUsEventsRunResponse>(URLs.indmoneyUs.eventsRun(), data ?? {});
+  }
+
+  indmoneyUsThreatsLatest(): Promise<IndMoneyUsThreatLatestResponse> {
+    return this.get<IndMoneyUsThreatLatestResponse>(URLs.indmoneyUs.threatsLatest());
+  }
+
+  indmoneyUsThreatsHistory(params?: { limit?: number }): Promise<IndMoneyUsThreatHistoryResponse> {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return this.get<IndMoneyUsThreatHistoryResponse>(
+      `${URLs.indmoneyUs.threatsHistory()}${query ? `?${query}` : ''}`,
+    );
+  }
+
+  indmoneyUsThreatJob(jobId: number): Promise<IndMoneyUsThreatAnalysis> {
+    return this.get<IndMoneyUsThreatAnalysis>(URLs.indmoneyUs.threatJob(jobId));
+  }
+
+  indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse> {
+    return this.post<IndMoneyUsThreatRunResponse>(URLs.indmoneyUs.threatsRun(), data ?? {});
   }
 
   googleSheetsAuthUrl(): Promise<GoogleSheetsAuthUrlResponse> {

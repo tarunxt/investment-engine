@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import math
+import re
 
 from openai import OpenAI
 
@@ -43,6 +44,7 @@ _SYSTEM_MESSAGE: dict = {
 }
 
 _MAX_TOOL_ROUNDS = 8
+_MAX_DSML_RECOVERY_SEARCHES = 4
 
 
 def _looks_like_tool_trace(text: str) -> bool:
@@ -57,11 +59,44 @@ def _looks_like_tool_trace(text: str) -> bool:
 
 def _looks_like_valid_markdown_table(text: str) -> bool:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    pipe_lines = [line for line in lines if "|" in line]
+    pipe_lines = [line for line in lines if line.count("|") >= 2]
     if len(pipe_lines) < 3:
         return False
-    has_separator = any(set(line.replace("|", "").strip()) <= {"-", ":"} for line in pipe_lines)
+    has_separator = any(re.fullmatch(r"\|?[\s:\-|\t]+\|?", line) for line in pipe_lines)
     return has_separator
+
+
+def _extract_dsml_web_search_calls(text: str) -> list[dict[str, int | str]]:
+    calls: list[dict[str, int | str]] = []
+    segments = re.findall(
+        r'invoke name="web_search">(.*?)</[^>]*invoke>',
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    for segment in segments:
+        query_match = re.search(
+            r'parameter name="query"[^>]*>(.*?)</[^>]*parameter>',
+            segment,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not query_match:
+            continue
+        query = " ".join(query_match.group(1).split()).strip()
+        if not query:
+            continue
+
+        max_results = 5
+        max_results_match = re.search(
+            r'parameter name="max_results"[^>]*>(.*?)</[^>]*parameter>',
+            segment,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if max_results_match:
+            digits = re.search(r"\d+", max_results_match.group(1))
+            if digits:
+                max_results = int(digits.group(0))
+        calls.append({"query": query, "max_results": max(1, min(max_results, 8))})
+    return calls
 
 
 class DeepSeekProvider(BaseAIProvider):
@@ -79,6 +114,78 @@ class DeepSeekProvider(BaseAIProvider):
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_api_base or "https://api.deepseek.com/v1",
         )
+
+    def _recover_from_dsml_tool_trace(
+        self,
+        *,
+        prompt: str,
+        tool_trace: str,
+        model: str,
+    ) -> tuple[str, int, int]:
+        search_calls = _extract_dsml_web_search_calls(tool_trace)
+        if not search_calls:
+            return tool_trace, 0, 0
+
+        search_payloads: list[dict[str, str | int]] = []
+        seen_queries: set[str] = set()
+        for call in search_calls:
+            query = str(call["query"]).strip()
+            if not query or query in seen_queries:
+                continue
+            seen_queries.add(query)
+            result = web_search_tool.execute(
+                "web_search",
+                {
+                    "query": query,
+                    "max_results": int(call["max_results"]),
+                },
+            )
+            search_payloads.append(
+                {
+                    "query": query,
+                    "max_results": int(call["max_results"]),
+                    "result": result,
+                }
+            )
+            if len(search_payloads) >= _MAX_DSML_RECOVERY_SEARCHES:
+                break
+
+        if not search_payloads:
+            return tool_trace, 0, 0
+
+        recovery_response = self.client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are given live web-search results already collected for the user. "
+                        "Do not call tools. Do not output XML, DSML, or tool traces. "
+                        "Return ONLY one valid markdown table with a header row, separator row, "
+                        "and at least 5 data rows in the exact format requested by the user."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Original user request:\n{prompt}\n\n"
+                        "Your previous attempt returned an invalid tool-call trace instead of the "
+                        "final answer. Use the collected search results below and produce the final "
+                        "markdown table now.\n\n"
+                        f"Collected search results JSON:\n{json.dumps(search_payloads, ensure_ascii=False)}"
+                    ),
+                },
+            ],
+            tool_choice="none",
+        )
+        usage = getattr(recovery_response, "usage", None)
+        tokens_in = getattr(usage, "prompt_tokens", 0) or 0
+        tokens_out = getattr(usage, "completion_tokens", 0) or 0
+        choices = getattr(recovery_response, "choices", []) or []
+        recovered = tool_trace
+        if choices:
+            recovered = (getattr(choices[0].message, "content", "") or "").strip() or tool_trace
+        return recovered, tokens_in, tokens_out
 
     def generate(self, *, prompt: str, model: str) -> AIProviderResponse:
         if model not in self.supported_models:
@@ -188,6 +295,16 @@ class DeepSeekProvider(BaseAIProvider):
                 content = getattr(final_choices[0].message, "content", "") or ""
 
         cleaned = content.strip()
+        if _looks_like_tool_trace(cleaned):
+            recovered, recovered_tokens_in, recovered_tokens_out = self._recover_from_dsml_tool_trace(
+                prompt=prompt,
+                tool_trace=cleaned,
+                model=model,
+            )
+            cleaned = recovered.strip()
+            total_tokens_in += recovered_tokens_in
+            total_tokens_out += recovered_tokens_out
+
         needs_rewrite = _looks_like_tool_trace(cleaned) or not _looks_like_valid_markdown_table(cleaned)
         if needs_rewrite:
             rewrite_response = self.client.chat.completions.create(

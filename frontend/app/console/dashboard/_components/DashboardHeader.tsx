@@ -36,6 +36,7 @@ export function DashboardHeader() {
             <span>{runsError}</span>
           </div>
           <button
+            type="button"
             onClick={() => {
               setRunsError(null);
               refreshRuns();

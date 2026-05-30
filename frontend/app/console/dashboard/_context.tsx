@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { AlertCircle, CalendarClock, CheckCircle2, Clock3, Loader2 } from 'lucide-react';
 import { apiService } from '@/services/api';
-import { type PromptResponse, type ProviderInfo, type RunModelTarget, type RunResponse } from '@/types/api';
+import { type PromptResponse, type ProviderInfo, type RunListItem, type RunModelTarget, type RunResponse } from '@/types/api';
 import { useRuns } from '@/hooks/useRuns';
 
 export const DASHBOARD_RUN_LIMIT = 50;
@@ -20,6 +20,7 @@ export const TEMPLATE_DEBOUNCE_MS = 300;
 export const PROMPT_MAX_CHARS = 10000;
 export const PROMPT_WARN_CHARS = 9000;
 export const INDIA_TIMEZONE = 'Asia/Kolkata';
+const RUN_PROMPT_PREVIEW_CHARS = 280;
 export const DEFAULT_TEMPLATE_NAME = 'India Swing-Trade Research';
 export const DEFAULT_EXPORT_SPREADSHEET_URL =
   'https://docs.google.com/spreadsheets/d/1aVPXUl5h8aSZcmOwKHvnuJqyCHqanmnrcmFOijcWYp4/edit?gid=0#gid=0';
@@ -40,9 +41,33 @@ export const STATUS_ICONS: Record<string, ElementType> = {
   failed: AlertCircle,
 };
 
+function toRunPromptPreview(prompt: string) {
+  const normalized = prompt.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= RUN_PROMPT_PREVIEW_CHARS) return normalized;
+  return `${normalized.slice(0, RUN_PROMPT_PREVIEW_CHARS).trimEnd()}...`;
+}
+
+function toRunListItem(run: RunResponse): RunListItem {
+  return {
+    id: run.id,
+    prompt_preview: toRunPromptPreview(run.prompt),
+    prompt_id: run.prompt_id,
+    status: run.status,
+    current_stage: run.current_stage,
+    run_jobs: run.run_jobs,
+    auto_export_enabled: run.auto_export_enabled,
+    export_status: run.export_status,
+    export_error: run.export_error,
+    exported_at: run.exported_at,
+    exported_sheet_url: run.exported_sheet_url,
+    created_at: run.created_at,
+    updated_at: run.updated_at,
+  };
+}
+
 interface DashboardContextValue {
   // Runs feed
-  runs: RunResponse[];
+  runs: RunListItem[];
   runsTotal: number;
   loadingRuns: boolean;
   runsError: string | null;
@@ -494,7 +519,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setScheduledAt('');
         promptRef.current?.focus();
         // Prepend the new run as a single entry — one row per job submission
-        setRuns((current) => [run, ...current].slice(0, DASHBOARD_RUN_LIMIT));
+        setRuns((current) => [toRunListItem(run), ...current].slice(0, DASHBOARD_RUN_LIMIT));
         setRunsTotal((t) => t + 1);
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : 'Failed to create job');

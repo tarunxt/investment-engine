@@ -1,4 +1,5 @@
 import json
+from datetime import date, datetime
 import re
 from time import monotonic
 
@@ -15,6 +16,9 @@ from app.domains.jobs.models import Job
 from app.shared.types import JobStatus
 
 logger = get_logger("app.domains.jobs.tasks")
+
+_EVENT_REFERENCE_DATE_PATTERN = re.compile(r"\[EVENT_SNAPSHOT_DATE=([0-9]{4}-[0-9]{2}-[0-9]{2})\]")
+_EVENT_EXACT_DATE_PATTERN = re.compile(r"\b(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\b")
 
 
 def _to_markdown_table_from_stocks(stocks: list[dict]) -> str:
@@ -115,19 +119,160 @@ def _count_markdown_table_data_rows(content: str) -> int:
     return data_rows
 
 
-def _requires_strict_table_output(prompt: str) -> bool:
+def _requires_generic_table_output(prompt: str) -> bool:
     text = (prompt or "").lower()
-    return (
-        "return only one markdown table" in text
-        or "table columns:" in text
-        or "stock name" in text and "units to buy" in text
-    )
+    return "return only one markdown table" in text or _requires_stock_recommendation_output(prompt)
+
+
+def _requires_stock_recommendation_output(prompt: str) -> bool:
+    text = (prompt or "").lower()
+    return "table columns:" in text or ("stock name" in text and "units to buy" in text)
 
 
 def _has_excessive_placeholder_noise(content: str) -> bool:
     text = content or ""
     dash_runs = re.findall(r"-{40,}", text)
     return len(dash_runs) >= 3
+
+
+def _parse_normalized_stock_rows(content: str) -> list[dict]:
+    from app.domains.google_sheets.stock_service import normalize_stock_rows, parse_stock_recommendations
+
+    return normalize_stock_rows(parse_stock_recommendations(content))
+
+
+def _is_portfolio_events_job(prompt: str) -> bool:
+    text = prompt or ""
+    return "[INDMONEY_US_EVENTS]" in text or "[ZERODHA_EVENTS]" in text
+
+
+def _extract_portfolio_event_reference_date(prompt: str) -> date | None:
+    match = _EVENT_REFERENCE_DATE_PATTERN.search(prompt or "")
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
+
+
+def _is_portfolio_event_fallback_row(row: dict[str, str]) -> bool:
+    row_date = (row.get("Date") or "").strip().lower()
+    row_holding = (row.get("Holding") or "").strip().lower()
+    row_event = (row.get("Event") or "").strip().lower()
+    return (
+        row_date == "not found"
+        or row_holding == "all holdings"
+        or "no upcoming scheduled price-sensitive event found" in row_event
+    )
+
+
+def _extract_first_exact_event_date(value: str) -> date | None:
+    match = _EVENT_EXACT_DATE_PATTERN.search(value or "")
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%d %b %Y").date()
+    except ValueError:
+        return None
+
+
+def _render_portfolio_event_table(rows: list[dict[str, str]]) -> str:
+    from app.domains.portfolio_events.common import EVENT_TABLE_COLUMNS
+
+    lines = [
+        f"| {' | '.join(EVENT_TABLE_COLUMNS)} |",
+        f"| {' | '.join('----' for _ in EVENT_TABLE_COLUMNS)} |",
+    ]
+    for row in rows:
+        cells = [str((row.get(column) or "")).replace("\n", " ").replace("|", "/").strip() for column in EVENT_TABLE_COLUMNS]
+        lines.append(f"| {' | '.join(cells)} |")
+    return "\n".join(lines)
+
+
+def _sanitize_portfolio_event_content(prompt: str, content: str) -> str:
+    if not _is_portfolio_events_job(prompt):
+        return (content or "").strip()
+
+    from app.domains.portfolio_events.common import parse_event_calendar_table
+
+    parsed = parse_event_calendar_table(content)
+    rows = list((parsed or {}).get("rows") or [])
+    if not rows:
+        return (content or "").strip()
+
+    reference_date = _extract_portfolio_event_reference_date(prompt)
+    sanitized_rows: list[dict[str, str]] = []
+    for row in rows:
+        if _is_portfolio_event_fallback_row(row):
+            continue
+        event_date = _extract_first_exact_event_date(row.get("Date") or "")
+        if reference_date and event_date and event_date < reference_date:
+            continue
+        sanitized_rows.append(row)
+
+    if sanitized_rows:
+        return _render_portfolio_event_table(sanitized_rows)
+
+    return (content or "").strip()
+
+
+def _portfolio_event_retry_reason(prompt: str, content: str) -> str | None:
+    if not _is_portfolio_events_job(prompt):
+        return None
+
+    from app.domains.portfolio_events.common import parse_event_calendar_table
+
+    parsed = parse_event_calendar_table(content)
+    rows = list((parsed or {}).get("rows") or [])
+    if not rows:
+        return "it did not return any event rows"
+
+    reference_date = _extract_portfolio_event_reference_date(prompt)
+    upcoming_rows = 0
+    past_rows = 0
+    fallback_rows = 0
+
+    for row in rows:
+        if _is_portfolio_event_fallback_row(row):
+            fallback_rows += 1
+            continue
+        event_date = _extract_first_exact_event_date(row.get("Date") or "")
+        if reference_date and event_date and event_date < reference_date:
+            past_rows += 1
+            continue
+        upcoming_rows += 1
+
+    if upcoming_rows > 0:
+        return None
+    if past_rows > 0 and fallback_rows > 0:
+        return "it mixed only past-dated event rows with the fallback `Not found` row"
+    if past_rows > 0:
+        return "it returned only past-dated events that are earlier than the reference date"
+    if fallback_rows == len(rows):
+        return "it used the fallback `Not found` row without listing any upcoming events"
+    return None
+
+
+def _build_portfolio_event_repair_prompt(prompt: str, previous_output: str, reason: str) -> str:
+    reference_date = _extract_portfolio_event_reference_date(prompt)
+    reference_text = (
+        f"on or after {reference_date.isoformat()}"
+        if reference_date
+        else "that are still upcoming"
+    )
+    return (
+        f"{prompt}\n\n"
+        "[PORTFOLIO_EVENTS_REPAIR]\n"
+        f"The previous assistant output was invalid because {reason}. "
+        f"Re-check live web sources and return ONLY events {reference_text}. "
+        "Remove any past-dated rows. "
+        "If you find one or more upcoming events, do not include the `Not found` / `All holdings` fallback row. "
+        "Use the ticker/symbol as authoritative, search exact scheduled dates, and sort rows nearest to farthest. "
+        "Only use the fallback row if there are truly zero upcoming events after checking earnings/results, dividend/ex-date, AGM/shareholder meeting, and investor conference / product event sources.\n\n"
+        "Previous assistant output:\n"
+        f"{previous_output}"
+    ).strip()
 
 
 def _publish_job_update(job: Job) -> None:
@@ -189,6 +334,17 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
     Terminal client errors (bad request, auth) are not retried.
     Everything else retries after 30 s.
     """
+
+    text = str(exc).lower()
+    if any(
+        marker in text
+        for marker in (
+            "returned malformed table output",
+            "returned insufficient recommendations",
+            "returned empty output after generation",
+        )
+    ):
+        return False, 0
 
     if attempt >= 3:
         return False, 0  # don't retry after max attempts
@@ -502,12 +658,30 @@ def _refresh_run_status(db, job_id: int) -> None:
         logger.exception("Failed to refresh run status for job %s", job_id)
 
 
-def _mark_failed(db, repo, job_id: int, error: str) -> None:
+def _mark_failed(
+    db,
+    repo,
+    job_id: int,
+    error: str,
+    *,
+    response: str | None = None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
+    estimated_cost: float | None = None,
+) -> None:
     try:
         db.rollback()
         job = repo.get(job_id)
         if job:
-            repo.update_status(job, JobStatus.FAILED, error_message=error)
+            repo.update_status(
+                job,
+                JobStatus.FAILED,
+                response=response,
+                error_message=error,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                estimated_cost=estimated_cost,
+            )
             _publish_job_update(job)
             _refresh_run_status(db, job_id)
     except Exception:
@@ -529,6 +703,10 @@ def execute_ai_job(self, job_id: int) -> None:
     db = SyncSessionLocal()
     repo = SyncJobRepository(db)
     started_at = monotonic()
+    content: str | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    estimated_cost: float | None = None
 
     try:
         job = repo.get(job_id)
@@ -546,14 +724,17 @@ def execute_ai_job(self, job_id: int) -> None:
 
         provider = ProviderFactory.create(job.provider)
         result = provider.generate(prompt=job.prompt, model=job.model)
+        tokens_in = result.tokens_in
+        tokens_out = result.tokens_out
+        estimated_cost = result.cost
         content = (result.content or "").strip()
         if not content:
             raise RuntimeError(
                 f"{job.provider}/{job.model} returned empty output after generation"
             )
-        if _requires_strict_table_output(job.prompt):
+        if _requires_generic_table_output(job.prompt):
             data_rows = _count_markdown_table_data_rows(content)
-            if data_rows < 1:
+            if data_rows < 1 and _requires_stock_recommendation_output(job.prompt):
                 repaired_content, repaired_rows = _repair_stock_table_content(content)
                 if repaired_rows > 0:
                     content = repaired_content.strip()
@@ -562,27 +743,42 @@ def execute_ai_job(self, job_id: int) -> None:
                 raise RuntimeError(
                     f"{job.provider}/{job.model} returned malformed table output (no data rows)"
                 )
-            if _has_excessive_placeholder_noise(content):
-                raise RuntimeError(
-                    f"{job.provider}/{job.model} returned malformed table output (placeholder noise)"
+            if _requires_stock_recommendation_output(job.prompt):
+                try:
+                    parsed_stocks = _parse_normalized_stock_rows(content)
+                    if len(parsed_stocks) >= 5:
+                        repaired_content = _to_markdown_table_from_stocks(parsed_stocks)
+                        if repaired_content:
+                            content = repaired_content.strip()
+                    else:
+                        if _has_excessive_placeholder_noise(content):
+                            raise RuntimeError(
+                                f"{job.provider}/{job.model} returned malformed table output (placeholder noise)"
+                            )
+                        raise RuntimeError(
+                            f"{job.provider}/{job.model} returned insufficient recommendations "
+                            f"(expected 5, got {len(parsed_stocks)})"
+                        )
+                except RuntimeError:
+                    raise
+                except Exception:
+                    # Keep primary output validation resilient even if parser has issues.
+                    logger.warning("Stock parser validation skipped for job_id=%s", job_id, exc_info=True)
+        if _is_portfolio_events_job(job.prompt):
+            content = _sanitize_portfolio_event_content(job.prompt, content)
+            retry_reason = _portfolio_event_retry_reason(job.prompt, content)
+            if retry_reason:
+                logger.info("Retrying portfolio events job %s because %s", job_id, retry_reason)
+                repair_result = provider.generate(
+                    prompt=_build_portfolio_event_repair_prompt(job.prompt, content, retry_reason),
+                    model=job.model,
                 )
-            try:
-                from app.domains.google_sheets.stock_service import normalize_stock_rows, parse_stock_recommendations
-                parsed_stocks = normalize_stock_rows(parse_stock_recommendations(content))
-                if len(parsed_stocks) >= 5:
-                    repaired_content = _to_markdown_table_from_stocks(parsed_stocks)
-                    if repaired_content:
-                        content = repaired_content.strip()
-                if len(parsed_stocks) < 5:
-                    raise RuntimeError(
-                        f"{job.provider}/{job.model} returned insufficient recommendations "
-                        f"(expected 5, got {len(parsed_stocks)})"
-                    )
-            except RuntimeError:
-                raise
-            except Exception:
-                # Keep primary output validation resilient even if parser has issues.
-                logger.warning("Stock parser validation skipped for job_id=%s", job_id, exc_info=True)
+                tokens_in = (tokens_in or 0) + repair_result.tokens_in
+                tokens_out = (tokens_out or 0) + repair_result.tokens_out
+                estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
+                repaired_content = (repair_result.content or "").strip()
+                if repaired_content:
+                    content = _sanitize_portfolio_event_content(job.prompt, repaired_content)
         latest = repo.get(job_id)
         if latest and latest.status == JobStatus.FAILED and (latest.error_message or "").lower().find("cancelled") >= 0:
             logger.info("Skipping completion update for cancelled job %s", job_id)
@@ -592,9 +788,9 @@ def execute_ai_job(self, job_id: int) -> None:
             job,
             JobStatus.COMPLETED,
             response=content,
-            tokens_in=result.tokens_in,
-            tokens_out=result.tokens_out,
-            estimated_cost=result.cost,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            estimated_cost=estimated_cost,
         )
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
@@ -603,7 +799,16 @@ def execute_ai_job(self, job_id: int) -> None:
         )
 
     except MaxRetriesExceededError:
-        _mark_failed(db, repo, job_id, "Max retries exceeded")
+        _mark_failed(
+            db,
+            repo,
+            job_id,
+            "Max retries exceeded",
+            response=content,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            estimated_cost=estimated_cost,
+        )
         logger.error("Job %s exhausted all retries", job_id)
 
     except Exception as exc:
@@ -613,13 +818,31 @@ def execute_ai_job(self, job_id: int) -> None:
         retryable, countdown = _classify_exc(exc, attempt=self.request.retries)
         logger.info("Error classified as retryable=%s with countdown=%s seconds", retryable, countdown)
         if not retryable:
-            _mark_failed(db, repo, job_id, str(exc))
+            _mark_failed(
+                db,
+                repo,
+                job_id,
+                str(exc),
+                response=content,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                estimated_cost=estimated_cost,
+            )
             return
 
         try:
             raise self.retry(exc=exc, countdown=countdown, max_retries=self.max_retries)
         except MaxRetriesExceededError:
-            _mark_failed(db, repo, job_id, str(exc))
+            _mark_failed(
+                db,
+                repo,
+                job_id,
+                str(exc),
+                response=content,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                estimated_cost=estimated_cost,
+            )
             logger.error("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:

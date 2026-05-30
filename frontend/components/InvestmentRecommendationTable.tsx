@@ -3,33 +3,31 @@
 import { useMemo } from 'react';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
 
-interface Stock {
-  stock_name: string;
-  technical_setup: string;
-  entry_range: string;
-  stop_loss: number;
-  target: number;
-  analyst_source: string;
-  units_to_buy: number;
-  price_per_unit: number;
-  total_buy_amount: number;
-  upside_horizon: string;
-  confidence_score: number;
-  rationale_remarks: string;
+interface JsonRecommendationRow {
+  [key: string]: unknown;
 }
 
-interface InvestmentRecommendation {
-  title: string;
-  stocks: Stock[];
+interface JsonRecommendationPayload {
+  title?: string;
+  stocks: JsonRecommendationRow[];
 }
 
 interface Props {
   content: string;
+  provider?: string;
+  model?: string;
+  runNumber?: number;
+  runCreatedAt?: string;
 }
 
 interface ParsedMarkdownTable {
   headers: string[];
   rows: string[][];
+}
+
+interface CanonicalTable {
+  title?: string;
+  rows: CanonicalRow[];
 }
 
 const EXACT_HEADER_ORDER = [
@@ -60,7 +58,31 @@ const EXACT_HEADER_ORDER = [
   'LLM',
 ] as const;
 
-const HEADER_ALIAS_TO_EXACT: Record<string, (typeof EXACT_HEADER_ORDER)[number]> = {
+type ExactHeader = (typeof EXACT_HEADER_ORDER)[number];
+type CanonicalRow = Record<ExactHeader, string>;
+
+const HEADERLESS_CANONICAL_HEADER_ORDERS: ExactHeader[][] = [
+  [...EXACT_HEADER_ORDER],
+  [...EXACT_HEADER_ORDER.slice(0, -1)],
+  EXACT_HEADER_ORDER.filter(
+    (header) => header !== 'Rationale - Technical Setup (Long Term)',
+  ) as ExactHeader[],
+  EXACT_HEADER_ORDER.filter(
+    (header) => header !== 'Rationale - Technical Setup (Long Term)' && header !== 'LLM',
+  ) as ExactHeader[],
+];
+const HEADERLESS_CANONICAL_MIN_COLUMN_COUNT =
+  HEADERLESS_CANONICAL_HEADER_ORDERS[HEADERLESS_CANONICAL_HEADER_ORDERS.length - 1].length;
+const HEADERLESS_CANONICAL_NUMERIC_HEADERS: ExactHeader[] = [
+  'Units to Buy',
+  'Price per Unit',
+  'Total Buy Amount',
+  'Upside Horizon (%)',
+  'Weeks',
+  'Confidence Score (0-100)',
+];
+
+const HEADER_ALIAS_TO_EXACT: Record<string, ExactHeader> = {
   'llm name model': 'LLM Name + Model',
   'llm name plus model': 'LLM Name + Model',
   'exchange symbol': 'Exchange Symbol',
@@ -71,45 +93,69 @@ const HEADER_ALIAS_TO_EXACT: Record<string, (typeof EXACT_HEADER_ORDER)[number]>
   'stop loss': 'Stop Loss',
   'target': 'Target',
   'analyst source': 'Analyst Source',
-  'analyst/source': 'Analyst Source',
   'units to buy': 'Units to Buy',
   'price per unit': 'Price per Unit',
   'total buy amount': 'Total Buy Amount',
   'upside horizon': 'Upside Horizon (%)',
   'upside horizon percent': 'Upside Horizon (%)',
-  'upside horizon (%)': 'Upside Horizon (%)',
+  'upside horizon percent return in weeks': 'Upside Horizon (%)',
+  'upside horizon return in weeks': 'Upside Horizon (%)',
   'weeks': 'Weeks',
   'confidence score': 'Confidence Score (0-100)',
-  'confidence score (0-100)': 'Confidence Score (0-100)',
+  'confidence score 0 100': 'Confidence Score (0-100)',
   'rationale remarks': 'Rationale Remarks',
-  'rationale - technical setup (medium term)': 'Rationale - Technical Setup (Medium Term)',
   'rationale technical setup medium term': 'Rationale - Technical Setup (Medium Term)',
-  'rationale - technical setup (long term)': 'Rationale - Technical Setup (Long Term)',
   'rationale technical setup long term': 'Rationale - Technical Setup (Long Term)',
-  'rationale - fundamentals short term': 'Rationale - Fundamentals Short Term',
   'rationale fundamentals short term': 'Rationale - Fundamentals Short Term',
-  'rationale - fundamentals medium/long term': 'Rationale - Fundamentals Medium/Long Term',
   'rationale fundamentals medium long term': 'Rationale - Fundamentals Medium/Long Term',
   'rationale technical setup short term 1 3 months': 'Rationale Technical Setup Short Term 1–3 Months',
   'run #': 'Run #',
   'run number': 'Run #',
   'run date': 'Run Date',
   'run time': 'Run Time',
-  'llm': 'LLM',
+  llm: 'LLM',
 };
 
 function normalizeHeader(value: string): string {
   return value
     .toLowerCase()
     .replace(/\*\*/g, '')
-    .replace(/[`_*]/g, '')
+    .replace(/[`*]/g, '')
+    .replace(/_/g, ' ')
     .replace(/[–—]/g, '-')
     .replace(/\+/g, ' plus ')
+    .replace(/%/g, ' percent ')
     .replace(/[()]/g, ' ')
-    .replace(/-/g, ' ')
-    .replace(/\//g, '/')
+    .replace(/[/-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function formatCellValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return value.map((item) => formatCellValue(item)).join(', ');
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value).trim();
+}
+
+function buildEmptyCanonicalRow(): CanonicalRow {
+  return EXACT_HEADER_ORDER.reduce((acc, header) => {
+    acc[header] = '';
+    return acc;
+  }, {} as CanonicalRow);
+}
+
+function looksLikeSeparator(value: string | number | undefined): boolean {
+  const text = String(value ?? '').trim();
+  if (!text) return false;
+  return /^[\-|_=:\s.]+$/.test(text);
+}
+
+function isKnownHeaderRow(headers: string[]): boolean {
+  const hits = headers.reduce((count, header) => {
+    return HEADER_ALIAS_TO_EXACT[normalizeHeader(header)] ? count + 1 : count;
+  }, 0);
+  return hits >= Math.min(4, headers.length);
 }
 
 function isHeaderLikeRow(row: string[], headers: string[]): boolean {
@@ -122,6 +168,32 @@ function isHeaderLikeRow(row: string[], headers: string[]): boolean {
   return matches >= Math.max(3, Math.floor(headers.length / 2));
 }
 
+function parseJsonContent(content: string): JsonRecommendationPayload | JsonRecommendationRow[] | null {
+  const trimmed = content.trim();
+  if (!trimmed || !/^(?:```json\s*|```[\s\S]*[{[]|[{[])/i.test(trimmed)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed.replace(/```json/gi, '').replace(/```/g, '').trim()) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed as JsonRecommendationRow[];
+    }
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'stocks' in parsed &&
+      Array.isArray((parsed as JsonRecommendationPayload).stocks)
+    ) {
+      return parsed as JsonRecommendationPayload;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error parsing investment recommendation data:', error);
+    return null;
+  }
+}
+
 function parseMarkdownTable(content: string): ParsedMarkdownTable | null {
   const lines = content
     .split('\n')
@@ -129,30 +201,29 @@ function parseMarkdownTable(content: string): ParsedMarkdownTable | null {
     .filter((line) => line.length > 0);
 
   const tableLines = lines.filter((line) => line.includes('|'));
-  if (tableLines.length < 3) return null;
+  if (tableLines.length < 2) return null;
 
-  const headerLine = tableLines.find((line) => {
+  const headerIndex = tableLines.findIndex((line) => {
     const cols = line
       .split('|')
-      .map((c) => c.trim())
+      .map((cell) => cell.trim())
       .filter(Boolean);
-    return cols.length >= 4;
+    return cols.length >= 4 && isKnownHeaderRow(cols);
   });
-  if (!headerLine) return null;
 
-  const headers = headerLine
+  if (headerIndex === -1) return null;
+
+  const headers = tableLines[headerIndex]
     .split('|')
-    .map((c) => c.trim())
+    .map((cell) => cell.trim())
     .filter(Boolean);
-  if (!headers.length) return null;
 
   const rows: string[][] = [];
-  for (const line of tableLines) {
-    if (line === headerLine) continue;
+  for (const line of tableLines.slice(headerIndex + 1)) {
     if (/^\|?[\s:\-|\t]+\|?$/.test(line)) continue;
     const cols = line
       .split('|')
-      .map((c) => c.trim())
+      .map((cell) => cell.trim())
       .filter(Boolean);
     if (!cols.length) continue;
     if (isHeaderLikeRow(cols, headers)) continue;
@@ -166,226 +237,319 @@ function parseMarkdownTable(content: string): ParsedMarkdownTable | null {
   return { headers, rows };
 }
 
-function looksLikeSeparator(value: string | number | undefined): boolean {
-  const text = String(value ?? '').trim();
-  if (!text) return false;
-  return /^[\-\|_=\s.]+$/.test(text);
+function parseSingleLinePipeTable(content: string): ParsedMarkdownTable | null {
+  const compact = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' ');
+
+  if (!compact.includes('|')) return null;
+
+  const tokens = compact
+    .split('|')
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (tokens.length < 10) return null;
+
+  const separatorIndex = tokens.findIndex((token) => looksLikeSeparator(token));
+  if (separatorIndex <= 0) return null;
+
+  const headers = tokens.slice(0, separatorIndex);
+  if (!isKnownHeaderRow(headers)) return null;
+
+  const dataTokens = tokens.slice(separatorIndex).filter((token) => !looksLikeSeparator(token));
+  const columnCount = headers.length;
+  const rows: string[][] = [];
+
+  for (let i = 0; i + columnCount <= dataTokens.length; i += columnCount) {
+    const row = dataTokens.slice(i, i + columnCount);
+    if (isHeaderLikeRow(row, headers)) continue;
+    rows.push(row);
+  }
+
+  if (!rows.length) return null;
+  return { headers, rows };
 }
 
-function isHeaderStockRow(stock: Stock): boolean {
-  const symbol = normalizeHeader(String(stock.stock_name || ''));
-  const setup = normalizeHeader(String(stock.technical_setup || ''));
-  const entry = normalizeHeader(String(stock.entry_range || ''));
-  const source = normalizeHeader(String(stock.analyst_source || ''));
-  return (
-    symbol === 'stock name' ||
-    symbol === 'stock symbol' ||
-    setup === 'technical setup' ||
-    entry === 'entry range' ||
-    source === 'analyst/source' ||
-    source === 'analyst source'
-  );
+function formatRunMetadata(runCreatedAt?: string): { runDate: string; runTime: string } {
+  if (!runCreatedAt) return { runDate: '', runTime: '' };
+
+  const parsed =
+    /[zZ]|[+-]\d{2}:\d{2}$/.test(runCreatedAt) ? new Date(runCreatedAt) : new Date(`${runCreatedAt}Z`);
+
+  if (Number.isNaN(parsed.getTime())) return { runDate: '', runTime: '' };
+
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(parsed);
+
+  const lookup = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+
+  return {
+    runDate: `${lookup('year')}-${lookup('month')}-${lookup('day')}`,
+    runTime: `${lookup('hour')}:${lookup('minute')}:${lookup('second')}`,
+  };
 }
 
-function isLikelyInvalidRow(stock: Stock): boolean {
-  if (isHeaderStockRow(stock)) return true;
+function toDisplayProvider(provider?: string): string {
+  if (!provider) return '';
+  return provider
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function buildCanonicalRow(
+  source: Record<string, unknown>,
+  context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string },
+): CanonicalRow {
+  const row = buildEmptyCanonicalRow();
+
+  for (const [key, value] of Object.entries(source)) {
+    const mappedHeader = HEADER_ALIAS_TO_EXACT[normalizeHeader(key)];
+    if (!mappedHeader) continue;
+    row[mappedHeader] = formatCellValue(value);
+  }
+
+  const providerLabel = toDisplayProvider(context.provider);
+  const llmNameModel = providerLabel && context.model ? `${providerLabel} ${context.model}` : providerLabel || context.model || '';
+  const { runDate, runTime } = formatRunMetadata(context.runCreatedAt);
+
+  if (llmNameModel) {
+    row['LLM Name + Model'] = llmNameModel;
+  }
+  if (providerLabel) {
+    row.LLM = providerLabel;
+  }
+  if (!row.LLM && row['LLM Name + Model']) {
+    row.LLM = row['LLM Name + Model'].split(/[\s/]+/)[0] ?? '';
+  }
+  if (context.runNumber !== undefined) {
+    row['Run #'] = String(context.runNumber);
+  }
+  if (runDate) {
+    row['Run Date'] = runDate;
+  }
+  if (runTime) {
+    row['Run Time'] = runTime;
+  }
+
+  return row;
+}
+
+function isLikelyInvalidRow(row: CanonicalRow): boolean {
+  const stockName = row['Stock Name'];
+  const stockSymbol = row['Stock Symbol'];
+  const technicalSetup = row['Technical Setup'];
+  const entryRange = row['Entry Range'];
+
+  if (![stockName, stockSymbol, technicalSetup, entryRange].some((value) => String(value).trim())) {
+    return true;
+  }
+
   if (
-    looksLikeSeparator(stock.stock_name) ||
-    looksLikeSeparator(stock.technical_setup) ||
-    looksLikeSeparator(stock.entry_range)
+    normalizeHeader(stockName) === 'stock name' ||
+    normalizeHeader(stockSymbol) === 'stock symbol' ||
+    normalizeHeader(technicalSetup) === 'technical setup'
   ) {
     return true;
   }
-  return false;
+
+  return (
+    looksLikeSeparator(stockName) ||
+    looksLikeSeparator(stockSymbol) ||
+    looksLikeSeparator(technicalSetup)
+  );
 }
 
-export default function InvestmentRecommendationTable({ content }: Props) {
-  const data = useMemo(() => {
-    try {
-      const parsed = JSON.parse(content.replaceAll('```json', '').replaceAll('```', ''));
-      if (parsed.title && Array.isArray(parsed.stocks) && parsed.stocks.length > 0) {
-        return parsed as InvestmentRecommendation;
-      }
-      return null;
-    } catch (e) {
-      console.error('Error parsing investment recommendation data:', e);
-      return null;
-    }
-  }, [content]);
+function normalizeJsonTable(
+  parsed: JsonRecommendationPayload | JsonRecommendationRow[],
+  context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string },
+): CanonicalTable | null {
+  const title = Array.isArray(parsed) ? undefined : parsed.title;
+  const stocks = Array.isArray(parsed) ? parsed : parsed.stocks;
+  const rows = stocks
+    .map((stock) => buildCanonicalRow(stock, context))
+    .filter((row) => !isLikelyInvalidRow(row));
 
-  const markdownTable = useMemo(() => {
-    if (data) return null;
-    return parseMarkdownTable(content);
-  }, [content, data]);
+  if (!rows.length) return null;
+  return { title, rows };
+}
 
-  const normalizedMarkdownTable = useMemo(() => {
-    if (!markdownTable) return null;
+function normalizeMarkdownTable(
+  content: string,
+  context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string },
+): CanonicalTable | null {
+  const parsed = parseMarkdownTable(content) ?? parseSingleLinePipeTable(content);
+  if (!parsed) return null;
 
-    const sourceIndexByTarget: Partial<Record<(typeof EXACT_HEADER_ORDER)[number], number>> = {};
-    markdownTable.headers.forEach((header, idx) => {
-      const key = normalizeHeader(header);
-      const mapped = HEADER_ALIAS_TO_EXACT[key];
-      if (mapped && sourceIndexByTarget[mapped] === undefined) {
-        sourceIndexByTarget[mapped] = idx;
-      }
-    });
-
-    const llmNameModelIndex = sourceIndexByTarget['LLM Name + Model'];
-    const llmIndex = sourceIndexByTarget.LLM;
-
-    const rows = markdownTable.rows.map((row) => {
-      const normalizedRow = EXACT_HEADER_ORDER.map((target) => {
-        const idx = sourceIndexByTarget[target];
-        return idx !== undefined ? (row[idx] ?? '') : '';
+  const rows = parsed.rows
+    .map((row) => {
+      const source: Record<string, string> = {};
+      parsed.headers.forEach((header, index) => {
+        source[header] = row[index] ?? '';
       });
+      return buildCanonicalRow(source, context);
+    })
+    .filter((row) => !isLikelyInvalidRow(row));
 
-      if (!normalizedRow[EXACT_HEADER_ORDER.indexOf('LLM')]) {
-        const llmNameModel = llmNameModelIndex !== undefined ? String(row[llmNameModelIndex] ?? '').trim() : '';
-        const llmValue = llmIndex !== undefined ? String(row[llmIndex] ?? '').trim() : '';
-        const derivedLlm = llmValue || (llmNameModel ? llmNameModel.split(/\s+/)[0] : '');
-        normalizedRow[EXACT_HEADER_ORDER.indexOf('LLM')] = derivedLlm;
+  if (!rows.length) return null;
+  return { rows };
+}
+
+function looksLikeHeaderlessCanonicalRow(tokens: string[], headers: ExactHeader[]): boolean {
+  if (tokens.length !== headers.length) {
+    return false;
+  }
+
+  const exchangeSymbol = tokens[headers.indexOf('Exchange Symbol')]?.trim().toUpperCase() ?? '';
+  const stockSymbol = tokens[headers.indexOf('Stock Symbol')]?.trim() ?? '';
+  const stockName = tokens[headers.indexOf('Stock Name')]?.trim() ?? '';
+  const entryRange = tokens[headers.indexOf('Entry Range')]?.trim() ?? '';
+  const runDate = tokens[headers.indexOf('Run Date')]?.trim() ?? '';
+  const runTime = tokens[headers.indexOf('Run Time')]?.trim() ?? '';
+
+  if (!['NSE', 'BSE'].includes(exchangeSymbol)) return false;
+  if (!stockSymbol || stockSymbol.length > 20) return false;
+  if (!stockName) return false;
+  if (!/\d/.test(entryRange)) return false;
+  if (!/\d{2,4}/.test(runDate)) return false;
+  if (!runTime.includes(':')) return false;
+
+  const numericHits = HEADERLESS_CANONICAL_NUMERIC_HEADERS.reduce((count, header) => {
+    const value = (tokens[headers.indexOf(header)] ?? '').replace(/,/g, '').trim();
+    return /^-?\d+(?:[.,]\d+)?$/.test(value)
+      ? count + 1
+      : count;
+  }, 0);
+
+  return numericHits >= 5;
+}
+
+function parseHeaderlessCanonicalLine(tokens: string[]): Record<string, string>[] {
+  for (const headers of HEADERLESS_CANONICAL_HEADER_ORDERS) {
+    if (tokens.length < headers.length || tokens.length % headers.length !== 0) continue;
+
+    const items: Record<string, string>[] = [];
+    let valid = true;
+
+    for (let offset = 0; offset + headers.length <= tokens.length; offset += headers.length) {
+      const chunk = tokens.slice(offset, offset + headers.length);
+      if (!looksLikeHeaderlessCanonicalRow(chunk, headers)) {
+        valid = false;
+        break;
       }
 
-      return normalizedRow;
-    });
+      const source: Record<string, string> = {};
+      headers.forEach((header, index) => {
+        source[header] = chunk[index] ?? '';
+      });
+      items.push(source);
+    }
 
-    return { headers: [...EXACT_HEADER_ORDER], rows };
-  }, [markdownTable]);
+    if (valid && items.length) {
+      return items;
+    }
+  }
 
-  const cleanStocks = useMemo(() => {
-    if (!data) return [];
-    return data.stocks.filter((stock) => !isLikelyInvalidRow(stock));
-  }, [data]);
+  return [];
+}
 
-  if (normalizedMarkdownTable) {
-    return (
+function parseHeaderlessCanonicalRows(
+  content: string,
+  context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string },
+): CanonicalTable | null {
+  const lines = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const titleLine = lines.find((line) => line.startsWith('#'));
+  const title = titleLine ? titleLine.replace(/^#+\s*/, '').trim() : undefined;
+
+  const rows: CanonicalRow[] = [];
+
+  for (const line of lines) {
+    if (line.split('|').length - 1 < HEADERLESS_CANONICAL_MIN_COLUMN_COUNT - 2) continue;
+    const tokens = line
+      .split('|')
+      .map((token) => token.trim())
+      .filter(Boolean);
+
+    for (const source of parseHeaderlessCanonicalLine(tokens)) {
+      rows.push(buildCanonicalRow(source, context));
+    }
+  }
+
+  const cleanedRows = rows.filter((row) => !isLikelyInvalidRow(row));
+  if (!cleanedRows.length) return null;
+  return { title, rows: cleanedRows };
+}
+
+export default function InvestmentRecommendationTable({
+  content,
+  provider,
+  model,
+  runNumber,
+  runCreatedAt,
+}: Props) {
+  const canonicalTable = useMemo(() => {
+    const context = { provider, model, runNumber, runCreatedAt };
+    const parsedJson = parseJsonContent(content);
+    if (parsedJson) {
+      return normalizeJsonTable(parsedJson, context);
+    }
+    return normalizeMarkdownTable(content, context) ?? parseHeaderlessCanonicalRows(content, context);
+  }, [content, model, provider, runCreatedAt, runNumber]);
+
+  if (!canonicalTable) {
+    return <MarkdownRenderer content={content} />;
+  }
+
+  return (
+    <div className="space-y-4">
+      {canonicalTable.title ? (
+        <div className="border-b border-gray-200 pb-3">
+          <h3 className="text-base font-semibold text-gray-900">{canonicalTable.title}</h3>
+        </div>
+      ) : null}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="min-w-max text-sm">
           <thead>
             <tr className="border-b border-gray-300 bg-gray-50">
-              {normalizedMarkdownTable.headers.map((header, index) => (
-                <th key={`${header}-${index}`} className="px-3 py-2 text-left font-semibold text-gray-700">
+              {EXACT_HEADER_ORDER.map((header) => (
+                <th
+                  key={header}
+                  className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700"
+                >
                   {header}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {normalizedMarkdownTable.rows.map((row, rowIdx) => (
+            {canonicalTable.rows.map((row, rowIdx) => (
               <tr key={rowIdx} className="hover:bg-gray-50">
-                {row.map((cell, colIdx) => (
-                  <td key={`${rowIdx}-${colIdx}`} className="px-3 py-2 align-top text-gray-700">
-                    {cell}
+                {EXACT_HEADER_ORDER.map((header) => (
+                  <td key={`${rowIdx}-${header}`} className="px-3 py-2 align-top text-gray-700">
+                    {row[header]}
                   </td>
                 ))}
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-    );
-  }
-
-  if (!data) {
-    return <MarkdownRenderer content={content} />;
-  }
-
-  const rows = cleanStocks.length > 0 ? cleanStocks : data.stocks;
-
-  const totalInvestment = rows.reduce((sum, stock) => sum + (stock.total_buy_amount || 0), 0);
-  const avgConfidence =
-    rows.reduce((sum, stock) => sum + (stock.confidence_score || 0), 0) / rows.length;
-
-  return (
-    <div className="space-y-6">
-      {/* Title */}
-      <div className="border-b border-gray-200 pb-4">
-        <h3 className="text-base font-semibold text-gray-900">{data.title}</h3>
-        <div className="mt-3 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Total Investment</p>
-            <p className="mt-1 text-lg font-semibold text-gray-900">₹{totalInvestment.toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Stocks Selected</p>
-            <p className="mt-1 text-lg font-semibold text-gray-900">{rows.length}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Avg Confidence</p>
-            <p className="mt-1 text-lg font-semibold text-gray-900">{avgConfidence.toFixed(1)}%</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Stocks Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-300 bg-gray-50">
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Stock</th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Entry Range</th>
-              <th className="px-4 py-3 text-right font-semibold text-gray-700">Stop Loss</th>
-              <th className="px-4 py-3 text-right font-semibold text-gray-700">Target</th>
-              <th className="px-4 py-3 text-right font-semibold text-gray-700">Units</th>
-              <th className="px-4 py-3 text-right font-semibold text-gray-700">Total Amount</th>
-              <th className="px-4 py-3 text-center font-semibold text-gray-700">Confidence</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {rows.map((stock, idx) => (
-              <tr key={idx} className="hover:bg-gray-50">
-                <td className="px-4 py-3">
-                  <div className="font-medium text-gray-900">{stock.stock_name}</div>
-                  <div className="mt-0.5 text-xs text-gray-500">{stock.analyst_source}</div>
-                </td>
-                <td className="px-4 py-3 text-gray-700">{stock.entry_range}</td>
-                <td className="px-4 py-3 text-right font-medium text-gray-900">
-                  {stock.stop_loss || '—'}
-                </td>
-                <td className="px-4 py-3 text-right font-medium text-gray-900">
-                  {stock.target || '—'}
-                </td>
-                <td className="px-4 py-3 text-right text-gray-700">{stock.units_to_buy}</td>
-                <td className="px-4 py-3 text-right font-medium text-gray-900">
-                  ₹{(stock.total_buy_amount || 0).toLocaleString()}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
-                    {stock.confidence_score}%
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Details Section */}
-      <div className="space-y-4">
-        <h4 className="font-semibold text-gray-900">Technical Setup & Analysis</h4>
-        <div className="grid gap-4 md:grid-cols-2">
-          {rows.map((stock, idx) => (
-            <div key={idx} className="border border-gray-200 bg-gray-50 p-4">
-              <p className="font-medium text-gray-900">{stock.stock_name}</p>
-              <div className="mt-3 space-y-2 text-sm">
-                <div>
-                  <p className="text-xs font-semibold uppercase text-gray-500">Upside Horizon</p>
-                  <p className="mt-0.5 text-gray-700">{stock.upside_horizon}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase text-gray-500">Technical Setup</p>
-                  <p className="mt-0.5 text-gray-700">{stock.technical_setup}</p>
-                </div>
-                {stock.rationale_remarks && (
-                  <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500">Remarks</p>
-                    <p className="mt-0.5 text-gray-700">{stock.rationale_remarks}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );

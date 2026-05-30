@@ -16,7 +16,7 @@ import { JobResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { WSClient } from '@/services/websocket';
-import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
+import InvestmentRecommendationTable from '@/components/InvestmentRecommendationTable';
 import ExportToSheetsModal from './_components/ExportToSheetsModal';
 
 const STATUS_STYLES: Record<string, string> = {
@@ -124,6 +124,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   }
 
   const StatusIcon = STATUS_ICONS[job.status] ?? Clock3;
+  const hasResponse = Boolean(job.response?.trim());
 
   return (
     <div className="mx-auto flex flex-col gap-6">
@@ -204,12 +205,18 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
 
           <div className="p-5 max-w-full">
             {job.status === 'failed' && job.error_message ? (
-              <p className="whitespace-pre-wrap text-sm leading-6 text-red-700">
-                {job.error_message}
-              </p>
-            ) : job.response ? (
-              <MarkdownRenderer content={job.response} />
-            ) : (
+              <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <p className="whitespace-pre-wrap leading-6">{job.error_message}</p>
+              </div>
+            ) : null}
+
+            {hasResponse ? (
+              <InvestmentRecommendationTable
+                content={job.response ?? ''}
+                provider={job.provider}
+                model={job.model}
+              />
+            ) : job.status === 'failed' && job.error_message ? null : (
               <p className="text-sm italic text-gray-400">
                 {isActive ? 'Response pending…' : 'No response.'}
               </p>

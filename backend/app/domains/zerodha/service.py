@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
 
@@ -51,59 +52,129 @@ class ZerodhaService:
             )
         resp.raise_for_status()
 
+    async def _request_async(
+        self,
+        method: str,
+        path: str,
+        *,
+        access_token: str | None = None,
+        data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> Any:
+        request_headers = dict(headers or {})
+        if access_token:
+            request_headers.update(self._auth_headers(access_token))
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.request(
+                method,
+                f"{self.KITE_BASE}{path}",
+                data=data,
+                headers=request_headers,
+            )
+            self._raise_for_kite(resp)
+            return resp.json().get("data")
+
+    def _request_sync(
+        self,
+        method: str,
+        path: str,
+        *,
+        access_token: str | None = None,
+        data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> Any:
+        request_headers = dict(headers or {})
+        if access_token:
+            request_headers.update(self._auth_headers(access_token))
+
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.request(
+                method,
+                f"{self.KITE_BASE}{path}",
+                data=data,
+                headers=request_headers,
+            )
+            self._raise_for_kite(resp)
+            return resp.json().get("data")
+
     async def exchange_token(self, request_token: str) -> dict:
         checksum = self._checksum(request_token)
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self.KITE_BASE}/session/token",
-                data={
-                    "api_key": settings.zerodha_api_key,
-                    "request_token": request_token,
-                    "checksum": checksum,
-                },
-                headers={
-                    "X-Kite-Version": "3",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-            )
-            self._raise_for_kite(resp)
-            return resp.json()["data"]
+        data = await self._request_async(
+            "POST",
+            "/session/token",
+            data={
+                "api_key": settings.zerodha_api_key,
+                "request_token": request_token,
+                "checksum": checksum,
+            },
+            headers={
+                "X-Kite-Version": "3",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+        return data or {}
 
     async def get_orders(self, access_token: str) -> list:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{self.KITE_BASE}/orders",
-                headers=self._auth_headers(access_token),
-            )
-            self._raise_for_kite(resp)
-            return resp.json().get("data", [])
+        data = await self._request_async("GET", "/orders", access_token=access_token)
+        return data or []
+
+    async def get_holdings(self, access_token: str) -> list[dict[str, Any]]:
+        data = await self._request_async(
+            "GET",
+            "/portfolio/holdings",
+            access_token=access_token,
+        )
+        return data or []
+
+    async def get_positions(self, access_token: str) -> dict[str, Any]:
+        data = await self._request_async(
+            "GET",
+            "/portfolio/positions",
+            access_token=access_token,
+        )
+        return data or {}
+
+    def get_holdings_sync(self, access_token: str) -> list[dict[str, Any]]:
+        data = self._request_sync(
+            "GET",
+            "/portfolio/holdings",
+            access_token=access_token,
+        )
+        return data or []
+
+    def get_positions_sync(self, access_token: str) -> dict[str, Any]:
+        data = self._request_sync(
+            "GET",
+            "/portfolio/positions",
+            access_token=access_token,
+        )
+        return data or {}
 
     async def place_order(self, access_token: str, order_data: dict) -> dict:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self.KITE_BASE}/orders/regular",
-                data=order_data,
-                headers={
-                    **self._auth_headers(access_token),
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-            )
-            self._raise_for_kite(resp)
-            return resp.json()["data"]
+        data = await self._request_async(
+            "POST",
+            "/orders/regular",
+            access_token=access_token,
+            data=order_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        return data or {}
 
     async def invalidate_token(self, access_token: str) -> None:
         """Best-effort: revoke the session on Zerodha's side."""
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                await client.delete(
-                    f"{self.KITE_BASE}/session/token",
-                    headers={
-                        **self._auth_headers(access_token),
-                        "Content-Type": "application/x-www-form-urlencoded",
-                    },
-                )
-            except Exception:
-                pass  # fire-and-forget; local record is deleted regardless
+        try:
+            await self._request_async(
+                "DELETE",
+                "/session/token",
+                access_token=access_token,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=15.0,
+            )
+        except Exception:
+            pass  # fire-and-forget; local record is deleted regardless
 
     @staticmethod
     def token_expires_at(login_time: datetime) -> datetime:

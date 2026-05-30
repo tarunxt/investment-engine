@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,15 +9,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.zerodha.audit import ZerodhaAuditRepository
-from app.domains.zerodha.repository import ZerodhaCredentialRepository
+from app.domains.zerodha.models import ZerodhaPortfolioSnapshot
+from app.domains.zerodha.portfolio import current_snapshot_date
+from app.domains.zerodha.repository import (
+    ZerodhaCredentialRepository,
+    ZerodhaPortfolioSnapshotRepository,
+)
 from app.domains.zerodha.schemas import (
     ZerodhaCallbackRequest,
     ZerodhaLoginUrlResponse,
+    ZerodhaPortfolioOverviewResponse,
+    ZerodhaPortfolioSnapshotDetailResponse,
+    ZerodhaPortfolioSnapshotSummaryResponse,
+    ZerodhaPortfolioSyncResponse,
+    ZerodhaPortfolioPositions,
     ZerodhaPlaceOrderRequest,
     ZerodhaPlaceOrderResponse,
     ZerodhaStatusResponse,
 )
 from app.domains.zerodha.service import KiteError, ZerodhaService
+from app.domains.zerodha.tasks import sync_portfolio_snapshot_task
 from app.infrastructure.database.session import get_async_db
 
 logger = logging.getLogger(__name__)
@@ -33,6 +44,37 @@ def _client_ip(request: Request) -> str | None:
     if request.client:
         return request.client.host
     return None
+
+
+def _snapshot_summary(
+    snapshot: ZerodhaPortfolioSnapshot,
+) -> ZerodhaPortfolioSnapshotSummaryResponse:
+    return ZerodhaPortfolioSnapshotSummaryResponse(
+        snapshot_date=snapshot.snapshot_date,
+        captured_at=snapshot.captured_at,
+        source=snapshot.source,
+        holdings_count=snapshot.holdings_count,
+        net_positions_count=snapshot.net_positions_count,
+        day_positions_count=snapshot.day_positions_count,
+        holdings_market_value=snapshot.holdings_market_value,
+        holdings_pnl=snapshot.holdings_pnl,
+        holdings_day_change_value=snapshot.holdings_day_change_value,
+        positions_pnl=snapshot.positions_pnl,
+        positions_m2m=snapshot.positions_m2m,
+    )
+
+
+def _snapshot_detail(
+    snapshot: ZerodhaPortfolioSnapshot,
+) -> ZerodhaPortfolioSnapshotDetailResponse:
+    return ZerodhaPortfolioSnapshotDetailResponse(
+        **_snapshot_summary(snapshot).model_dump(),
+        holdings=snapshot.holdings or [],
+        positions=ZerodhaPortfolioPositions(
+            net=snapshot.net_positions or [],
+            day=snapshot.day_positions or [],
+        ),
+    )
 
 
 @router.get("/login-url", response_model=ZerodhaLoginUrlResponse)
@@ -77,6 +119,16 @@ async def callback(
     await audit.log(current_user.id, "token_exchange", ip, {"expires_at": expires_at.isoformat()})
     await db.commit()
 
+    try:
+        task = sync_portfolio_snapshot_task.delay(current_user.id, "login")  # type: ignore[attr-defined]
+        logger.info(
+            "Queued Zerodha login portfolio sync for user %s (task_id=%s)",
+            current_user.id,
+            task.id,
+        )
+    except Exception:
+        logger.exception("Failed to queue Zerodha login portfolio sync for user %s", current_user.id)
+
     logger.info("Zerodha connected for user %s, expires %s", current_user.id, expires_at)
     return ZerodhaStatusResponse(connected=True, login_time=login_time, expires_at=expires_at)
 
@@ -87,14 +139,99 @@ async def get_status(
     current_user: User = Depends(get_current_user),
 ):
     repo = ZerodhaCredentialRepository(db)
+    snapshot_repo = ZerodhaPortfolioSnapshotRepository(db)
     cred = await repo.get_by_user(current_user.id)
+    latest_snapshot = await snapshot_repo.get_latest_by_user(current_user.id)
+    snapshot_meta = {
+        "last_portfolio_sync_at": latest_snapshot.captured_at if latest_snapshot else None,
+        "last_portfolio_snapshot_date": latest_snapshot.snapshot_date if latest_snapshot else None,
+    }
     if not cred:
-        return ZerodhaStatusResponse(connected=False)
+        return ZerodhaStatusResponse(connected=False, **snapshot_meta)
     if cred.expires_at <= datetime.now(tz=timezone.utc):
-        return ZerodhaStatusResponse(connected=False)
+        return ZerodhaStatusResponse(connected=False, **snapshot_meta)
     return ZerodhaStatusResponse(
-        connected=True, login_time=cred.login_time, expires_at=cred.expires_at
+        connected=True,
+        login_time=cred.login_time,
+        expires_at=cred.expires_at,
+        **snapshot_meta,
     )
+
+
+@router.get("/portfolio", response_model=ZerodhaPortfolioOverviewResponse)
+async def get_portfolio_overview(
+    limit: int = 30,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    snapshot_repo = ZerodhaPortfolioSnapshotRepository(db)
+    snapshots = await snapshot_repo.list_by_user(current_user.id, limit=min(max(limit, 1), 120))
+    latest = _snapshot_detail(snapshots[0]) if snapshots else None
+    return ZerodhaPortfolioOverviewResponse(
+        latest=latest,
+        history=[_snapshot_summary(snapshot) for snapshot in snapshots],
+    )
+
+
+@router.post("/portfolio/sync", response_model=ZerodhaPortfolioSyncResponse)
+async def queue_portfolio_sync(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    ip = _client_ip(request)
+    repo = ZerodhaCredentialRepository(db)
+    audit = ZerodhaAuditRepository(db)
+    cred = await repo.get_by_user(current_user.id)
+
+    if not cred or cred.expires_at <= datetime.now(tz=timezone.utc):
+        raise HTTPException(401, detail="Zerodha session expired. Please login again.")
+
+    snapshot_date = current_snapshot_date()
+    try:
+        task = sync_portfolio_snapshot_task.delay(current_user.id, "manual")  # type: ignore[attr-defined]
+    except Exception:
+        logger.exception("Failed to queue Zerodha portfolio sync for user %s", current_user.id)
+        await audit.log(
+            current_user.id,
+            "portfolio_sync_queue_failed",
+            ip,
+            {"source": "manual", "snapshot_date": snapshot_date.isoformat()},
+        )
+        await db.commit()
+        raise HTTPException(502, detail="Failed to queue portfolio sync")
+
+    await audit.log(
+        current_user.id,
+        "portfolio_sync_queued",
+        ip,
+        {
+            "source": "manual",
+            "snapshot_date": snapshot_date.isoformat(),
+            "task_id": task.id,
+        },
+    )
+    await db.commit()
+
+    return ZerodhaPortfolioSyncResponse(
+        status="queued",
+        message="Portfolio sync queued",
+        snapshot_date=snapshot_date,
+        task_id=task.id,
+    )
+
+
+@router.get("/portfolio/{snapshot_date}", response_model=ZerodhaPortfolioSnapshotDetailResponse)
+async def get_portfolio_snapshot(
+    snapshot_date: date,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    snapshot_repo = ZerodhaPortfolioSnapshotRepository(db)
+    snapshot = await snapshot_repo.get_by_user_and_date(current_user.id, snapshot_date)
+    if not snapshot:
+        raise HTTPException(404, detail="Portfolio snapshot not found")
+    return _snapshot_detail(snapshot)
 
 
 @router.get("/orders")

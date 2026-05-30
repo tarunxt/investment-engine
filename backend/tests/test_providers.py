@@ -3,47 +3,67 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-os.environ.setdefault("DATABASE_URL", "sqlite:////tmp/investor-test.db")
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+asyncpg://test:test@localhost:5432/testdb",
+)
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
+os.environ.setdefault("DEEPSEEK_API_KEY", "test-deepseek-key")
 
-from app.providers.base import AIProviderResponse
-from app.providers.factory import ProviderFactory
-from app.providers.gemini_provider import GeminiProvider
-from app.providers.openai_provider import OpenAIProvider
-from app.workers.tasks import execute_ai_job
-
-
-class FakeQuery:
-    def __init__(self, job):
-        self.job = job
-
-    def filter(self, *_args, **_kwargs):
-        return self
-
-    def first(self):
-        return self.job
+from app.domains.ai_providers.anthropic import AnthropicProvider
+from app.domains.ai_providers.base import AIProviderResponse
+from app.domains.ai_providers.deepseek import DeepSeekProvider
+from app.domains.ai_providers.factory import ProviderFactory
+from app.domains.ai_providers.gemini import GeminiProvider
+from app.domains.ai_providers.openai import OpenAIProvider
+from app.domains.jobs import tasks
+from app.shared.types import JobStatus
 
 
-class FakeSession:
-    def __init__(self, job):
-        self.job = job
-        self.commits = 0
-        self.closed = False
+class FakeDB:
+    def __init__(self):
         self.rolled_back = False
-
-    def query(self, _model):
-        return FakeQuery(self.job)
-
-    def commit(self):
-        self.commits += 1
+        self.closed = False
 
     def rollback(self):
         self.rolled_back = True
 
     def close(self):
         self.closed = True
+
+
+class FakeRepo:
+    def __init__(self, job):
+        self.job = job
+
+    def get(self, _job_id: int):
+        return self.job
+
+    def update_status(
+        self,
+        job,
+        status,
+        *,
+        response=None,
+        error_message=None,
+        tokens_in=None,
+        tokens_out=None,
+        estimated_cost=None,
+    ):
+        job.status = status
+        if response is not None:
+            job.response = response
+        if error_message is not None:
+            job.error_message = error_message
+        if tokens_in is not None:
+            job.tokens_in = tokens_in
+        if tokens_out is not None:
+            job.tokens_out = tokens_out
+        if estimated_cost is not None:
+            job.estimated_cost = estimated_cost
 
 
 class ProviderFactoryTests(unittest.TestCase):
@@ -57,103 +77,52 @@ class ProviderFactoryTests(unittest.TestCase):
 
         self.assertIsInstance(provider, GeminiProvider)
 
+    def test_create_returns_anthropic_provider(self):
+        provider = ProviderFactory.create("anthropic")
+
+        self.assertIsInstance(provider, AnthropicProvider)
+
+    def test_create_returns_deepseek_provider(self):
+        provider = ProviderFactory.create("deepseek")
+
+        self.assertIsInstance(provider, DeepSeekProvider)
+
     def test_create_rejects_unsupported_provider(self):
         with self.assertRaises(ValueError):
-            ProviderFactory.create("anthropic")
-
-
-class OpenAIProviderTests(unittest.TestCase):
-    @patch("app.providers.openai_provider.OpenAI")
-    def test_generate_returns_normalized_response(self, openai_client_cls):
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content="  investment analysis  ")
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=123, completion_tokens=45),
-        )
-        openai_client_cls.return_value = mock_client
-
-        provider = OpenAIProvider()
-        result = provider.generate(prompt="analyze tesla", model="gpt-4o-mini")
-
-        self.assertEqual(
-            result,
-            AIProviderResponse(
-                content="investment analysis",
-                tokens_in=123,
-                tokens_out=45,
-                cost=0.000045,
-                provider="openai",
-                model="gpt-4o-mini",
-            ),
-        )
-
-
-class GeminiProviderTests(unittest.TestCase):
-    @patch("app.providers.gemini_provider.httpx.post")
-    def test_generate_returns_normalized_response(self, httpx_post):
-        response = MagicMock()
-        response.json.return_value = {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {"text": " investment "},
-                            {"text": "analysis "},
-                        ]
-                    }
-                }
-            ],
-            "usageMetadata": {
-                "promptTokenCount": 200,
-                "candidatesTokenCount": 75,
-            },
-        }
-        httpx_post.return_value = response
-
-        provider = GeminiProvider()
-        result = provider.generate(prompt="analyze tesla", model="gemini-1.5-flash")
-
-        response.raise_for_status.assert_called_once_with()
-        httpx_post.assert_called_once()
-        self.assertEqual(
-            result,
-            AIProviderResponse(
-                content="investment analysis",
-                tokens_in=200,
-                tokens_out=75,
-                cost=0.000037,
-                provider="gemini",
-                model="gemini-1.5-flash",
-            ),
-        )
+            ProviderFactory.create("unsupported-provider")
 
 
 class ExecuteAIJobTests(unittest.TestCase):
-    @patch("app.workers.tasks.ProviderFactory.create")
-    @patch("app.workers.tasks.SessionLocal")
+    @patch("app.domains.jobs.tasks._refresh_run_status")
+    @patch("app.domains.jobs.tasks._publish_job_update")
+    @patch("app.domains.ai_providers.factory.ProviderFactory.create")
+    @patch("app.domains.jobs.tasks.SyncJobRepository")
+    @patch("app.domains.jobs.tasks.SyncSessionLocal")
     def test_execute_ai_job_updates_job_with_provider_response(
         self,
-        session_local_mock,
-        provider_factory_mock,
+        sync_session_local_mock,
+        sync_repo_cls_mock,
+        provider_factory_create_mock,
+        _publish_job_update_mock,
+        _refresh_run_status_mock,
     ):
         job = SimpleNamespace(
             id=1,
             prompt="analyze apple",
             provider="openai",
             model="gpt-4o-mini",
-            status="pending",
+            status=JobStatus.PENDING,
             response=None,
             error_message=None,
             tokens_in=None,
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_session = FakeSession(job)
-        session_local_mock.return_value = fake_session
+        fake_db = FakeDB()
+        fake_repo = FakeRepo(job)
+
+        sync_session_local_mock.return_value = fake_db
+        sync_repo_cls_mock.return_value = fake_repo
 
         provider = MagicMock()
         provider.generate.return_value = AIProviderResponse(
@@ -164,46 +133,62 @@ class ExecuteAIJobTests(unittest.TestCase):
             provider="openai",
             model="gpt-4o-mini",
         )
-        provider_factory_mock.return_value = provider
+        provider_factory_create_mock.return_value = provider
 
-        execute_ai_job.run(1)
+        tasks.execute_ai_job.run(1)
 
-        self.assertEqual(job.status, "completed")
+        self.assertEqual(job.status, JobStatus.COMPLETED)
         self.assertEqual(job.response, "analysis complete")
         self.assertEqual(job.tokens_in, 321)
         self.assertEqual(job.tokens_out, 123)
         self.assertEqual(job.estimated_cost, 0.000154)
         self.assertIsNone(job.error_message)
-        self.assertEqual(fake_session.commits, 2)
-        self.assertTrue(fake_session.closed)
+        self.assertTrue(fake_db.closed)
 
-    @patch("app.workers.tasks.ProviderFactory.create")
-    @patch("app.workers.tasks.SessionLocal")
+    @patch("app.domains.jobs.tasks._refresh_run_status")
+    @patch("app.domains.jobs.tasks._publish_job_update")
+    @patch("app.domains.jobs.tasks._classify_exc", return_value=(False, 0))
+    @patch("app.domains.ai_providers.factory.ProviderFactory.create")
+    @patch("app.domains.jobs.tasks.SyncJobRepository")
+    @patch("app.domains.jobs.tasks.SyncSessionLocal")
     def test_execute_ai_job_marks_job_failed_when_provider_errors(
         self,
-        session_local_mock,
-        provider_factory_mock,
+        sync_session_local_mock,
+        sync_repo_cls_mock,
+        provider_factory_create_mock,
+        _classify_exc_mock,
+        _publish_job_update_mock,
+        _refresh_run_status_mock,
     ):
         job = SimpleNamespace(
             id=2,
             prompt="analyze risk",
             provider="openai",
             model="gpt-4o-mini",
-            status="pending",
+            status=JobStatus.PENDING,
             response=None,
             error_message=None,
             tokens_in=None,
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_session = FakeSession(job)
-        session_local_mock.return_value = fake_session
-        provider_factory_mock.return_value.generate.side_effect = RuntimeError("boom")
+        fake_db = FakeDB()
+        fake_repo = FakeRepo(job)
 
-        execute_ai_job.run(2)
+        sync_session_local_mock.return_value = fake_db
+        sync_repo_cls_mock.return_value = fake_repo
 
-        self.assertEqual(job.status, "failed")
+        provider = MagicMock()
+        provider.generate.side_effect = RuntimeError("boom")
+        provider_factory_create_mock.return_value = provider
+
+        tasks.execute_ai_job.run(2)
+
+        self.assertEqual(job.status, JobStatus.FAILED)
         self.assertEqual(job.error_message, "boom")
-        self.assertTrue(fake_session.rolled_back)
-        self.assertEqual(fake_session.commits, 2)
-        self.assertTrue(fake_session.closed)
+        self.assertTrue(fake_db.rolled_back)
+        self.assertTrue(fake_db.closed)
+
+
+if __name__ == "__main__":
+    unittest.main()

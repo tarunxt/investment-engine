@@ -1,23 +1,24 @@
 "use client";
 
 import { useAuth } from "@/hooks/useAuth";
+import { isClientAuthBypassed, resolveAuthRedirectTarget } from "@/lib/authRedirect";
 import { URLs } from "@/lib/urls";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
-
-const devAuthEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH === "true";
 
 export function AuthRedirect({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isAuthenticated, loading } = useAuth();
+  const redirectTo = resolveAuthRedirectTarget(searchParams.get("redirectTo"));
 
   useEffect(() => {
-    if (devAuthEnabled || (!loading && isAuthenticated)) {
-      router.push(URLs.routes.console.dashboard());
+    if (isClientAuthBypassed || (!loading && isAuthenticated)) {
+      router.replace(redirectTo || URLs.routes.console.dashboard());
     }
-  }, [isAuthenticated, loading, router]);
+  }, [isAuthenticated, loading, redirectTo, router]);
 
-  if (devAuthEnabled || isAuthenticated) {
+  if (isClientAuthBypassed || isAuthenticated) {
     return null;
   }
 
