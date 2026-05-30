@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
+import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 
 interface JsonRecommendationRow {
   [key: string]: unknown;
@@ -525,7 +526,7 @@ export default function InvestmentRecommendationTable({
         </div>
       ) : null}
       <div className="overflow-x-auto">
-        <table className="min-w-max text-sm">
+	        <table className="min-w-max text-sm">
           <thead>
             <tr className="border-b border-gray-300 bg-gray-50">
               {EXACT_HEADER_ORDER.map((header) => (
@@ -538,18 +539,39 @@ export default function InvestmentRecommendationTable({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
-            {canonicalTable.rows.map((row, rowIdx) => (
-              <tr key={rowIdx} className="hover:bg-gray-50">
-                {EXACT_HEADER_ORDER.map((header) => (
-                  <td key={`${rowIdx}-${header}`} className="px-3 py-2 align-top text-gray-700">
-                    {row[header]}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+	          <tbody className="divide-y divide-gray-200">
+	            {canonicalTable.rows.map((row, rowIdx) => (
+	              <tr key={rowIdx} className="hover:bg-gray-50">
+	                {EXACT_HEADER_ORDER.map((header) => {
+	                  const cellValue = row[header];
+	                  const stockSymbol = row['Stock Symbol'] || row['Stock Name'];
+	                  const exchangeSymbol = row['Exchange Symbol'];
+	                  const market = ['NSE', 'BSE'].includes(exchangeSymbol) ? 'india' : 'us';
+
+	                  const content =
+	                    (header === 'Stock Name' || header === 'Stock Symbol') && cellValue ? (
+	                      <TradingViewSymbolLink
+	                        symbol={stockSymbol}
+	                        market={market}
+	                        exchange={exchangeSymbol}
+	                        className="hover:text-blue-700"
+	                      >
+	                        <span className="underline-offset-4 hover:underline">{cellValue}</span>
+	                      </TradingViewSymbolLink>
+	                    ) : (
+	                      cellValue
+	                    );
+
+	                  return (
+	                    <td key={`${rowIdx}-${header}`} className="px-3 py-2 align-top text-gray-700">
+	                      {content}
+	                    </td>
+	                  );
+	                })}
+	              </tr>
+	            ))}
+	          </tbody>
+	        </table>
       </div>
     </div>
   );

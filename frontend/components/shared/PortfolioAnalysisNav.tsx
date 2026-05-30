@@ -5,14 +5,16 @@ import { URLs } from '@/lib/urls';
 import { cn } from '@/lib/utils';
 
 type PortfolioKey = 'zerodha' | 'indmoneyUs';
-type ActiveTab = 'events' | 'threats' | null;
+type ActiveTab = 'portfolio' | 'events' | 'threats' | null;
 
 const ROUTES = {
   zerodha: {
+    portfolio: URLs.routes.console.zerodha(),
     events: URLs.routes.console.zerodhaEvents(),
     threats: URLs.routes.console.zerodhaThreats(),
   },
   indmoneyUs: {
+    portfolio: URLs.routes.console.indmoneyUs(),
     events: URLs.routes.console.indmoneyUsEvents(),
     threats: URLs.routes.console.indmoneyUsThreats(),
   },
@@ -32,6 +34,7 @@ export function PortfolioAnalysisNav({
   return (
     <div className={cn('flex flex-wrap items-center gap-2', className)}>
       {([
+        { key: 'portfolio', label: 'Portfolio' },
         { key: 'events', label: 'Events' },
         { key: 'threats', label: 'Threats' },
       ] as const).map((item) => (

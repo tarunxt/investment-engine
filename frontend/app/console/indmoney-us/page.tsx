@@ -147,7 +147,7 @@ export default function IndMoneyUsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 self-start">
-          <PortfolioAnalysisNav portfolio="indmoneyUs" />
+          <PortfolioAnalysisNav portfolio="indmoneyUs" active="portfolio" />
           <button
             type="button"
             onClick={() => setShowManualNote((current) => !current)}

@@ -3,6 +3,13 @@
 import React from 'react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
+import {
+  isTradingViewDisplayColumn,
+  resolveTradingViewRowExchange,
+  resolveTradingViewRowSymbol,
+  type TradingViewMarket,
+} from '@/lib/tradingview';
 import { cn } from '@/lib/utils';
 import type { PortfolioEventTable } from '@/types/api';
 
@@ -59,10 +66,12 @@ function renderSourceContent(value: string) {
 
 export function EventCalendarTable({
   table,
+  market,
   title = 'Upcoming Events',
   className,
 }: {
   table: PortfolioEventTable;
+  market: TradingViewMarket;
   title?: string;
   className?: string;
 }) {
@@ -91,12 +100,14 @@ export function EventCalendarTable({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {table.rows.map((row, index) => (
-                <tr key={`event-row-${index}`} className="align-top">
-                  {table.columns.map((column) => {
-                    const value = row[column] ?? '';
+	              {table.rows.map((row, index) => (
+	                <tr key={`event-row-${index}`} className="align-top">
+	                  {table.columns.map((column) => {
+	                    const value = row[column] ?? '';
+	                    const rowSymbol = resolveTradingViewRowSymbol(row, column);
+	                    const rowExchange = resolveTradingViewRowExchange(row);
 
-                    if (column === 'Expected Outcome') {
+	                    if (column === 'Expected Outcome') {
                       const tone = OUTCOME_STYLES[value] ?? OUTCOME_STYLES.Neutral;
                       return (
                         <td key={`${column}-${index}`} className="px-5 py-4 text-slate-700">
@@ -107,13 +118,26 @@ export function EventCalendarTable({
                       );
                     }
 
-                    return (
-                      <td key={`${column}-${index}`} className="px-5 py-4 text-slate-700">
-                        <div className="min-w-[10rem] max-w-[20rem] whitespace-pre-wrap leading-6">
-                          {column === 'Status / Source' ? renderSourceContent(value) : (value || '-')}
-                        </div>
-                      </td>
-                    );
+	                    return (
+	                      <td key={`${column}-${index}`} className="px-5 py-4 text-slate-700">
+	                        <div className="min-w-[10rem] max-w-[20rem] whitespace-pre-wrap leading-6">
+	                          {column === 'Status / Source'
+	                            ? renderSourceContent(value)
+	                            : isTradingViewDisplayColumn(column) && value
+	                              ? (
+	                                  <TradingViewSymbolLink
+	                                    symbol={rowSymbol ?? value}
+	                                    market={market}
+	                                    exchange={rowExchange}
+	                                    className="font-medium hover:text-blue-700"
+	                                  >
+	                                    <span className="underline-offset-4 hover:underline">{value}</span>
+	                                  </TradingViewSymbolLink>
+	                                )
+	                              : (value || '-')}
+	                        </div>
+	                      </td>
+	                    );
                   })}
                 </tr>
               ))}

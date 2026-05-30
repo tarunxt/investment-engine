@@ -11,6 +11,7 @@ import {
   Wallet,
 } from 'lucide-react';
 
+import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { cn } from '@/lib/utils';
 import type {
   IndMoneyUsHolding,
@@ -211,13 +212,19 @@ function CompactHoldingsTable({
               <th className="pb-2">P&amp;L %</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
-            {holdings.map((holding) => (
-              <tr key={`${title}-${holding.symbol}`} className="hover:bg-gray-50">
-                <td className="py-2.5 pr-4">
-                  <div className="font-medium text-gray-900">{holding.symbol}</div>
-                  <div className="text-xs text-gray-500">{holding.company_name}</div>
-                </td>
+	          <tbody className="divide-y divide-gray-50">
+	            {holdings.map((holding) => (
+	              <tr key={`${title}-${holding.symbol}`} className="hover:bg-gray-50">
+	                <td className="py-2.5 pr-4">
+	                  <TradingViewSymbolLink symbol={holding.symbol} market="us" className="group inline-flex flex-col">
+	                    <span className="font-medium text-gray-900 transition-colors group-hover:text-blue-700">
+	                      {holding.symbol}
+	                    </span>
+	                    <span className="text-xs text-gray-500 transition-colors group-hover:text-blue-600">
+	                      {holding.company_name}
+	                    </span>
+	                  </TradingViewSymbolLink>
+	                </td>
                 <td className="py-2.5 pr-4 text-gray-700">{formatPercent(holding.portfolio_weight_percent)}</td>
                 <td className="py-2.5 pr-4 text-gray-700">{formatCurrency(holding.current_value)}</td>
                 <td className={cn('py-2.5 pr-4 font-medium', toneClass(holding.total_pnl))}>
@@ -445,12 +452,18 @@ export function IndMoneyUsSnapshotsPanel({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {selectedSnapshot.holdings.map((holding) => (
-                    <tr key={holding.symbol} className="hover:bg-gray-50">
-                      <td className="py-2.5 pr-4">
-                        <div className="font-medium text-gray-900">{holding.company_name}</div>
-                        <div className="text-xs text-gray-500">{holding.symbol}</div>
-                      </td>
+	                  {selectedSnapshot.holdings.map((holding) => (
+	                    <tr key={holding.symbol} className="hover:bg-gray-50">
+	                      <td className="py-2.5 pr-4">
+	                        <TradingViewSymbolLink symbol={holding.symbol} market="us" className="group inline-flex flex-col">
+	                          <span className="font-medium text-gray-900 transition-colors group-hover:text-blue-700">
+	                            {holding.company_name}
+	                          </span>
+	                          <span className="text-xs text-gray-500 transition-colors group-hover:text-blue-600">
+	                            {holding.symbol}
+	                          </span>
+	                        </TradingViewSymbolLink>
+	                      </td>
                       <td className="py-2.5 pr-4 text-gray-700">{formatCount(holding.quantity)}</td>
                       <td className="py-2.5 pr-4 text-gray-700">{formatCurrency(holding.average_price)}</td>
                       <td className="py-2.5 pr-4 text-gray-700">{formatCurrency(holding.market_price)}</td>

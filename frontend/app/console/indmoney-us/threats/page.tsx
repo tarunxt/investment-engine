@@ -16,6 +16,7 @@ import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import { EventScanRunControls } from '@/components/shared/EventScanRunControls';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
 import { ScanHistoryButton } from '@/components/shared/ScanHistoryButton';
+import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { Button } from '@/components/ui/button';
 import { useHistoricalAnalysisCosts } from '@/hooks/useHistoricalAnalysisCosts';
 import { useUsdInrRate } from '@/hooks/useUsdInrRate';
@@ -305,15 +306,17 @@ export default function IndMoneyUsThreatsPage() {
               <div className="mt-5">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Top Holdings by Value</div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {topHoldings.map((holding: IndMoneyUsHolding) => (
-                    <div
-                      key={holding.symbol}
-                      className="rounded-full border border-white/10 bg-white/8 px-3 py-1.5 text-xs text-slate-100"
-                    >
-                      <span className="font-semibold">{holding.symbol}</span>
-                      <span className="ml-2 text-slate-300">{formatUsd(holding.current_value)}</span>
-                    </div>
-                  ))}
+	                  {topHoldings.map((holding: IndMoneyUsHolding) => (
+	                    <TradingViewSymbolLink
+	                      key={holding.symbol}
+	                      symbol={holding.symbol}
+	                      market="us"
+	                      className="inline-flex items-center rounded-full border border-white/10 bg-white/8 px-3 py-1.5 text-xs text-slate-100 hover:bg-white/12"
+	                    >
+	                      <span className="font-semibold">{holding.symbol}</span>
+	                      <span className="ml-2 text-slate-300">{formatUsd(holding.current_value)}</span>
+	                    </TradingViewSymbolLink>
+	                  ))}
                 </div>
               </div>
             )}
@@ -418,15 +421,15 @@ export default function IndMoneyUsThreatsPage() {
 
           {hasUrgentActions && urgentSection && (
             <section className="rounded-[30px] border border-rose-200 bg-linear-to-br from-rose-50 to-white p-1 shadow-sm">
-              <ThreatsReportTable section={urgentSection} className="bg-transparent ring-0 shadow-none" />
+	              <ThreatsReportTable section={urgentSection} market="us" className="bg-transparent ring-0 shadow-none" />
             </section>
           )}
 
           {analysis.report.tables
-            .filter((section) => section.key !== 'urgent_actionables')
-            .map((section) => (
-              <ThreatsReportTable key={section.key} section={section} />
-            ))}
+	            .filter((section) => section.key !== 'urgent_actionables')
+	            .map((section) => (
+	              <ThreatsReportTable key={section.key} section={section} market="us" />
+	            ))}
 
           <section className="rounded-[30px] border border-slate-200 bg-white px-6 py-6 shadow-sm">
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Bottom Line</div>

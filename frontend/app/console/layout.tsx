@@ -34,6 +34,28 @@ type NavigationGroup = {
 
 type NavigationEntry = NavigationItem | NavigationGroup;
 
+type PortfolioHeader = {
+    title: string;
+    subtitle: string;
+};
+
+const PORTFOLIO_HEADERS: Array<{ prefix: string; header: PortfolioHeader }> = [
+    {
+        prefix: URLs.routes.console.zerodha(),
+        header: {
+            title: 'Zerodha',
+            subtitle: 'Kite Connect integration — save daywise portfolio history and manage orders',
+        },
+    },
+    {
+        prefix: URLs.routes.console.indmoneyUs(),
+        header: {
+            title: 'IndMoney US',
+            subtitle: 'Manual US portfolio tracking for INDmoney when no direct API is available.',
+        },
+    },
+];
+
 export default function DashboardLayout({
     children,
 }: {
@@ -125,6 +147,8 @@ export default function DashboardLayout({
     const isPortfolioActive =
         pathname.startsWith('/console/zerodha') || pathname.startsWith('/console/indmoney-us');
     const isPortfolioExpanded = portfolioOpen || isPortfolioActive;
+    const activePortfolioHeader =
+        PORTFOLIO_HEADERS.find(({ prefix }) => pathname === prefix || pathname.startsWith(`${prefix}/`))?.header ?? null;
 
     if (loading) {
         return (
@@ -262,21 +286,34 @@ export default function DashboardLayout({
             <div className="lg:pl-64">
                 {/* Top header */}
                 <header className="bg-white shadow-sm sticky top-0 z-10">
-                    <div className="flex items-center justify-between h-16 px-4 sm:px-6">
-                        <button
-                            type="button"
-                            onClick={() => setSidebarOpen(true)}
-                            className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 lg:hidden"
-                        >
-                            <HiOutlineMenu />
-                        </button>
+                    <div className="flex h-16 items-center justify-between gap-4 px-4 sm:px-6">
+                        <div className="flex min-w-0 flex-1 items-center gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setSidebarOpen(true)}
+                                className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 lg:hidden"
+                            >
+                                <HiOutlineMenu />
+                            </button>
 
-                        <div className="flex-1" />
+                            {activePortfolioHeader ? (
+                                <div className="min-w-0 leading-tight">
+                                    <div className="truncate text-base font-semibold tracking-tight text-gray-950">
+                                        {activePortfolioHeader.title}
+                                    </div>
+                                    <div className="truncate text-xs text-gray-500">
+                                        {activePortfolioHeader.subtitle}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex-1" />
+                            )}
+                        </div>
 
                         <UserMenu
                             user={user}
                             onLogout={logout}
-                            className="ml-auto"
+                            className="shrink-0"
                         />
                     </div>
                 </header>

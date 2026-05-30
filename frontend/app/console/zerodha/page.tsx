@@ -15,6 +15,7 @@ import {
   TrendingUp,
   Unplug,
 } from 'lucide-react';
+import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { Button } from '@/components/ui/button';
 import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import { apiService, APIError } from '@/services/api';
@@ -297,12 +298,19 @@ function OrdersTable({ orders }: { orders: ZerodhaOrder[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-50">
-          {orders.map((o) => (
-            <tr key={o.order_id} className="hover:bg-gray-50">
-              <td className="py-2.5 pr-4 font-medium text-gray-900">
-                {o.tradingsymbol}
-                <span className="ml-1 text-xs text-gray-400">{o.exchange}</span>
-              </td>
+	          {orders.map((o) => (
+	            <tr key={o.order_id} className="hover:bg-gray-50">
+	              <td className="py-2.5 pr-4 font-medium text-gray-900">
+	                <TradingViewSymbolLink
+	                  symbol={o.tradingsymbol}
+	                  market="india"
+	                  exchange={o.exchange}
+	                  className="hover:text-blue-700"
+	                >
+	                  <span className="underline-offset-4 hover:underline">{o.tradingsymbol}</span>
+	                </TradingViewSymbolLink>
+	                <span className="ml-1 text-xs text-gray-400">{o.exchange}</span>
+	              </td>
               <td className="py-2.5 pr-4">
                 {o.transaction_type === 'BUY' ? (
                   <span className="inline-flex items-center gap-1 text-emerald-600">
@@ -616,7 +624,7 @@ export default function ZerodhaPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <PortfolioAnalysisNav portfolio="zerodha" />
+          <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" />
           {status?.connected && (
             <Button
               variant="outline"
