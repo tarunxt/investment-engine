@@ -5,184 +5,235 @@ import { sessionStorage } from '@/services/session';
  * API Base URL Configuration
  * Adjusts based on environment
  */
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  process.env.API_URL ||
-  "http://localhost:8000";
-const FRONTEND_BASE_URL =
-  process.env.NEXT_PUBLIC_FRONTEND_URL ||
-  process.env.NEXTAUTH_URL ||
-  "http://localhost:3000";
+const LOCAL_API_FALLBACK = "http://localhost:8000";
+const LOCAL_FRONTEND_FALLBACK = "http://localhost:3000";
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 
-// Derive WebSocket base URL: http → ws, https → wss
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, "ws");
+function trimTrailingSlash(url: string) {
+  return url.replace(/\/+$/, "");
+}
+
+function inferBrowserFrontendBaseUrl() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return trimTrailingSlash(window.location.origin);
+}
+
+function inferBrowserApiBaseUrl() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const { protocol, hostname } = window.location;
+  if (LOCAL_HOSTNAMES.has(hostname)) {
+    return LOCAL_API_FALLBACK;
+  }
+
+  const rootHostname = hostname.replace(/^www\./, "");
+  return `${protocol}//api.${rootHostname}`;
+}
+
+function resolveApiBaseUrl() {
+  const configuredClientUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (configuredClientUrl) {
+    return trimTrailingSlash(configuredClientUrl);
+  }
+
+  if (typeof window === "undefined") {
+    return trimTrailingSlash(process.env.API_URL || LOCAL_API_FALLBACK);
+  }
+
+  return inferBrowserApiBaseUrl() || LOCAL_API_FALLBACK;
+}
+
+function resolveFrontendBaseUrl() {
+  const configuredFrontendUrl =
+    process.env.NEXT_PUBLIC_FRONTEND_URL ||
+    process.env.NEXTAUTH_URL;
+
+  if (configuredFrontendUrl) {
+    return trimTrailingSlash(configuredFrontendUrl);
+  }
+
+  return inferBrowserFrontendBaseUrl() || LOCAL_FRONTEND_FALLBACK;
+}
+
+function resolveWebSocketBaseUrl() {
+  return resolveApiBaseUrl().replace(/^http/, "ws");
+}
 
 /**
  * URL Resolver - Centralized API endpoint management
  */
 export const URLs = {
   // Base URLs
-  api: API_BASE_URL,
-  frontend: FRONTEND_BASE_URL,
+  get api() {
+    return resolveApiBaseUrl();
+  },
+  get frontend() {
+    return resolveFrontendBaseUrl();
+  },
 
   // Health Check endpoints
   health: {
-    ping: () => `${API_BASE_URL}/health`,
-    db: () => `${API_BASE_URL}/health/db`,
-    redis: () => `${API_BASE_URL}/health/redis`,
-    full: () => `${API_BASE_URL}/health/full`,
+    ping: () => `${resolveApiBaseUrl()}/health`,
+    db: () => `${resolveApiBaseUrl()}/health/db`,
+    redis: () => `${resolveApiBaseUrl()}/health/redis`,
+    full: () => `${resolveApiBaseUrl()}/health/full`,
   },
 
   // Authentication endpoints
   auth: {
-    register: () => `${API_BASE_URL}/auth/register`,
-    login: () => `${API_BASE_URL}/auth/login`,
-    logout: () => `${API_BASE_URL}/auth/logout`,
-    refresh: () => `${API_BASE_URL}/auth/refresh`,
-    me: () => `${API_BASE_URL}/auth/me`,
-    updatePassword: () => `${API_BASE_URL}/auth/password`,
-    getProfile: () => `${API_BASE_URL}/auth/profile`,
-    updateProfile: () => `${API_BASE_URL}/auth/profile`,
-    forgotPassword: () => `${API_BASE_URL}/auth/forgot-password`,
-    resetPassword: () => `${API_BASE_URL}/auth/reset-password`,
+    register: () => `${resolveApiBaseUrl()}/auth/register`,
+    login: () => `${resolveApiBaseUrl()}/auth/login`,
+    logout: () => `${resolveApiBaseUrl()}/auth/logout`,
+    refresh: () => `${resolveApiBaseUrl()}/auth/refresh`,
+    me: () => `${resolveApiBaseUrl()}/auth/me`,
+    updatePassword: () => `${resolveApiBaseUrl()}/auth/password`,
+    getProfile: () => `${resolveApiBaseUrl()}/auth/profile`,
+    updateProfile: () => `${resolveApiBaseUrl()}/auth/profile`,
+    forgotPassword: () => `${resolveApiBaseUrl()}/auth/forgot-password`,
+    resetPassword: () => `${resolveApiBaseUrl()}/auth/reset-password`,
   },
 
   // User endpoints
   users: {
-    list: () => `${API_BASE_URL}/users`,
-    get: (id: number) => `${API_BASE_URL}/users/${id}`,
-    update: (id: number) => `${API_BASE_URL}/users/${id}`,
-    delete: (id: number) => `${API_BASE_URL}/users/${id}`,
-    getJobs: (id: number) => `${API_BASE_URL}/users/${id}/jobs`,
-    getActivity: (id: number) => `${API_BASE_URL}/users/${id}/activity`,
+    list: () => `${resolveApiBaseUrl()}/users`,
+    get: (id: number) => `${resolveApiBaseUrl()}/users/${id}`,
+    update: (id: number) => `${resolveApiBaseUrl()}/users/${id}`,
+    delete: (id: number) => `${resolveApiBaseUrl()}/users/${id}`,
+    getJobs: (id: number) => `${resolveApiBaseUrl()}/users/${id}/jobs`,
+    getActivity: (id: number) => `${resolveApiBaseUrl()}/users/${id}/activity`,
   },
 
   // Job endpoints
   jobs: {
-    create: () => `${API_BASE_URL}/jobs`,
-    list: () => `${API_BASE_URL}/jobs`,
-    get: (id: number) => `${API_BASE_URL}/jobs/${id}`,
-    update: (id: number) => `${API_BASE_URL}/jobs/${id}`,
-    delete: (id: number) => `${API_BASE_URL}/jobs/${id}`,
-    getCost: (id: number) => `${API_BASE_URL}/jobs/${id}/cost`,
+    create: () => `${resolveApiBaseUrl()}/jobs`,
+    list: () => `${resolveApiBaseUrl()}/jobs`,
+    get: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}`,
+    update: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}`,
+    delete: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}`,
+    getCost: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}/cost`,
     // WebSocket base URLs — WSClient appends ?token= before each connect attempt
-    ws: () => `${WS_BASE_URL}/ws/jobs`,
-    wsJob: (id: number) => `${WS_BASE_URL}/ws/jobs/${id}`,
+    ws: () => `${resolveWebSocketBaseUrl()}/ws/jobs`,
+    wsJob: (id: number) => `${resolveWebSocketBaseUrl()}/ws/jobs/${id}`,
   },
 
   // Run endpoints (multi-LLM fan-out)
   runs: {
-    create: () => `${API_BASE_URL}/runs`,
-    list: () => `${API_BASE_URL}/runs`,
-    get: (id: number) => `${API_BASE_URL}/runs/${id}`,
-    cancel: (id: number) => `${API_BASE_URL}/runs/${id}/cancel`,
-    ws: () => `${WS_BASE_URL}/ws/runs`,
-    wsRun: (id: number) => `${WS_BASE_URL}/ws/runs/${id}`,
+    create: () => `${resolveApiBaseUrl()}/runs`,
+    list: () => `${resolveApiBaseUrl()}/runs`,
+    get: (id: number) => `${resolveApiBaseUrl()}/runs/${id}`,
+    cancel: (id: number) => `${resolveApiBaseUrl()}/runs/${id}/cancel`,
+    ws: () => `${resolveWebSocketBaseUrl()}/ws/runs`,
+    wsRun: (id: number) => `${resolveWebSocketBaseUrl()}/ws/runs/${id}`,
   },
 
   // Zerodha endpoints
   zerodha: {
-    loginUrl: () => `${API_BASE_URL}/zerodha/login-url`,
-    callback: () => `${API_BASE_URL}/zerodha/callback`,
-    status: () => `${API_BASE_URL}/zerodha/status`,
-    portfolio: () => `${API_BASE_URL}/zerodha/portfolio`,
-    portfolioSync: () => `${API_BASE_URL}/zerodha/portfolio/sync`,
-    portfolioSnapshot: (snapshotDate: string) => `${API_BASE_URL}/zerodha/portfolio/${snapshotDate}`,
-    orders: () => `${API_BASE_URL}/zerodha/orders`,
-    disconnect: () => `${API_BASE_URL}/zerodha/disconnect`,
-    eventsLatest: () => `${API_BASE_URL}/zerodha/events/latest`,
-    eventsHistory: () => `${API_BASE_URL}/zerodha/events/history`,
-    eventJob: (jobId: number) => `${API_BASE_URL}/zerodha/events/${jobId}`,
-    eventsRun: () => `${API_BASE_URL}/zerodha/events/run`,
-    threatsLatest: () => `${API_BASE_URL}/zerodha/threats/latest`,
-    threatsHistory: () => `${API_BASE_URL}/zerodha/threats/history`,
-    threatJob: (jobId: number) => `${API_BASE_URL}/zerodha/threats/${jobId}`,
-    threatsRun: () => `${API_BASE_URL}/zerodha/threats/run`,
+    loginUrl: () => `${resolveApiBaseUrl()}/zerodha/login-url`,
+    callback: () => `${resolveApiBaseUrl()}/zerodha/callback`,
+    status: () => `${resolveApiBaseUrl()}/zerodha/status`,
+    portfolio: () => `${resolveApiBaseUrl()}/zerodha/portfolio`,
+    portfolioSync: () => `${resolveApiBaseUrl()}/zerodha/portfolio/sync`,
+    portfolioSnapshot: (snapshotDate: string) => `${resolveApiBaseUrl()}/zerodha/portfolio/${snapshotDate}`,
+    orders: () => `${resolveApiBaseUrl()}/zerodha/orders`,
+    disconnect: () => `${resolveApiBaseUrl()}/zerodha/disconnect`,
+    eventsLatest: () => `${resolveApiBaseUrl()}/zerodha/events/latest`,
+    eventsHistory: () => `${resolveApiBaseUrl()}/zerodha/events/history`,
+    eventJob: (jobId: number) => `${resolveApiBaseUrl()}/zerodha/events/${jobId}`,
+    eventsRun: () => `${resolveApiBaseUrl()}/zerodha/events/run`,
+    threatsLatest: () => `${resolveApiBaseUrl()}/zerodha/threats/latest`,
+    threatsHistory: () => `${resolveApiBaseUrl()}/zerodha/threats/history`,
+    threatJob: (jobId: number) => `${resolveApiBaseUrl()}/zerodha/threats/${jobId}`,
+    threatsRun: () => `${resolveApiBaseUrl()}/zerodha/threats/run`,
   },
 
   // INDmoney US endpoints
   indmoneyUs: {
-    portfolio: () => `${API_BASE_URL}/indmoney-us/portfolio`,
-    portfolioSnapshot: (snapshotId: number) => `${API_BASE_URL}/indmoney-us/portfolio/${snapshotId}`,
-    currentPrices: () => `${API_BASE_URL}/indmoney-us/prices/current`,
-    eventsLatest: () => `${API_BASE_URL}/indmoney-us/events/latest`,
-    eventsHistory: () => `${API_BASE_URL}/indmoney-us/events/history`,
-    eventJob: (jobId: number) => `${API_BASE_URL}/indmoney-us/events/${jobId}`,
-    eventsRun: () => `${API_BASE_URL}/indmoney-us/events/run`,
-    threatsLatest: () => `${API_BASE_URL}/indmoney-us/threats/latest`,
-    threatsHistory: () => `${API_BASE_URL}/indmoney-us/threats/history`,
-    threatJob: (jobId: number) => `${API_BASE_URL}/indmoney-us/threats/${jobId}`,
-    threatsRun: () => `${API_BASE_URL}/indmoney-us/threats/run`,
+    portfolio: () => `${resolveApiBaseUrl()}/indmoney-us/portfolio`,
+    portfolioSnapshot: (snapshotId: number) => `${resolveApiBaseUrl()}/indmoney-us/portfolio/${snapshotId}`,
+    currentPrices: () => `${resolveApiBaseUrl()}/indmoney-us/prices/current`,
+    eventsLatest: () => `${resolveApiBaseUrl()}/indmoney-us/events/latest`,
+    eventsHistory: () => `${resolveApiBaseUrl()}/indmoney-us/events/history`,
+    eventJob: (jobId: number) => `${resolveApiBaseUrl()}/indmoney-us/events/${jobId}`,
+    eventsRun: () => `${resolveApiBaseUrl()}/indmoney-us/events/run`,
+    threatsLatest: () => `${resolveApiBaseUrl()}/indmoney-us/threats/latest`,
+    threatsHistory: () => `${resolveApiBaseUrl()}/indmoney-us/threats/history`,
+    threatJob: (jobId: number) => `${resolveApiBaseUrl()}/indmoney-us/threats/${jobId}`,
+    threatsRun: () => `${resolveApiBaseUrl()}/indmoney-us/threats/run`,
   },
 
   // Polymarket endpoints
   polymarket: {
-    state: () => `${API_BASE_URL}/polymarket/state`,
-    start: () => `${API_BASE_URL}/polymarket/start`,
-    stop: () => `${API_BASE_URL}/polymarket/stop`,
-    pause: () => `${API_BASE_URL}/polymarket/pause`,
-    resume: () => `${API_BASE_URL}/polymarket/resume`,
-    liveUnlock: () => `${API_BASE_URL}/polymarket/live/unlock`,
-    liveLock: () => `${API_BASE_URL}/polymarket/live/lock`,
-    liveDoctor: () => `${API_BASE_URL}/polymarket/live/doctor`,
-    liveBalanceRefresh: () => `${API_BASE_URL}/polymarket/live/balance/refresh`,
-    liveEmergencyStop: () => `${API_BASE_URL}/polymarket/live/emergency-stop`,
-    liveResetEmergencyStop: () => `${API_BASE_URL}/polymarket/live/reset-emergency-stop`,
-    liveTradeConfirm: (tradeId: string) => `${API_BASE_URL}/polymarket/live/trades/${tradeId}/confirm`,
-    liveTradeReject: (tradeId: string) => `${API_BASE_URL}/polymarket/live/trades/${tradeId}/reject`,
-    liveRejectAll: () => `${API_BASE_URL}/polymarket/live/trades/reject-all`,
-    discoveryDebug: () => `${API_BASE_URL}/polymarket/live/discovery/debug`,
+    state: () => `${resolveApiBaseUrl()}/polymarket/state`,
+    start: () => `${resolveApiBaseUrl()}/polymarket/start`,
+    stop: () => `${resolveApiBaseUrl()}/polymarket/stop`,
+    pause: () => `${resolveApiBaseUrl()}/polymarket/pause`,
+    resume: () => `${resolveApiBaseUrl()}/polymarket/resume`,
+    liveUnlock: () => `${resolveApiBaseUrl()}/polymarket/live/unlock`,
+    liveLock: () => `${resolveApiBaseUrl()}/polymarket/live/lock`,
+    liveDoctor: () => `${resolveApiBaseUrl()}/polymarket/live/doctor`,
+    liveBalanceRefresh: () => `${resolveApiBaseUrl()}/polymarket/live/balance/refresh`,
+    liveEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/live/emergency-stop`,
+    liveResetEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/live/reset-emergency-stop`,
+    liveTradeConfirm: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket/live/trades/${tradeId}/confirm`,
+    liveTradeReject: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket/live/trades/${tradeId}/reject`,
+    liveRejectAll: () => `${resolveApiBaseUrl()}/polymarket/live/trades/reject-all`,
+    discoveryDebug: () => `${resolveApiBaseUrl()}/polymarket/live/discovery/debug`,
   },
 
   // Google Sheets endpoints
   googleSheets: {
-    authUrl: () => `${API_BASE_URL}/google-sheets/auth-url`,
-    exchangeCode: () => `${API_BASE_URL}/google-sheets/exchange-code`,
-    status: () => `${API_BASE_URL}/google-sheets/status`,
-    disconnect: () => `${API_BASE_URL}/google-sheets/disconnect`,
-    exportJob: () => `${API_BASE_URL}/google-sheets/export/job`,
-    exportRun: () => `${API_BASE_URL}/google-sheets/export/run`,
-    import: () => `${API_BASE_URL}/google-sheets/import`,
+    authUrl: () => `${resolveApiBaseUrl()}/google-sheets/auth-url`,
+    exchangeCode: () => `${resolveApiBaseUrl()}/google-sheets/exchange-code`,
+    status: () => `${resolveApiBaseUrl()}/google-sheets/status`,
+    disconnect: () => `${resolveApiBaseUrl()}/google-sheets/disconnect`,
+    exportJob: () => `${resolveApiBaseUrl()}/google-sheets/export/job`,
+    exportRun: () => `${resolveApiBaseUrl()}/google-sheets/export/run`,
+    import: () => `${resolveApiBaseUrl()}/google-sheets/import`,
   },
 
   // Provider endpoints
   providers: {
-    list: () => `${API_BASE_URL}/providers`,
+    list: () => `${resolveApiBaseUrl()}/providers`,
   },
 
   // Prompt endpoints
   prompts: {
-    list: () => `${API_BASE_URL}/prompts`,
-    create: () => `${API_BASE_URL}/prompts`,
-    get: (id: number) => `${API_BASE_URL}/prompts/${id}`,
-    update: (id: number) => `${API_BASE_URL}/prompts/${id}`,
-    delete: (id: number) => `${API_BASE_URL}/prompts/${id}`,
+    list: () => `${resolveApiBaseUrl()}/prompts`,
+    create: () => `${resolveApiBaseUrl()}/prompts`,
+    get: (id: number) => `${resolveApiBaseUrl()}/prompts/${id}`,
+    update: (id: number) => `${resolveApiBaseUrl()}/prompts/${id}`,
+    delete: (id: number) => `${resolveApiBaseUrl()}/prompts/${id}`,
   },
   apiUsage: {
-    summary: () => `${API_BASE_URL}/api-usage/summary`,
+    summary: () => `${resolveApiBaseUrl()}/api-usage/summary`,
   },
 
   // Schedule endpoints
   schedules: {
-    create: () => `${API_BASE_URL}/schedules`,
-    list: () => `${API_BASE_URL}/schedules`,
-    get: (id: number) => `${API_BASE_URL}/schedules/${id}`,
-    update: (id: number) => `${API_BASE_URL}/schedules/${id}`,
-    delete: (id: number) => `${API_BASE_URL}/schedules/${id}`,
+    create: () => `${resolveApiBaseUrl()}/schedules`,
+    list: () => `${resolveApiBaseUrl()}/schedules`,
+    get: (id: number) => `${resolveApiBaseUrl()}/schedules/${id}`,
+    update: (id: number) => `${resolveApiBaseUrl()}/schedules/${id}`,
+    delete: (id: number) => `${resolveApiBaseUrl()}/schedules/${id}`,
   },
 
   // API Key endpoints
   apiKeys: {
-    create: () => `${API_BASE_URL}/api-keys`,
-    list: () => `${API_BASE_URL}/api-keys`,
-    get: (id: number) => `${API_BASE_URL}/api-keys/${id}`,
-    delete: (id: number) => `${API_BASE_URL}/api-keys/${id}`,
+    create: () => `${resolveApiBaseUrl()}/api-keys`,
+    list: () => `${resolveApiBaseUrl()}/api-keys`,
+    get: (id: number) => `${resolveApiBaseUrl()}/api-keys/${id}`,
+    delete: (id: number) => `${resolveApiBaseUrl()}/api-keys/${id}`,
   },
 
   // Activity Log endpoints
   activityLogs: {
-    list: () => `${API_BASE_URL}/activity-logs`,
-    get: (id: number) => `${API_BASE_URL}/activity-logs/${id}`,
+    list: () => `${resolveApiBaseUrl()}/activity-logs`,
+    get: (id: number) => `${resolveApiBaseUrl()}/activity-logs/${id}`,
   },
 
   // Frontend Routes

@@ -20,8 +20,9 @@ export interface AuthContextType {
   loading: boolean;
   isAuthenticated: boolean;
   error: string | null;
+  errorDetails: string[];
 
-  login: (emailOrUsername: string, password: string) => Promise<void>;
+  login: (emailOrUsername: string, password: string, redirectTo?: string) => Promise<void>;
   register: (
     email: string,
     username: string,

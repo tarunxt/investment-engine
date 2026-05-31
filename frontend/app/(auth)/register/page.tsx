@@ -19,7 +19,7 @@ const PASSWORD_REQUIREMENTS = {
 };
 
 export default function RegisterPage() {
-  const { register, loading, error, clearError } = useAuth();
+  const { register, loading, error, errorDetails, clearError } = useAuth();
   const [formData, setFormData] = useState({
     email: "",
     username: "",
@@ -133,6 +133,7 @@ export default function RegisterPage() {
                   type="error"
                   title="Registration Failed"
                   message={error}
+                  details={errorDetails}
                   onDismiss={clearError}
                 />
               )}

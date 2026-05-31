@@ -16,7 +16,7 @@ import { Loader2 } from "lucide-react";
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login, loading, error, clearError } = useAuth();
+  const { login, loading, error, errorDetails, clearError } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -42,7 +42,7 @@ export default function LoginPage() {
 
     try {
       clearError();
-      await login(email, password);
+      await login(email, password, redirectTo);
       // router will redirect automatically after login
     } catch (err) {
       console.error("Login error:", err);
@@ -66,6 +66,7 @@ export default function LoginPage() {
                   type="error"
                   title={validationError ? "Validation Error" : "Login Failed"}
                   message={error || validationError || "Please try again"}
+                  details={validationError ? [] : errorDetails}
                   onDismiss={clearError}
                 />
               )}

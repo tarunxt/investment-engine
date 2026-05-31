@@ -79,6 +79,17 @@ export class APIError extends Error {
   }
 }
 
+export class NetworkError extends Error {
+  constructor(
+    public method: string,
+    public url: string,
+    public originalMessage: string,
+  ) {
+    super(`Unable to reach ${url} (${method}). ${originalMessage}`);
+    this.name = "NetworkError";
+  }
+}
+
 // Helper function to get auth token
 async function getAuthToken(): Promise<string | null> {
   return sessionStorage.getAccessToken();
@@ -173,9 +184,10 @@ class apiServiceClass implements IApiService {
         throw err;
       }
 
-      if (!(err instanceof APIError)) {
+      if (!(err instanceof APIError) && !(err instanceof NetworkError)) {
         const message = err instanceof Error ? err.message : String(err);
         this.error("❌ Network or Unexpected Error:", message);
+        throw new NetworkError(method, url, message);
       }
       throw err;
     } finally {

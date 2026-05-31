@@ -6,7 +6,8 @@ import { useState, useEffect, useCallback } from "react";
 import { sessionStorage as customSessionStorage } from "@/services/session";
 import { useSession, signIn, signOut as nextSignOut } from "next-auth/react";
 import { UserResponse } from "@/types/api";
-import { apiService } from "@/services/api";
+import { APIError, NetworkError, apiService } from "@/services/api";
+import { URLs } from "@/lib/urls";
 
 const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
@@ -40,6 +41,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserResponse | null>(devAuthDisabled ? devUser : null);
   const [loading, setLoading] = useState(!devAuthDisabled);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string[]>([]);
+
+  const clearErrorState = useCallback(() => {
+    setError(null);
+    setErrorDetails([]);
+  }, []);
+
+  const setStructuredError = useCallback((message: string, details: string[] = []) => {
+    setError(message);
+    setErrorDetails(details);
+  }, []);
+
+  const normalizeAuthError = useCallback((err: unknown, fallbackMessage: string) => {
+    if (err instanceof NetworkError) {
+      return {
+        message: "We could not reach the authentication server from your browser.",
+        details: [
+          `${err.method} ${err.url}`,
+          "This usually means the frontend is pointing at the wrong API URL or the request was blocked before the server responded.",
+          `Browser error: ${err.originalMessage}`,
+        ],
+      };
+    }
+
+    if (err instanceof APIError) {
+      const details: string[] = [`HTTP ${err.status}`];
+      const payload = err.details as Record<string, unknown> | undefined;
+      const detail = payload?.detail;
+      const rawDetails = Array.isArray(detail)
+        ? detail.filter((item): item is string => typeof item === "string")
+        : typeof detail === "string"
+          ? [detail]
+          : [];
+
+      return {
+        message: err.message || fallbackMessage,
+        details: [...details, ...rawDetails],
+      };
+    }
+
+    if (err instanceof Error) {
+      if (err.message === "CredentialsSignin") {
+        return {
+          message: "Invalid email, username, or password.",
+          details: ["The credentials provider rejected the sign-in attempt."],
+        };
+      }
+
+      return {
+        message: err.message || fallbackMessage,
+        details: [],
+      };
+    }
+
+    return {
+      message: fallbackMessage,
+      details: [],
+    };
+  }, []);
 
   // Check if token is expired
   const isTokenExpired = useCallback((): boolean => {
@@ -166,24 +226,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [user, isTokenExpired, handleTokenExpiry]);
 
-  const login = useCallback(async (emailOrUsername: string, password: string) => {
+  const login = useCallback(async (
+    emailOrUsername: string,
+    password: string,
+    redirectTo = URLs.routes.console.dashboard(),
+  ) => {
     if (devAuthDisabled) {
       setUser(devUser);
-      setError(null);
+      clearErrorState();
       setLoading(false);
       return;
     }
 
-    setError(null);
+    clearErrorState();
     setLoading(true);
 
     try {
       // Determine if input is email or username
       const isEmail = emailOrUsername.includes("@");
+      const callbackUrl = redirectTo;
 
       const result = await signIn("credentials", {
         [isEmail ? "email" : "username"]: emailOrUsername,
         password,
+        callbackUrl,
         redirect: false,
       });
 
@@ -191,16 +257,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(result.error);
       }
 
-      // Wait for session to update
-      await update();
+      if (typeof window !== "undefined") {
+        window.location.assign(result?.url || callbackUrl);
+      }
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Login failed";
-      setError(errorMsg);
+      const normalized = normalizeAuthError(err, "Login failed");
+      setStructuredError(normalized.message, normalized.details);
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [update]);
+  }, [clearErrorState, normalizeAuthError, setStructuredError]);
 
   const register = useCallback(async (
     email: string,
@@ -210,13 +277,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   ) => {
     if (devAuthDisabled) {
       setUser(devUser);
-      setError(null);
+      clearErrorState();
       setLoading(false);
       return;
     }
 
-    setError(null);
+    clearErrorState();
     setLoading(true);
+    let registrationSucceeded = false;
 
     try {
       // Direct API call for registration
@@ -226,28 +294,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password,
         full_name: fullName,
       });
+      registrationSucceeded = true;
 
       // Auto-login after registration
       await login(email, password);
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Registration failed";
-      setError(errorMsg);
+      if (registrationSucceeded) {
+        const normalized = normalizeAuthError(
+          err,
+          "Your account was created, but automatic sign-in failed.",
+        );
+        setStructuredError(
+          "Your account was created, but we could not complete automatic sign-in.",
+          [
+            ...normalized.details,
+            "Please use the Sign In button below with the credentials you just created.",
+          ],
+        );
+      } else {
+        const normalized = normalizeAuthError(err, "Registration failed");
+        setStructuredError(normalized.message, normalized.details);
+      }
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [login]);
+  }, [clearErrorState, login, normalizeAuthError, setStructuredError]);
 
   const logout = useCallback(async () => {
     if (devAuthDisabled) {
       setUser(devUser);
-      setError(null);
+      clearErrorState();
       setLoading(false);
       window.location.href = "/console/dashboard";
       return;
     }
 
-    setError(null);
+    clearErrorState();
     setLoading(true);
 
     try {
@@ -266,20 +349,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       window.location.href = "/login";
     }
-  }, []);
+  }, [clearErrorState]);
 
   const refreshAuth = useCallback(async () => {
     if (devAuthDisabled) {
       setUser(devUser);
       setLoading(false);
-      setError(null);
+      clearErrorState();
       return;
     }
 
     await update();
-  }, [update]);
+  }, [clearErrorState, update]);
 
-  const clearError = useCallback(() => setError(null), []);
+  const clearError = clearErrorState;
 
   const value: AuthContextType = {
     user: user ? ({
@@ -289,6 +372,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     isAuthenticated: !!user,
     error,
+    errorDetails,
     login,
     register,
     logout,
