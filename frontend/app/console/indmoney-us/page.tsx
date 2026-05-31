@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { AlertCircle, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { AlertCircle, Copy, Loader2 } from 'lucide-react';
 
 import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
+import { Button } from '@/components/ui/button';
 import { IndMoneyUsPasteCard } from './_components/IndMoneyUsPasteCard';
 import { IndMoneyUsSnapshotsPanel } from './_components/IndMoneyUsSnapshotsPanel';
+import { cn } from '@/lib/utils';
 import { apiService, APIError } from '@/services/api';
 import type {
   IndMoneyUsPortfolioOverviewResponse,
@@ -141,26 +143,42 @@ export default function IndMoneyUsPage() {
     <div className="mx-auto flex flex-col gap-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight text-gray-950">IndMoney US</h1>
+          <div className="inline-flex items-start gap-1">
+            <h1 className="text-lg font-semibold tracking-tight text-gray-950">IndMoney US</h1>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-expanded={showManualNote}
+              aria-controls="indmoney-us-manual-note"
+              aria-label={showManualNote ? 'Hide manual workflow note' : 'Show manual workflow note'}
+              title={showManualNote ? 'Hide manual workflow note' : 'Show manual workflow note'}
+              onClick={() => setShowManualNote((current) => !current)}
+              className={cn(
+                '-mt-1 rounded-full text-amber-700 hover:bg-amber-100 hover:text-amber-800',
+                showManualNote ? 'bg-amber-100 text-amber-900' : '',
+              )}
+            >
+              <Copy className="size-3.5" />
+              <span className="sr-only">
+                {showManualNote ? 'Hide manual workflow note' : 'Show manual workflow note'}
+              </span>
+            </Button>
+          </div>
           <p className="text-sm text-gray-500">
             Manual US portfolio tracking for INDmoney when no direct API is available.
           </p>
         </div>
         <div className="flex items-center gap-2 self-start">
           <PortfolioAnalysisNav portfolio="indmoneyUs" active="portfolio" />
-          <button
-            type="button"
-            onClick={() => setShowManualNote((current) => !current)}
-            className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 transition hover:bg-amber-100"
-          >
-            Manual
-            {showManualNote ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-          </button>
         </div>
       </div>
 
       {showManualNote ? (
-        <div className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm">
+        <div
+          id="indmoney-us-manual-note"
+          className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm"
+        >
           The flow here is intentionally manual: paste the INDmoney portfolio screen daily, save a timestamped
           snapshot, and the dashboard will turn that raw text into holdings tables, allocation views, and
           reconciliation checks as far as the pasted structure allows.
