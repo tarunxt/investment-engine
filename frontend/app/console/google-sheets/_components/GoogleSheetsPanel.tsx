@@ -143,17 +143,18 @@ export default function GoogleSheetsPanel() {
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <div className="space-y-2">
             <p className="font-medium text-amber-900">
-              Google Sheets setup is waiting on the client&apos;s Google OAuth app keys.
+              Google Sheets setup is pending.
             </p>
+            <p>To finish setup:</p>
             <p>
-              Ask the client to share their{' '}
+              1. Get these from the client:{' '}
               <code className="font-mono text-xs">GOOGLE_CLIENT_ID</code> and{' '}
-              <code className="font-mono text-xs">GOOGLE_CLIENT_SECRET</code>, then
-              add them to the backend environment before users try to connect.
+              <code className="font-mono text-xs">GOOGLE_CLIENT_SECRET</code>
             </p>
+            <p>2. Add them to the backend environment</p>
             {redirectUri ? (
               <p>
-                Redirect URI to whitelist in Google Cloud:{' '}
+                3. Add this Redirect URI in Google Cloud:{' '}
                 <code className="font-mono text-xs">{redirectUri}</code>
               </p>
             ) : null}
@@ -200,7 +201,7 @@ export default function GoogleSheetsPanel() {
             <span className="text-sm text-gray-600">
               {configured
                 ? 'Not connected — log in below to get started.'
-                : 'Setup required — add the client Google OAuth keys first, then users can sign in here.'}
+                : 'Waiting for client Google keys.'}
             </span>
           </>
         )}
