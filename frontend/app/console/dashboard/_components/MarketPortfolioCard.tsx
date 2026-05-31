@@ -117,15 +117,6 @@ export function MarketPortfolioCard({
                     ) : null}
                   </span>
                 </div>
-                <div className="flex items-center justify-center">
-                  <span className="text-slate-400">{pill.label}</span>
-                  <span className="ml-1.5 text-slate-900">{pill.value}</span>
-                </div>
-                {pill.detail ? (
-                  <div className="mt-1 text-center text-[10px] font-medium normal-case tracking-[0.06em] text-slate-500">
-                    {pill.detail}
-                  </div>
-                ) : null}
               </div>
             ))}
           </div>
