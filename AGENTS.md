@@ -484,6 +484,14 @@ Unless the user explicitly says `local only`, `do not push`, `draft`, `no deploy
 
 Use `scripts/release-prod.sh` as the standard release path whenever possible.
 
+When running in Codex cloud/browser task environments, or any checkout that is not on `main`, do not treat `scripts/release-prod.sh` as mandatory. Those environments commonly work on task branches and may not include the GitHub CLI. In that case, the correct release path is:
+
+1. Commit the task changes on the task branch.
+2. Open a PR.
+3. Merge the PR into `main`.
+4. Monitor the production deploy triggered by the push to `main` in GitHub Actions.
+5. Report the PR link, merge commit SHA, deploy result, and any live verification you can observe.
+
 Release safety rules:
 
 - Commit and release the current task's files by default, not unrelated dirty files.

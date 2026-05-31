@@ -50,10 +50,25 @@ Behavior:
 EOF
 }
 
+print_pr_release_hint() {
+  cat >&2 <<EOF
+If you're working from a Codex/browser task environment or any non-$RELEASE_BRANCH checkout,
+use the PR release path instead:
+  1. Commit the task branch.
+  2. Open a PR.
+  3. Merge into $RELEASE_BRANCH.
+  4. Monitor the deploy triggered by the push to $RELEASE_BRANCH in GitHub Actions.
+EOF
+}
+
 require_command() {
   local name="$1"
   if ! command -v "$name" >/dev/null 2>&1; then
     echo "Required command not found: $name" >&2
+    if [[ "$name" == "gh" ]]; then
+      echo "This script needs GitHub CLI to dispatch and monitor the production workflow." >&2
+      print_pr_release_hint
+    fi
     exit 1
   fi
 }
@@ -140,17 +155,20 @@ case "$DEPLOY_SCOPE" in
 esac
 
 require_command git
-require_command gh
 require_command curl
-
-if ! gh auth status >/dev/null 2>&1; then
-  echo "GitHub CLI is not authenticated. Run: gh auth login" >&2
-  exit 1
-fi
 
 CURRENT_BRANCH="$(git branch --show-current)"
 if [[ "$CURRENT_BRANCH" != "$RELEASE_BRANCH" ]]; then
   echo "Current branch is '$CURRENT_BRANCH'. Switch to '$RELEASE_BRANCH' before releasing." >&2
+  print_pr_release_hint
+  exit 1
+fi
+
+require_command gh
+
+if ! gh auth status >/dev/null 2>&1; then
+  echo "GitHub CLI is not authenticated. Run: gh auth login" >&2
+  print_pr_release_hint
   exit 1
 fi
 
