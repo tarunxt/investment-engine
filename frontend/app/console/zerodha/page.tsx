@@ -1,12 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
   Link2,
   Loader2,
   LogOut,
@@ -22,6 +21,7 @@ import { apiService, APIError } from '@/services/api';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { PortfolioSnapshotsPanel } from './_components/PortfolioSnapshotsPanel';
+import { ZerodhaConnectionGuide } from './_components/ZerodhaConnectionGuide';
 import {
   type ZerodhaOrder,
   type ZerodhaPortfolioOverviewResponse,
@@ -373,8 +373,8 @@ function ManualTokenForm({ onConnected }: { onConnected: () => void }) {
   };
 
   return (
-    <div className="border border-blue-200 bg-blue-50 px-5 py-4">
-      <p className="mb-3 text-xs text-blue-700">
+    <div className="border border-blue-200 bg-white px-5 py-4 shadow-sm">
+      <p className="mb-3 text-xs leading-6 text-blue-700">
         After logging in via Kite, copy the <code className="font-mono">request_token</code> from the
         redirect URL (e.g. <code className="font-mono text-[11px]">…?request_token=abc123&amp;status=success</code>) and paste it below.
       </p>
@@ -416,12 +416,26 @@ export default function ZerodhaPage() {
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [selectingSnapshot, setSelectingSnapshot] = useState(false);
   const [syncingPortfolio, setSyncingPortfolio] = useState(false);
+  const [connectingPopup, setConnectingPopup] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [showConnectionDetails, setShowConnectionDetails] = useState(false);
   const [showRedirectDetails, setShowRedirectDetails] = useState(false);
+  const popupRef = useRef<Window | null>(null);
+  const popupPollRef = useRef<number | null>(null);
+
+  const stopPopupTracking = useCallback((updateState = true) => {
+    if (popupPollRef.current !== null) {
+      window.clearInterval(popupPollRef.current);
+      popupPollRef.current = null;
+    }
+    popupRef.current = null;
+    if (updateState) {
+      setConnectingPopup(false);
+    }
+  }, []);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -521,6 +535,45 @@ export default function ZerodhaPage() {
     await pollPortfolioOverview(baselineCapturedAt);
   }, [pollPortfolioOverview, portfolioOverview?.latest?.captured_at]);
 
+  const handlePopupConnect = useCallback(() => {
+    if (!loginUrl) {
+      setError('Zerodha login URL is not ready yet. Please retry in a moment.');
+      return;
+    }
+
+    setError(null);
+    setConnectingPopup(true);
+
+    const width = 560;
+    const height = 760;
+    const left = Math.max(window.screenX + (window.outerWidth - width) / 2, 0);
+    const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0);
+    const popup = window.open(
+      loginUrl,
+      'zerodha-connect',
+      `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`,
+    );
+
+    if (!popup) {
+      setConnectingPopup(false);
+      setError('Popup blocked. Allow popups for this site or use the manual token option below.');
+      return;
+    }
+
+    popupRef.current = popup;
+    popup.focus();
+
+    if (popupPollRef.current !== null) {
+      window.clearInterval(popupPollRef.current);
+    }
+
+    popupPollRef.current = window.setInterval(() => {
+      if (popupRef.current?.closed) {
+        stopPopupTracking();
+      }
+    }, 500);
+  }, [loginUrl, stopPopupTracking]);
+
   const handleSelectSnapshot = useCallback(
     async (snapshotDate: string) => {
       if (snapshotDate === selectedSnapshotDate && selectedSnapshot) {
@@ -548,23 +601,32 @@ export default function ZerodhaPage() {
     [portfolioOverview, selectedSnapshot, selectedSnapshotDate],
   );
 
-  // Handle postMessage from callback iframe
+  // Handle postMessage from the callback window or embedded callback page.
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
       if (ev.origin !== window.location.origin) return;
       if (ev.data?.type === 'zerodha_connected') {
+        stopPopupTracking();
         const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
         fetchStatus().then(() => {
           fetchOrders();
           pollPortfolioOverview(baselineCapturedAt);
         });
       } else if (ev.data?.type === 'zerodha_error') {
+        stopPopupTracking();
         setError(ev.data.message ?? 'Zerodha login failed');
       }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [fetchOrders, fetchStatus, pollPortfolioOverview, portfolioOverview?.latest?.captured_at]);
+  }, [fetchOrders, fetchStatus, pollPortfolioOverview, portfolioOverview?.latest?.captured_at, stopPopupTracking]);
+
+  useEffect(
+    () => () => {
+      stopPopupTracking(false);
+    },
+    [stopPopupTracking],
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -728,6 +790,28 @@ export default function ZerodhaPage() {
         </div>
       ) : null}
 
+      {!status?.connected && (
+        <ZerodhaConnectionGuide
+          configured={configured}
+          loginUrl={loginUrl}
+          redirectUrl={`${URLs.frontend}/zerodha/callback`}
+          connecting={connectingPopup}
+          onQuickConnect={handlePopupConnect}
+        >
+          {configured ? (
+            <ManualTokenForm
+              onConnected={() => {
+                const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
+                fetchStatus().then(() => {
+                  fetchOrders();
+                  pollPortfolioOverview(baselineCapturedAt);
+                });
+              }}
+            />
+          ) : null}
+        </ZerodhaConnectionGuide>
+      )}
+
       <PortfolioSnapshotsPanel
         connected={Boolean(status?.connected)}
         overview={portfolioOverview}
@@ -740,36 +824,6 @@ export default function ZerodhaPage() {
         onSelectSnapshot={handleSelectSnapshot}
         onSync={handleSyncPortfolio}
       />
-
-      {/* Login (shown when not connected and configured) */}
-      {!status?.connected && configured && (
-        <>
-          <div className="border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Login with Zerodha Kite
-              </span>
-              <a
-                href={loginUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
-              >
-                Open in new tab <ExternalLink className="size-3" />
-              </a>
-            </div>
-          </div>
-          <ManualTokenForm
-            onConnected={() => {
-              const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
-              fetchStatus().then(() => {
-                fetchOrders();
-                pollPortfolioOverview(baselineCapturedAt);
-              });
-            }}
-          />
-        </>
-      )}
 
       {/* Connected — orders + place order */}
       {status?.connected && (

@@ -19,15 +19,21 @@ export default function ZerodhaCallbackPage({
     attempted.current = true;
 
     const { request_token, status, message } = params;
+    const notifyHost = (payload: { type: 'zerodha_connected' } | { type: 'zerodha_error'; message: string }) => {
+      if (window.parent !== window) {
+        window.parent.postMessage(payload, window.location.origin);
+      }
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(payload, window.location.origin);
+      }
+    };
 
     if (status !== 'success' || !request_token) {
       const reason = message ?? 'Login was cancelled or failed.';
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setErrorMsg(reason);
       setState('error');
-      if (window.parent !== window) {
-        window.parent.postMessage({ type: 'zerodha_error', message: reason }, window.location.origin);
-      }
+      notifyHost({ type: 'zerodha_error', message: reason });
       return;
     }
 
@@ -35,17 +41,16 @@ export default function ZerodhaCallbackPage({
       .zerodhaCallback(request_token)
       .then(() => {
         setState('success');
-        if (window.parent !== window) {
-          window.parent.postMessage({ type: 'zerodha_connected' }, window.location.origin);
-        }
+        notifyHost({ type: 'zerodha_connected' });
+        window.setTimeout(() => {
+          window.close();
+        }, 900);
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : 'Token exchange failed';
         setErrorMsg(msg);
         setState('error');
-        if (window.parent !== window) {
-          window.parent.postMessage({ type: 'zerodha_error', message: msg }, window.location.origin);
-        }
+        notifyHost({ type: 'zerodha_error', message: msg });
       });
   }, [params]);
 
