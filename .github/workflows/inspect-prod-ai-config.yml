@@ -48,22 +48,22 @@ jobs:
               source '$BACKEND_ENV_FILE'
               set +a
               python - <<'PY'
-from app.core.config import get_gemini_api_keys, settings
-from app.domains.ai_providers.factory import ProviderFactory
+              from app.core.config import get_gemini_api_keys, settings
+              from app.domains.ai_providers.factory import ProviderFactory
 
-status = {
-    'settings.openai_api_key': bool(settings.openai_api_key),
-    'settings.anthropic_api_key': bool(settings.anthropic_api_key),
-    'settings.deepseek_api_key': bool(settings.deepseek_api_key),
-    'get_gemini_api_keys': bool(get_gemini_api_keys()),
-    'provider_factory': {
-        provider['name']: provider['configured']
-        for provider in ProviderFactory.list_providers()
-    },
-    'default_target': ProviderFactory.resolve_default_target('openai', 'gpt-4o-mini'),
-}
-print(status)
-PY
+              status = {
+                  'settings.openai_api_key': bool(settings.openai_api_key),
+                  'settings.anthropic_api_key': bool(settings.anthropic_api_key),
+                  'settings.deepseek_api_key': bool(settings.deepseek_api_key),
+                  'get_gemini_api_keys': bool(get_gemini_api_keys()),
+                  'provider_factory': {
+                      provider['name']: provider['configured']
+                      for provider in ProviderFactory.list_providers()
+                  },
+                  'default_target': ProviderFactory.resolve_default_target('openai', 'gpt-4o-mini'),
+              }
+              print(status)
+              PY
             "
 
             echo "==> Recent backend logs"
