@@ -61,6 +61,8 @@ export function PortfolioSwingTradeConsole({
       defaultTemplateName={null}
       promptPreset={promptPreset}
       defaultExportSheetName={getSwingTradeDefaultExportSheetName(market)}
+      runScopeMarket={market}
+      runScopeLabel={copy.title}
     >
       <div className="mx-auto flex flex-col gap-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

@@ -6,6 +6,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
+import {
+  formatRunLabel,
+  getJobSheetsPresentation,
+  getRunSheetsPresentation,
+  isRunInSwingTradeMarket,
+} from '@/lib/runPresentation';
 import { INDIA_TIMEZONE, useDashboard, STATUS_ICONS, STATUS_STYLES } from '../_context';
 import { apiService } from '@/services/api';
 
@@ -86,12 +92,15 @@ const PROVIDER_CONSOLE_URL: Record<string, string> = {
 };
 
 export function RecentJobsTable() {
-  const { runs, runsTotal, loadingRuns, lastUpdated } = useDashboard();
+  const { runs, runsTotal, loadingRuns, lastUpdated, runScopeMarket, runScopeLabel } = useDashboard();
   const router = useRouter();
   const [usdInrRate, setUsdInrRate] = useState(83.5);
   const [tickNow, setTickNow] = useState(() => Date.now());
   const [jobTimers, setJobTimers] = useState<Record<number, JobTimer>>({});
   const previousStatusesRef = useRef<Record<number, string>>({});
+  const visibleRuns = runScopeMarket
+    ? runs.filter((run) => isRunInSwingTradeMarket(run.prompt_preview, runScopeMarket))
+    : runs;
 
   useEffect(() => {
     let mounted = true;
@@ -224,52 +233,28 @@ export function RecentJobsTable() {
                   Loading jobs…
                 </td>
               </tr>
-            ) : runs.length === 0 ? (
+            ) : visibleRuns.length === 0 ? (
               <tr>
                 <td colSpan={3} className="px-5 py-10 text-center text-sm text-gray-500">
-                  No jobs yet
+                  {runScopeLabel ? `No ${runScopeLabel} jobs yet` : 'No jobs yet'}
                 </td>
               </tr>
             ) : (
-              runs.map((run) => {
+              visibleRuns.map((run) => {
                 const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
                 const runJobs = [...(run.run_jobs ?? [])].sort((a, b) =>
                   a.job.provider.localeCompare(b.job.provider) ||
                   a.job.model.localeCompare(b.job.model)
                 );
-                const exportStatus = (run.export_status ?? (run.auto_export_enabled ? 'pending' : 'disabled')).toLowerCase();
                 const knownCostJobs = runJobs.filter((rj) => hasKnownCost(rj.job.estimated_cost));
                 const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
                 const missingCostCount = runJobs.length - knownCostJobs.length;
                 const hasAnyKnownCost = knownCostJobs.length > 0;
-                const modelExportStates = runJobs.map((rj) => {
-                  const j = rj.job;
-                  const explicit = (j.export_status ?? '').toLowerCase();
-                  if (explicit) return explicit;
-                  if (!run.auto_export_enabled) return 'disabled';
-                  if (j.status === 'failed') return 'failed';
-                  if (j.status === 'completed') return 'processing';
-                  return 'pending';
+                const runSheets = getRunSheetsPresentation({
+                  autoExportEnabled: run.auto_export_enabled,
+                  runJobs: runJobs.map((runJob) => runJob.job),
+                  exportStatus: run.export_status,
                 });
-                const doneExports = modelExportStates.filter((s) => s === 'completed').length;
-                const eligibleExports = modelExportStates.filter((s) => s !== 'disabled').length;
-                const failedExports = modelExportStates.filter((s) => s === 'failed').length;
-                const isPartiallyExported = failedExports > 0 && doneExports > 0;
-                const derivedOverallExportStatus = isPartiallyExported ? 'partial' : exportStatus;
-                const derivedOverallExportLabel = isPartiallyExported
-                  ? `Partially exported (${doneExports}/${eligibleExports})`
-                  : exportStatus;
-                const getModelExportStatus = (jobStatus: string, modelExportStatus?: string | null) => {
-                  const explicit = (modelExportStatus ?? '').toLowerCase();
-                  if (explicit) return explicit;
-                  if (!run.auto_export_enabled) return 'disabled';
-                  if (jobStatus === 'failed') return 'failed';
-                  if (jobStatus === 'completed') return 'processing';
-                  if (jobStatus === 'pending' || jobStatus === 'processing' || jobStatus === 'scheduled') return 'pending';
-                  if (exportStatus === 'failed') return 'failed';
-                  if (exportStatus === 'completed') return 'completed';
-                  return 'pending';
-                };
                 return (
                   <tr
                     key={run.id}
@@ -277,7 +262,9 @@ export function RecentJobsTable() {
                     className="cursor-pointer align-top hover:bg-gray-50"
                   >
                     <td className="max-w-90 px-5 py-4">
-                      <div className="font-medium text-gray-950">#{run.id}</div>
+                      <div className="font-medium text-gray-950">
+                        {formatRunLabel(run.id, runScopeLabel)}
+                      </div>
                       <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">
                         {run.prompt_preview}
                       </div>
@@ -318,10 +305,13 @@ export function RecentJobsTable() {
                                   const job = runJob.job;
                                   const normalizedJobStatus = normalizeStatus(job.status);
                                   const JobStatusIcon = STATUS_ICONS[normalizedJobStatus] ?? Clock3;
-                                  const modelExportStatus = getModelExportStatus(
-                                    normalizedJobStatus,
-                                    job.export_status,
-                                  );
+                                  const modelSheets = getJobSheetsPresentation({
+                                    autoExportEnabled: run.auto_export_enabled,
+                                    jobStatus: normalizedJobStatus,
+                                    exportStatus: job.export_status,
+                                    errorMessage: job.error_message,
+                                    exportError: job.export_error,
+                                  });
                                   const costLabel = hasKnownCost(job.estimated_cost)
                                     ? formatNullableCostWithInr(job.estimated_cost, usdInrRate)
                                     : TERMINAL_STATUSES.has(normalizedJobStatus)
@@ -362,12 +352,12 @@ export function RecentJobsTable() {
                                       <td className="px-2 py-2">
                                         <span
                                           className={cn(
-                                            'inline-flex items-center gap-1 px-1.5 py-0.5 font-semibold capitalize ring-1',
-                                            EXPORT_STYLES[modelExportStatus] ??
+                                            'inline-flex items-center gap-1 px-1.5 py-0.5 font-semibold ring-1',
+                                            EXPORT_STYLES[modelSheets.state] ??
                                               'bg-gray-50 text-gray-700 ring-gray-200',
                                           )}
                                         >
-                                          {modelExportStatus}
+                                          {modelSheets.label}
                                         </span>
                                       </td>
                                       <td className="px-2 py-2 text-gray-700">
@@ -433,11 +423,11 @@ export function RecentJobsTable() {
                           <span className="text-gray-500">Sheets Export:</span>
                           <span
                             className={cn(
-                              'inline-flex items-center gap-1.5 px-2 py-0.5 font-semibold capitalize ring-1',
-                              EXPORT_STYLES[derivedOverallExportStatus] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
+                              'inline-flex items-center gap-1.5 px-2 py-0.5 font-semibold ring-1',
+                              EXPORT_STYLES[runSheets.state] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
                             )}
                           >
-                            {derivedOverallExportLabel}
+                            {runSheets.label}
                           </span>
                           <span className="text-gray-500">
                             {missingCostCount > 0 ? 'Known cost:' : 'Total cost:'}{' '}
@@ -457,7 +447,7 @@ export function RecentJobsTable() {
                             </Link>
                           ) : null}
                         </div>
-                        {exportStatus === 'failed' && run.export_error ? (
+                        {runSheets.state === 'failed' && run.export_error ? (
                           <div
                             className="max-w-[680px] truncate text-[11px] text-red-600"
                             title={run.export_error}
@@ -478,9 +468,13 @@ export function RecentJobsTable() {
 
       <div className="flex items-center justify-between border-t border-gray-200 px-5 py-3">
         <span className="text-xs text-gray-500">
-          {runsTotal === 0
-            ? 'No jobs yet'
-            : `Showing ${runs.length} of ${runsTotal} job${runsTotal !== 1 ? 's' : ''}`}
+          {runScopeLabel
+            ? visibleRuns.length === 0
+              ? `No ${runScopeLabel} jobs yet`
+              : `Showing ${visibleRuns.length} recent ${runScopeLabel} job${visibleRuns.length !== 1 ? 's' : ''}`
+            : runsTotal === 0
+              ? 'No jobs yet'
+              : `Showing ${runs.length} of ${runsTotal} job${runsTotal !== 1 ? 's' : ''}`}
         </span>
         <Link
           href={URLs.routes.console.jobs()}

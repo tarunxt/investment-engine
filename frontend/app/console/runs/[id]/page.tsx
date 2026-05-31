@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useCallback, useEffect, useRef, useState, type ElementType } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
@@ -18,6 +19,7 @@ import { URLs } from '@/lib/urls';
 import { type RunResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
 import InvestmentRecommendationTable from '@/components/InvestmentRecommendationTable';
+import { getJobSheetsPresentation, getRunLabelFromPrompt } from '@/lib/runPresentation';
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
@@ -37,6 +39,15 @@ const STATUS_ICONS: Record<string, ElementType> = {
 
 const ACTIVE_STATUSES = new Set(['pending', 'processing']);
 const TERMINAL_STATUSES = new Set(['completed', 'failed']);
+
+const SHEETS_STATUS_STYLES: Record<string, string> = {
+  pending: 'bg-amber-50 text-amber-700 ring-amber-200',
+  queued: 'bg-blue-50 text-blue-700 ring-blue-200',
+  processing: 'bg-blue-50 text-blue-700 ring-blue-200',
+  completed: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  failed: 'bg-red-50 text-red-700 ring-red-200',
+  partial: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+};
 
 const parseApiTimestamp = (value: string) =>
   /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? new Date(value) : new Date(`${value}Z`);
@@ -199,6 +210,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
 
   const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
   const isActive = ACTIVE_STATUSES.has(run.status);
+  const runLabel = getRunLabelFromPrompt(run.id, run.prompt);
   const knownCostJobs = run.run_jobs.filter((rj) => hasKnownCost(rj.job.estimated_cost));
   const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
   const missingCostCount = run.run_jobs.length - knownCostJobs.length;
@@ -226,7 +238,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
             Back
           </Button>
           <span className="text-gray-300">/</span>
-          <h1 className="text-lg font-semibold tracking-tight text-gray-950">Run #{run.id}</h1>
+          <h1 className="text-lg font-semibold tracking-tight text-gray-950">{runLabel}</h1>
           <span
             className={cn(
               'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold capitalize ring-1',
@@ -334,9 +346,16 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
             const jobIsActive = ACTIVE_STATUSES.has(job.status);
             const hasResponse = Boolean(job.response?.trim());
             const showJobCost = hasKnownCost(job.estimated_cost) || TERMINAL_STATUSES.has((job.status || '').toLowerCase());
+            const sheets = getJobSheetsPresentation({
+              autoExportEnabled: run.auto_export_enabled,
+              jobStatus: job.status,
+              exportStatus: job.export_status,
+              errorMessage: job.error_message,
+              exportError: job.export_error,
+            });
             return (
               <div key={rj.id} className="border border-gray-200 bg-white shadow-sm max-w-full overflow-auto">
-                <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-3">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium capitalize text-gray-950">
                       {job.provider}
@@ -370,6 +389,28 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
                         </span>
                       ) : null}
                     </div>
+                    {sheets.state !== 'disabled' ? (
+                      <div className="flex flex-col items-start">
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold ring-1',
+                            SHEETS_STATUS_STYLES[sheets.state] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
+                          )}
+                        >
+                          {sheets.label}
+                        </span>
+                        {job.exported_sheet_url ? (
+                          <Link
+                            href={job.exported_sheet_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                          >
+                            Open tab
+                          </Link>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <div className="max-w-full p-5">

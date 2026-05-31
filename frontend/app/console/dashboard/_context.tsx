@@ -11,9 +11,11 @@ import {
   type ReactNode,
 } from 'react';
 import { AlertCircle, CalendarClock, CheckCircle2, Clock3, Loader2 } from 'lucide-react';
+import { isRunInSwingTradeMarket } from '@/lib/runPresentation';
 import { apiService } from '@/services/api';
 import { type PromptResponse, type ProviderInfo, type RunListItem, type RunModelTarget, type RunResponse } from '@/types/api';
 import { useRuns } from '@/hooks/useRuns';
+import { type SwingTradeMarket } from '@/lib/swingTrade';
 
 export const DASHBOARD_RUN_LIMIT = 50;
 export const TEMPLATE_DEBOUNCE_MS = 300;
@@ -83,6 +85,8 @@ interface DashboardContextValue {
   lastUpdated: Date | null;
   refreshRuns: () => void;
   setRunsError: (error: string | null) => void;
+  runScopeMarket: SwingTradeMarket | null;
+  runScopeLabel: string | null;
 
   // Form state
   prompt: string;
@@ -159,6 +163,8 @@ interface DashboardProviderProps {
   defaultTemplateName?: string | null;
   promptPreset?: DashboardPromptPreset | null;
   defaultExportSheetName?: string | null;
+  runScopeMarket?: SwingTradeMarket | null;
+  runScopeLabel?: string | null;
 }
 
 export function DashboardProvider({
@@ -166,6 +172,8 @@ export function DashboardProvider({
   defaultTemplateName = DEFAULT_TEMPLATE_NAME,
   promptPreset = null,
   defaultExportSheetName = null,
+  runScopeMarket = null,
+  runScopeLabel = null,
 }: DashboardProviderProps) {
   const {
     runs,
@@ -559,7 +567,8 @@ export function DashboardProvider({
       setSubmitError(null);
       try {
         const hasActiveRun = runs.some((run) =>
-          ['scheduled', 'pending', 'processing'].includes((run.status || '').toLowerCase()),
+          ['scheduled', 'pending', 'processing'].includes((run.status || '').toLowerCase()) &&
+          isRunInSwingTradeMarket(run.prompt_preview, runScopeMarket),
         );
         let allowParallel = false;
         if (hasActiveRun) {
@@ -606,6 +615,7 @@ export function DashboardProvider({
       exportInvestmentAmount,
       exportTitle,
       googleSheetsConnected,
+      runScopeMarket,
       setRuns,
       setRunsTotal,
     ],
@@ -658,6 +668,8 @@ export function DashboardProvider({
         lastUpdated,
         refreshRuns,
         setRunsError,
+        runScopeMarket,
+        runScopeLabel,
         prompt,
         setPrompt,
         providers,
