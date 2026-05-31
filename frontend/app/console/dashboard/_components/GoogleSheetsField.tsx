@@ -5,9 +5,14 @@ import Link from 'next/link';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
 import { useDashboard } from '../_context';
 
-export function GoogleSheetsField() {
+export function GoogleSheetsField({
+  showInvestmentAmount = true,
+}: {
+  showInvestmentAmount?: boolean;
+} = {}) {
   const {
     autoExportEnabled,
     setAutoExportEnabled,
@@ -88,21 +93,27 @@ export function GoogleSheetsField() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="investment-amount" className="text-xs font-semibold uppercase text-gray-600">
-                Investment Amount (Optional)
-              </Label>
-              <Input
-                id="investment-amount"
-                type="text"
-                placeholder="e.g., 10000"
-                value={exportInvestmentAmount}
-                onChange={(e) => setExportInvestmentAmount(e.target.value)}
-                className="mt-1 text-sm"
-              />
-            </div>
-
+          <div
+            className={cn(
+              'grid gap-3',
+              showInvestmentAmount ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1',
+            )}
+          >
+            {showInvestmentAmount ? (
+              <div>
+                <Label htmlFor="investment-amount" className="text-xs font-semibold uppercase text-gray-600">
+                  Investment Amount (Optional)
+                </Label>
+                <Input
+                  id="investment-amount"
+                  type="text"
+                  placeholder="e.g., 10000"
+                  value={exportInvestmentAmount}
+                  onChange={(e) => setExportInvestmentAmount(e.target.value)}
+                  className="mt-1 text-sm"
+                />
+              </div>
+            ) : null}
             <div>
               <Label htmlFor="export-title" className="text-xs font-semibold uppercase text-gray-600">
                 Title (Optional)

@@ -5,17 +5,21 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useDashboard } from '../_context';
 
-export function DashboardHeader() {
+export function DashboardHeader({
+  title = 'AI Job Console',
+  description = 'Queue investment research jobs and monitor worker execution.',
+}: {
+  title?: string;
+  description?: string;
+} = {}) {
   const { loadingRuns, runsError, setRunsError, refreshRuns } = useDashboard();
 
   return (
     <>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-950">AI Job Console</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Queue investment research jobs and monitor worker execution.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-950">{title}</h1>
+          <p className="mt-1 text-sm text-gray-600">{description}</p>
         </div>
         <Button
           type="button"

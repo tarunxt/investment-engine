@@ -24,6 +24,16 @@ const RUN_PROMPT_PREVIEW_CHARS = 280;
 export const DEFAULT_TEMPLATE_NAME = 'India Swing-Trade Research';
 export const DEFAULT_EXPORT_SPREADSHEET_URL = '';
 
+export interface DashboardPromptPreset {
+  initialInvestmentAmount: string;
+  buildPrompt: (investmentAmount: string) => string;
+  syncPrompt?: (
+    currentPrompt: string,
+    previousInvestmentAmount: string,
+    nextInvestmentAmount: string,
+  ) => string;
+}
+
 export const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
   pending: 'bg-amber-50 text-amber-700 ring-amber-200',
@@ -76,6 +86,7 @@ interface DashboardContextValue {
 
   // Form state
   prompt: string;
+  setPrompt: React.Dispatch<React.SetStateAction<string>>;
   providers: ProviderInfo[];
   scheduledAt: string;
   setScheduledAt: (val: string) => void;
@@ -143,7 +154,17 @@ export function useDashboard(): DashboardContextValue {
   return ctx;
 }
 
-export function DashboardProvider({ children }: { children: ReactNode }) {
+interface DashboardProviderProps {
+  children: ReactNode;
+  defaultTemplateName?: string | null;
+  promptPreset?: DashboardPromptPreset | null;
+}
+
+export function DashboardProvider({
+  children,
+  defaultTemplateName = DEFAULT_TEMPLATE_NAME,
+  promptPreset = null,
+}: DashboardProviderProps) {
   const {
     runs,
     setRuns,
@@ -156,7 +177,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     refresh: refreshRuns,
   } = useRuns({ limit: DASHBOARD_RUN_LIMIT });
 
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(() =>
+    promptPreset ? promptPreset.buildPrompt(promptPreset.initialInvestmentAmount) : '',
+  );
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [scheduledAt, setScheduledAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -180,7 +203,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       day: 'numeric',
     });
   });
-  const [exportInvestmentAmount, setExportInvestmentAmount] = useState('');
+  const [exportInvestmentAmount, setExportInvestmentAmount] = useState(
+    () => promptPreset?.initialInvestmentAmount ?? '',
+  );
   const [exportTitle, setExportTitle] = useState('');
   const [googleSheetsConnected, setGoogleSheetsConnected] = useState(false);
 
@@ -189,6 +214,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const providerControllerRef = useRef<AbortController | null>(null);
   const providerDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null!);
+  const presetPromptRef = useRef(
+    promptPreset ? promptPreset.buildPrompt(promptPreset.initialInvestmentAmount) : '',
+  );
+  const presetAmountRef = useRef(promptPreset?.initialInvestmentAmount ?? '');
 
   useEffect(() => {
     try {
@@ -269,7 +298,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     if (templatesRes.status === 'fulfilled') {
       const templates = templatesRes.value;
       setPromptTemplates(templates);
-      const defaultTemplate = templates.find((tpl) => tpl.name === DEFAULT_TEMPLATE_NAME);
+      const defaultTemplate = defaultTemplateName
+        ? templates.find((tpl) => tpl.name === defaultTemplateName)
+        : undefined;
       if (defaultTemplate) {
         setSelectedTemplateId(String(defaultTemplate.id));
         setPrompt(defaultTemplate.body);
@@ -287,7 +318,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
 
     setIsLoading(false);
-  }, [prompt]);
+  }, [defaultTemplateName, prompt]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -315,6 +346,30 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       if (providerDebounceRef.current) clearTimeout(providerDebounceRef.current);
     };
   }, [prompt]);
+
+  useEffect(() => {
+    if (!promptPreset) return;
+
+    const nextAmount = exportInvestmentAmount.trim() || promptPreset.initialInvestmentAmount;
+    const previousAmount = presetAmountRef.current || promptPreset.initialInvestmentAmount;
+    const previousGeneratedPrompt = presetPromptRef.current;
+    const nextGeneratedPrompt = promptPreset.buildPrompt(nextAmount);
+
+    setPrompt((current) => {
+      if (!current.trim() || current === previousGeneratedPrompt) {
+        return nextGeneratedPrompt;
+      }
+
+      if (promptPreset.syncPrompt) {
+        return promptPreset.syncPrompt(current, previousAmount, nextAmount);
+      }
+
+      return current;
+    });
+
+    presetAmountRef.current = nextAmount;
+    presetPromptRef.current = nextGeneratedPrompt;
+  }, [exportInvestmentAmount, promptPreset]);
 
   const fetchTemplates = useCallback(async (q: string) => {
     templateControllerRef.current?.abort('New search started');
@@ -555,14 +610,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const totalAvailableTargets = providers.reduce((n, p) => n + p.models.length, 0);
 
   useEffect(() => {
-    const defaultTemplate = promptTemplates.find((tpl) => tpl.name === DEFAULT_TEMPLATE_NAME);
+    const defaultTemplate = defaultTemplateName
+      ? promptTemplates.find((tpl) => tpl.name === defaultTemplateName)
+      : undefined;
     if (!defaultTemplate) return;
     if (!selectedTemplateId || selectedTemplateId === 'none') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedTemplateId(String(defaultTemplate.id));
     }
     if (!prompt.trim()) setPrompt(defaultTemplate.body);
-  }, [selectedTemplateId, promptTemplates, prompt]);
+  }, [defaultTemplateName, selectedTemplateId, promptTemplates, prompt]);
 
   useEffect(() => {
     if (!submitError) return;
@@ -595,6 +652,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         refreshRuns,
         setRunsError,
         prompt,
+        setPrompt,
         providers,
         scheduledAt,
         setScheduledAt,

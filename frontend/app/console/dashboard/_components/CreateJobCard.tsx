@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { CalendarClock, Loader2, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +11,13 @@ import { PromptField } from './PromptField';
 import { ScheduleField } from './ScheduleField';
 import { GoogleSheetsField } from './GoogleSheetsField';
 
-export function CreateJobCard() {
+export function CreateJobCard({
+  promptAside,
+  showGoogleSheetsInvestmentAmount = true,
+}: {
+  promptAside?: ReactNode;
+  showGoogleSheetsInvestmentAmount?: boolean;
+} = {}) {
   const {
     prompt,
     scheduledAt,
@@ -31,11 +38,11 @@ export function CreateJobCard() {
           <div className="space-y-5">
             <RunModeFields />
             <TemplateField />
-            <PromptField />
+            <PromptField aside={promptAside} />
           </div>
           <div className="space-y-5">
             <ScheduleField />
-            <GoogleSheetsField />
+            <GoogleSheetsField showInvestmentAmount={showGoogleSheetsInvestmentAmount} />
           </div>
 
           {submitError && <p className="text-sm text-red-700 xl:col-span-2">{submitError}</p>}

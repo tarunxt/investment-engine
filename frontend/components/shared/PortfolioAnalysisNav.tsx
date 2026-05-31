@@ -5,15 +5,17 @@ import { URLs } from '@/lib/urls';
 import { cn } from '@/lib/utils';
 
 type PortfolioKey = 'zerodha' | 'indmoneyUs';
-type ActiveTab = 'portfolio' | 'events' | 'threats' | null;
+type ActiveTab = 'swingTrade' | 'portfolio' | 'events' | 'threats' | null;
 
 const ROUTES = {
   zerodha: {
+    swingTrade: URLs.routes.console.zerodhaSwingTrade(),
     portfolio: URLs.routes.console.zerodha(),
     events: URLs.routes.console.zerodhaEvents(),
     threats: URLs.routes.console.zerodhaThreats(),
   },
   indmoneyUs: {
+    swingTrade: URLs.routes.console.indmoneyUsSwingTrade(),
     portfolio: URLs.routes.console.indmoneyUs(),
     events: URLs.routes.console.indmoneyUsEvents(),
     threats: URLs.routes.console.indmoneyUsThreats(),
@@ -21,6 +23,7 @@ const ROUTES = {
 } satisfies Record<PortfolioKey, Record<Exclude<ActiveTab, null>, string>>;
 
 const TABS = [
+  { key: 'swingTrade', label: 'Swing Trade' },
   { key: 'portfolio', label: 'Portfolio' },
   { key: 'events', label: 'Events' },
   { key: 'threats', label: 'Threats' },
