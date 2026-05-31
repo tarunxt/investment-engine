@@ -106,6 +106,17 @@ export function MarketPortfolioCard({
                 key={`${pill.label}-${pill.value}`}
                 className="rounded-full border border-slate-200 bg-white/85 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-700 shadow-sm"
               >
+                <div className="flex items-start justify-center gap-1.5">
+                  <span className="text-slate-400">{pill.label}</span>
+                  <span className="flex flex-col items-center text-slate-900">
+                    <span>{pill.value}</span>
+                    {pill.detail ? (
+                      <span className="mt-1 text-[10px] font-medium normal-case tracking-[0.06em] text-slate-500">
+                        {pill.detail}
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
                 <div className="flex items-center justify-center">
                   <span className="text-slate-400">{pill.label}</span>
                   <span className="ml-1.5 text-slate-900">{pill.value}</span>
