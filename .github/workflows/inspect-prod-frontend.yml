@@ -1,0 +1,62 @@
+name: Inspect Production Frontend
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    name: Inspect frontend runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Inspect frontend service over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 900s
+          command_timeout: 900s
+          script: |
+            set -euo pipefail
+            APP="${{ secrets.APP_PATH }}"
+            FRONTEND_ENV_FILE="/etc/investor/frontend.env"
+
+            echo "==> Frontend env file presence"
+            sudo test -f "$FRONTEND_ENV_FILE"
+            sudo ls -l "$FRONTEND_ENV_FILE"
+
+            echo "==> Frontend env values"
+            sudo bash -lc '
+              for key in NODE_ENV NEXT_PUBLIC_API_URL NEXT_PUBLIC_FRONTEND_URL NEXTAUTH_URL AUTH_TRUST_HOST NEXT_PUBLIC_BRAND_PREFIX; do
+                line="$(grep -E "^${key}=" /etc/investor/frontend.env || true)"
+                if [[ -n "$line" ]]; then
+                  echo "$line"
+                else
+                  echo "$key=missing"
+                fi
+              done
+
+              if grep -q "^NEXTAUTH_SECRET=" /etc/investor/frontend.env; then
+                echo "NEXTAUTH_SECRET=present"
+              else
+                echo "NEXTAUTH_SECRET=missing"
+              fi
+            '
+
+            echo "==> Frontend service status"
+            sudo systemctl status investor-frontend --no-pager || true
+
+            echo "==> Recent frontend logs"
+            sudo journalctl -u investor-frontend -n 200 --no-pager || true
+
+            echo "==> Localhost frontend responses"
+            curl -i --max-time 20 http://127.0.0.1:3000/login || true
+            curl -i --max-time 20 http://127.0.0.1:3000/api/auth/csrf || true
+
+            echo "==> Frontend process env sanity"
+            sudo -u investor -H bash -lc "
+              cd '$APP/frontend'
+              node -e 'console.log({ node: process.version, nextauthUrl: process.env.NEXTAUTH_URL || null, frontendUrl: process.env.NEXT_PUBLIC_FRONTEND_URL || null, apiUrl: process.env.NEXT_PUBLIC_API_URL || null, trustHost: process.env.AUTH_TRUST_HOST || null })'
+            "
