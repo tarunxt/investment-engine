@@ -437,10 +437,18 @@ export default function IndMoneyUsThreatsPage() {
       : [];
 
     if (quotes.length === 0) {
-      setCurrentPriceQuotes([]);
-      setCurrentPricesLoading(false);
+      const timeoutId = window.setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setCurrentPriceQuotes([]);
+        setCurrentPricesLoading(false);
+      }, 0);
+
       return () => {
         cancelled = true;
+        window.clearTimeout(timeoutId);
       };
     }
 

@@ -1,20 +1,436 @@
 'use client';
 
-import { DashboardProvider } from './_context';
-import { DashboardHeader } from './_components/DashboardHeader';
-import { CreateJobCard } from './_components/CreateJobCard';
-import { RecentJobsTable } from './_components/RecentJobsTable';
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  AlertCircle,
+  ArrowRight,
+  Globe2,
+  Loader2,
+  Radar,
+  RefreshCw,
+  Sparkles,
+  TrendingUp,
+} from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { URLs } from '@/lib/urls';
+import { apiService } from '@/services/api';
+import type {
+  IndMoneyUsPortfolioOverviewResponse,
+  IndMoneyUsThreatAnalysis,
+  ZerodhaPortfolioOverviewResponse,
+  ZerodhaStatusResponse,
+  ZerodhaThreatAnalysis,
+} from '@/types/api';
+
+import { MarketPortfolioCard, type PortfolioCardTopHolding } from './_components/MarketPortfolioCard';
+import { ThreatActionTable } from './_components/ThreatActionTable';
+import { ThreatMarketCard } from './_components/ThreatMarketCard';
+import {
+  countThreatSeverities,
+  extractUrgentActionRows,
+  formatCount,
+  formatInr,
+  formatPercent,
+  formatSnapshotDate,
+  formatTs,
+  formatUsd,
+  getThreatSummaryPoints,
+  normalizeError,
+  sortUrgentActionRows,
+  toneClass,
+} from './_components/dashboardOverviewUtils';
+
+type DashboardState = {
+  zerodhaStatus: ZerodhaStatusResponse | null;
+  zerodhaOverview: ZerodhaPortfolioOverviewResponse | null;
+  zerodhaThreat: ZerodhaThreatAnalysis | null;
+  indmoneyOverview: IndMoneyUsPortfolioOverviewResponse | null;
+  indmoneyThreat: IndMoneyUsThreatAnalysis | null;
+};
+
+const INITIAL_STATE: DashboardState = {
+  zerodhaStatus: null,
+  zerodhaOverview: null,
+  zerodhaThreat: null,
+  indmoneyOverview: null,
+  indmoneyThreat: null,
+};
+
+function latestTimestamp(values: Array<string | null | undefined>) {
+  const timestamps = values
+    .filter((value): value is string => Boolean(value))
+    .map((value) => Date.parse(value))
+    .filter((value) => !Number.isNaN(value));
+
+  if (timestamps.length === 0) {
+    return null;
+  }
+
+  return new Date(Math.max(...timestamps)).toISOString();
+}
+
+function buildIndiaTopHoldings(overview: ZerodhaPortfolioOverviewResponse | null): PortfolioCardTopHolding[] {
+  const holdings = [...(overview?.latest?.holdings ?? [])]
+    .sort((left, right) => right.market_value - left.market_value)
+    .slice(0, 4);
+
+  return holdings.map((holding) => ({
+    id: `${holding.exchange}-${holding.tradingsymbol}`,
+    symbol: holding.tradingsymbol,
+    exchange: holding.exchange,
+    value: formatInr(holding.market_value),
+    secondaryValue: `P&L ${formatInr(holding.pnl)}`,
+    secondaryToneClass: toneClass(holding.pnl),
+  }));
+}
+
+function buildUsTopHoldings(overview: IndMoneyUsPortfolioOverviewResponse | null): PortfolioCardTopHolding[] {
+  const topAllocations = overview?.latest?.derived.top_allocations ?? [];
+  const holdings = topAllocations.length > 0
+    ? topAllocations.slice(0, 4)
+    : [...(overview?.latest?.holdings ?? [])]
+      .sort((left, right) => (right.current_value ?? 0) - (left.current_value ?? 0))
+      .slice(0, 4);
+
+  return holdings.map((holding) => ({
+    id: holding.symbol,
+    symbol: holding.symbol,
+    value: formatUsd(holding.current_value),
+    name: holding.company_name,
+    secondaryValue: `P&L ${formatPercent(holding.total_pnl_percent)}`,
+    secondaryToneClass: toneClass(holding.total_pnl_percent),
+  }));
+}
 
 export default function DashboardPage() {
-  return (
-    <DashboardProvider>
-      <div className="mx-auto flex flex-col gap-6">
-        <DashboardHeader />
-        <div className="grid gap-6">
-          <CreateJobCard />
-          <RecentJobsTable />
-        </div>
+  const [dashboard, setDashboard] = useState<DashboardState>(INITIAL_STATE);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const loadDashboard = useCallback(async (initialLoad = false) => {
+    if (initialLoad) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+
+    const results = await Promise.allSettled([
+      apiService.zerodhaStatus(),
+      apiService.zerodhaPortfolioOverview(),
+      apiService.zerodhaThreatsLatest(),
+      apiService.indmoneyUsPortfolioOverview(),
+      apiService.indmoneyUsThreatsLatest(),
+    ] as const);
+
+    const nextErrors: string[] = [];
+
+    setDashboard((current) => {
+      const nextState = { ...current };
+
+      if (results[0].status === 'fulfilled') {
+        nextState.zerodhaStatus = results[0].value;
+      } else {
+        nextErrors.push(`India connection status: ${normalizeError(results[0].reason)}`);
+      }
+
+      if (results[1].status === 'fulfilled') {
+        nextState.zerodhaOverview = results[1].value;
+      } else {
+        nextErrors.push(`India portfolio: ${normalizeError(results[1].reason)}`);
+      }
+
+      if (results[2].status === 'fulfilled') {
+        nextState.zerodhaThreat = results[2].value.analysis;
+      } else {
+        nextErrors.push(`India threats: ${normalizeError(results[2].reason)}`);
+      }
+
+      if (results[3].status === 'fulfilled') {
+        nextState.indmoneyOverview = results[3].value;
+      } else {
+        nextErrors.push(`US portfolio: ${normalizeError(results[3].reason)}`);
+      }
+
+      if (results[4].status === 'fulfilled') {
+        nextState.indmoneyThreat = results[4].value.analysis;
+      } else {
+        nextErrors.push(`US threats: ${normalizeError(results[4].reason)}`);
+      }
+
+      return nextState;
+    });
+
+    setErrors(nextErrors);
+    if (initialLoad) {
+      setLoading(false);
+    } else {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadDashboard(true);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [loadDashboard]);
+
+  const indiaSnapshot = dashboard.zerodhaOverview?.latest ?? null;
+  const usSnapshot = dashboard.indmoneyOverview?.latest ?? null;
+  const indiaUrgentRows = sortUrgentActionRows(
+    extractUrgentActionRows({
+      analysis: dashboard.zerodhaThreat,
+      market: 'india',
+      threatHref: URLs.routes.console.zerodhaThreats(),
+    }),
+  );
+  const usUrgentRows = sortUrgentActionRows(
+    extractUrgentActionRows({
+      analysis: dashboard.indmoneyThreat,
+      market: 'us',
+      threatHref: URLs.routes.console.indmoneyUsThreats(),
+    }),
+  );
+  const totalUrgentRows = indiaUrgentRows.length + usUrgentRows.length;
+  const topUrgentRows = sortUrgentActionRows([...indiaUrgentRows, ...usUrgentRows]).slice(0, 10);
+  const latestThreatUpdate = latestTimestamp([
+    dashboard.zerodhaThreat?.updated_at,
+    dashboard.indmoneyThreat?.updated_at,
+  ]);
+
+  if (loading && !indiaSnapshot && !usSnapshot && !dashboard.zerodhaThreat && !dashboard.indmoneyThreat) {
+    return (
+      <div className="flex items-center gap-3 text-sm text-slate-500">
+        <Loader2 className="size-4 animate-spin" />
+        Loading investor dashboard...
       </div>
-    </DashboardProvider>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex flex-col gap-6">
+      <section className="relative overflow-hidden rounded-[36px] border border-slate-200 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.22),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.22),_transparent_35%)]" />
+
+        <div className="relative grid gap-6 px-6 py-7 lg:grid-cols-[1.2fr_0.8fr] lg:px-8">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
+              <Sparkles className="size-3.5" />
+              India + US Control Room
+            </div>
+            <h1 className="mt-4 max-w-3xl font-serif text-3xl tracking-tight text-white md:text-4xl">
+              Portfolio Command Center
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-200/90">
+              The dashboard is now centered on real portfolio intelligence instead of the old AI console:
+              India and INDmoney US snapshots up front, plus Table 10 urgent actionables from each threat radar.
+            </p>
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Button
+                onClick={() => void loadDashboard(false)}
+                disabled={refreshing}
+                className="rounded-full bg-amber-400 text-slate-950 hover:bg-amber-300"
+              >
+                {refreshing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
+                Refresh Board
+              </Button>
+              <Button asChild variant="outline" className="rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white">
+                <Link href={URLs.routes.console.zerodhaThreats()}>
+                  India Threats
+                  <ArrowRight className="ml-2 size-4" />
+                </Link>
+              </Button>
+              <Button asChild variant="outline" className="rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white">
+                <Link href={URLs.routes.console.indmoneyUsThreats()}>
+                  US Threats
+                  <ArrowRight className="ml-2 size-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+                <TrendingUp className="size-3.5" />
+                Markets Covered
+              </div>
+              <div className="mt-3 text-3xl font-semibold text-white">2</div>
+              <div className="mt-2 text-sm text-slate-300">Zerodha India and INDmoney US</div>
+            </div>
+            <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+                <Radar className="size-3.5" />
+                Urgent Actions
+              </div>
+              <div className="mt-3 text-3xl font-semibold text-white">{totalUrgentRows}</div>
+              <div className="mt-2 text-sm text-slate-300">Combined Table 10 signals</div>
+            </div>
+            <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+                <Globe2 className="size-3.5" />
+                India Snapshot
+              </div>
+              <div className="mt-3 text-lg font-semibold text-white">
+                {indiaSnapshot?.snapshot_date
+                  ? formatSnapshotDate(indiaSnapshot.snapshot_date)
+                  : dashboard.zerodhaStatus?.last_portfolio_snapshot_date
+                    ? formatSnapshotDate(dashboard.zerodhaStatus.last_portfolio_snapshot_date)
+                    : 'Awaiting sync'}
+              </div>
+              <div className="mt-2 text-sm text-slate-300">
+                {dashboard.zerodhaStatus?.connected ? 'Broker connected' : 'Broker disconnected'}
+              </div>
+            </div>
+            <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+                <Globe2 className="size-3.5" />
+                US Snapshot
+              </div>
+              <div className="mt-3 text-lg font-semibold text-white">
+                {usSnapshot?.snapshot_date ? formatSnapshotDate(usSnapshot.snapshot_date) : 'Awaiting paste'}
+              </div>
+              <div className="mt-2 text-sm text-slate-300">
+                {latestThreatUpdate ? `Threats updated ${formatTs(latestThreatUpdate)}` : 'Threat scans not run yet'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {errors.length > 0 ? (
+        <div className="flex items-start gap-3 rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <AlertCircle className="mt-0.5 size-4 shrink-0" />
+          <span>Some dashboard modules could not be refreshed: {errors.join(' | ')}</span>
+        </div>
+      ) : null}
+
+      <section className="grid gap-6 xl:grid-cols-2">
+        <MarketPortfolioCard
+          market="india"
+          title="Zerodha India"
+          description="Live broker-backed holdings, P&L, and top concentration pockets from your latest synced India book."
+          statusPills={[
+            { label: 'Connection', value: dashboard.zerodhaStatus?.connected ? 'Connected' : 'Disconnected' },
+            { label: 'Snapshot', value: indiaSnapshot ? formatSnapshotDate(indiaSnapshot.snapshot_date) : 'Missing' },
+          ]}
+          metrics={[
+            {
+              label: 'Holdings Value',
+              value: formatInr(indiaSnapshot?.holdings_market_value),
+            },
+            {
+              label: 'Unrealized P&L',
+              value: formatInr(indiaSnapshot?.holdings_pnl),
+              tone: (indiaSnapshot?.holdings_pnl ?? 0) >= 0 ? 'positive' : 'negative',
+            },
+            {
+              label: 'Day Change',
+              value: formatInr(indiaSnapshot?.holdings_day_change_value),
+              tone: (indiaSnapshot?.holdings_day_change_value ?? 0) >= 0 ? 'positive' : 'negative',
+            },
+            {
+              label: 'Holdings',
+              value: formatCount(indiaSnapshot?.holdings_count),
+              detail: indiaSnapshot ? `Captured ${formatTs(indiaSnapshot.captured_at)}` : 'No synced snapshot yet',
+            },
+          ]}
+          topHoldings={buildIndiaTopHoldings(dashboard.zerodhaOverview)}
+          portfolioHref={URLs.routes.console.zerodha()}
+          threatsHref={URLs.routes.console.zerodhaThreats()}
+          emptyMessage={
+            indiaSnapshot
+              ? null
+              : 'Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here.'
+          }
+        />
+
+        <MarketPortfolioCard
+          market="us"
+          title="INDmoney US"
+          description="Manual US snapshot tracking, top allocations, and return posture for the INDmoney portfolio."
+          statusPills={[
+            { label: 'Parse', value: usSnapshot?.parse_status ?? 'Missing' },
+            { label: 'Snapshot', value: usSnapshot ? formatSnapshotDate(usSnapshot.snapshot_date) : 'Missing' },
+          ]}
+          metrics={[
+            {
+              label: 'Current Value',
+              value: formatUsd(usSnapshot?.current_value),
+            },
+            {
+              label: 'Total Return',
+              value: formatUsd(usSnapshot?.total_return_value),
+              tone: (usSnapshot?.total_return_value ?? 0) >= 0 ? 'positive' : 'negative',
+            },
+            {
+              label: 'Day Return',
+              value: formatUsd(usSnapshot?.day_return_value),
+              tone: (usSnapshot?.day_return_value ?? 0) >= 0 ? 'positive' : 'negative',
+            },
+            {
+              label: 'Holdings',
+              value: formatCount(usSnapshot?.holdings_count),
+              detail: usSnapshot ? `Captured ${formatTs(usSnapshot.captured_at)}` : 'No pasted snapshot yet',
+            },
+          ]}
+          topHoldings={buildUsTopHoldings(dashboard.indmoneyOverview)}
+          portfolioHref={URLs.routes.console.indmoneyUs()}
+          threatsHref={URLs.routes.console.indmoneyUsThreats()}
+          emptyMessage={
+            usSnapshot
+              ? null
+              : 'Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard.'
+          }
+        />
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-2">
+        <ThreatMarketCard
+          market="india"
+          title="India Threat Pulse"
+          description="Summary of the most important downside signals, protection cues, and severity mix from the latest India threat scan."
+          summaryPoints={getThreatSummaryPoints(dashboard.zerodhaThreat)}
+          severityCounts={countThreatSeverities(dashboard.zerodhaThreat?.report?.tables)}
+          urgentActionCount={indiaUrgentRows.length}
+          lastUpdated={formatTs(dashboard.zerodhaThreat?.updated_at)}
+          href={URLs.routes.console.zerodhaThreats()}
+          emptyMessage={
+            dashboard.zerodhaThreat?.report
+              ? null
+              : indiaSnapshot
+                ? 'Run a Zerodha threat scan to populate Table 10 actionables and the India severity pulse.'
+                : 'Threat insights will appear here after your first India portfolio sync.'
+          }
+        />
+
+        <ThreatMarketCard
+          market="us"
+          title="US Threat Pulse"
+          description="Quick read on crowded winners, event risk, and capital-protection ideas from the latest INDmoney US threat radar."
+          summaryPoints={getThreatSummaryPoints(dashboard.indmoneyThreat)}
+          severityCounts={countThreatSeverities(dashboard.indmoneyThreat?.report?.tables)}
+          urgentActionCount={usUrgentRows.length}
+          lastUpdated={formatTs(dashboard.indmoneyThreat?.updated_at)}
+          href={URLs.routes.console.indmoneyUsThreats()}
+          emptyMessage={
+            dashboard.indmoneyThreat?.report
+              ? null
+              : usSnapshot
+                ? 'Run the INDmoney US threat scan to surface Table 10 actionables on the dashboard.'
+                : 'Threat insights will appear here after your first INDmoney US snapshot.'
+          }
+        />
+      </section>
+
+      <ThreatActionTable rows={topUrgentRows} totalRows={totalUrgentRows} />
+    </div>
   );
 }
