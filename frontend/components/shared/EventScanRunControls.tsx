@@ -225,20 +225,24 @@ export function EventScanRunControls({
   const selectedEstimatedCostInr = selectedProvider && activeTarget
     ? getEstimatedCostInr(selectedProvider.name, activeTarget.model) ?? 0
     : 0;
+  const runButtonLoading = Boolean(running);
+  const runButtonDisabled = Boolean(disabled || running);
+  const runButtonLabel = running ? 'Starting Scan…' : buttonLabel;
 
   return (
     <div ref={containerRef} className="relative flex items-center gap-2">
       <Button
         onClick={() => void onRun(activeTarget)}
-        disabled={disabled || running}
+        disabled={runButtonDisabled}
+        aria-busy={runButtonLoading}
         className={buttonClassName}
       >
-        {running ? (
+        {runButtonLoading ? (
           <Loader2 className="mr-2 size-4 animate-spin" />
         ) : (
           <Sparkles className="mr-2 size-4" />
         )}
-        {buttonLabel}
+        {runButtonLabel}
       </Button>
 
       <button
