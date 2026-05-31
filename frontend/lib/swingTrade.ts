@@ -5,9 +5,19 @@ const DEFAULT_INVESTMENT_AMOUNT: Record<SwingTradeMarket, string> = {
   us: '100',
 };
 
+const EXPORT_SHEET_SUFFIX: Record<SwingTradeMarket, string> = {
+  india: 'Ind',
+  us: 'US',
+};
+
 const CURRENCY_CODE: Record<SwingTradeMarket, string> = {
   india: 'INR',
   us: 'USD',
+};
+
+const MARKET_TIMEZONE: Record<SwingTradeMarket, string> = {
+  india: 'Asia/Kolkata',
+  us: 'America/New_York',
 };
 
 function stripCurrencyPrefix(value: string) {
@@ -27,6 +37,18 @@ export function getSwingTradeCurrencyCode(market: SwingTradeMarket) {
 
 export function getSwingTradeDefaultInvestmentAmount(market: SwingTradeMarket) {
   return DEFAULT_INVESTMENT_AMOUNT[market];
+}
+
+export function getSwingTradeDefaultExportSheetName(
+  market: SwingTradeMarket,
+  now = new Date(),
+) {
+  const dateLabel = now.toLocaleDateString('en-IN', {
+    timeZone: MARKET_TIMEZONE[market],
+    month: 'short',
+    day: 'numeric',
+  });
+  return `${dateLabel} (${EXPORT_SHEET_SUFFIX[market]})`;
 }
 
 export function normalizeSwingTradeInvestmentAmount(

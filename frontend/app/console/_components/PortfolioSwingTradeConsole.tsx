@@ -11,6 +11,7 @@ import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import {
   buildSwingTradePrompt,
   getSwingTradeDefaultInvestmentAmount,
+  getSwingTradeDefaultExportSheetName,
   syncSwingTradePrompt,
   type SwingTradeMarket,
 } from '@/lib/swingTrade';
@@ -56,7 +57,11 @@ export function PortfolioSwingTradeConsole({
   };
 
   return (
-    <DashboardProvider defaultTemplateName={null} promptPreset={promptPreset}>
+    <DashboardProvider
+      defaultTemplateName={null}
+      promptPreset={promptPreset}
+      defaultExportSheetName={getSwingTradeDefaultExportSheetName(market)}
+    >
       <div className="mx-auto flex flex-col gap-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -77,7 +82,7 @@ export function PortfolioSwingTradeConsole({
             showGoogleSheetsInvestmentAmount={false}
             collapsible
             defaultExpanded={false}
-            runActionLabel="Run Scan"
+            runActionLabel="Run Swing Trade Scan"
             runButtonClassName="bg-blue-600 text-white hover:bg-blue-500 focus-visible:border-blue-600 focus-visible:ring-blue-300"
           />
           <RecentJobsTable />

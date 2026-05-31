@@ -158,12 +158,14 @@ interface DashboardProviderProps {
   children: ReactNode;
   defaultTemplateName?: string | null;
   promptPreset?: DashboardPromptPreset | null;
+  defaultExportSheetName?: string | null;
 }
 
 export function DashboardProvider({
   children,
   defaultTemplateName = DEFAULT_TEMPLATE_NAME,
   promptPreset = null,
+  defaultExportSheetName = null,
 }: DashboardProviderProps) {
   const {
     runs,
@@ -196,6 +198,9 @@ export function DashboardProvider({
   const [autoExportEnabled, setAutoExportEnabled] = useState(true);
   const [exportSpreadsheetUrl, setExportSpreadsheetUrl] = useState(DEFAULT_EXPORT_SPREADSHEET_URL);
   const [exportSheetName, setExportSheetName] = useState(() => {
+    if (defaultExportSheetName?.trim()) {
+      return defaultExportSheetName.trim();
+    }
     const today = new Date();
     return today.toLocaleDateString('en-IN', {
       timeZone: INDIA_TIMEZONE,
@@ -575,6 +580,7 @@ export function DashboardProvider({
           auto_export_enabled: autoExportEnabled,
           export_spreadsheet_url:
             autoExportEnabled ? (exportSpreadsheetUrl.trim() || undefined) : undefined,
+          export_sheet_name: autoExportEnabled ? (exportSheetName.trim() || undefined) : undefined,
           export_investment_amount: autoExportEnabled ? exportInvestmentAmount || undefined : undefined,
           export_title: autoExportEnabled ? exportTitle || undefined : undefined,
         });
@@ -596,6 +602,7 @@ export function DashboardProvider({
       scheduledAt,
       autoExportEnabled,
       exportSpreadsheetUrl,
+      exportSheetName,
       exportInvestmentAmount,
       exportTitle,
       googleSheetsConnected,
