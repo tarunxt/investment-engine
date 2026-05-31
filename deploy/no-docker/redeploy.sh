@@ -141,7 +141,10 @@ if [[ "$SCOPE" == "full" ]]; then
   echo "==> Update frontend dependencies and build"
   run_as_app_user "
     cd '$APP_ROOT/frontend'
+    rm -rf node_modules .next
     npm ci
+    test -f node_modules/next/dist/compiled/cookie/index.js
+    test -f node_modules/next/dist/server/lib/router-utils/instrumentation-globals.external.js
     set -a
     source '$FRONTEND_ENV_FILE'
     set +a
@@ -150,6 +153,7 @@ if [[ "$SCOPE" == "full" ]]; then
 fi
 
 echo "==> Restart services"
+sudo systemctl daemon-reload
 sudo systemctl restart investor-backend investor-celery-worker investor-celery-beat
 
 if [[ "$SCOPE" == "full" ]]; then
