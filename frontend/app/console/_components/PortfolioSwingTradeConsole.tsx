@@ -67,7 +67,7 @@ export function PortfolioSwingTradeConsole({
         </div>
 
         <DashboardHeader
-          title="AI Job Console"
+          title="Swing Trade Console"
           description={copy.consoleDescription}
         />
 
@@ -75,6 +75,10 @@ export function PortfolioSwingTradeConsole({
           <CreateJobCard
             promptAside={<SwingTradeInvestmentAmountField market={market} />}
             showGoogleSheetsInvestmentAmount={false}
+            collapsible
+            defaultExpanded={false}
+            runActionLabel="Run Scan"
+            runButtonClassName="bg-blue-600 text-white hover:bg-blue-500 focus-visible:border-blue-600 focus-visible:ring-blue-300"
           />
           <RecentJobsTable />
         </div>
