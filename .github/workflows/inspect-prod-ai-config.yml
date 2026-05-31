@@ -1,0 +1,70 @@
+name: Inspect Production AI Config
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    name: Inspect backend provider config
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Inspect AI provider env over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 900s
+          command_timeout: 900s
+          script: |
+            set -euo pipefail
+            APP="${{ secrets.APP_PATH }}"
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
+
+            echo "==> Backend env file presence"
+            sudo test -f "$BACKEND_ENV_FILE"
+            sudo ls -l "$BACKEND_ENV_FILE"
+
+            echo "==> Provider key presence in env file"
+            sudo bash -lc '
+              for key in OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY GEMINI_API_KEY_FALLBACK GEMINI_API_KEY_FALLBACK_2 GEMINI_API_KEY_FALLBACK_3 DEEPSEEK_API_KEY; do
+                line="$(grep -E "^${key}=" /etc/investor/backend.env || true)"
+                value="${line#*=}"
+                if [[ -n "$line" && -n "$value" ]]; then
+                  echo "$key=present"
+                else
+                  echo "$key=missing"
+                fi
+              done
+            '
+
+            echo "==> Provider availability from backend runtime"
+            sudo -u investor -H bash -lc "
+              cd '$APP/backend'
+              source .venv/bin/activate
+              set -a
+              source '$BACKEND_ENV_FILE'
+              set +a
+              python - <<'PY'
+from app.core.config import get_gemini_api_keys, settings
+from app.domains.ai_providers.factory import ProviderFactory
+
+status = {
+    'settings.openai_api_key': bool(settings.openai_api_key),
+    'settings.anthropic_api_key': bool(settings.anthropic_api_key),
+    'settings.deepseek_api_key': bool(settings.deepseek_api_key),
+    'get_gemini_api_keys': bool(get_gemini_api_keys()),
+    'provider_factory': {
+        provider['name']: provider['configured']
+        for provider in ProviderFactory.list_providers()
+    },
+    'default_target': ProviderFactory.resolve_default_target('openai', 'gpt-4o-mini'),
+}
+print(status)
+PY
+            "
+
+            echo "==> Recent backend logs"
+            sudo journalctl -u investor-backend -n 50 --no-pager
