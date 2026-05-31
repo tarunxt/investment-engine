@@ -67,12 +67,12 @@ export default function DashboardLayout({
             >
                 <div className="flex flex-col h-full">
                     {/* Logo */}
-                    <div className="relative flex h-20 items-center justify-center border-b px-4">
-                        <Link href={URLs.routes.console.dashboard()} className="flex flex-col items-center gap-2 text-center">
-                            <div className="rounded-2xl bg-linear-to-r from-indigo-600 via-violet-600 to-fuchsia-600 px-3 py-2 shadow-sm">
+                    <div className="relative flex min-h-28 items-center justify-center border-b px-5 py-5">
+                        <Link href={URLs.routes.console.dashboard()} className="flex flex-col items-center gap-3 text-center">
+                            <div className="rounded-2xl bg-linear-to-r from-indigo-600 via-violet-600 to-fuchsia-600 px-5 py-3 shadow-sm">
                                 <span className="text-xs font-bold uppercase tracking-[0.28em] text-white">{BRAND_ACRONYM}</span>
                             </div>
-                            <div className="leading-tight">
+                            <div className="space-y-1 leading-tight">
                                 <div className="text-sm font-semibold text-gray-900">{brandExpansionLines.primary}</div>
                                 {brandExpansionLines.secondary ? (
                                     <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">
