@@ -3,37 +3,17 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import type { IconType } from 'react-icons';
 import { useAuth } from '@/hooks/useAuth';
 import {
-    HiOutlineViewGrid,
     HiOutlineMenu,
     HiOutlineX,
-    HiOutlineUser,
-    HiOutlineBriefcase,
-    HiOutlineBookOpen,
-    HiOutlineTrendingUp,
-    HiOutlineCube,
 } from 'react-icons/hi';
 import { URLs } from '@/lib/urls';
 import { BRAND_ACRONYM, getBrandExpansionLines } from '@/lib/brand';
 import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
 import { FullLoader } from '@/components/shared/Loader';
 import { UserMenu } from '@/components/dashboard/UserMenu';
-
-type NavigationItem = {
-    name: string;
-    href: string;
-    icon: IconType;
-};
-
-type NavigationGroup = {
-    name: string;
-    icon: IconType;
-    children: NavigationItem[];
-};
-
-type NavigationEntry = NavigationItem | NavigationGroup;
+import { SidebarNavigation } from './_components/SidebarNavigation';
 
 export default function DashboardLayout({
     children,
@@ -48,7 +28,6 @@ export default function DashboardLayout({
     const searchParamString = searchParams.toString();
     const hasRedirectToParam = searchParams.has('redirectTo');
     const [sidebarOpen, setSidebarOpen] = useState(false);
-    const [portfolioOpen, setPortfolioOpen] = useState(false);
 
     useEffect(() => {
         if (!hasRedirectToParam) return;
@@ -59,79 +38,6 @@ export default function DashboardLayout({
             router.replace(cleanedUrl, { scroll: false });
         }
     }, [hasRedirectToParam, pathname, router, searchParamString]);
-
-    const portfolioChildren: NavigationItem[] = [
-        {
-            name: 'Zerodha',
-            href: URLs.routes.console.zerodha(),
-            icon: HiOutlineTrendingUp,
-        },
-        {
-            name: 'IndMoney US',
-            href: URLs.routes.console.indmoneyUs(),
-            icon: HiOutlineTrendingUp,
-        },
-        {
-            name: 'Polymarket Bot',
-            href: URLs.routes.console.polymarketBot(),
-            icon: HiOutlineTrendingUp,
-        },
-    ];
-
-    const portfolioRoutes = portfolioChildren.map((child) => child.href);
-
-    const navigation: NavigationEntry[] = [
-        {
-            name: 'Dashboard',
-            href: URLs.routes.console.dashboard(),
-            icon: HiOutlineViewGrid,
-        },
-        {
-            name: 'Runs',
-            href: URLs.routes.console.runs(),
-            icon: HiOutlineBriefcase,
-        },
-        {
-            name: 'Prompts',
-            href: URLs.routes.console.prompts(),
-            icon: HiOutlineBookOpen,
-        },
-        {
-            name: 'Portfolio',
-            children: portfolioChildren,
-            icon: HiOutlineTrendingUp,
-        },
-        {
-            name: 'APIs',
-            href: URLs.routes.console.apis(),
-            icon: HiOutlineCube,
-        },
-        {
-            name: 'Google Sheets',
-            href: URLs.routes.console.googleSheets(),
-            icon: HiOutlineViewGrid,
-        },
-        {
-            name: 'Profile',
-            href: URLs.routes.profile.root(),
-            icon: HiOutlineUser,
-        },
-    ];
-
-    const isActive = (href: string) => {
-        if (href === URLs.routes.console.dashboard()) {
-            return pathname === href;
-        }
-        if (portfolioRoutes.includes(href)) {
-            return pathname === href || pathname.startsWith(`${href}/`);
-        }
-        return pathname.startsWith(href);
-    };
-
-    const isPortfolioActive = portfolioRoutes.some(
-        (href) => pathname === href || pathname.startsWith(`${href}/`),
-    );
-    const isPortfolioExpanded = portfolioOpen || isPortfolioActive;
     if (loading) {
         return (
             <div className='w-full h-screen flex items-center justify-center'>
@@ -185,66 +91,12 @@ export default function DashboardLayout({
                     </div>
 
                     {/* Navigation */}
-                    <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-                        {navigation.map((item) => (
-                            'children' in item ? (
-                                <div key={item.name} className="space-y-1">
-                                    <button
-                                        type="button"
-                                        onClick={() => setPortfolioOpen((current) => !current)}
-                                        className={`flex w-full items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors ${isPortfolioActive
-                                            ? 'bg-indigo-50 text-indigo-600'
-                                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                                            }`}
-                                    >
-                                        <item.icon
-                                            className={`mr-3 h-5 w-5 ${isPortfolioActive ? 'text-indigo-600' : 'text-gray-400'
-                                                }`}
-                                        />
-                                        <span>{item.name}</span>
-                                        <span className="ml-auto text-xs text-gray-400">
-                                            {isPortfolioExpanded ? 'v' : '>'}
-                                        </span>
-                                    </button>
-                                    {isPortfolioExpanded && (
-                                        <div className="ml-6 space-y-1 border-l border-gray-200 pl-3">
-                                            {item.children.map((child) => (
-                                                <Link
-                                                    key={child.name}
-                                                    href={child.href}
-                                                    onClick={() => setSidebarOpen(false)}
-                                                    className={`flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isActive(child.href)
-                                                        ? 'bg-indigo-50 text-indigo-600'
-                                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                                                        }`}
-                                                >
-                                                    <span className={`mr-2 text-xs ${isActive(child.href) ? 'text-indigo-500' : 'text-gray-300'}`}>
-                                                        •
-                                                    </span>
-                                                    {child.name}
-                                                </Link>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            ) : (
-                                <Link
-                                    key={item.name}
-                                    href={item.href}
-                                    onClick={() => setSidebarOpen(false)}
-                                    className={`flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors ${isActive(item.href)
-                                        ? 'bg-indigo-50 text-indigo-600'
-                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                                        }`}
-                                >
-                                    <item.icon
-                                        className={`mr-3 h-5 w-5 ${isActive(item.href) ? 'text-indigo-600' : 'text-gray-400'
-                                            }`}
-                                    />
-                                    {item.name}
-                                </Link>
-                            )
-                        ))}
+                    <nav className="flex-1 py-4">
+                        <SidebarNavigation
+                            pathname={pathname}
+                            userId={user?.id}
+                            onNavigate={() => setSidebarOpen(false)}
+                        />
                     </nav>
 
                     {/* User info in sidebar (mobile) */}
