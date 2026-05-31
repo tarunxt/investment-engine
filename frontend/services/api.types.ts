@@ -4,6 +4,8 @@ import {
     UserResponse,
     JobResponse,
     JobCreate,
+    GoogleSheetsAdminConfigResponse,
+    GoogleSheetsAdminConfigUpdateRequest,
     GoogleSheetsAuthUrlResponse,
     GoogleSheetsDefaultSheetRequest,
     GoogleSheetsDefaultSheetResponse,
@@ -89,6 +91,8 @@ export interface IApiService {
 
     // Google Sheets endpoints
     googleSheetsAuthUrl(): Promise<GoogleSheetsAuthUrlResponse>;
+    googleSheetsAdminConfig(): Promise<GoogleSheetsAdminConfigResponse>;
+    googleSheetsUpdateAdminConfig(data: GoogleSheetsAdminConfigUpdateRequest): Promise<GoogleSheetsAdminConfigResponse>;
     googleSheetsExchangeCode(code: string): Promise<{ status: string; message: string }>;
     googleSheetsStatus(): Promise<GoogleSheetsStatusResponse>;
     googleSheetsDisconnect(): Promise<{ message: string }>;

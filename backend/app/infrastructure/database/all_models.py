@@ -1,7 +1,7 @@
 # Import every ORM model so SQLAlchemy's mapper registry is fully populated
 # before any query runs. Required in Celery workers (which don't load main.py).
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
-from app.domains.google_sheets.models import GoogleSheetsCredential  # noqa: F401
+from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
 from app.domains.jobs.models import Job  # noqa: F401
 from app.domains.runs.models import Run, RunJob  # noqa: F401

@@ -13,6 +13,9 @@ export default function GoogleSheetsPage() {
           <p>
             Once connected, each user gets a personal Google Sheet that can receive AI-generated investment analysis, day-wise exports, and shared research tabs.
           </p>
+          <p>
+            An admin can complete the Google OAuth setup once on this page, after which every user simply clicks Connect Google Sheets.
+          </p>
           <ul className="list-disc list-inside space-y-1">
             <li>Export individual job results (single AI analysis)</li>
             <li>Export run results (multi-LLM comparison analysis)</li>

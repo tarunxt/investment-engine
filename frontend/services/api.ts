@@ -4,6 +4,8 @@ import { syncTokenToCookie } from "@/services/cookies";
 import { signOut } from "next-auth/react";
 import {
   ApiUsageSummaryResponse,
+  GoogleSheetsAdminConfigResponse,
+  GoogleSheetsAdminConfigUpdateRequest,
   GoogleSheetsAuthUrlResponse,
   GoogleSheetsDefaultSheetRequest,
   GoogleSheetsDefaultSheetResponse,
@@ -777,6 +779,19 @@ class apiServiceClass implements IApiService {
 
   googleSheetsAuthUrl(): Promise<GoogleSheetsAuthUrlResponse> {
     return this.get<GoogleSheetsAuthUrlResponse>(URLs.googleSheets.authUrl());
+  }
+
+  googleSheetsAdminConfig(): Promise<GoogleSheetsAdminConfigResponse> {
+    return this.get<GoogleSheetsAdminConfigResponse>(URLs.googleSheets.adminConfig());
+  }
+
+  googleSheetsUpdateAdminConfig(
+    data: GoogleSheetsAdminConfigUpdateRequest,
+  ): Promise<GoogleSheetsAdminConfigResponse> {
+    return this.put<GoogleSheetsAdminConfigResponse>(
+      URLs.googleSheets.adminConfig(),
+      data,
+    );
   }
 
   googleSheetsExchangeCode(code: string): Promise<{ status: string; message: string }> {

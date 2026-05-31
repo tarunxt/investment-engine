@@ -7,12 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.config import settings
-from app.domains.auth.dependencies import get_current_user
-from app.domains.auth.models import User, UserProfile
+from app.domains.auth.dependencies import get_current_user, require_admin
+from app.domains.auth.models import ActivityLog, User, UserProfile
 from app.domains.google_sheets.crypto import decrypt_token, encrypt_token
 from app.domains.google_sheets.models import GoogleSheetsCredential
-from app.domains.google_sheets.repository import GoogleSheetsCredentialRepository
+from app.domains.google_sheets.repository import (
+    GoogleSheetsAppConfigRepository,
+    GoogleSheetsCredentialRepository,
+)
 from app.domains.google_sheets.schemas import (
+    GoogleSheetsAdminConfigResponse,
+    GoogleSheetsAdminConfigUpdateRequest,
     GoogleSheetsAuthUrlResponse,
     GoogleSheetsDefaultSheetRequest,
     GoogleSheetsDefaultSheetResponse,
@@ -106,12 +111,11 @@ async def _save_default_sheet_url(
 @router.get("/auth-url", response_model=GoogleSheetsAuthUrlResponse)
 async def get_auth_url(current_user: User = Depends(get_current_user)):
     try:
-        auth_url = (
-            await run_in_threadpool(_svc.get_auth_url) if _svc.is_configured else ""
-        )
+        configured = await run_in_threadpool(lambda: _svc.is_configured)
+        auth_url = await run_in_threadpool(_svc.get_auth_url) if configured else ""
         return GoogleSheetsAuthUrlResponse(
             auth_url=auth_url,
-            configured=_svc.is_configured,
+            configured=configured,
             redirect_uri=settings.google_redirect_uri,
         )
     except Exception as e:
@@ -126,7 +130,8 @@ async def exchange_code(
     current_user: User = Depends(get_current_user),
 ):
     """Exchange authorization code for tokens. Frontend receives code from Google redirect."""
-    if not _svc.is_configured:
+    configured = await run_in_threadpool(lambda: _svc.is_configured)
+    if not configured:
         raise HTTPException(503, detail="Google Sheets is not configured")
 
     try:
@@ -178,6 +183,78 @@ async def exchange_code(
     except Exception as e:
         logger.exception("Google Sheets token exchange failed for user %d", current_user.id)
         raise HTTPException(500, detail="Failed to exchange authorization code")
+
+
+@router.get("/admin-config", response_model=GoogleSheetsAdminConfigResponse)
+async def get_admin_config(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_admin),
+):
+    repo = GoogleSheetsAppConfigRepository(db)
+    config = await repo.get()
+    configured = await run_in_threadpool(lambda: _svc.is_configured)
+
+    return GoogleSheetsAdminConfigResponse(
+        configured=configured,
+        client_id=config.client_id if config else None,
+        has_client_secret=bool(config and config.client_secret_enc),
+        redirect_uri=settings.google_redirect_uri,
+        updated_at=config.updated_at if config else None,
+        updated_by_user_id=config.updated_by_user_id if config else None,
+    )
+
+
+@router.put("/admin-config", response_model=GoogleSheetsAdminConfigResponse)
+async def update_admin_config(
+    data: GoogleSheetsAdminConfigUpdateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(require_admin),
+):
+    repo = GoogleSheetsAppConfigRepository(db)
+    existing = await repo.get()
+
+    client_id = data.client_id.strip()
+    client_secret = (data.client_secret or "").strip()
+
+    if not client_id:
+        raise HTTPException(400, detail="Client ID is required")
+
+    if not client_secret:
+        if existing and existing.client_secret_enc:
+            client_secret_enc = existing.client_secret_enc
+        else:
+            raise HTTPException(400, detail="Client secret is required")
+    else:
+        try:
+            client_secret_enc = encrypt_token(client_secret)
+        except RuntimeError as exc:
+            raise HTTPException(503, detail=str(exc)) from exc
+
+    config = await repo.upsert(
+        client_id=client_id,
+        client_secret_enc=client_secret_enc,
+        updated_by_user_id=current_user.id,
+    )
+    db.add(
+        ActivityLog(
+            user_id=current_user.id,
+            action="update_google_sheets_app_config",
+            details="Updated Google Sheets OAuth app configuration",
+        )
+    )
+    await db.commit()
+
+    logger.info(
+        "Google Sheets app config updated by admin user %d", current_user.id
+    )
+    return GoogleSheetsAdminConfigResponse(
+        configured=await run_in_threadpool(lambda: _svc.is_configured),
+        client_id=config.client_id,
+        has_client_secret=bool(config.client_secret_enc),
+        redirect_uri=settings.google_redirect_uri,
+        updated_at=config.updated_at,
+        updated_by_user_id=config.updated_by_user_id,
+    )
 
 
 @router.get("/status", response_model=GoogleSheetsStatusResponse)

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GoogleSheetsAuthUrlResponse(BaseModel):
@@ -14,6 +14,20 @@ class GoogleSheetsStatusResponse(BaseModel):
     connected: bool
     token_expiry: Optional[datetime] = None
     default_spreadsheet_url: Optional[str] = None
+
+
+class GoogleSheetsAdminConfigResponse(BaseModel):
+    configured: bool
+    client_id: Optional[str] = None
+    has_client_secret: bool = False
+    redirect_uri: str
+    updated_at: Optional[datetime] = None
+    updated_by_user_id: Optional[int] = None
+
+
+class GoogleSheetsAdminConfigUpdateRequest(BaseModel):
+    client_id: str = Field(..., min_length=1, max_length=255)
+    client_secret: Optional[str] = Field(None, max_length=4000)
 
 
 class GoogleSheetsDefaultSheetRequest(BaseModel):

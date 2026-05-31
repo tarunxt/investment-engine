@@ -769,6 +769,20 @@ export interface GoogleSheetsStatusResponse {
   default_spreadsheet_url?: string | null;
 }
 
+export interface GoogleSheetsAdminConfigResponse {
+  configured: boolean;
+  client_id?: string | null;
+  has_client_secret: boolean;
+  redirect_uri: string;
+  updated_at?: string | null;
+  updated_by_user_id?: number | null;
+}
+
+export interface GoogleSheetsAdminConfigUpdateRequest {
+  client_id: string;
+  client_secret?: string | null;
+}
+
 export interface GoogleSheetsDefaultSheetRequest {
   spreadsheet_url?: string | null;
   title?: string | null;

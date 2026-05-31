@@ -8,7 +8,7 @@ from alembic import context
 # ── Import all models so Alembic autogenerate can see them ────────────────────
 from app.infrastructure.database.base import Base  # noqa: F401
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
-from app.domains.google_sheets.models import GoogleSheetsCredential  # noqa: F401
+from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
 from app.domains.jobs.models import Job  # noqa: F401
 from app.domains.prompts.models import Prompt  # noqa: F401

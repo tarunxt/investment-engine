@@ -34,7 +34,7 @@ from app.shared.exceptions import AppException
 
 # Ensure all ORM models are registered with the shared metadata
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
-from app.domains.google_sheets.models import GoogleSheetsCredential  # noqa: F401
+from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
 from app.domains.jobs.models import Job  # noqa: F401
 from app.domains.prompts.models import Prompt  # noqa: F401

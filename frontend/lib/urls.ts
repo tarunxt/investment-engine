@@ -237,6 +237,7 @@ export const URLs = {
   // Google Sheets endpoints
   googleSheets: {
     authUrl: () => `${resolveApiBaseUrl()}/google-sheets/auth-url`,
+    adminConfig: () => `${resolveApiBaseUrl()}/google-sheets/admin-config`,
     exchangeCode: () => `${resolveApiBaseUrl()}/google-sheets/exchange-code`,
     status: () => `${resolveApiBaseUrl()}/google-sheets/status`,
     disconnect: () => `${resolveApiBaseUrl()}/google-sheets/disconnect`,

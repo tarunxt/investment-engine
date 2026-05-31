@@ -1,7 +1,8 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from app.domains.google_sheets.models import GoogleSheetsCredential
+from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential
 
 
 class GoogleSheetsCredentialRepository:
@@ -48,3 +49,56 @@ class GoogleSheetsCredentialRepository:
         if cred:
             await self.db.delete(cred)
             await self.db.flush()
+
+
+class GoogleSheetsAppConfigRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get(self) -> GoogleSheetsAppConfig | None:
+        result = await self.db.execute(
+            select(GoogleSheetsAppConfig).order_by(
+                GoogleSheetsAppConfig.updated_at.desc(),
+                GoogleSheetsAppConfig.id.desc(),
+            )
+        )
+        return result.scalars().first()
+
+    async def upsert(
+        self,
+        client_id: str,
+        client_secret_enc: str,
+        updated_by_user_id: int | None,
+    ) -> GoogleSheetsAppConfig:
+        config = await self.get()
+
+        if config:
+            config.client_id = client_id
+            config.client_secret_enc = client_secret_enc
+            config.updated_by_user_id = updated_by_user_id
+            self.db.add(config)
+        else:
+            config = GoogleSheetsAppConfig(
+                client_id=client_id,
+                client_secret_enc=client_secret_enc,
+                updated_by_user_id=updated_by_user_id,
+            )
+            self.db.add(config)
+
+        await self.db.flush()
+        await self.db.refresh(config)
+        return config
+
+
+class GoogleSheetsAppConfigSyncRepository:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get(self) -> GoogleSheetsAppConfig | None:
+        result = self.db.execute(
+            select(GoogleSheetsAppConfig).order_by(
+                GoogleSheetsAppConfig.updated_at.desc(),
+                GoogleSheetsAppConfig.id.desc(),
+            )
+        )
+        return result.scalars().first()

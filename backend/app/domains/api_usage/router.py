@@ -6,12 +6,14 @@ import logging
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.google_sheets.service import GoogleSheetsService
 from app.domains.jobs.models import Job
 from app.core.config import get_gemini_api_keys, settings, settings_loaded_at_utc
 from app.infrastructure.database.session import get_async_db
@@ -21,6 +23,7 @@ router = APIRouter(prefix="/api-usage", tags=["api-usage"])
 
 IST = ZoneInfo("Asia/Kolkata")
 logger = logging.getLogger(__name__)
+_google_sheets_service = GoogleSheetsService()
 
 USD_INR_FALLBACK = 83.50
 FX_SOURCE = "https://open.er-api.com/v6/latest/USD"
@@ -118,6 +121,9 @@ async def api_usage_summary(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    google_sheets_configured = await run_in_threadpool(
+        lambda: _google_sheets_service.is_configured
+    )
     start_utc, end_utc, period_label = _window_utc(period, custom_start, custom_end)
     usd_inr_rate, fx_source = await _fetch_usd_inr_rate()
 
@@ -241,7 +247,7 @@ async def api_usage_summary(
             ApiUsageItem(
                 name="Google Sheets API",
                 category="Integration",
-                configured=bool(settings.google_client_id and settings.google_client_secret),
+                configured=google_sheets_configured,
                 daily_requests=0,
                 daily_tokens_in=0,
                 daily_tokens_out=0,

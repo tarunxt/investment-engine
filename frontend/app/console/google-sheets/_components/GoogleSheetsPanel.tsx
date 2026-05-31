@@ -9,15 +9,21 @@ import {
   Loader2,
   LogOut,
   Save,
+  ShieldCheck,
   Sparkles,
   Unplug,
+  Wrench,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { apiService, APIError } from '@/services/api';
+import { useAuth } from '@/hooks/useAuth';
 import { useClipboard } from '@/hooks/useClipboard';
 import { cn } from '@/lib/utils';
-import type { GoogleSheetsStatusResponse } from '@/types/api';
+import type {
+  GoogleSheetsAdminConfigResponse,
+  GoogleSheetsStatusResponse,
+} from '@/types/api';
 
 function normalizeError(err: unknown) {
   if (err instanceof APIError) return err.message;
@@ -26,7 +32,11 @@ function normalizeError(err: unknown) {
 }
 
 export default function GoogleSheetsPanel() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   const [status, setStatus] = useState<GoogleSheetsStatusResponse | null>(null);
+  const [adminConfig, setAdminConfig] = useState<GoogleSheetsAdminConfigResponse | null>(null);
   const [authUrl, setAuthUrl] = useState('');
   const [redirectUri, setRedirectUri] = useState('');
   const [configured, setConfigured] = useState(true);
@@ -35,33 +45,47 @@ export default function GoogleSheetsPanel() {
   const [connecting, setConnecting] = useState(false);
   const [savingSheet, setSavingSheet] = useState(false);
   const [creatingSheet, setCreatingSheet] = useState(false);
+  const [savingAdminConfig, setSavingAdminConfig] = useState(false);
   const [sheetUrlInput, setSheetUrlInput] = useState('');
+  const [adminClientId, setAdminClientId] = useState('');
+  const [adminClientSecret, setAdminClientSecret] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const { copy, copied } = useClipboard();
 
   const fetchStatus = useCallback(async () => {
     try {
-      const [s, urlRes] = await Promise.all([
+      const [sheetStatus, authResponse, adminResponse] = await Promise.all([
         apiService.googleSheetsStatus(),
         apiService.googleSheetsAuthUrl(),
+        isAdmin ? apiService.googleSheetsAdminConfig() : Promise.resolve(null),
       ]);
-      setStatus(s);
-      setAuthUrl(urlRes.auth_url);
-      setConfigured(urlRes.configured);
-      setRedirectUri(urlRes.redirect_uri ?? '');
-      setSheetUrlInput(s.default_spreadsheet_url ?? '');
+
+      setStatus(sheetStatus);
+      setAuthUrl(authResponse.auth_url);
+      setConfigured(authResponse.configured);
+      setRedirectUri(authResponse.redirect_uri ?? '');
+      setSheetUrlInput(sheetStatus.default_spreadsheet_url ?? '');
+
+      if (adminResponse) {
+        setAdminConfig(adminResponse);
+        setAdminClientId(adminResponse.client_id ?? '');
+      } else {
+        setAdminConfig(null);
+        setAdminClientId('');
+      }
     } catch (err) {
       setError(normalizeError(err));
     } finally {
       setLoadingStatus(false);
       setConnecting(false);
+      setSavingAdminConfig(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchStatus();
+    void fetchStatus();
   }, [fetchStatus]);
 
   useEffect(() => {
@@ -71,7 +95,7 @@ export default function GoogleSheetsPanel() {
         setSuccess('Google Sheets connected. Your personal sheet is ready to use.');
         setError(null);
         setConnecting(false);
-        fetchStatus();
+        void fetchStatus();
       } else if (ev.data?.type === 'google_sheets_error') {
         setConnecting(false);
         setError(ev.data.message ?? 'Google Sheets login failed');
@@ -138,6 +162,36 @@ export default function GoogleSheetsPanel() {
     if (ok) {
       setSuccess(message);
       setError(null);
+    }
+  };
+
+  const handleSaveAdminConfig = async () => {
+    const clientId = adminClientId.trim();
+    const clientSecret = adminClientSecret.trim();
+
+    if (!clientId) {
+      setError('Client ID is required.');
+      setSuccess(null);
+      return;
+    }
+
+    setSavingAdminConfig(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      await apiService.googleSheetsUpdateAdminConfig({
+        client_id: clientId,
+        client_secret: clientSecret || undefined,
+      });
+      setAdminClientSecret('');
+      await fetchStatus();
+      setSuccess(
+        'Google OAuth app settings saved on the server. Add the redirect URI in Google Cloud if needed, then users can connect normally.',
+      );
+    } catch (err) {
+      setSavingAdminConfig(false);
+      setError(normalizeError(err));
     }
   };
 
@@ -253,32 +307,128 @@ export default function GoogleSheetsPanel() {
         </div>
       </div>
 
-      {!configured && (
+      {isAdmin && (
+        <div className="border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="size-4 text-gray-700" />
+                <h2 className="text-base font-semibold text-gray-950">Admin Google OAuth App</h2>
+              </div>
+              <p className="text-sm text-gray-500">
+                One-time setup for the whole workspace. These values are stored server-side only and never shown to normal users.
+              </p>
+            </div>
+            <div
+              className={cn(
+                'inline-flex items-center gap-2 border px-3 py-2 text-xs font-medium',
+                configured
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-amber-200 bg-amber-50 text-amber-800',
+              )}
+            >
+              {configured ? <CheckCircle2 className="size-3.5" /> : <Wrench className="size-3.5" />}
+              {configured ? 'Configured' : 'Setup required'}
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Google Client ID
+                </label>
+                <Input
+                  value={adminClientId}
+                  onChange={(e) => setAdminClientId(e.target.value)}
+                  placeholder="1234567890-abc123.apps.googleusercontent.com"
+                  className="mt-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Google Client Secret
+                </label>
+                <Input
+                  type="password"
+                  value={adminClientSecret}
+                  onChange={(e) => setAdminClientSecret(e.target.value)}
+                  placeholder={
+                    adminConfig?.has_client_secret
+                      ? 'Leave blank to keep the saved secret'
+                      : 'GOCSPX-...'
+                  }
+                  className="mt-2 text-sm"
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  {adminConfig?.has_client_secret
+                    ? 'A client secret is already saved securely on the server. Enter a new one only if you want to replace it.'
+                    : 'The client secret will be encrypted before storing it on the server.'}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={handleSaveAdminConfig}
+                  disabled={savingAdminConfig}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {savingAdminConfig ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 size-4" />
+                  )}
+                  Save Server-Side Settings
+                </Button>
+                <Button asChild variant="outline">
+                  <a
+                    href="https://console.cloud.google.com/apis/credentials"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ExternalLink className="mr-2 size-4" />
+                    Open Google Cloud
+                  </a>
+                </Button>
+              </div>
+            </div>
+
+            <div className="border border-slate-200 bg-slate-50 p-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Redirect URI
+              </h3>
+              <Input value={redirectUri} readOnly className="mt-3 bg-white text-sm" />
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => handleCopy(redirectUri, 'Copied redirect URI.')}
+              >
+                <Copy className="mr-2 size-3.5" />
+                {copied ? 'Copied' : 'Copy Redirect URI'}
+              </Button>
+              <ol className="mt-4 space-y-2 text-sm text-slate-700">
+                <li>1. Save the client ID and client secret here.</li>
+                <li>2. Add the redirect URI above in your Google Cloud OAuth app.</li>
+                <li>3. Normal users will then see the Connect Google Sheets button automatically.</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!configured && !isAdmin && (
         <div className="border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
           <div className="flex items-start gap-3">
             <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            <div className="flex-1 space-y-3">
+            <div className="space-y-2">
               <p className="font-medium text-amber-900">
-                Google login is not enabled on this deployment yet.
+                Google login is not available yet for this workspace.
               </p>
               <p>
-                Add <code className="font-mono text-xs">GOOGLE_CLIENT_ID</code> and{' '}
-                <code className="font-mono text-xs">GOOGLE_CLIENT_SECRET</code> to the backend,
-                then register this redirect URI in Google Cloud:
+                An admin needs to finish the one-time Google OAuth setup before users can connect personal sheets.
               </p>
-              {redirectUri ? (
-                <div className="flex flex-col gap-2 lg:flex-row">
-                  <Input value={redirectUri} readOnly className="bg-white text-sm" />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleCopy(redirectUri, 'Copied redirect URI.')}
-                  >
-                    <Copy className="mr-2 size-3.5" />
-                    {copied ? 'Copied' : 'Copy URI'}
-                  </Button>
-                </div>
-              ) : null}
             </div>
           </div>
         </div>
@@ -327,8 +477,7 @@ export default function GoogleSheetsPanel() {
               </span>
               {status.token_expiry && (
                 <span className="ml-2 text-xs text-emerald-600">
-                  Token expires{' '}
-                  {new Date(status.token_expiry).toLocaleDateString()}
+                  Token expires {new Date(status.token_expiry).toLocaleDateString()}
                 </span>
               )}
             </div>
@@ -339,7 +488,9 @@ export default function GoogleSheetsPanel() {
             <span className="text-sm text-gray-600">
               {configured
                 ? 'Not connected. Log in once to create the user personal sheet.'
-                : 'Waiting for Google app credentials.'}
+                : isAdmin
+                  ? 'Save the Google OAuth app settings above to enable user connections.'
+                  : 'Waiting for an admin to finish Google app setup.'}
             </span>
           </>
         )}

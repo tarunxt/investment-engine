@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -8,52 +9,78 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 from app.core.config import settings
+from app.core.logging import get_logger
+from app.domains.google_sheets.crypto import decrypt_token
+from app.domains.google_sheets.repository import GoogleSheetsAppConfigSyncRepository
+from app.infrastructure.database.sync_session import SyncSessionLocal
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class GoogleSheetsOAuthConfig:
+    client_id: str | None
+    client_secret: str | None
+    redirect_uri: str
 
 
 class GoogleSheetsService:
+    def _get_oauth_config(self) -> GoogleSheetsOAuthConfig:
+        stored_client_id: str | None = None
+        stored_client_secret: str | None = None
+
+        try:
+            with SyncSessionLocal() as db:
+                config = GoogleSheetsAppConfigSyncRepository(db).get()
+                if config:
+                    stored_client_id = config.client_id.strip() or None
+                    stored_client_secret = decrypt_token(config.client_secret_enc)
+        except Exception:
+            logger.exception("Failed to load stored Google Sheets app config")
+
+        return GoogleSheetsOAuthConfig(
+            client_id=stored_client_id or settings.google_client_id,
+            client_secret=stored_client_secret or settings.google_client_secret,
+            redirect_uri=settings.google_redirect_uri,
+        )
+
     @property
     def is_configured(self) -> bool:
-        return bool(settings.google_client_id and settings.google_client_secret)
+        config = self._get_oauth_config()
+        return bool(config.client_id and config.client_secret)
 
-    def get_auth_url(self) -> str:
-        if not self.is_configured:
+    def _client_config(self, config: GoogleSheetsOAuthConfig) -> dict[str, Any]:
+        if not (config.client_id and config.client_secret):
             raise ValueError("Google Sheets is not configured")
 
+        return {
+            "web": {
+                "client_id": config.client_id,
+                "client_secret": config.client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [config.redirect_uri],
+            }
+        }
+
+    def get_auth_url(self) -> str:
+        config = self._get_oauth_config()
         flow = Flow.from_client_config(
-            {
-                "web": {
-                    "client_id": settings.google_client_id,
-                    "client_secret": settings.google_client_secret,
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [settings.google_redirect_uri],
-                }
-            },
+            self._client_config(config),
             scopes=SCOPES,
         )
-        flow.redirect_uri = settings.google_redirect_uri
+        flow.redirect_uri = config.redirect_uri
         auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
         return auth_url
 
     def exchange_code(self, code: str) -> dict[str, Any]:
-        if not self.is_configured:
-            raise ValueError("Google Sheets is not configured")
-
+        config = self._get_oauth_config()
         flow = Flow.from_client_config(
-            {
-                "web": {
-                    "client_id": settings.google_client_id,
-                    "client_secret": settings.google_client_secret,
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [settings.google_redirect_uri],
-                }
-            },
+            self._client_config(config),
             scopes=SCOPES,
         )
-        flow.redirect_uri = settings.google_redirect_uri
+        flow.redirect_uri = config.redirect_uri
         flow.fetch_token(code=code)
         creds = flow.credentials
         expiry = creds.expiry or datetime.now(tz=timezone.utc) + timedelta(hours=1)
@@ -65,23 +92,31 @@ class GoogleSheetsService:
         }
 
     def _build_service(self, access_token: str, refresh_token: str | None):
+        config = self._get_oauth_config()
+        if not (config.client_id and config.client_secret):
+            raise ValueError("Google Sheets is not configured")
+
         creds = Credentials(
             token=access_token,
             refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
-            client_id=settings.google_client_id,
-            client_secret=settings.google_client_secret,
+            client_id=config.client_id,
+            client_secret=config.client_secret,
             scopes=SCOPES,
         )
         return build("sheets", "v4", credentials=creds)
 
     def refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
+        config = self._get_oauth_config()
+        if not (config.client_id and config.client_secret):
+            raise ValueError("Google Sheets is not configured")
+
         creds = Credentials(
             token=None,
             refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
-            client_id=settings.google_client_id,
-            client_secret=settings.google_client_secret,
+            client_id=config.client_id,
+            client_secret=config.client_secret,
             scopes=SCOPES,
         )
         creds.refresh(Request())
