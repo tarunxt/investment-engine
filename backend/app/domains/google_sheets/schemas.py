@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class GoogleSheetsAuthUrlResponse(BaseModel):
     auth_url: str
     configured: bool
+    redirect_uri: Optional[str] = None
 
 
 class GoogleSheetsStatusResponse(BaseModel):

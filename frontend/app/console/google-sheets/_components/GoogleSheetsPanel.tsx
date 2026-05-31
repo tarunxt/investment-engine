@@ -22,6 +22,7 @@ function normalizeError(err: unknown) {
 export default function GoogleSheetsPanel() {
   const [status, setStatus] = useState<GoogleSheetsStatusResponse | null>(null);
   const [authUrl, setAuthUrl] = useState('');
+  const [redirectUri, setRedirectUri] = useState('');
   const [configured, setConfigured] = useState(true);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -37,6 +38,7 @@ export default function GoogleSheetsPanel() {
       setStatus(s);
       setAuthUrl(urlRes.auth_url);
       setConfigured(urlRes.configured);
+      setRedirectUri(urlRes.redirect_uri ?? '');
     } catch (err) {
       setError(normalizeError(err));
     } finally {
@@ -139,12 +141,23 @@ export default function GoogleSheetsPanel() {
       {!configured && (
         <div className="flex items-start gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            Google Sheets is not configured. Add{' '}
-            <code className="font-mono text-xs">GOOGLE_CLIENT_ID</code> and{' '}
-            <code className="font-mono text-xs">GOOGLE_CLIENT_SECRET</code> to your
-            backend <code className="font-mono text-xs">.env</code> file.
-          </span>
+          <div className="space-y-2">
+            <p className="font-medium text-amber-900">
+              Google Sheets setup is waiting on the client&apos;s Google OAuth app keys.
+            </p>
+            <p>
+              Ask the client to share their{' '}
+              <code className="font-mono text-xs">GOOGLE_CLIENT_ID</code> and{' '}
+              <code className="font-mono text-xs">GOOGLE_CLIENT_SECRET</code>, then
+              add them to the backend environment before users try to connect.
+            </p>
+            {redirectUri ? (
+              <p>
+                Redirect URI to whitelist in Google Cloud:{' '}
+                <code className="font-mono text-xs">{redirectUri}</code>
+              </p>
+            ) : null}
+          </div>
         </div>
       )}
 
@@ -185,7 +198,9 @@ export default function GoogleSheetsPanel() {
           <>
             <LogOut className="size-4 text-gray-400" />
             <span className="text-sm text-gray-600">
-              Not connected — log in below to get started.
+              {configured
+                ? 'Not connected — log in below to get started.'
+                : 'Setup required — add the client Google OAuth keys first, then users can sign in here.'}
             </span>
           </>
         )}

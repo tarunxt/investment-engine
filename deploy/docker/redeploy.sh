@@ -18,6 +18,54 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
+looks_like_placeholder_url() {
+  local value="${1:-}"
+  [[ -n "$value" ]] && [[ "$value" == *"yourdomain.com"* || "$value" == *"example.com"* ]]
+}
+
+validate_required_env_var() {
+  local name="$1"
+  local value="${!name:-}"
+
+  if [[ -z "$value" ]]; then
+    echo "Required environment variable missing: $name" >&2
+    exit 1
+  fi
+}
+
+validate_prod_env_file() {
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+
+  validate_required_env_var "DATABASE_URL"
+  validate_required_env_var "REDIS_URL"
+  validate_required_env_var "FRONTEND_URL"
+  if looks_like_placeholder_url "${FRONTEND_URL:-}"; then
+    echo "Production env still contains a placeholder public URL: $FRONTEND_URL" >&2
+    exit 1
+  fi
+
+  if [[ "$SCOPE" == "full" ]]; then
+    validate_required_env_var "NEXTAUTH_URL"
+    validate_required_env_var "NEXTAUTH_SECRET"
+
+    for value in \
+      "${NEXTAUTH_URL:-}" \
+      "${NEXT_PUBLIC_FRONTEND_URL:-}" \
+      "${NEXT_PUBLIC_API_URL:-}"; do
+      if looks_like_placeholder_url "$value"; then
+        echo "Production env still contains a placeholder public URL: $value" >&2
+        exit 1
+      fi
+    done
+
+    echo "==> Frontend URL: ${NEXT_PUBLIC_FRONTEND_URL:-$NEXTAUTH_URL}"
+    echo "==> Frontend API URL: ${NEXT_PUBLIC_API_URL:-<runtime inferred from browser host>}"
+  fi
+}
+
 case "$SCOPE" in
   backend|full)
     ;;
@@ -33,6 +81,8 @@ compose() {
 
 echo "==> Deploy scope: $SCOPE"
 echo "==> App root: $APP_ROOT"
+
+validate_prod_env_file
 
 cd "$APP_ROOT"
 

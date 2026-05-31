@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.config import settings
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.google_sheets.crypto import decrypt_token, encrypt_token
@@ -41,7 +42,9 @@ async def get_auth_url(current_user: User = Depends(get_current_user)):
     try:
         auth_url = _svc.get_auth_url() if _svc.is_configured else ""
         return GoogleSheetsAuthUrlResponse(
-            auth_url=auth_url, configured=_svc.is_configured
+            auth_url=auth_url,
+            configured=_svc.is_configured,
+            redirect_uri=settings.google_redirect_uri,
         )
     except Exception as e:
         logger.error("Failed to generate Google Sheets auth URL: %s", str(e))

@@ -760,6 +760,7 @@ export interface ZerodhaThreatRunResponse {
 export interface GoogleSheetsAuthUrlResponse {
   auth_url: string;
   configured: boolean;
+  redirect_uri?: string | null;
 }
 
 export interface GoogleSheetsStatusResponse {

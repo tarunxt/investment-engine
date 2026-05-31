@@ -23,6 +23,65 @@ if [[ ! -d "$APP_ROOT" ]]; then
   exit 1
 fi
 
+looks_like_placeholder_url() {
+  local value="${1:-}"
+  [[ -n "$value" ]] && [[ "$value" == *"yourdomain.com"* || "$value" == *"example.com"* ]]
+}
+
+validate_required_env_var() {
+  local name="$1"
+  local value="${!name:-}"
+
+  if [[ -z "$value" ]]; then
+    echo "Required environment variable missing: $name" >&2
+    exit 1
+  fi
+}
+
+validate_frontend_env_file() {
+  set -a
+  # shellcheck disable=SC1090
+  source "$FRONTEND_ENV_FILE"
+  set +a
+
+  validate_required_env_var "NEXTAUTH_URL"
+  validate_required_env_var "NEXTAUTH_SECRET"
+
+  if looks_like_placeholder_url "${NEXTAUTH_URL:-}"; then
+    echo "NEXTAUTH_URL still uses a placeholder domain: $NEXTAUTH_URL" >&2
+    exit 1
+  fi
+
+  if [[ -n "${NEXT_PUBLIC_FRONTEND_URL:-}" ]] && looks_like_placeholder_url "${NEXT_PUBLIC_FRONTEND_URL:-}"; then
+    echo "NEXT_PUBLIC_FRONTEND_URL still uses a placeholder domain: $NEXT_PUBLIC_FRONTEND_URL" >&2
+    exit 1
+  fi
+
+  if [[ -n "${NEXT_PUBLIC_API_URL:-}" ]] && looks_like_placeholder_url "${NEXT_PUBLIC_API_URL:-}"; then
+    echo "NEXT_PUBLIC_API_URL still uses a placeholder domain: $NEXT_PUBLIC_API_URL" >&2
+    exit 1
+  fi
+
+  echo "==> Frontend URL: ${NEXT_PUBLIC_FRONTEND_URL:-$NEXTAUTH_URL}"
+  echo "==> Frontend API URL: ${NEXT_PUBLIC_API_URL:-<runtime inferred from browser host>}"
+}
+
+validate_backend_env_file() {
+  set -a
+  # shellcheck disable=SC1090
+  source "$BACKEND_ENV_FILE"
+  set +a
+
+  validate_required_env_var "DATABASE_URL"
+  validate_required_env_var "REDIS_URL"
+  validate_required_env_var "FRONTEND_URL"
+
+  if looks_like_placeholder_url "${FRONTEND_URL:-}"; then
+    echo "FRONTEND_URL still uses a placeholder domain: $FRONTEND_URL" >&2
+    exit 1
+  fi
+}
+
 run_as_app_user() {
   sudo -u "$APP_USER" -H bash -lc "$1"
 }
@@ -30,6 +89,11 @@ run_as_app_user() {
 echo "==> Deploy scope: $SCOPE"
 echo "==> App root: $APP_ROOT"
 echo "==> App user: $APP_USER"
+
+validate_backend_env_file
+if [[ "$SCOPE" == "full" ]]; then
+  validate_frontend_env_file
+fi
 
 if [[ "$SKIP_GIT_SYNC" != "true" ]]; then
   echo "==> Pull latest code"

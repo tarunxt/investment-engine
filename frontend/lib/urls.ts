@@ -8,9 +8,57 @@ import { sessionStorage } from '@/services/session';
 const LOCAL_API_FALLBACK = "http://localhost:8000";
 const LOCAL_FRONTEND_FALLBACK = "http://localhost:3000";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
+const PLACEHOLDER_HOST_SNIPPETS = ["yourdomain.com", "example.com"];
 
 function trimTrailingSlash(url: string) {
   return url.replace(/\/+$/, "");
+}
+
+function parseConfiguredUrl(url: string | undefined | null) {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    return new URL(url);
+  } catch {
+    return null;
+  }
+}
+
+function isPlaceholderHostname(hostname: string) {
+  return PLACEHOLDER_HOST_SNIPPETS.some(snippet => hostname.includes(snippet));
+}
+
+function getBrowserHostname() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.location.hostname;
+}
+
+function resolveConfiguredBrowserUrl(url: string | undefined | null) {
+  const parsed = parseConfiguredUrl(url);
+  if (!parsed) {
+    return null;
+  }
+
+  if (isPlaceholderHostname(parsed.hostname)) {
+    return null;
+  }
+
+  const browserHostname = getBrowserHostname();
+  if (!browserHostname) {
+    return trimTrailingSlash(parsed.toString());
+  }
+
+  const browserIsLocal = LOCAL_HOSTNAMES.has(browserHostname);
+  if (!browserIsLocal && LOCAL_HOSTNAMES.has(parsed.hostname)) {
+    return null;
+  }
+
+  return trimTrailingSlash(parsed.toString());
 }
 
 function inferBrowserFrontendBaseUrl() {
@@ -36,9 +84,9 @@ function inferBrowserApiBaseUrl() {
 }
 
 function resolveApiBaseUrl() {
-  const configuredClientUrl = process.env.NEXT_PUBLIC_API_URL;
+  const configuredClientUrl = resolveConfiguredBrowserUrl(process.env.NEXT_PUBLIC_API_URL);
   if (configuredClientUrl) {
-    return trimTrailingSlash(configuredClientUrl);
+    return configuredClientUrl;
   }
 
   if (typeof window === "undefined") {
@@ -49,12 +97,13 @@ function resolveApiBaseUrl() {
 }
 
 function resolveFrontendBaseUrl() {
-  const configuredFrontendUrl =
+  const configuredFrontendUrl = resolveConfiguredBrowserUrl(
     process.env.NEXT_PUBLIC_FRONTEND_URL ||
-    process.env.NEXTAUTH_URL;
+      process.env.NEXTAUTH_URL,
+  );
 
   if (configuredFrontendUrl) {
-    return trimTrailingSlash(configuredFrontendUrl);
+    return configuredFrontendUrl;
   }
 
   return inferBrowserFrontendBaseUrl() || LOCAL_FRONTEND_FALLBACK;
