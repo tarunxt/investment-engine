@@ -99,6 +99,37 @@ class GoogleSheetsService:
             return match.group(1)
         return url_or_id.strip()
 
+    @staticmethod
+    def build_spreadsheet_url(
+        spreadsheet_id: str, sheet_gid: int | None = None
+    ) -> str:
+        base_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
+        if sheet_gid is None:
+            return base_url
+        return f"{base_url}#gid={sheet_gid}"
+
+    def get_spreadsheet(
+        self,
+        access_token: str,
+        refresh_token: str | None,
+        url_or_id: str,
+    ) -> dict[str, Any]:
+        spreadsheet_id = self.extract_spreadsheet_id(url_or_id)
+        service = self._build_service(access_token, refresh_token)
+        metadata = (
+            service.spreadsheets()
+            .get(
+                spreadsheetId=spreadsheet_id,
+                fields="spreadsheetId,properties(title)",
+            )
+            .execute()
+        )
+        return {
+            "spreadsheet_id": metadata["spreadsheetId"],
+            "title": metadata.get("properties", {}).get("title"),
+            "spreadsheet_url": self.build_spreadsheet_url(metadata["spreadsheetId"]),
+        }
+
     def read_sheet(
         self,
         access_token: str,

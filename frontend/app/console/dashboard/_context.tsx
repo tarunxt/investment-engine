@@ -22,8 +22,7 @@ export const PROMPT_WARN_CHARS = 9000;
 export const INDIA_TIMEZONE = 'Asia/Kolkata';
 const RUN_PROMPT_PREVIEW_CHARS = 280;
 export const DEFAULT_TEMPLATE_NAME = 'India Swing-Trade Research';
-export const DEFAULT_EXPORT_SPREADSHEET_URL =
-  'https://docs.google.com/spreadsheets/d/1aVPXUl5h8aSZcmOwKHvnuJqyCHqanmnrcmFOijcWYp4/edit?gid=0#gid=0';
+export const DEFAULT_EXPORT_SPREADSHEET_URL = '';
 
 export const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
@@ -278,9 +277,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
 
     if (sheetsStatusRes.status === 'fulfilled') {
-      setGoogleSheetsConnected(Boolean(sheetsStatusRes.value.connected));
+      const sheetsStatus = sheetsStatusRes.value;
+      const connected = Boolean(sheetsStatus.connected);
+      setGoogleSheetsConnected(connected);
+      setExportSpreadsheetUrl(connected ? (sheetsStatus.default_spreadsheet_url ?? '') : '');
     } else {
       setGoogleSheetsConnected(false);
+      setExportSpreadsheetUrl('');
     }
 
     setIsLoading(false);
@@ -488,6 +491,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setSubmitError('Connect Google Sheets first, then run with auto-export enabled.');
         return;
       }
+      if (autoExportEnabled && !exportSpreadsheetUrl.trim()) {
+        setSubmitError('Set your personal Google Sheet first from Google Sheets settings.');
+        return;
+      }
       setSubmitting(true);
       setSubmitError(null);
       try {
@@ -512,7 +519,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           allow_parallel: allowParallel,
           auto_export_enabled: autoExportEnabled,
           export_spreadsheet_url:
-            autoExportEnabled ? (exportSpreadsheetUrl.trim() || DEFAULT_EXPORT_SPREADSHEET_URL) : undefined,
+            autoExportEnabled ? (exportSpreadsheetUrl.trim() || undefined) : undefined,
           export_investment_amount: autoExportEnabled ? exportInvestmentAmount || undefined : undefined,
           export_title: autoExportEnabled ? exportTitle || undefined : undefined,
         });
@@ -570,8 +577,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
     if (submitError.includes('Connect Google Sheets first') && googleSheetsConnected) {
       setSubmitError(null);
+      return;
     }
-  }, [submitError, prompt, selectedTargets, googleSheetsConnected]);
+    if (submitError.includes('Set your personal Google Sheet first') && exportSpreadsheetUrl.trim()) {
+      setSubmitError(null);
+    }
+  }, [submitError, prompt, selectedTargets, googleSheetsConnected, exportSpreadsheetUrl]);
 
   return (
     <DashboardContext.Provider

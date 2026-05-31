@@ -5,6 +5,8 @@ import { signOut } from "next-auth/react";
 import {
   ApiUsageSummaryResponse,
   GoogleSheetsAuthUrlResponse,
+  GoogleSheetsDefaultSheetRequest,
+  GoogleSheetsDefaultSheetResponse,
   GoogleSheetsExportJobRequest,
   GoogleSheetsExportResponse,
   GoogleSheetsExportRunRequest,
@@ -787,6 +789,15 @@ class apiServiceClass implements IApiService {
 
   googleSheetsDisconnect(): Promise<{ message: string }> {
     return this.delete<{ message: string }>(URLs.googleSheets.disconnect());
+  }
+
+  googleSheetsSaveDefaultSheet(
+    data: GoogleSheetsDefaultSheetRequest,
+  ): Promise<GoogleSheetsDefaultSheetResponse> {
+    return this.put<GoogleSheetsDefaultSheetResponse>(
+      URLs.googleSheets.defaultSheet(),
+      data,
+    );
   }
 
   googleSheetsExportJob(data: GoogleSheetsExportJobRequest): Promise<GoogleSheetsExportResponse> {

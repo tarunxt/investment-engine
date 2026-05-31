@@ -766,6 +766,17 @@ export interface GoogleSheetsAuthUrlResponse {
 export interface GoogleSheetsStatusResponse {
   connected: boolean;
   token_expiry: string | null;
+  default_spreadsheet_url?: string | null;
+}
+
+export interface GoogleSheetsDefaultSheetRequest {
+  spreadsheet_url?: string | null;
+  title?: string | null;
+}
+
+export interface GoogleSheetsDefaultSheetResponse {
+  spreadsheet_url: string;
+  created_new: boolean;
 }
 
 export interface GoogleSheetsExportJobRequest {

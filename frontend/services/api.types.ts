@@ -4,6 +4,14 @@ import {
     UserResponse,
     JobResponse,
     JobCreate,
+    GoogleSheetsAuthUrlResponse,
+    GoogleSheetsDefaultSheetRequest,
+    GoogleSheetsDefaultSheetResponse,
+    GoogleSheetsExportJobRequest,
+    GoogleSheetsExportResponse,
+    GoogleSheetsExportRunRequest,
+    GoogleSheetsImportRequest,
+    GoogleSheetsStatusResponse,
     UpdateProfileRequest,
     UpdatePasswordRequest,
     HTTPValidationError,
@@ -78,6 +86,16 @@ export interface IApiService {
 
     // Provider endpoints
     getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]>;
+
+    // Google Sheets endpoints
+    googleSheetsAuthUrl(): Promise<GoogleSheetsAuthUrlResponse>;
+    googleSheetsExchangeCode(code: string): Promise<{ status: string; message: string }>;
+    googleSheetsStatus(): Promise<GoogleSheetsStatusResponse>;
+    googleSheetsDisconnect(): Promise<{ message: string }>;
+    googleSheetsSaveDefaultSheet(data: GoogleSheetsDefaultSheetRequest): Promise<GoogleSheetsDefaultSheetResponse>;
+    googleSheetsExportJob(data: GoogleSheetsExportJobRequest): Promise<GoogleSheetsExportResponse>;
+    googleSheetsExportRun(data: GoogleSheetsExportRunRequest): Promise<GoogleSheetsExportResponse>;
+    googleSheetsImport(data: GoogleSheetsImportRequest): Promise<GoogleSheetsExportResponse>;
 
     // Prompt endpoints
     getPrompts(params?: { q?: string }, signal?: AbortSignal): Promise<PromptResponse[]>;

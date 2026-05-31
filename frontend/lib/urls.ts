@@ -240,6 +240,7 @@ export const URLs = {
     exchangeCode: () => `${resolveApiBaseUrl()}/google-sheets/exchange-code`,
     status: () => `${resolveApiBaseUrl()}/google-sheets/status`,
     disconnect: () => `${resolveApiBaseUrl()}/google-sheets/disconnect`,
+    defaultSheet: () => `${resolveApiBaseUrl()}/google-sheets/default-sheet`,
     exportJob: () => `${resolveApiBaseUrl()}/google-sheets/export/job`,
     exportRun: () => `${resolveApiBaseUrl()}/google-sheets/export/run`,
     import: () => `${resolveApiBaseUrl()}/google-sheets/import`,

@@ -13,6 +13,17 @@ class GoogleSheetsAuthUrlResponse(BaseModel):
 class GoogleSheetsStatusResponse(BaseModel):
     connected: bool
     token_expiry: Optional[datetime] = None
+    default_spreadsheet_url: Optional[str] = None
+
+
+class GoogleSheetsDefaultSheetRequest(BaseModel):
+    spreadsheet_url: Optional[str] = None
+    title: Optional[str] = None
+
+
+class GoogleSheetsDefaultSheetResponse(BaseModel):
+    spreadsheet_url: str
+    created_new: bool = False
 
 
 class GoogleSheetsExportJobRequest(BaseModel):

@@ -1,19 +1,21 @@
-import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.config import settings
 from app.domains.auth.dependencies import get_current_user
-from app.domains.auth.models import User
+from app.domains.auth.models import User, UserProfile
 from app.domains.google_sheets.crypto import decrypt_token, encrypt_token
 from app.domains.google_sheets.models import GoogleSheetsCredential
 from app.domains.google_sheets.repository import GoogleSheetsCredentialRepository
 from app.domains.google_sheets.schemas import (
     GoogleSheetsAuthUrlResponse,
+    GoogleSheetsDefaultSheetRequest,
+    GoogleSheetsDefaultSheetResponse,
     GoogleSheetsExportJobRequest,
     GoogleSheetsExportResponse,
     GoogleSheetsExportRunRequest,
@@ -37,10 +39,76 @@ class ExchangeCodeRequest(BaseModel):
     code: str
 
 
+def _default_sheet_title(user: User) -> str:
+    display_name = (
+        (user.full_name or "").strip()
+        or user.username.strip()
+        or user.email.split("@", 1)[0].strip()
+    )
+    return f"{display_name} - Investor Engine"
+
+
+def _get_or_create_profile(current_user: User, db: AsyncSession) -> UserProfile:
+    if current_user.profile is not None:
+        return current_user.profile
+
+    profile = UserProfile(user_id=current_user.id)
+    current_user.profile = profile
+    db.add(profile)
+    return profile
+
+
+def _get_sheet_tokens(cred: GoogleSheetsCredential) -> tuple[str, str | None]:
+    access_token = decrypt_token(cred.access_token_enc)
+    refresh_token = (
+        decrypt_token(cred.refresh_token_enc) if cred.refresh_token_enc else None
+    )
+    return access_token, refresh_token
+
+
+async def _save_default_sheet_url(
+    db: AsyncSession,
+    current_user: User,
+    *,
+    access_token: str,
+    refresh_token: str | None,
+    spreadsheet_url: str | None = None,
+    title: str | None = None,
+) -> tuple[str, bool]:
+    profile = _get_or_create_profile(current_user, db)
+    cleaned_url = spreadsheet_url.strip() if spreadsheet_url else None
+
+    if cleaned_url:
+        spreadsheet = await run_in_threadpool(
+            _svc.get_spreadsheet,
+            access_token,
+            refresh_token,
+            cleaned_url,
+        )
+        canonical_url = spreadsheet["spreadsheet_url"]
+        created_new = False
+    else:
+        spreadsheet_id = await run_in_threadpool(
+            _svc.create_spreadsheet,
+            access_token,
+            refresh_token,
+            title or _default_sheet_title(current_user),
+        )
+        canonical_url = _svc.build_spreadsheet_url(spreadsheet_id)
+        created_new = True
+
+    profile.google_sheets_master_url = canonical_url
+    db.add(profile)
+    await db.flush()
+    return canonical_url, created_new
+
+
 @router.get("/auth-url", response_model=GoogleSheetsAuthUrlResponse)
 async def get_auth_url(current_user: User = Depends(get_current_user)):
     try:
-        auth_url = _svc.get_auth_url() if _svc.is_configured else ""
+        auth_url = (
+            await run_in_threadpool(_svc.get_auth_url) if _svc.is_configured else ""
+        )
         return GoogleSheetsAuthUrlResponse(
             auth_url=auth_url,
             configured=_svc.is_configured,
@@ -62,7 +130,7 @@ async def exchange_code(
         raise HTTPException(503, detail="Google Sheets is not configured")
 
     try:
-        token_data = _svc.exchange_code(body.code)
+        token_data = await run_in_threadpool(_svc.exchange_code, body.code)
 
         access_token_enc = encrypt_token(token_data["access_token"])
         refresh_token_enc = (
@@ -78,12 +146,33 @@ async def exchange_code(
             refresh_token_enc,
             token_data["token_expiry"],
         )
+
+        default_spreadsheet_url = (
+            current_user.profile.google_sheets_master_url
+            if current_user.profile is not None
+            else None
+        )
+        if not default_spreadsheet_url:
+            try:
+                default_spreadsheet_url, _ = await _save_default_sheet_url(
+                    db,
+                    current_user,
+                    access_token=token_data["access_token"],
+                    refresh_token=token_data["refresh_token"],
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to create default Google Sheet for user %d",
+                    current_user.id,
+                )
+
         await db.commit()
 
         logger.info("Google Sheets connected for user %d", current_user.id)
         return {
             "status": "connected",
             "message": "Google Sheets connected successfully",
+            "default_spreadsheet_url": default_spreadsheet_url,
         }
 
     except Exception as e:
@@ -98,9 +187,17 @@ async def get_status(
 ):
     repo = GoogleSheetsCredentialRepository(db)
     cred = await repo.get_by_user(current_user.id)
+    default_spreadsheet_url = (
+        current_user.profile.google_sheets_master_url
+        if current_user.profile is not None
+        else None
+    )
 
     if not cred:
-        return GoogleSheetsStatusResponse(connected=False)
+        return GoogleSheetsStatusResponse(
+            connected=False,
+            default_spreadsheet_url=default_spreadsheet_url,
+        )
 
     if cred.token_expiry:
         # Ensure timezone-aware comparison
@@ -115,18 +212,44 @@ async def get_status(
                     else None
                 )
                 if not refresh_token:
-                    return GoogleSheetsStatusResponse(connected=False)
-                refreshed = _svc.refresh_access_token(refresh_token)
+                    return GoogleSheetsStatusResponse(
+                        connected=False,
+                        default_spreadsheet_url=default_spreadsheet_url,
+                    )
+                refreshed = await run_in_threadpool(
+                    _svc.refresh_access_token, refresh_token
+                )
                 cred.access_token_enc = encrypt_token(refreshed["access_token"])
                 cred.token_expiry = refreshed["token_expiry"]
                 await db.commit()
                 await db.refresh(cred)
             except Exception:
                 logger.exception("Google Sheets token refresh failed for user %d", current_user.id)
-                return GoogleSheetsStatusResponse(connected=False)
+                return GoogleSheetsStatusResponse(
+                    connected=False,
+                    default_spreadsheet_url=default_spreadsheet_url,
+                )
+
+    if not default_spreadsheet_url:
+        access_token, refresh_token = _get_sheet_tokens(cred)
+        try:
+            default_spreadsheet_url, _ = await _save_default_sheet_url(
+                db,
+                current_user,
+                access_token=access_token,
+                refresh_token=refresh_token,
+            )
+            await db.commit()
+        except Exception:
+            logger.exception(
+                "Failed to backfill default Google Sheet for user %d",
+                current_user.id,
+            )
 
     return GoogleSheetsStatusResponse(
-        connected=True, token_expiry=cred.token_expiry
+        connected=True,
+        token_expiry=cred.token_expiry,
+        default_spreadsheet_url=default_spreadsheet_url,
     )
 
 
@@ -141,6 +264,48 @@ async def disconnect(
 
     logger.info("Google Sheets disconnected for user %d", current_user.id)
     return {"message": "Disconnected from Google Sheets"}
+
+
+@router.put("/default-sheet", response_model=GoogleSheetsDefaultSheetResponse)
+async def save_default_sheet(
+    data: GoogleSheetsDefaultSheetRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    repo = GoogleSheetsCredentialRepository(db)
+    cred = await repo.get_by_user(current_user.id)
+
+    if not cred:
+        raise HTTPException(
+            401, detail="Google Sheets not connected. Please connect first."
+        )
+
+    access_token, refresh_token = _get_sheet_tokens(cred)
+
+    try:
+        default_spreadsheet_url, created_new = await _save_default_sheet_url(
+            db,
+            current_user,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            spreadsheet_url=data.spreadsheet_url,
+            title=data.title,
+        )
+        await db.commit()
+        logger.info(
+            "Updated default Google Sheet for user %d (created_new=%s)",
+            current_user.id,
+            created_new,
+        )
+        return GoogleSheetsDefaultSheetResponse(
+            spreadsheet_url=default_spreadsheet_url,
+            created_new=created_new,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to save default Google Sheet for user %d", current_user.id
+        )
+        raise HTTPException(400, detail="Failed to save Google Sheet URL")
 
 
 @router.post("/export/job", response_model=GoogleSheetsExportResponse)
@@ -175,6 +340,14 @@ async def export_job(
     return GoogleSheetsExportResponse(
         status="queued",
         message="Job export queued",
+        spreadsheet_url=(
+            data.spreadsheet_url
+            or (
+                current_user.profile.google_sheets_master_url
+                if current_user.profile is not None
+                else None
+            )
+        ),
         task_id=task.id,
     )
 
@@ -211,6 +384,14 @@ async def export_run(
     return GoogleSheetsExportResponse(
         status="queued",
         message="Run export queued",
+        spreadsheet_url=(
+            data.spreadsheet_url
+            or (
+                current_user.profile.google_sheets_master_url
+                if current_user.profile is not None
+                else None
+            )
+        ),
         task_id=task.id,
     )
 

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { DEFAULT_EXPORT_SPREADSHEET_URL, useDashboard } from '../_context';
+import { useDashboard } from '../_context';
 
 export function GoogleSheetsField() {
   const {
@@ -54,16 +54,26 @@ export function GoogleSheetsField() {
         <div className="mt-4 space-y-3 border-t border-gray-200 pt-4">
           <div>
             <Label className="text-xs font-semibold uppercase text-gray-600">
-              Linked Sheet
+              Personal Sheet
             </Label>
-            <a
-              href={exportSpreadsheetUrl || DEFAULT_EXPORT_SPREADSHEET_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 block truncate text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
-            >
-              {exportSpreadsheetUrl || DEFAULT_EXPORT_SPREADSHEET_URL}
-            </a>
+            {exportSpreadsheetUrl ? (
+              <a
+                href={exportSpreadsheetUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 block truncate text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
+              >
+                {exportSpreadsheetUrl}
+              </a>
+            ) : (
+              <p className="mt-1 text-sm text-amber-700">
+                No personal sheet linked yet. Set it from{' '}
+                <Link href="/console/google-sheets" className="text-indigo-600 hover:text-indigo-800 hover:underline">
+                  Google Sheets settings
+                </Link>
+                .
+              </p>
+            )}
           </div>
 
           <div>
@@ -74,7 +84,7 @@ export function GoogleSheetsField() {
               {exportSheetName}
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              Data will be exported to a day-wise tab in your master Google Sheet
+              Data will be exported to a day-wise tab in your personal Google Sheet
             </p>
           </div>
 

@@ -11,12 +11,12 @@ export default function GoogleSheetsPage() {
         <h2 className="text-base font-semibold text-gray-900 mb-4">About Google Sheets Integration</h2>
         <div className="prose prose-sm text-gray-600 space-y-3">
           <p>
-            Once connected, you can export your AI-generated investment analysis and ideas to Google Sheets for further analysis, sharing with team members, or archival.
+            Once connected, each user gets a personal Google Sheet that can receive AI-generated investment analysis, day-wise exports, and shared research tabs.
           </p>
           <ul className="list-disc list-inside space-y-1">
             <li>Export individual job results (single AI analysis)</li>
             <li>Export run results (multi-LLM comparison analysis)</li>
-            <li>Create new sheets or append to existing spreadsheets</li>
+            <li>Create a personal default sheet or link an existing spreadsheet</li>
             <li>Share results easily with your team</li>
           </ul>
           <p className="text-xs text-gray-500 mt-4">

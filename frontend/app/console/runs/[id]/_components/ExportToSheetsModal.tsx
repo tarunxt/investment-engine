@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { apiService, APIError } from '@/services/api';
@@ -29,12 +29,34 @@ export default function ExportToSheetsModal({
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [successUrl, setSuccessUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || sheetUrl.trim()) return;
+
+    let active = true;
+    apiService.googleSheetsStatus()
+      .then((res) => {
+        if (!active) return;
+        if (res.default_spreadsheet_url) {
+          setSheetUrl(res.default_spreadsheet_url);
+        }
+      })
+      .catch(() => {
+        // Keep the modal usable even if this prefill request fails.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isOpen, sheetUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setExporting(true);
     setError(null);
     setSuccess(null);
+    setSuccessUrl(null);
 
     try {
       const res = await apiService.googleSheetsExportRun({
@@ -45,7 +67,9 @@ export default function ExportToSheetsModal({
         investment_amount: investmentAmount,
       });
 
-      setSuccess(`Run queued for export. View it at: ${res.spreadsheet_url || 'your Google Sheets'}`);
+      const targetUrl = res.spreadsheet_url || sheetUrl || null;
+      setSuccess('Run queued for export to Google Sheets.');
+      setSuccessUrl(targetUrl);
       setSheetUrl('');
       setSheetName('Run Analysis');
       setTitle('Multi-LLM Analysis Export');
@@ -149,7 +173,19 @@ export default function ExportToSheetsModal({
           {success && (
             <div className="flex items-start gap-2 rounded bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-700">
               <CheckCircle2 className="mt-0.5 size-4 shrink-0 flex-none" />
-              <span>{success}</span>
+              <div className="space-y-1">
+                <div>{success}</div>
+                {successUrl ? (
+                  <a
+                    href={successUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-800 underline hover:text-emerald-900"
+                  >
+                    Open sheet
+                  </a>
+                ) : null}
+              </div>
             </div>
           )}
 
@@ -163,6 +199,7 @@ export default function ExportToSheetsModal({
                 setIsOpen(false);
                 setError(null);
                 setSuccess(null);
+                setSuccessUrl(null);
               }}
               disabled={exporting}
             >
