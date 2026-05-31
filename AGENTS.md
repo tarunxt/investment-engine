@@ -467,3 +467,27 @@ Priority order:
 5. Features
 
 Never sacrifice stability for speed.
+
+---
+
+# 26. DEFAULT RELEASE BEHAVIOR
+
+Unless the user explicitly says `local only`, `do not push`, `draft`, `no deploy`, or `review only`, the default expectation is:
+
+1. Complete the task end-to-end.
+2. Run relevant verification for the changed area.
+3. Commit the task changes.
+4. Push to `origin/main`.
+5. Trigger production deployment.
+6. Monitor deployment until it succeeds.
+7. Report the commit SHA, deployment result, and any live verification.
+
+Use `scripts/release-prod.sh` as the standard release path whenever possible.
+
+Release safety rules:
+
+- Commit and release the current task's files by default, not unrelated dirty files.
+- If unrelated local changes exist, stage only the files relevant to the current task unless the user explicitly says `ship all local changes`.
+- If deployment fails, inspect the failure, fix it, push again, and continue until production is healthy or a real external blocker is found.
+- If required production access, GitHub auth, secrets, or server env values are missing, surface the blocker clearly and specifically.
+- Do not perform destructive production actions or delete user data unless the user explicitly requests it.

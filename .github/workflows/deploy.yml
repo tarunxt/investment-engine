@@ -48,6 +48,7 @@ jobs:
               - '.env.prod.example'
               - '.github/workflows/deploy.yml'
               - 'deploy/no-docker/**'
+              - 'scripts/**'
 
   deploy-backend:
     name: Deploy backend
