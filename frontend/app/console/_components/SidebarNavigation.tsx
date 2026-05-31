@@ -137,6 +137,7 @@ const DEFAULT_NAVIGATION_ORDER = DEFAULT_NAVIGATION.map((item) => item.id);
 const DEFAULT_NAVIGATION_ID_SET = new Set(DEFAULT_NAVIGATION_ORDER);
 const PORTFOLIO_ROUTES = PORTFOLIO_CHILDREN.map((child) => child.href);
 const SIDEBAR_ORDER_UPDATED_EVENT = 'investor:sidebar-order-updated';
+const navigationOrderSnapshotCache = new Map<string, { raw: string | null; value: string[] }>();
 
 function isNavigationGroup(item: NavigationEntry): item is NavigationGroup {
     return 'children' in item;
@@ -182,22 +183,38 @@ function readNavigationOrder(storageKey: string) {
         return DEFAULT_NAVIGATION_ORDER;
     }
 
+    const raw = window.localStorage.getItem(storageKey);
+
     try {
-        const raw = window.localStorage.getItem(storageKey);
+        const cachedSnapshot = navigationOrderSnapshotCache.get(storageKey);
+
+        if (cachedSnapshot && cachedSnapshot.raw === raw) {
+            return cachedSnapshot.value;
+        }
 
         if (!raw) {
+            navigationOrderSnapshotCache.set(storageKey, {
+                raw,
+                value: DEFAULT_NAVIGATION_ORDER,
+            });
             return DEFAULT_NAVIGATION_ORDER;
         }
 
         const parsed = JSON.parse(raw);
 
         if (Array.isArray(parsed)) {
-            return reconcileNavigationOrder(parsed.filter((value): value is string => typeof value === 'string'));
+            const value = reconcileNavigationOrder(parsed.filter((entry): entry is string => typeof entry === 'string'));
+            navigationOrderSnapshotCache.set(storageKey, { raw, value });
+            return value;
         }
     } catch (error) {
         console.warn('Failed to restore sidebar order:', error);
     }
 
+    navigationOrderSnapshotCache.set(storageKey, {
+        raw,
+        value: DEFAULT_NAVIGATION_ORDER,
+    });
     return DEFAULT_NAVIGATION_ORDER;
 }
 
@@ -235,7 +252,15 @@ function persistNavigationOrder(storageKey: string, order: string[]) {
     }
 
     const normalized = reconcileNavigationOrder(order);
-    window.localStorage.setItem(storageKey, JSON.stringify(normalized));
+    const raw = JSON.stringify(normalized);
+    const cachedSnapshot = navigationOrderSnapshotCache.get(storageKey);
+
+    if (cachedSnapshot && cachedSnapshot.raw === raw) {
+        return;
+    }
+
+    navigationOrderSnapshotCache.set(storageKey, { raw, value: normalized });
+    window.localStorage.setItem(storageKey, raw);
     window.dispatchEvent(new CustomEvent(SIDEBAR_ORDER_UPDATED_EVENT, { detail: storageKey }));
 }
 
