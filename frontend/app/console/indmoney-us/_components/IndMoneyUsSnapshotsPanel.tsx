@@ -3,9 +3,6 @@
 import {
   Activity,
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
   Database,
   Loader2,
   PiggyBank,
@@ -15,10 +12,13 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 
+import { SortableTableHeader } from '@/components/shared/SortableTableHeader';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
+import { sortItems, type SortState, toggleSortState } from '@/lib/tableSorting';
 import { cn } from '@/lib/utils';
 import type {
   IndMoneyUsHolding,
+  IndMoneyUsMarketIndex,
   IndMoneyUsPortfolioOverviewResponse,
   IndMoneyUsPortfolioSnapshotDetail,
   IndMoneyUsPortfolioSnapshotSummary,
@@ -137,108 +137,78 @@ const HOLDINGS_SORT_ACCESSORS: Record<
   },
 };
 
-function compareSortableValues(
-  left: number | string | null | undefined,
-  right: number | string | null | undefined,
-  type: 'number' | 'text',
-  direction: SortDirection,
-) {
-  if (left == null && right == null) return 0;
-  if (left == null) return 1;
-  if (right == null) return -1;
+type CompactHoldingsSortColumn =
+  | 'stock'
+  | 'portfolio_weight_percent'
+  | 'current_value'
+  | 'total_pnl'
+  | 'total_pnl_percent';
+type ReconciliationSortColumn = 'label' | 'summary_value' | 'parsed_value' | 'delta';
+type MarketIndexSortColumn = 'name' | 'value' | 'change_value' | 'change_percent';
 
-  const comparison =
-    type === 'number'
-      ? Number(left) - Number(right)
-      : String(left).localeCompare(String(right), undefined, {
-          numeric: true,
-          sensitivity: 'base',
-        });
+const COMPACT_HOLDINGS_SORT_ACCESSORS = {
+  stock: {
+    type: 'text',
+    getValue: (holding: IndMoneyUsHolding) => holding.company_name || holding.symbol,
+  },
+  portfolio_weight_percent: {
+    type: 'number',
+    getValue: (holding: IndMoneyUsHolding) => holding.portfolio_weight_percent,
+  },
+  current_value: {
+    type: 'number',
+    getValue: (holding: IndMoneyUsHolding) => holding.current_value,
+  },
+  total_pnl: {
+    type: 'number',
+    getValue: (holding: IndMoneyUsHolding) => holding.total_pnl,
+  },
+  total_pnl_percent: {
+    type: 'number',
+    getValue: (holding: IndMoneyUsHolding) => holding.total_pnl_percent,
+  },
+} satisfies Record<CompactHoldingsSortColumn, { type: 'number' | 'text'; getValue: (holding: IndMoneyUsHolding) => number | string | null | undefined }>;
 
-  return direction === 'asc' ? comparison : -comparison;
-}
+const RECONCILIATION_SORT_ACCESSORS = {
+  label: {
+    type: 'text',
+    getValue: (item: IndMoneyUsReconciliationItem) => item.label,
+  },
+  summary_value: {
+    type: 'number',
+    getValue: (item: IndMoneyUsReconciliationItem) => item.summary_value,
+  },
+  parsed_value: {
+    type: 'number',
+    getValue: (item: IndMoneyUsReconciliationItem) => item.parsed_value,
+  },
+  delta: {
+    type: 'number',
+    getValue: (item: IndMoneyUsReconciliationItem) => item.delta,
+  },
+} satisfies Record<ReconciliationSortColumn, { type: 'number' | 'text'; getValue: (item: IndMoneyUsReconciliationItem) => number | string | null | undefined }>;
 
-function toggleSortState<TColumn extends string>(
-  currentSort: { column: TColumn; direction: SortDirection } | null,
-  column: TColumn,
-) {
-  if (currentSort?.column !== column) {
-    return {
-      column,
-      direction: 'asc' as const,
-    };
-  }
-
-  if (currentSort.direction === 'asc') {
-    return {
-      column,
-      direction: 'desc' as const,
-    };
-  }
-
-  return null;
-}
+const MARKET_INDEX_SORT_ACCESSORS = {
+  name: {
+    type: 'text',
+    getValue: (index: IndMoneyUsMarketIndex) => index.name,
+  },
+  value: {
+    type: 'number',
+    getValue: (index: IndMoneyUsMarketIndex) => index.value,
+  },
+  change_value: {
+    type: 'number',
+    getValue: (index: IndMoneyUsMarketIndex) => index.change_value,
+  },
+  change_percent: {
+    type: 'number',
+    getValue: (index: IndMoneyUsMarketIndex) => index.change_percent,
+  },
+} satisfies Record<MarketIndexSortColumn, { type: 'number' | 'text'; getValue: (index: IndMoneyUsMarketIndex) => number | string | null | undefined }>;
 
 function sortIndMoneyHoldings(holdings: IndMoneyUsHolding[], sortState: IndMoneyHoldingsSortState) {
-  if (!sortState) {
-    return holdings;
-  }
-
-  const accessor = HOLDINGS_SORT_ACCESSORS[sortState.column];
-
-  return [...holdings].sort((left, right) => {
-    const primaryComparison = compareSortableValues(
-      accessor.getValue(left),
-      accessor.getValue(right),
-      accessor.type,
-      sortState.direction,
-    );
-
-    if (primaryComparison !== 0) {
-      return primaryComparison;
-    }
-
-    return left.symbol.localeCompare(right.symbol, undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    });
-  });
-}
-
-function SortableHeader({
-  label,
-  activeDirection,
-  onToggle,
-  className,
-}: {
-  label: string;
-  activeDirection: SortDirection | null;
-  onToggle: () => void;
-  className?: string;
-}) {
-  return (
-    <th
-      className={className}
-      aria-sort={
-        activeDirection === 'asc' ? 'ascending' : activeDirection === 'desc' ? 'descending' : 'none'
-      }
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        className="inline-flex items-center gap-1.5 whitespace-nowrap text-left transition-colors hover:text-gray-600"
-      >
-        <span>{label}</span>
-        {activeDirection === 'asc' ? (
-          <ArrowUp className="size-3.5 shrink-0" />
-        ) : activeDirection === 'desc' ? (
-          <ArrowDown className="size-3.5 shrink-0" />
-        ) : (
-          <ArrowUpDown className="size-3.5 shrink-0 opacity-70" />
-        )}
-      </button>
-    </th>
-  );
+  return sortItems(holdings, sortState, HOLDINGS_SORT_ACCESSORS, (holding) => holding.symbol);
 }
 
 function formatIndexNumber(value: number | null | undefined) {
@@ -370,6 +340,9 @@ function CompactHoldingsTable({
   title: string;
   holdings: IndMoneyUsHolding[];
 }) {
+  const [sortState, setSortState] = useState<SortState<CompactHoldingsSortColumn>>(null);
+  const sortedHoldings = sortItems(holdings, sortState, COMPACT_HOLDINGS_SORT_ACCESSORS, (holding) => holding.symbol);
+
   return (
     <div className="border border-gray-200 bg-white shadow-sm">
       <div className="border-b border-gray-200 px-5 py-4">
@@ -379,26 +352,55 @@ function CompactHoldingsTable({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-              <th className="pb-2 pr-4">Stock</th>
-              <th className="pb-2 pr-4">Weight</th>
-              <th className="pb-2 pr-4">Current</th>
-              <th className="pb-2 pr-4">P&amp;L</th>
-              <th className="pb-2">P&amp;L %</th>
+              <SortableTableHeader
+                label="Stock"
+                activeDirection={sortState?.column === 'stock' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'stock'))}
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="Weight"
+                activeDirection={sortState?.column === 'portfolio_weight_percent' ? sortState.direction : null}
+                onToggle={() =>
+                  setSortState((currentSort) => toggleSortState(currentSort, 'portfolio_weight_percent'))
+                }
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="Current"
+                activeDirection={sortState?.column === 'current_value' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'current_value'))}
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="P&L"
+                activeDirection={sortState?.column === 'total_pnl' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'total_pnl'))}
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="P&L %"
+                activeDirection={sortState?.column === 'total_pnl_percent' ? sortState.direction : null}
+                onToggle={() =>
+                  setSortState((currentSort) => toggleSortState(currentSort, 'total_pnl_percent'))
+                }
+                className="pb-2"
+              />
             </tr>
           </thead>
-	          <tbody className="divide-y divide-gray-50">
-	            {holdings.map((holding) => (
-	              <tr key={`${title}-${holding.symbol}`} className="hover:bg-gray-50">
-	                <td className="py-2.5 pr-4">
-	                  <TradingViewSymbolLink symbol={holding.symbol} market="us" className="group inline-flex flex-col">
-	                    <span className="font-medium text-gray-900 transition-colors group-hover:text-blue-700">
-	                      {holding.symbol}
-	                    </span>
-	                    <span className="text-xs text-gray-500 transition-colors group-hover:text-blue-600">
-	                      {holding.company_name}
-	                    </span>
-	                  </TradingViewSymbolLink>
-	                </td>
+          <tbody className="divide-y divide-gray-50">
+            {sortedHoldings.map((holding) => (
+              <tr key={`${title}-${holding.symbol}`} className="hover:bg-gray-50">
+                <td className="py-2.5 pr-4">
+                  <TradingViewSymbolLink symbol={holding.symbol} market="us" className="group inline-flex flex-col">
+                    <span className="font-medium text-gray-900 transition-colors group-hover:text-blue-700">
+                      {holding.symbol}
+                    </span>
+                    <span className="text-xs text-gray-500 transition-colors group-hover:text-blue-600">
+                      {holding.company_name}
+                    </span>
+                  </TradingViewSymbolLink>
+                </td>
                 <td className="py-2.5 pr-4 text-gray-700">{formatPercent(holding.portfolio_weight_percent)}</td>
                 <td className="py-2.5 pr-4 text-gray-700">{formatCurrency(holding.current_value)}</td>
                 <td className={cn('py-2.5 pr-4 font-medium', toneClass(holding.total_pnl))}>
@@ -420,6 +422,9 @@ function CompactHoldingsTable({
 }
 
 function ReconciliationTable({ items }: { items: IndMoneyUsReconciliationItem[] }) {
+  const [sortState, setSortState] = useState<SortState<ReconciliationSortColumn>>(null);
+  const sortedItems = sortItems(items, sortState, RECONCILIATION_SORT_ACCESSORS, (item) => item.label);
+
   return (
     <div className="border border-gray-200 bg-white shadow-sm">
       <div className="border-b border-gray-200 px-5 py-4">
@@ -429,14 +434,34 @@ function ReconciliationTable({ items }: { items: IndMoneyUsReconciliationItem[] 
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-              <th className="pb-2 pr-4">Metric</th>
-              <th className="pb-2 pr-4">Snapshot</th>
-              <th className="pb-2 pr-4">Parsed</th>
-              <th className="pb-2">Delta</th>
+              <SortableTableHeader
+                label="Metric"
+                activeDirection={sortState?.column === 'label' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'label'))}
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="Snapshot"
+                activeDirection={sortState?.column === 'summary_value' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'summary_value'))}
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="Parsed"
+                activeDirection={sortState?.column === 'parsed_value' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'parsed_value'))}
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="Delta"
+                activeDirection={sortState?.column === 'delta' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'delta'))}
+                className="pb-2"
+              />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
-            {items.map((item) => (
+            {sortedItems.map((item) => (
               <tr key={item.label} className="hover:bg-gray-50">
                 <td className="py-2.5 pr-4 font-medium text-gray-900">{item.label}</td>
                 <td className="py-2.5 pr-4 text-gray-700">
@@ -452,6 +477,70 @@ function ReconciliationTable({ items }: { items: IndMoneyUsReconciliationItem[] 
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function MarketIndicesTable({ indices }: { indices: IndMoneyUsMarketIndex[] }) {
+  const [sortState, setSortState] = useState<SortState<MarketIndexSortColumn>>(null);
+  const sortedIndices = sortItems(indices, sortState, MARKET_INDEX_SORT_ACCESSORS, (index) => index.name);
+
+  return (
+    <div className="border border-gray-200 bg-white shadow-sm">
+      <div className="border-b border-gray-200 px-5 py-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Market Indices</h3>
+      </div>
+      <div className="overflow-x-auto p-5">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
+              <SortableTableHeader
+                label="Index"
+                activeDirection={sortState?.column === 'name' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'name'))}
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="Value"
+                activeDirection={sortState?.column === 'value' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'value'))}
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="Change"
+                activeDirection={sortState?.column === 'change_value' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'change_value'))}
+                className="pb-2 pr-4"
+              />
+              <SortableTableHeader
+                label="Change %"
+                activeDirection={sortState?.column === 'change_percent' ? sortState.direction : null}
+                onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'change_percent'))}
+                className="pb-2"
+              />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {sortedIndices.map((index) => (
+              <tr key={index.name} className="hover:bg-gray-50">
+                <td className="py-2.5 pr-4 font-medium text-gray-900">{index.name}</td>
+                <td className="py-2.5 pr-4 text-gray-700">{formatIndexNumber(index.value)}</td>
+                <td className={cn('py-2.5 pr-4 font-medium', toneClass(index.change_value))}>
+                  {formatIndexNumber(index.change_value)}
+                </td>
+                <td className={cn('py-2.5 font-medium', toneClass(index.change_percent))}>
+                  {formatPercent(index.change_percent)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {indices.length === 0 ? (
+          <p className="py-8 text-center text-sm text-gray-400">
+            No market indices were detected in this pasted snapshot.
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -474,7 +563,7 @@ export function IndMoneyUsSnapshotsPanel({
   error: string | null;
   onSelectSnapshot: (snapshotId: number) => void;
 }) {
-  const [holdingsSort, setHoldingsSort] = useState<IndMoneyHoldingsSortState>(null);
+  const [holdingsSort, setHoldingsSort] = useState<SortState<IndMoneyHoldingsSortColumn>>(null);
 
   if (loading) {
     return (
@@ -616,61 +705,61 @@ export function IndMoneyUsSnapshotsPanel({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-                    <SortableHeader
+                    <SortableTableHeader
                       label="Stock"
                       activeDirection={holdingsSort?.column === 'stock' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'stock'))}
                       className="pb-2 pr-4"
                     />
-                    <SortableHeader
+                    <SortableTableHeader
                       label="Qty"
                       activeDirection={holdingsSort?.column === 'quantity' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'quantity'))}
                       className="pb-2 pr-4"
                     />
-                    <SortableHeader
+                    <SortableTableHeader
                       label="Avg"
                       activeDirection={holdingsSort?.column === 'average_price' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'average_price'))}
                       className="pb-2 pr-4"
                     />
-                    <SortableHeader
+                    <SortableTableHeader
                       label="Market"
                       activeDirection={holdingsSort?.column === 'market_price' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'market_price'))}
                       className="pb-2 pr-4"
                     />
-                    <SortableHeader
+                    <SortableTableHeader
                       label="Invested"
                       activeDirection={holdingsSort?.column === 'invested_value' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'invested_value'))}
                       className="pb-2 pr-4"
                     />
-                    <SortableHeader
+                    <SortableTableHeader
                       label="Current"
                       activeDirection={holdingsSort?.column === 'current_value' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'current_value'))}
                       className="pb-2 pr-4"
                     />
-                    <SortableHeader
+                    <SortableTableHeader
                       label="P&L"
                       activeDirection={holdingsSort?.column === 'total_pnl' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'total_pnl'))}
                       className="pb-2 pr-4"
                     />
-                    <SortableHeader
+                    <SortableTableHeader
                       label="P&L %"
                       activeDirection={holdingsSort?.column === 'total_pnl_percent' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'total_pnl_percent'))}
                       className="pb-2 pr-4"
                     />
-                    <SortableHeader
+                    <SortableTableHeader
                       label="Weight"
                       activeDirection={holdingsSort?.column === 'portfolio_weight_percent' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'portfolio_weight_percent'))}
                       className="pb-2 pr-4"
                     />
-                    <SortableHeader
+                    <SortableTableHeader
                       label="1D %"
                       activeDirection={holdingsSort?.column === 'market_change_percent' ? holdingsSort.direction : null}
                       onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'market_change_percent'))}
@@ -718,43 +807,7 @@ export function IndMoneyUsSnapshotsPanel({
 
           <div className="grid gap-5 xl:grid-cols-2">
             <ReconciliationTable items={selectedSnapshot.derived.reconciliation} />
-
-            <div className="border border-gray-200 bg-white shadow-sm">
-              <div className="border-b border-gray-200 px-5 py-4">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Market Indices</h3>
-              </div>
-              <div className="overflow-x-auto p-5">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-                      <th className="pb-2 pr-4">Index</th>
-                      <th className="pb-2 pr-4">Value</th>
-                      <th className="pb-2 pr-4">Change</th>
-                      <th className="pb-2">Change %</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {selectedSnapshot.market_indices.map((index) => (
-                      <tr key={index.name} className="hover:bg-gray-50">
-                        <td className="py-2.5 pr-4 font-medium text-gray-900">{index.name}</td>
-                        <td className="py-2.5 pr-4 text-gray-700">{formatIndexNumber(index.value)}</td>
-                        <td className={cn('py-2.5 pr-4 font-medium', toneClass(index.change_value))}>
-                          {formatIndexNumber(index.change_value)}
-                        </td>
-                        <td className={cn('py-2.5 font-medium', toneClass(index.change_percent))}>
-                          {formatPercent(index.change_percent)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {selectedSnapshot.market_indices.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-gray-400">
-                    No market indices were detected in this pasted snapshot.
-                  </p>
-                ) : null}
-              </div>
-            </div>
+            <MarketIndicesTable indices={selectedSnapshot.market_indices} />
           </div>
 
           <div className="grid gap-5 xl:grid-cols-3">

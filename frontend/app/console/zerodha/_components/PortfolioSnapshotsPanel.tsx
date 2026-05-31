@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   Activity,
   Briefcase,
@@ -11,10 +12,13 @@ import {
   Wallet,
 } from 'lucide-react';
 
+import { SortableTableHeader } from '@/components/shared/SortableTableHeader';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { Button } from '@/components/ui/button';
+import { sortItems, type SortState, toggleSortState } from '@/lib/tableSorting';
 import { cn } from '@/lib/utils';
 import {
+  type ZerodhaPortfolioHolding,
   type ZerodhaPortfolioOverviewResponse,
   type ZerodhaPortfolioPosition,
   type ZerodhaPortfolioSnapshotDetail,
@@ -53,6 +57,121 @@ function toneClass(value: number) {
   if (value < 0) return 'text-red-600';
   return 'text-gray-500';
 }
+
+type ZerodhaHoldingsSortColumn =
+  | 'holding'
+  | 'quantity'
+  | 'average_price'
+  | 'last_price'
+  | 'market_value'
+  | 'pnl'
+  | 'day_change_value';
+type ZerodhaNetPositionsSortColumn = 'symbol' | 'product' | 'quantity' | 'average_price' | 'last_price' | 'pnl' | 'm2m';
+type ZerodhaDayPositionsSortColumn =
+  | 'symbol'
+  | 'day_buy_quantity'
+  | 'day_sell_quantity'
+  | 'realised'
+  | 'unrealised'
+  | 'pnl';
+
+const ZERODHA_HOLDINGS_SORT_ACCESSORS = {
+  holding: {
+    type: 'text',
+    getValue: (holding: ZerodhaPortfolioHolding) => holding.tradingsymbol,
+  },
+  quantity: {
+    type: 'number',
+    getValue: (holding: ZerodhaPortfolioHolding) => holding.quantity,
+  },
+  average_price: {
+    type: 'number',
+    getValue: (holding: ZerodhaPortfolioHolding) => holding.average_price,
+  },
+  last_price: {
+    type: 'number',
+    getValue: (holding: ZerodhaPortfolioHolding) => holding.last_price,
+  },
+  market_value: {
+    type: 'number',
+    getValue: (holding: ZerodhaPortfolioHolding) => holding.market_value,
+  },
+  pnl: {
+    type: 'number',
+    getValue: (holding: ZerodhaPortfolioHolding) => holding.pnl,
+  },
+  day_change_value: {
+    type: 'number',
+    getValue: (holding: ZerodhaPortfolioHolding) => holding.day_change_value,
+  },
+} satisfies Record<
+  ZerodhaHoldingsSortColumn,
+  { type: 'number' | 'text'; getValue: (holding: ZerodhaPortfolioHolding) => number | string | null | undefined }
+>;
+
+const ZERODHA_NET_POSITIONS_SORT_ACCESSORS = {
+  symbol: {
+    type: 'text',
+    getValue: (position: ZerodhaPortfolioPosition) => position.tradingsymbol,
+  },
+  product: {
+    type: 'text',
+    getValue: (position: ZerodhaPortfolioPosition) => position.product,
+  },
+  quantity: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.quantity,
+  },
+  average_price: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.average_price,
+  },
+  last_price: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.last_price,
+  },
+  pnl: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.pnl,
+  },
+  m2m: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.m2m,
+  },
+} satisfies Record<
+  ZerodhaNetPositionsSortColumn,
+  { type: 'number' | 'text'; getValue: (position: ZerodhaPortfolioPosition) => number | string | null | undefined }
+>;
+
+const ZERODHA_DAY_POSITIONS_SORT_ACCESSORS = {
+  symbol: {
+    type: 'text',
+    getValue: (position: ZerodhaPortfolioPosition) => position.tradingsymbol,
+  },
+  day_buy_quantity: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.day_buy_quantity,
+  },
+  day_sell_quantity: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.day_sell_quantity,
+  },
+  realised: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.realised,
+  },
+  unrealised: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.unrealised,
+  },
+  pnl: {
+    type: 'number',
+    getValue: (position: ZerodhaPortfolioPosition) => position.pnl,
+  },
+} satisfies Record<
+  ZerodhaDayPositionsSortColumn,
+  { type: 'number' | 'text'; getValue: (position: ZerodhaPortfolioPosition) => number | string | null | undefined }
+>;
 
 function MetricCard({
   label,
@@ -228,6 +347,10 @@ export function PortfolioSnapshotsPanel({
   onSelectSnapshot: (snapshotDate: string) => void;
   onSync: () => void;
 }) {
+  const [holdingsSort, setHoldingsSort] = useState<SortState<ZerodhaHoldingsSortColumn>>(null);
+  const [netPositionsSort, setNetPositionsSort] = useState<SortState<ZerodhaNetPositionsSortColumn>>(null);
+  const [dayPositionsSort, setDayPositionsSort] = useState<SortState<ZerodhaDayPositionsSortColumn>>(null);
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 border border-gray-200 bg-white px-5 py-4 text-sm text-gray-500 shadow-sm">
@@ -246,6 +369,25 @@ export function PortfolioSnapshotsPanel({
   if (!selectedSnapshot) {
     return null;
   }
+
+  const sortedHoldings = sortItems(
+    selectedSnapshot.holdings,
+    holdingsSort,
+    ZERODHA_HOLDINGS_SORT_ACCESSORS,
+    (holding) => `${holding.exchange}:${holding.tradingsymbol}`,
+  );
+  const sortedNetPositions = sortItems(
+    selectedSnapshot.positions.net,
+    netPositionsSort,
+    ZERODHA_NET_POSITIONS_SORT_ACCESSORS,
+    (position) => `${position.exchange}:${position.tradingsymbol}`,
+  );
+  const sortedDayPositions = sortItems(
+    selectedSnapshot.positions.day,
+    dayPositionsSort,
+    ZERODHA_DAY_POSITIONS_SORT_ACCESSORS,
+    (position) => `${position.exchange}:${position.tradingsymbol}`,
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -336,29 +478,70 @@ export function PortfolioSnapshotsPanel({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-                      <th className="pb-2 pr-4">Holding</th>
-                      <th className="pb-2 pr-4">Qty</th>
-                      <th className="pb-2 pr-4">Avg</th>
-                      <th className="pb-2 pr-4">LTP</th>
-                      <th className="pb-2 pr-4">Value</th>
-                      <th className="pb-2 pr-4">P&amp;L</th>
-                      <th className="pb-2">Day</th>
+                      <SortableTableHeader
+                        label="Holding"
+                        activeDirection={holdingsSort?.column === 'holding' ? holdingsSort.direction : null}
+                        onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'holding'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Qty"
+                        activeDirection={holdingsSort?.column === 'quantity' ? holdingsSort.direction : null}
+                        onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'quantity'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Avg"
+                        activeDirection={holdingsSort?.column === 'average_price' ? holdingsSort.direction : null}
+                        onToggle={() =>
+                          setHoldingsSort((currentSort) => toggleSortState(currentSort, 'average_price'))
+                        }
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="LTP"
+                        activeDirection={holdingsSort?.column === 'last_price' ? holdingsSort.direction : null}
+                        onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'last_price'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Value"
+                        activeDirection={holdingsSort?.column === 'market_value' ? holdingsSort.direction : null}
+                        onToggle={() =>
+                          setHoldingsSort((currentSort) => toggleSortState(currentSort, 'market_value'))
+                        }
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="P&L"
+                        activeDirection={holdingsSort?.column === 'pnl' ? holdingsSort.direction : null}
+                        onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'pnl'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Day"
+                        activeDirection={holdingsSort?.column === 'day_change_value' ? holdingsSort.direction : null}
+                        onToggle={() =>
+                          setHoldingsSort((currentSort) => toggleSortState(currentSort, 'day_change_value'))
+                        }
+                        className="pb-2"
+                      />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-	                    {selectedSnapshot.holdings.map((holding) => (
-	                      <tr key={`${holding.exchange}:${holding.tradingsymbol}`} className="hover:bg-gray-50">
-	                        <td className="py-2.5 pr-4 font-medium text-gray-900">
-	                          <TradingViewSymbolLink
-	                            symbol={holding.tradingsymbol}
-	                            market="india"
-	                            exchange={holding.exchange}
-	                            className="hover:text-blue-700"
-	                          >
-	                            <span className="underline-offset-4 hover:underline">{holding.tradingsymbol}</span>
-	                          </TradingViewSymbolLink>
-	                          <span className="ml-1 text-xs text-gray-400">{holding.exchange}</span>
-	                        </td>
+                    {sortedHoldings.map((holding) => (
+                      <tr key={`${holding.exchange}:${holding.tradingsymbol}`} className="hover:bg-gray-50">
+                        <td className="py-2.5 pr-4 font-medium text-gray-900">
+                          <TradingViewSymbolLink
+                            symbol={holding.tradingsymbol}
+                            market="india"
+                            exchange={holding.exchange}
+                            className="hover:text-blue-700"
+                          >
+                            <span className="underline-offset-4 hover:underline">{holding.tradingsymbol}</span>
+                          </TradingViewSymbolLink>
+                          <span className="ml-1 text-xs text-gray-400">{holding.exchange}</span>
+                        </td>
                         <td className="py-2.5 pr-4 text-gray-700">{formatCount(holding.quantity)}</td>
                         <td className="py-2.5 pr-4 text-gray-700">{holding.average_price.toFixed(2)}</td>
                         <td className="py-2.5 pr-4 text-gray-700">{holding.last_price.toFixed(2)}</td>
@@ -389,17 +572,54 @@ export function PortfolioSnapshotsPanel({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-                      <th className="pb-2 pr-4">Symbol</th>
-                      <th className="pb-2 pr-4">Product</th>
-                      <th className="pb-2 pr-4">Qty</th>
-                      <th className="pb-2 pr-4">Avg</th>
-                      <th className="pb-2 pr-4">LTP</th>
-                      <th className="pb-2 pr-4">P&amp;L</th>
-                      <th className="pb-2">M2M</th>
+                      <SortableTableHeader
+                        label="Symbol"
+                        activeDirection={netPositionsSort?.column === 'symbol' ? netPositionsSort.direction : null}
+                        onToggle={() => setNetPositionsSort((currentSort) => toggleSortState(currentSort, 'symbol'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Product"
+                        activeDirection={netPositionsSort?.column === 'product' ? netPositionsSort.direction : null}
+                        onToggle={() => setNetPositionsSort((currentSort) => toggleSortState(currentSort, 'product'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Qty"
+                        activeDirection={netPositionsSort?.column === 'quantity' ? netPositionsSort.direction : null}
+                        onToggle={() => setNetPositionsSort((currentSort) => toggleSortState(currentSort, 'quantity'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Avg"
+                        activeDirection={netPositionsSort?.column === 'average_price' ? netPositionsSort.direction : null}
+                        onToggle={() =>
+                          setNetPositionsSort((currentSort) => toggleSortState(currentSort, 'average_price'))
+                        }
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="LTP"
+                        activeDirection={netPositionsSort?.column === 'last_price' ? netPositionsSort.direction : null}
+                        onToggle={() => setNetPositionsSort((currentSort) => toggleSortState(currentSort, 'last_price'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="P&L"
+                        activeDirection={netPositionsSort?.column === 'pnl' ? netPositionsSort.direction : null}
+                        onToggle={() => setNetPositionsSort((currentSort) => toggleSortState(currentSort, 'pnl'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="M2M"
+                        activeDirection={netPositionsSort?.column === 'm2m' ? netPositionsSort.direction : null}
+                        onToggle={() => setNetPositionsSort((currentSort) => toggleSortState(currentSort, 'm2m'))}
+                        className="pb-2"
+                      />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {selectedSnapshot.positions.net.map((position) => (
+                    {sortedNetPositions.map((position) => (
                       <PositionRow key={`${position.exchange}:${position.tradingsymbol}`} position={position} />
                     ))}
                   </tbody>
@@ -420,28 +640,64 @@ export function PortfolioSnapshotsPanel({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-                      <th className="pb-2 pr-4">Symbol</th>
-                      <th className="pb-2 pr-4">Buy Qty</th>
-                      <th className="pb-2 pr-4">Sell Qty</th>
-                      <th className="pb-2 pr-4">Realised</th>
-                      <th className="pb-2 pr-4">Unrealised</th>
-                      <th className="pb-2">P&amp;L</th>
+                      <SortableTableHeader
+                        label="Symbol"
+                        activeDirection={dayPositionsSort?.column === 'symbol' ? dayPositionsSort.direction : null}
+                        onToggle={() => setDayPositionsSort((currentSort) => toggleSortState(currentSort, 'symbol'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Buy Qty"
+                        activeDirection={dayPositionsSort?.column === 'day_buy_quantity' ? dayPositionsSort.direction : null}
+                        onToggle={() =>
+                          setDayPositionsSort((currentSort) => toggleSortState(currentSort, 'day_buy_quantity'))
+                        }
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Sell Qty"
+                        activeDirection={dayPositionsSort?.column === 'day_sell_quantity' ? dayPositionsSort.direction : null}
+                        onToggle={() =>
+                          setDayPositionsSort((currentSort) => toggleSortState(currentSort, 'day_sell_quantity'))
+                        }
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Realised"
+                        activeDirection={dayPositionsSort?.column === 'realised' ? dayPositionsSort.direction : null}
+                        onToggle={() => setDayPositionsSort((currentSort) => toggleSortState(currentSort, 'realised'))}
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="Unrealised"
+                        activeDirection={dayPositionsSort?.column === 'unrealised' ? dayPositionsSort.direction : null}
+                        onToggle={() =>
+                          setDayPositionsSort((currentSort) => toggleSortState(currentSort, 'unrealised'))
+                        }
+                        className="pb-2 pr-4"
+                      />
+                      <SortableTableHeader
+                        label="P&L"
+                        activeDirection={dayPositionsSort?.column === 'pnl' ? dayPositionsSort.direction : null}
+                        onToggle={() => setDayPositionsSort((currentSort) => toggleSortState(currentSort, 'pnl'))}
+                        className="pb-2"
+                      />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-	                    {selectedSnapshot.positions.day.map((position) => (
-	                      <tr key={`${position.exchange}:${position.tradingsymbol}`} className="hover:bg-gray-50">
-	                        <td className="py-2.5 pr-4 font-medium text-gray-900">
-	                          <TradingViewSymbolLink
-	                            symbol={position.tradingsymbol}
-	                            market="india"
-	                            exchange={position.exchange}
-	                            className="hover:text-blue-700"
-	                          >
-	                            <span className="underline-offset-4 hover:underline">{position.tradingsymbol}</span>
-	                          </TradingViewSymbolLink>
-	                          <span className="ml-1 text-xs text-gray-400">{position.exchange}</span>
-	                        </td>
+                    {sortedDayPositions.map((position) => (
+                      <tr key={`${position.exchange}:${position.tradingsymbol}`} className="hover:bg-gray-50">
+                        <td className="py-2.5 pr-4 font-medium text-gray-900">
+                          <TradingViewSymbolLink
+                            symbol={position.tradingsymbol}
+                            market="india"
+                            exchange={position.exchange}
+                            className="hover:text-blue-700"
+                          >
+                            <span className="underline-offset-4 hover:underline">{position.tradingsymbol}</span>
+                          </TradingViewSymbolLink>
+                          <span className="ml-1 text-xs text-gray-400">{position.exchange}</span>
+                        </td>
                         <td className="py-2.5 pr-4 text-gray-700">{formatCount(position.day_buy_quantity)}</td>
                         <td className="py-2.5 pr-4 text-gray-700">{formatCount(position.day_sell_quantity)}</td>
                         <td className={cn('py-2.5 pr-4 font-medium', toneClass(position.realised))}>

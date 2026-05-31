@@ -14,6 +14,8 @@ import {
   TrendingUp,
   Unplug,
 } from 'lucide-react';
+import { SortableTableHeader } from '@/components/shared/SortableTableHeader';
+import { sortItems, type SortState, toggleSortState } from '@/lib/tableSorting';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { Button } from '@/components/ui/button';
 import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
@@ -56,6 +58,46 @@ const STATUS_COLORS: Record<string, string> = {
   OPEN: 'bg-blue-50 text-blue-700 ring-blue-200',
   TRIGGER_PENDING: 'bg-amber-50 text-amber-700 ring-amber-200',
 };
+
+type OrdersSortColumn = 'tradingsymbol' | 'transaction_type' | 'order_type' | 'quantity' | 'price' | 'average_price' | 'status' | 'order_timestamp';
+
+const ORDER_SORT_ACCESSORS = {
+  tradingsymbol: {
+    type: 'text',
+    getValue: (order: ZerodhaOrder) => order.tradingsymbol,
+  },
+  transaction_type: {
+    type: 'text',
+    getValue: (order: ZerodhaOrder) => order.transaction_type,
+  },
+  order_type: {
+    type: 'text',
+    getValue: (order: ZerodhaOrder) => order.order_type,
+  },
+  quantity: {
+    type: 'number',
+    getValue: (order: ZerodhaOrder) => order.quantity,
+  },
+  price: {
+    type: 'number',
+    getValue: (order: ZerodhaOrder) => order.price,
+  },
+  average_price: {
+    type: 'number',
+    getValue: (order: ZerodhaOrder) => order.average_price,
+  },
+  status: {
+    type: 'text',
+    getValue: (order: ZerodhaOrder) => order.status,
+  },
+  order_timestamp: {
+    type: 'number',
+    getValue: (order: ZerodhaOrder) => (order.order_timestamp ? Date.parse(order.order_timestamp) : null),
+  },
+} satisfies Record<
+  OrdersSortColumn,
+  { type: 'number' | 'text'; getValue: (order: ZerodhaOrder) => number | string | null | undefined }
+>;
 
 function StatusRevealButton({
   active,
@@ -279,6 +321,9 @@ function PlaceOrderForm({ onPlaced }: { onPlaced: () => void }) {
 // ─── Orders table ────────────────────────────────────────────────────────────
 
 function OrdersTable({ orders }: { orders: ZerodhaOrder[] }) {
+  const [sortState, setSortState] = useState<SortState<OrdersSortColumn>>(null);
+  const sortedOrders = sortItems(orders, sortState, ORDER_SORT_ACCESSORS, (order) => order.order_id);
+
   if (orders.length === 0) {
     return <p className="py-8 text-center text-sm text-gray-400">No orders today.</p>;
   }
@@ -287,30 +332,70 @@ function OrdersTable({ orders }: { orders: ZerodhaOrder[] }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-            <th className="pb-2 pr-4">Symbol</th>
-            <th className="pb-2 pr-4">Side</th>
-            <th className="pb-2 pr-4">Type</th>
-            <th className="pb-2 pr-4">Qty</th>
-            <th className="pb-2 pr-4">Price</th>
-            <th className="pb-2 pr-4">Avg</th>
-            <th className="pb-2 pr-4">Status</th>
-            <th className="pb-2">Time</th>
+            <SortableTableHeader
+              label="Symbol"
+              activeDirection={sortState?.column === 'tradingsymbol' ? sortState.direction : null}
+              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'tradingsymbol'))}
+              className="pb-2 pr-4"
+            />
+            <SortableTableHeader
+              label="Side"
+              activeDirection={sortState?.column === 'transaction_type' ? sortState.direction : null}
+              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'transaction_type'))}
+              className="pb-2 pr-4"
+            />
+            <SortableTableHeader
+              label="Type"
+              activeDirection={sortState?.column === 'order_type' ? sortState.direction : null}
+              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'order_type'))}
+              className="pb-2 pr-4"
+            />
+            <SortableTableHeader
+              label="Qty"
+              activeDirection={sortState?.column === 'quantity' ? sortState.direction : null}
+              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'quantity'))}
+              className="pb-2 pr-4"
+            />
+            <SortableTableHeader
+              label="Price"
+              activeDirection={sortState?.column === 'price' ? sortState.direction : null}
+              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'price'))}
+              className="pb-2 pr-4"
+            />
+            <SortableTableHeader
+              label="Avg"
+              activeDirection={sortState?.column === 'average_price' ? sortState.direction : null}
+              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'average_price'))}
+              className="pb-2 pr-4"
+            />
+            <SortableTableHeader
+              label="Status"
+              activeDirection={sortState?.column === 'status' ? sortState.direction : null}
+              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'status'))}
+              className="pb-2 pr-4"
+            />
+            <SortableTableHeader
+              label="Time"
+              activeDirection={sortState?.column === 'order_timestamp' ? sortState.direction : null}
+              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'order_timestamp'))}
+              className="pb-2"
+            />
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-50">
-	          {orders.map((o) => (
-	            <tr key={o.order_id} className="hover:bg-gray-50">
-	              <td className="py-2.5 pr-4 font-medium text-gray-900">
-	                <TradingViewSymbolLink
-	                  symbol={o.tradingsymbol}
-	                  market="india"
-	                  exchange={o.exchange}
-	                  className="hover:text-blue-700"
-	                >
-	                  <span className="underline-offset-4 hover:underline">{o.tradingsymbol}</span>
-	                </TradingViewSymbolLink>
-	                <span className="ml-1 text-xs text-gray-400">{o.exchange}</span>
-	              </td>
+          {sortedOrders.map((o) => (
+            <tr key={o.order_id} className="hover:bg-gray-50">
+              <td className="py-2.5 pr-4 font-medium text-gray-900">
+                <TradingViewSymbolLink
+                  symbol={o.tradingsymbol}
+                  market="india"
+                  exchange={o.exchange}
+                  className="hover:text-blue-700"
+                >
+                  <span className="underline-offset-4 hover:underline">{o.tradingsymbol}</span>
+                </TradingViewSymbolLink>
+                <span className="ml-1 text-xs text-gray-400">{o.exchange}</span>
+              </td>
               <td className="py-2.5 pr-4">
                 {o.transaction_type === 'BUY' ? (
                   <span className="inline-flex items-center gap-1 text-emerald-600">
