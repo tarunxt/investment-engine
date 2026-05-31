@@ -23,10 +23,10 @@ const ROUTES = {
 } satisfies Record<PortfolioKey, Record<Exclude<ActiveTab, null>, string>>;
 
 const TABS = [
-  { key: 'swingTrade', label: 'Swing Trade' },
   { key: 'portfolio', label: 'Portfolio' },
-  { key: 'events', label: 'Events' },
+  { key: 'swingTrade', label: 'Swing Trade' },
   { key: 'threats', label: 'Threats' },
+  { key: 'events', label: 'Events' },
 ] as const;
 
 export function PortfolioAnalysisNav({
