@@ -1,5 +1,7 @@
 import time
 from contextlib import asynccontextmanager
+from os import getenv
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
@@ -45,11 +47,56 @@ configure_logging()
 logger = get_logger(__name__)
 
 
+def _build_cors_allowed_origins() -> list[str]:
+    """Allow the configured frontend origin plus its apex/www alias."""
+    origins = {
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    }
+
+    candidates = (
+        settings.frontend_url,
+        getenv("NEXT_PUBLIC_FRONTEND_URL"),
+        getenv("NEXTAUTH_URL"),
+    )
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+
+        parsed = urlsplit(candidate)
+        if not parsed.scheme or not parsed.netloc:
+            continue
+
+        host = parsed.hostname
+        if not host:
+            continue
+
+        port = f":{parsed.port}" if parsed.port else ""
+        origins.add(f"{parsed.scheme}://{host}{port}")
+
+        if host in {"localhost", "127.0.0.1"}:
+            continue
+
+        if host.startswith("www."):
+            alias_host = host.removeprefix("www.")
+        else:
+            alias_host = f"www.{host}"
+
+        origins.add(f"{parsed.scheme}://{alias_host}{port}")
+
+    return sorted(origins)
+
+
+cors_allowed_origins = _build_cors_allowed_origins()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting AI Investment Platform Backend")
     logger.info("Database: %s", settings.database_url.split("@")[-1])
     logger.info("Redis: %s", settings.redis_url)
+    logger.info("CORS allowed origins: %s", cors_allowed_origins)
 
     # Seed default prompts (idempotent — only inserts if missing)
     async with AsyncSessionLocal() as db:
@@ -108,7 +155,7 @@ async def correlation_id_middleware(request: Request, call_next):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://localhost:3000"],
+    allow_origins=cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
