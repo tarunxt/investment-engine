@@ -141,6 +141,59 @@ def _parse_normalized_stock_rows(content: str) -> list[dict]:
     return normalize_stock_rows(parse_stock_recommendations(content))
 
 
+def _validate_stock_table_content(content: str) -> tuple[str, str | None]:
+    """Validate stock recommendation output and return normalized markdown when possible."""
+    normalized_content = (content or "").strip()
+    data_rows = _count_markdown_table_data_rows(normalized_content)
+
+    if data_rows < 1:
+        repaired_content, repaired_rows = _repair_stock_table_content(normalized_content)
+        if repaired_rows > 0:
+            normalized_content = repaired_content.strip()
+            data_rows = _count_markdown_table_data_rows(normalized_content)
+        if data_rows < 1:
+            return normalized_content, "malformed table output (no data rows)"
+
+    try:
+        parsed_stocks = _parse_normalized_stock_rows(normalized_content)
+    except Exception:
+        # Keep primary output validation resilient even if parser has issues.
+        logger.warning("Stock parser validation skipped", exc_info=True)
+        return normalized_content, None
+
+    if len(parsed_stocks) >= 5:
+        repaired_content = _to_markdown_table_from_stocks(parsed_stocks)
+        if repaired_content:
+            normalized_content = repaired_content.strip()
+        return normalized_content, None
+
+    if _has_excessive_placeholder_noise(normalized_content):
+        return normalized_content, "malformed table output (placeholder noise)"
+
+    return (
+        normalized_content,
+        f"insufficient recommendations (expected 5, got {len(parsed_stocks)})",
+    )
+
+
+def _build_stock_table_repair_prompt(prompt: str, previous_output: str, reason: str) -> str:
+    return (
+        f"{prompt}\n\n"
+        "[STOCK_TABLE_REPAIR]\n"
+        "The previous assistant output was invalid.\n"
+        f"Issue: {reason}.\n"
+        "Regenerate the FULL answer and return ONLY one markdown table that follows the original title and exact column order.\n"
+        "Requirements:\n"
+        "- Include exactly 5 unique stock recommendation rows.\n"
+        "- Every row must be complete with all columns populated.\n"
+        "- Do not output placeholder rows, separators, notes, or any prose before/after the table.\n"
+        "- Keep numeric fields numeric-only and ensure the total allocation stays close to INR 50,000.\n"
+        "- If some earlier rows were valid, you may reuse them, but the final table must be complete and self-contained.\n\n"
+        "Previous invalid output:\n"
+        f"{previous_output}"
+    ).strip()
+
+
 def _is_portfolio_events_job(prompt: str) -> bool:
     text = prompt or ""
     return "[INDMONEY_US_EVENTS]" in text or "[ZERODHA_EVENTS]" in text
@@ -735,37 +788,37 @@ def execute_ai_job(self, job_id: int) -> None:
                 f"{job.provider}/{job.model} returned empty output after generation"
             )
         if _requires_generic_table_output(job.prompt):
-            data_rows = _count_markdown_table_data_rows(content)
-            if data_rows < 1 and _requires_stock_recommendation_output(job.prompt):
-                repaired_content, repaired_rows = _repair_stock_table_content(content)
-                if repaired_rows > 0:
-                    content = repaired_content.strip()
-                    data_rows = _count_markdown_table_data_rows(content)
-            if data_rows < 1:
+            if _requires_stock_recommendation_output(job.prompt):
+                content, stock_table_issue = _validate_stock_table_content(content)
+                if stock_table_issue:
+                    logger.info(
+                        "Repairing stock table for job %s because %s",
+                        job_id,
+                        stock_table_issue,
+                    )
+                    repair_result = provider.generate(
+                        prompt=_build_stock_table_repair_prompt(
+                            job.prompt,
+                            content,
+                            stock_table_issue,
+                        ),
+                        model=job.model,
+                    )
+                    tokens_in = (tokens_in or 0) + repair_result.tokens_in
+                    tokens_out = (tokens_out or 0) + repair_result.tokens_out
+                    estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
+                    repaired_content = (repair_result.content or "").strip()
+                    if repaired_content:
+                        content = repaired_content
+                    content, stock_table_issue = _validate_stock_table_content(content)
+                    if stock_table_issue:
+                        raise RuntimeError(
+                            f"{job.provider}/{job.model} returned {stock_table_issue}"
+                        )
+            elif _count_markdown_table_data_rows(content) < 1:
                 raise RuntimeError(
                     f"{job.provider}/{job.model} returned malformed table output (no data rows)"
                 )
-            if _requires_stock_recommendation_output(job.prompt):
-                try:
-                    parsed_stocks = _parse_normalized_stock_rows(content)
-                    if len(parsed_stocks) >= 5:
-                        repaired_content = _to_markdown_table_from_stocks(parsed_stocks)
-                        if repaired_content:
-                            content = repaired_content.strip()
-                    else:
-                        if _has_excessive_placeholder_noise(content):
-                            raise RuntimeError(
-                                f"{job.provider}/{job.model} returned malformed table output (placeholder noise)"
-                            )
-                        raise RuntimeError(
-                            f"{job.provider}/{job.model} returned insufficient recommendations "
-                            f"(expected 5, got {len(parsed_stocks)})"
-                        )
-                except RuntimeError:
-                    raise
-                except Exception:
-                    # Keep primary output validation resilient even if parser has issues.
-                    logger.warning("Stock parser validation skipped for job_id=%s", job_id, exc_info=True)
         if _is_portfolio_events_job(job.prompt):
             content = _sanitize_portfolio_event_content(job.prompt, content)
             retry_reason = _portfolio_event_retry_reason(job.prompt, content)
