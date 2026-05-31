@@ -16,6 +16,7 @@ import {
     HiOutlineCube,
 } from 'react-icons/hi';
 import { URLs } from '@/lib/urls';
+import { BRAND_ACRONYM, getBrandExpansionLines } from '@/lib/brand';
 import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
 import { FullLoader } from '@/components/shared/Loader';
 import { UserMenu } from '@/components/dashboard/UserMenu';
@@ -39,6 +40,7 @@ export default function DashboardLayout({
 }: {
     children: React.ReactNode;
 }) {
+    const brandExpansionLines = getBrandExpansionLines();
     const { user, logout, loading } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
@@ -162,13 +164,15 @@ export default function DashboardLayout({
                     <div className="relative flex h-20 items-center justify-center border-b px-4">
                         <Link href={URLs.routes.console.dashboard()} className="flex flex-col items-center gap-2 text-center">
                             <div className="rounded-2xl bg-linear-to-r from-indigo-600 via-violet-600 to-fuchsia-600 px-3 py-2 shadow-sm">
-                                <span className="text-xs font-bold uppercase tracking-[0.28em] text-white">TIE</span>
+                                <span className="text-xs font-bold uppercase tracking-[0.28em] text-white">{BRAND_ACRONYM}</span>
                             </div>
                             <div className="leading-tight">
-                                <div className="text-sm font-semibold text-gray-900">Tarun&apos;s</div>
-                                <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">
-                                    Investment Engine
-                                </div>
+                                <div className="text-sm font-semibold text-gray-900">{brandExpansionLines.primary}</div>
+                                {brandExpansionLines.secondary ? (
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">
+                                        {brandExpansionLines.secondary}
+                                    </div>
+                                ) : null}
                             </div>
                         </Link>
                         <button

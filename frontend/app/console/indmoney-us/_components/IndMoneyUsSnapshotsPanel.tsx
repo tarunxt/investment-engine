@@ -3,6 +3,9 @@
 import {
   Activity,
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Database,
   Loader2,
   PiggyBank,
@@ -10,6 +13,7 @@ import {
   TrendingUp,
   Wallet,
 } from 'lucide-react';
+import { useState } from 'react';
 
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { cn } from '@/lib/utils';
@@ -65,6 +69,176 @@ function statusClass(status: string) {
   if (status === 'parsed') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
   if (status === 'partial') return 'bg-amber-50 text-amber-700 ring-amber-200';
   return 'bg-gray-50 text-gray-700 ring-gray-200';
+}
+
+type SortDirection = 'asc' | 'desc';
+type IndMoneyHoldingsSortColumn =
+  | 'stock'
+  | 'quantity'
+  | 'average_price'
+  | 'market_price'
+  | 'invested_value'
+  | 'current_value'
+  | 'total_pnl'
+  | 'total_pnl_percent'
+  | 'portfolio_weight_percent'
+  | 'market_change_percent';
+type IndMoneyHoldingsSortState = {
+  column: IndMoneyHoldingsSortColumn;
+  direction: SortDirection;
+} | null;
+
+const HOLDINGS_SORT_ACCESSORS: Record<
+  IndMoneyHoldingsSortColumn,
+  {
+    type: 'number' | 'text';
+    getValue: (holding: IndMoneyUsHolding) => number | string | null | undefined;
+  }
+> = {
+  stock: {
+    type: 'text',
+    getValue: (holding) => holding.company_name || holding.symbol,
+  },
+  quantity: {
+    type: 'number',
+    getValue: (holding) => holding.quantity,
+  },
+  average_price: {
+    type: 'number',
+    getValue: (holding) => holding.average_price,
+  },
+  market_price: {
+    type: 'number',
+    getValue: (holding) => holding.market_price,
+  },
+  invested_value: {
+    type: 'number',
+    getValue: (holding) => holding.invested_value,
+  },
+  current_value: {
+    type: 'number',
+    getValue: (holding) => holding.current_value,
+  },
+  total_pnl: {
+    type: 'number',
+    getValue: (holding) => holding.total_pnl,
+  },
+  total_pnl_percent: {
+    type: 'number',
+    getValue: (holding) => holding.total_pnl_percent,
+  },
+  portfolio_weight_percent: {
+    type: 'number',
+    getValue: (holding) => holding.portfolio_weight_percent,
+  },
+  market_change_percent: {
+    type: 'number',
+    getValue: (holding) => holding.market_change_percent,
+  },
+};
+
+function compareSortableValues(
+  left: number | string | null | undefined,
+  right: number | string | null | undefined,
+  type: 'number' | 'text',
+  direction: SortDirection,
+) {
+  if (left == null && right == null) return 0;
+  if (left == null) return 1;
+  if (right == null) return -1;
+
+  const comparison =
+    type === 'number'
+      ? Number(left) - Number(right)
+      : String(left).localeCompare(String(right), undefined, {
+          numeric: true,
+          sensitivity: 'base',
+        });
+
+  return direction === 'asc' ? comparison : -comparison;
+}
+
+function toggleSortState<TColumn extends string>(
+  currentSort: { column: TColumn; direction: SortDirection } | null,
+  column: TColumn,
+) {
+  if (currentSort?.column !== column) {
+    return {
+      column,
+      direction: 'asc' as const,
+    };
+  }
+
+  if (currentSort.direction === 'asc') {
+    return {
+      column,
+      direction: 'desc' as const,
+    };
+  }
+
+  return null;
+}
+
+function sortIndMoneyHoldings(holdings: IndMoneyUsHolding[], sortState: IndMoneyHoldingsSortState) {
+  if (!sortState) {
+    return holdings;
+  }
+
+  const accessor = HOLDINGS_SORT_ACCESSORS[sortState.column];
+
+  return [...holdings].sort((left, right) => {
+    const primaryComparison = compareSortableValues(
+      accessor.getValue(left),
+      accessor.getValue(right),
+      accessor.type,
+      sortState.direction,
+    );
+
+    if (primaryComparison !== 0) {
+      return primaryComparison;
+    }
+
+    return left.symbol.localeCompare(right.symbol, undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    });
+  });
+}
+
+function SortableHeader({
+  label,
+  activeDirection,
+  onToggle,
+  className,
+}: {
+  label: string;
+  activeDirection: SortDirection | null;
+  onToggle: () => void;
+  className?: string;
+}) {
+  return (
+    <th
+      className={className}
+      aria-sort={
+        activeDirection === 'asc' ? 'ascending' : activeDirection === 'desc' ? 'descending' : 'none'
+      }
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="inline-flex items-center gap-1.5 whitespace-nowrap text-left transition-colors hover:text-gray-600"
+      >
+        <span>{label}</span>
+        {activeDirection === 'asc' ? (
+          <ArrowUp className="size-3.5 shrink-0" />
+        ) : activeDirection === 'desc' ? (
+          <ArrowDown className="size-3.5 shrink-0" />
+        ) : (
+          <ArrowUpDown className="size-3.5 shrink-0 opacity-70" />
+        )}
+      </button>
+    </th>
+  );
 }
 
 function formatIndexNumber(value: number | null | undefined) {
@@ -300,6 +474,8 @@ export function IndMoneyUsSnapshotsPanel({
   error: string | null;
   onSelectSnapshot: (snapshotId: number) => void;
 }) {
+  const [holdingsSort, setHoldingsSort] = useState<IndMoneyHoldingsSortState>(null);
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 border border-gray-200 bg-white px-5 py-4 text-sm text-gray-500 shadow-sm">
@@ -325,6 +501,7 @@ export function IndMoneyUsSnapshotsPanel({
       ? 'positive'
       : 'negative';
   const dayReturnTone = (selectedSnapshot.day_return_value ?? 0) >= 0 ? 'positive' : 'negative';
+  const sortedHoldings = sortIndMoneyHoldings(selectedSnapshot.holdings, holdingsSort);
 
   return (
     <div className="flex flex-col gap-5">
@@ -439,20 +616,70 @@ export function IndMoneyUsSnapshotsPanel({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-                    <th className="pb-2 pr-4">Stock</th>
-                    <th className="pb-2 pr-4">Qty</th>
-                    <th className="pb-2 pr-4">Avg</th>
-                    <th className="pb-2 pr-4">Market</th>
-                    <th className="pb-2 pr-4">Invested</th>
-                    <th className="pb-2 pr-4">Current</th>
-                    <th className="pb-2 pr-4">P&amp;L</th>
-                    <th className="pb-2 pr-4">P&amp;L %</th>
-                    <th className="pb-2 pr-4">Weight</th>
-                    <th className="pb-2">1D %</th>
+                    <SortableHeader
+                      label="Stock"
+                      activeDirection={holdingsSort?.column === 'stock' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'stock'))}
+                      className="pb-2 pr-4"
+                    />
+                    <SortableHeader
+                      label="Qty"
+                      activeDirection={holdingsSort?.column === 'quantity' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'quantity'))}
+                      className="pb-2 pr-4"
+                    />
+                    <SortableHeader
+                      label="Avg"
+                      activeDirection={holdingsSort?.column === 'average_price' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'average_price'))}
+                      className="pb-2 pr-4"
+                    />
+                    <SortableHeader
+                      label="Market"
+                      activeDirection={holdingsSort?.column === 'market_price' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'market_price'))}
+                      className="pb-2 pr-4"
+                    />
+                    <SortableHeader
+                      label="Invested"
+                      activeDirection={holdingsSort?.column === 'invested_value' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'invested_value'))}
+                      className="pb-2 pr-4"
+                    />
+                    <SortableHeader
+                      label="Current"
+                      activeDirection={holdingsSort?.column === 'current_value' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'current_value'))}
+                      className="pb-2 pr-4"
+                    />
+                    <SortableHeader
+                      label="P&L"
+                      activeDirection={holdingsSort?.column === 'total_pnl' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'total_pnl'))}
+                      className="pb-2 pr-4"
+                    />
+                    <SortableHeader
+                      label="P&L %"
+                      activeDirection={holdingsSort?.column === 'total_pnl_percent' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'total_pnl_percent'))}
+                      className="pb-2 pr-4"
+                    />
+                    <SortableHeader
+                      label="Weight"
+                      activeDirection={holdingsSort?.column === 'portfolio_weight_percent' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'portfolio_weight_percent'))}
+                      className="pb-2 pr-4"
+                    />
+                    <SortableHeader
+                      label="1D %"
+                      activeDirection={holdingsSort?.column === 'market_change_percent' ? holdingsSort.direction : null}
+                      onToggle={() => setHoldingsSort((currentSort) => toggleSortState(currentSort, 'market_change_percent'))}
+                      className="pb-2"
+                    />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-	                  {selectedSnapshot.holdings.map((holding) => (
+	                  {sortedHoldings.map((holding) => (
 	                    <tr key={holding.symbol} className="hover:bg-gray-50">
 	                      <td className="py-2.5 pr-4">
 	                        <TradingViewSymbolLink symbol={holding.symbol} market="us" className="group inline-flex flex-col">
