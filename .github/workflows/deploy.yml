@@ -43,14 +43,11 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
-              - 'backend/Dockerfile'
             full:
               - 'frontend/**'
-              - 'frontend/Dockerfile'
-              - 'docker-compose.prod.yml'
               - '.env.prod.example'
               - '.github/workflows/deploy.yml'
-              - 'deploy/docker/**'
+              - 'deploy/no-docker/**'
 
   deploy-backend:
     name: Deploy backend
@@ -78,7 +75,7 @@ jobs:
             cd "$APP"
             git fetch origin main
             git reset --hard origin/main
-            SKIP_GIT_SYNC=true bash "$APP/deploy/docker/redeploy.sh" backend
+            SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" backend
 
   deploy-full:
     name: Deploy full stack
@@ -104,4 +101,4 @@ jobs:
             cd "$APP"
             git fetch origin main
             git reset --hard origin/main
-            SKIP_GIT_SYNC=true bash "$APP/deploy/docker/redeploy.sh" full
+            SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" full
