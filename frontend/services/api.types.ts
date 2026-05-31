@@ -32,6 +32,9 @@ import {
     IndMoneyUsThreatHistoryResponse,
     IndMoneyUsThreatLatestResponse,
     IndMoneyUsThreatRunResponse,
+    PolymarketBotState,
+    PolymarketDiscoveryDebugReport,
+    PolymarketDiscoveryDebugRequest,
     ZerodhaLoginUrlResponse,
     ZerodhaOrder,
     ZerodhaPlaceOrderRequest,
@@ -117,6 +120,23 @@ export interface IApiService {
     indmoneyUsThreatsHistory(params?: { limit?: number }): Promise<IndMoneyUsThreatHistoryResponse>;
     indmoneyUsThreatJob(jobId: number): Promise<IndMoneyUsThreatAnalysis>;
     indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse>;
+
+    // Polymarket endpoints
+    polymarketState(): Promise<PolymarketBotState>;
+    polymarketStart(): Promise<PolymarketBotState>;
+    polymarketStop(): Promise<PolymarketBotState>;
+    polymarketPause(): Promise<PolymarketBotState>;
+    polymarketResume(): Promise<PolymarketBotState>;
+    polymarketLiveUnlock(): Promise<PolymarketBotState>;
+    polymarketLiveLock(): Promise<PolymarketBotState>;
+    polymarketLiveDoctor(): Promise<PolymarketBotState>;
+    polymarketLiveBalanceRefresh(): Promise<PolymarketBotState>;
+    polymarketLiveEmergencyStop(): Promise<PolymarketBotState>;
+    polymarketLiveResetEmergencyStop(): Promise<PolymarketBotState>;
+    polymarketLiveTradeConfirm(tradeId: string): Promise<PolymarketBotState>;
+    polymarketLiveTradeReject(tradeId: string): Promise<PolymarketBotState>;
+    polymarketLiveRejectAll(): Promise<PolymarketBotState>;
+    polymarketDiscoveryDebug(data: PolymarketDiscoveryDebugRequest): Promise<PolymarketDiscoveryDebugReport>;
 }
 
 // Type for API error handling

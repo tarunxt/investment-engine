@@ -34,3 +34,27 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Polymarket Bot
+
+The dashboard now includes a native `Polymarket Bot` module at `/console/polymarket-bot`.
+
+Safe defaults:
+
+- `PAPER_TRADING=true`
+- `LIVE_TRADING=false`
+- `USE_LIVE_READS=false`
+- `AUTO_EXECUTE_LIVE=false`
+- `REQUIRE_MANUAL_CONFIRMATION=true`
+- `LIVE_UNLOCK_MODE=automatic`
+
+Persistent bot files are stored outside `public/` under `POLYMARKET_DATA_DIR` (default: `data/polymarket`) and are created per authenticated user:
+
+- `polymarket-trades.json`
+- `polymarket-live-trades.json`
+- `polymarket-bot.log`
+- `polymarket-errors.log`
+
+The backend integration only uses Bullpen through explicit subprocess execution. No live order is placed unless a user confirms an existing pending trade from the dashboard.
+
+The backend Docker image now installs the Bullpen CLI, so `Refresh doctor`, balance refresh, and live reads no longer depend on a host-machine-only Bullpen binary. Bullpen credentials still need to exist inside the backend runtime for authenticated checks to pass.

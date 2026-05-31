@@ -795,6 +795,272 @@ export interface GoogleSheetsExportResponse {
   task_id?: string | null;
 }
 
+// ==================== Polymarket Types ====================
+
+export interface PolymarketBotConfig {
+  paper_trading: boolean;
+  live_trading: boolean;
+  use_live_reads: boolean;
+  auto_execute_live: boolean;
+  live_unlock_mode: 'automatic' | 'manual';
+  require_manual_confirmation: boolean;
+  poll_interval_ms: number;
+  max_trade_size: number;
+  max_trades_per_day: number;
+  max_exposure_per_market: number;
+  max_daily_loss: number;
+  max_live_trade_size: number;
+  max_live_trades_per_day: number;
+  max_live_daily_loss: number;
+  max_live_exposure_per_market: number;
+  jurisdiction_confirmation: boolean;
+  manual_tracked_wallets: string;
+  use_trending_market_activity: boolean;
+  paused: boolean;
+  max_pending_confirmations: number;
+  max_new_live_proposals_per_poll: number;
+  max_new_live_proposals_per_trader_per_poll: number;
+  max_pending_per_trader: number;
+  proposal_cooldown_seconds_per_trader: number;
+  min_source_trade_size_usd: number;
+  min_copy_price: number;
+  max_copy_price: number;
+  max_tracked_traders: number;
+  tracked_trader_mode: string;
+  require_manual_tracked_wallets_for_live: boolean;
+  exclude_market_title_regex: string;
+  allow_market_title_regex: string;
+  exclude_trader_handle_regex: string;
+  allow_trader_handle_regex: string;
+  data_dir: string;
+}
+
+export interface PolymarketTrader {
+  id: string;
+  name: string;
+  address: string;
+  handle?: string | null;
+  profile_slug?: string | null;
+  profile_url?: string | null;
+  activity_url?: string | null;
+  activity_source?: 'wallet' | 'handle' | 'feed' | 'fallback' | null;
+  bullpen_profile_url?: string | null;
+  polymarket_profile_url?: string | null;
+  volume_24h: number;
+  trades_1h: number;
+  trades_6h: number;
+  trades_24h: number;
+  last_trade_at?: string | null;
+  last_trade_age?: string | null;
+  source_reason: string;
+  source: 'mock' | 'live-read' | 'live-market-read';
+}
+
+export interface PolymarketSourceTradeDecision {
+  id: string;
+  source_trade_id: string;
+  source_trade_key: string;
+  proposed_at: string;
+  updated_at: string;
+  trader_id: string;
+  trader_name: string;
+  trader_address: string;
+  trader_handle?: string | null;
+  market_id: string;
+  market_title: string;
+  outcome: string;
+  side: 'BUY' | 'SELL';
+  amount: number;
+  price: number;
+  shares: number;
+  max_loss: number;
+  reason: string;
+  status: 'proposed' | 'confirmed' | 'rejected' | 'executed' | 'failed' | 'skipped';
+  command?: 'buy' | 'sell' | null;
+  failure_reason?: string | null;
+  executed_at?: string | null;
+  source: 'mock' | 'live-read' | 'live-market-read';
+}
+
+export interface PolymarketBalanceState {
+  status: 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
+  message: string;
+  checked_at?: string | null;
+  next_refresh_at?: string | null;
+}
+
+export interface PolymarketLiveSourceStatus {
+  source_mode: 'mock' | 'live-read' | 'live-trading';
+  discovery_mode: string;
+  live_read_traders_count: number;
+  active_traders_found: number;
+  candidate_rows_considered: number;
+  candidate_wallets_extracted: number;
+  fallback_traders_selected: number;
+  activity_source_used?: 'wallet' | 'handle' | 'feed' | 'fallback' | null;
+  rows_rejected_last_discovery: number;
+  accepted_activity_trades_last_discovery: number;
+  manual_wallets_configured: number;
+  manual_wallets_valid: number;
+  manual_wallets_invalid: string[];
+  manual_tracked_wallets: PolymarketTrader[];
+  last_poll_time?: string | null;
+  last_active_trader_discovery_time?: string | null;
+  last_discovery_error?: string | null;
+  source_trades_found_last_poll: number;
+  source_trades_after_filters_last_poll: number;
+  new_live_proposals_created_last_poll: number;
+  skipped_by_filters_last_poll: number;
+  skipped_by_limits_last_poll: number;
+  skipped_duplicates_last_poll: number;
+  live_baseline_completed_at?: string | null;
+  seen_live_trades_baseline_count: number;
+  last_live_read_error?: string | null;
+  trending_market_activity_enabled: boolean;
+  trending_market_activity_unavailable?: string | null;
+}
+
+export interface PolymarketPosition {
+  key: string;
+  market_id: string;
+  market_title: string;
+  outcome: string;
+  shares: number;
+  average_price: number;
+  cost_basis: number;
+}
+
+export interface PolymarketMetrics {
+  total_pnl: number;
+  win_rate: number;
+  total_trades: number;
+  winners: number;
+  losers: number;
+  skipped: number;
+  failed: number;
+}
+
+export interface PolymarketActivity {
+  timestamp: string;
+  message: string;
+}
+
+export interface PolymarketDoctorStatus {
+  checked_at?: string | null;
+  ok: boolean;
+  message: string;
+}
+
+export interface PolymarketLiveControlState {
+  enabled_by_env: boolean;
+  unlocked: boolean;
+  unlock_mode: 'locked' | 'automatic' | 'manual';
+  manually_locked: boolean;
+  locked_reason?: string | null;
+  emergency_stopped: boolean;
+  doctor: PolymarketDoctorStatus;
+  balance: PolymarketBalanceState;
+  source_status: PolymarketLiveSourceStatus;
+  max_live_trade_size: number;
+  live_trades_today: number;
+  pending_confirmations: PolymarketSourceTradeDecision[];
+  recent_decisions: PolymarketSourceTradeDecision[];
+}
+
+export interface PolymarketPaperTrade {
+  id: string;
+  source_trade_id: string;
+  timestamp: string;
+  trader_id: string;
+  trader_name: string;
+  market_id: string;
+  market_title: string;
+  outcome: string;
+  side: 'BUY' | 'SELL';
+  price: number;
+  copied_usd: number;
+  shares: number;
+  realized_pnl: number;
+  status: 'executed' | 'skipped' | 'failed';
+  reason?: string | null;
+}
+
+export interface PolymarketBotState {
+  running: boolean;
+  paused: boolean;
+  mode: 'mock' | 'live-read' | 'live-trading';
+  server_now: string;
+  session_started_at: string;
+  started_at?: string | null;
+  last_poll_at?: string | null;
+  next_poll_at?: string | null;
+  seconds_until_next_poll: number;
+  last_error?: string | null;
+  tracked_traders: PolymarketTrader[];
+  open_positions: PolymarketPosition[];
+  trade_history: PolymarketPaperTrade[];
+  recent_activity: PolymarketActivity[];
+  metrics: PolymarketMetrics;
+  config: PolymarketBotConfig;
+  live: PolymarketLiveControlState;
+}
+
+export interface PolymarketDiscoveryDebugRequest {
+  target: string;
+}
+
+export interface PolymarketDiscoveryDebugCommand {
+  label: string;
+  args: string[];
+}
+
+export interface PolymarketDiscoveryDebugCandidate {
+  address?: string | null;
+  handle?: string | null;
+  username?: string | null;
+  profile_slug?: string | null;
+}
+
+export interface PolymarketDiscoveryDebugAccepted {
+  address?: string | null;
+  clean_identity?: string | null;
+  raw_identity?: string | null;
+  handle?: string | null;
+  username?: string | null;
+  market?: string | null;
+  title?: string | null;
+  outcome?: string | null;
+  side?: string | null;
+  price?: number | null;
+  amount?: number | null;
+  timestamp?: string | null;
+  reason: string;
+}
+
+export interface PolymarketDiscoveryDebugRejected {
+  keys: string[];
+  reason: string;
+  extracted: Record<string, unknown>;
+}
+
+export interface PolymarketDiscoveryDebugError {
+  command: string;
+  error: string;
+}
+
+export interface PolymarketDiscoveryDebugReport {
+  target: string;
+  commands_attempted: PolymarketDiscoveryDebugCommand[];
+  rows_returned_count: number;
+  accepted_trades_count: number;
+  rejected_rows_count: number;
+  sample_row_keys: string[][];
+  candidates: PolymarketDiscoveryDebugCandidate[];
+  accepted: PolymarketDiscoveryDebugAccepted[];
+  rejected: PolymarketDiscoveryDebugRejected[];
+  errors: PolymarketDiscoveryDebugError[];
+}
+
 // ==================== API Response Wrapper Types ====================
 
 export interface ApiResponse<T = unknown> {

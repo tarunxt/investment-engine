@@ -69,7 +69,14 @@ export default function DashboardLayout({
             href: URLs.routes.console.indmoneyUs(),
             icon: HiOutlineTrendingUp,
         },
+        {
+            name: 'Polymarket Bot',
+            href: URLs.routes.console.polymarketBot(),
+            icon: HiOutlineTrendingUp,
+        },
     ];
+
+    const portfolioRoutes = portfolioChildren.map((child) => child.href);
 
     const navigation: NavigationEntry[] = [
         {
@@ -110,20 +117,18 @@ export default function DashboardLayout({
     ];
 
     const isActive = (href: string) => {
-        if (href === '/dashboard') {
+        if (href === URLs.routes.console.dashboard()) {
             return pathname === href;
         }
-        if (href === URLs.routes.console.zerodha()) {
-            return pathname === href || pathname.startsWith(`${href}/`);
-        }
-        if (href === URLs.routes.console.indmoneyUs()) {
+        if (portfolioRoutes.includes(href)) {
             return pathname === href || pathname.startsWith(`${href}/`);
         }
         return pathname.startsWith(href);
     };
 
-    const isPortfolioActive =
-        pathname.startsWith('/console/zerodha') || pathname.startsWith('/console/indmoney-us');
+    const isPortfolioActive = portfolioRoutes.some(
+        (href) => pathname === href || pathname.startsWith(`${href}/`),
+    );
     const isPortfolioExpanded = portfolioOpen || isPortfolioActive;
     if (loading) {
         return (
@@ -192,7 +197,7 @@ export default function DashboardLayout({
                                             className={`mr-3 h-5 w-5 ${isPortfolioActive ? 'text-indigo-600' : 'text-gray-400'
                                                 }`}
                                         />
-                                        <span>Portfolio</span>
+                                        <span>{item.name}</span>
                                         <span className="ml-auto text-xs text-gray-400">
                                             {isPortfolioExpanded ? 'v' : '>'}
                                         </span>

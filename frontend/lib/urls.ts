@@ -115,6 +115,25 @@ export const URLs = {
     threatsRun: () => `${API_BASE_URL}/indmoney-us/threats/run`,
   },
 
+  // Polymarket endpoints
+  polymarket: {
+    state: () => `${API_BASE_URL}/polymarket/state`,
+    start: () => `${API_BASE_URL}/polymarket/start`,
+    stop: () => `${API_BASE_URL}/polymarket/stop`,
+    pause: () => `${API_BASE_URL}/polymarket/pause`,
+    resume: () => `${API_BASE_URL}/polymarket/resume`,
+    liveUnlock: () => `${API_BASE_URL}/polymarket/live/unlock`,
+    liveLock: () => `${API_BASE_URL}/polymarket/live/lock`,
+    liveDoctor: () => `${API_BASE_URL}/polymarket/live/doctor`,
+    liveBalanceRefresh: () => `${API_BASE_URL}/polymarket/live/balance/refresh`,
+    liveEmergencyStop: () => `${API_BASE_URL}/polymarket/live/emergency-stop`,
+    liveResetEmergencyStop: () => `${API_BASE_URL}/polymarket/live/reset-emergency-stop`,
+    liveTradeConfirm: (tradeId: string) => `${API_BASE_URL}/polymarket/live/trades/${tradeId}/confirm`,
+    liveTradeReject: (tradeId: string) => `${API_BASE_URL}/polymarket/live/trades/${tradeId}/reject`,
+    liveRejectAll: () => `${API_BASE_URL}/polymarket/live/trades/reject-all`,
+    discoveryDebug: () => `${API_BASE_URL}/polymarket/live/discovery/debug`,
+  },
+
   // Google Sheets endpoints
   googleSheets: {
     authUrl: () => `${API_BASE_URL}/google-sheets/auth-url`,
@@ -193,6 +212,7 @@ export const URLs = {
       indmoneyUsEvents: () => "/console/indmoney-us/events",
       zerodhaThreats: () => "/console/zerodha/threats",
       indmoneyUsThreats: () => "/console/indmoney-us/threats",
+      polymarketBot: () => "/console/polymarket-bot",
       googleSheets: () => "/console/google-sheets",
       apis: () => "/console/apis",
     },

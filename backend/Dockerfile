@@ -6,6 +6,7 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ARG BULLPEN_VERSION=0.1.97
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
@@ -26,10 +27,17 @@ RUN pip install --upgrade pip --index-url https://pypi.org/simple/ --trusted-hos
     pip install --no-cache-dir -r requirements.txt --index-url https://pypi.org/simple/ --trusted-host pypi.org --timeout 100 && \
     pip install --no-cache-dir gunicorn[gevent]
 
+RUN curl -fsSL https://cli.bullpen.fi/install.sh -o /tmp/install-bullpen.sh && \
+    chmod +x /tmp/install-bullpen.sh && \
+    BULLPEN_VERSION=${BULLPEN_VERSION} BULLPEN_INSTALL_DIR=/usr/local/bin /tmp/install-bullpen.sh && \
+    rm /tmp/install-bullpen.sh && \
+    /usr/local/bin/bullpen --version
+
 # Copy application
 COPY --chown=appuser:appuser . .
 
-RUN chown -R appuser:appuser $VIRTUAL_ENV
+RUN mkdir -p /home/appuser/.bullpen && \
+    chown -R appuser:appuser $VIRTUAL_ENV /home/appuser/.bullpen
 
 USER appuser
 

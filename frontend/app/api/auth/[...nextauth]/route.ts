@@ -5,6 +5,15 @@ import type { JWT } from "next-auth/jwt";
 import { apiService } from "@/services/api";
 import { User } from "@/types/next-auth";
 
+function resolveNextAuthSecret(): string {
+  const configuredSecret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+  if (configuredSecret) {
+    return configuredSecret;
+  }
+
+  return "local-auth-disabled-fallback-secret";
+}
+
 export const authConfig: NextAuthConfig = {
   providers: [
     Credentials({
@@ -118,7 +127,7 @@ export const authConfig: NextAuthConfig = {
     maxAge: 30 * 24 * 60 * 60,
   },
 
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: resolveNextAuthSecret(),
 };
 
 export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
