@@ -429,7 +429,7 @@ export function SidebarNavigation({
     onNavigate,
 }: SidebarNavigationProps) {
     const [isReordering, setIsReordering] = useState(false);
-    const [portfolioOpen, setPortfolioOpen] = useState(false);
+    const [portfolioOpen, setPortfolioOpen] = useState(true);
 
     const storageKey = useMemo(() => buildStorageKey(userId), [userId]);
     const navigationOrder = useSyncExternalStore(
