@@ -15,6 +15,8 @@ function resolveNextAuthSecret(): string {
 }
 
 export const authConfig: NextAuthConfig = {
+  // Production runs behind nginx, so Auth.js must trust the forwarded host header.
+  trustHost: true,
   providers: [
     Credentials({
       name: "credentials",
