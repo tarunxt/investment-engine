@@ -117,6 +117,39 @@ HEADERLESS_CANONICAL_KEY_VARIANTS = (
     HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER,
 )
 
+STOCK_SHEET_KEY_ORDER = [
+    "llm_name_model",
+    "exchange_symbol",
+    "stock_symbol",
+    "stock_name",
+    "technical_setup",
+    "entry_range",
+    "stop_loss",
+    "target",
+    "analyst_source",
+    "units_to_buy",
+    "price_per_unit",
+    "total_buy_amount",
+    "upside_horizon",
+    "weeks",
+    "confidence_score",
+    "rationale_remarks",
+    "rationale_technical_medium_term",
+    "rationale_technical_long_term",
+    "rationale_fundamentals_short_term",
+    "rationale_fundamentals_medium_long_term",
+    "rationale_technical_short_term",
+]
+
+STOCK_SHEET_NUMERIC_KEYS = {
+    "units_to_buy",
+    "price_per_unit",
+    "total_buy_amount",
+    "upside_horizon",
+    "weeks",
+    "confidence_score",
+}
+
 
 def _normalize_header(value: str) -> str:
     cleaned = (
@@ -262,6 +295,36 @@ def normalize_stock_rows(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         normalized.append(item)
     return normalized
+
+
+def is_complete_stock_row(stock: dict[str, Any]) -> bool:
+    """Return True when every export column is populated with a usable value."""
+    for key in STOCK_SHEET_KEY_ORDER:
+        value = stock.get(key)
+        if key in STOCK_SHEET_NUMERIC_KEYS:
+            if _to_number(value) is None:
+                return False
+        elif not str(value or "").strip():
+            return False
+    return True
+
+
+def filter_complete_stock_rows(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize rows, require all export columns, and dedupe by stock symbol."""
+    complete_rows: list[dict[str, Any]] = []
+    seen_symbols: set[str] = set()
+
+    for stock in normalize_stock_rows(stocks):
+        symbol = str(stock.get("stock_symbol", "")).strip().upper()
+        if symbol and symbol in seen_symbols:
+            continue
+        if not is_complete_stock_row(stock):
+            continue
+        complete_rows.append(stock)
+        if symbol:
+            seen_symbols.add(symbol)
+
+    return complete_rows
 
 
 def _to_number(value: Any) -> int | float | None:
@@ -433,6 +496,11 @@ def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
     return []
 
 
+def parse_complete_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
+    """Parse AI output and keep only complete, export-ready stock rows."""
+    return filter_complete_stock_rows(parse_stock_recommendations(response_text))
+
+
 def format_sheet_title(date: datetime, investment_amount: str) -> str:
     """Format the Google Sheet title with date and investment amount."""
     date_str = date.strftime("%d %B %Y")  # e.g., "21 May 2026"
@@ -447,30 +515,6 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
     # Include Stage column if any stock has stage info
     has_stage = any(stock.get("stage") is not None for stock in stocks)
     present_keys = {key for stock in stocks for key in stock.keys() if key != "stage"}
-
-    preferred_key_order = [
-        "llm_name_model",
-        "exchange_symbol",
-        "stock_symbol",
-        "stock_name",
-        "technical_setup",
-        "entry_range",
-        "stop_loss",
-        "target",
-        "analyst_source",
-        "units_to_buy",
-        "price_per_unit",
-        "total_buy_amount",
-        "upside_horizon",
-        "weeks",
-        "confidence_score",
-        "rationale_remarks",
-        "rationale_technical_medium_term",
-        "rationale_technical_long_term",
-        "rationale_fundamentals_short_term",
-        "rationale_fundamentals_medium_long_term",
-        "rationale_technical_short_term",
-    ]
 
     reserved_metadata_keys = {"run_number", "run_date", "run_time", "llm"}
 
@@ -503,7 +547,7 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
 
     # Keep a stable, exact column sequence across all exports.
     # Missing fields are exported as blank cells rather than dropping headers.
-    selected_keys = list(preferred_key_order)
+    selected_keys = list(STOCK_SHEET_KEY_ORDER)
     extra_keys = [
         key for key in sorted(present_keys) if key not in selected_keys and key not in reserved_metadata_keys
     ]
@@ -511,15 +555,6 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
 
     headers = ["Stage"] if has_stage else []
     headers.extend(header_labels.get(key, key.replace("_", " ").title()) for key in selected_keys)
-
-    numeric_keys = {
-        "units_to_buy",
-        "price_per_unit",
-        "total_buy_amount",
-        "upside_horizon",
-        "weeks",
-        "confidence_score",
-    }
 
     rows: list[list[Any]] = []
 
@@ -530,7 +565,7 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
 
         for key in selected_keys:
             value = stock.get(key, "")
-            if key in numeric_keys:
+            if key in STOCK_SHEET_NUMERIC_KEYS:
                 parsed = _to_number(value)
                 row_data.append(parsed if parsed is not None else "")
             else:

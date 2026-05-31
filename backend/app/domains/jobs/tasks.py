@@ -19,6 +19,9 @@ logger = get_logger("app.domains.jobs.tasks")
 
 _EVENT_REFERENCE_DATE_PATTERN = re.compile(r"\[EVENT_SNAPSHOT_DATE=([0-9]{4}-[0-9]{2}-[0-9]{2})\]")
 _EVENT_EXACT_DATE_PATTERN = re.compile(r"\b(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\b")
+_STOCK_TARGET_ROW_COUNT = 5
+_MAX_STOCK_REPAIR_ATTEMPTS = 2
+_INSUFFICIENT_RECOMMENDATIONS_MARKER = "insufficient recommendations"
 
 
 def _to_markdown_table_from_stocks(stocks: list[dict]) -> str:
@@ -141,7 +144,47 @@ def _parse_normalized_stock_rows(content: str) -> list[dict]:
     return normalize_stock_rows(parse_stock_recommendations(content))
 
 
-def _validate_stock_table_content(content: str) -> tuple[str, str | None]:
+def _parse_complete_stock_rows(content: str) -> list[dict]:
+    from app.domains.google_sheets.stock_service import parse_complete_stock_recommendations
+
+    return parse_complete_stock_recommendations(content)
+
+
+def _merge_unique_stock_rows(existing_rows: list[dict], new_rows: list[dict]) -> list[dict]:
+    merged_rows: list[dict] = []
+    seen_symbols: set[str] = set()
+
+    for row in [*existing_rows, *new_rows]:
+        symbol = str(row.get("stock_symbol", "")).strip().upper()
+        if not symbol or symbol in seen_symbols:
+            continue
+        merged_rows.append(row)
+        seen_symbols.add(symbol)
+        if len(merged_rows) >= _STOCK_TARGET_ROW_COUNT:
+            break
+
+    return merged_rows
+
+
+def _is_insufficient_stock_issue(issue: str | None) -> bool:
+    return bool(issue and _INSUFFICIENT_RECOMMENDATIONS_MARKER in issue)
+
+
+def _failed_job_has_exportable_partial_stock_rows(job: Job) -> bool:
+    if job.status != JobStatus.FAILED:
+        return False
+    if _INSUFFICIENT_RECOMMENDATIONS_MARKER not in (job.error_message or "").lower():
+        return False
+    if not job.response:
+        return False
+    try:
+        return len(_parse_complete_stock_rows(job.response)) > 0
+    except Exception:
+        logger.warning("Partial stock exportability check skipped for job_id=%s", getattr(job, "id", "n/a"), exc_info=True)
+        return False
+
+
+def _validate_stock_table_content(content: str) -> tuple[str, str | None, list[dict]]:
     """Validate stock recommendation output and return normalized markdown when possible."""
     normalized_content = (content or "").strip()
     data_rows = _count_markdown_table_data_rows(normalized_content)
@@ -152,27 +195,31 @@ def _validate_stock_table_content(content: str) -> tuple[str, str | None]:
             normalized_content = repaired_content.strip()
             data_rows = _count_markdown_table_data_rows(normalized_content)
         if data_rows < 1:
-            return normalized_content, "malformed table output (no data rows)"
+            return normalized_content, "malformed table output (no data rows)", []
 
     try:
         parsed_stocks = _parse_normalized_stock_rows(normalized_content)
     except Exception:
         # Keep primary output validation resilient even if parser has issues.
         logger.warning("Stock parser validation skipped", exc_info=True)
-        return normalized_content, None
+        return normalized_content, None, []
 
-    if len(parsed_stocks) >= 5:
-        repaired_content = _to_markdown_table_from_stocks(parsed_stocks)
+    canonical_rows = parsed_stocks[:_STOCK_TARGET_ROW_COUNT]
+    if canonical_rows:
+        repaired_content = _to_markdown_table_from_stocks(canonical_rows)
         if repaired_content:
             normalized_content = repaired_content.strip()
-        return normalized_content, None
+
+    if len(parsed_stocks) >= _STOCK_TARGET_ROW_COUNT:
+        return normalized_content, None, canonical_rows
 
     if _has_excessive_placeholder_noise(normalized_content):
-        return normalized_content, "malformed table output (placeholder noise)"
+        return normalized_content, "malformed table output (placeholder noise)", canonical_rows
 
     return (
         normalized_content,
-        f"insufficient recommendations (expected 5, got {len(parsed_stocks)})",
+        f"insufficient recommendations (expected {_STOCK_TARGET_ROW_COUNT}, got {len(parsed_stocks)})",
+        canonical_rows,
     )
 
 
@@ -191,6 +238,35 @@ def _build_stock_table_repair_prompt(prompt: str, previous_output: str, reason: 
         "- If some earlier rows were valid, you may reuse them, but the final table must be complete and self-contained.\n\n"
         "Previous invalid output:\n"
         f"{previous_output}"
+    ).strip()
+
+
+def _build_stock_table_top_up_prompt(
+    prompt: str,
+    existing_rows: list[dict],
+    missing_count: int,
+) -> str:
+    existing_symbols = ", ".join(
+        str(row.get("stock_symbol", "")).strip().upper()
+        for row in existing_rows
+        if str(row.get("stock_symbol", "")).strip()
+    )
+    existing_table = _to_markdown_table_from_stocks(existing_rows) or ""
+    return (
+        f"{prompt}\n\n"
+        "[STOCK_TABLE_TOP_UP]\n"
+        f"You already have {len(existing_rows)} valid stock rows. "
+        f"Return ONLY one markdown table with exactly {missing_count} ADDITIONAL unique stock row"
+        f"{'s' if missing_count != 1 else ''}.\n"
+        "Requirements:\n"
+        "- Use the exact same columns and column order as the original prompt.\n"
+        "- Every cell in every returned row must be populated.\n"
+        "- Do not repeat any existing stock symbol.\n"
+        "- Do not include commentary, notes, or prose before or after the table.\n"
+        "- Keep numeric fields numeric-only.\n"
+        f"- Forbidden existing stock symbols: {existing_symbols or 'none'}.\n\n"
+        "Existing locked rows:\n"
+        f"{existing_table}"
     ).strip()
 
 
@@ -595,12 +671,17 @@ def _refresh_run_status(db, job_id: int) -> None:
                 )
                 logger.info("Run %s status → %s", run_id, new_status.value)
 
-            # Trigger auto-export per model as soon as a model completes
+            # Trigger auto-export per model as soon as a model completes, or when
+            # a failed model still produced complete stock rows that can be exported.
             if (
                 updated_job is not None
-                and updated_job.status == JobStatus.COMPLETED
+                and updated_job.status in {JobStatus.COMPLETED, JobStatus.FAILED}
                 and auto_export_enabled
                 and export_spreadsheet_url
+                and (
+                    updated_job.status == JobStatus.COMPLETED
+                    or _failed_job_has_exportable_partial_stock_rows(updated_job)
+                )
                 and (updated_job.export_status or "").lower() not in {"queued", "processing", "completed", "failed"}
             ):
                 try:
@@ -789,19 +870,34 @@ def execute_ai_job(self, job_id: int) -> None:
             )
         if _requires_generic_table_output(job.prompt):
             if _requires_stock_recommendation_output(job.prompt):
-                content, stock_table_issue = _validate_stock_table_content(content)
-                if stock_table_issue:
+                content, stock_table_issue, parsed_stocks = _validate_stock_table_content(content)
+                for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
+                    if not stock_table_issue:
+                        break
                     logger.info(
-                        "Repairing stock table for job %s because %s",
+                        "Repairing stock table for job %s because %s (attempt %s/%s)",
                         job_id,
                         stock_table_issue,
+                        attempt + 1,
+                        _MAX_STOCK_REPAIR_ATTEMPTS,
                     )
-                    repair_result = provider.generate(
-                        prompt=_build_stock_table_repair_prompt(
+                    missing_count = max(1, _STOCK_TARGET_ROW_COUNT - len(parsed_stocks))
+                    use_top_up_prompt = _is_insufficient_stock_issue(stock_table_issue) and bool(parsed_stocks)
+                    repair_prompt = (
+                        _build_stock_table_top_up_prompt(
+                            job.prompt,
+                            parsed_stocks,
+                            missing_count,
+                        )
+                        if use_top_up_prompt
+                        else _build_stock_table_repair_prompt(
                             job.prompt,
                             content,
                             stock_table_issue,
-                        ),
+                        )
+                    )
+                    repair_result = provider.generate(
+                        prompt=repair_prompt,
                         model=job.model,
                     )
                     tokens_in = (tokens_in or 0) + repair_result.tokens_in
@@ -809,12 +905,18 @@ def execute_ai_job(self, job_id: int) -> None:
                     estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
                     repaired_content = (repair_result.content or "").strip()
                     if repaired_content:
-                        content = repaired_content
-                    content, stock_table_issue = _validate_stock_table_content(content)
-                    if stock_table_issue:
-                        raise RuntimeError(
-                            f"{job.provider}/{job.model} returned {stock_table_issue}"
-                        )
+                        if use_top_up_prompt:
+                            supplemental_rows = _parse_normalized_stock_rows(repaired_content)
+                            merged_rows = _merge_unique_stock_rows(parsed_stocks, supplemental_rows)
+                            merged_content = _to_markdown_table_from_stocks(merged_rows)
+                            content = (merged_content or repaired_content).strip()
+                        else:
+                            content = repaired_content
+                    content, stock_table_issue, parsed_stocks = _validate_stock_table_content(content)
+                if stock_table_issue:
+                    raise RuntimeError(
+                        f"{job.provider}/{job.model} returned {stock_table_issue}"
+                    )
             elif _count_markdown_table_data_rows(content) < 1:
                 raise RuntimeError(
                     f"{job.provider}/{job.model} returned malformed table output (no data rows)"
