@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.indmoney_us.repository import IndMoneyUsPortfolioSnapshotRepository
@@ -41,6 +40,7 @@ from app.domains.portfolio_events.schemas import (
     PortfolioAnalysisHistoryItemResponse,
     PortfolioEventRunRequest,
 )
+from app.domains.portfolio_events.target_resolution import resolve_portfolio_analysis_target
 from app.infrastructure.database.session import get_async_db
 from app.infrastructure.locks.redis_lock import RedisLock
 from app.infrastructure.messaging.event_bus import event_bus
@@ -150,42 +150,12 @@ async def run_threat_analysis(
 
 
 def _resolve_threat_target(body: PortfolioEventRunRequest | None) -> tuple[str, str]:
-    using_default_target = body is None or (body.provider is None and body.model is None)
-    provider = body.provider if body and body.provider else THREAT_ANALYSIS_PROVIDER
-    model = body.model if body and body.model else THREAT_ANALYSIS_MODEL
-
-    if not ProviderFactory.supports(provider):
-        raise HTTPException(400, detail=f"Unsupported provider: '{provider}'")
-
-    if not ProviderFactory.is_configured(provider):
-        detail = (
-            "OpenAI is not configured on this server"
-            if using_default_target
-            else f"Provider '{provider}' is not configured on this server"
-        )
-        raise HTTPException(503, detail=detail)
-
-    provider_instance = ProviderFactory.create(provider)
-    if model not in provider_instance.supported_models:
-        raise HTTPException(
-            400,
-            detail=f"Model '{model}' is not supported for provider '{provider}'",
-        )
-
-    is_compatible, reason = ProviderFactory.model_compatibility(provider, model)
-    if not is_compatible:
-        detail = (
-            f"Configured threats model '{model}' is unavailable. "
-            f"{reason or 'Please update provider compatibility settings.'}"
-            if using_default_target
-            else (
-                f"Model '{model}' for provider '{provider}' is unavailable. "
-                f"{reason or 'Please choose another compatible model.'}"
-            )
-        )
-        raise HTTPException(503 if using_default_target else 400, detail=detail)
-
-    return provider, model
+    return resolve_portfolio_analysis_target(
+        body,
+        default_provider=THREAT_ANALYSIS_PROVIDER,
+        default_model=THREAT_ANALYSIS_MODEL,
+        analysis_label="threats",
+    )
 
 
 async def _get_latest_threat_job(db: AsyncSession, user_id: int) -> Job | None:

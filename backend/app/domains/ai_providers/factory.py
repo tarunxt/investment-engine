@@ -8,6 +8,12 @@ from app.domains.ai_providers.openai import OpenAIProvider
 
 
 class ProviderFactory:
+    _default_provider_priority: tuple[str, ...] = (
+        "openai",
+        "gemini",
+        "deepseek",
+        "anthropic",
+    )
     _providers: dict[str, type[BaseAIProvider]] = {
         AnthropicProvider.provider_name: AnthropicProvider,
         GeminiProvider.provider_name: GeminiProvider,
@@ -84,3 +90,69 @@ class ProviderFactory:
         if reason:
             return False, reason
         return True, None
+
+    @classmethod
+    def resolve_default_target(
+        cls,
+        preferred_provider: str,
+        preferred_model: str,
+    ) -> tuple[str, str] | None:
+        provider_name = preferred_provider.strip().lower()
+        model_name = preferred_model.strip()
+
+        resolved = cls._resolve_target_for_provider(provider_name, preferred_model=model_name)
+        if resolved:
+            return resolved
+
+        for candidate_provider in cls._ordered_provider_names(preferred_provider=provider_name):
+            if candidate_provider == provider_name:
+                continue
+            resolved = cls._resolve_target_for_provider(candidate_provider)
+            if resolved:
+                return resolved
+
+        return None
+
+    @classmethod
+    def _resolve_target_for_provider(
+        cls,
+        provider_name: str,
+        *,
+        preferred_model: str | None = None,
+    ) -> tuple[str, str] | None:
+        provider = provider_name.strip().lower()
+        provider_class = cls._providers.get(provider)
+        if provider_class is None or not provider_class.is_configured():
+            return None
+
+        if preferred_model:
+            normalized_model = preferred_model.strip()
+            if normalized_model in provider_class.supported_models:
+                is_compatible, _ = cls.model_compatibility(provider, normalized_model)
+                if is_compatible:
+                    return provider, normalized_model
+
+        for model_name in provider_class.supported_models:
+            is_compatible, _ = cls.model_compatibility(provider, model_name)
+            if is_compatible:
+                return provider, model_name
+
+        return None
+
+    @classmethod
+    def _ordered_provider_names(cls, *, preferred_provider: str | None = None) -> list[str]:
+        ordered: list[str] = []
+        normalized_preferred = preferred_provider.strip().lower() if preferred_provider else None
+
+        if normalized_preferred and normalized_preferred in cls._providers:
+            ordered.append(normalized_preferred)
+
+        for provider_name in cls._default_provider_priority:
+            if provider_name in cls._providers and provider_name not in ordered:
+                ordered.append(provider_name)
+
+        for provider_name in cls._providers:
+            if provider_name not in ordered:
+                ordered.append(provider_name)
+
+        return ordered

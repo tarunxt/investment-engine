@@ -92,6 +92,39 @@ class ProviderFactoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderFactory.create("unsupported-provider")
 
+    @patch.object(ProviderFactory, "_resolve_target_for_provider")
+    def test_resolve_default_target_falls_back_to_next_configured_provider(
+        self,
+        resolve_target_for_provider_mock,
+    ):
+        def resolve(provider_name: str, *, preferred_model: str | None = None):
+            if provider_name == "openai":
+                return None
+            if provider_name == "gemini":
+                return ("gemini", "gemini-2.5-flash")
+            return None
+
+        resolve_target_for_provider_mock.side_effect = resolve
+
+        target = ProviderFactory.resolve_default_target("openai", "gpt-4o-mini")
+
+        self.assertEqual(target, ("gemini", "gemini-2.5-flash"))
+
+    @patch.object(ProviderFactory, "_resolve_target_for_provider")
+    def test_resolve_default_target_prefers_requested_model_when_available(
+        self,
+        resolve_target_for_provider_mock,
+    ):
+        resolve_target_for_provider_mock.side_effect = lambda provider_name, *, preferred_model=None: (
+            ("openai", "gpt-4o-mini")
+            if provider_name == "openai" and preferred_model == "gpt-4o-mini"
+            else None
+        )
+
+        target = ProviderFactory.resolve_default_target("openai", "gpt-4o-mini")
+
+        self.assertEqual(target, ("openai", "gpt-4o-mini"))
+
 
 class ProviderCostSelectionTests(unittest.TestCase):
     def test_prefers_latest_exact_prompt_cost_for_current_user(self):
