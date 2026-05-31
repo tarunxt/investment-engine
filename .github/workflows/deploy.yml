@@ -4,19 +4,67 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Deployment scope
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - backend
+          - full
 
 concurrency:
   group: production-deploy
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy
+  detect-changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      full: ${{ steps.filter.outputs.full }}
+
+    steps:
+      - name: Checkout
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect deploy scope
+        if: github.event_name == 'push'
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'backend/Dockerfile'
+            full:
+              - 'frontend/**'
+              - 'frontend/Dockerfile'
+              - 'docker-compose.prod.yml'
+              - '.env.prod.example'
+              - '.github/workflows/deploy.yml'
+              - 'deploy/docker/**'
+
+  deploy-backend:
+    name: Deploy backend
+    needs: detect-changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.scope == 'backend') ||
+      (github.event_name == 'push' &&
+        needs.detect-changes.outputs.backend == 'true' &&
+        needs.detect-changes.outputs.full != 'true')
+
     steps:
-      - name: Deploy via SSH
+      - name: Deploy backend via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -24,53 +72,36 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 1800s
           command_timeout: 1800s
-    
           script: |
             set -euo pipefail
-    
             APP="${{ secrets.APP_PATH }}"
-            COMPOSE="docker compose --parallel 1 -f $APP/docker-compose.prod.yml --env-file $APP/.env.prod"
-    
-            echo "==> Go to app directory"
             cd "$APP"
-    
-            echo "==> Pull latest code"
             git fetch origin main
             git reset --hard origin/main
-    
-            echo "==> Ensure swap exists"
-            if ! swapon --show | grep -q swapfile; then
-              sudo fallocate -l 2G /swapfile || true
-              sudo chmod 600 /swapfile || true
-              sudo mkswap /swapfile || true
-              sudo swapon /swapfile || true
-            fi
-    
-            echo "==> Docker cleanup"
-            docker system prune -af || true
-    
-            echo "==> Build backend first"
-            $COMPOSE build backend
-    
-            echo "==> Build frontend second"
-            $COMPOSE build frontend
-    
-            echo "==> Build celery services"
-            $COMPOSE build celery_worker celery_beat
-    
-            echo "==> Start/update containers"
-            $COMPOSE up -d --remove-orphans
-    
-            echo "==> Run migrations"
-            $COMPOSE exec -T backend alembic upgrade head
-    
-            echo "==> Wait for services"
-            sleep 15
-    
-            echo "==> Container status"
-            $COMPOSE ps
-    
-            echo "==> Cleanup unused images"
-            docker image prune -af || true
-    
-            echo "==> Deploy complete"
+            SKIP_GIT_SYNC=true bash "$APP/deploy/docker/redeploy.sh" backend
+
+  deploy-full:
+    name: Deploy full stack
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: |
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.scope == 'auto' || github.event.inputs.scope == 'full')) ||
+      (github.event_name == 'push' && needs.detect-changes.outputs.full == 'true')
+
+    steps:
+      - name: Deploy full stack via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 1800s
+          command_timeout: 1800s
+          script: |
+            set -euo pipefail
+            APP="${{ secrets.APP_PATH }}"
+            cd "$APP"
+            git fetch origin main
+            git reset --hard origin/main
+            SKIP_GIT_SYNC=true bash "$APP/deploy/docker/redeploy.sh" full
