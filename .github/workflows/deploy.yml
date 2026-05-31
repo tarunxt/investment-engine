@@ -73,9 +73,7 @@ jobs:
             set -euo pipefail
             APP="${{ secrets.APP_PATH }}"
             cd "$APP"
-            git fetch origin main
-            git reset --hard origin/main
-            SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" backend
+            bash "$APP/deploy/no-docker/redeploy.sh" backend
 
   deploy-full:
     name: Deploy full stack
@@ -99,6 +97,4 @@ jobs:
             set -euo pipefail
             APP="${{ secrets.APP_PATH }}"
             cd "$APP"
-            git fetch origin main
-            git reset --hard origin/main
-            SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" full
+            bash "$APP/deploy/no-docker/redeploy.sh" full
