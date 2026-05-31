@@ -206,8 +206,6 @@ export function EventScanRunControls({
       ? selectedTarget
       : getPreferredTarget(providers, defaultTarget))
     : null;
-  const hasKnownUnavailableProviderState =
-    !loadingProviders && !providerError && providers.length === 0;
 
   const selectedCount = activeTarget ? 1 : 0;
   const totalModelCount = providers.reduce((total, provider) => total + provider.models.length, 0);
@@ -232,7 +230,7 @@ export function EventScanRunControls({
     <div ref={containerRef} className="relative flex items-center gap-2">
       <Button
         onClick={() => void onRun(activeTarget)}
-        disabled={disabled || running || hasKnownUnavailableProviderState}
+        disabled={disabled || running}
         className={buttonClassName}
       >
         {running ? (
