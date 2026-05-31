@@ -10,6 +10,11 @@ import type { Session } from "next-auth";
 
 export default auth((req: NextRequest & { auth: Session | null }) => {
   const path = req.nextUrl.pathname;
+  const isAuthRoute =
+    path === "/login" ||
+    path === "/register" ||
+    path === "/forgot-password" ||
+    path.startsWith("/reset-password");
   const isProtectedAppRoute =
     path.startsWith("/console") ||
     path.startsWith("/dashboard") ||
@@ -51,11 +56,22 @@ export default auth((req: NextRequest & { auth: Session | null }) => {
 
   // Not logged in
   if (!token) {
+    if (isAuthRoute) {
+      return NextResponse.next();
+    }
+
     const loginHref = buildLoginRedirectHref(
       req.nextUrl.pathname,
       req.nextUrl.searchParams.toString(),
     );
     return NextResponse.redirect(new URL(loginHref, req.url));
+  }
+
+  if (isAuthRoute) {
+    const redirectTo = resolveAuthRedirectTarget(
+      req.nextUrl.searchParams.get("redirectTo"),
+    );
+    return NextResponse.redirect(new URL(redirectTo, req.url));
   }
 
   // Admin route protection
