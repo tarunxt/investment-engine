@@ -9,7 +9,7 @@ export const BRAND_EXPANSION = normalizeBrandValue(
   process.env.NEXT_PUBLIC_BRAND_EXPANSION,
   "Tarun's Investment Engine",
 );
-export const BRAND_TITLE = [BRAND_PREFIX, BRAND_ACRONYM].filter(Boolean).join('');
+export const BRAND_TITLE = [BRAND_PREFIX, BRAND_ACRONYM].filter(Boolean).join(' ');
 
 export function getBrandExpansionLines() {
   const words = BRAND_EXPANSION.split(/\s+/).filter(Boolean);
