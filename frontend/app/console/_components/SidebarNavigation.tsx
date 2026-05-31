@@ -264,6 +264,27 @@ function persistNavigationOrder(storageKey: string, order: string[]) {
     window.dispatchEvent(new CustomEvent(SIDEBAR_ORDER_UPDATED_EVENT, { detail: storageKey }));
 }
 
+function ReorderIcon({ className }: { className?: string }) {
+    return (
+        <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            className={className}
+        >
+            <path d="M12 2.75L16.25 7.75H7.75L12 2.75Z" fill="currentColor" />
+            <path
+                d="M5 10H19M5 12.5H19M5 15H19"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+            />
+            <path d="M12 21.25L7.75 16.25H16.25L12 21.25Z" fill="currentColor" />
+        </svg>
+    );
+}
+
 function DragHandle({
     attributes,
     listeners,
@@ -488,9 +509,13 @@ export function SidebarNavigation({
                         <button
                             type="button"
                             onClick={() => setIsReordering((current) => !current)}
-                            className="rounded-full border border-gray-200 px-3 py-1 text-xs font-semibold text-gray-600 transition hover:border-gray-300 hover:text-gray-900"
+                            aria-label={isReordering ? 'Finish reordering navigation' : 'Reorder navigation'}
+                            title={isReordering ? 'Done' : 'Reorder'}
+                            className={`rounded-full border border-gray-200 text-xs font-semibold text-gray-600 transition hover:border-gray-300 hover:text-gray-900 ${
+                                isReordering ? 'px-3 py-1' : 'flex h-9 w-9 items-center justify-center p-0'
+                            }`}
                         >
-                            {isReordering ? 'Done' : 'Reorder'}
+                            {isReordering ? 'Done' : <ReorderIcon className="h-5 w-5" />}
                         </button>
                     </div>
                 </div>
