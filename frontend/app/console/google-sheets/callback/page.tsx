@@ -54,9 +54,6 @@ export default function GoogleSheetsCallbackPage() {
         const session = await getSession();
         if (session?.accessToken) {
           sessionStorage.setTokens(session.accessToken, session.refreshToken || '');
-          if (session.userData) {
-            sessionStorage.setUserData(session.userData);
-          }
         }
 
          
