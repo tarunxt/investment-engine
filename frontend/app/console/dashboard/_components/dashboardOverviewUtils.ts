@@ -111,6 +111,15 @@ export function formatSnapshotDate(value: string | null | undefined) {
   });
 }
 
+export function formatSnapshotTime(value: string | null | undefined, timeZone = 'Asia/Kolkata') {
+  if (!value) return '—';
+  return new Date(value).toLocaleTimeString('en-IN', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 export function formatCount(value: number | null | undefined) {
   if (value == null) return '—';
   return new Intl.NumberFormat('en-IN').format(value);

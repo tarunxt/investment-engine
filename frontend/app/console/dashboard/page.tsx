@@ -34,6 +34,7 @@ import {
   formatInr,
   formatPercent,
   formatSnapshotDate,
+  formatSnapshotTime,
   formatTs,
   formatUsd,
   getThreatSummaryPoints,
@@ -319,7 +320,11 @@ export default function DashboardPage() {
           description="Live broker-backed holdings, P&L, and top concentration pockets from your latest synced India book."
           statusPills={[
             { label: 'Connection', value: dashboard.zerodhaStatus?.connected ? 'Connected' : 'Disconnected' },
-            { label: 'Snapshot', value: indiaSnapshot ? formatSnapshotDate(indiaSnapshot.snapshot_date) : 'Missing' },
+            {
+              label: 'Snapshot',
+              value: indiaSnapshot ? formatSnapshotDate(indiaSnapshot.snapshot_date) : 'Missing',
+              detail: indiaSnapshot ? formatSnapshotTime(indiaSnapshot.captured_at) : undefined,
+            },
           ]}
           metrics={[
             {
@@ -358,7 +363,11 @@ export default function DashboardPage() {
           description="Manual US snapshot tracking, top allocations, and return posture for the INDmoney portfolio."
           statusPills={[
             { label: 'Parse', value: usSnapshot?.parse_status ?? 'Missing' },
-            { label: 'Snapshot', value: usSnapshot ? formatSnapshotDate(usSnapshot.snapshot_date) : 'Missing' },
+            {
+              label: 'Snapshot',
+              value: usSnapshot ? formatSnapshotDate(usSnapshot.snapshot_date) : 'Missing',
+              detail: usSnapshot ? formatSnapshotTime(usSnapshot.captured_at) : undefined,
+            },
           ]}
           metrics={[
             {
