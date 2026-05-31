@@ -39,47 +39,69 @@ validate_required_env_var() {
 }
 
 validate_frontend_env_file() {
-  set -a
-  # shellcheck disable=SC1090
-  source "$FRONTEND_ENV_FILE"
-  set +a
+  run_as_app_user "
+    set -euo pipefail
+    set -a
+    source '$FRONTEND_ENV_FILE'
+    set +a
 
-  validate_required_env_var "NEXTAUTH_URL"
-  validate_required_env_var "NEXTAUTH_SECRET"
+    if [[ -z \"\${NEXTAUTH_URL:-}\" ]]; then
+      echo 'Required environment variable missing: NEXTAUTH_URL' >&2
+      exit 1
+    fi
 
-  if looks_like_placeholder_url "${NEXTAUTH_URL:-}"; then
-    echo "NEXTAUTH_URL still uses a placeholder domain: $NEXTAUTH_URL" >&2
-    exit 1
-  fi
+    if [[ -z \"\${NEXTAUTH_SECRET:-}\" ]]; then
+      echo 'Required environment variable missing: NEXTAUTH_SECRET' >&2
+      exit 1
+    fi
 
-  if [[ -n "${NEXT_PUBLIC_FRONTEND_URL:-}" ]] && looks_like_placeholder_url "${NEXT_PUBLIC_FRONTEND_URL:-}"; then
-    echo "NEXT_PUBLIC_FRONTEND_URL still uses a placeholder domain: $NEXT_PUBLIC_FRONTEND_URL" >&2
-    exit 1
-  fi
+    if [[ \"\${NEXTAUTH_URL:-}\" == *yourdomain.com* || \"\${NEXTAUTH_URL:-}\" == *example.com* ]]; then
+      echo \"NEXTAUTH_URL still uses a placeholder domain: \${NEXTAUTH_URL}\" >&2
+      exit 1
+    fi
 
-  if [[ -n "${NEXT_PUBLIC_API_URL:-}" ]] && looks_like_placeholder_url "${NEXT_PUBLIC_API_URL:-}"; then
-    echo "NEXT_PUBLIC_API_URL still uses a placeholder domain: $NEXT_PUBLIC_API_URL" >&2
-    exit 1
-  fi
+    if [[ -n \"\${NEXT_PUBLIC_FRONTEND_URL:-}\" ]] && [[ \"\${NEXT_PUBLIC_FRONTEND_URL:-}\" == *yourdomain.com* || \"\${NEXT_PUBLIC_FRONTEND_URL:-}\" == *example.com* ]]; then
+      echo \"NEXT_PUBLIC_FRONTEND_URL still uses a placeholder domain: \${NEXT_PUBLIC_FRONTEND_URL}\" >&2
+      exit 1
+    fi
 
-  echo "==> Frontend URL: ${NEXT_PUBLIC_FRONTEND_URL:-$NEXTAUTH_URL}"
-  echo "==> Frontend API URL: ${NEXT_PUBLIC_API_URL:-<runtime inferred from browser host>}"
+    if [[ -n \"\${NEXT_PUBLIC_API_URL:-}\" ]] && [[ \"\${NEXT_PUBLIC_API_URL:-}\" == *yourdomain.com* || \"\${NEXT_PUBLIC_API_URL:-}\" == *example.com* ]]; then
+      echo \"NEXT_PUBLIC_API_URL still uses a placeholder domain: \${NEXT_PUBLIC_API_URL}\" >&2
+      exit 1
+    fi
+
+    echo \"==> Frontend URL: \${NEXT_PUBLIC_FRONTEND_URL:-\$NEXTAUTH_URL}\"
+    echo \"==> Frontend API URL: \${NEXT_PUBLIC_API_URL:-<runtime inferred from browser host>}\"
+  "
 }
 
 validate_backend_env_file() {
-  set -a
-  # shellcheck disable=SC1090
-  source "$BACKEND_ENV_FILE"
-  set +a
+  run_as_app_user "
+    set -euo pipefail
+    set -a
+    source '$BACKEND_ENV_FILE'
+    set +a
 
-  validate_required_env_var "DATABASE_URL"
-  validate_required_env_var "REDIS_URL"
-  validate_required_env_var "FRONTEND_URL"
+    if [[ -z \"\${DATABASE_URL:-}\" ]]; then
+      echo 'Required environment variable missing: DATABASE_URL' >&2
+      exit 1
+    fi
 
-  if looks_like_placeholder_url "${FRONTEND_URL:-}"; then
-    echo "FRONTEND_URL still uses a placeholder domain: $FRONTEND_URL" >&2
-    exit 1
-  fi
+    if [[ -z \"\${REDIS_URL:-}\" ]]; then
+      echo 'Required environment variable missing: REDIS_URL' >&2
+      exit 1
+    fi
+
+    if [[ -z \"\${FRONTEND_URL:-}\" ]]; then
+      echo 'Required environment variable missing: FRONTEND_URL' >&2
+      exit 1
+    fi
+
+    if [[ \"\${FRONTEND_URL:-}\" == *yourdomain.com* || \"\${FRONTEND_URL:-}\" == *example.com* ]]; then
+      echo \"FRONTEND_URL still uses a placeholder domain: \${FRONTEND_URL}\" >&2
+      exit 1
+    fi
+  "
 }
 
 run_as_app_user() {
