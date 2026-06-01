@@ -81,7 +81,6 @@ export function PortfolioSwingTradeConsole({
         <div className="grid gap-6">
           <CreateJobCard
             promptAside={<SwingTradeInvestmentAmountField market={market} />}
-            showGoogleSheetsInvestmentAmount={false}
             collapsible
             defaultExpanded={false}
             runActionLabel="Run Swing Trade Scan"

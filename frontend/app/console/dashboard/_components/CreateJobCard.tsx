@@ -10,11 +10,9 @@ import { RunModeFields } from './RunModeFields';
 import { TemplateField } from './TemplateField';
 import { PromptField } from './PromptField';
 import { ScheduleField } from './ScheduleField';
-import { GoogleSheetsField } from './GoogleSheetsField';
 
 export function CreateJobCard({
   promptAside,
-  showGoogleSheetsInvestmentAmount = true,
   title = 'Create Job',
   collapsible = false,
   defaultExpanded = true,
@@ -22,7 +20,6 @@ export function CreateJobCard({
   runButtonClassName,
 }: {
   promptAside?: ReactNode;
-  showGoogleSheetsInvestmentAmount?: boolean;
   title?: string;
   collapsible?: boolean;
   defaultExpanded?: boolean;
@@ -65,12 +62,11 @@ export function CreateJobCard({
           <form onSubmit={handleSubmit} className="grid gap-5 xl:grid-cols-2">
             <div className="space-y-5">
               <RunModeFields />
-              <TemplateField />
-              <PromptField aside={promptAside} />
             </div>
             <div className="space-y-5">
+              <TemplateField />
+              <PromptField aside={promptAside} />
               <ScheduleField />
-              <GoogleSheetsField showInvestmentAmount={showGoogleSheetsInvestmentAmount} />
             </div>
 
             {submitError && <p className="text-sm text-red-700 xl:col-span-2">{submitError}</p>}

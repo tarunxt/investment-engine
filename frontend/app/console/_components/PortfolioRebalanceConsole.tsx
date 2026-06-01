@@ -362,7 +362,6 @@ export function PortfolioRebalanceConsole({
           <RebalanceInputBox portfolio={portfolio} market={market} basePrompt={basePrompt} />
           <CreateJobCard
             title="Create Job"
-            showGoogleSheetsInvestmentAmount={false}
             collapsible
             defaultExpanded
             runActionLabel="Run Rebalance"
