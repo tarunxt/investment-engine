@@ -494,6 +494,14 @@ class apiServiceClass implements IApiService {
     return this.get<PaginatedResponse<RunListItem>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
   }
 
+  getFullRuns(params?: { page?: number; limit?: number }): Promise<PaginatedResponse<RunResponse>> {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return this.get<PaginatedResponse<RunResponse>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
+  }
+
   getRun(id: number): Promise<RunResponse> {
     return this.get<RunResponse>(URLs.runs.get(id));
   }

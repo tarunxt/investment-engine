@@ -58,6 +58,7 @@ import {
     ZerodhaPortfolioSyncResponse,
     ZerodhaStatusResponse,
     RunListItem,
+    RunResponse,
 } from '@/types/api';
 
 // Define the API service interface with proper types
@@ -85,6 +86,7 @@ export interface IApiService {
     getJobs(params?: { page?: number; limit?: number; status?: string; q?: string }): Promise<PaginatedResponse<JobResponse>>;
     getJob(id: number): Promise<JobResponse>;
     getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>>;
+    getFullRuns(params?: { page?: number; limit?: number }): Promise<PaginatedResponse<RunResponse>>;
 
     // Provider endpoints
     getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]>;
