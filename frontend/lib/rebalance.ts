@@ -290,8 +290,11 @@ Inputs you will receive in this prompt:
 3. Latest Threats report output.
 
 Capital / Portfolio Rules:
-- Review existing holdings and decide whether to Hold, Buy/Add, Trim, Sell All, or Buy New.
-- Include Buy New stocks only if they are stronger than existing portfolio names.
+- MANDATORY coverage: output exactly one decision row for EVERY stock currently present in the Latest Portfolio Snapshot, even if the decision is Hold. Never omit a current holding because it is weak, unchanged, small, low-conviction, or already discussed in threats.
+- Review existing holdings and decide whether each one is Hold, Buy/Add, Trim, or Sell All.
+- Evaluate EVERY stock appearing in the attached swing-trade recommendation tables as a possible fresh Buy New candidate.
+- Include Buy New rows for the swing-trade candidates that are stronger than existing portfolio names after considering current portfolio concentration, threats, catalysts, momentum, and opportunity cost.
+- If a swing-trade candidate is not selected for fresh buy, exclude it; but all current holdings must still have one row.
 - Use aggressive but sensible swing-trade logic.
 - Prefer liquid ${exchangeExamples} stocks with strong volume, momentum, catalyst, and relative strength.
 - Do not recommend too many names just for diversification.
@@ -317,6 +320,7 @@ For each stock, evaluate:
 
 Output Rules:
 Return ONLY one markdown table.
+The table is invalid unless it contains one row for every current portfolio holding from Input Section 1 plus any selected Buy New rows from Input Section 2.
 No introduction.
 No explanation outside the table.
 No disclaimer.
@@ -331,6 +335,7 @@ Create one table only with exactly these columns:
 | Exchange Symbol | Stock Symbol | Current Units | Action (Buy/Add/Sell All/Trim/Hold/Buy New) | Units Change | Final Units | Technical Setup | Entry Range | Stop Loss | Target | Analyst/Source | Units to Buy | Price Per Unit | Total Buy Amount | Upside Horizon (% return in weeks) | Confidence Score (0-100) | Rationale Remarks | Rationale - Technical setup (short term (1-3 months) | Rationale - Technical setup (medium term) | Rationale - Technical setup (long term term) | Rationale - Fundamentals Short term | Rationale - Fundamentals Medium/Long Term |
 
 Formatting Rules:
+- Before writing the final table, internally build the complete current-holding symbol checklist from the Latest Portfolio Snapshot and verify every symbol appears exactly once in the output table.
 - Rank rows by action priority: Sell All / Trim first, then Buy New / Add, then Hold.
 - Keep rationale concise but meaningful.
 - Mention key reason clearly: breakout, weak momentum, better opportunity, sector tailwind, earnings catalyst, overextension, support breach, consolidation, etc.
@@ -338,6 +343,7 @@ Formatting Rules:
 - For Sell All, Units Change must equal negative Current Units and Final Units must be 0.
 - For Hold, Units Change must be 0 and Final Units must equal Current Units.
 - Do not include any stock unless it is from my current holdings or from the attached LLM recommendation tables.
+- Do not output a partial rebalance table. Missing any current holding is a hard failure.
 - Use only factual/current market intelligence available online and the provided LLM tables.
 - Use numeric-only values in cells for all numeric fields (no ${copy.currency}/% text in values).
 - Be decisive. Avoid vague comments.
