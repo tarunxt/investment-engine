@@ -20,6 +20,8 @@ export function DashboardHeader({
     setRunsError,
     refreshRuns,
     googleSheetsConnected,
+    googleSheetsStatusLoading,
+    googleSheetsStatusLoaded,
     refreshGoogleSheetsStatus,
   } = useDashboard();
   const [showSheets, setShowSheets] = useState(false);
@@ -47,7 +49,11 @@ export function DashboardHeader({
               <span
                 className={cn(
                   'absolute -right-1 -top-1 size-2 rounded-full ring-1 ring-white',
-                  googleSheetsConnected ? 'bg-emerald-500' : 'bg-amber-500',
+                  googleSheetsStatusLoading && !googleSheetsStatusLoaded
+                    ? 'bg-gray-300 motion-safe:animate-pulse'
+                    : googleSheetsConnected
+                      ? 'bg-emerald-500'
+                      : 'bg-amber-500',
                 )}
                 aria-hidden="true"
               />

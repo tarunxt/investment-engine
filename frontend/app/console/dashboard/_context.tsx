@@ -126,6 +126,8 @@ interface DashboardContextValue {
   exportTitle: string;
   setExportTitle: (val: string) => void;
   googleSheetsConnected: boolean;
+  googleSheetsStatusLoading: boolean;
+  googleSheetsStatusLoaded: boolean;
   refreshGoogleSheetsStatus: () => Promise<GoogleSheetsStatusResponse | null>;
 
   // Derived
@@ -233,27 +235,42 @@ export function DashboardProvider({
   );
   const [exportTitle, setExportTitle] = useState('');
   const [googleSheetsConnected, setGoogleSheetsConnected] = useState(false);
+  const [googleSheetsStatusLoading, setGoogleSheetsStatusLoading] = useState(true);
+  const [googleSheetsStatusLoaded, setGoogleSheetsStatusLoaded] = useState(false);
+  const sheetsStatusRequestIdRef = useRef(0);
+
+  const applyGoogleSheetsStatus = useCallback((sheetsStatus: GoogleSheetsStatusResponse | null) => {
+    const connected = Boolean(sheetsStatus?.connected);
+    setGoogleSheetsConnected(connected);
+    setExportSpreadsheetUrl(connected ? (sheetsStatus?.default_spreadsheet_url ?? '') : '');
+  }, []);
 
   const refreshGoogleSheetsStatus = useCallback(async () => {
+    const requestId = sheetsStatusRequestIdRef.current + 1;
+    sheetsStatusRequestIdRef.current = requestId;
+    setGoogleSheetsStatusLoading(true);
+
     try {
       const sheetsStatus = await apiService.googleSheetsStatus();
-      const connected = Boolean(sheetsStatus.connected);
-      setGoogleSheetsConnected(connected);
-      setExportSpreadsheetUrl(connected ? (sheetsStatus.default_spreadsheet_url ?? '') : '');
+      if (requestId === sheetsStatusRequestIdRef.current) {
+        applyGoogleSheetsStatus(sheetsStatus);
+      }
       return sheetsStatus;
     } catch (err) {
       console.error('Failed to load Google Sheets status:', err);
-      setGoogleSheetsConnected(false);
-      setExportSpreadsheetUrl('');
+      if (requestId === sheetsStatusRequestIdRef.current) {
+        applyGoogleSheetsStatus(null);
+      }
       return null;
+    } finally {
+      if (requestId === sheetsStatusRequestIdRef.current) {
+        setGoogleSheetsStatusLoaded(true);
+        setGoogleSheetsStatusLoading(false);
+      }
     }
-  }, []);
+  }, [applyGoogleSheetsStatus]);
 
   useEffect(() => {
-    const initialRefresh = window.setTimeout(() => {
-      void refreshGoogleSheetsStatus();
-    }, 0);
-
     const refreshWhenActive = () => {
       if (document.visibilityState === 'hidden') return;
       void refreshGoogleSheetsStatus();
@@ -263,7 +280,6 @@ export function DashboardProvider({
     document.addEventListener('visibilitychange', refreshWhenActive);
 
     return () => {
-      window.clearTimeout(initialRefresh);
       window.removeEventListener('focus', refreshWhenActive);
       document.removeEventListener('visibilitychange', refreshWhenActive);
     };
@@ -336,7 +352,7 @@ export function DashboardProvider({
     const [providersRes, templatesRes, sheetsStatusRes] = await Promise.allSettled([
       apiService.getProviders({ signal: controller.signal, prompt }),
       apiService.getPrompts({ q: '' }, controller.signal),
-      apiService.googleSheetsStatus(),
+      refreshGoogleSheetsStatus(),
     ]);
 
     if (providersRes.status === 'fulfilled') {
@@ -367,19 +383,12 @@ export function DashboardProvider({
       }
     }
 
-    if (sheetsStatusRes.status === 'fulfilled') {
-      const sheetsStatus = sheetsStatusRes.value;
-      const connected = Boolean(sheetsStatus.connected);
-      setGoogleSheetsConnected(connected);
-      setExportSpreadsheetUrl(connected ? (sheetsStatus.default_spreadsheet_url ?? '') : '');
-    } else {
+    if (sheetsStatusRes.status === 'rejected') {
       console.error('Failed to load Google Sheets status:', sheetsStatusRes.reason);
-      setGoogleSheetsConnected(false);
-      setExportSpreadsheetUrl('');
     }
 
     setIsLoading(false);
-  }, [defaultTemplateName, prompt]);
+  }, [defaultTemplateName, prompt, refreshGoogleSheetsStatus]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -770,6 +779,8 @@ export function DashboardProvider({
         exportTitle,
         setExportTitle,
         googleSheetsConnected,
+        googleSheetsStatusLoading,
+        googleSheetsStatusLoaded,
         refreshGoogleSheetsStatus,
         handleSubmit,
         handlePromptChange,

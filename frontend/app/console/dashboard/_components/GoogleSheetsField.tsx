@@ -23,11 +23,15 @@ export function GoogleSheetsField({
     exportTitle,
     setExportTitle,
     googleSheetsConnected,
+    googleSheetsStatusLoading,
+    googleSheetsStatusLoaded,
   } = useDashboard();
 
   const handleToggle = () => {
     setAutoExportEnabled(!autoExportEnabled);
   };
+
+  const isCheckingSheets = googleSheetsStatusLoading && !googleSheetsStatusLoaded;
 
   return (
     <Card className="border border-gray-200 bg-gray-50 p-4">
@@ -45,10 +49,18 @@ export function GoogleSheetsField({
         </Label>
       </div>
       <div className="mt-2 flex items-center gap-2 text-xs">
-        <span className={googleSheetsConnected ? 'text-emerald-600' : 'text-amber-700'}>
-          {googleSheetsConnected ? 'Connected' : 'Not connected'}
+        <span
+          className={cn(
+            isCheckingSheets
+              ? 'text-gray-500'
+              : googleSheetsConnected
+                ? 'text-emerald-600'
+                : 'text-amber-700',
+          )}
+        >
+          {isCheckingSheets ? 'Checking connection...' : googleSheetsConnected ? 'Connected' : 'Not connected'}
         </span>
-        {!googleSheetsConnected && (
+        {!isCheckingSheets && !googleSheetsConnected && (
           <Link href="/console/google-sheets" className="text-indigo-600 hover:text-indigo-800 hover:underline">
             Connect now
           </Link>
@@ -70,6 +82,10 @@ export function GoogleSheetsField({
               >
                 {exportSpreadsheetUrl}
               </a>
+            ) : isCheckingSheets ? (
+              <p className="mt-1 text-sm text-gray-500">
+                Checking your linked Google Sheet...
+              </p>
             ) : (
               <p className="mt-1 text-sm text-amber-700">
                 No personal sheet linked yet. Set it from{' '}
