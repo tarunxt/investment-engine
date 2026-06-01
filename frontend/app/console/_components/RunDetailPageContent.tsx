@@ -39,6 +39,11 @@ const STATUS_ICONS: Record<string, ElementType> = {
 
 const ACTIVE_STATUSES = new Set(['pending', 'processing']);
 const TERMINAL_STATUSES = new Set(['completed', 'failed']);
+const RUN_DETAIL_ROUTE_PREFIXES = [
+  '/console/runs/',
+  '/console/zerodha-swing-run/',
+  '/console/indmoney-us-swing-run/',
+];
 
 const SHEETS_STATUS_STYLES: Record<string, string> = {
   pending: 'bg-amber-50 text-amber-700 ring-amber-200',
@@ -69,6 +74,10 @@ function formatCost(value?: number | null) {
 
 function hasKnownCost(value?: number | null): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isRunDetailPath(pathname?: string | null) {
+  return Boolean(pathname && RUN_DETAIL_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix)));
 }
 
 function formatDuration(createdAt: string, updatedAt?: string) {
@@ -121,7 +130,7 @@ export default function RunDetailPage() {
         setError(null);
 
         const canonicalPath = getRunDetailPathFromPrompt(data.id, data.prompt);
-        if (pathname?.startsWith('/console/runs/') && canonicalPath !== pathname) {
+        if (isRunDetailPath(pathname) && canonicalPath !== pathname) {
           router.replace(canonicalPath);
         }
       } catch (err) {
