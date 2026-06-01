@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { AlertCircle, CalendarClock, CheckCircle2, Clock3, Loader2 } from 'lucide-react';
 import { isRunInSwingTradeMarket } from '@/lib/runPresentation';
+import { inferRebalanceMarketFromPrompt } from '@/lib/rebalance';
 import { apiService } from '@/services/api';
 import { type PromptResponse, type ProviderInfo, type RunListItem, type RunModelTarget, type RunResponse } from '@/types/api';
 import { useRuns } from '@/hooks/useRuns';
@@ -19,8 +20,8 @@ import { type SwingTradeMarket } from '@/lib/swingTrade';
 
 export const DASHBOARD_RUN_LIMIT = 50;
 export const TEMPLATE_DEBOUNCE_MS = 300;
-export const PROMPT_MAX_CHARS = 10000;
-export const PROMPT_WARN_CHARS = 9000;
+export const PROMPT_MAX_CHARS = 60000;
+export const PROMPT_WARN_CHARS = 50000;
 export const INDIA_TIMEZONE = 'Asia/Kolkata';
 const RUN_PROMPT_PREVIEW_CHARS = 280;
 export const DEFAULT_TEMPLATE_NAME = 'India Swing-Trade Research';
@@ -87,6 +88,7 @@ interface DashboardContextValue {
   setRunsError: (error: string | null) => void;
   runScopeMarket: SwingTradeMarket | null;
   runScopeLabel: string | null;
+  runScopeKind: 'swingTrade' | 'rebalance';
 
   // Form state
   prompt: string;
@@ -165,6 +167,7 @@ interface DashboardProviderProps {
   defaultExportSheetName?: string | null;
   runScopeMarket?: SwingTradeMarket | null;
   runScopeLabel?: string | null;
+  runScopeKind?: 'swingTrade' | 'rebalance';
 }
 
 export function DashboardProvider({
@@ -174,6 +177,7 @@ export function DashboardProvider({
   defaultExportSheetName = null,
   runScopeMarket = null,
   runScopeLabel = null,
+  runScopeKind = 'swingTrade',
 }: DashboardProviderProps) {
   const {
     runs,
@@ -542,6 +546,18 @@ export function DashboardProvider({
     [selectedTargets]
   );
 
+
+  const isRunInCurrentScope = useCallback(
+    (promptPreview: string | null | undefined) => {
+      if (!runScopeMarket) return true;
+      if (runScopeKind === 'rebalance') {
+        return inferRebalanceMarketFromPrompt(promptPreview) === runScopeMarket;
+      }
+      return isRunInSwingTradeMarket(promptPreview, runScopeMarket);
+    },
+    [runScopeKind, runScopeMarket],
+  );
+
   const handleSubmit = useCallback(
     async (event: React.SubmitEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -568,7 +584,7 @@ export function DashboardProvider({
       try {
         const hasActiveRun = runs.some((run) =>
           ['scheduled', 'pending', 'processing'].includes((run.status || '').toLowerCase()) &&
-          isRunInSwingTradeMarket(run.prompt_preview, runScopeMarket),
+          isRunInCurrentScope(run.prompt_preview),
         );
         let allowParallel = false;
         if (hasActiveRun) {
@@ -615,7 +631,7 @@ export function DashboardProvider({
       exportInvestmentAmount,
       exportTitle,
       googleSheetsConnected,
-      runScopeMarket,
+      isRunInCurrentScope,
       setRuns,
       setRunsTotal,
     ],
@@ -670,6 +686,7 @@ export function DashboardProvider({
         setRunsError,
         runScopeMarket,
         runScopeLabel,
+        runScopeKind,
         prompt,
         setPrompt,
         providers,

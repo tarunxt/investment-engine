@@ -12,6 +12,7 @@ import {
   getRunSheetsPresentation,
   isRunInSwingTradeMarket,
 } from '@/lib/runPresentation';
+import { inferRebalanceMarketFromPrompt } from '@/lib/rebalance';
 import { INDIA_TIMEZONE, useDashboard, STATUS_ICONS, STATUS_STYLES } from '../_context';
 import { apiService } from '@/services/api';
 
@@ -92,14 +93,18 @@ const PROVIDER_CONSOLE_URL: Record<string, string> = {
 };
 
 export function RecentJobsTable() {
-  const { runs, runsTotal, loadingRuns, lastUpdated, runScopeMarket, runScopeLabel } = useDashboard();
+  const { runs, runsTotal, loadingRuns, lastUpdated, runScopeMarket, runScopeLabel, runScopeKind } = useDashboard();
   const router = useRouter();
   const [usdInrRate, setUsdInrRate] = useState(83.5);
   const [tickNow, setTickNow] = useState(() => Date.now());
   const [jobTimers, setJobTimers] = useState<Record<number, JobTimer>>({});
   const previousStatusesRef = useRef<Record<number, string>>({});
   const visibleRuns = runScopeMarket
-    ? runs.filter((run) => isRunInSwingTradeMarket(run.prompt_preview, runScopeMarket))
+    ? runs.filter((run) =>
+        runScopeKind === 'rebalance'
+          ? inferRebalanceMarketFromPrompt(run.prompt_preview) === runScopeMarket
+          : isRunInSwingTradeMarket(run.prompt_preview, runScopeMarket),
+      )
     : runs;
 
   useEffect(() => {

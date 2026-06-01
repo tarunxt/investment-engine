@@ -28,7 +28,31 @@ def _to_markdown_table_from_stocks(stocks: list[dict]) -> str:
     """Build a sheet-safe markdown table from normalized stock rows."""
     if not stocks:
         return ""
-    key_order = [
+    rebalance_key_order = [
+        "exchange_symbol",
+        "stock_symbol",
+        "current_units",
+        "action",
+        "units_change",
+        "final_units",
+        "technical_setup",
+        "entry_range",
+        "stop_loss",
+        "target",
+        "analyst_source",
+        "units_to_buy",
+        "price_per_unit",
+        "total_buy_amount",
+        "upside_horizon",
+        "confidence_score",
+        "rationale_remarks",
+        "rationale_technical_short_term",
+        "rationale_technical_medium_term",
+        "rationale_technical_long_term",
+        "rationale_fundamentals_short_term",
+        "rationale_fundamentals_medium_long_term",
+    ]
+    key_order = rebalance_key_order if any(str(row.get("action", "")).strip() for row in stocks) else [
         "llm_name_model",
         "exchange_symbol",
         "stock_symbol",
@@ -63,6 +87,10 @@ def _to_markdown_table_from_stocks(stocks: list[dict]) -> str:
             "llm_name_model": "LLM Name + Model",
             "upside_horizon": "Upside Horizon (%)",
             "confidence_score": "Confidence Score (0-100)",
+            "current_units": "Current Units",
+            "action": "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
+            "units_change": "Units Change",
+            "final_units": "Final Units",
             "rationale_technical_medium_term": "Rationale - Technical Setup (Medium Term)",
             "rationale_technical_long_term": "Rationale - Technical Setup (Long Term)",
             "rationale_fundamentals_short_term": "Rationale - Fundamentals Short Term",
@@ -127,8 +155,15 @@ def _requires_generic_table_output(prompt: str) -> bool:
     return "return only one markdown table" in text or _requires_stock_recommendation_output(prompt)
 
 
+def _is_rebalance_output(prompt: str) -> bool:
+    text = (prompt or "").lower()
+    return "[rebalance_flow:" in text or "recommended rebalance" in text
+
+
 def _requires_stock_recommendation_output(prompt: str) -> bool:
     text = (prompt or "").lower()
+    if _is_rebalance_output(prompt):
+        return False
     return "table columns:" in text or ("stock name" in text and "units to buy" in text)
 
 
