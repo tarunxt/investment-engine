@@ -26,7 +26,7 @@ interface ParsedMarkdownTable {
   rows: string[][];
 }
 
-interface CanonicalTable {
+export interface CanonicalTable {
   title?: string;
   headers: readonly CanonicalHeader[];
   rows: CanonicalRow[];
@@ -60,7 +60,7 @@ const SWING_HEADER_ORDER = [
   'LLM',
 ] as const;
 
-const REBALANCE_HEADER_ORDER = [
+export const REBALANCE_HEADER_ORDER = [
   'Exchange Symbol',
   'Stock Symbol',
   'Current Units',
@@ -86,10 +86,10 @@ const REBALANCE_HEADER_ORDER = [
   'Rationale - Fundamentals Medium/Long Term',
 ] as const;
 
-type SwingHeader = (typeof SWING_HEADER_ORDER)[number];
-type RebalanceHeader = (typeof REBALANCE_HEADER_ORDER)[number];
-type CanonicalHeader = SwingHeader | RebalanceHeader;
-type CanonicalRow = Record<string, string>;
+export type SwingHeader = (typeof SWING_HEADER_ORDER)[number];
+export type RebalanceHeader = (typeof REBALANCE_HEADER_ORDER)[number];
+export type CanonicalHeader = SwingHeader | RebalanceHeader;
+export type CanonicalRow = Record<string, string>;
 
 const HEADERLESS_CANONICAL_HEADER_ORDERS: SwingHeader[][] = [
   [...SWING_HEADER_ORDER],
@@ -459,7 +459,7 @@ function normalizeJsonTable(
   return { title, headers, rows };
 }
 
-function normalizeMarkdownTable(
+export function normalizeMarkdownRecommendationTable(
   content: string,
   context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string },
 ): CanonicalTable | null {
@@ -570,6 +570,17 @@ function parseHeaderlessCanonicalRows(
   return { title, headers: SWING_HEADER_ORDER, rows: cleanedRows };
 }
 
+export function parseInvestmentRecommendationContent(
+  content: string,
+  context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string } = {},
+): CanonicalTable | null {
+  const parsedJson = parseJsonContent(content);
+  if (parsedJson) {
+    return normalizeJsonTable(parsedJson, context);
+  }
+  return normalizeMarkdownRecommendationTable(content, context) ?? parseHeaderlessCanonicalRows(content, context);
+}
+
 export default function InvestmentRecommendationTable({
   content,
   provider,
@@ -577,14 +588,9 @@ export default function InvestmentRecommendationTable({
   runNumber,
   runCreatedAt,
 }: Props) {
-  const canonicalTable = useMemo(() => {
-    const context = { provider, model, runNumber, runCreatedAt };
-    const parsedJson = parseJsonContent(content);
-    if (parsedJson) {
-      return normalizeJsonTable(parsedJson, context);
-    }
-    return normalizeMarkdownTable(content, context) ?? parseHeaderlessCanonicalRows(content, context);
-  }, [content, model, provider, runCreatedAt, runNumber]);
+  const canonicalTable = useMemo(() => (
+    parseInvestmentRecommendationContent(content, { provider, model, runNumber, runCreatedAt })
+  ), [content, model, provider, runCreatedAt, runNumber]);
 
   if (!canonicalTable) {
     return <MarkdownRenderer content={content} />;
