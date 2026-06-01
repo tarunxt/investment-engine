@@ -206,6 +206,9 @@ function RebalanceInputBox({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [collapsedSwingRunIds, setCollapsedSwingRunIds] = useState<Set<number>>(
+    () => new Set(),
+  );
   const lastGeneratedPromptRef = useRef("");
 
   const previousClose = useMemo(() => getPreviousMarketClose(market), [market]);
@@ -390,6 +393,18 @@ function RebalanceInputBox({
           )
         : new Set(),
     );
+  }
+
+  function toggleSwingRunCollapsed(runId: number) {
+    setCollapsedSwingRunIds((current) => {
+      const next = new Set(current);
+      if (next.has(runId)) {
+        next.delete(runId);
+      } else {
+        next.add(runId);
+      }
+      return next;
+    });
   }
 
   return (
@@ -597,79 +612,98 @@ function RebalanceInputBox({
                       "No completed swing-trade runs found after previous market close."}
                   </pre>
                 ) : (
-                  swingRuns.map((run) => (
-                    <div
-                      key={run.id}
-                      className="overflow-hidden rounded-xl border border-emerald-100 bg-white/75 shadow-sm"
-                    >
-                      <div className="flex flex-col gap-1 border-b border-emerald-50 bg-emerald-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <h4 className="text-sm font-semibold text-gray-950">
-                            Run #{run.id} ·{" "}
-                            {market === "us" ? "IndMoney US" : "Zerodha"}
-                          </h4>
-                          <p className="text-xs text-gray-600">
-                            Created {formatInputTimestamp(run.created_at)} ·
-                            export sheet {run.export_sheet_name || "n/a"}
-                          </p>
-                        </div>
-                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
-                          {run.run_jobs.length.toLocaleString("en-IN")} models
-                        </span>
+                  swingRuns.map((run) => {
+                    const isRunCollapsed = collapsedSwingRunIds.has(run.id);
+                    const selectedRunJobCount = run.run_jobs.filter((link) =>
+                      selectedSwingJobIds.has(getSwingJobSelectionId(run.id, link)),
+                    ).length;
+
+                    return (
+                      <div
+                        key={run.id}
+                        className="overflow-hidden rounded-xl border border-emerald-100 bg-white/75 shadow-sm"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleSwingRunCollapsed(run.id)}
+                          aria-expanded={!isRunCollapsed}
+                          className="flex w-full flex-col gap-2 border-b border-emerald-50 bg-emerald-50/70 px-4 py-3 text-left transition hover:bg-emerald-100/70 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <span>
+                            <span className="block text-sm font-semibold text-gray-950">
+                              Run #{run.id} · {market === "us" ? "IndMoney US" : "Zerodha"}
+                            </span>
+                            <span className="mt-1 block text-xs text-gray-600">
+                              Created {formatInputTimestamp(run.created_at)} ·
+                              export sheet {run.export_sheet_name || "n/a"}
+                            </span>
+                          </span>
+                          <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                            {selectedRunJobCount.toLocaleString("en-IN")} of {run.run_jobs.length.toLocaleString("en-IN")} models
+                            <span className="rounded-full border border-emerald-200 bg-white p-1 text-emerald-700 shadow-sm">
+                              {isRunCollapsed ? (
+                                <ChevronDown className="size-4" />
+                              ) : (
+                                <ChevronUp className="size-4" />
+                              )}
+                            </span>
+                          </span>
+                        </button>
+                        {!isRunCollapsed ? (
+                          <div className="divide-y divide-emerald-50">
+                            {run.run_jobs.map((link) => {
+                              const selectionId = getSwingJobSelectionId(
+                                run.id,
+                                link,
+                              );
+                              const isSelected =
+                                selectedSwingJobIds.has(selectionId);
+                              const outputLength = getRunJobResponseLength(link);
+                              return (
+                                <label
+                                  key={selectionId}
+                                  className={`grid cursor-pointer gap-3 px-4 py-3 transition hover:bg-emerald-50/60 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_auto] md:items-center ${
+                                    isSelected
+                                      ? "bg-white"
+                                      : "bg-gray-50/80 opacity-70"
+                                  }`}
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+                                      LLM model
+                                    </span>
+                                    <span className="mt-1 block truncate text-sm font-semibold text-gray-950">
+                                      {link.job.provider}/{link.job.model}
+                                    </span>
+                                  </span>
+                                  <span className="min-w-0 text-xs text-gray-600">
+                                    <span className="block font-semibold uppercase tracking-[0.14em] text-gray-400">
+                                      Timestamp
+                                    </span>
+                                    <span className="mt-1 block truncate">
+                                      {formatInputTimestamp(link.job.updated_at)}
+                                    </span>
+                                  </span>
+                                  <span className="justify-self-start rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 md:justify-self-end">
+                                    Output length · {outputLength.toLocaleString("en-IN")} chars
+                                  </span>
+                                  <span className="flex items-center gap-2 justify-self-start rounded-full border border-emerald-100 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 shadow-sm md:justify-self-end">
+                                    <input
+                                      type="checkbox"
+                                      className="size-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                                      checked={isSelected}
+                                      onChange={() => toggleSwingJob(selectionId)}
+                                    />
+                                    {isSelected ? "Included" : "Excluded"}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        ) : null}
                       </div>
-                      <div className="divide-y divide-emerald-50">
-                        {run.run_jobs.map((link) => {
-                          const selectionId = getSwingJobSelectionId(
-                            run.id,
-                            link,
-                          );
-                          const isSelected =
-                            selectedSwingJobIds.has(selectionId);
-                          const outputLength = getRunJobResponseLength(link);
-                          return (
-                            <label
-                              key={selectionId}
-                              className={`grid cursor-pointer gap-3 px-4 py-3 transition hover:bg-emerald-50/60 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_auto] md:items-center ${
-                                isSelected
-                                  ? "bg-white"
-                                  : "bg-gray-50/80 opacity-70"
-                              }`}
-                            >
-                              <span className="min-w-0">
-                                <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-                                  LLM model
-                                </span>
-                                <span className="mt-1 block truncate text-sm font-semibold text-gray-950">
-                                  {link.job.provider}/{link.job.model}
-                                </span>
-                              </span>
-                              <span className="min-w-0 text-xs text-gray-600">
-                                <span className="block font-semibold uppercase tracking-[0.14em] text-gray-400">
-                                  Timestamp
-                                </span>
-                                <span className="mt-1 block truncate">
-                                  {formatInputTimestamp(link.job.updated_at)}
-                                </span>
-                              </span>
-                              <span className="justify-self-start rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 md:justify-self-end">
-                                Output length ·{" "}
-                                {outputLength.toLocaleString("en-IN")} chars
-                              </span>
-                              <span className="flex items-center gap-2 justify-self-start rounded-full border border-emerald-100 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 shadow-sm md:justify-self-end">
-                                <input
-                                  type="checkbox"
-                                  className="size-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
-                                  checked={isSelected}
-                                  onChange={() => toggleSwingJob(selectionId)}
-                                />
-                                {isSelected ? "Included" : "Excluded"}
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 

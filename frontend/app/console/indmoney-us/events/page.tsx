@@ -19,6 +19,7 @@ import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink
 import { Button } from '@/components/ui/button';
 import { useHistoricalAnalysisCosts } from '@/hooks/useHistoricalAnalysisCosts';
 import { useUsdInrRate } from '@/hooks/useUsdInrRate';
+import { formatApiTimestamp } from '@/lib/datetime';
 import { URLs } from '@/lib/urls';
 import { apiService, APIError } from '@/services/api';
 import type {
@@ -35,12 +36,7 @@ function normalizeError(err: unknown) {
 }
 
 function formatTs(iso: string | null | undefined) {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
+  return formatApiTimestamp(iso);
 }
 
 function formatUsd(value: number | null | undefined) {
