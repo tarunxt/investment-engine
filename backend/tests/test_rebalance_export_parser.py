@@ -19,13 +19,29 @@ def test_rebalance_markdown_table_parses_and_formats_for_sheets():
 
     headers, sheet_rows = format_stocks_for_sheet(rows)
 
-    assert headers[:6] == [
+    assert headers == [
         "Exchange Symbol",
         "Stock Symbol",
         "Current Units",
         "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
         "Units Change",
         "Final Units",
+        "Technical Setup",
+        "Entry Range",
+        "Stop Loss",
+        "Target",
+        "Analyst/Source",
+        "Units to Buy",
+        "Price Per Unit",
+        "Total Buy Amount",
+        "Upside Horizon (% return in weeks)",
+        "Confidence Score (0-100)",
+        "Rationale Remarks",
+        "Rationale - Technical setup (short term (1-3 months)",
+        "Rationale - Technical setup (medium term)",
+        "Rationale - Technical setup (long term term)",
+        "Rationale - Fundamentals Short term",
+        "Rationale - Fundamentals Medium/Long Term",
     ]
     assert sheet_rows[0][:6] == ["NSE", "ABC", 10, "Hold", 0, 10]
 
