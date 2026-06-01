@@ -258,6 +258,49 @@ def _validate_stock_table_content(content: str) -> tuple[str, str | None, list[d
     )
 
 
+def _validate_rebalance_table_content(content: str) -> tuple[str, str | None, list[dict]]:
+    """Validate rebalance output and return canonical markdown when possible."""
+    normalized_content = (content or "").strip()
+    data_rows = _count_markdown_table_data_rows(normalized_content)
+    if data_rows < 1:
+        return normalized_content, "malformed table output (no data rows)", []
+
+    try:
+        parsed_rows = _parse_complete_stock_rows(normalized_content)
+    except Exception:
+        logger.warning("Rebalance parser validation skipped", exc_info=True)
+        return normalized_content, None, []
+
+    if not parsed_rows:
+        return normalized_content, "malformed table output (no complete rebalance rows)", []
+
+    repaired_content = _to_markdown_table_from_stocks(parsed_rows)
+    if repaired_content:
+        normalized_content = repaired_content.strip()
+
+    return normalized_content, None, parsed_rows
+
+
+def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reason: str) -> str:
+    return (
+        f"{prompt}\n\n"
+        "[REBALANCE_TABLE_REPAIR]\n"
+        "The previous assistant output was invalid.\n"
+        f"Issue: {reason}.\n"
+        "Regenerate the FULL rebalance answer and return ONLY one markdown table with the exact rebalance columns from the original prompt.\n"
+        "Requirements:\n"
+        "- Include at least one complete rebalance data row; do not stop after the title/header.\n"
+        "- Prefer one decision row for every current portfolio holding, plus any stronger Buy New ideas from the supplied swing-trade tables.\n"
+        "- Every row must include Exchange Symbol, Stock Symbol, Current Units, Action, Units Change, Final Units, price/risk fields, confidence, and all rationale columns.\n"
+        "- Units Change must be numeric: negative for Sell All/Trim, positive for Buy/Add/Buy New, and 0 for Hold.\n"
+        "- Final Units must equal Current Units + Units Change.\n"
+        "- Do not output placeholder rows, separators only, notes, or prose before/after the table.\n"
+        "- Keep numeric fields numeric-only.\n\n"
+        "Previous invalid output:\n"
+        f"{previous_output}"
+    ).strip()
+
+
 def _build_stock_table_repair_prompt(prompt: str, previous_output: str, reason: str) -> str:
     return (
         f"{prompt}\n\n"
@@ -904,7 +947,38 @@ def execute_ai_job(self, job_id: int) -> None:
                 f"{job.provider}/{job.model} returned empty output after generation"
             )
         if _requires_generic_table_output(job.prompt):
-            if _requires_stock_recommendation_output(job.prompt):
+            if _is_rebalance_output(job.prompt):
+                content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content)
+                for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
+                    if not rebalance_table_issue:
+                        break
+                    logger.info(
+                        "Repairing rebalance table for job %s because %s (attempt %s/%s)",
+                        job_id,
+                        rebalance_table_issue,
+                        attempt + 1,
+                        _MAX_STOCK_REPAIR_ATTEMPTS,
+                    )
+                    repair_result = provider.generate(
+                        prompt=_build_rebalance_table_repair_prompt(
+                            job.prompt,
+                            content,
+                            rebalance_table_issue,
+                        ),
+                        model=job.model,
+                    )
+                    tokens_in = (tokens_in or 0) + repair_result.tokens_in
+                    tokens_out = (tokens_out or 0) + repair_result.tokens_out
+                    estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
+                    repaired_content = (repair_result.content or "").strip()
+                    if repaired_content:
+                        content = repaired_content
+                    content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content)
+                if rebalance_table_issue:
+                    raise RuntimeError(
+                        f"{job.provider}/{job.model} returned {rebalance_table_issue}"
+                    )
+            elif _requires_stock_recommendation_output(job.prompt):
                 content, stock_table_issue, parsed_stocks = _validate_stock_table_content(content)
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
                     if not stock_table_issue:
