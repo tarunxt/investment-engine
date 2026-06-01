@@ -198,6 +198,7 @@ export default function IndMoneyUsEventsPage() {
   }, [analysis?.job_id, analysis?.status, loadAnalysisJob]);
 
   const latestSnapshot = overview?.latest ?? null;
+  const analysisIsActive = isJobActive(analysis?.status);
   const historicalEstimatedCostInrByTarget = useHistoricalAnalysisCosts({
     analysis,
     loadHistory: loadAnalysisHistory,
@@ -245,7 +246,7 @@ export default function IndMoneyUsEventsPage() {
               <EventScanRunControls
                 onRun={handleRunAnalysis}
                 disabled={!latestSnapshot}
-                running={runningAnalysis}
+                running={runningAnalysis || analysisIsActive}
                 defaultTarget={analysis ? { provider: analysis.provider, model: analysis.model } : undefined}
                 historicalEstimatedCostInrByTarget={historicalEstimatedCostInrByTarget}
                 buttonClassName="rounded-full bg-sky-300 px-5 text-slate-950 hover:bg-sky-200"

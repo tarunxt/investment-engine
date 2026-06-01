@@ -227,7 +227,7 @@ export function EventScanRunControls({
     : 0;
   const runButtonLoading = Boolean(running);
   const runButtonDisabled = Boolean(disabled || running);
-  const runButtonLabel = running ? 'Starting Scan…' : buttonLabel;
+  const runButtonLabel = running ? buttonLabel.replace(/^Run\b/i, 'Running') : buttonLabel;
 
   return (
     <div ref={containerRef} className="relative flex items-center gap-2">
