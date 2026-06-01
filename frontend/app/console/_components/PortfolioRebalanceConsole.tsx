@@ -35,6 +35,7 @@ import { apiService } from "@/services/api";
 import type {
   IndMoneyUsPortfolioSnapshotDetail,
   IndMoneyUsThreatAnalysis,
+  RunJobResponse,
   RunResponse,
   ZerodhaPortfolioSnapshotDetail,
   ZerodhaThreatAnalysis,
@@ -154,6 +155,37 @@ function parseApiTimestampMs(value?: string | null) {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function formatInputTimestamp(value?: string | null) {
+  const ms = parseApiTimestampMs(value);
+  if (ms === null) return value || "Unknown time";
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(ms));
+}
+
+function getSwingJobSelectionId(runId: number, link: RunJobResponse) {
+  return `${runId}:${link.job_id}`;
+}
+
+function getRunJobResponseLength(link: RunJobResponse) {
+  return link.job.response?.length ?? 0;
+}
+
+function getSelectedSwingRuns(
+  runs: RunResponse[],
+  selectedJobIds: ReadonlySet<string>,
+) {
+  return runs
+    .map((run) => ({
+      ...run,
+      run_jobs: run.run_jobs.filter((link) =>
+        selectedJobIds.has(getSwingJobSelectionId(run.id, link)),
+      ),
+    }))
+    .filter((run) => run.run_jobs.length > 0);
+}
+
 function RebalanceInputBox({
   portfolio,
   market,
@@ -164,11 +196,12 @@ function RebalanceInputBox({
   basePrompt: string;
 }) {
   const { setPrompt } = useDashboard();
-  const [promptInputBundle, setPromptInputBundle] = useState(
-    "Loading rebalance inputs…",
-  );
-  const [displayInputBundle, setDisplayInputBundle] = useState(
-    "Loading rebalance inputs…",
+  const [portfolioSnapshot, setPortfolioSnapshot] =
+    useState<PortfolioSnapshot>(null);
+  const [threatAnalysis, setThreatAnalysis] = useState<ThreatAnalysis>(null);
+  const [swingRuns, setSwingRuns] = useState<RunResponse[]>([]);
+  const [selectedSwingJobIds, setSelectedSwingJobIds] = useState<Set<string>>(
+    () => new Set(),
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -206,30 +239,20 @@ function RebalanceInputBox({
         .filter((run) => isRunInSwingTradeMarket(run.prompt, market))
         .slice(0, 12);
 
-      const bundleInput = {
-        market,
-        previousClose,
-        portfolio: portfolioRes.latest as PortfolioSnapshot,
-        threats: threatsRes.analysis as ThreatAnalysis,
-        swingRuns: fullRuns,
-      };
-      setPromptInputBundle(
-        buildRebalanceInputBundle({ ...bundleInput, swingDisplayMode: "full" }),
+      const allSwingJobIds = fullRuns.flatMap((run) =>
+        run.run_jobs.map((link) => getSwingJobSelectionId(run.id, link)),
       );
-      setDisplayInputBundle(
-        buildRebalanceInputBundle({
-          ...bundleInput,
-          swingDisplayMode: "summary",
-        }),
-      );
+
+      setPortfolioSnapshot(portfolioRes.latest as PortfolioSnapshot);
+      setThreatAnalysis(threatsRes.analysis as ThreatAnalysis);
+      setSwingRuns(fullRuns);
+      setSelectedSwingJobIds(new Set(allSwingJobIds));
     } catch (err) {
       setError(normalizeError(err));
-      setPromptInputBundle(
-        "Failed to load one or more rebalance inputs. Refresh to try again.",
-      );
-      setDisplayInputBundle(
-        "Failed to load one or more rebalance inputs. Refresh to try again.",
-      );
+      setPortfolioSnapshot(null);
+      setThreatAnalysis(null);
+      setSwingRuns([]);
+      setSelectedSwingJobIds(new Set());
     } finally {
       setLoading(false);
     }
@@ -239,6 +262,59 @@ function RebalanceInputBox({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadInputs();
   }, [loadInputs]);
+
+  const selectedSwingRuns = useMemo(
+    () => getSelectedSwingRuns(swingRuns, selectedSwingJobIds),
+    [selectedSwingJobIds, swingRuns],
+  );
+
+  const promptInputBundle = useMemo(() => {
+    if (loading) return "Loading rebalance inputs…";
+    if (error) {
+      return "Failed to load one or more rebalance inputs. Refresh to try again.";
+    }
+
+    return buildRebalanceInputBundle({
+      market,
+      previousClose,
+      portfolio: portfolioSnapshot,
+      threats: threatAnalysis,
+      swingRuns: selectedSwingRuns,
+      swingDisplayMode: "full",
+    });
+  }, [
+    error,
+    loading,
+    market,
+    portfolioSnapshot,
+    previousClose,
+    selectedSwingRuns,
+    threatAnalysis,
+  ]);
+
+  const displayInputBundle = useMemo(() => {
+    if (loading) return "Loading rebalance inputs…";
+    if (error) {
+      return "Failed to load one or more rebalance inputs. Refresh to try again.";
+    }
+
+    return buildRebalanceInputBundle({
+      market,
+      previousClose,
+      portfolio: portfolioSnapshot,
+      threats: threatAnalysis,
+      swingRuns: selectedSwingRuns,
+      swingDisplayMode: "summary",
+    });
+  }, [
+    error,
+    loading,
+    market,
+    portfolioSnapshot,
+    previousClose,
+    selectedSwingRuns,
+    threatAnalysis,
+  ]);
 
   useEffect(() => {
     const nextPrompt = composePrompt(basePrompt, promptInputBundle);
@@ -260,6 +336,61 @@ function RebalanceInputBox({
     () => buildInputSections(displayInputBundle),
     [displayInputBundle],
   );
+  const portfolioInputSection = inputSections.find(
+    (section) => section.key === "portfolio",
+  );
+  const swingInputSection = inputSections.find(
+    (section) => section.key === "swing",
+  );
+  const threatsInputSection = inputSections.find(
+    (section) => section.key === "threats",
+  );
+  const selectedSwingJobCount = selectedSwingJobIds.size;
+  const totalSwingJobCount = useMemo(
+    () => swingRuns.reduce((total, run) => total + run.run_jobs.length, 0),
+    [swingRuns],
+  );
+  const selectedSwingCharacterCount = useMemo(
+    () =>
+      swingRuns.reduce(
+        (runTotal, run) =>
+          runTotal +
+          run.run_jobs.reduce((jobTotal, link) => {
+            if (!selectedSwingJobIds.has(getSwingJobSelectionId(run.id, link))) {
+              return jobTotal;
+            }
+            return jobTotal + getRunJobResponseLength(link);
+          }, 0),
+        0,
+      ),
+    [selectedSwingJobIds, swingRuns],
+  );
+  const allSwingJobsSelected =
+    totalSwingJobCount > 0 && selectedSwingJobCount === totalSwingJobCount;
+
+  function toggleSwingJob(jobId: string) {
+    setSelectedSwingJobIds((current) => {
+      const next = new Set(current);
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else {
+        next.add(jobId);
+      }
+      return next;
+    });
+  }
+
+  function setAllSwingJobsSelected(checked: boolean) {
+    setSelectedSwingJobIds(
+      checked
+        ? new Set(
+            swingRuns.flatMap((run) =>
+              run.run_jobs.map((link) => getSwingJobSelectionId(run.id, link)),
+            ),
+          )
+        : new Set(),
+    );
+  }
 
   return (
     <Card
@@ -364,8 +495,9 @@ function RebalanceInputBox({
           ) : null}
 
           <div className="grid gap-4 xl:grid-cols-2">
-            {inputSections.map(
-              ({
+            {[portfolioInputSection, threatsInputSection].map((section) => {
+              if (!section) return null;
+              const {
                 key,
                 title,
                 description,
@@ -373,7 +505,8 @@ function RebalanceInputBox({
                 shellClassName,
                 iconClassName,
                 content,
-              }) => (
+              } = section;
+              return (
                 <section
                   key={key}
                   className={`overflow-hidden rounded-xl border ${shellClassName}`}
@@ -405,9 +538,160 @@ function RebalanceInputBox({
                         : "0 characters"}
                   </div>
                 </section>
-              ),
-            )}
+              );
+            })}
           </div>
+
+          {swingInputSection ? (
+            <section
+              className={`overflow-hidden rounded-xl border ${swingInputSection.shellClassName}`}
+            >
+              <div className="flex flex-col gap-3 border-b border-white/70 bg-white/65 p-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex items-start gap-3">
+                  <span
+                    className={`rounded-lg p-2 ${swingInputSection.iconClassName}`}
+                  >
+                    {(() => {
+                      const SwingIcon = swingInputSection.Icon;
+                      return <SwingIcon className="size-4" />;
+                    })()}
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-950">
+                      {swingInputSection.title}
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-600">
+                      {swingInputSection.description}
+                    </p>
+                    <p className="mt-2 text-xs font-medium text-emerald-800">
+                      {selectedSwingJobCount.toLocaleString("en-IN")} of{" "}
+                      {totalSwingJobCount.toLocaleString("en-IN")} LLM outputs
+                      selected ·{" "}
+                      {selectedSwingCharacterCount.toLocaleString("en-IN")}{" "}
+                      output characters selected
+                    </p>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 shadow-sm">
+                  <input
+                    type="checkbox"
+                    className="size-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                    checked={allSwingJobsSelected}
+                    disabled={loading || totalSwingJobCount === 0}
+                    onChange={(event) =>
+                      setAllSwingJobsSelected(event.target.checked)
+                    }
+                  />
+                  Select all models
+                </label>
+              </div>
+
+              <div className="space-y-3 p-4">
+                {loading ? (
+                  <div className="rounded-lg border border-emerald-100 bg-white/70 p-4 text-sm text-gray-600">
+                    Loading swing-trade model outputs…
+                  </div>
+                ) : swingRuns.length === 0 ? (
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-emerald-100 bg-white/70 p-4 font-mono text-xs leading-5 text-gray-800">
+                    {swingInputSection.content ||
+                      "No completed swing-trade runs found after previous market close."}
+                  </pre>
+                ) : (
+                  swingRuns.map((run) => (
+                    <div
+                      key={run.id}
+                      className="overflow-hidden rounded-xl border border-emerald-100 bg-white/75 shadow-sm"
+                    >
+                      <div className="flex flex-col gap-1 border-b border-emerald-50 bg-emerald-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-950">
+                            Run #{run.id} ·{" "}
+                            {market === "us" ? "IndMoney US" : "Zerodha"}
+                          </h4>
+                          <p className="text-xs text-gray-600">
+                            Created {formatInputTimestamp(run.created_at)} ·
+                            export sheet {run.export_sheet_name || "n/a"}
+                          </p>
+                        </div>
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                          {run.run_jobs.length.toLocaleString("en-IN")} models
+                        </span>
+                      </div>
+                      <div className="divide-y divide-emerald-50">
+                        {run.run_jobs.map((link) => {
+                          const selectionId = getSwingJobSelectionId(
+                            run.id,
+                            link,
+                          );
+                          const isSelected =
+                            selectedSwingJobIds.has(selectionId);
+                          const outputLength = getRunJobResponseLength(link);
+                          return (
+                            <label
+                              key={selectionId}
+                              className={`grid cursor-pointer gap-3 px-4 py-3 transition hover:bg-emerald-50/60 md:grid-cols-[minmax(0,1fr)_auto] ${
+                                isSelected
+                                  ? "bg-white"
+                                  : "bg-gray-50/80 opacity-70"
+                              }`}
+                            >
+                              <span className="flex min-w-0 items-start gap-3">
+                                <input
+                                  type="checkbox"
+                                  className="mt-1 size-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                                  checked={isSelected}
+                                  onChange={() => toggleSwingJob(selectionId)}
+                                />
+                                <span className="min-w-0">
+                                  <span className="block truncate text-sm font-semibold text-gray-950">
+                                    {link.job.provider}/{link.job.model}
+                                  </span>
+                                  <span className="mt-1 block text-xs text-gray-500">
+                                    Job #{link.job_id} · {link.job.status} ·
+                                    updated{" "}
+                                    {formatInputTimestamp(link.job.updated_at)}
+                                  </span>
+                                  {link.job.response ? (
+                                    <span className="mt-2 line-clamp-2 block text-xs leading-5 text-gray-600">
+                                      {link.job.response}
+                                    </span>
+                                  ) : null}
+                                </span>
+                              </span>
+                              <span className="flex items-center justify-between gap-3 md:justify-end">
+                                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                                  {outputLength.toLocaleString("en-IN")} chars
+                                </span>
+                                <span
+                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                    isSelected
+                                      ? "bg-blue-100 text-blue-800"
+                                      : "bg-gray-100 text-gray-500"
+                                  }`}
+                                >
+                                  {isSelected ? "Included" : "Excluded"}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="border-t border-white/70 bg-white/65 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+                {swingInputSection.content
+                  ? `${swingInputSection.content.length.toLocaleString(
+                      "en-IN",
+                    )} characters in selected swing input summary`
+                  : loading
+                    ? "Counting characters…"
+                    : "0 characters"}
+              </div>
+            </section>
+          ) : null}
 
           <details className="rounded-xl border border-gray-200 bg-white p-3">
             <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
