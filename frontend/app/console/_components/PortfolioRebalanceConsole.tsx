@@ -629,48 +629,40 @@ function RebalanceInputBox({
                           return (
                             <label
                               key={selectionId}
-                              className={`grid cursor-pointer gap-3 px-4 py-3 transition hover:bg-emerald-50/60 md:grid-cols-[minmax(0,1fr)_auto] ${
+                              className={`grid cursor-pointer gap-3 px-4 py-3 transition hover:bg-emerald-50/60 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_auto] md:items-center ${
                                 isSelected
                                   ? "bg-white"
                                   : "bg-gray-50/80 opacity-70"
                               }`}
                             >
-                              <span className="flex min-w-0 items-start gap-3">
+                              <span className="min-w-0">
+                                <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+                                  LLM model
+                                </span>
+                                <span className="mt-1 block truncate text-sm font-semibold text-gray-950">
+                                  {link.job.provider}/{link.job.model}
+                                </span>
+                              </span>
+                              <span className="min-w-0 text-xs text-gray-600">
+                                <span className="block font-semibold uppercase tracking-[0.14em] text-gray-400">
+                                  Timestamp
+                                </span>
+                                <span className="mt-1 block truncate">
+                                  {formatInputTimestamp(link.job.updated_at)}
+                                </span>
+                              </span>
+                              <span className="justify-self-start rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 md:justify-self-end">
+                                Output length ·{" "}
+                                {outputLength.toLocaleString("en-IN")} chars
+                              </span>
+                              <span className="flex items-center gap-2 justify-self-start rounded-full border border-emerald-100 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 shadow-sm md:justify-self-end">
                                 <input
                                   type="checkbox"
-                                  className="mt-1 size-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                                  className="size-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
                                   checked={isSelected}
                                   onChange={() => toggleSwingJob(selectionId)}
                                 />
-                                <span className="min-w-0">
-                                  <span className="block truncate text-sm font-semibold text-gray-950">
-                                    {link.job.provider}/{link.job.model}
-                                  </span>
-                                  <span className="mt-1 block text-xs text-gray-500">
-                                    Job #{link.job_id} · {link.job.status} ·
-                                    updated{" "}
-                                    {formatInputTimestamp(link.job.updated_at)}
-                                  </span>
-                                  {link.job.response ? (
-                                    <span className="mt-2 line-clamp-2 block text-xs leading-5 text-gray-600">
-                                      {link.job.response}
-                                    </span>
-                                  ) : null}
-                                </span>
-                              </span>
-                              <span className="flex items-center justify-between gap-3 md:justify-end">
-                                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                                  {outputLength.toLocaleString("en-IN")} chars
-                                </span>
-                                <span
-                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                    isSelected
-                                      ? "bg-blue-100 text-blue-800"
-                                      : "bg-gray-100 text-gray-500"
-                                  }`}
-                                >
-                                  {isSelected ? "Included" : "Excluded"}
-                                </span>
+                                {isSelected ? "Included" : "Excluded"}
                               </span>
                             </label>
                           );
