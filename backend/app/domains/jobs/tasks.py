@@ -44,6 +44,7 @@ def _to_markdown_table_from_stocks(stocks: list[dict]) -> str:
         "price_per_unit",
         "total_buy_amount",
         "upside_horizon",
+        "weeks",
         "confidence_score",
         "rationale_remarks",
         "rationale_technical_short_term",
@@ -99,7 +100,7 @@ def _to_markdown_table_from_stocks(stocks: list[dict]) -> str:
         }
         rebalance_labels = {
             **stock_labels,
-            "upside_horizon": "Upside Horizon (% return in weeks)",
+            "upside_horizon": "Upside Horizon (% return)",
             "current_units": "Current Units",
             "action": "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
             "units_change": "Units Change",
@@ -393,7 +394,7 @@ def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reas
         "Requirements:\n"
         "- Include one complete decision row for EVERY current portfolio holding from the Latest Portfolio Snapshot; do not omit holdings and do not stop after a subset.\n"
         "- Consider every stock from the supplied swing-trade tables as a possible fresh Buy New candidate, and include Buy New rows for the candidates that are stronger than existing holdings after threats/opportunity-cost review.\n"
-        "- Every row must include Exchange Symbol, Stock Symbol, Current Units, Action, Units Change, Final Units, price/risk fields, confidence, and all rationale columns.\n"
+        "- Every row must include Exchange Symbol, Stock Symbol, Current Units, Action, Units Change, Final Units, price/risk fields, Upside Horizon (% return), Weeks, confidence, and all rationale columns.\n"
         "- Units Change must be numeric: negative for Sell All/Trim, positive for Buy/Add/Buy New, and 0 for Hold.\n"
         "- Final Units must equal Current Units + Units Change.\n"
         "- Do not output placeholder rows, separators only, notes, or prose before/after the table.\n"
