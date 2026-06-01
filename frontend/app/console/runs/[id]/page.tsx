@@ -1,8 +1,8 @@
 'use client';
 
-import { use, useCallback, useEffect, useRef, useState, type ElementType } from 'react';
+import { useCallback, useEffect, useRef, useState, type ElementType } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   AlertCircle,
   ArrowLeft,
@@ -87,9 +87,12 @@ function formatDuration(createdAt: string, updatedAt?: string) {
   return `${hours} hr ${remMinutes} min ${seconds} sec`;
 }
 
-export default function RunDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function RunDetailPage() {
+  const params = useParams<{ id: string | string[] }>();
   const router = useRouter();
+  const idParam = Array.isArray(params.id) ? params.id[0] : params.id;
+  const runId = Number(idParam);
+  const hasValidRunId = Number.isInteger(runId) && runId > 0;
   const [run, setRun] = useState<RunResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,10 +105,16 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
 
   const loadRun = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!hasValidRunId) {
+        setLoading(false);
+        setError('Invalid run id.');
+        return;
+      }
+
       const gen = ++generationRef.current;
       if (!silent) setLoading(true);
       try {
-        const data = await apiService.getRun(Number(id));
+        const data = await apiService.getRun(runId);
         if (gen !== generationRef.current) return;
         setRun(data);
         setError(null);
@@ -116,10 +125,12 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
         if (gen === generationRef.current && !silent) setLoading(false);
       }
     },
-    [id],
+    [hasValidRunId, runId],
   );
 
   useEffect(() => {
+    if (!hasValidRunId) return;
+
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadRun();
     apiService
@@ -132,7 +143,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
       .catch(() => {});
 
     const client = new WSClient({
-      url: URLs.runs.wsRun(Number(id)),
+      url: URLs.runs.wsRun(runId),
       onStatusChange: setWsConnected,
       onMessage: (data) => {
         if (data.type === 'job.updated') {
@@ -141,7 +152,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
             if (!prev) return prev;
             return {
               ...prev,
-              run_jobs: prev.run_jobs.map((rj) =>
+              run_jobs: (prev.run_jobs ?? []).map((rj) =>
                 rj.job.id === jobId
                   ? {
                     ...rj,
@@ -177,7 +188,25 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
       wsClientRef.current?.close();
       wsClientRef.current = null;
     };
-  }, [id, loadRun]);
+  }, [hasValidRunId, loadRun, runId]);
+
+  if (!hasValidRunId) {
+    return (
+      <div className="mx-auto flex flex-col gap-6">
+        <button
+          onClick={() => router.back()}
+          className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900"
+        >
+          <ArrowLeft className="size-4" />
+          Back
+        </button>
+        <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <AlertCircle className="mt-0.5 size-4 shrink-0" />
+          <span>Invalid run id.</span>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -211,9 +240,10 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
   const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
   const isActive = ACTIVE_STATUSES.has(run.status);
   const runLabel = getRunLabelFromPrompt(run.id, run.prompt);
-  const knownCostJobs = run.run_jobs.filter((rj) => hasKnownCost(rj.job.estimated_cost));
+  const runJobs = run.run_jobs ?? [];
+  const knownCostJobs = runJobs.filter((rj) => hasKnownCost(rj.job.estimated_cost));
   const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
-  const missingCostCount = run.run_jobs.length - knownCostJobs.length;
+  const missingCostCount = runJobs.length - knownCostJobs.length;
   const hasAnyKnownCost = knownCostJobs.length > 0;
   const formatCostWithInr = (value?: number | null) => {
     if (!hasKnownCost(value)) return 'Not captured';
@@ -221,8 +251,8 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
     const inr = usd * usdInrRate;
     return `${formatCost(usd)} (₹${inr.toFixed(2)})`;
   };
-  const totalTokensIn = run.run_jobs.reduce((sum, rj) => sum + (rj.job.tokens_in ?? 0), 0);
-  const totalTokensOut = run.run_jobs.reduce((sum, rj) => sum + (rj.job.tokens_out ?? 0), 0);
+  const totalTokensIn = runJobs.reduce((sum, rj) => sum + (rj.job.tokens_in ?? 0), 0);
+  const totalTokensOut = runJobs.reduce((sum, rj) => sum + (rj.job.tokens_out ?? 0), 0);
 
   return (
     <div className="mx-auto flex flex-col gap-6">
@@ -279,7 +309,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
           <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">Stage</div>
           <div className="mt-2 font-medium text-gray-950">S{run.current_stage}</div>
           <div className="mt-0.5 text-xs text-gray-500">
-            {run.run_jobs.length} model{run.run_jobs.length !== 1 ? 's' : ''}
+            {runJobs.length} model{runJobs.length !== 1 ? 's' : ''}
           </div>
         </div>
         <div className="border border-gray-200 bg-white px-4 py-4 shadow-sm">
@@ -340,7 +370,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
           Stage 1 — Model Responses
         </h2>
         <div className="grid gap-4">
-          {run.run_jobs.map((rj) => {
+          {runJobs.map((rj) => {
             const job = rj.job;
             const JobStatusIcon = STATUS_ICONS[job.status] ?? Clock3;
             const jobIsActive = ACTIVE_STATUSES.has(job.status);
