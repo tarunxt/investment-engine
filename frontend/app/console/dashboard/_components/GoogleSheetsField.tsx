@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
 import { FileSpreadsheet } from 'lucide-react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/card';
@@ -24,24 +23,7 @@ export function GoogleSheetsField({
     exportTitle,
     setExportTitle,
     googleSheetsConnected,
-    refreshGoogleSheetsStatus,
   } = useDashboard();
-
-  useEffect(() => {
-    void refreshGoogleSheetsStatus();
-
-    const refreshOnFocus = () => {
-      void refreshGoogleSheetsStatus();
-    };
-
-    window.addEventListener('focus', refreshOnFocus);
-    document.addEventListener('visibilitychange', refreshOnFocus);
-
-    return () => {
-      window.removeEventListener('focus', refreshOnFocus);
-      document.removeEventListener('visibilitychange', refreshOnFocus);
-    };
-  }, [refreshGoogleSheetsStatus]);
 
   const handleToggle = () => {
     setAutoExportEnabled(!autoExportEnabled);
