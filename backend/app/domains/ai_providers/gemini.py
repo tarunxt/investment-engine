@@ -31,9 +31,35 @@ SUPPORTED_MODELS = [
     "gemini-3-flash-preview",
 ]
 
+MAX_OUTPUT_TOKENS = 12000
+MAX_RESPONSE_CHARS = 60000
+REPAIR_PROMPT_MARKERS = (
+    "[REBALANCE_TABLE_REPAIR]",
+    "[STOCK_TABLE_REPAIR]",
+)
+
+
+def _should_disable_search(prompt: str) -> bool:
+    return any(marker in (prompt or "") for marker in REPAIR_PROMPT_MARKERS)
+
+
+def _thinking_config_for_model(model: str) -> types.ThinkingConfig | None:
+    # Gemini 2.5 Flash spends part of max_output_tokens on hidden thinking by
+    # default. Table jobs need deterministic visible rows more than hidden
+    # reasoning, so keep thinking disabled for Flash while leaving other models
+    # on provider defaults.
+    if model == "gemini-2.5-flash":
+        return types.ThinkingConfig(thinking_budget=0)
+    return None
+
 
 def _error_attr(exc: Exception, name: str) -> Any:
-    for candidate in (name, name.lower(), name.upper(), "".join(part.capitalize() for part in name.split("_"))):
+    for candidate in (
+        name,
+        name.lower(),
+        name.upper(),
+        "".join(part.capitalize() for part in name.split("_")),
+    ):
         if hasattr(exc, candidate):
             return getattr(exc, candidate)
     return None
@@ -85,9 +111,7 @@ class GeminiProvider(BaseAIProvider):
     def __init__(self) -> None:
         self._api_keys = get_gemini_api_keys()
         if not self._api_keys:
-            raise ValueError(
-                "GEMINI_API_KEY is not configured"
-            )
+            raise ValueError("GEMINI_API_KEY is not configured")
         self.client = genai.Client(
             api_key=self._api_keys[0],
             http_options={"api_version": "v1alpha"},
@@ -130,40 +154,25 @@ class GeminiProvider(BaseAIProvider):
     ) -> AIProviderResponse:
         tools: list[types.Tool] = []
 
-        # thinking_level = (
-        #     types.ThinkingLevel.HIGH
-        #     if model == "gemini-3.1-pro-preview"
-        #     else types.ThinkingLevel.MINIMAL
-        # )
-
-        tools: list[types.Tool] = []
-
-        tools.append(
-            types.Tool(
-                google_search=types.GoogleSearch()
-            )
-        )
+        if not _should_disable_search(prompt):
+            tools.append(types.Tool(google_search=types.GoogleSearch()))
 
         config = types.GenerateContentConfig(
-            # thinking_config=types.ThinkingConfig(
-            #     thinking_level=thinking_level,
-            # ),
+            thinking_config=_thinking_config_for_model(model),
             temperature=0.7,
-            max_output_tokens=3500,
+            max_output_tokens=MAX_OUTPUT_TOKENS,
             tools=tools if tools else None,
         )
 
         contents = [
             types.Content(
                 role="user",
-                parts=[
-                    types.Part.from_text(text=prompt)
-                ],
+                parts=[types.Part.from_text(text=prompt)],
             )
         ]
 
         full_text_parts: list[str] = []
-        max_chars = 18000
+        max_chars = MAX_RESPONSE_CHARS
 
         usage_metadata = None
 
@@ -200,7 +209,8 @@ class GeminiProvider(BaseAIProvider):
                 usage_metadata,
                 "prompt_token_count",
                 0,
-            ) or 0
+            )
+            or 0
         )
 
         tokens_out = int(
@@ -208,7 +218,8 @@ class GeminiProvider(BaseAIProvider):
                 usage_metadata,
                 "candidates_token_count",
                 0,
-            ) or 0
+            )
+            or 0
         )
 
         return AIProviderResponse(
@@ -238,10 +249,8 @@ class GeminiProvider(BaseAIProvider):
             return 0.0
 
         return round(
-            (tokens_in / 1_000_000)
-            * pricing["input"]
-            + (tokens_out / 1_000_000)
-            * pricing["output"],
+            (tokens_in / 1_000_000) * pricing["input"]
+            + (tokens_out / 1_000_000) * pricing["output"],
             6,
         )
 
@@ -251,7 +260,7 @@ class GeminiProvider(BaseAIProvider):
         if not pricing:
             return 0.0
         prompt_tokens = max(1, math.ceil(len(prompt) / 4))
-        expected_output_tokens = 1800
+        expected_output_tokens = 5000
         return round(
             (prompt_tokens / 1_000_000) * pricing["input"]
             + (expected_output_tokens / 1_000_000) * pricing["output"],

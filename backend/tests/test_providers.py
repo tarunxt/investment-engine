@@ -17,7 +17,7 @@ from app.domains.ai_providers.anthropic import AnthropicProvider
 from app.domains.ai_providers.base import AIProviderResponse
 from app.domains.ai_providers.deepseek import DeepSeekProvider
 from app.domains.ai_providers.factory import ProviderFactory
-from app.domains.ai_providers.gemini import GeminiProvider
+from app.domains.ai_providers.gemini import MAX_OUTPUT_TOKENS, GeminiProvider
 from app.domains.ai_providers.openai import OpenAIProvider
 from app.domains.ai_providers.router import _resolve_recent_model_costs
 from app.domains.jobs import tasks
@@ -115,10 +115,12 @@ class ProviderFactoryTests(unittest.TestCase):
         self,
         resolve_target_for_provider_mock,
     ):
-        resolve_target_for_provider_mock.side_effect = lambda provider_name, *, preferred_model=None: (
-            ("openai", "gpt-4o-mini")
-            if provider_name == "openai" and preferred_model == "gpt-4o-mini"
-            else None
+        resolve_target_for_provider_mock.side_effect = (
+            lambda provider_name, *, preferred_model=None: (
+                ("openai", "gpt-4o-mini")
+                if provider_name == "openai" and preferred_model == "gpt-4o-mini"
+                else None
+            )
         )
 
         target = ProviderFactory.resolve_default_target("openai", "gpt-4o-mini")
@@ -172,6 +174,60 @@ class ProviderCostSelectionTests(unittest.TestCase):
 
         self.assertEqual(exact_prompt_cost, 0.0008)
         self.assertEqual(latest_model_cost, 0.0008)
+
+
+class GeminiProviderConfigTests(unittest.TestCase):
+    def test_flash_generation_disables_thinking_and_uses_larger_output_budget(self):
+        provider = GeminiProvider()
+        stream_mock = MagicMock(
+            return_value=[
+                SimpleNamespace(
+                    text="ok",
+                    usage_metadata=SimpleNamespace(
+                        prompt_token_count=10,
+                        candidates_token_count=2,
+                    ),
+                )
+            ]
+        )
+        provider.client = SimpleNamespace(
+            models=SimpleNamespace(generate_content_stream=stream_mock),
+        )
+
+        provider._generate_once(
+            prompt="[REBALANCE_FLOW:india] build table", model="gemini-2.5-flash"
+        )
+
+        config = stream_mock.call_args.kwargs["config"]
+        self.assertEqual(config.max_output_tokens, MAX_OUTPUT_TOKENS)
+        self.assertIsNotNone(config.tools)
+        self.assertIsNotNone(config.thinking_config)
+        self.assertEqual(config.thinking_config.thinking_budget, 0)
+
+    def test_repair_generation_disables_search_tools(self):
+        provider = GeminiProvider()
+        stream_mock = MagicMock(
+            return_value=[
+                SimpleNamespace(
+                    text="ok",
+                    usage_metadata=SimpleNamespace(
+                        prompt_token_count=10,
+                        candidates_token_count=2,
+                    ),
+                )
+            ]
+        )
+        provider.client = SimpleNamespace(
+            models=SimpleNamespace(generate_content_stream=stream_mock),
+        )
+
+        provider._generate_once(
+            prompt="[REBALANCE_TABLE_REPAIR] return rows only",
+            model="gemini-2.5-flash",
+        )
+
+        config = stream_mock.call_args.kwargs["config"]
+        self.assertIsNone(config.tools)
 
 
 class ExecuteAIJobTests(unittest.TestCase):
