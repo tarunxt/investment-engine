@@ -258,7 +258,93 @@ def _validate_stock_table_content(content: str) -> tuple[str, str | None, list[d
     )
 
 
-def _validate_rebalance_table_content(content: str) -> tuple[str, str | None, list[dict]]:
+
+def _split_markdown_table_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _extract_rebalance_current_holdings_from_prompt(prompt: str) -> list[dict[str, str]]:
+    """Extract current portfolio holdings from the rebalance prompt input table."""
+    text = prompt or ""
+    section_match = re.search(
+        r"##\s*1\.\s*Latest Portfolio Snapshot(?P<section>.*?)(?:\n##\s*2\.|\Z)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not section_match:
+        return []
+
+    section = section_match.group("section")
+    table_lines = [line.strip() for line in section.splitlines() if line.strip().startswith("|")]
+    if len(table_lines) < 3:
+        return []
+
+    header_idx = next(
+        (
+            idx
+            for idx, line in enumerate(table_lines)
+            if "stock symbol" in line.lower() and "current units" in line.lower()
+        ),
+        None,
+    )
+    if header_idx is None:
+        return []
+
+    headers = [_normalize_rebalance_prompt_header(cell) for cell in _split_markdown_table_row(table_lines[header_idx])]
+    try:
+        symbol_idx = headers.index("stock symbol")
+        current_units_idx = headers.index("current units")
+    except ValueError:
+        return []
+    exchange_idx = headers.index("exchange") if "exchange" in headers else None
+
+    holdings: list[dict[str, str]] = []
+    seen_symbols: set[str] = set()
+    for line in table_lines[header_idx + 1 :]:
+        if line.replace("|", "").replace(":", "").replace("-", "").strip() == "":
+            continue
+        cells = _split_markdown_table_row(line)
+        if len(cells) <= max(symbol_idx, current_units_idx):
+            continue
+        symbol = cells[symbol_idx].strip().upper()
+        if not symbol or symbol in {"STOCK SYMBOL", "SYMBOL"}:
+            continue
+        units = cells[current_units_idx].strip()
+        exchange = cells[exchange_idx].strip() if exchange_idx is not None and exchange_idx < len(cells) else ""
+        if symbol in seen_symbols:
+            continue
+        holdings.append({"exchange_symbol": exchange, "stock_symbol": symbol, "current_units": units})
+        seen_symbols.add(symbol)
+
+    return holdings
+
+
+def _normalize_rebalance_prompt_header(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _rebalance_missing_current_holdings_issue(prompt: str, parsed_rows: list[dict]) -> str | None:
+    required_holdings = _extract_rebalance_current_holdings_from_prompt(prompt)
+    if not required_holdings:
+        return None
+
+    output_symbols = {str(row.get("stock_symbol", "")).strip().upper() for row in parsed_rows}
+    missing = [holding for holding in required_holdings if holding["stock_symbol"] not in output_symbols]
+    if not missing:
+        return None
+
+    missing_labels = ", ".join(
+        f"{holding['exchange_symbol']}:{holding['stock_symbol']}" if holding.get("exchange_symbol") else holding["stock_symbol"]
+        for holding in missing
+    )
+    return (
+        "partial rebalance table "
+        f"(missing {len(missing)} current portfolio holding row(s): {missing_labels}; "
+        f"expected at least {len(required_holdings)} current-holding rows)"
+    )
+
+
+def _validate_rebalance_table_content(content: str, prompt: str = "") -> tuple[str, str | None, list[dict]]:
     """Validate rebalance output and return canonical markdown when possible."""
     normalized_content = (content or "").strip()
     data_rows = _count_markdown_table_data_rows(normalized_content)
@@ -273,6 +359,10 @@ def _validate_rebalance_table_content(content: str) -> tuple[str, str | None, li
 
     if not parsed_rows:
         return normalized_content, "malformed table output (no complete rebalance rows)", []
+
+    missing_holdings_issue = _rebalance_missing_current_holdings_issue(prompt, parsed_rows)
+    if missing_holdings_issue:
+        return normalized_content, missing_holdings_issue, parsed_rows
 
     repaired_content = _to_markdown_table_from_stocks(parsed_rows)
     if repaired_content:
@@ -289,8 +379,8 @@ def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reas
         f"Issue: {reason}.\n"
         "Regenerate the FULL rebalance answer and return ONLY one markdown table with the exact rebalance columns from the original prompt.\n"
         "Requirements:\n"
-        "- Include at least one complete rebalance data row; do not stop after the title/header.\n"
-        "- Prefer one decision row for every current portfolio holding, plus any stronger Buy New ideas from the supplied swing-trade tables.\n"
+        "- Include one complete decision row for EVERY current portfolio holding from the Latest Portfolio Snapshot; do not omit holdings and do not stop after a subset.\n"
+        "- Consider every stock from the supplied swing-trade tables as a possible fresh Buy New candidate, and include Buy New rows for the candidates that are stronger than existing holdings after threats/opportunity-cost review.\n"
         "- Every row must include Exchange Symbol, Stock Symbol, Current Units, Action, Units Change, Final Units, price/risk fields, confidence, and all rationale columns.\n"
         "- Units Change must be numeric: negative for Sell All/Trim, positive for Buy/Add/Buy New, and 0 for Hold.\n"
         "- Final Units must equal Current Units + Units Change.\n"
@@ -948,7 +1038,7 @@ def execute_ai_job(self, job_id: int) -> None:
             )
         if _requires_generic_table_output(job.prompt):
             if _is_rebalance_output(job.prompt):
-                content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content)
+                content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
                     if not rebalance_table_issue:
                         break
@@ -973,7 +1063,7 @@ def execute_ai_job(self, job_id: int) -> None:
                     repaired_content = (repair_result.content or "").strip()
                     if repaired_content:
                         content = repaired_content
-                    content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content)
+                    content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
                 if rebalance_table_issue:
                     raise RuntimeError(
                         f"{job.provider}/{job.model} returned {rebalance_table_issue}"
