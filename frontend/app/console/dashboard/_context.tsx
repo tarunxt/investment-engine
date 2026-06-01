@@ -14,7 +14,14 @@ import { AlertCircle, CalendarClock, CheckCircle2, Clock3, Loader2 } from 'lucid
 import { isRunInSwingTradeMarket } from '@/lib/runPresentation';
 import { inferRebalanceMarketFromPrompt } from '@/lib/rebalance';
 import { apiService } from '@/services/api';
-import { type PromptResponse, type ProviderInfo, type RunListItem, type RunModelTarget, type RunResponse } from '@/types/api';
+import {
+  type GoogleSheetsStatusResponse,
+  type PromptResponse,
+  type ProviderInfo,
+  type RunListItem,
+  type RunModelTarget,
+  type RunResponse,
+} from '@/types/api';
 import { useRuns } from '@/hooks/useRuns';
 import { type SwingTradeMarket } from '@/lib/swingTrade';
 
@@ -119,7 +126,7 @@ interface DashboardContextValue {
   exportTitle: string;
   setExportTitle: (val: string) => void;
   googleSheetsConnected: boolean;
-  refreshGoogleSheetsStatus: () => Promise<void>;
+  refreshGoogleSheetsStatus: () => Promise<GoogleSheetsStatusResponse | null>;
 
   // Derived
   charCount: number;
@@ -233,10 +240,12 @@ export function DashboardProvider({
       const connected = Boolean(sheetsStatus.connected);
       setGoogleSheetsConnected(connected);
       setExportSpreadsheetUrl(connected ? (sheetsStatus.default_spreadsheet_url ?? '') : '');
+      return sheetsStatus;
     } catch (err) {
       console.error('Failed to load Google Sheets status:', err);
       setGoogleSheetsConnected(false);
       setExportSpreadsheetUrl('');
+      return null;
     }
   }, []);
 
