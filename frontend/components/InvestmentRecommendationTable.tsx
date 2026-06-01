@@ -156,8 +156,8 @@ const HEADER_ALIAS_TO_EXACT: Record<string, CanonicalHeader> = {
   llm: 'LLM',
 };
 
-function normalizeHeader(value: string): string {
-  return value
+function normalizeHeader(value: unknown): string {
+  return String(value ?? '')
     .toLowerCase()
     .replace(/\*\*/g, '')
     .replace(/[`*]/g, '')
