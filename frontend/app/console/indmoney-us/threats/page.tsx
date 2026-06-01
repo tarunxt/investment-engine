@@ -394,6 +394,7 @@ export default function IndMoneyUsThreatsPage() {
   }, [analysis?.job_id, analysis?.status, loadAnalysisJob]);
 
   const latestSnapshot = overview?.latest ?? null;
+  const analysisIsActive = isJobActive(analysis?.status);
   const displayedAnalysis = analysis?.report ? analysis : lastReportAnalysis;
   const technicalRiskSection = findSection(displayedAnalysis, 'technical_risk_map');
   const currentPriceRequestEntries = buildCurrentPriceRequests(technicalRiskSection);
@@ -509,7 +510,7 @@ export default function IndMoneyUsThreatsPage() {
               <EventScanRunControls
                 onRun={handleRunAnalysis}
                 disabled={!latestSnapshot}
-                running={runningAnalysis}
+                running={runningAnalysis || analysisIsActive}
                 buttonLabel="Run Threat Scan"
                 defaultTarget={analysis ? { provider: analysis.provider, model: analysis.model } : undefined}
                 historicalEstimatedCostInrByTarget={historicalEstimatedCostInrByTarget}

@@ -326,6 +326,7 @@ export default function ZerodhaThreatsPage() {
   }, [analysis?.job_id, analysis?.status, loadAnalysisJob]);
 
   const latestSnapshot = overview?.latest ?? null;
+  const analysisIsActive = isJobActive(analysis?.status);
   const displayedAnalysis = analysis?.report ? analysis : lastReportAnalysis;
   const historicalEstimatedCostInrByTarget = useHistoricalAnalysisCosts({
     analysis,
@@ -380,7 +381,7 @@ export default function ZerodhaThreatsPage() {
               <EventScanRunControls
                 onRun={handleRunAnalysis}
                 disabled={!latestSnapshot}
-                running={runningAnalysis}
+                running={runningAnalysis || analysisIsActive}
                 buttonLabel="Run Threat Scan"
                 defaultTarget={analysis ? { provider: analysis.provider, model: analysis.model } : undefined}
                 historicalEstimatedCostInrByTarget={historicalEstimatedCostInrByTarget}
