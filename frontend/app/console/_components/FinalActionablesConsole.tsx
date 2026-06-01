@@ -66,17 +66,18 @@ const PAGE_COPY: Record<RebalancePortfolioKey, { title: string; description: str
   },
 };
 
-function normalizeWhitespace(value: string) {
-  return value.replace(/\s+/g, " ").trim();
+function normalizeWhitespace(value?: string | null) {
+  return (value || "").replace(/\s+/g, " ").trim();
 }
 
-function extractRebalanceInputFingerprint(prompt: string) {
+function extractRebalanceInputFingerprint(prompt?: string | null) {
+  const text = prompt || "";
   const marker = "## Rebalance Input Bundle";
-  const markerIndex = prompt.indexOf(marker);
+  const markerIndex = text.indexOf(marker);
   if (markerIndex >= 0) {
-    return normalizeWhitespace(prompt.slice(markerIndex));
+    return normalizeWhitespace(text.slice(markerIndex));
   }
-  return normalizeWhitespace(prompt);
+  return normalizeWhitespace(text);
 }
 
 function parseTimestampMs(value?: string | null) {
@@ -422,8 +423,8 @@ export function FinalActionablesConsole({
                 </table>
               </div>
             ) : (
-              <div className="py-12 text-center text-sm text-gray-500">
-                No completed rebalance output tables were found for the latest matching input set.
+              <div className="mx-auto max-w-2xl py-12 text-center text-sm text-gray-500">
+                No completed rebalance output tables were found for the latest matching input set. Runs with empty or missing prompts are ignored by the input-set matcher until a completed rebalance response is available.
               </div>
             )}
           </CardContent>

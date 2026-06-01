@@ -34,16 +34,17 @@ const EXPORTED_ROWS_RE = /(\d+)\s*\/\s*(\d+)\s*exported/i;
 const SWING_TRADE_MARKET_PATTERNS: Record<SwingTradeMarket, RegExp[]> = {
   india: [
     /\[rebalance_flow:india\]/i,
-    /\bindia(?:n)?\b[^.\n]{0,180}\baggressive swing-trad/i,
-    /\baggressive swing-trad[^.\n]{0,180}\bindia(?:n)?\b/i,
-    /\bzerodha\b[^.\n]{0,120}\bindian? equity\b/i,
+    /\bzerodha\b/i,
+    /\bindia(?:n)?\b[^.\n]{0,220}\b(?:portfolio|holdings|equity|equities|stocks|swing[-\s]?trade|rebalance)\b/i,
+    /\b(?:portfolio|holdings|equity|equities|stocks|swing[-\s]?trade|rebalance)\b[^.\n]{0,220}\bindia(?:n)?\b/i,
+    /\baggressive swing[-\s]?trad[^.\n]{0,180}\bindia(?:n)?\b/i,
   ],
   us: [
     /\[rebalance_flow:us\]/i,
-    /\bus\b[^.\n]{0,180}\baggressive swing-trad/i,
-    /\baggressive swing-trad[^.\n]{0,180}\bus\b/i,
     /\bindmoney\s*us\b/i,
-    /\bindmoney\b[^.\n]{0,120}\bus equity\b/i,
+    /\b(?:us|u\.s\.|usa|united states)\b[^.\n]{0,220}\b(?:portfolio|holdings|equity|equities|stocks|swing[-\s]?trade|rebalance)\b/i,
+    /\b(?:portfolio|holdings|equity|equities|stocks|swing[-\s]?trade|rebalance)\b[^.\n]{0,220}\b(?:us|u\.s\.|usa|united states)\b/i,
+    /\baggressive swing[-\s]?trad[^.\n]{0,180}\b(?:us|u\.s\.|usa|united states)\b/i,
   ],
 };
 
