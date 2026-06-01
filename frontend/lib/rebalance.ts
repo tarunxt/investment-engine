@@ -1,106 +1,137 @@
 import type {
-  IndMoneyUsEventsAnalysis,
   IndMoneyUsPortfolioSnapshotDetail,
   IndMoneyUsThreatAnalysis,
   RunResponse,
-  ZerodhaEventsAnalysis,
   ZerodhaPortfolioSnapshotDetail,
   ZerodhaThreatAnalysis,
-} from '@/types/api';
-import type { SwingTradeMarket } from '@/lib/swingTrade';
+} from "@/types/api";
+import type { SwingTradeMarket } from "@/lib/swingTrade";
 
-export type RebalancePortfolioKey = 'zerodha' | 'indmoneyUs';
+export type RebalancePortfolioKey = "zerodha" | "indmoneyUs";
 
-type PortfolioSnapshot = ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null;
-type EventsAnalysis = ZerodhaEventsAnalysis | IndMoneyUsEventsAnalysis | null;
+type PortfolioSnapshot =
+  | ZerodhaPortfolioSnapshotDetail
+  | IndMoneyUsPortfolioSnapshotDetail
+  | null;
 type ThreatAnalysis = ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis | null;
 
 const SWING_COLUMN_LEGEND = [
-  'LLM=LLM Name + Model',
-  'Ex=Exchange Symbol',
-  'Sym=Stock Symbol',
-  'Name=Stock Name',
-  'Setup=Technical Setup',
-  'Entry=Entry Range',
-  'SL=Stop Loss',
-  'Tgt=Target',
-  'Src=Analyst Source',
-  'Units=Units to Buy',
-  'Px=Price per Unit',
-  'Amt=Total Buy Amount',
-  'Upside=Upside Horizon (%)',
-  'Wks=Weeks',
-  'Conf=Confidence Score (0-100)',
-  'Notes=Rationale Remarks',
-  'TechMT=Rationale - Technical Setup (Medium Term)',
-  'TechLT=Rationale - Technical Setup (Long Term)',
-  'FundST=Rationale - Fundamentals Short Term',
-  'FundMLT=Rationale - Fundamentals Medium/Long Term',
-  'TechST=Rationale Technical Setup Short Term 1–3 Months',
-  'Run=Run #',
-  'Date=Run Date',
-  'Time=Run Time',
-  'LLMShort=LLM',
-].join(' | ');
+  "LLM=LLM Name + Model",
+  "Ex=Exchange Symbol",
+  "Sym=Stock Symbol",
+  "Name=Stock Name",
+  "Setup=Technical Setup",
+  "Entry=Entry Range",
+  "SL=Stop Loss",
+  "Tgt=Target",
+  "Src=Analyst Source",
+  "Units=Units to Buy",
+  "Px=Price per Unit",
+  "Amt=Total Buy Amount",
+  "Upside=Upside Horizon (%)",
+  "Wks=Weeks",
+  "Conf=Confidence Score (0-100)",
+  "Notes=Rationale Remarks",
+  "TechMT=Rationale - Technical Setup (Medium Term)",
+  "TechLT=Rationale - Technical Setup (Long Term)",
+  "FundST=Rationale - Fundamentals Short Term",
+  "FundMLT=Rationale - Fundamentals Medium/Long Term",
+  "TechST=Rationale Technical Setup Short Term 1–3 Months",
+  "Run=Run #",
+  "Date=Run Date",
+  "Time=Run Time",
+  "LLMShort=LLM",
+].join(" | ");
 
 const SWING_TABLE_HEADER_MARKERS = [
-  'llm name',
-  'exchange symbol',
-  'stock symbol',
-  'technical setup',
-  'confidence score',
-  'rationale',
+  "llm name",
+  "exchange symbol",
+  "stock symbol",
+  "technical setup",
+  "confidence score",
+  "rationale",
 ];
 
-const MARKET_COPY: Record<SwingTradeMarket, { label: string; portfolioName: string; currency: string; timezone: string; closeHour: number; closeMinute: number; sheetSuffix: string }> = {
+const MARKET_COPY: Record<
+  SwingTradeMarket,
+  {
+    label: string;
+    portfolioName: string;
+    currency: string;
+    timezone: string;
+    closeHour: number;
+    closeMinute: number;
+    sheetSuffix: string;
+  }
+> = {
   india: {
-    label: 'India',
-    portfolioName: 'Zerodha Indian equity',
-    currency: 'INR',
-    timezone: 'Asia/Kolkata',
+    label: "India",
+    portfolioName: "Zerodha Indian equity",
+    currency: "INR",
+    timezone: "Asia/Kolkata",
     closeHour: 15,
     closeMinute: 30,
-    sheetSuffix: 'Ind',
+    sheetSuffix: "Ind",
   },
   us: {
-    label: 'US',
-    portfolioName: 'INDmoney US equity',
-    currency: 'USD',
-    timezone: 'America/New_York',
+    label: "US",
+    portfolioName: "INDmoney US equity",
+    currency: "USD",
+    timezone: "America/New_York",
     closeHour: 16,
     closeMinute: 0,
-    sheetSuffix: 'US',
+    sheetSuffix: "US",
   },
 };
 
 function zonedDateParts(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
+  const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
     hour12: false,
-    weekday: 'short',
+    weekday: "short",
   }).formatToParts(date);
 
-  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
 
   return {
-    year: Number(get('year')),
-    month: Number(get('month')),
-    day: Number(get('day')),
-    hour: Number(get('hour')),
-    minute: Number(get('minute')),
-    second: Number(get('second')),
-    weekday: get('weekday'),
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+    second: Number(get("second")),
+    weekday: get("weekday"),
   };
 }
 
-function zonedWallTimeToUtc(parts: { year: number; month: number; day: number; hour: number; minute: number; second?: number }, timeZone: string) {
-  const utcGuess = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second ?? 0));
+function zonedWallTimeToUtc(
+  parts: {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
+    minute: number;
+    second?: number;
+  },
+  timeZone: string,
+) {
+  const utcGuess = new Date(
+    Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second ?? 0,
+    ),
+  );
   const actualParts = zonedDateParts(utcGuess, timeZone);
   const actualAsUtc = Date.UTC(
     actualParts.year,
@@ -110,20 +141,39 @@ function zonedWallTimeToUtc(parts: { year: number; month: number; day: number; h
     actualParts.minute,
     actualParts.second,
   );
-  const desiredAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second ?? 0);
+  const desiredAsUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second ?? 0,
+  );
   return new Date(utcGuess.getTime() + (desiredAsUtc - actualAsUtc));
 }
 
-function addDays(parts: { year: number; month: number; day: number }, days: number) {
-  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
-  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+function addDays(
+  parts: { year: number; month: number; day: number },
+  days: number,
+) {
+  const date = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day + days),
+  );
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
 }
 
 function weekdayIndex(weekday: string) {
-  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday);
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekday);
 }
 
-function previousBusinessDate(parts: { year: number; month: number; day: number }, weekday: string) {
+function previousBusinessDate(
+  parts: { year: number; month: number; day: number },
+  weekday: string,
+) {
   let back = -1;
   const idx = weekdayIndex(weekday);
   if (idx === 1) back = -3;
@@ -131,11 +181,20 @@ function previousBusinessDate(parts: { year: number; month: number; day: number 
   return addDays(parts, back);
 }
 
-export function getPreviousMarketClose(market: SwingTradeMarket, now = new Date()) {
+export function getPreviousMarketClose(
+  market: SwingTradeMarket,
+  now = new Date(),
+) {
   const copy = MARKET_COPY[market];
   const local = zonedDateParts(now, copy.timezone);
   const todayClose = zonedWallTimeToUtc(
-    { year: local.year, month: local.month, day: local.day, hour: copy.closeHour, minute: copy.closeMinute },
+    {
+      year: local.year,
+      month: local.month,
+      day: local.day,
+      hour: copy.closeHour,
+      minute: copy.closeMinute,
+    },
     copy.timezone,
   );
   const weekday = weekdayIndex(local.weekday);
@@ -145,32 +204,76 @@ export function getPreviousMarketClose(market: SwingTradeMarket, now = new Date(
   }
   const previous = previousBusinessDate(local, local.weekday);
   return zonedWallTimeToUtc(
-    { year: previous.year, month: previous.month, day: previous.day, hour: copy.closeHour, minute: copy.closeMinute },
+    {
+      year: previous.year,
+      month: previous.month,
+      day: previous.day,
+      hour: copy.closeHour,
+      minute: copy.closeMinute,
+    },
     copy.timezone,
   );
 }
 
-export function getRebalanceDefaultExportSheetName(market: SwingTradeMarket, now = new Date()) {
-  const dateLabel = now.toLocaleDateString('en-IN', {
+function parseApiDate(value?: string | null) {
+  if (!value || typeof value !== "string") return null;
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const parsed = /[zZ]|[+-]\d{2}:\d{2}$/.test(normalized)
+    ? new Date(normalized)
+    : new Date(`${normalized}Z`);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function formatDateTimeForMarket(date: Date, market: SwingTradeMarket) {
+  const timeZone = MARKET_COPY[market].timezone;
+  const local = date.toLocaleString("en-IN", {
+    timeZone,
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  });
+  return `${local} (${date.toISOString()})`;
+}
+
+export function formatPreviousMarketClose(
+  market: SwingTradeMarket,
+  previousClose: Date,
+) {
+  return formatDateTimeForMarket(previousClose, market);
+}
+
+export function getRebalanceDefaultExportSheetName(
+  market: SwingTradeMarket,
+  now = new Date(),
+) {
+  const dateLabel = now.toLocaleDateString("en-IN", {
     timeZone: MARKET_COPY[market].timezone,
-    day: 'numeric',
-    month: 'short',
+    day: "numeric",
+    month: "short",
   });
   return `${dateLabel} Rebalance (${MARKET_COPY[market].sheetSuffix})`;
 }
 
-export function inferRebalanceMarketFromPrompt(prompt?: string | null): SwingTradeMarket | null {
-  const text = (prompt || '').toLowerCase();
-  if (text.includes('[rebalance_flow:india]')) return 'india';
-  if (text.includes('[rebalance_flow:us]')) return 'us';
+export function inferRebalanceMarketFromPrompt(
+  prompt?: string | null,
+): SwingTradeMarket | null {
+  const text = (prompt || "").toLowerCase();
+  if (text.includes("[rebalance_flow:india]")) return "india";
+  if (text.includes("[rebalance_flow:us]")) return "us";
   return null;
 }
 
 export function buildRebalancePrompt(market: SwingTradeMarket) {
   const copy = MARKET_COPY[market];
-  const isIndia = market === 'india';
-  const benchmark = isIndia ? 'Nifty / sector index' : 'S&P 500 / Nasdaq / sector ETF';
-  const exchangeExamples = isIndia ? 'NSE/BSE' : 'NASDAQ/NYSE/AMEX';
+  const isIndia = market === "india";
+  const benchmark = isIndia
+    ? "Nifty / sector index"
+    : "S&P 500 / Nasdaq / sector ETF";
+  const exchangeExamples = isIndia ? "NSE/BSE" : "NASDAQ/NYSE/AMEX";
 
   return `[REBALANCE_FLOW:${market}]
 Act as a top-tier ${copy.label} equity aggressive swing-trading portfolio strategist combining the skills of a hedge fund trader, technical analyst, momentum screener, sell-side strategist, and portfolio risk manager.
@@ -241,70 +344,97 @@ Formatting Rules:
 - Final output must be plain markdown table only.`;
 }
 
-function asMarkdownTable(headers: string[], rows: Array<Array<string | number | null | undefined>>) {
-  if (rows.length === 0) return '_No rows available._';
-  const clean = (value: string | number | null | undefined) => String(value ?? '').replace(/\s+/g, ' ').replace(/\|/g, '/').trim();
+function asMarkdownTable(
+  headers: string[],
+  rows: Array<Array<string | number | null | undefined>>,
+) {
+  if (rows.length === 0) return "_No rows available._";
+  const clean = (value: string | number | null | undefined) =>
+    String(value ?? "")
+      .replace(/\s+/g, " ")
+      .replace(/\|/g, "/")
+      .trim();
   return [
-    `| ${headers.join(' | ')} |`,
-    `| ${headers.map(() => '---').join(' | ')} |`,
-    ...rows.map((row) => `| ${row.map(clean).join(' | ')} |`),
-  ].join('\n');
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.map(clean).join(" | ")} |`),
+  ].join("\n");
 }
 
 function normalizeTableCell(value: string) {
   return value
     .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/[+()–—-]/g, ' ')
+    .replace(/\s+/g, " ")
+    .replace(/[+()–—-]/g, " ")
     .trim();
 }
 
 function isMarkdownSeparatorRow(line: string) {
   const trimmed = line.trim();
-  return /^\|?[\s:|\-]+\|?$/.test(trimmed) && trimmed.includes('---');
+  return /^\|?[\s:|\-]+\|?$/.test(trimmed) && trimmed.includes("---");
 }
 
 function isSwingRecommendationHeader(line: string) {
   const normalized = normalizeTableCell(line);
-  return SWING_TABLE_HEADER_MARKERS.every((marker) => normalized.includes(marker));
+  return SWING_TABLE_HEADER_MARKERS.every((marker) =>
+    normalized.includes(marker),
+  );
 }
 
 function isSwingRecommendationTitle(line: string) {
   const normalized = line.toLowerCase();
-  return normalized.startsWith('##') && normalized.includes('how to invest') && normalized.includes('generated by');
+  return (
+    normalized.startsWith("##") &&
+    normalized.includes("how to invest") &&
+    normalized.includes("generated by")
+  );
 }
 
 function compactSwingRecommendationResponse(response?: string | null) {
-  if (!response?.trim()) return '_No response captured yet._';
+  if (!response?.trim()) return "_No response captured yet._";
 
   const compactedLines: string[] = [];
+  const seenContentLines = new Set<string>();
   let previousWasBlank = false;
 
   for (const rawLine of response.split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (isSwingRecommendationTitle(line) || isSwingRecommendationHeader(line) || isMarkdownSeparatorRow(line)) {
+    if (
+      isSwingRecommendationTitle(line) ||
+      isSwingRecommendationHeader(line) ||
+      isMarkdownSeparatorRow(line)
+    ) {
       continue;
     }
 
     if (!line) {
       if (!previousWasBlank && compactedLines.length > 0) {
-        compactedLines.push('');
+        compactedLines.push("");
       }
       previousWasBlank = true;
       continue;
     }
 
-    compactedLines.push(line.replace(/\s+/g, ' '));
+    const compactLine = line.replace(/\s+/g, " ");
+    const normalizedLine = normalizeTableCell(compactLine);
+    if (seenContentLines.has(normalizedLine)) {
+      continue;
+    }
+    seenContentLines.add(normalizedLine);
+    compactedLines.push(compactLine);
     previousWasBlank = false;
   }
 
-  return compactedLines.join('\n').trim() || '_No response captured yet._';
+  return compactedLines.join("\n").trim() || "_No response captured yet._";
 }
 
-function formatPortfolioSnapshot(market: SwingTradeMarket, snapshot: PortfolioSnapshot) {
-  if (!snapshot) return '_No latest portfolio snapshot available._';
+function formatPortfolioSnapshot(
+  market: SwingTradeMarket,
+  snapshot: PortfolioSnapshot,
+) {
+  if (!snapshot) return "_No latest portfolio snapshot available._";
 
-  if (market === 'india' && 'holdings' in snapshot) {
+  if (market === "india" && "holdings" in snapshot) {
     const indiaSnapshot = snapshot as ZerodhaPortfolioSnapshotDetail;
     const rows = indiaSnapshot.holdings.map((holding) => [
       holding.exchange,
@@ -317,15 +447,24 @@ function formatPortfolioSnapshot(market: SwingTradeMarket, snapshot: PortfolioSn
       holding.day_change_percentage,
     ]);
     return `Snapshot date: ${indiaSnapshot.snapshot_date}; captured at: ${indiaSnapshot.captured_at}\n\n${asMarkdownTable(
-      ['Exchange', 'Stock Symbol', 'Current Units', 'Average Price', 'Last Price', 'Market Value', 'PnL', 'Day Change %'],
+      [
+        "Exchange",
+        "Stock Symbol",
+        "Current Units",
+        "Average Price",
+        "Last Price",
+        "Market Value",
+        "PnL",
+        "Day Change %",
+      ],
       rows,
     )}`;
   }
 
-  if (market === 'us' && 'holdings' in snapshot) {
+  if (market === "us" && "holdings" in snapshot) {
     const usSnapshot = snapshot as IndMoneyUsPortfolioSnapshotDetail;
     const rows = usSnapshot.holdings.map((holding) => [
-      'US',
+      "US",
       holding.symbol,
       holding.company_name,
       holding.quantity,
@@ -336,26 +475,74 @@ function formatPortfolioSnapshot(market: SwingTradeMarket, snapshot: PortfolioSn
       holding.portfolio_weight_percent,
     ]);
     return `Snapshot date: ${usSnapshot.snapshot_date}; captured at: ${usSnapshot.captured_at}\n\n${asMarkdownTable(
-      ['Exchange', 'Stock Symbol', 'Company Name', 'Current Units', 'Average Price', 'Market Price', 'Current Value', 'Total PnL %', 'Portfolio Weight %'],
+      [
+        "Exchange",
+        "Stock Symbol",
+        "Company Name",
+        "Current Units",
+        "Average Price",
+        "Market Price",
+        "Current Value",
+        "Total PnL %",
+        "Portfolio Weight %",
+      ],
       rows,
     )}`;
   }
 
-  return '_Portfolio snapshot format is unavailable._';
+  return "_Portfolio snapshot format is unavailable._";
 }
 
 function formatPortfolioThreats(analysis: ThreatAnalysis) {
-  if (!analysis) return '_No latest Threats report available._';
+  if (!analysis) return "_No latest Threats report available._";
   const report = analysis.report;
   return [
     `Job: #${analysis.job_id} ${analysis.provider}/${analysis.model}; status: ${analysis.status}; created: ${analysis.created_at}`,
-    report?.raw_markdown || '_Threats report has no parsed markdown output yet._',
-  ].join('\n\n');
+    report?.raw_markdown ||
+      "_Threats report has no parsed markdown output yet._",
+  ].join("\n\n");
 }
 
-function formatSwingRuns(runs: RunResponse[], previousClose: Date) {
+function getSwingRunLabel(run: RunResponse, market: SwingTradeMarket) {
+  return `#${run.id} ${market === "us" ? "IndMoney US" : "Zerodha"}`;
+}
+
+function getSwingRunTimestamp(run: RunResponse, market: SwingTradeMarket) {
+  const parsed = parseApiDate(run.created_at);
+  return parsed ? formatDateTimeForMarket(parsed, market) : run.created_at;
+}
+
+function getModelRunSummary(run: RunResponse, market: SwingTradeMarket) {
+  const models = run.run_jobs
+    .map((link) => {
+      const job = link.job;
+      const completed = (job.status || "").toLowerCase() === "completed";
+      return `${completed ? "✅ " : ""}${job.provider}/${job.model} at ${getSwingRunTimestamp(run, market)}`;
+    })
+    .join("; ");
+  return `${getSwingRunLabel(run, market)} — ${models || "No model jobs captured"}`;
+}
+
+function formatSwingRuns(
+  runs: RunResponse[],
+  previousClose: Date,
+  market: SwingTradeMarket,
+  displayMode: "full" | "summary",
+) {
+  const previousCloseLine = `Previous market close cutoff: ${formatPreviousMarketClose(
+    market,
+    previousClose,
+  )}`;
+
   if (runs.length === 0) {
-    return `_No completed swing-trade runs found after previous market close (${previousClose.toISOString()})._`;
+    return `${previousCloseLine}\n\n_No completed ${MARKET_COPY[market].label} swing-trade runs found after previous market close._`;
+  }
+
+  if (displayMode === "summary") {
+    return [
+      previousCloseLine,
+      runs.map((run) => `- ${getModelRunSummary(run, market)}`).join("\n"),
+    ].join("\n\n");
   }
 
   const formattedRuns = runs
@@ -363,14 +550,22 @@ function formatSwingRuns(runs: RunResponse[], previousClose: Date) {
       const jobs = run.run_jobs
         .map((link) => {
           const job = link.job;
-          return `### Run #${run.id} | Job #${job.id} | ${job.provider}/${job.model} | ${job.status}\n${compactSwingRecommendationResponse(job.response)}`;
+          return `### ${getSwingRunLabel(run, market)} | ${job.provider}/${job.model} | ${job.status}\n${compactSwingRecommendationResponse(
+            job.response,
+          )}`;
         })
-        .join('\n\n');
-      return `## Swing Trade Run #${run.id}\nCreated: ${run.created_at}; export sheet: ${run.export_sheet_name || 'n/a'}\n${jobs}`;
+        .join("\n\n");
+      return `## Swing Trade Run ${getSwingRunLabel(run, market)}\nCreated: ${run.created_at}; export sheet: ${
+        run.export_sheet_name || "n/a"
+      }\n${jobs}`;
     })
-    .join('\n\n---\n\n');
+    .join("\n\n---\n\n");
 
-  return [`Columns for all compacted swing rows: ${SWING_COLUMN_LEGEND}`, formattedRuns].join('\n\n');
+  return [
+    previousCloseLine,
+    `Columns for all compacted swing rows: ${SWING_COLUMN_LEGEND}`,
+    formattedRuns,
+  ].join("\n\n");
 }
 
 export function buildRebalanceInputBundle({
@@ -379,26 +574,27 @@ export function buildRebalanceInputBundle({
   swingRuns,
   threats,
   previousClose,
+  swingDisplayMode = "full",
 }: {
   market: SwingTradeMarket;
   portfolio: PortfolioSnapshot;
   swingRuns: RunResponse[];
   threats: ThreatAnalysis;
-  events: EventsAnalysis;
   previousClose: Date;
+  swingDisplayMode?: "full" | "summary";
 }) {
   const copy = MARKET_COPY[market];
   return `# Inputs considered at current time
 
 Market: ${copy.label}
-Previous market close cutoff: ${previousClose.toISOString()}
+Previous market close cutoff: ${formatPreviousMarketClose(market, previousClose)}
 Generated at: ${new Date().toISOString()}
 
 ## 1. Latest Portfolio Snapshot
 ${formatPortfolioSnapshot(market, portfolio)}
 
 ## 2. Completed Swing Trade Runs After Previous Market Close
-${formatSwingRuns(swingRuns, previousClose)}
+${formatSwingRuns(swingRuns, previousClose, market, swingDisplayMode)}
 
 ## 3. Latest Threats Report
 ${formatPortfolioThreats(threats)}`;
