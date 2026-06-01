@@ -9,6 +9,7 @@ import { URLs } from '@/lib/urls';
 import {
   formatRunLabel,
   getJobSheetsPresentation,
+  getRunDetailPathFromPrompt,
   getRunSheetsPresentation,
   isRunInSwingTradeMarket,
 } from '@/lib/runPresentation';
@@ -263,7 +264,7 @@ export function RecentJobsTable() {
                 return (
                   <tr
                     key={run.id}
-                    onClick={() => router.push(URLs.routes.console.runDetail(run.id))}
+                    onClick={() => router.push(getRunDetailPathFromPrompt(run.id, run.prompt_preview))}
                     className="cursor-pointer align-top hover:bg-gray-50"
                   >
                     <td className="max-w-90 px-5 py-4">

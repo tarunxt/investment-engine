@@ -160,6 +160,20 @@ export function getRunLabelFromPrompt(runId: number, prompt?: string | null) {
   return formatRunLabel(runId, getPortfolioLabelForMarket(inferSwingTradeMarketFromPrompt(prompt)));
 }
 
+export function getRunDetailPathFromPrompt(runId: number, prompt?: string | null) {
+  const market = inferSwingTradeMarketFromPrompt(prompt);
+
+  if (market === 'india') {
+    return `/console/zerodha-swing-run/${runId}`;
+  }
+
+  if (market === 'us') {
+    return `/console/indmoney-us-swing-run/${runId}`;
+  }
+
+  return `/console/runs/${runId}`;
+}
+
 export function getJobSheetsPresentation({
   autoExportEnabled,
   jobStatus,
