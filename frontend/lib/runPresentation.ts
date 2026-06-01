@@ -31,9 +31,20 @@ export type SheetsPresentation = {
 const INSUFFICIENT_RECOMMENDATIONS_RE = /expected\s+(\d+)\s*,\s*got\s+(\d+)/i;
 const EXPORTED_ROWS_RE = /(\d+)\s*\/\s*(\d+)\s*exported/i;
 
-const SWING_TRADE_MARKET_PATTERNS: Record<SwingTradeMarket, RegExp> = {
-  india: /\btop-tier india aggressive swing-trading strategist\b/i,
-  us: /\btop-tier us aggressive swing-trading strategist\b/i,
+const SWING_TRADE_MARKET_PATTERNS: Record<SwingTradeMarket, RegExp[]> = {
+  india: [
+    /\[rebalance_flow:india\]/i,
+    /\bindia(?:n)?\b[^.\n]{0,180}\baggressive swing-trad/i,
+    /\baggressive swing-trad[^.\n]{0,180}\bindia(?:n)?\b/i,
+    /\bzerodha\b[^.\n]{0,120}\bindian? equity\b/i,
+  ],
+  us: [
+    /\[rebalance_flow:us\]/i,
+    /\bus\b[^.\n]{0,180}\baggressive swing-trad/i,
+    /\baggressive swing-trad[^.\n]{0,180}\bus\b/i,
+    /\bindmoney\s*us\b/i,
+    /\bindmoney\b[^.\n]{0,120}\bus equity\b/i,
+  ],
 };
 
 const PORTFOLIO_LABELS: Record<SwingTradeMarket, string> = {
@@ -129,10 +140,10 @@ export function inferSwingTradeMarketFromPrompt(prompt?: string | null): SwingTr
   const text = prompt?.trim();
   if (!text) return null;
 
-  if (SWING_TRADE_MARKET_PATTERNS.india.test(text)) {
+  if (SWING_TRADE_MARKET_PATTERNS.india.some((pattern) => pattern.test(text))) {
     return 'india';
   }
-  if (SWING_TRADE_MARKET_PATTERNS.us.test(text)) {
+  if (SWING_TRADE_MARKET_PATTERNS.us.some((pattern) => pattern.test(text))) {
     return 'us';
   }
 

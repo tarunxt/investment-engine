@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ElementType } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, usePathname, useRouter } from 'next/navigation';
 import {
   AlertCircle,
   ArrowLeft,
@@ -19,7 +19,7 @@ import { URLs } from '@/lib/urls';
 import { type RunResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
 import InvestmentRecommendationTable from '@/components/InvestmentRecommendationTable';
-import { getJobSheetsPresentation, getRunLabelFromPrompt } from '@/lib/runPresentation';
+import { getJobSheetsPresentation, getRunDetailPathFromPrompt, getRunLabelFromPrompt } from '@/lib/runPresentation';
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
@@ -90,6 +90,7 @@ function formatDuration(createdAt: string, updatedAt?: string) {
 export default function RunDetailPage() {
   const params = useParams<{ id: string | string[] }>();
   const router = useRouter();
+  const pathname = usePathname();
   const idParam = Array.isArray(params.id) ? params.id[0] : params.id;
   const runId = Number(idParam);
   const hasValidRunId = Number.isInteger(runId) && runId > 0;
@@ -118,6 +119,11 @@ export default function RunDetailPage() {
         if (gen !== generationRef.current) return;
         setRun(data);
         setError(null);
+
+        const canonicalPath = getRunDetailPathFromPrompt(data.id, data.prompt);
+        if (pathname?.startsWith('/console/runs/') && canonicalPath !== pathname) {
+          router.replace(canonicalPath);
+        }
       } catch (err) {
         if (gen !== generationRef.current) return;
         setError(normalizeError(err));
@@ -125,7 +131,7 @@ export default function RunDetailPage() {
         if (gen === generationRef.current && !silent) setLoading(false);
       }
     },
-    [hasValidRunId, runId],
+    [hasValidRunId, pathname, router, runId],
   );
 
   useEffect(() => {

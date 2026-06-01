@@ -132,12 +132,14 @@ async function fetchAllFullRuns() {
 }
 
 function parseRunRows(run: RunResponse): LlmBreakupRow[] {
-  return run.run_jobs.flatMap((link) => {
-    const response = link.job.response;
-    if (link.job.status !== "completed" || !response) return [];
+  return (run.run_jobs ?? []).flatMap((link) => {
+    const job = link.job;
+    if (!job) return [];
+    const response = job.response;
+    if (job.status !== "completed" || !response) return [];
     const parsed = parseInvestmentRecommendationContent(response, {
-      provider: link.job.provider,
-      model: link.job.model,
+      provider: job.provider,
+      model: job.model,
       runNumber: run.id,
       runCreatedAt: run.created_at,
     });
@@ -147,9 +149,9 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
       meta: {
         runId: run.id,
         jobId: link.job_id,
-        provider: link.job.provider,
-        model: link.job.model,
-        createdAt: link.job.created_at,
+        provider: job.provider,
+        model: job.model,
+        createdAt: job.created_at,
       },
     }));
   });
@@ -159,6 +161,7 @@ function buildConsensusRows(runs: RunResponse[]): StockConsensus[] {
   const grouped = new Map<string, LlmBreakupRow[]>();
 
   runs.flatMap(parseRunRows).forEach((row) => {
+    if (!Object.values(row.cells).some((value) => value.trim())) return;
     const key = getStockKey(row.cells);
     const rows = grouped.get(key) ?? [];
     rows.push(row);
@@ -263,7 +266,7 @@ function RebalanceCell({ row, header, market }: { row: CanonicalRow; header: Reb
       </TradingViewSymbolLink>
     );
   }
-  return cellValue;
+  return cellValue || "";
 }
 
 export function FinalActionablesConsole({
