@@ -18,6 +18,7 @@ import { apiService, APIError } from '@/services/api';
 import { RunListItem } from '@/types/api';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
+import { getRunDetailPathFromPrompt } from '@/lib/runPresentation';
 import { WSClient } from '@/services/websocket';
 import { INDIA_TIMEZONE } from '../dashboard/_context';
 
@@ -262,7 +263,7 @@ export default function RunsPage() {
                   return (
                     <tr
                       key={run.id}
-                      onClick={() => router.push(URLs.routes.console.runDetail(run.id))}
+                      onClick={() => router.push(getRunDetailPathFromPrompt(run.id, run.prompt_preview))}
                       className="cursor-pointer align-top hover:bg-gray-50"
                     >
                       <td className="max-w-90 px-5 py-4">
