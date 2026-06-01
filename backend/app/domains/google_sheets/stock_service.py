@@ -13,6 +13,11 @@ KEY_MAP = {
     "llm name plus model": "llm_name_model",
     "exchange symbol": "exchange_symbol",
     "stock symbol": "stock_symbol",
+    "current units": "current_units",
+    "action buy add sell all trim hold buy new": "action",
+    "action": "action",
+    "units change": "units_change",
+    "final units": "final_units",
     "stock name": "stock_name",
     "technical setup": "technical_setup",
     "entry range": "entry_range",
@@ -22,6 +27,7 @@ KEY_MAP = {
     "target inr": "target",
     "analyst source": "analyst_source",
     "analyst/source": "analyst_source",
+    "analyst": "analyst_source",
     "units to buy": "units_to_buy",
     "price per unit": "price_per_unit",
     "price per unit inr": "price_per_unit",
@@ -141,7 +147,35 @@ STOCK_SHEET_KEY_ORDER = [
     "rationale_technical_short_term",
 ]
 
+REBALANCE_SHEET_KEY_ORDER = [
+    "exchange_symbol",
+    "stock_symbol",
+    "current_units",
+    "action",
+    "units_change",
+    "final_units",
+    "technical_setup",
+    "entry_range",
+    "stop_loss",
+    "target",
+    "analyst_source",
+    "units_to_buy",
+    "price_per_unit",
+    "total_buy_amount",
+    "upside_horizon",
+    "confidence_score",
+    "rationale_remarks",
+    "rationale_technical_short_term",
+    "rationale_technical_medium_term",
+    "rationale_technical_long_term",
+    "rationale_fundamentals_short_term",
+    "rationale_fundamentals_medium_long_term",
+]
+
 STOCK_SHEET_NUMERIC_KEYS = {
+    "current_units",
+    "units_change",
+    "final_units",
     "units_to_buy",
     "price_per_unit",
     "total_buy_amount",
@@ -297,9 +331,22 @@ def normalize_stock_rows(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _is_rebalance_row(stock: dict[str, Any]) -> bool:
+    return bool(
+        str(stock.get("action", "")).strip()
+        or str(stock.get("current_units", "")).strip()
+        or str(stock.get("final_units", "")).strip()
+        or str(stock.get("units_change", "")).strip()
+    )
+
+
+def _required_keys_for_row(stock: dict[str, Any]) -> list[str]:
+    return REBALANCE_SHEET_KEY_ORDER if _is_rebalance_row(stock) else STOCK_SHEET_KEY_ORDER
+
+
 def is_complete_stock_row(stock: dict[str, Any]) -> bool:
     """Return True when every export column is populated with a usable value."""
-    for key in STOCK_SHEET_KEY_ORDER:
+    for key in _required_keys_for_row(stock):
         value = stock.get(key)
         if key in STOCK_SHEET_NUMERIC_KEYS:
             if _to_number(value) is None:
@@ -421,7 +468,7 @@ def parse_stock_recommendations(response_text: str) -> list[dict[str, Any]]:
         import re
 
         lines = [line.strip() for line in response_text.splitlines() if line.strip()]
-        table_lines = [line for line in lines if line.count("|") >= 3]
+        table_lines = [line for line in lines if line.count("|") >= 3 and not line.lstrip().startswith("#")]
         if table_lines:
             header_line = table_lines[0].strip("|")
             headers = [h.strip() for h in header_line.split("|")]
@@ -523,6 +570,10 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
         "exchange_symbol": "Exchange Symbol",
         "stock_symbol": "Stock Symbol",
         "stock_name": "Stock Name",
+        "current_units": "Current Units",
+        "action": "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
+        "units_change": "Units Change",
+        "final_units": "Final Units",
         "technical_setup": "Technical Setup",
         "entry_range": "Entry Range",
         "stop_loss": "Stop Loss",
@@ -547,7 +598,8 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
 
     # Keep a stable, exact column sequence across all exports.
     # Missing fields are exported as blank cells rather than dropping headers.
-    selected_keys = list(STOCK_SHEET_KEY_ORDER)
+    base_key_order = REBALANCE_SHEET_KEY_ORDER if any(_is_rebalance_row(stock) for stock in stocks) else STOCK_SHEET_KEY_ORDER
+    selected_keys = list(base_key_order)
     extra_keys = [
         key for key in sorted(present_keys) if key not in selected_keys and key not in reserved_metadata_keys
     ]
