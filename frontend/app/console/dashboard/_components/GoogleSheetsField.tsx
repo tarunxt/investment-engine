@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { FileSpreadsheet } from 'lucide-react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/card';
@@ -23,7 +24,12 @@ export function GoogleSheetsField({
     exportTitle,
     setExportTitle,
     googleSheetsConnected,
+    refreshGoogleSheetsStatus,
   } = useDashboard();
+
+  useEffect(() => {
+    void refreshGoogleSheetsStatus();
+  }, [refreshGoogleSheetsStatus]);
 
   const handleToggle = () => {
     setAutoExportEnabled(!autoExportEnabled);

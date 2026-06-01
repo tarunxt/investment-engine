@@ -119,6 +119,7 @@ interface DashboardContextValue {
   exportTitle: string;
   setExportTitle: (val: string) => void;
   googleSheetsConnected: boolean;
+  refreshGoogleSheetsStatus: () => Promise<void>;
 
   // Derived
   charCount: number;
@@ -226,6 +227,19 @@ export function DashboardProvider({
   const [exportTitle, setExportTitle] = useState('');
   const [googleSheetsConnected, setGoogleSheetsConnected] = useState(false);
 
+  const refreshGoogleSheetsStatus = useCallback(async () => {
+    try {
+      const sheetsStatus = await apiService.googleSheetsStatus();
+      const connected = Boolean(sheetsStatus.connected);
+      setGoogleSheetsConnected(connected);
+      setExportSpreadsheetUrl(connected ? (sheetsStatus.default_spreadsheet_url ?? '') : '');
+    } catch (err) {
+      console.error('Failed to load Google Sheets status:', err);
+      setGoogleSheetsConnected(false);
+      setExportSpreadsheetUrl('');
+    }
+  }, []);
+
   const templateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const templateControllerRef = useRef<AbortController | null>(null);
   const providerControllerRef = useRef<AbortController | null>(null);
@@ -330,6 +344,7 @@ export function DashboardProvider({
       setGoogleSheetsConnected(connected);
       setExportSpreadsheetUrl(connected ? (sheetsStatus.default_spreadsheet_url ?? '') : '');
     } else {
+      console.error('Failed to load Google Sheets status:', sheetsStatusRes.reason);
       setGoogleSheetsConnected(false);
       setExportSpreadsheetUrl('');
     }
@@ -717,6 +732,7 @@ export function DashboardProvider({
         exportTitle,
         setExportTitle,
         googleSheetsConnected,
+        refreshGoogleSheetsStatus,
         handleSubmit,
         handlePromptChange,
         handleTemplateChange,
