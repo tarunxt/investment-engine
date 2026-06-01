@@ -29,6 +29,18 @@ export function GoogleSheetsField({
 
   useEffect(() => {
     void refreshGoogleSheetsStatus();
+
+    const refreshOnFocus = () => {
+      void refreshGoogleSheetsStatus();
+    };
+
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnFocus);
+
+    return () => {
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnFocus);
+    };
   }, [refreshGoogleSheetsStatus]);
 
   const handleToggle = () => {

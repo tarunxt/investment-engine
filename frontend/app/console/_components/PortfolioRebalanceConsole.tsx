@@ -298,6 +298,9 @@ function RebalanceInputBox({
                 <pre className="max-h-72 overflow-auto whitespace-pre-wrap p-4 font-mono text-xs leading-5 text-gray-800">
                   {content || (loading ? 'Loading…' : 'No input available for this section.')}
                 </pre>
+                <div className="border-t border-white/70 bg-white/65 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+                  {content ? `${content.length.toLocaleString('en-IN')} characters` : loading ? 'Counting characters…' : '0 characters'}
+                </div>
               </section>
             ))}
           </div>
