@@ -28,10 +28,11 @@ interface ParsedMarkdownTable {
 
 interface CanonicalTable {
   title?: string;
+  headers: readonly CanonicalHeader[];
   rows: CanonicalRow[];
 }
 
-const EXACT_HEADER_ORDER = [
+const SWING_HEADER_ORDER = [
   'LLM Name + Model',
   'Exchange Symbol',
   'Stock Symbol',
@@ -59,22 +60,49 @@ const EXACT_HEADER_ORDER = [
   'LLM',
 ] as const;
 
-type ExactHeader = (typeof EXACT_HEADER_ORDER)[number];
-type CanonicalRow = Record<ExactHeader, string>;
+const REBALANCE_HEADER_ORDER = [
+  'Exchange Symbol',
+  'Stock Symbol',
+  'Current Units',
+  'Action (Buy/Add/Sell All/Trim/Hold/Buy New)',
+  'Units Change',
+  'Final Units',
+  'Technical Setup',
+  'Entry Range',
+  'Stop Loss',
+  'Target',
+  'Analyst/Source',
+  'Units to Buy',
+  'Price Per Unit',
+  'Total Buy Amount',
+  'Upside Horizon (% return in weeks)',
+  'Confidence Score (0-100)',
+  'Rationale Remarks',
+  'Rationale - Technical setup (short term (1-3 months)',
+  'Rationale - Technical setup (medium term)',
+  'Rationale - Technical setup (long term term)',
+  'Rationale - Fundamentals Short term',
+  'Rationale - Fundamentals Medium/Long Term',
+] as const;
 
-const HEADERLESS_CANONICAL_HEADER_ORDERS: ExactHeader[][] = [
-  [...EXACT_HEADER_ORDER],
-  [...EXACT_HEADER_ORDER.slice(0, -1)],
-  EXACT_HEADER_ORDER.filter(
+type SwingHeader = (typeof SWING_HEADER_ORDER)[number];
+type RebalanceHeader = (typeof REBALANCE_HEADER_ORDER)[number];
+type CanonicalHeader = SwingHeader | RebalanceHeader;
+type CanonicalRow = Record<string, string>;
+
+const HEADERLESS_CANONICAL_HEADER_ORDERS: SwingHeader[][] = [
+  [...SWING_HEADER_ORDER],
+  [...SWING_HEADER_ORDER.slice(0, -1)],
+  SWING_HEADER_ORDER.filter(
     (header) => header !== 'Rationale - Technical Setup (Long Term)',
-  ) as ExactHeader[],
-  EXACT_HEADER_ORDER.filter(
+  ) as SwingHeader[],
+  SWING_HEADER_ORDER.filter(
     (header) => header !== 'Rationale - Technical Setup (Long Term)' && header !== 'LLM',
-  ) as ExactHeader[],
+  ) as SwingHeader[],
 ];
 const HEADERLESS_CANONICAL_MIN_COLUMN_COUNT =
   HEADERLESS_CANONICAL_HEADER_ORDERS[HEADERLESS_CANONICAL_HEADER_ORDERS.length - 1].length;
-const HEADERLESS_CANONICAL_NUMERIC_HEADERS: ExactHeader[] = [
+const HEADERLESS_CANONICAL_NUMERIC_HEADERS: SwingHeader[] = [
   'Units to Buy',
   'Price per Unit',
   'Total Buy Amount',
@@ -83,30 +111,38 @@ const HEADERLESS_CANONICAL_NUMERIC_HEADERS: ExactHeader[] = [
   'Confidence Score (0-100)',
 ];
 
-const HEADER_ALIAS_TO_EXACT: Record<string, ExactHeader> = {
+const HEADER_ALIAS_TO_EXACT: Record<string, CanonicalHeader> = {
   'llm name model': 'LLM Name + Model',
   'llm name plus model': 'LLM Name + Model',
   'exchange symbol': 'Exchange Symbol',
   'stock symbol': 'Stock Symbol',
   'stock name': 'Stock Name',
+  'current units': 'Current Units',
+  'action': 'Action (Buy/Add/Sell All/Trim/Hold/Buy New)',
+  'action buy add sell all trim hold buy new': 'Action (Buy/Add/Sell All/Trim/Hold/Buy New)',
+  'units change': 'Units Change',
+  'final units': 'Final Units',
   'technical setup': 'Technical Setup',
   'entry range': 'Entry Range',
   'stop loss': 'Stop Loss',
   'target': 'Target',
   'analyst source': 'Analyst Source',
+  'analyst/source': 'Analyst/Source',
   'units to buy': 'Units to Buy',
   'price per unit': 'Price per Unit',
+  'price per unit inr': 'Price Per Unit',
   'total buy amount': 'Total Buy Amount',
   'upside horizon': 'Upside Horizon (%)',
   'upside horizon percent': 'Upside Horizon (%)',
-  'upside horizon percent return in weeks': 'Upside Horizon (%)',
-  'upside horizon return in weeks': 'Upside Horizon (%)',
+  'upside horizon percent return in weeks': 'Upside Horizon (% return in weeks)',
+  'upside horizon return in weeks': 'Upside Horizon (% return in weeks)',
   'weeks': 'Weeks',
   'confidence score': 'Confidence Score (0-100)',
   'confidence score 0 100': 'Confidence Score (0-100)',
   'rationale remarks': 'Rationale Remarks',
   'rationale technical setup medium term': 'Rationale - Technical Setup (Medium Term)',
   'rationale technical setup long term': 'Rationale - Technical Setup (Long Term)',
+  'rationale technical setup long term term': 'Rationale - Technical setup (long term term)',
   'rationale fundamentals short term': 'Rationale - Fundamentals Short Term',
   'rationale fundamentals medium long term': 'Rationale - Fundamentals Medium/Long Term',
   'rationale technical setup short term 1 3 months': 'Rationale Technical Setup Short Term 1–3 Months',
@@ -139,11 +175,38 @@ function formatCellValue(value: unknown): string {
   return String(value).trim();
 }
 
-function buildEmptyCanonicalRow(): CanonicalRow {
-  return EXACT_HEADER_ORDER.reduce((acc, header) => {
+function buildEmptyCanonicalRow(headers: readonly CanonicalHeader[]): CanonicalRow {
+  return headers.reduce((acc, header) => {
     acc[header] = '';
     return acc;
   }, {} as CanonicalRow);
+}
+
+function canonicalHeadersForSource(source: Record<string, unknown>): readonly CanonicalHeader[] {
+  const mappedHeaders = Object.keys(source).map((key) => HEADER_ALIAS_TO_EXACT[normalizeHeader(key)]);
+  return mappedHeaders.some((header) => REBALANCE_HEADER_ORDER.includes(header as RebalanceHeader))
+    ? REBALANCE_HEADER_ORDER
+    : SWING_HEADER_ORDER;
+}
+
+function canonicalHeaderForKey(key: string, headers: readonly CanonicalHeader[]): CanonicalHeader | undefined {
+  const mappedHeader = HEADER_ALIAS_TO_EXACT[normalizeHeader(key)];
+  if (!mappedHeader) return undefined;
+  if (headers.includes(mappedHeader)) return mappedHeader;
+
+  const rebalanceAliases: Partial<Record<CanonicalHeader, RebalanceHeader>> = {
+    'Analyst Source': 'Analyst/Source',
+    'Price per Unit': 'Price Per Unit',
+    'Upside Horizon (%)': 'Upside Horizon (% return in weeks)',
+    'Rationale Technical Setup Short Term 1–3 Months': 'Rationale - Technical setup (short term (1-3 months)',
+    'Rationale - Technical Setup (Medium Term)': 'Rationale - Technical setup (medium term)',
+    'Rationale - Technical Setup (Long Term)': 'Rationale - Technical setup (long term term)',
+    'Rationale - Fundamentals Short Term': 'Rationale - Fundamentals Short term',
+  };
+  const rebalanceHeader = rebalanceAliases[mappedHeader];
+  if (rebalanceHeader && headers.includes(rebalanceHeader)) return rebalanceHeader;
+
+  return undefined;
 }
 
 function looksLikeSeparator(value: string | number | undefined): boolean {
@@ -314,11 +377,12 @@ function toDisplayProvider(provider?: string): string {
 function buildCanonicalRow(
   source: Record<string, unknown>,
   context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string },
+  headers = canonicalHeadersForSource(source),
 ): CanonicalRow {
-  const row = buildEmptyCanonicalRow();
+  const row = buildEmptyCanonicalRow(headers);
 
   for (const [key, value] of Object.entries(source)) {
-    const mappedHeader = HEADER_ALIAS_TO_EXACT[normalizeHeader(key)];
+    const mappedHeader = canonicalHeaderForKey(key, headers);
     if (!mappedHeader) continue;
     row[mappedHeader] = formatCellValue(value);
   }
@@ -352,10 +416,11 @@ function buildCanonicalRow(
 function isLikelyInvalidRow(row: CanonicalRow): boolean {
   const stockName = row['Stock Name'];
   const stockSymbol = row['Stock Symbol'];
+  const exchangeSymbol = row['Exchange Symbol'];
   const technicalSetup = row['Technical Setup'];
   const entryRange = row['Entry Range'];
 
-  if (![stockName, stockSymbol, technicalSetup, entryRange].some((value) => String(value).trim())) {
+  if (![stockName, stockSymbol, exchangeSymbol, technicalSetup, entryRange].some((value) => String(value).trim())) {
     return true;
   }
 
@@ -385,7 +450,10 @@ function normalizeJsonTable(
     .filter((row) => !isLikelyInvalidRow(row));
 
   if (!rows.length) return null;
-  return { title, rows };
+  const headers = stocks.some((stock) => canonicalHeadersForSource(stock).includes('Action (Buy/Add/Sell All/Trim/Hold/Buy New)'))
+    ? REBALANCE_HEADER_ORDER
+    : SWING_HEADER_ORDER;
+  return { title, headers, rows };
 }
 
 function normalizeMarkdownTable(
@@ -395,21 +463,22 @@ function normalizeMarkdownTable(
   const parsed = parseMarkdownTable(content) ?? parseSingleLinePipeTable(content);
   if (!parsed) return null;
 
+  const headers = canonicalHeadersForSource(Object.fromEntries(parsed.headers.map((header) => [header, ''])));
   const rows = parsed.rows
     .map((row) => {
       const source: Record<string, string> = {};
       parsed.headers.forEach((header, index) => {
         source[header] = row[index] ?? '';
       });
-      return buildCanonicalRow(source, context);
+      return buildCanonicalRow(source, context, headers);
     })
     .filter((row) => !isLikelyInvalidRow(row));
 
   if (!rows.length) return null;
-  return { rows };
+  return { headers, rows };
 }
 
-function looksLikeHeaderlessCanonicalRow(tokens: string[], headers: ExactHeader[]): boolean {
+function looksLikeHeaderlessCanonicalRow(tokens: string[], headers: SwingHeader[]): boolean {
   if (tokens.length !== headers.length) {
     return false;
   }
@@ -495,7 +564,7 @@ function parseHeaderlessCanonicalRows(
 
   const cleanedRows = rows.filter((row) => !isLikelyInvalidRow(row));
   if (!cleanedRows.length) return null;
-  return { title, rows: cleanedRows };
+  return { title, headers: SWING_HEADER_ORDER, rows: cleanedRows };
 }
 
 export default function InvestmentRecommendationTable({
@@ -529,7 +598,7 @@ export default function InvestmentRecommendationTable({
 	        <table className="min-w-max text-sm">
           <thead>
             <tr className="border-b border-gray-300 bg-gray-50">
-              {EXACT_HEADER_ORDER.map((header) => (
+              {canonicalTable.headers.map((header) => (
                 <th
                   key={header}
                   className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700"
@@ -542,7 +611,7 @@ export default function InvestmentRecommendationTable({
 	          <tbody className="divide-y divide-gray-200">
 	            {canonicalTable.rows.map((row, rowIdx) => (
 	              <tr key={rowIdx} className="hover:bg-gray-50">
-	                {EXACT_HEADER_ORDER.map((header) => {
+	                {canonicalTable.headers.map((header) => {
 	                  const cellValue = row[header];
 	                  const stockSymbol = row['Stock Symbol'] || row['Stock Name'];
 	                  const exchangeSymbol = row['Exchange Symbol'];

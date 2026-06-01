@@ -578,18 +578,18 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
         "entry_range": "Entry Range",
         "stop_loss": "Stop Loss",
         "target": "Target",
-        "analyst_source": "Analyst Source",
+        "analyst_source": "Analyst/Source",
         "units_to_buy": "Units to Buy",
-        "price_per_unit": "Price per Unit",
+        "price_per_unit": "Price Per Unit",
         "total_buy_amount": "Total Buy Amount",
-        "upside_horizon": "Upside Horizon (%)",
+        "upside_horizon": "Upside Horizon (% return in weeks)",
         "weeks": "Weeks",
         "confidence_score": "Confidence Score (0-100)",
         "rationale_remarks": "Rationale Remarks",
-        "rationale_technical_short_term": "Rationale Technical Setup Short Term 1–3 Months",
-        "rationale_technical_medium_term": "Rationale - Technical Setup (Medium Term)",
-        "rationale_technical_long_term": "Rationale - Technical Setup (Long Term)",
-        "rationale_fundamentals_short_term": "Rationale - Fundamentals Short Term",
+        "rationale_technical_short_term": "Rationale - Technical setup (short term (1-3 months)",
+        "rationale_technical_medium_term": "Rationale - Technical setup (medium term)",
+        "rationale_technical_long_term": "Rationale - Technical setup (long term term)",
+        "rationale_fundamentals_short_term": "Rationale - Fundamentals Short term",
         "rationale_fundamentals_medium_long_term": "Rationale - Fundamentals Medium/Long Term",
         "run_number": "Run #",
         "run_date": "Run Date",
@@ -598,7 +598,18 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
 
     # Keep a stable, exact column sequence across all exports.
     # Missing fields are exported as blank cells rather than dropping headers.
-    base_key_order = REBALANCE_SHEET_KEY_ORDER if any(_is_rebalance_row(stock) for stock in stocks) else STOCK_SHEET_KEY_ORDER
+    is_rebalance_export = any(_is_rebalance_row(stock) for stock in stocks)
+    if not is_rebalance_export:
+        header_labels.update({
+            "analyst_source": "Analyst Source",
+            "price_per_unit": "Price per Unit",
+            "upside_horizon": "Upside Horizon (%)",
+            "rationale_technical_short_term": "Rationale Technical Setup Short Term 1–3 Months",
+            "rationale_technical_medium_term": "Rationale - Technical Setup (Medium Term)",
+            "rationale_technical_long_term": "Rationale - Technical Setup (Long Term)",
+            "rationale_fundamentals_short_term": "Rationale - Fundamentals Short Term",
+        })
+    base_key_order = REBALANCE_SHEET_KEY_ORDER if is_rebalance_export else STOCK_SHEET_KEY_ORDER
     selected_keys = list(base_key_order)
     extra_keys = [
         key for key in sorted(present_keys) if key not in selected_keys and key not in reserved_metadata_keys

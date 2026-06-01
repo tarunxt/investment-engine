@@ -78,19 +78,16 @@ def _to_markdown_table_from_stocks(stocks: list[dict]) -> str:
         "run_date",
         "run_time",
     ]
-    headers = [k for k in key_order if any(str(row.get(k, "")).strip() for row in stocks)]
+    is_rebalance_table = any(str(row.get("action", "")).strip() for row in stocks)
+    headers = key_order if is_rebalance_table else [k for k in key_order if any(str(row.get(k, "")).strip() for row in stocks)]
     if not headers:
         return ""
 
     def _label(key: str) -> str:
-        labels = {
+        stock_labels = {
             "llm_name_model": "LLM Name + Model",
             "upside_horizon": "Upside Horizon (%)",
             "confidence_score": "Confidence Score (0-100)",
-            "current_units": "Current Units",
-            "action": "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
-            "units_change": "Units Change",
-            "final_units": "Final Units",
             "rationale_technical_medium_term": "Rationale - Technical Setup (Medium Term)",
             "rationale_technical_long_term": "Rationale - Technical Setup (Long Term)",
             "rationale_fundamentals_short_term": "Rationale - Fundamentals Short Term",
@@ -100,6 +97,21 @@ def _to_markdown_table_from_stocks(stocks: list[dict]) -> str:
             "run_date": "Run Date",
             "run_time": "Run Time",
         }
+        rebalance_labels = {
+            **stock_labels,
+            "upside_horizon": "Upside Horizon (% return in weeks)",
+            "current_units": "Current Units",
+            "action": "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
+            "units_change": "Units Change",
+            "final_units": "Final Units",
+            "analyst_source": "Analyst/Source",
+            "price_per_unit": "Price Per Unit",
+            "rationale_technical_short_term": "Rationale - Technical setup (short term (1-3 months)",
+            "rationale_technical_medium_term": "Rationale - Technical setup (medium term)",
+            "rationale_technical_long_term": "Rationale - Technical setup (long term term)",
+            "rationale_fundamentals_short_term": "Rationale - Fundamentals Short term",
+        }
+        labels = rebalance_labels if is_rebalance_table else stock_labels
         return labels.get(key, key.replace("_", " ").title())
 
     def _cell(value: object) -> str:
