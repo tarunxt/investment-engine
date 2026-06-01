@@ -14,7 +14,14 @@ export function DashboardHeader({
   title?: string;
   description?: string;
 } = {}) {
-  const { loadingRuns, runsError, setRunsError, refreshRuns, googleSheetsConnected } = useDashboard();
+  const {
+    loadingRuns,
+    runsError,
+    setRunsError,
+    refreshRuns,
+    googleSheetsConnected,
+    refreshGoogleSheetsStatus,
+  } = useDashboard();
   const [showSheets, setShowSheets] = useState(false);
 
   return (
@@ -28,7 +35,10 @@ export function DashboardHeader({
           <Button
             type="button"
             variant="outline"
-            onClick={() => setShowSheets((current) => !current)}
+            onClick={() => {
+              void refreshGoogleSheetsStatus();
+              setShowSheets((current) => !current);
+            }}
             aria-expanded={showSheets}
             className="w-full justify-center sm:w-auto"
           >

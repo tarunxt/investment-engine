@@ -249,6 +249,26 @@ export function DashboardProvider({
     }
   }, []);
 
+  useEffect(() => {
+    const initialRefresh = window.setTimeout(() => {
+      void refreshGoogleSheetsStatus();
+    }, 0);
+
+    const refreshWhenActive = () => {
+      if (document.visibilityState === 'hidden') return;
+      void refreshGoogleSheetsStatus();
+    };
+
+    window.addEventListener('focus', refreshWhenActive);
+    document.addEventListener('visibilitychange', refreshWhenActive);
+
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.removeEventListener('focus', refreshWhenActive);
+      document.removeEventListener('visibilitychange', refreshWhenActive);
+    };
+  }, [refreshGoogleSheetsStatus]);
+
   const templateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const templateControllerRef = useRef<AbortController | null>(null);
   const providerControllerRef = useRef<AbortController | null>(null);
@@ -595,17 +615,26 @@ export function DashboardProvider({
         setSubmitError('Select at least one model for Stage 1.');
         return;
       }
-      if (autoExportEnabled && !googleSheetsConnected) {
-        setSubmitError('Connect Google Sheets first, then run with auto-export enabled.');
-        return;
-      }
-      if (autoExportEnabled && !exportSpreadsheetUrl.trim()) {
-        setSubmitError('Set your personal Google Sheet first from Google Sheets settings.');
-        return;
-      }
       setSubmitting(true);
       setSubmitError(null);
       try {
+        let runExportSpreadsheetUrl = exportSpreadsheetUrl;
+        if (autoExportEnabled) {
+          const sheetsStatus = await refreshGoogleSheetsStatus();
+          const sheetsConnected = Boolean(sheetsStatus?.connected);
+          runExportSpreadsheetUrl = sheetsConnected
+            ? (sheetsStatus?.default_spreadsheet_url ?? '')
+            : '';
+
+          if (!sheetsConnected) {
+            setSubmitError('Connect Google Sheets first, then run with auto-export enabled.');
+            return;
+          }
+          if (!runExportSpreadsheetUrl.trim()) {
+            setSubmitError('Set your personal Google Sheet first from Google Sheets settings.');
+            return;
+          }
+        }
         const hasActiveRun = runs.some((run) =>
           ['scheduled', 'pending', 'processing'].includes((run.status || '').toLowerCase()) &&
           isRunInCurrentScope(run.prompt_preview),
@@ -628,7 +657,7 @@ export function DashboardProvider({
           allow_parallel: allowParallel,
           auto_export_enabled: autoExportEnabled,
           export_spreadsheet_url:
-            autoExportEnabled ? (exportSpreadsheetUrl.trim() || undefined) : undefined,
+            autoExportEnabled ? (runExportSpreadsheetUrl.trim() || undefined) : undefined,
           export_sheet_name: autoExportEnabled ? (exportSheetName.trim() || undefined) : undefined,
           export_investment_amount: autoExportEnabled ? exportInvestmentAmount || undefined : undefined,
           export_title: autoExportEnabled ? exportTitle || undefined : undefined,
@@ -654,7 +683,7 @@ export function DashboardProvider({
       exportSheetName,
       exportInvestmentAmount,
       exportTitle,
-      googleSheetsConnected,
+      refreshGoogleSheetsStatus,
       isRunInCurrentScope,
       setRuns,
       setRunsTotal,
