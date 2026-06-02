@@ -1852,6 +1852,204 @@ function RunGroupDetails({
   );
 }
 
+
+function getLatestMatchingRuns(runs: RunResponse[], market: SwingTradeMarket) {
+  const marketRuns = runs
+    .filter((run) => isCompletedRebalanceRun(run, market))
+    .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at));
+  const latestRun = marketRuns[0];
+  if (!latestRun) return [];
+  const fingerprint = extractRebalanceInputFingerprint(latestRun.prompt);
+  return marketRuns.filter(
+    (run) => extractRebalanceInputFingerprint(run.prompt) === fingerprint,
+  );
+}
+
+function marketLabelClass(market: SwingTradeMarket) {
+  return market === "us"
+    ? "border-sky-200 bg-sky-50 text-sky-900"
+    : "border-amber-200 bg-amber-50 text-amber-900";
+}
+
+export function DashboardFinalActionablesTables() {
+  const [runs, setRuns] = useState<RunResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadRuns = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setRuns(await fetchAllFullRuns());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load final actionables.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadRuns();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [loadRuns]);
+
+  const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
+  const actionRows = useMemo(() => {
+    const india = buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india").map((stock) => ({
+      market: "india" as SwingTradeMarket,
+      stock,
+    }));
+    const us = buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us").map((stock) => ({
+      market: "us" as SwingTradeMarket,
+      stock,
+    }));
+    return [...india, ...us];
+  }, [runs]);
+
+  return (
+    <section className="rounded-[32px] border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Final Actionables
+          </div>
+          <h2 className="mt-2 font-serif text-2xl tracking-tight text-slate-950">
+            Final Actionable 5 Tables
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">
+            Latest consolidated India and US rebalance decisions grouped into Sell All, Add More, Buy New,
+            Trim, and Hold tables.
+          </p>
+        </div>
+
+        <Button
+          onClick={() => void loadRuns()}
+          variant="outline"
+          disabled={loading}
+          className="rounded-full border-slate-300 bg-white/80"
+        >
+          <RefreshCw className={cn("mr-2 size-4", loading ? "animate-spin" : "")} />
+          Refresh Actions
+        </Button>
+      </div>
+
+      <div className="space-y-4 p-6">
+        {error ? (
+          <div className="rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {error}
+          </div>
+        ) : null}
+
+        {loading && actionRows.length === 0 ? (
+          <div className="rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+            Loading final actionables…
+          </div>
+        ) : (
+          ACTION_CATEGORIES.map((action) => {
+            const rows = actionRows
+              .filter(({ stock }) => stock.consensusAction === action)
+              .sort((a, b) => {
+                const sorted = sortStocksByConfidence([a.stock, b.stock], technicalScans);
+                return sorted[0]?.key === a.stock.key ? -1 : 1;
+              });
+
+            return (
+              <Card
+                key={action}
+                id={`dashboard-${finalActionCategoryDomId(action)}`}
+                className={cn("scroll-mt-24 border", CATEGORY_BADGE_CLASS[action])}
+              >
+                <CardHeader className="pb-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <CardTitle className="text-sm">{ACTION_CATEGORY_LABEL[action]}</CardTitle>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {rows.length} stock{rows.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent className="text-xs">
+                  {rows.length ? (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                            <th className="px-3 py-2 font-semibold">Market</th>
+                            <th className="px-3 py-2 font-semibold">Stock</th>
+                            <th className="px-3 py-2 font-semibold">Consensus</th>
+                            <th className="px-3 py-2 font-semibold">Current Units</th>
+                            <th className="px-3 py-2 font-semibold">Current Investment Amount</th>
+                            <th className="px-3 py-2 font-semibold">Units to {getActionVerb(action)}</th>
+                            <th className="px-3 py-2 font-semibold">Amount</th>
+                            <th className="px-3 py-2 font-semibold">Technical Setup</th>
+                            <th className="px-3 py-2 font-semibold">Confidence Score</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {rows.map(({ market, stock }) => {
+                            const estimate = stock.actionAverages[action];
+                            const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
+                            const scan = getTechnicalScanForStock(technicalScans, stock);
+                            const setup = formatTechnicalSetup(scan, stock.representative);
+                            return (
+                              <tr key={`${market}-${stock.key}`} className="bg-white/40">
+                                <td className="whitespace-nowrap px-3 py-2 align-top">
+                                  <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]", marketLabelClass(market))}>
+                                    {market === "us" ? "US" : "India"}
+                                  </span>
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 align-top">
+                                  <TradingViewSymbolLink
+                                    symbol={stock.symbol}
+                                    market={market}
+                                    exchange={stock.exchange}
+                                    className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
+                                  >
+                                    {stock.symbol}
+                                  </TradingViewSymbolLink>
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                  {stock.actionCounts[action]}/{stock.totalSuggestions}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                  {formatQuantity(estimate.currentUnits)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                  {formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentInvestmentAmount(stock.representative), market)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                  {showActionColumns ? formatQuantity(estimate.units) : "—"}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                  {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
+                                </td>
+                                <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan, stock.representative))}>
+                                  <TechnicalSetupLink setup={setup} />
+                                </td>
+                                <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan, stock.representative))}>
+                                  {formatTechnicalConfidence(scan, stock.representative)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <span className="text-gray-600">No consensus stocks.</span>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function FinalActionablesConsole({
   portfolio,
   market,

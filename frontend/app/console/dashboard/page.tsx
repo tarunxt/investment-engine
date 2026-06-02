@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
-  Globe2,
   Loader2,
   Radar,
   RefreshCw,
@@ -24,8 +23,8 @@ import type {
   ZerodhaThreatAnalysis,
 } from '@/types/api';
 
+import { DashboardFinalActionablesTables } from '@/app/console/_components/FinalActionablesConsole';
 import { MarketPortfolioCard, type PortfolioCardTopHolding } from './_components/MarketPortfolioCard';
-import { ThreatActionTable } from './_components/ThreatActionTable';
 import { ThreatMarketCard } from './_components/ThreatMarketCard';
 import {
   countThreatSeverities,
@@ -59,19 +58,6 @@ const INITIAL_STATE: DashboardState = {
   indmoneyThreat: null,
 };
 
-function latestTimestamp(values: Array<string | null | undefined>) {
-  const timestamps = values
-    .filter((value): value is string => Boolean(value))
-    .map((value) => Date.parse(value))
-    .filter((value) => !Number.isNaN(value));
-
-  if (timestamps.length === 0) {
-    return null;
-  }
-
-  return new Date(Math.max(...timestamps)).toISOString();
-}
-
 function buildIndiaTopHoldings(overview: ZerodhaPortfolioOverviewResponse | null): PortfolioCardTopHolding[] {
   const holdings = [...(overview?.latest?.holdings ?? [])]
     .sort((left, right) => right.market_value - left.market_value)
@@ -85,6 +71,110 @@ function buildIndiaTopHoldings(overview: ZerodhaPortfolioOverviewResponse | null
     secondaryValue: `P&L ${formatInr(holding.pnl)}`,
     secondaryToneClass: toneClass(holding.pnl),
   }));
+}
+
+
+type SnapshotMarket = 'india' | 'us';
+type SnapshotPillTone = 'success' | 'warning' | 'danger';
+
+const MARKET_SESSIONS: Record<SnapshotMarket, { timeZone: string; openMinutes: number; closeMinutes: number }> = {
+  india: { timeZone: 'Asia/Kolkata', openMinutes: (9 * 60) + 15, closeMinutes: (15 * 60) + 30 },
+  us: { timeZone: 'America/New_York', openMinutes: (9 * 60) + 30, closeMinutes: 16 * 60 },
+};
+
+function getZonedParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    weekday: 'short',
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
+  return {
+    year: Number(get('year')),
+    month: Number(get('month')),
+    day: Number(get('day')),
+    hour: Number(get('hour')),
+    minute: Number(get('minute')),
+    second: Number(get('second')),
+    weekday: get('weekday'),
+  };
+}
+
+function getTimeZoneOffsetMs(utcDate: Date, timeZone: string) {
+  const parts = getZonedParts(utcDate, timeZone);
+  const zonedAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return zonedAsUtc - utcDate.getTime();
+}
+
+function zonedTimeToUtc(
+  timeZone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+) {
+  const approximateUtc = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  const offsetMs = getTimeZoneOffsetMs(approximateUtc, timeZone);
+  return new Date(approximateUtc.getTime() - offsetMs);
+}
+
+function isWeekday(weekday: string) {
+  return weekday !== 'Sat' && weekday !== 'Sun';
+}
+
+function getPreviousMarketClose(now: Date, market: SnapshotMarket) {
+  const session = MARKET_SESSIONS[market];
+  const parts = getZonedParts(now, session.timeZone);
+  const localMinutes = (parts.hour * 60) + parts.minute;
+  const todayClose = zonedTimeToUtc(session.timeZone, parts.year, parts.month, parts.day, Math.floor(session.closeMinutes / 60), session.closeMinutes % 60);
+
+  if (isWeekday(parts.weekday) && localMinutes >= session.closeMinutes) {
+    return todayClose;
+  }
+
+  for (let daysBack = 1; daysBack <= 7; daysBack += 1) {
+    const candidate = new Date(todayClose);
+    candidate.setUTCDate(candidate.getUTCDate() - daysBack);
+    const candidateParts = getZonedParts(candidate, session.timeZone);
+    if (isWeekday(candidateParts.weekday)) {
+      return zonedTimeToUtc(
+        session.timeZone,
+        candidateParts.year,
+        candidateParts.month,
+        candidateParts.day,
+        Math.floor(session.closeMinutes / 60),
+        session.closeMinutes % 60,
+      );
+    }
+  }
+
+  return todayClose;
+}
+
+function isMarketOpen(now: Date, market: SnapshotMarket) {
+  const session = MARKET_SESSIONS[market];
+  const parts = getZonedParts(now, session.timeZone);
+  if (!isWeekday(parts.weekday)) return false;
+  const localMinutes = (parts.hour * 60) + parts.minute;
+  return localMinutes >= session.openMinutes && localMinutes < session.closeMinutes;
+}
+
+function getSnapshotPillTone(capturedAt: string | null | undefined, market: SnapshotMarket): SnapshotPillTone {
+  if (!capturedAt) return 'danger';
+  const now = new Date();
+  if (isMarketOpen(now, market)) return 'warning';
+
+  const capturedMs = Date.parse(capturedAt);
+  if (!Number.isFinite(capturedMs)) return 'danger';
+
+  return capturedMs >= getPreviousMarketClose(now, market).getTime() ? 'success' : 'danger';
 }
 
 function buildUsTopHoldings(overview: IndMoneyUsPortfolioOverviewResponse | null): PortfolioCardTopHolding[] {
@@ -184,6 +274,8 @@ export default function DashboardPage() {
 
   const indiaSnapshot = dashboard.zerodhaOverview?.latest ?? null;
   const usSnapshot = dashboard.indmoneyOverview?.latest ?? null;
+  const indiaSnapshotTone = getSnapshotPillTone(indiaSnapshot?.captured_at, 'india');
+  const usSnapshotTone = getSnapshotPillTone(usSnapshot?.captured_at, 'us');
   const indiaUrgentRows = sortUrgentActionRows(
     extractUrgentActionRows({
       analysis: dashboard.zerodhaThreat,
@@ -199,12 +291,6 @@ export default function DashboardPage() {
     }),
   );
   const totalUrgentRows = indiaUrgentRows.length + usUrgentRows.length;
-  const topUrgentRows = sortUrgentActionRows([...indiaUrgentRows, ...usUrgentRows]).slice(0, 10);
-  const latestThreatUpdate = latestTimestamp([
-    dashboard.zerodhaThreat?.updated_at,
-    dashboard.indmoneyThreat?.updated_at,
-  ]);
-
   if (loading && !indiaSnapshot && !usSnapshot && !dashboard.zerodhaThreat && !dashboard.indmoneyThreat) {
     return (
       <div className="flex items-center gap-3 text-sm text-slate-500">
@@ -229,8 +315,8 @@ export default function DashboardPage() {
               Portfolio Command Center
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-200/90">
-              The dashboard is now centered on real portfolio intelligence instead of the old AI console:
-              India and INDmoney US snapshots up front, plus Table 10 urgent actionables from each threat radar.
+              The dashboard is centered on real portfolio intelligence: India and INDmoney US portfolios up front,
+              followed by the five final actionable decision tables.
             </p>
 
             <div className="mt-5 flex flex-wrap gap-3">
@@ -272,35 +358,7 @@ export default function DashboardPage() {
                 Urgent Actions
               </div>
               <div className="mt-3 text-3xl font-semibold text-white">{totalUrgentRows}</div>
-              <div className="mt-2 text-sm text-slate-300">Combined Table 10 signals</div>
-            </div>
-            <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
-                <Globe2 className="size-3.5" />
-                India Snapshot
-              </div>
-              <div className="mt-3 text-lg font-semibold text-white">
-                {indiaSnapshot?.snapshot_date
-                  ? formatSnapshotDate(indiaSnapshot.snapshot_date)
-                  : dashboard.zerodhaStatus?.last_portfolio_snapshot_date
-                    ? formatSnapshotDate(dashboard.zerodhaStatus.last_portfolio_snapshot_date)
-                    : 'Awaiting sync'}
-              </div>
-              <div className="mt-2 text-sm text-slate-300">
-                {dashboard.zerodhaStatus?.connected ? 'Broker connected' : 'Broker disconnected'}
-              </div>
-            </div>
-            <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
-                <Globe2 className="size-3.5" />
-                US Snapshot
-              </div>
-              <div className="mt-3 text-lg font-semibold text-white">
-                {usSnapshot?.snapshot_date ? formatSnapshotDate(usSnapshot.snapshot_date) : 'Awaiting paste'}
-              </div>
-              <div className="mt-2 text-sm text-slate-300">
-                {latestThreatUpdate ? `Threats updated ${formatTs(latestThreatUpdate)}` : 'Threat scans not run yet'}
-              </div>
+              <div className="mt-2 text-sm text-slate-300">Combined threat radar signals</div>
             </div>
           </div>
         </div>
@@ -319,11 +377,16 @@ export default function DashboardPage() {
           title="Zerodha India"
           description="Live broker-backed holdings, P&L, and top concentration pockets from your latest synced India book."
           statusPills={[
-            { label: 'Connection', value: dashboard.zerodhaStatus?.connected ? 'Connected' : 'Disconnected' },
+            {
+              label: 'Connection',
+              value: dashboard.zerodhaStatus?.connected ? 'Connected' : 'Disconnected',
+              tone: dashboard.zerodhaStatus?.connected ? 'success' : 'danger',
+            },
             {
               label: 'Snapshot',
               value: indiaSnapshot ? formatSnapshotDate(indiaSnapshot.snapshot_date) : 'Missing',
               detail: indiaSnapshot ? formatSnapshotTime(indiaSnapshot.captured_at) : undefined,
+              tone: indiaSnapshot ? indiaSnapshotTone : 'danger',
             },
           ]}
           metrics={[
@@ -362,11 +425,16 @@ export default function DashboardPage() {
           title="INDmoney US"
           description="Manual US snapshot tracking, top allocations, and return posture for the INDmoney portfolio."
           statusPills={[
-            { label: 'Parse', value: usSnapshot?.parse_status ?? 'Missing' },
+            {
+              label: 'Parse',
+              value: usSnapshot?.parse_status ?? 'Missing',
+              tone: usSnapshot?.parse_status?.toLowerCase() === 'parsed' ? 'success' : 'danger',
+            },
             {
               label: 'Snapshot',
               value: usSnapshot ? formatSnapshotDate(usSnapshot.snapshot_date) : 'Missing',
               detail: usSnapshot ? formatSnapshotTime(usSnapshot.captured_at) : undefined,
+              tone: usSnapshot ? usSnapshotTone : 'danger',
             },
           ]}
           metrics={[
@@ -400,6 +468,8 @@ export default function DashboardPage() {
           }
         />
       </section>
+
+      <DashboardFinalActionablesTables />
 
       <section className="grid gap-6 xl:grid-cols-2">
         <ThreatMarketCard
@@ -438,8 +508,6 @@ export default function DashboardPage() {
           }
         />
       </section>
-
-      <ThreatActionTable rows={topUrgentRows} totalRows={totalUrgentRows} />
     </div>
   );
 }
