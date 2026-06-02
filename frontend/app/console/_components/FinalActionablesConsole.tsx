@@ -1421,12 +1421,16 @@ function ActionSummarySections({
   consensus,
   market,
   technicalScans,
+  setupGroups,
   detailsData,
+  onSetupClick,
 }: {
   consensus: StockConsensus[];
   market: SwingTradeMarket;
   technicalScans: TechnicalScanMap;
+  setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
+  onSetupClick: (group: SetupStockGroup) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -1781,6 +1785,7 @@ export function FinalActionablesConsole({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showRunDetails, setShowRunDetails] = useState(false);
+  const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
   const [detailsData, setDetailsData] = useState<StockDetailsData>({
     portfolioSnapshot: null,
@@ -2077,7 +2082,9 @@ export function FinalActionablesConsole({
               consensus={consensus}
               market={market}
               technicalScans={technicalScans}
+              setupGroups={setupStockGroups}
               detailsData={detailsData}
+              onSetupClick={setSelectedSetupGroup}
             />
           </>
         )}
@@ -2127,7 +2134,9 @@ export function FinalActionablesConsole({
                             onToggle={() => toggleExpanded(stock.key)}
                             market={market}
                             technicalScan={getTechnicalScanForStock(technicalScans, stock)}
+                            setupGroups={setupStockGroups}
                             detailsData={detailsData}
+                            onSetupClick={setSelectedSetupGroup}
                           />
                         );
                       })}
@@ -2224,14 +2233,18 @@ function FragmentRows({
   onToggle,
   market,
   technicalScan,
+  setupGroups,
   detailsData,
+  onSetupClick,
 }: {
   stock: StockConsensus;
   isExpanded: boolean;
   onToggle: () => void;
   market: SwingTradeMarket;
   technicalScan: TechnicalScanResult | null;
+  setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
+  onSetupClick: (group: SetupStockGroup) => void;
 }) {
   return (
     <>
