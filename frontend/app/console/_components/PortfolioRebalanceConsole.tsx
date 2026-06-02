@@ -174,6 +174,46 @@ function getRunJobResponseLength(link: RunJobResponse) {
   return link.job.response?.length ?? 0;
 }
 
+function splitMarkdownRow(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.includes("|")) return [];
+  const withoutOuterPipes = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  return withoutOuterPipes.split("|").map((cell) => cell.trim());
+}
+
+function isMarkdownSeparatorRow(line: string) {
+  const trimmed = line.trim();
+  return /^\|?[\s:|\-]+\|?$/.test(trimmed) && trimmed.includes("---");
+}
+
+function isSwingRecommendationDataRow(line: string) {
+  if (isMarkdownSeparatorRow(line)) return false;
+
+  const cells = splitMarkdownRow(line);
+  if (cells.length < 6) return false;
+
+  const normalizedCells = cells.map((cell) => cell.toLowerCase());
+  if (
+    normalizedCells.some((cell) => cell.includes("stock symbol")) ||
+    normalizedCells.some((cell) => cell.includes("llm name"))
+  ) {
+    return false;
+  }
+
+  return Boolean(cells[2]?.trim());
+}
+
+function countSwingRecommendations(response?: string | null) {
+  if (!response?.trim()) return 0;
+  return response
+    .split(/\r?\n/)
+    .filter((line) => isSwingRecommendationDataRow(line)).length;
+}
+
+function getRunJobRecommendationCount(link: RunJobResponse) {
+  return countSwingRecommendations(link.job.response);
+}
+
 function getSelectedSwingRuns(
   runs: RunResponse[],
   selectedJobIds: ReadonlySet<string>,
@@ -357,6 +397,7 @@ function RebalanceInputBox({
   const promptSwingInputSection = promptInputSections.find(
     (section) => section.key === "swing",
   );
+  const selectedSwingRunCount = selectedSwingRuns.length;
   const selectedSwingJobCount = selectedSwingJobIds.size;
   const totalSwingJobCount = useMemo(
     () => swingRuns.reduce((total, run) => total + run.run_jobs.length, 0),
@@ -368,7 +409,9 @@ function RebalanceInputBox({
         (runTotal, run) =>
           runTotal +
           run.run_jobs.reduce((jobTotal, link) => {
-            if (!selectedSwingJobIds.has(getSwingJobSelectionId(run.id, link))) {
+            if (
+              !selectedSwingJobIds.has(getSwingJobSelectionId(run.id, link))
+            ) {
               return jobTotal;
             }
             return jobTotal + getRunJobResponseLength(link);
@@ -377,6 +420,30 @@ function RebalanceInputBox({
       ),
     [selectedSwingJobIds, swingRuns],
   );
+  const selectedSwingRecommendationCount = useMemo(
+    () =>
+      swingRuns.reduce(
+        (runTotal, run) =>
+          runTotal +
+          run.run_jobs.reduce((jobTotal, link) => {
+            if (
+              !selectedSwingJobIds.has(getSwingJobSelectionId(run.id, link))
+            ) {
+              return jobTotal;
+            }
+            return jobTotal + getRunJobRecommendationCount(link);
+          }, 0),
+        0,
+      ),
+    [selectedSwingJobIds, swingRuns],
+  );
+  const swingBriefStats = `${selectedSwingRunCount.toLocaleString(
+    "en-IN",
+  )} runs considered · ${selectedSwingJobCount.toLocaleString(
+    "en-IN",
+  )} LLMs considered · ${selectedSwingRecommendationCount.toLocaleString(
+    "en-IN",
+  )} stocks recommended`;
   const allSwingJobsSelected =
     totalSwingJobCount > 0 && selectedSwingJobCount === totalSwingJobCount;
 
@@ -502,11 +569,14 @@ function RebalanceInputBox({
                         key === "swing"
                           ? promptSwingInputSection?.content.length
                           : content.length;
-                      return characterCount
-                        ? `${characterCount.toLocaleString("en-IN")} chars`
-                        : loading
-                          ? "Loading…"
-                          : "No data";
+                      if (loading) return "Loading…";
+                      if (!characterCount) return "No data";
+                      if (key === "swing") {
+                        return `${swingBriefStats} · ${characterCount.toLocaleString(
+                          "en-IN",
+                        )} chars`;
+                      }
+                      return `${characterCount.toLocaleString("en-IN")} chars`;
                     })()}
                   </span>
                 </span>
@@ -594,6 +664,7 @@ function RebalanceInputBox({
                       {swingInputSection.description}
                     </p>
                     <p className="mt-2 text-xs font-medium text-emerald-800">
+                      {swingBriefStats} ·{" "}
                       {selectedSwingJobCount.toLocaleString("en-IN")} of{" "}
                       {totalSwingJobCount.toLocaleString("en-IN")} LLM outputs
                       selected ·{" "}
@@ -630,7 +701,9 @@ function RebalanceInputBox({
                   swingRuns.map((run) => {
                     const isRunCollapsed = collapsedSwingRunIds.has(run.id);
                     const selectedRunJobCount = run.run_jobs.filter((link) =>
-                      selectedSwingJobIds.has(getSwingJobSelectionId(run.id, link)),
+                      selectedSwingJobIds.has(
+                        getSwingJobSelectionId(run.id, link),
+                      ),
                     ).length;
 
                     return (
@@ -646,7 +719,8 @@ function RebalanceInputBox({
                           >
                             <span className="min-w-0">
                               <span className="block text-sm font-semibold text-gray-950">
-                                Run #{run.id} · {market === "us" ? "IndMoney US" : "Zerodha"}
+                                Run #{run.id} ·{" "}
+                                {market === "us" ? "IndMoney US" : "Zerodha"}
                               </span>
                               <span className="mt-1 block text-xs text-gray-600">
                                 Created {formatInputTimestamp(run.created_at)} ·
@@ -654,7 +728,9 @@ function RebalanceInputBox({
                               </span>
                             </span>
                             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
-                              {selectedRunJobCount.toLocaleString("en-IN")} of {run.run_jobs.length.toLocaleString("en-IN")} models
+                              {selectedRunJobCount.toLocaleString("en-IN")} of{" "}
+                              {run.run_jobs.length.toLocaleString("en-IN")}{" "}
+                              models
                             </span>
                           </Link>
                           <div className="flex items-center px-4 py-3 pl-0 sm:pl-3">
@@ -682,7 +758,8 @@ function RebalanceInputBox({
                               );
                               const isSelected =
                                 selectedSwingJobIds.has(selectionId);
-                              const outputLength = getRunJobResponseLength(link);
+                              const outputLength =
+                                getRunJobResponseLength(link);
                               return (
                                 <label
                                   key={selectionId}
@@ -705,18 +782,23 @@ function RebalanceInputBox({
                                       Timestamp
                                     </span>
                                     <span className="mt-1 block truncate">
-                                      {formatInputTimestamp(link.job.updated_at)}
+                                      {formatInputTimestamp(
+                                        link.job.updated_at,
+                                      )}
                                     </span>
                                   </span>
                                   <span className="justify-self-start rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 md:justify-self-end">
-                                    Output length · {outputLength.toLocaleString("en-IN")} chars
+                                    Output length ·{" "}
+                                    {outputLength.toLocaleString("en-IN")} chars
                                   </span>
                                   <span className="flex items-center gap-2 justify-self-start rounded-full border border-emerald-100 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 shadow-sm md:justify-self-end">
                                     <input
                                       type="checkbox"
                                       className="size-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
                                       checked={isSelected}
-                                      onChange={() => toggleSwingJob(selectionId)}
+                                      onChange={() =>
+                                        toggleSwingJob(selectionId)
+                                      }
                                     />
                                     {isSelected ? "Included" : "Excluded"}
                                   </span>
@@ -733,12 +815,12 @@ function RebalanceInputBox({
 
               <div className="border-t border-white/70 bg-white/65 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
                 {promptSwingInputSection?.content
-                  ? `${promptSwingInputSection.content.length.toLocaleString(
+                  ? `${swingBriefStats} · ${promptSwingInputSection.content.length.toLocaleString(
                       "en-IN",
                     )} characters in selected swing input prompt context`
                   : loading
                     ? "Counting characters…"
-                    : "0 characters"}
+                    : "0 runs considered · 0 LLMs considered · 0 stocks recommended · 0 characters"}
               </div>
             </section>
           ) : null}
