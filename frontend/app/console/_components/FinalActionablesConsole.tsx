@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 
 import {
   parseInvestmentRecommendationContent,
@@ -13,7 +13,10 @@ import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { inferRebalanceMarketFromPrompt, type RebalancePortfolioKey } from "@/lib/rebalance";
+import {
+  inferRebalanceMarketFromPrompt,
+  type RebalancePortfolioKey,
+} from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
 import { cn } from "@/lib/utils";
 import { apiService } from "@/services/api";
@@ -32,19 +35,37 @@ type LlmBreakupRow = {
   };
 };
 
+type ActionEstimate = {
+  units: number | null;
+  amount: number | null;
+};
+
 type StockConsensus = {
   key: string;
   exchange: string;
   symbol: string;
   consensusAction: ActionCategory;
   actionCounts: Record<ActionCategory, number>;
+  actionAverages: Record<ActionCategory, ActionEstimate>;
   totalSuggestions: number;
   representative: CanonicalRow;
   rows: LlmBreakupRow[];
 };
 
-const ACTION_CATEGORIES: ActionCategory[] = ["Sell All", "Trim", "Hold", "Add more", "Buy New"];
-const ACTION_HEADER: RebalanceHeader = "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
+const ACTION_CATEGORIES: ActionCategory[] = [
+  "Sell All",
+  "Trim",
+  "Hold",
+  "Add more",
+  "Buy New",
+];
+const ACTION_HEADER: RebalanceHeader =
+  "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
+const ACTION_ESTIMATE_CATEGORIES = new Set<ActionCategory>([
+  "Trim",
+  "Add more",
+  "Buy New",
+]);
 const CATEGORY_BADGE_CLASS: Record<ActionCategory, string> = {
   "Sell All": "border-red-200 bg-red-50 text-red-700",
   Trim: "border-orange-200 bg-orange-50 text-orange-700",
@@ -53,7 +74,10 @@ const CATEGORY_BADGE_CLASS: Record<ActionCategory, string> = {
   "Buy New": "border-emerald-200 bg-emerald-50 text-emerald-700",
 };
 
-const PAGE_COPY: Record<RebalancePortfolioKey, { title: string; description: string }> = {
+const PAGE_COPY: Record<
+  RebalancePortfolioKey,
+  { title: string; description: string }
+> = {
   zerodha: {
     title: "Zerodha Final Actionables",
     description:
@@ -100,24 +124,119 @@ function formatDateTime(value: string) {
 }
 
 function normalizeAction(value: string): ActionCategory | null {
-  const action = value.toLowerCase().replace(/[\s_-]+/g, " ").trim();
+  const action = value
+    .toLowerCase()
+    .replace(/[\s_-]+/g, " ")
+    .trim();
   if (!action) return null;
   if (action.includes("sell all") || action === "sell") return "Sell All";
   if (action.includes("trim") || action.includes("reduce")) return "Trim";
-  if (action.includes("buy new") || action.includes("new buy")) return "Buy New";
+  if (action.includes("buy new") || action.includes("new buy"))
+    return "Buy New";
   if (action.includes("add") || action.includes("buy more")) return "Add more";
   if (action.includes("hold")) return "Hold";
   return null;
 }
 
+function parseNumericCell(value?: string | null) {
+  const match = String(value || "")
+    .replace(/,/g, "")
+    .match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function average(values: number[]) {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function getActionUnits(row: CanonicalRow, action: ActionCategory) {
+  const unitsChange = parseNumericCell(row["Units Change"]);
+  const unitsToBuy = parseNumericCell(row["Units to Buy"]);
+  if (action === "Trim") {
+    return Math.abs(unitsChange ?? unitsToBuy ?? 0) || null;
+  }
+  if (action === "Add more" || action === "Buy New") {
+    return Math.abs(unitsToBuy ?? unitsChange ?? 0) || null;
+  }
+  return null;
+}
+
+function getActionAmount(row: CanonicalRow, units: number | null) {
+  const explicitAmount = parseNumericCell(row["Total Buy Amount"]);
+  if (explicitAmount !== null) return Math.abs(explicitAmount);
+  const price = parseNumericCell(row["Price Per Unit"]);
+  if (units !== null && price !== null) return Math.abs(units * price);
+  return null;
+}
+
+function summarizeActionEstimate(
+  rows: LlmBreakupRow[],
+  action: ActionCategory,
+): ActionEstimate {
+  const matchingRows = rows.filter(
+    (row) => normalizeAction(row.cells[ACTION_HEADER] || "") === action,
+  );
+  const unitValues = matchingRows
+    .map((row) => getActionUnits(row.cells, action))
+    .filter((value): value is number => value !== null);
+  const amountValues = matchingRows
+    .map((row) => getActionAmount(row.cells, getActionUnits(row.cells, action)))
+    .filter((value): value is number => value !== null);
+
+  return {
+    units: average(unitValues),
+    amount: average(amountValues),
+  };
+}
+
+function formatQuantity(value: number | null) {
+  if (value === null) return "—";
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(
+    value,
+  );
+}
+
+function formatCurrency(value: number | null, market: SwingTradeMarket) {
+  if (value === null) return "amount unavailable";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: market === "us" ? "USD" : "INR",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function getActionEstimateLabel(
+  stock: StockConsensus,
+  action: ActionCategory,
+  market: SwingTradeMarket,
+) {
+  const estimate = stock.actionAverages[action];
+  if (
+    !ACTION_ESTIMATE_CATEGORIES.has(action) ||
+    (!estimate.units && !estimate.amount)
+  ) {
+    return null;
+  }
+  const verb = action === "Trim" ? "sell" : "buy";
+  return `${formatQuantity(estimate.units)} units to ${verb} (${formatCurrency(estimate.amount, market)})`;
+}
+
 function getStockKey(row: CanonicalRow) {
   const exchange = (row["Exchange Symbol"] || "UNKNOWN").trim().toUpperCase();
-  const symbol = (row["Stock Symbol"] || row["Stock Name"] || "UNKNOWN").trim().toUpperCase();
+  const symbol = (row["Stock Symbol"] || row["Stock Name"] || "UNKNOWN")
+    .trim()
+    .toUpperCase();
   return `${exchange}:${symbol}`;
 }
 
 function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
-  return run.status === "completed" && inferRebalanceMarketFromPrompt(run.prompt) === market;
+  return (
+    run.status === "completed" &&
+    inferRebalanceMarketFromPrompt(run.prompt) === market
+  );
 }
 
 async function fetchAllFullRuns() {
@@ -171,10 +290,20 @@ function buildConsensusRows(runs: RunResponse[]): StockConsensus[] {
 
   return Array.from(grouped.entries())
     .map(([key, rows]) => {
-      const actionCounts = ACTION_CATEGORIES.reduce((acc, action) => {
-        acc[action] = 0;
-        return acc;
-      }, {} as Record<ActionCategory, number>);
+      const actionCounts = ACTION_CATEGORIES.reduce(
+        (acc, action) => {
+          acc[action] = 0;
+          return acc;
+        },
+        {} as Record<ActionCategory, number>,
+      );
+      const actionAverages = ACTION_CATEGORIES.reduce(
+        (acc, action) => {
+          acc[action] = summarizeActionEstimate(rows, action);
+          return acc;
+        },
+        {} as Record<ActionCategory, ActionEstimate>,
+      );
 
       rows.forEach((row) => {
         const category = normalizeAction(row.cells[ACTION_HEADER] || "");
@@ -188,11 +317,14 @@ function buildConsensusRows(runs: RunResponse[]): StockConsensus[] {
 
       const first = rows[0].cells;
       const representative = { ...first };
-      representative[ACTION_HEADER] = ACTION_CATEGORIES
-        .filter((action) => actionCounts[action] > 0)
-        .map((action) => `${action} (${actionCounts[action]}/${rows.length})`)
-        .join("; ") || "No action consensus";
-      representative["Confidence Score (0-100)"] = summarizeNumeric(rows, "Confidence Score (0-100)");
+      representative[ACTION_HEADER] =
+        ACTION_CATEGORIES.filter((action) => actionCounts[action] > 0)
+          .map((action) => `${action} (${actionCounts[action]}/${rows.length})`)
+          .join("; ") || "No action consensus";
+      representative["Confidence Score (0-100)"] = summarizeNumeric(
+        rows,
+        "Confidence Score (0-100)",
+      );
       representative["Rationale Remarks"] = summarizeRationales(rows);
 
       return {
@@ -201,6 +333,7 @@ function buildConsensusRows(runs: RunResponse[]): StockConsensus[] {
         symbol: first["Stock Symbol"] || first["Stock Name"] || key,
         consensusAction,
         actionCounts,
+        actionAverages,
         totalSuggestions: rows.length,
         representative,
         rows,
@@ -211,7 +344,9 @@ function buildConsensusRows(runs: RunResponse[]): StockConsensus[] {
 
 function summarizeNumeric(rows: LlmBreakupRow[], header: RebalanceHeader) {
   const values = rows
-    .map((row) => Number(String(row.cells[header] || "").replace(/[^\d.-]/g, "")))
+    .map((row) =>
+      Number(String(row.cells[header] || "").replace(/[^\d.-]/g, "")),
+    )
     .filter((value) => Number.isFinite(value));
   if (!values.length) return "";
   const average = values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -221,29 +356,66 @@ function summarizeNumeric(rows: LlmBreakupRow[], header: RebalanceHeader) {
 function summarizeRationales(rows: LlmBreakupRow[]) {
   return rows
     .slice(0, 3)
-    .map((row) => `${row.meta.provider} ${row.meta.model}: ${row.cells["Rationale Remarks"] || row.cells["Technical Setup"] || "No rationale"}`)
+    .map(
+      (row) =>
+        `${row.meta.provider} ${row.meta.model}: ${row.cells["Rationale Remarks"] || row.cells["Technical Setup"] || "No rationale"}`,
+    )
     .join(" | ");
 }
 
-function ActionSummarySections({ consensus }: { consensus: StockConsensus[] }) {
+function ActionSummarySections({
+  consensus,
+  market,
+}: {
+  consensus: StockConsensus[];
+  market: SwingTradeMarket;
+}) {
   return (
     <div className="grid gap-4 lg:grid-cols-5">
       {ACTION_CATEGORIES.map((action) => {
-        const stocks = consensus.filter((item) => item.consensusAction === action);
+        const stocks = consensus.filter(
+          (item) => item.consensusAction === action,
+        );
         return (
-          <Card key={action} className={cn("border", CATEGORY_BADGE_CLASS[action])}>
+          <Card
+            key={action}
+            className={cn("border", CATEGORY_BADGE_CLASS[action])}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">{action}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-xs">
-              <div className="font-semibold">{stocks.length} stock{stocks.length === 1 ? "" : "s"}</div>
+              <div className="font-semibold">
+                {stocks.length} stock{stocks.length === 1 ? "" : "s"}
+              </div>
               <div className="space-y-1 text-gray-700">
-                {stocks.length ? stocks.map((stock) => (
-                  <div key={stock.key} className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{stock.symbol}</span>
-                    <span>{stock.actionCounts[action]}/{stock.totalSuggestions}</span>
-                  </div>
-                )) : <span>No consensus stocks.</span>}
+                {stocks.length ? (
+                  stocks.map((stock) => {
+                    const estimateLabel = getActionEstimateLabel(
+                      stock,
+                      action,
+                      market,
+                    );
+                    return (
+                      <div key={stock.key} className="space-y-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium">{stock.symbol}</span>
+                          <span>
+                            {stock.actionCounts[action]}/
+                            {stock.totalSuggestions}
+                          </span>
+                        </div>
+                        {estimateLabel ? (
+                          <div className="text-[11px] text-gray-500">
+                            Avg: {estimateLabel}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <span>No consensus stocks.</span>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -253,7 +425,15 @@ function ActionSummarySections({ consensus }: { consensus: StockConsensus[] }) {
   );
 }
 
-function RebalanceCell({ row, header, market }: { row: CanonicalRow; header: RebalanceHeader; market: SwingTradeMarket }) {
+function RebalanceCell({
+  row,
+  header,
+  market,
+}: {
+  row: CanonicalRow;
+  header: RebalanceHeader;
+  market: SwingTradeMarket;
+}) {
   const cellValue = row[header];
   if (header === "Stock Symbol" && cellValue) {
     return (
@@ -270,6 +450,173 @@ function RebalanceCell({ row, header, market }: { row: CanonicalRow; header: Reb
   return cellValue || "";
 }
 
+function RunGroupDetails({
+  runs,
+  latestRun,
+  market,
+  onBack,
+}: {
+  runs: RunResponse[];
+  latestRun: RunResponse | null;
+  market: SwingTradeMarket;
+  onBack: () => void;
+}) {
+  const marketLabel = market === "us" ? "US" : "India";
+  const totalLlmJobs = runs.reduce(
+    (sum, run) => sum + (run.run_jobs?.length ?? 0),
+    0,
+  );
+  const completedLlmJobs = runs.reduce(
+    (sum, run) =>
+      sum +
+      (run.run_jobs ?? []).filter((link) => link.job?.status === "completed")
+        .length,
+    0,
+  );
+  const uniqueLlms = new Set(
+    runs.flatMap((run) =>
+      (run.run_jobs ?? []).map(
+        (link) =>
+          `${link.job?.provider || "provider"} ${link.job?.model || "model"}`,
+      ),
+    ),
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">
+            Run consolidation details
+          </p>
+          <h2 className="mt-2 text-2xl font-bold text-gray-900">
+            {runs.length} run{runs.length === 1 ? "" : "s"} considered
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm text-gray-600">
+            A run is considered when it is completed, is detected as a{" "}
+            {marketLabel} rebalance run, and uses the same rebalance input
+            bundle as the latest matching run
+            {latestRun ? ` (#${latestRun.id})` : ""}.
+          </p>
+        </div>
+        <Button type="button" variant="outline" onClick={onBack}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to final actionables
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Consideration summary</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 text-sm text-gray-700 md:grid-cols-4">
+          <div>
+            <div className="font-semibold text-gray-900">Runs considered</div>
+            <div>{runs.length}</div>
+          </div>
+          <div>
+            <div className="font-semibold text-gray-900">
+              Latest matching run
+            </div>
+            <div>{latestRun ? `#${latestRun.id}` : "None found"}</div>
+          </div>
+          <div>
+            <div className="font-semibold text-gray-900">LLMs run</div>
+            <div>{uniqueLlms.size}</div>
+          </div>
+          <div>
+            <div className="font-semibold text-gray-900">
+              Completed LLM jobs
+            </div>
+            <div>
+              {completedLlmJobs}/{totalLlmJobs}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Runs and LLMs included</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {runs.length ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-300 bg-gray-50">
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Run
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Run date
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Rationale for consideration
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      LLMs run
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Rows used
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {runs.map((run) => {
+                    const parsedRows = parseRunRows(run);
+                    return (
+                      <tr key={run.id}>
+                        <td className="whitespace-nowrap px-3 py-3 align-top font-semibold text-gray-900">
+                          #{run.id}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 align-top text-gray-700">
+                          {formatDateTime(run.created_at)}
+                        </td>
+                        <td className="min-w-72 px-3 py-3 align-top text-gray-700">
+                          Completed {marketLabel} rebalance run with the same
+                          normalized rebalance input bundle as the latest
+                          matching run{latestRun ? ` #${latestRun.id}` : ""}.
+                        </td>
+                        <td className="min-w-64 px-3 py-3 align-top text-gray-700">
+                          <div className="space-y-1">
+                            {(run.run_jobs ?? []).map((link) => (
+                              <div
+                                key={link.id}
+                                className="rounded border border-gray-200 bg-white px-2 py-1"
+                              >
+                                <div className="font-medium text-gray-900">
+                                  {link.job?.provider || "Unknown provider"}{" "}
+                                  {link.job?.model || "Unknown model"}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Job #{link.job_id} ·{" "}
+                                  {link.job?.status || "unknown"}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 align-top text-gray-700">
+                          {parsedRows.length}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-gray-500">
+              No runs matched the completed rebalance criteria yet.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export function FinalActionablesConsole({
   portfolio,
   market,
@@ -281,6 +628,7 @@ export function FinalActionablesConsole({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showRunDetails, setShowRunDetails] = useState(false);
 
   const loadRuns = useCallback(async (showLoading = true) => {
     if (showLoading) {
@@ -291,7 +639,9 @@ export function FinalActionablesConsole({
       const response = await fetchAllFullRuns();
       setRuns(response);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load rebalance runs.");
+      setError(
+        err instanceof Error ? err.message : "Failed to load rebalance runs.",
+      );
     } finally {
       setLoading(false);
     }
@@ -305,7 +655,11 @@ export function FinalActionablesConsole({
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          setError(err instanceof Error ? err.message : "Failed to load rebalance runs.");
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load rebalance runs.",
+          );
         }
       })
       .finally(() => {
@@ -320,17 +674,29 @@ export function FinalActionablesConsole({
   const groupedRuns = useMemo(() => {
     const marketRuns = runs
       .filter((run) => isCompletedRebalanceRun(run, market))
-      .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at));
+      .sort(
+        (a, b) =>
+          parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at),
+      );
     const latestRun = marketRuns[0];
     if (!latestRun) return { latestRun: null, runs: [] as RunResponse[] };
     const fingerprint = extractRebalanceInputFingerprint(latestRun.prompt);
     return {
       latestRun,
-      runs: marketRuns.filter((run) => extractRebalanceInputFingerprint(run.prompt) === fingerprint),
+      runs: marketRuns.filter(
+        (run) => extractRebalanceInputFingerprint(run.prompt) === fingerprint,
+      ),
     };
   }, [market, runs]);
 
-  const consensus = useMemo(() => buildConsensusRows(groupedRuns.runs), [groupedRuns.runs]);
+  const consensus = useMemo(
+    () => buildConsensusRows(groupedRuns.runs),
+    [groupedRuns.runs],
+  );
+  const totalStocksConsolidated = consensus.reduce(
+    (sum, stock) => sum + stock.totalSuggestions,
+    0,
+  );
   const copy = PAGE_COPY[portfolio];
 
   const toggleExpanded = (key: string) => {
@@ -345,90 +711,148 @@ export function FinalActionablesConsole({
   return (
     <div className="min-h-screen bg-gray-50">
       <main className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-        <PortfolioAnalysisNav portfolio={portfolio} active="finalActionables" className="justify-center" />
+        <PortfolioAnalysisNav
+          portfolio={portfolio}
+          active="finalActionables"
+          className="justify-center"
+        />
 
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Final Actionables</p>
-            <h1 className="mt-2 text-3xl font-bold text-gray-900">{copy.title}</h1>
-            <p className="mt-2 max-w-3xl text-sm text-gray-600">{copy.description}</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+              Final Actionables
+            </p>
+            <h1 className="mt-2 text-3xl font-bold text-gray-900">
+              {copy.title}
+            </h1>
+            <p className="mt-2 max-w-3xl text-sm text-gray-600">
+              {copy.description}
+            </p>
           </div>
-          <Button onClick={() => void loadRuns()} variant="outline" disabled={loading}>
-            <RefreshCw className={cn("mr-2 h-4 w-4", loading ? "animate-spin" : "")} />
+          <Button
+            onClick={() => void loadRuns()}
+            variant="outline"
+            disabled={loading}
+          >
+            <RefreshCw
+              className={cn("mr-2 h-4 w-4", loading ? "animate-spin" : "")}
+            />
             Refresh
           </Button>
         </div>
 
         {error ? (
           <Card className="border-red-200 bg-red-50">
-            <CardContent className="pt-6 text-sm text-red-700">{error}</CardContent>
+            <CardContent className="pt-6 text-sm text-red-700">
+              {error}
+            </CardContent>
           </Card>
         ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Run Group</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-4 text-sm text-gray-600 sm:grid-cols-3">
-            <div>
-              <div className="font-semibold text-gray-900">Latest matching run</div>
-              <div>{groupedRuns.latestRun ? `#${groupedRuns.latestRun.id}` : "None found"}</div>
-            </div>
-            <div>
-              <div className="font-semibold text-gray-900">Runs consolidated</div>
-              <div>{groupedRuns.runs.length}</div>
-            </div>
-            <div>
-              <div className="font-semibold text-gray-900">LLM outputs consolidated</div>
-              <div>{consensus.reduce((sum, stock) => sum + stock.totalSuggestions, 0)}</div>
-            </div>
-          </CardContent>
-        </Card>
+        {showRunDetails ? (
+          <RunGroupDetails
+            runs={groupedRuns.runs}
+            latestRun={groupedRuns.latestRun}
+            market={market}
+            onBack={() => setShowRunDetails(false)}
+          />
+        ) : (
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Run Group</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 text-sm text-gray-600 sm:grid-cols-3">
+                <div>
+                  <div className="font-semibold text-gray-900">
+                    Latest matching run
+                  </div>
+                  <div>
+                    {groupedRuns.latestRun
+                      ? `#${groupedRuns.latestRun.id}`
+                      : "None found"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRunDetails(true)}
+                  className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-left transition hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <div className="font-semibold text-gray-900">
+                    Runs consolidated
+                  </div>
+                  <div>{groupedRuns.runs.length}</div>
+                  <div className="mt-1 text-xs text-blue-700">
+                    Open run consideration details
+                  </div>
+                </button>
+                <div>
+                  <div className="font-semibold text-gray-900">
+                    Total Stocks consolidated
+                  </div>
+                  <div>{totalStocksConsolidated}</div>
+                </div>
+              </CardContent>
+            </Card>
 
-        <ActionSummarySections consensus={consensus} />
+            <ActionSummarySections consensus={consensus} market={market} />
+          </>
+        )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Stock-wise Consolidated Rebalance Output</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="py-12 text-center text-sm text-gray-500">Loading final actionables…</div>
-            ) : consensus.length ? (
-              <div className="overflow-x-auto">
-                <table className="min-w-max text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-300 bg-gray-50">
-                      {REBALANCE_HEADER_ORDER.map((header) => (
-                        <th key={header} className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700">
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {consensus.map((stock) => {
-                      const isExpanded = expanded.has(stock.key);
-                      return (
-                        <FragmentRows
-                          key={stock.key}
-                          stock={stock}
-                          isExpanded={isExpanded}
-                          onToggle={() => toggleExpanded(stock.key)}
-                          market={market}
-                        />
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="mx-auto max-w-2xl py-12 text-center text-sm text-gray-500">
-                No completed rebalance output tables were found for the latest matching input set. Runs with empty or missing prompts are ignored by the input-set matcher until a completed rebalance response is available.
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {!showRunDetails ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">
+                Stock-wise Consolidated Rebalance Output
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="py-12 text-center text-sm text-gray-500">
+                  Loading final actionables…
+                </div>
+              ) : consensus.length ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-max text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-300 bg-gray-50">
+                        {REBALANCE_HEADER_ORDER.map((header) => (
+                          <th
+                            key={header}
+                            className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700"
+                          >
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {consensus.map((stock) => {
+                        const isExpanded = expanded.has(stock.key);
+                        return (
+                          <FragmentRows
+                            key={stock.key}
+                            stock={stock}
+                            isExpanded={isExpanded}
+                            onToggle={() => toggleExpanded(stock.key)}
+                            market={market}
+                          />
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="mx-auto max-w-2xl py-12 text-center text-sm text-gray-500">
+                  No completed rebalance output tables were found for the latest
+                  matching input set. Runs with empty or missing prompts are
+                  ignored by the input-set matcher until a completed rebalance
+                  response is available.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
       </main>
     </div>
   );
@@ -449,15 +873,35 @@ function FragmentRows({
     <>
       <tr className="cursor-pointer hover:bg-gray-50" onClick={onToggle}>
         {REBALANCE_HEADER_ORDER.map((header) => {
-          const content = header === "Stock Symbol" ? (
-            <span className="inline-flex items-center gap-2">
-              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              <RebalanceCell row={stock.representative} header={header} market={market} />
-            </span>
-          ) : (
-            <RebalanceCell row={stock.representative} header={header} market={market} />
+          const content =
+            header === "Stock Symbol" ? (
+              <span className="inline-flex items-center gap-2">
+                {isExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                <RebalanceCell
+                  row={stock.representative}
+                  header={header}
+                  market={market}
+                />
+              </span>
+            ) : (
+              <RebalanceCell
+                row={stock.representative}
+                header={header}
+                market={market}
+              />
+            );
+          return (
+            <td
+              key={`${stock.key}-${header}`}
+              className="px-3 py-2 align-top text-gray-700"
+            >
+              {content}
+            </td>
           );
-          return <td key={`${stock.key}-${header}`} className="px-3 py-2 align-top text-gray-700">{content}</td>;
         })}
       </tr>
       {isExpanded ? (
@@ -470,9 +914,14 @@ function FragmentRows({
               <table className="min-w-max text-xs">
                 <thead>
                   <tr className="border-b bg-gray-50">
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Run / LLM</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Run / LLM
+                    </th>
                     {REBALANCE_HEADER_ORDER.map((header) => (
-                      <th key={`breakup-${stock.key}-${header}`} className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700">
+                      <th
+                        key={`breakup-${stock.key}-${header}`}
+                        className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700"
+                      >
                         {header}
                       </th>
                     ))}
@@ -482,13 +931,26 @@ function FragmentRows({
                   {stock.rows.map((row) => (
                     <tr key={`${row.meta.runId}-${row.meta.jobId}`}>
                       <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                        <div className="font-semibold">Run #{row.meta.runId}</div>
-                        <div>{row.meta.provider} {row.meta.model}</div>
-                        <div className="text-gray-400">{formatDateTime(row.meta.createdAt)}</div>
+                        <div className="font-semibold">
+                          Run #{row.meta.runId}
+                        </div>
+                        <div>
+                          {row.meta.provider} {row.meta.model}
+                        </div>
+                        <div className="text-gray-400">
+                          {formatDateTime(row.meta.createdAt)}
+                        </div>
                       </td>
                       {REBALANCE_HEADER_ORDER.map((header) => (
-                        <td key={`${row.meta.runId}-${row.meta.jobId}-${header}`} className="px-3 py-2 align-top text-gray-700">
-                          <RebalanceCell row={row.cells} header={header} market={market} />
+                        <td
+                          key={`${row.meta.runId}-${row.meta.jobId}-${header}`}
+                          className="px-3 py-2 align-top text-gray-700"
+                        >
+                          <RebalanceCell
+                            row={row.cells}
+                            header={header}
+                            market={market}
+                          />
                         </td>
                       ))}
                     </tr>
