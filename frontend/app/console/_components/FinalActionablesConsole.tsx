@@ -1865,12 +1865,6 @@ function getLatestMatchingRuns(runs: RunResponse[], market: SwingTradeMarket) {
   );
 }
 
-function marketLabelClass(market: SwingTradeMarket) {
-  return market === "us"
-    ? "border-sky-200 bg-sky-50 text-sky-900"
-    : "border-amber-200 bg-amber-50 text-amber-900";
-}
-
 export function DashboardFinalActionablesTables() {
   const [runs, setRuns] = useState<RunResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1897,17 +1891,131 @@ export function DashboardFinalActionablesTables() {
   }, [loadRuns]);
 
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
-  const actionRows = useMemo(() => {
-    const india = buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india").map((stock) => ({
+  const actionRowsByMarket = useMemo(() => ({
+    india: buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india").map((stock) => ({
       market: "india" as SwingTradeMarket,
       stock,
-    }));
-    const us = buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us").map((stock) => ({
+    })),
+    us: buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us").map((stock) => ({
       market: "us" as SwingTradeMarket,
       stock,
-    }));
-    return [...india, ...us];
-  }, [runs]);
+    })),
+  }), [runs]);
+
+  const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
+    const actionRows = actionRowsByMarket[market];
+
+    return (
+      <div className="rounded-[28px] border border-slate-200 bg-white/80 p-4 shadow-sm">
+        <div className="mb-4">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            {market === "us" ? "US" : "Zerodha India"}
+          </div>
+          <h3 className="mt-1 font-serif text-xl tracking-tight text-slate-950">{title}</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
+        </div>
+
+        <div className="space-y-4">
+          {loading && actionRows.length === 0 ? (
+            <div className="rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+              Loading final actionables…
+            </div>
+          ) : (
+            ACTION_CATEGORIES.map((action) => {
+              const rows = actionRows
+                .filter(({ stock }) => stock.consensusAction === action)
+                .sort((a, b) => {
+                  const sorted = sortStocksByConfidence([a.stock, b.stock], technicalScans);
+                  return sorted[0]?.key === a.stock.key ? -1 : 1;
+                });
+
+              return (
+                <Card
+                  key={`${market}-${action}`}
+                  id={`dashboard-${market}-${finalActionCategoryDomId(action)}`}
+                  className={cn("scroll-mt-24 border", CATEGORY_BADGE_CLASS[action])}
+                >
+                  <CardHeader className="pb-2">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <CardTitle className="text-sm">{ACTION_CATEGORY_LABEL[action]}</CardTitle>
+                      <span className="text-xs font-semibold text-slate-600">
+                        {rows.length} stock{rows.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="text-xs">
+                    {rows.length ? (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-[64rem] text-xs">
+                          <thead>
+                            <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                              <th className="px-3 py-2 font-semibold">Stock</th>
+                              <th className="px-3 py-2 font-semibold">Consensus</th>
+                              <th className="px-3 py-2 font-semibold">Current Units</th>
+                              <th className="px-3 py-2 font-semibold">Current Investment Amount</th>
+                              <th className="px-3 py-2 font-semibold">Units to {getActionVerb(action)}</th>
+                              <th className="px-3 py-2 font-semibold">Amount</th>
+                              <th className="px-3 py-2 font-semibold">Technical Setup</th>
+                              <th className="px-3 py-2 font-semibold">Confidence Score</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {rows.map(({ stock }) => {
+                              const estimate = stock.actionAverages[action];
+                              const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
+                              const scan = getTechnicalScanForStock(technicalScans, stock);
+                              const setup = formatTechnicalSetup(scan, stock.representative);
+                              return (
+                                <tr key={`${market}-${stock.key}`} className="bg-white/40">
+                                  <td className="whitespace-nowrap px-3 py-2 align-top">
+                                    <TradingViewSymbolLink
+                                      symbol={stock.symbol}
+                                      market={market}
+                                      exchange={stock.exchange}
+                                      className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
+                                    >
+                                      {stock.symbol}
+                                    </TradingViewSymbolLink>
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                    {stock.actionCounts[action]}/{stock.totalSuggestions}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                    {formatQuantity(estimate.currentUnits)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                    {formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentInvestmentAmount(stock.representative), market)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                    {showActionColumns ? formatQuantity(estimate.units) : "—"}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                    {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
+                                  </td>
+                                  <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan, stock.representative))}>
+                                    <TechnicalSetupLink setup={setup} />
+                                  </td>
+                                  <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan, stock.representative))}>
+                                    {formatTechnicalConfidence(scan, stock.representative)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <span className="text-gray-600">No consensus stocks.</span>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <section className="rounded-[32px] border border-slate-200 bg-white shadow-sm">
@@ -1917,11 +2025,10 @@ export function DashboardFinalActionablesTables() {
             Final Actionables
           </div>
           <h2 className="mt-2 font-serif text-2xl tracking-tight text-slate-950">
-            Final Actionable 5 Tables
+            Final Actionable Zerodha & Final Actionable US
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">
-            Latest consolidated India and US rebalance decisions grouped into Sell All, Add More, Buy New,
-            Trim, and Hold tables.
+            Latest rebalance decisions split into adjacent Zerodha India and INDmoney US action tables.
           </p>
         </div>
 
@@ -1936,115 +2043,25 @@ export function DashboardFinalActionablesTables() {
         </Button>
       </div>
 
-      <div className="space-y-4 p-6">
+      <div className="p-6">
         {error ? (
-          <div className="rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <div className="mb-4 rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
             {error}
           </div>
         ) : null}
 
-        {loading && actionRows.length === 0 ? (
-          <div className="rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-            Loading final actionables…
-          </div>
-        ) : (
-          ACTION_CATEGORIES.map((action) => {
-            const rows = actionRows
-              .filter(({ stock }) => stock.consensusAction === action)
-              .sort((a, b) => {
-                const sorted = sortStocksByConfidence([a.stock, b.stock], technicalScans);
-                return sorted[0]?.key === a.stock.key ? -1 : 1;
-              });
-
-            return (
-              <Card
-                key={action}
-                id={`dashboard-${finalActionCategoryDomId(action)}`}
-                className={cn("scroll-mt-24 border", CATEGORY_BADGE_CLASS[action])}
-              >
-                <CardHeader className="pb-2">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <CardTitle className="text-sm">{ACTION_CATEGORY_LABEL[action]}</CardTitle>
-                    <span className="text-xs font-semibold text-slate-600">
-                      {rows.length} stock{rows.length === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                </CardHeader>
-                <CardContent className="text-xs">
-                  {rows.length ? (
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
-                            <th className="px-3 py-2 font-semibold">Market</th>
-                            <th className="px-3 py-2 font-semibold">Stock</th>
-                            <th className="px-3 py-2 font-semibold">Consensus</th>
-                            <th className="px-3 py-2 font-semibold">Current Units</th>
-                            <th className="px-3 py-2 font-semibold">Current Investment Amount</th>
-                            <th className="px-3 py-2 font-semibold">Units to {getActionVerb(action)}</th>
-                            <th className="px-3 py-2 font-semibold">Amount</th>
-                            <th className="px-3 py-2 font-semibold">Technical Setup</th>
-                            <th className="px-3 py-2 font-semibold">Confidence Score</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {rows.map(({ market, stock }) => {
-                            const estimate = stock.actionAverages[action];
-                            const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
-                            const scan = getTechnicalScanForStock(technicalScans, stock);
-                            const setup = formatTechnicalSetup(scan, stock.representative);
-                            return (
-                              <tr key={`${market}-${stock.key}`} className="bg-white/40">
-                                <td className="whitespace-nowrap px-3 py-2 align-top">
-                                  <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]", marketLabelClass(market))}>
-                                    {market === "us" ? "US" : "India"}
-                                  </span>
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-2 align-top">
-                                  <TradingViewSymbolLink
-                                    symbol={stock.symbol}
-                                    market={market}
-                                    exchange={stock.exchange}
-                                    className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
-                                  >
-                                    {stock.symbol}
-                                  </TradingViewSymbolLink>
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                  {stock.actionCounts[action]}/{stock.totalSuggestions}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                  {formatQuantity(estimate.currentUnits)}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                  {formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentInvestmentAmount(stock.representative), market)}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                  {showActionColumns ? formatQuantity(estimate.units) : "—"}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                  {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
-                                </td>
-                                <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan, stock.representative))}>
-                                  <TechnicalSetupLink setup={setup} />
-                                </td>
-                                <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan, stock.representative))}>
-                                  {formatTechnicalConfidence(scan, stock.representative)}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <span className="text-gray-600">No consensus stocks.</span>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })
-        )}
+        <div className="grid gap-6 xl:grid-cols-2">
+          {renderMarketPanel(
+            "india",
+            "Final Actionable Zerodha",
+            "Zerodha India rebalance decisions grouped into Sell All, Add More, Buy New, Trim, and Hold tables.",
+          )}
+          {renderMarketPanel(
+            "us",
+            "Final Actionable US",
+            "INDmoney US rebalance decisions grouped into Sell All, Add More, Buy New, Trim, and Hold tables.",
+          )}
+        </div>
       </div>
     </section>
   );

@@ -584,8 +584,8 @@ export function PortfolioSnapshotsPanel({
             {error}
           </div>
         )}
-        <div className="grid gap-5 px-5 py-5 xl:grid-cols-[20rem,minmax(0,1fr)]">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+        <div className="grid gap-5 px-5 py-5 xl:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <MetricCard
               label="Holdings Value"
               value={formatCurrency(selectedSnapshot.holdings_market_value)}

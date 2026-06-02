@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, Wallet } from 'lucide-react';
+import { Wallet } from 'lucide-react';
 
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,12 @@ export type PortfolioCardTopHolding = {
   value: string;
   secondaryValue?: string;
   secondaryToneClass?: string;
+};
+
+export type PortfolioCardActionLink = {
+  label: string;
+  href: string;
+  primary?: boolean;
 };
 
 const ACCENT_STYLES = {
@@ -88,6 +94,7 @@ export function MarketPortfolioCard({
   topHoldings,
   portfolioHref,
   threatsHref,
+  actionLinks,
   emptyMessage,
 }: {
   market: DashboardMarket;
@@ -98,9 +105,14 @@ export function MarketPortfolioCard({
   topHoldings: PortfolioCardTopHolding[];
   portfolioHref: string;
   threatsHref: string;
+  actionLinks?: PortfolioCardActionLink[];
   emptyMessage?: string | null;
 }) {
   const accent = ACCENT_STYLES[market];
+  const links = actionLinks ?? [
+    { label: 'Portfolio', href: portfolioHref, primary: true },
+    { label: 'Threat Radar', href: threatsHref },
+  ];
 
   return (
     <section className="relative overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm">
@@ -228,15 +240,21 @@ export function MarketPortfolioCard({
         )}
 
         <div className="mt-6 flex flex-wrap gap-3">
-          <Button asChild className="rounded-full bg-slate-950 text-white hover:bg-slate-900">
-            <Link href={portfolioHref}>
-              Open Portfolio
-              <ArrowRight className="ml-2 size-4" />
-            </Link>
-          </Button>
-          <Button asChild variant="outline" className="rounded-full border-slate-300 bg-white/80">
-            <Link href={threatsHref}>Open Threat Radar</Link>
-          </Button>
+          {links.map((link) => (
+            <Button
+              key={`${link.label}-${link.href}`}
+              asChild
+              variant={link.primary ? 'default' : 'outline'}
+              className={cn(
+                'rounded-full',
+                link.primary
+                  ? 'bg-slate-950 text-white hover:bg-slate-900'
+                  : 'border-slate-300 bg-white/80',
+              )}
+            >
+              <Link href={link.href}>{link.label}</Link>
+            </Button>
+          ))}
         </div>
       </div>
     </section>

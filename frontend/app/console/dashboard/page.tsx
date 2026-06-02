@@ -1,10 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import {
   AlertCircle,
-  ArrowRight,
   Loader2,
   Radar,
   RefreshCw,
@@ -13,6 +11,7 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { useUsdInrRate } from '@/hooks/useUsdInrRate';
 import { URLs } from '@/lib/urls';
 import { apiService } from '@/services/api';
 import type {
@@ -200,6 +199,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const usdInrRate = useUsdInrRate();
 
   const loadDashboard = useCallback(async (initialLoad = false) => {
     if (initialLoad) {
@@ -290,7 +290,8 @@ export default function DashboardPage() {
       threatHref: URLs.routes.console.indmoneyUsThreats(),
     }),
   );
-  const totalUrgentRows = indiaUrgentRows.length + usUrgentRows.length;
+  const totalInvestmentValue = (indiaSnapshot?.holdings_market_value ?? 0) + ((usSnapshot?.current_value ?? 0) * usdInrRate);
+  const totalInvestmentDetail = `India ${formatInr(indiaSnapshot?.holdings_market_value)} + US ${formatUsd(usSnapshot?.current_value)}`;
   if (loading && !indiaSnapshot && !usSnapshot && !dashboard.zerodhaThreat && !dashboard.indmoneyThreat) {
     return (
       <div className="flex items-center gap-3 text-sm text-slate-500">
@@ -328,18 +329,6 @@ export default function DashboardPage() {
                 {refreshing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
                 Refresh Board
               </Button>
-              <Button asChild variant="outline" className="rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white">
-                <Link href={URLs.routes.console.zerodhaThreats()}>
-                  India Threats
-                  <ArrowRight className="ml-2 size-4" />
-                </Link>
-              </Button>
-              <Button asChild variant="outline" className="rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white">
-                <Link href={URLs.routes.console.indmoneyUsThreats()}>
-                  US Threats
-                  <ArrowRight className="ml-2 size-4" />
-                </Link>
-              </Button>
             </div>
           </div>
 
@@ -355,10 +344,10 @@ export default function DashboardPage() {
             <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur">
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
                 <Radar className="size-3.5" />
-                Urgent Actions
+                Total Investments
               </div>
-              <div className="mt-3 text-3xl font-semibold text-white">{totalUrgentRows}</div>
-              <div className="mt-2 text-sm text-slate-300">Combined threat radar signals</div>
+              <div className="mt-3 text-3xl font-semibold text-white">{formatInr(totalInvestmentValue)}</div>
+              <div className="mt-2 text-sm text-slate-300">{totalInvestmentDetail}</div>
             </div>
           </div>
         </div>
@@ -413,6 +402,14 @@ export default function DashboardPage() {
           topHoldings={buildIndiaTopHoldings(dashboard.zerodhaOverview)}
           portfolioHref={URLs.routes.console.zerodha()}
           threatsHref={URLs.routes.console.zerodhaThreats()}
+          actionLinks={[
+            { label: 'Portfolio', href: URLs.routes.console.zerodha(), primary: true },
+            { label: 'Threat Radar', href: URLs.routes.console.zerodhaThreats() },
+            { label: 'Swing Trade', href: URLs.routes.console.zerodhaSwingTrade() },
+            { label: 'Events', href: URLs.routes.console.zerodhaEvents() },
+            { label: 'Rebalance', href: URLs.routes.console.zerodhaRebalance() },
+            { label: 'Final Actionables', href: URLs.routes.console.zerodhaFinalActionables() },
+          ]}
           emptyMessage={
             indiaSnapshot
               ? null
@@ -461,6 +458,14 @@ export default function DashboardPage() {
           topHoldings={buildUsTopHoldings(dashboard.indmoneyOverview)}
           portfolioHref={URLs.routes.console.indmoneyUs()}
           threatsHref={URLs.routes.console.indmoneyUsThreats()}
+          actionLinks={[
+            { label: 'Portfolio', href: URLs.routes.console.indmoneyUs(), primary: true },
+            { label: 'Threat Radar', href: URLs.routes.console.indmoneyUsThreats() },
+            { label: 'Swing Trade', href: URLs.routes.console.indmoneyUsSwingTrade() },
+            { label: 'Events', href: URLs.routes.console.indmoneyUsEvents() },
+            { label: 'Rebalance', href: URLs.routes.console.indmoneyUsRebalance() },
+            { label: 'Final Actionables', href: URLs.routes.console.indmoneyUsFinalActionables() },
+          ]}
           emptyMessage={
             usSnapshot
               ? null
