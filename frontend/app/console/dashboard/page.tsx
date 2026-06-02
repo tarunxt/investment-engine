@@ -25,6 +25,7 @@ import type {
 import { DashboardFinalActionablesTables } from '@/app/console/_components/FinalActionablesConsole';
 import { MarketPortfolioCard, type PortfolioCardTopHolding } from './_components/MarketPortfolioCard';
 import { ThreatMarketCard } from './_components/ThreatMarketCard';
+import { RebalanceWorkflowSections } from './_components/RebalanceWorkflowSections';
 import {
   countThreatSeverities,
   extractUrgentActionRows,
@@ -359,6 +360,8 @@ export default function DashboardPage() {
           <span>Some dashboard modules could not be refreshed: {errors.join(' | ')}</span>
         </div>
       ) : null}
+
+      <RebalanceWorkflowSections onDashboardRefresh={() => loadDashboard(false)} />
 
       <section className="grid gap-6 xl:grid-cols-2">
         <MarketPortfolioCard
