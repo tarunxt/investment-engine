@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   Briefcase,
@@ -57,6 +57,99 @@ function formatSnapshotTime(value: string) {
     timeZone: 'Asia/Kolkata',
     timeStyle: 'short',
   });
+}
+
+function formatShortSnapshotDate(value: string) {
+  return new Date(`${value}T00:00:00+05:30`).toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
+const INDIA_TIME_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const INDIA_MARKET_OPEN_MINUTES = 9 * 60 + 15;
+const INDIA_MARKET_CLOSE_MINUTES = 15 * 60 + 30;
+
+function getIndiaLocalDateParts(date: Date) {
+  const indiaLocalDate = new Date(date.getTime() + INDIA_TIME_OFFSET_MS);
+
+  return {
+    year: indiaLocalDate.getUTCFullYear(),
+    month: indiaLocalDate.getUTCMonth(),
+    day: indiaLocalDate.getUTCDate(),
+    weekday: indiaLocalDate.getUTCDay(),
+    minutes: indiaLocalDate.getUTCHours() * 60 + indiaLocalDate.getUTCMinutes(),
+  };
+}
+
+function isWeekday(weekday: number) {
+  return weekday >= 1 && weekday <= 5;
+}
+
+function getIndiaInstant(year: number, month: number, day: number, hours: number, minutes: number) {
+  return Date.UTC(year, month, day, hours, minutes) - INDIA_TIME_OFFSET_MS;
+}
+
+function getPreviousTradingDayClose(parts: ReturnType<typeof getIndiaLocalDateParts>) {
+  let localMidnight = Date.UTC(parts.year, parts.month, parts.day);
+  do {
+    localMidnight -= 24 * 60 * 60 * 1000;
+  } while (!isWeekday(new Date(localMidnight).getUTCDay()));
+
+  const previousCloseDate = new Date(localMidnight);
+
+  return getIndiaInstant(
+    previousCloseDate.getUTCFullYear(),
+    previousCloseDate.getUTCMonth(),
+    previousCloseDate.getUTCDate(),
+    15,
+    30,
+  );
+}
+
+function getMostRecentIndiaMarketClose(now: Date) {
+  const parts = getIndiaLocalDateParts(now);
+
+  if (isWeekday(parts.weekday) && parts.minutes >= INDIA_MARKET_CLOSE_MINUTES) {
+    return getIndiaInstant(parts.year, parts.month, parts.day, 15, 30);
+  }
+
+  return getPreviousTradingDayClose(parts);
+}
+
+function isIndiaMarketOpen(now: Date) {
+  const parts = getIndiaLocalDateParts(now);
+
+  return (
+    isWeekday(parts.weekday) &&
+    parts.minutes >= INDIA_MARKET_OPEN_MINUTES &&
+    parts.minutes < INDIA_MARKET_CLOSE_MINUTES
+  );
+}
+
+function getSyncButtonTone(lastSyncAt: string | null | undefined, now: Date) {
+  if (isIndiaMarketOpen(now)) {
+    return {
+      label: 'Market open — live prices are changing',
+      className: 'border-amber-500 bg-amber-400 text-amber-950 hover:bg-amber-300',
+    };
+  }
+
+  const lastSyncTime = lastSyncAt ? new Date(lastSyncAt).getTime() : Number.NaN;
+  const latestCloseTime = getMostRecentIndiaMarketClose(now);
+
+  if (Number.isFinite(lastSyncTime) && lastSyncTime >= latestCloseTime) {
+    return {
+      label: 'Latest — synced after the previous market close',
+      className: 'border-emerald-700 bg-emerald-600 text-white hover:bg-emerald-500',
+    };
+  }
+
+  return {
+    label: 'Stale — sync after market close to update numbers',
+    className: 'border-red-700 bg-red-600 text-white hover:bg-red-500',
+  };
 }
 
 function toneClass(value: number) {
@@ -237,7 +330,7 @@ function EmptyState({
   );
 }
 
-function SnapshotHistory({
+function SnapshotHistoryChart({
   history,
   selectedSnapshotDate,
   onSelect,
@@ -246,58 +339,108 @@ function SnapshotHistory({
   selectedSnapshotDate: string | null;
   onSelect: (snapshotDate: string) => void;
 }) {
+  const chartData = [...history]
+    .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
+    .map((snapshot) => ({
+      ...snapshot,
+      value: snapshot.holdings_market_value || 0,
+    }));
+
+  if (chartData.length === 0) {
+    return null;
+  }
+
+  const values = chartData.map((snapshot) => snapshot.value);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const valueRange = maxValue - minValue || 1;
+  const width = 1000;
+  const height = 230;
+  const padding = { top: 18, right: 28, bottom: 54, left: 76 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const points = chartData.map((snapshot, index) => {
+    const x = padding.left + (chartData.length === 1 ? plotWidth / 2 : (index / (chartData.length - 1)) * plotWidth);
+    const y = padding.top + (1 - (snapshot.value - minValue) / valueRange) * plotHeight;
+
+    return { ...snapshot, x, y };
+  });
+  const path = points.map((point) => `${point.x},${point.y}`).join(' ');
+  const yTicks = [maxValue, minValue + valueRange / 2, minValue];
+  const selectedPoint = points.find((point) => point.snapshot_date === selectedSnapshotDate) ?? points.at(-1);
+
   return (
-    <div className="border border-gray-200 bg-white shadow-sm">
-      <div className="border-b border-gray-200 px-5 py-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Daily History</span>
+    <div className="border-t border-gray-200 px-5 py-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Daily History</span>
+          <p className="mt-1 text-sm text-gray-500">Holdings value trend across saved portfolio snapshots.</p>
+        </div>
+        {selectedPoint && (
+          <div className="text-sm sm:text-right">
+            <p className="font-semibold text-gray-950">{formatCurrency(selectedPoint.value)}</p>
+            <p className="text-xs text-gray-500">
+              {formatSnapshotDate(selectedPoint.snapshot_date)} · Saved {formatSnapshotTime(selectedPoint.captured_at)}
+            </p>
+          </div>
+        )}
       </div>
-      <div className="max-h-[28rem] overflow-y-auto">
-        {history.map((snapshot) => {
-          const isActive = selectedSnapshotDate === snapshot.snapshot_date;
-          return (
-            <button
-              key={snapshot.snapshot_date}
-              onClick={() => onSelect(snapshot.snapshot_date)}
-              className={cn(
-                'w-full border-b border-gray-100 px-5 py-4 text-left transition-colors last:border-b-0',
-                isActive ? 'bg-gray-950 text-white' : 'hover:bg-gray-50',
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className={cn('text-sm font-semibold', isActive ? 'text-white' : 'text-gray-900')}>
-                    {formatSnapshotDate(snapshot.snapshot_date)}
-                  </p>
-                  <p className={cn('mt-1 text-xs', isActive ? 'text-gray-300' : 'text-gray-500')}>
-                    Saved {formatCapturedAt(snapshot.captured_at)}
-                  </p>
-                </div>
-                <span
-                  className={cn(
-                    'text-xs font-semibold uppercase tracking-wider',
-                    isActive ? 'text-gray-300' : 'text-gray-400',
-                  )}
+
+      <div className="mt-4 overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Daily portfolio holdings value history" className="min-w-[44rem]">
+          <defs>
+            <linearGradient id="zerodha-history-area" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {yTicks.map((tick, index) => {
+            const y = padding.top + (1 - (tick - minValue) / valueRange) * plotHeight;
+
+            return (
+              <g key={`${tick}-${index}`}>
+                <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="#e5e7eb" strokeDasharray="4 4" />
+                <text x={padding.left - 12} y={y + 4} textAnchor="end" className="fill-gray-400 text-[11px]">
+                  {formatCurrency(tick)}
+                </text>
+              </g>
+            );
+          })}
+          {points.length > 0 && (
+            <>
+              <polygon
+                points={`${padding.left},${padding.top + plotHeight} ${path} ${width - padding.right},${padding.top + plotHeight}`}
+                fill="url(#zerodha-history-area)"
+              />
+              <polyline points={path} fill="none" stroke="#059669" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+            </>
+          )}
+          {points.map((point) => {
+            const isActive = selectedSnapshotDate === point.snapshot_date;
+
+            return (
+              <g key={point.snapshot_date} className="cursor-pointer" onClick={() => onSelect(point.snapshot_date)}>
+                <title>{`${formatSnapshotDate(point.snapshot_date)} · ${formatCurrency(point.value)}`}</title>
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r={isActive ? 8 : 5}
+                  fill={isActive ? '#020617' : '#10b981'}
+                  stroke="white"
+                  strokeWidth="3"
+                />
+                <text
+                  x={point.x}
+                  y={height - 20}
+                  textAnchor="middle"
+                  className={cn('fill-gray-400 text-[11px]', isActive && 'fill-gray-950 font-semibold')}
                 >
-                  {snapshot.source}
-                </span>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <p className={cn(isActive ? 'text-gray-400' : 'text-gray-500')}>Holdings</p>
-                  <p className={cn('font-medium', isActive ? 'text-white' : 'text-gray-900')}>
-                    {formatCount(snapshot.holdings_count)}
-                  </p>
-                </div>
-                <div>
-                  <p className={cn(isActive ? 'text-gray-400' : 'text-gray-500')}>Value</p>
-                  <p className={cn('font-medium', isActive ? 'text-white' : 'text-gray-900')}>
-                    {formatCurrency(snapshot.holdings_market_value)}
-                  </p>
-                </div>
-              </div>
-            </button>
-          );
-        })}
+                  {formatShortSnapshotDate(point.snapshot_date)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
       </div>
     </div>
   );
@@ -357,6 +500,18 @@ export function PortfolioSnapshotsPanel({
   const [holdingsSort, setHoldingsSort] = useState<SortState<ZerodhaHoldingsSortColumn>>(null);
   const [netPositionsSort, setNetPositionsSort] = useState<SortState<ZerodhaNetPositionsSortColumn>>(null);
   const [dayPositionsSort, setDayPositionsSort] = useState<SortState<ZerodhaDayPositionsSortColumn>>(null);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60 * 1000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const syncButtonTone = useMemo(
+    () => getSyncButtonTone(overview?.latest?.captured_at ?? selectedSnapshot?.captured_at, now),
+    [now, overview?.latest?.captured_at, selectedSnapshot?.captured_at],
+  );
 
   if (loading) {
     return (
@@ -413,7 +568,12 @@ export function PortfolioSnapshotsPanel({
               <p className="mt-1">Snapshot time</p>
               <p className="font-medium text-gray-700">{formatSnapshotTime(selectedSnapshot.captured_at)}</p>
             </div>
-            <Button onClick={onSync} disabled={!connected || syncing}>
+            <Button
+              onClick={onSync}
+              disabled={!connected || syncing}
+              className={cn('min-w-[12rem]', syncButtonTone.className)}
+              title={syncButtonTone.label}
+            >
               {syncing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
               Sync Portfolio
             </Button>
@@ -449,16 +609,14 @@ export function PortfolioSnapshotsPanel({
             tone={selectedSnapshot.positions_m2m >= 0 ? 'positive' : 'negative'}
           />
         </div>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[18rem,minmax(0,1fr)]">
-        <SnapshotHistory
+        <SnapshotHistoryChart
           history={history}
           selectedSnapshotDate={selectedSnapshotDate}
           onSelect={onSelectSnapshot}
         />
+      </div>
 
-        <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-5">
           <div className="border border-gray-200 bg-white shadow-sm">
             <div className="flex flex-col gap-2 border-b border-gray-200 px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -728,7 +886,6 @@ export function PortfolioSnapshotsPanel({
               </div>
             </div>
           </div>
-        </div>
       </div>
     </div>
   );
