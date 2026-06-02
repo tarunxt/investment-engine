@@ -32,7 +32,6 @@ export function CreateJobCard({
     submitting,
     submitError,
     selectedTargets,
-    charOverLimit,
     handleSubmit,
   } = useDashboard();
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
@@ -73,7 +72,7 @@ export function CreateJobCard({
 
             <Button
               type="submit"
-              disabled={submitting || !prompt.trim() || charOverLimit || selectedTargets.size === 0}
+              disabled={submitting || !prompt.trim() || selectedTargets.size === 0}
               className={cn(
                 'w-full xl:col-span-2',
                 !scheduledAt && runButtonClassName,

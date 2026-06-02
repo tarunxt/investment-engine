@@ -27,8 +27,6 @@ import { type SwingTradeMarket } from '@/lib/swingTrade';
 
 export const DASHBOARD_RUN_LIMIT = 50;
 export const TEMPLATE_DEBOUNCE_MS = 300;
-export const PROMPT_MAX_CHARS = 60000;
-export const PROMPT_WARN_CHARS = 50000;
 export const INDIA_TIMEZONE = 'Asia/Kolkata';
 const RUN_PROMPT_PREVIEW_CHARS = 280;
 export const DEFAULT_TEMPLATE_NAME = 'India Swing-Trade Research';
@@ -132,8 +130,6 @@ interface DashboardContextValue {
 
   // Derived
   charCount: number;
-  charOverLimit: boolean;
-  charNearLimit: boolean;
   totalAvailableTargets: number;
 
   // Handlers
@@ -700,8 +696,6 @@ export function DashboardProvider({
   );
 
   const charCount = prompt.length;
-  const charOverLimit = charCount > PROMPT_MAX_CHARS;
-  const charNearLimit = charCount > PROMPT_WARN_CHARS && !charOverLimit;
   const totalAvailableTargets = providers.reduce((n, p) => n + p.models.length, 0);
 
   useEffect(() => {
@@ -765,8 +759,6 @@ export function DashboardProvider({
         selectedModelMixId,
         promptRef,
         charCount,
-        charOverLimit,
-        charNearLimit,
         totalAvailableTargets,
         autoExportEnabled,
         setAutoExportEnabled,
