@@ -355,9 +355,33 @@ function normalizeScanHeader(value?: string | null) {
 function normalizeScanKey(value?: string | null) {
   return normalizeScanCell(value)
     .toUpperCase()
-    .replace(/^(NSE|BSE|NASDAQ|NYSE)[:\s-]+/, "")
-    .replace(/\.(NS|BO)$/, "")
+    .replace(/^(NSE|BSE|NASDAQ|NYSE|NYSEARCA|AMEX)[:\s-]+/, "")
+    .replace(/\.(NS|BO|NSE|BSE)$/, "")
     .replace(/[^A-Z0-9]+/g, "");
+}
+
+function getScanSymbolCandidates(...values: Array<string | null | undefined>) {
+  const candidates = new Set<string>();
+
+  values.forEach((value) => {
+    const cleaned = normalizeScanCell(value || "");
+    if (!cleaned) return;
+
+    const pieces = [cleaned];
+    const colonPart = cleaned.split(":").pop();
+    if (colonPart && colonPart !== cleaned) pieces.push(colonPart);
+    const slashPart = cleaned.split("/").pop();
+    if (slashPart && slashPart !== cleaned) pieces.push(slashPart);
+
+    pieces.forEach((piece) => {
+      const key = normalizeScanKey(piece);
+      if (key && !["NSE", "BSE", "NASDAQ", "NYSE", "NYSEARCA", "AMEX", "US"].includes(key)) {
+        candidates.add(key);
+      }
+    });
+  });
+
+  return Array.from(candidates);
 }
 
 function splitMarkdownRow(line: string) {
@@ -388,7 +412,9 @@ function parseTechnicalScanResponse(
     const hasStockColumn = headers.some((header) =>
       ["stock symbol", "symbol", "stock", "ticker"].includes(header),
     );
-    const hasSetupColumn = headers.some((header) => header.includes("setup"));
+    const hasSetupColumn = headers.some((header) =>
+      header.includes("setup") || header.includes("pattern"),
+    );
     if (!hasStockColumn || !hasSetupColumn) continue;
 
     const getIndex = (names: string[]) =>
@@ -397,10 +423,10 @@ function parseTechnicalScanResponse(
       );
     const exchangeIndex = getIndex(["exchange symbol", "exchange", "market"]);
     const symbolIndex = getIndex(["stock symbol", "ticker symbol", "symbol", "ticker", "stock"]);
-    const primaryIndex = getIndex(["primary setup", "technical setup", "setup name", "setup"]);
-    const secondaryIndex = getIndex(["secondary setups", "secondary setup", "other setups"]);
-    const biasIndex = getIndex(["bias", "sentiment", "direction"]);
-    const confidenceIndex = getIndex(["confidence score", "confidence"]);
+    const primaryIndex = getIndex(["primary setup", "primary technical setup", "technical setup", "setup name", "setup", "pattern", "technical pattern"]);
+    const secondaryIndex = getIndex(["secondary setups", "secondary setup", "other setups", "additional setups", "supporting setups"]);
+    const biasIndex = getIndex(["bias", "sentiment", "direction", "view"]);
+    const confidenceIndex = getIndex(["confidence score", "confidence", "score", "conviction"]);
     const triggerIndex = getIndex(["trigger level", "trigger", "entry level", "entry range"]);
     const invalidationIndex = getIndex(["invalidation level", "invalidation", "stop loss", "stop"]);
     if (symbolIndex < 0 || primaryIndex < 0) continue;
@@ -469,7 +495,9 @@ function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
 
   return scanRows.reduce<TechnicalScanMap>((acc, row) => {
     acc[getStockIdentityKey(row.exchangeSymbol, row.stockSymbol)] = row;
-    acc[`SYMBOL:${normalizeScanKey(row.stockSymbol)}`] = row;
+    getScanSymbolCandidates(row.stockSymbol, row.exchangeSymbol).forEach((candidate) => {
+      acc[`SYMBOL:${candidate}`] = row;
+    });
     return acc;
   }, {});
 }
@@ -509,9 +537,13 @@ function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsens
 
   for (const symbol of symbolCandidates) {
     const exactScan = scanMap[getStockIdentityKey(stock.exchange, symbol)]
-      ?? scanMap[getStockIdentityKey("UNKNOWN", symbol)]
-      ?? scanMap[`SYMBOL:${normalizeScanKey(symbol)}`];
+      ?? scanMap[getStockIdentityKey("UNKNOWN", symbol)];
     if (exactScan) return exactScan;
+
+    for (const candidate of getScanSymbolCandidates(symbol)) {
+      const symbolScan = scanMap[`SYMBOL:${candidate}`];
+      if (symbolScan) return symbolScan;
+    }
   }
 
   return null;
@@ -546,15 +578,33 @@ async function waitForTechnicalScanRunCompletion(runId: number) {
   }
 }
 
-function formatTechnicalSetup(scan: TechnicalScanResult | null) {
-  if (!scan) return "";
-  const secondary = scan.secondarySetups && scan.secondarySetups !== "—" ? `; ${scan.secondarySetups}` : "";
-  return `${scan.primarySetup || "No clean setup"}${secondary}`;
+function normalizeEmptyTechnicalValue(value?: string | null) {
+  const normalized = normalizeScanCell(value || "");
+  return normalized && !/^(?:—|-|n\/?a|na|none|null)$/i.test(normalized)
+    ? normalized
+    : "";
 }
 
-function formatTechnicalConfidence(scan: TechnicalScanResult | null) {
-  if (!scan) return "";
-  return scan.confidenceScore || "";
+function getFallbackTechnicalSetup(row?: CanonicalRow | null) {
+  return normalizeEmptyTechnicalValue(row?.["Technical Setup"]);
+}
+
+function getFallbackTechnicalConfidence(row?: CanonicalRow | null) {
+  return (
+    normalizeEmptyTechnicalValue(row?.["Confidence Score"]) ||
+    normalizeEmptyTechnicalValue(row?.["Confidence Score (0-100)"])
+  );
+}
+
+function formatTechnicalSetup(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  if (!scan) return getFallbackTechnicalSetup(row);
+  const secondary = normalizeEmptyTechnicalValue(scan.secondarySetups);
+  const primary = normalizeEmptyTechnicalValue(scan.primarySetup) || "No clean setup";
+  return secondary ? `${primary}; ${secondary}` : primary;
+}
+
+function formatTechnicalConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  return normalizeEmptyTechnicalValue(scan?.confidenceScore) || getFallbackTechnicalConfidence(row);
 }
 
 function getTechnicalScanClass(scan: TechnicalScanResult | null) {
@@ -809,10 +859,10 @@ function ActionSummarySections({
                               {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
                             </td>
                             <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan))}>
-                              {formatTechnicalSetup(scan)}
+                              {formatTechnicalSetup(scan, stock.representative)}
                             </td>
                             <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan))}>
-                              {formatTechnicalConfidence(scan)}
+                              {formatTechnicalConfidence(scan, stock.representative)}
                             </td>
                           </tr>
                         );
@@ -845,14 +895,14 @@ function RebalanceCell({
   if (header === "Technical Setup") {
     return (
       <span className={cn("font-medium", getTechnicalScanClass(technicalScan || null))}>
-        {formatTechnicalSetup(technicalScan || null)}
+        {formatTechnicalSetup(technicalScan || null, row)}
       </span>
     );
   }
   if (header === "Confidence Score") {
     return (
       <span className={cn("font-semibold", getTechnicalScanClass(technicalScan || null))}>
-        {formatTechnicalConfidence(technicalScan || null)}
+        {formatTechnicalConfidence(technicalScan || null, row)}
       </span>
     );
   }
