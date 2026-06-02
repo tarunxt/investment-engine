@@ -12,6 +12,7 @@ import {
   getSetupStockActionClasses,
   getSetupStockGroups,
   isCompletedRebalanceRun,
+  type ActionCategory,
   type SetupStockGroup,
 } from '@/app/console/_components/FinalActionablesConsole';
 
@@ -46,6 +47,32 @@ function compareRows(a: SetupRow, b: SetupRow, key: SortKey) {
   return a[key].localeCompare(b[key], undefined, { sensitivity: 'base' });
 }
 
+function getPopulatedSetupRowClasses(targetTone?: 'bullish' | 'bearish') {
+  if (targetTone === 'bullish') {
+    return {
+      row: 'bg-emerald-50/80 hover:bg-emerald-100/80',
+      cell: 'text-emerald-950',
+      mutedCell: 'text-emerald-900',
+      scoreCell: 'text-emerald-800',
+    };
+  }
+
+  if (targetTone === 'bearish') {
+    return {
+      row: 'bg-red-50/80 hover:bg-red-100/80',
+      cell: 'text-red-950',
+      mutedCell: 'text-red-900',
+      scoreCell: 'text-red-800',
+    };
+  }
+
+  return {
+    row: 'bg-gray-50/80 hover:bg-gray-100/80',
+    cell: 'text-gray-950',
+    mutedCell: 'text-gray-700',
+    scoreCell: 'text-gray-950',
+  };
+}
 
 function getTargetRowClasses(targetTone?: 'bullish' | 'bearish') {
   if (targetTone === 'bullish') {
@@ -89,6 +116,7 @@ function SortIcon({ isActive, direction }: { isActive: boolean; direction: SortD
 type SetupTableWithGroupsProps = SetupTableProps & {
   setupGroups: Record<string, SetupStockGroup>;
   onSetupClick: (group: SetupStockGroup) => void;
+  defaultSortByStockCount?: boolean;
 };
 
 function SetupTable({
@@ -101,17 +129,37 @@ function SetupTable({
   targetTone,
   setupGroups,
   onSetupClick,
+  defaultSortByStockCount = false,
 }: SetupTableWithGroupsProps) {
-  const [sort, setSort] = useState<SortState>({ key: 'confidence', direction: 'desc' });
+  const [sort, setSort] = useState<SortState>(() => ({
+    key: defaultSortByStockCount ? 'setup' : 'confidence',
+    direction: 'desc',
+  }));
   const targetRowRef = useRef<HTMLTableRowElement | null>(null);
   const normalizedTargetSetup = normalizeTechnicalSetupKey(targetSetup);
 
   const sortedRows = useMemo(() => {
     return [...rows].sort((a, b) => {
+      if (defaultSortByStockCount && sort.key === 'setup') {
+        const stockCountComparison =
+          (setupGroups[b.setup]?.stocks.length ?? 0) - (setupGroups[a.setup]?.stocks.length ?? 0);
+        if (stockCountComparison !== 0) {
+          return sort.direction === 'asc' ? -stockCountComparison : stockCountComparison;
+        }
+
+        const confidenceComparison = b.confidence - a.confidence;
+        if (confidenceComparison !== 0) {
+          return sort.direction === 'asc' ? -confidenceComparison : confidenceComparison;
+        }
+
+        const setupComparison = a.setup.localeCompare(b.setup, undefined, { sensitivity: 'base' });
+        return sort.direction === 'asc' ? -setupComparison : setupComparison;
+      }
+
       const comparison = compareRows(a, b, sort.key);
       return sort.direction === 'asc' ? comparison : -comparison;
     });
-  }, [rows, sort]);
+  }, [defaultSortByStockCount, rows, setupGroups, sort]);
 
   useEffect(() => {
     if (!normalizedTargetSetup || !targetRowRef.current) return;
@@ -168,6 +216,9 @@ function SetupTable({
                 Boolean(normalizedTargetSetup) &&
                 normalizeTechnicalSetupKey(row.setup) === normalizedTargetSetup;
               const targetClasses = isTarget ? getTargetRowClasses(targetTone) : null;
+              const stockCount = setupGroups[row.setup]?.stocks.length ?? 0;
+              const populatedToneClasses =
+                !targetClasses && stockCount > 0 ? getPopulatedSetupRowClasses(targetTone) : null;
               const baseCellClass = 'px-4 py-3';
 
               return (
@@ -177,18 +228,38 @@ function SetupTable({
                   ref={isTarget ? targetRowRef : null}
                   tabIndex={isTarget ? -1 : undefined}
                   aria-current={isTarget ? 'true' : undefined}
-                  className={`scroll-mt-24 hover:bg-gray-50/70 ${targetClasses?.row || ''}`}
+                  className={`scroll-mt-24 ${targetClasses?.row || populatedToneClasses?.row || 'hover:bg-gray-50/70'}`}
                 >
-                  <td className={`${baseCellClass} font-semibold ${targetClasses?.cell || 'text-gray-950'}`}>
+                  <td
+                    className={`${baseCellClass} font-semibold ${
+                      targetClasses?.cell || populatedToneClasses?.cell || 'text-gray-950'
+                    }`}
+                  >
                     <SetupNameCell row={row} group={setupGroups[row.setup]} onSetupClick={onSetupClick} />
                   </td>
-                  <td className={`${baseCellClass} text-right ${targetClasses?.mutedCell || 'text-gray-700'}`}>{row.bias}</td>
-                  <td className={`${baseCellClass} text-right font-semibold ${targetClasses?.scoreCell || 'text-gray-950'}`}>
+                  <td
+                    className={`${baseCellClass} text-right ${
+                      targetClasses?.mutedCell || populatedToneClasses?.mutedCell || 'text-gray-700'
+                    }`}
+                  >
+                    {row.bias}
+                  </td>
+                  <td
+                    className={`${baseCellClass} text-right font-semibold ${
+                      targetClasses?.scoreCell || populatedToneClasses?.scoreCell || 'text-gray-950'
+                    }`}
+                  >
                     {row.confidence.toFixed(1)}/10
                   </td>
-                  <td className={`${baseCellClass} ${targetClasses?.mutedCell || 'text-gray-700'}`}>{row.bestUse}</td>
-                  <td className={`${baseCellClass} ${targetClasses?.mutedCell || 'text-gray-700'}`}>{row.trigger}</td>
-                  <td className={`${baseCellClass} ${targetClasses?.mutedCell || 'text-gray-700'}`}>{row.invalidation}</td>
+                  <td className={`${baseCellClass} ${targetClasses?.mutedCell || populatedToneClasses?.mutedCell || 'text-gray-700'}`}>
+                    {row.bestUse}
+                  </td>
+                  <td className={`${baseCellClass} ${targetClasses?.mutedCell || populatedToneClasses?.mutedCell || 'text-gray-700'}`}>
+                    {row.trigger}
+                  </td>
+                  <td className={`${baseCellClass} ${targetClasses?.mutedCell || populatedToneClasses?.mutedCell || 'text-gray-700'}`}>
+                    {row.invalidation}
+                  </td>
                 </tr>
               );
             })}
@@ -248,6 +319,61 @@ function buildFinalActionablesSetupGroups(runs: RunResponse[]) {
   return mergeSetupGroups(groupsByMarket);
 }
 
+const SETUP_ACTION_COUNT_ORDER: Array<{
+  action: ActionCategory;
+  className: string;
+  label: string;
+}> = [
+  { action: 'Sell All', className: 'text-red-700', label: 'Sell All' },
+  { action: 'Add more', className: 'text-emerald-700', label: 'Buy More' },
+  { action: 'Trim', className: 'text-red-400', label: 'Trim' },
+  { action: 'Buy New', className: 'text-emerald-400', label: 'Buy New' },
+  { action: 'Hold', className: 'text-yellow-700', label: 'Hold' },
+];
+
+function getSetupActionCounts(group: SetupStockGroup) {
+  return group.stocks.reduce(
+    (counts, stock) => {
+      counts[stock.action] += 1;
+      return counts;
+    },
+    {
+      'Sell All': 0,
+      'Add more': 0,
+      Trim: 0,
+      'Buy New': 0,
+      Hold: 0,
+    } as Record<ActionCategory, number>,
+  );
+}
+
+function SetupActionCountBreakdown({ group }: { group: SetupStockGroup }) {
+  const counts = getSetupActionCounts(group);
+  const total = group.stocks.length;
+  const breakdownLabel = SETUP_ACTION_COUNT_ORDER
+    .map(({ action, label }) => `${label}: ${counts[action]}`)
+    .join(', ');
+
+  return (
+    <span
+      className="whitespace-nowrap"
+      aria-label={`${breakdownLabel}; Total stocks: ${total}`}
+      title={`${breakdownLabel}; Total stocks: ${total}`}
+    >
+      {' ('}
+      {SETUP_ACTION_COUNT_ORDER.map(({ action, className }, index) => (
+        <span key={action}>
+          {index > 0 ? ', ' : ''}
+          <span className={className}>{counts[action]}</span>
+        </span>
+      ))}
+      <span>=</span>
+      <span>{total}</span>
+      <span>)</span>
+    </span>
+  );
+}
+
 function SetupNameCell({
   row,
   group,
@@ -257,10 +383,8 @@ function SetupNameCell({
   group?: SetupStockGroup;
   onSetupClick: (group: SetupStockGroup) => void;
 }) {
-  const label = `${row.setup} (${group?.stocks.length ?? 0})`;
-
   if (!group?.stocks.length) {
-    return <span>{label}</span>;
+    return <span>{row.setup} (0)</span>;
   }
 
   return (
@@ -269,7 +393,8 @@ function SetupNameCell({
       className="text-left underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
       onClick={() => onSetupClick(group)}
     >
-      {label}
+      <span>{row.setup}</span>
+      <SetupActionCountBreakdown group={group} />
     </button>
   );
 }
@@ -372,14 +497,14 @@ export default function TechnicalSetupsPage() {
         <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Technical setups</p>
         <h1 className="mt-2 text-2xl font-semibold text-gray-950">Technical Setups</h1>
         <p className="mt-2 max-w-3xl text-sm text-gray-600">
-          Bullish and bearish chart setups ranked by averaged confidence score. Each table defaults to highest confidence first;
-          click any column header to toggle between descending and ascending order.
+          Bullish setup rows default to highest stock count first, then highest confidence, then alphabetical order. Bearish setups
+          default to highest confidence first; click any column header to toggle between descending and ascending order.
         </p>
       </div>
 
       <SetupTable
         title="Bullish Setups"
-        description="Long-entry and continuation structures sorted by confidence score."
+        description="Long-entry and continuation structures sorted by stock count, then confidence score."
         accentClassName="border-emerald-500 bg-emerald-50/50"
         triggerLabel="Entry trigger"
         rows={BULLISH_SETUPS}
@@ -387,6 +512,7 @@ export default function TechnicalSetupsPage() {
         targetTone="bullish"
         setupGroups={setupGroups}
         onSetupClick={setSelectedSetupGroup}
+        defaultSortByStockCount
       />
 
       <SetupTable
