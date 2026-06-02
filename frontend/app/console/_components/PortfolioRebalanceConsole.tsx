@@ -339,6 +339,10 @@ function RebalanceInputBox({
     () => buildInputSections(displayInputBundle),
     [displayInputBundle],
   );
+  const promptInputSections = useMemo(
+    () => buildInputSections(promptInputBundle),
+    [promptInputBundle],
+  );
   const portfolioInputSection = inputSections.find(
     (section) => section.key === "portfolio",
   );
@@ -347,6 +351,9 @@ function RebalanceInputBox({
   );
   const threatsInputSection = inputSections.find(
     (section) => section.key === "threats",
+  );
+  const promptSwingInputSection = promptInputSections.find(
+    (section) => section.key === "swing",
   );
   const selectedSwingJobCount = selectedSwingJobIds.size;
   const totalSwingJobCount = useMemo(
@@ -488,11 +495,17 @@ function RebalanceInputBox({
                     {title}
                   </span>
                   <span className="block text-[11px] text-gray-500">
-                    {content
-                      ? `${content.length.toLocaleString("en-IN")} chars`
-                      : loading
-                        ? "Loading…"
-                        : "No data"}
+                    {(() => {
+                      const characterCount =
+                        key === "swing"
+                          ? promptSwingInputSection?.content.length
+                          : content.length;
+                      return characterCount
+                        ? `${characterCount.toLocaleString("en-IN")} chars`
+                        : loading
+                          ? "Loading…"
+                          : "No data";
+                    })()}
                   </span>
                 </span>
               </button>
@@ -708,10 +721,10 @@ function RebalanceInputBox({
               </div>
 
               <div className="border-t border-white/70 bg-white/65 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
-                {swingInputSection.content
-                  ? `${swingInputSection.content.length.toLocaleString(
+                {promptSwingInputSection?.content
+                  ? `${promptSwingInputSection.content.length.toLocaleString(
                       "en-IN",
-                    )} characters in selected swing input summary`
+                    )} characters in selected swing input prompt context`
                   : loading
                     ? "Counting characters…"
                     : "0 characters"}
