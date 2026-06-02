@@ -22,6 +22,7 @@ export type SetupTableProps = {
   triggerLabel: string;
   rows: SetupRow[];
   targetSetup?: string | null;
+  targetTone?: 'bullish' | 'bearish';
 };
 
 export function normalizeTechnicalSetupKey(value?: string | null) {
