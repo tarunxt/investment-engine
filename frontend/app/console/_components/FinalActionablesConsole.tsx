@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 
 import {
   parseInvestmentRecommendationContent,
@@ -36,6 +36,7 @@ type LlmBreakupRow = {
 };
 
 type ActionEstimate = {
+  currentUnits: number | null;
   units: number | null;
   amount: number | null;
 };
@@ -62,10 +63,33 @@ const ACTION_CATEGORIES: ActionCategory[] = [
 const ACTION_HEADER: RebalanceHeader =
   "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
 const ACTION_ESTIMATE_CATEGORIES = new Set<ActionCategory>([
+  "Sell All",
   "Trim",
   "Add more",
   "Buy New",
 ]);
+const CONSOLIDATED_DISPLAY_HEADERS = [
+  "Exchange Symbol",
+  "Stock Symbol",
+  "Current Units",
+  "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
+  "Units to Sell/Buy",
+  "Amount",
+  ...REBALANCE_HEADER_ORDER.filter(
+    (header) =>
+      ![
+        "Exchange Symbol",
+        "Stock Symbol",
+        "Current Units",
+        "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
+      ].includes(header),
+  ),
+] as const;
+
+type ConsolidatedDisplayHeader =
+  | (typeof CONSOLIDATED_DISPLAY_HEADERS)[number]
+  | RebalanceHeader;
+
 const CATEGORY_BADGE_CLASS: Record<ActionCategory, string> = {
   "Sell All": "border-red-200 bg-red-50 text-red-700",
   Trim: "border-orange-200 bg-orange-50 text-orange-700",
@@ -153,8 +177,12 @@ function average(values: number[]) {
 }
 
 function getActionUnits(row: CanonicalRow, action: ActionCategory) {
+  const currentUnits = parseNumericCell(row["Current Units"]);
   const unitsChange = parseNumericCell(row["Units Change"]);
   const unitsToBuy = parseNumericCell(row["Units to Buy"]);
+  if (action === "Sell All") {
+    return Math.abs(currentUnits ?? unitsChange ?? 0) || null;
+  }
   if (action === "Trim") {
     return Math.abs(unitsChange ?? unitsToBuy ?? 0) || null;
   }
@@ -164,10 +192,19 @@ function getActionUnits(row: CanonicalRow, action: ActionCategory) {
   return null;
 }
 
-function getActionAmount(row: CanonicalRow, units: number | null) {
+function getActionAmount(
+  row: CanonicalRow,
+  units: number | null,
+  action: ActionCategory | null,
+) {
   const explicitAmount = parseNumericCell(row["Total Buy Amount"]);
-  if (explicitAmount !== null) return Math.abs(explicitAmount);
   const price = parseNumericCell(row["Price Per Unit"]);
+  if (
+    explicitAmount !== null &&
+    (explicitAmount !== 0 || action === "Add more" || action === "Buy New")
+  ) {
+    return Math.abs(explicitAmount);
+  }
   if (units !== null && price !== null) return Math.abs(units * price);
   return null;
 }
@@ -179,14 +216,20 @@ function summarizeActionEstimate(
   const matchingRows = rows.filter(
     (row) => normalizeAction(row.cells[ACTION_HEADER] || "") === action,
   );
+  const currentUnitValues = matchingRows
+    .map((row) => parseNumericCell(row.cells["Current Units"]))
+    .filter((value): value is number => value !== null);
   const unitValues = matchingRows
     .map((row) => getActionUnits(row.cells, action))
     .filter((value): value is number => value !== null);
   const amountValues = matchingRows
-    .map((row) => getActionAmount(row.cells, getActionUnits(row.cells, action)))
+    .map((row) =>
+      getActionAmount(row.cells, getActionUnits(row.cells, action), action),
+    )
     .filter((value): value is number => value !== null);
 
   return {
+    currentUnits: average(currentUnitValues),
     units: average(unitValues),
     amount: average(amountValues),
   };
@@ -208,6 +251,10 @@ function formatCurrency(value: number | null, market: SwingTradeMarket) {
   }).format(value);
 }
 
+function getActionVerb(action: ActionCategory) {
+  return action === "Sell All" || action === "Trim" ? "sell" : "buy";
+}
+
 function getActionEstimateLabel(
   stock: StockConsensus,
   action: ActionCategory,
@@ -220,8 +267,22 @@ function getActionEstimateLabel(
   ) {
     return null;
   }
-  const verb = action === "Trim" ? "sell" : "buy";
-  return `${formatQuantity(estimate.units)} units to ${verb} (${formatCurrency(estimate.amount, market)})`;
+  return `${formatQuantity(estimate.units)} units to ${getActionVerb(action)} (${formatCurrency(estimate.amount, market)})`;
+}
+
+function getDisplayActionEstimate(row: CanonicalRow) {
+  const action = normalizeAction(row[ACTION_HEADER] || "");
+  if (!action || !ACTION_ESTIMATE_CATEGORIES.has(action)) return null;
+  const units = getActionUnits(row, action);
+  return {
+    action,
+    units,
+    amount: getActionAmount(row, units, action),
+  };
+}
+
+function formatDisplayAmount(value: number | null, market: SwingTradeMarket) {
+  return value === null ? "—" : formatCurrency(value, market);
 }
 
 function getStockKey(row: CanonicalRow) {
@@ -277,7 +338,10 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
   });
 }
 
-function buildConsensusRows(runs: RunResponse[]): StockConsensus[] {
+function buildConsensusRows(
+  runs: RunResponse[],
+  market: SwingTradeMarket,
+): StockConsensus[] {
   const grouped = new Map<string, LlmBreakupRow[]>();
 
   runs.flatMap(parseRunRows).forEach((row) => {
@@ -326,6 +390,18 @@ function buildConsensusRows(runs: RunResponse[]): StockConsensus[] {
         "Confidence Score (0-100)",
       );
       representative["Rationale Remarks"] = summarizeRationales(rows);
+      const consensusEstimate = actionAverages[consensusAction];
+      representative["Current Units"] = formatQuantity(
+        consensusEstimate.currentUnits ?? parseNumericCell(first["Current Units"]),
+      );
+      representative["Units to Sell/Buy"] = ACTION_ESTIMATE_CATEGORIES.has(
+        consensusAction,
+      )
+        ? formatQuantity(consensusEstimate.units)
+        : "—";
+      representative["Amount"] = ACTION_ESTIMATE_CATEGORIES.has(consensusAction)
+        ? formatCurrency(consensusEstimate.amount, market)
+        : "—";
 
       return {
         key,
@@ -396,16 +472,37 @@ function ActionSummarySections({
                       action,
                       market,
                     );
+                    const estimate = stock.actionAverages[action];
+                    const showActionColumns =
+                      action === "Sell All" ||
+                      action === "Trim" ||
+                      action === "Add more" ||
+                      action === "Buy New";
                     return (
                       <div key={stock.key} className="space-y-0.5">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium">{stock.symbol}</span>
+                          <TradingViewSymbolLink
+                            symbol={stock.symbol}
+                            market={market}
+                            exchange={stock.exchange}
+                            className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
+                          >
+                            {stock.symbol}
+                          </TradingViewSymbolLink>
                           <span>
                             {stock.actionCounts[action]}/
                             {stock.totalSuggestions}
                           </span>
                         </div>
-                        {estimateLabel ? (
+                        {showActionColumns ? (
+                          <div className="grid grid-cols-3 gap-1 text-[11px] text-gray-500">
+                            <span>Current: {formatQuantity(estimate.currentUnits)}</span>
+                            <span>
+                              Units to {getActionVerb(action)}: {formatQuantity(estimate.units)}
+                            </span>
+                            <span>Amount: {formatDisplayAmount(estimate.amount, market)}</span>
+                          </div>
+                        ) : estimateLabel ? (
                           <div className="text-[11px] text-gray-500">
                             Avg: {estimateLabel}
                           </div>
@@ -431,10 +528,18 @@ function RebalanceCell({
   market,
 }: {
   row: CanonicalRow;
-  header: RebalanceHeader;
+  header: ConsolidatedDisplayHeader;
   market: SwingTradeMarket;
 }) {
-  const cellValue = row[header];
+  const actionEstimate = getDisplayActionEstimate(row);
+  const cellValue =
+    header === "Units to Sell/Buy"
+      ? row[header] ||
+        (actionEstimate ? formatQuantity(actionEstimate.units) : "—")
+      : header === "Amount"
+        ? row[header] ||
+          (actionEstimate ? formatDisplayAmount(actionEstimate.amount, market) : "—")
+        : row[header];
   if (header === "Stock Symbol" && cellValue) {
     return (
       <TradingViewSymbolLink
@@ -690,8 +795,8 @@ export function FinalActionablesConsole({
   }, [market, runs]);
 
   const consensus = useMemo(
-    () => buildConsensusRows(groupedRuns.runs),
-    [groupedRuns.runs],
+    () => buildConsensusRows(groupedRuns.runs, market),
+    [groupedRuns.runs, market],
   );
   const totalStocksConsolidated = consensus.reduce(
     (sum, stock) => sum + stock.totalSuggestions,
@@ -816,7 +921,10 @@ export function FinalActionablesConsole({
                   <table className="min-w-max text-sm">
                     <thead>
                       <tr className="border-b border-gray-300 bg-gray-50">
-                        {REBALANCE_HEADER_ORDER.map((header) => (
+                        <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700">
+                          Details
+                        </th>
+                        {CONSOLIDATED_DISPLAY_HEADERS.map((header) => (
                           <th
                             key={header}
                             className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700"
@@ -872,41 +980,40 @@ function FragmentRows({
   return (
     <>
       <tr className="cursor-pointer hover:bg-gray-50" onClick={onToggle}>
-        {REBALANCE_HEADER_ORDER.map((header) => {
-          const content =
-            header === "Stock Symbol" ? (
-              <span className="inline-flex items-center gap-2">
-                {isExpanded ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
-                )}
-                <RebalanceCell
-                  row={stock.representative}
-                  header={header}
-                  market={market}
-                />
-              </span>
+        <td className="px-3 py-2 align-top text-gray-700">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle();
+            }}
+            className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 transition hover:border-blue-300 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${stock.symbol} LLM-wise breakup`}
+          >
+            {isExpanded ? (
+              <ChevronUp className="h-4 w-4" />
             ) : (
-              <RebalanceCell
-                row={stock.representative}
-                header={header}
-                market={market}
-              />
-            );
-          return (
-            <td
-              key={`${stock.key}-${header}`}
-              className="px-3 py-2 align-top text-gray-700"
-            >
-              {content}
-            </td>
-          );
-        })}
+              <ChevronDown className="h-4 w-4" />
+            )}
+            {isExpanded ? "Hide" : "Show"}
+          </button>
+        </td>
+        {CONSOLIDATED_DISPLAY_HEADERS.map((header) => (
+          <td
+            key={`${stock.key}-${header}`}
+            className="px-3 py-2 align-top text-gray-700"
+          >
+            <RebalanceCell
+              row={stock.representative}
+              header={header}
+              market={market}
+            />
+          </td>
+        ))}
       </tr>
       {isExpanded ? (
         <tr className="bg-gray-50/70">
-          <td colSpan={REBALANCE_HEADER_ORDER.length} className="px-3 py-4">
+          <td colSpan={CONSOLIDATED_DISPLAY_HEADERS.length + 1} className="px-3 py-4">
             <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
               LLM-wise breakup leading to consolidation
             </div>
