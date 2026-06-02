@@ -435,12 +435,36 @@ function formatDisplayAmount(value: number | null, market: SwingTradeMarket) {
   return value === null ? "—" : formatCurrency(value, market);
 }
 
-function getStockKey(row: CanonicalRow) {
-  const exchange = (row["Exchange Symbol"] || "UNKNOWN").trim().toUpperCase();
-  const symbol = (row["Stock Symbol"] || row["Stock Name"] || "UNKNOWN")
+function normalizeStockSymbol(value?: string | null) {
+  const symbol = (value || "UNKNOWN")
     .trim()
-    .toUpperCase();
-  return `${exchange}:${symbol}`;
+    .toUpperCase()
+    .replace(/^(?:NSE|BSE|NASDAQ|NYSE|AMEX|ARCA):/, "")
+    .replace(/\.(?:NS|BO|NSE|BSE)$/i, "")
+    .trim();
+  return symbol || "UNKNOWN";
+}
+
+function getStockKey(row: CanonicalRow) {
+  const symbol = normalizeStockSymbol(
+    row["Stock Symbol"] || row["Stock Name"],
+  );
+  if (symbol !== "UNKNOWN") return symbol;
+
+  const exchange = (row["Exchange Symbol"] || "UNKNOWN").trim().toUpperCase();
+  return `${exchange}:UNKNOWN`;
+}
+
+function getRepresentativeConsensusRow(rows: LlmBreakupRow[]) {
+  return (
+    rows.find((row) => {
+      const symbol = normalizeStockSymbol(
+        row.cells["Stock Symbol"] || row.cells["Stock Name"],
+      );
+      const exchange = (row.cells["Exchange Symbol"] || "").trim();
+      return symbol !== "UNKNOWN" && exchange.length > 0;
+    }) ?? rows[0]
+  ).cells;
 }
 
 function getStockIdentityKey(exchange: string, symbol: string) {
@@ -981,7 +1005,7 @@ function buildConsensusRows(
         return winner;
       }, "Hold" as ActionCategory);
 
-      const first = rows[0].cells;
+      const first = getRepresentativeConsensusRow(rows);
       const representative = { ...first };
       representative[ACTION_HEADER] =
         ACTION_CATEGORIES.filter((action) => actionCounts[action] > 0)
@@ -1456,10 +1480,7 @@ export function FinalActionablesConsole({
     () => buildConsensusRows(groupedRuns.runs, market),
     [groupedRuns.runs, market],
   );
-  const totalStocksConsolidated = consensus.reduce(
-    (sum, stock) => sum + stock.totalSuggestions,
-    0,
-  );
+  const totalStocksConsolidated = consensus.length;
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
   const technicalScanHistory = useMemo(() => buildTechnicalScanHistory(runs), [runs]);
   const technicalScanIsActive = useMemo(() => hasActiveTechnicalScan(runs), [runs]);
