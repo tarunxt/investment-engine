@@ -63,15 +63,14 @@ type ActionEstimate = {
   amount: number | null;
 };
 
-type SetupStockDetail = {
+export type SetupStockDetail = {
   key: string;
   name: string;
   currentUnits: string;
-  currentInvestmentAmount: string;
   action: ActionCategory;
 };
 
-type SetupStockGroup = {
+export type SetupStockGroup = {
   setup: string;
   stocks: SetupStockDetail[];
 };
@@ -343,7 +342,7 @@ function normalizeWhitespace(value?: string | null) {
   return (value || "").replace(/\s+/g, " ").trim();
 }
 
-function extractRebalanceInputFingerprint(prompt?: string | null) {
+export function extractRebalanceInputFingerprint(prompt?: string | null) {
   const text = prompt || "";
   const marker = "## Rebalance Input Bundle";
   const markerIndex = text.indexOf(marker);
@@ -617,6 +616,16 @@ function findApprovedSetupInText(value?: string | null) {
   }) ?? null;
 }
 
+function findApprovedSetupsInText(value?: string | null) {
+  const lookup = normalizeSetupLookupKey(value);
+  if (!lookup) return [];
+
+  return APPROVED_TECHNICAL_SETUPS.filter((setup) => {
+    const setupKey = normalizeSetupLookupKey(setup.setup);
+    return lookup.includes(setupKey) || setupKey.includes(lookup);
+  });
+}
+
 function inferApprovedSetupFromText(
   value: string,
   preferredDirection?: "bullish" | "bearish" | "neutral" | null,
@@ -832,7 +841,7 @@ function parseTechnicalScanResponse(
   return results;
 }
 
-function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
+export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
   const scanRows = runs
     .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
     .flatMap((run) =>
@@ -957,6 +966,30 @@ function formatTechnicalSetup(scan: TechnicalScanResult | null, row?: CanonicalR
   return resolveApprovedTechnicalSetup(scan, row)?.setup || getFallbackTechnicalSetup(row);
 }
 
+function getSetupNamesTaggedForStock(
+  stock: StockConsensus,
+  technicalScan: TechnicalScanResult | null,
+) {
+  const setupNames = new Set<string>();
+  const addSetup = (setup?: (SetupRow & { direction: "bullish" | "bearish" }) | null) => {
+    if (setup) setupNames.add(setup.setup);
+  };
+  const addSetupsFromText = (value?: string | null) => {
+    findApprovedSetupsInText(value).forEach(addSetup);
+  };
+
+  addSetup(resolveApprovedTechnicalSetup(technicalScan, stock.representative));
+  addSetupsFromText(technicalScan?.primarySetup);
+  addSetupsFromText(technicalScan?.secondarySetups);
+
+  stock.rows.forEach((row) => {
+    addSetup(resolveApprovedTechnicalSetup(null, row.cells));
+    addSetupsFromText(row.cells["Technical Setup"]);
+  });
+
+  return Array.from(setupNames);
+}
+
 function formatTechnicalConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
   const approvedSetup = resolveApprovedTechnicalSetup(scan, row);
   return approvedSetup ? approvedSetup.confidence.toFixed(1) : getFallbackTechnicalConfidence(row);
@@ -989,10 +1022,9 @@ function getTechnicalScanClass(scan: TechnicalScanResult | null, row?: Canonical
   return getApprovedTechnicalSetupClass(resolveApprovedTechnicalSetup(scan, row));
 }
 
-function getSetupStockGroups(
+export function getSetupStockGroups(
   consensus: StockConsensus[],
   technicalScans: TechnicalScanMap,
-  market: SwingTradeMarket,
 ) {
   const groups = new Map<string, Map<string, SetupStockDetail>>();
 
@@ -1005,17 +1037,14 @@ function getSetupStockGroups(
       key: stock.key,
       name: stock.symbol,
       currentUnits: stock.representative["Current Units"] || "—",
-      currentInvestmentAmount: getFormattedCurrentInvestmentAmount(stock.representative, market),
       action: stock.consensusAction,
     });
     groups.set(normalizedSetup, stockMap);
   };
 
   consensus.forEach((stock) => {
-    addStockToSetup(formatTechnicalSetup(getTechnicalScanForStock(technicalScans, stock), stock.representative), stock);
-    stock.rows.forEach((row) => {
-      addStockToSetup(formatTechnicalSetup(null, row.cells), stock);
-    });
+    getSetupNamesTaggedForStock(stock, getTechnicalScanForStock(technicalScans, stock))
+      .forEach((setup) => addStockToSetup(setup, stock));
   });
 
   return Array.from(groups.entries()).reduce(
@@ -1062,14 +1091,14 @@ function buildTechnicalScanPrompt(stocks: StockConsensus[], market: SwingTradeMa
   return `${TECHNICAL_SCAN_MARKER}\nMarket: ${market === "us" ? "US equities" : "India equities"}\n\nStock list:\n| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |\n|---|---|---|---:|\n${stockRows}\n\nApproved Technical Setups list from sidebar:\n${setupListMarkdown()}\n\nAct as a top-tier technical analyst and swing-trading strategist.\n\nObjective:\nFor the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.\n\nImportant rules:\n- Use current fresh internet data only. Do not rely on stale memory.\n- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.\n- Check at least daily chart data. If possible, also consider weekly chart for broader trend.\n- Tag only from the approved setup names above. Do not invent, paraphrase, or abbreviate setup names.\n- Every stock must receive a Primary Setup that exactly matches one Setup value from the approved Technical Setups list above.\n- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups; every setup name must exactly match an approved Setup value.\n- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.\n- For Confidence Score, copy the numeric Confidence value from the approved Technical Setups list for the same Primary Setup. Return only the number, without /10, %, avg text, or LLM counts.\n- Always mention the exact trigger level and invalidation level wherever possible.\n- Do not give generic advice. Make the tagging specific to the latest chart structure.\n\nReturn ONLY this markdown table and no extra prose:\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.join(" | ")} |\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.map(() => "---").join(" | ")} |\n| EXCHANGE | SYMBOL | Exact approved primary setup name | Optional exact approved setup names | Bullish/Bearish/Neutral | approved confidence number only | exact price/level | exact price/level |`;
 }
 
-function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
+export function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
   return (
     run.status === "completed" &&
     inferRebalanceMarketFromPrompt(run.prompt) === market
   );
 }
 
-async function fetchAllFullRuns() {
+export async function fetchAllFullRuns() {
   const firstPage = await apiService.getFullRuns({ page: 1, limit: 100 });
   if (firstPage.pages <= 1) return firstPage.items;
 
@@ -1113,7 +1142,7 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
   });
 }
 
-function buildConsensusRows(
+export function buildConsensusRows(
   runs: RunResponse[],
   market: SwingTradeMarket,
 ): StockConsensus[] {
@@ -1915,8 +1944,8 @@ export function FinalActionablesConsole({
   const totalStocksConsolidated = consensus.length;
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
   const setupStockGroups = useMemo(
-    () => getSetupStockGroups(consensus, technicalScans, market),
-    [consensus, market, technicalScans],
+    () => getSetupStockGroups(consensus, technicalScans),
+    [consensus, technicalScans],
   );
   const technicalScanHistory = useMemo(() => buildTechnicalScanHistory(runs), [runs]);
   const technicalScanIsActive = useMemo(() => hasActiveTechnicalScan(runs), [runs]);
@@ -2206,7 +2235,6 @@ function SetupStocksModal({
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="px-3 py-2 font-semibold">Name</th>
                 <th className="px-3 py-2 font-semibold">Current Units</th>
-                <th className="px-3 py-2 font-semibold">Current Investment Amount</th>
                 <th className="px-3 py-2 font-semibold">Action Suggested in Rebalance</th>
               </tr>
             </thead>
@@ -2215,7 +2243,6 @@ function SetupStocksModal({
                 <tr key={stock.key}>
                   <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-900">{stock.name}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.currentUnits}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.currentInvestmentAmount}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.action}</td>
                 </tr>
               ))}
