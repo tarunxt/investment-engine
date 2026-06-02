@@ -32,6 +32,34 @@ function compareRows(a: SetupRow, b: SetupRow, key: SortKey) {
   return a[key].localeCompare(b[key], undefined, { sensitivity: 'base' });
 }
 
+
+function getTargetRowClasses(targetTone?: 'bullish' | 'bearish') {
+  if (targetTone === 'bullish') {
+    return {
+      row: 'bg-emerald-100 outline outline-2 outline-emerald-600 ring-2 ring-emerald-300',
+      cell: 'bg-emerald-100 text-emerald-950',
+      mutedCell: 'bg-emerald-100 text-emerald-900',
+      scoreCell: 'bg-emerald-100 text-emerald-700',
+    };
+  }
+
+  if (targetTone === 'bearish') {
+    return {
+      row: 'bg-red-100 outline outline-2 outline-red-600 ring-2 ring-red-300',
+      cell: 'bg-red-100 text-red-950',
+      mutedCell: 'bg-red-100 text-red-900',
+      scoreCell: 'bg-red-100 text-red-700',
+    };
+  }
+
+  return {
+    row: 'bg-indigo-50 outline outline-2 outline-indigo-500 ring-2 ring-indigo-200',
+    cell: 'bg-indigo-50 text-indigo-950',
+    mutedCell: 'bg-indigo-50 text-indigo-900',
+    scoreCell: 'bg-indigo-50 text-indigo-700',
+  };
+}
+
 function SortIcon({ isActive, direction }: { isActive: boolean; direction: SortDirection }) {
   if (!isActive) {
     return <ChevronsUpDown className="size-3.5 text-gray-400" aria-hidden="true" />;
@@ -44,7 +72,7 @@ function SortIcon({ isActive, direction }: { isActive: boolean; direction: SortD
   );
 }
 
-function SetupTable({ title, description, accentClassName, triggerLabel, rows, targetSetup }: SetupTableProps) {
+function SetupTable({ title, description, accentClassName, triggerLabel, rows, targetSetup, targetTone }: SetupTableProps) {
   const [sort, setSort] = useState<SortState>({ key: 'confidence', direction: 'desc' });
   const targetRowRef = useRef<HTMLTableRowElement | null>(null);
   const normalizedTargetSetup = normalizeTechnicalSetupKey(targetSetup);
@@ -110,6 +138,8 @@ function SetupTable({ title, description, accentClassName, triggerLabel, rows, t
               const isTarget =
                 Boolean(normalizedTargetSetup) &&
                 normalizeTechnicalSetupKey(row.setup) === normalizedTargetSetup;
+              const targetClasses = isTarget ? getTargetRowClasses(targetTone) : null;
+              const baseCellClass = 'px-4 py-3';
 
               return (
                 <tr
@@ -117,16 +147,17 @@ function SetupTable({ title, description, accentClassName, triggerLabel, rows, t
                   id={technicalSetupDomId(row.setup)}
                   ref={isTarget ? targetRowRef : null}
                   tabIndex={isTarget ? -1 : undefined}
-                  className={`scroll-mt-24 hover:bg-gray-50/70 ${
-                    isTarget ? 'bg-indigo-50 outline outline-2 outline-indigo-500' : ''
-                  }`}
+                  aria-current={isTarget ? 'true' : undefined}
+                  className={`scroll-mt-24 hover:bg-gray-50/70 ${targetClasses?.row || ''}`}
                 >
-                  <td className="px-4 py-3 font-semibold text-gray-950">{row.setup}</td>
-                  <td className="px-4 py-3 text-right text-gray-700">{row.bias}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-950">{row.confidence.toFixed(1)}/10</td>
-                  <td className="px-4 py-3 text-gray-700">{row.bestUse}</td>
-                  <td className="px-4 py-3 text-gray-700">{row.trigger}</td>
-                  <td className="px-4 py-3 text-gray-700">{row.invalidation}</td>
+                  <td className={`${baseCellClass} font-semibold ${targetClasses?.cell || 'text-gray-950'}`}>{row.setup}</td>
+                  <td className={`${baseCellClass} text-right ${targetClasses?.mutedCell || 'text-gray-700'}`}>{row.bias}</td>
+                  <td className={`${baseCellClass} text-right font-semibold ${targetClasses?.scoreCell || 'text-gray-950'}`}>
+                    {row.confidence.toFixed(1)}/10
+                  </td>
+                  <td className={`${baseCellClass} ${targetClasses?.mutedCell || 'text-gray-700'}`}>{row.bestUse}</td>
+                  <td className={`${baseCellClass} ${targetClasses?.mutedCell || 'text-gray-700'}`}>{row.trigger}</td>
+                  <td className={`${baseCellClass} ${targetClasses?.mutedCell || 'text-gray-700'}`}>{row.invalidation}</td>
                 </tr>
               );
             })}
@@ -163,6 +194,7 @@ export default function TechnicalSetupsPage() {
         triggerLabel="Entry trigger"
         rows={BULLISH_SETUPS}
         targetSetup={targetSetup}
+        targetTone="bullish"
       />
 
       <SetupTable
@@ -172,6 +204,7 @@ export default function TechnicalSetupsPage() {
         triggerLabel="Sell / trim trigger"
         rows={BEARISH_SETUPS}
         targetSetup={targetSetup}
+        targetTone="bearish"
       />
     </div>
   );
