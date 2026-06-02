@@ -1,12 +1,14 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react';
 
 import {
   BEARISH_SETUPS,
   BULLISH_SETUPS,
   type SetupRow,
+  normalizeTechnicalSetupKey,
+  technicalSetupDomId,
   type SetupTableProps,
   type SortDirection,
   type SortKey,
@@ -42,8 +44,10 @@ function SortIcon({ isActive, direction }: { isActive: boolean; direction: SortD
   );
 }
 
-function SetupTable({ title, description, accentClassName, triggerLabel, rows }: SetupTableProps) {
+function SetupTable({ title, description, accentClassName, triggerLabel, rows, targetSetup }: SetupTableProps) {
   const [sort, setSort] = useState<SortState>({ key: 'confidence', direction: 'desc' });
+  const targetRowRef = useRef<HTMLTableRowElement | null>(null);
+  const normalizedTargetSetup = normalizeTechnicalSetupKey(targetSetup);
 
   const sortedRows = useMemo(() => {
     return [...rows].sort((a, b) => {
@@ -51,6 +55,13 @@ function SetupTable({ title, description, accentClassName, triggerLabel, rows }:
       return sort.direction === 'asc' ? comparison : -comparison;
     });
   }, [rows, sort]);
+
+  useEffect(() => {
+    if (!normalizedTargetSetup || !targetRowRef.current) return;
+
+    targetRowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    targetRowRef.current.focus({ preventScroll: true });
+  }, [normalizedTargetSetup, sortedRows]);
 
   const handleSort = (key: SortKey) => {
     setSort((current) => ({
@@ -95,16 +106,30 @@ function SetupTable({ title, description, accentClassName, triggerLabel, rows }:
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {sortedRows.map((row) => (
-              <tr key={row.setup} className="hover:bg-gray-50/70">
-                <td className="px-4 py-3 font-semibold text-gray-950">{row.setup}</td>
-                <td className="px-4 py-3 text-right text-gray-700">{row.bias}</td>
-                <td className="px-4 py-3 text-right font-semibold text-gray-950">{row.confidence.toFixed(1)}/10</td>
-                <td className="px-4 py-3 text-gray-700">{row.bestUse}</td>
-                <td className="px-4 py-3 text-gray-700">{row.trigger}</td>
-                <td className="px-4 py-3 text-gray-700">{row.invalidation}</td>
-              </tr>
-            ))}
+            {sortedRows.map((row) => {
+              const isTarget =
+                Boolean(normalizedTargetSetup) &&
+                normalizeTechnicalSetupKey(row.setup) === normalizedTargetSetup;
+
+              return (
+                <tr
+                  key={row.setup}
+                  id={technicalSetupDomId(row.setup)}
+                  ref={isTarget ? targetRowRef : null}
+                  tabIndex={isTarget ? -1 : undefined}
+                  className={`scroll-mt-24 hover:bg-gray-50/70 ${
+                    isTarget ? 'bg-indigo-50 outline outline-2 outline-indigo-500' : ''
+                  }`}
+                >
+                  <td className="px-4 py-3 font-semibold text-gray-950">{row.setup}</td>
+                  <td className="px-4 py-3 text-right text-gray-700">{row.bias}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-950">{row.confidence.toFixed(1)}/10</td>
+                  <td className="px-4 py-3 text-gray-700">{row.bestUse}</td>
+                  <td className="px-4 py-3 text-gray-700">{row.trigger}</td>
+                  <td className="px-4 py-3 text-gray-700">{row.invalidation}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -112,7 +137,14 @@ function SetupTable({ title, description, accentClassName, triggerLabel, rows }:
   );
 }
 
+function readTargetSetupFromLocation() {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get('setup');
+}
+
 export default function TechnicalSetupsPage() {
+  const [targetSetup] = useState<string | null>(() => readTargetSetupFromLocation());
+
   return (
     <div className="space-y-6">
       <div>
@@ -130,6 +162,7 @@ export default function TechnicalSetupsPage() {
         accentClassName="border-emerald-500 bg-emerald-50/50"
         triggerLabel="Entry trigger"
         rows={BULLISH_SETUPS}
+        targetSetup={targetSetup}
       />
 
       <SetupTable
@@ -138,6 +171,7 @@ export default function TechnicalSetupsPage() {
         accentClassName="border-red-500 bg-red-50/50"
         triggerLabel="Sell / trim trigger"
         rows={BEARISH_SETUPS}
+        targetSetup={targetSetup}
       />
     </div>
   );

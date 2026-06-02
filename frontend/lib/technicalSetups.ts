@@ -21,7 +21,21 @@ export type SetupTableProps = {
   accentClassName: string;
   triggerLabel: string;
   rows: SetupRow[];
+  targetSetup?: string | null;
 };
+
+export function normalizeTechnicalSetupKey(value?: string | null) {
+  return (value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+export function technicalSetupDomId(setup: string) {
+  const slug = normalizeTechnicalSetupKey(setup).replace(/\s+/g, '-');
+  return slug ? `setup-${slug}` : 'setup';
+}
 
 export const BULLISH_SETUPS: SetupRow[] = [
   {

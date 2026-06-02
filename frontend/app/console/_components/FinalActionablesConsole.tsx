@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import Link from "next/link";
 import { ArrowLeft, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 
 import {
@@ -20,7 +21,13 @@ import {
   type RebalancePortfolioKey,
 } from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
-import { BULLISH_SETUPS, BEARISH_SETUPS, type SetupRow } from "@/lib/technicalSetups";
+import {
+  BULLISH_SETUPS,
+  BEARISH_SETUPS,
+  technicalSetupDomId,
+  type SetupRow,
+} from "@/lib/technicalSetups";
+import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { apiService } from "@/services/api";
@@ -93,6 +100,121 @@ const TECHNICAL_SCAN_ACTIVE_STATUSES = new Set([
 ]);
 const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 
+
+const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 1;
+
+type CachedFinalActionablesRuns = {
+  version: number;
+  cachedAt: number;
+  runs: RunResponse[];
+};
+
+function buildFinalActionablesCacheKey(portfolio: RebalancePortfolioKey, market: SwingTradeMarket) {
+  return `investor:final-actionables:runs:${portfolio}:${market}:v${FINAL_ACTIONABLES_RUN_CACHE_VERSION}`;
+}
+
+function readFinalActionablesRunCache(cacheKey: string) {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(cacheKey);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<CachedFinalActionablesRuns>;
+    if (parsed.version !== FINAL_ACTIONABLES_RUN_CACHE_VERSION || !Array.isArray(parsed.runs)) {
+      return null;
+    }
+
+    return parsed.runs;
+  } catch (error) {
+    console.warn("Failed to restore cached final actionables runs:", error);
+    return null;
+  }
+}
+
+function writeFinalActionablesRunCache(cacheKey: string, runs: RunResponse[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const payload: CachedFinalActionablesRuns = {
+      version: FINAL_ACTIONABLES_RUN_CACHE_VERSION,
+      cachedAt: Date.now(),
+      runs,
+    };
+    window.localStorage.setItem(cacheKey, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Failed to cache final actionables runs:", error);
+  }
+}
+
+function selectCacheableFinalActionablesRuns(runs: RunResponse[], market: SwingTradeMarket) {
+  const marketRuns = runs
+    .filter((run) => isCompletedRebalanceRun(run, market))
+    .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at));
+  const latestRun = marketRuns[0];
+  const latestFingerprint = latestRun ? extractRebalanceInputFingerprint(latestRun.prompt) : null;
+  const cacheableRuns = new Map<number, RunResponse>();
+
+  if (latestFingerprint) {
+    marketRuns
+      .filter((run) => extractRebalanceInputFingerprint(run.prompt) === latestFingerprint)
+      .forEach((run) => cacheableRuns.set(run.id, run));
+  }
+
+  runs
+    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .forEach((run) => cacheableRuns.set(run.id, run));
+
+  return Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id);
+}
+
+function cacheFinalActionablesRuns(cacheKey: string, runs: RunResponse[], market: SwingTradeMarket) {
+  writeFinalActionablesRunCache(cacheKey, selectCacheableFinalActionablesRuns(runs, market));
+}
+
+function getTechnicalSetupsHref(setup?: string | null) {
+  const baseHref = URLs.routes.console.technicalSetups();
+  const normalizedSetup = normalizeEmptyTechnicalValue(setup);
+  if (!normalizedSetup) return baseHref;
+
+  return `${baseHref}?setup=${encodeURIComponent(normalizedSetup)}#${technicalSetupDomId(normalizedSetup)}`;
+}
+
+function stopRowToggle(event: MouseEvent<HTMLAnchorElement>) {
+  event.stopPropagation();
+}
+
+function TechnicalSetupsHeaderLink({ children }: { children: ReactNode }) {
+  return (
+    <Link
+      href={URLs.routes.console.technicalSetups()}
+      className="underline-offset-4 transition hover:text-blue-700 hover:underline"
+      onClick={stopRowToggle}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function TechnicalSetupLink({
+  setup,
+  className,
+}: {
+  setup: string;
+  className?: string;
+}) {
+  if (!setup) return null;
+
+  return (
+    <Link
+      href={getTechnicalSetupsHref(setup)}
+      className={cn("underline-offset-4 transition hover:text-blue-700 hover:underline", className)}
+      onClick={stopRowToggle}
+    >
+      {setup}
+    </Link>
+  );
+}
 
 const ACTION_CATEGORIES: ActionCategory[] = [
   "Sell All",
@@ -776,14 +898,20 @@ function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
 
 async function fetchAllFullRuns() {
   const firstPage = await apiService.getFullRuns({ page: 1, limit: 100 });
-  const items = [...firstPage.items];
+  if (firstPage.pages <= 1) return firstPage.items;
 
-  for (let page = 2; page <= firstPage.pages; page += 1) {
-    const nextPage = await apiService.getFullRuns({ page, limit: 100 });
-    items.push(...nextPage.items);
-  }
+  const remainingPages = Array.from(
+    { length: firstPage.pages - 1 },
+    (_, index) => index + 2,
+  );
+  const remainingResults = await Promise.all(
+    remainingPages.map((page) => apiService.getFullRuns({ page, limit: 100 })),
+  );
 
-  return items;
+  return [
+    ...firstPage.items,
+    ...remainingResults.flatMap((page) => page.items),
+  ];
 }
 
 function parseRunRows(run: RunResponse): LlmBreakupRow[] {
@@ -950,7 +1078,9 @@ function ActionSummarySections({
                         <th className="px-3 py-2 font-semibold">Current Units</th>
                         <th className="px-3 py-2 font-semibold">Units to {getActionVerb(action)}</th>
                         <th className="px-3 py-2 font-semibold">Amount</th>
-                        <th className="px-3 py-2 font-semibold">Technical Setup</th>
+                        <th className="px-3 py-2 font-semibold">
+                          <TechnicalSetupsHeaderLink>Technical Setup</TechnicalSetupsHeaderLink>
+                        </th>
                         <th className="px-3 py-2 font-semibold">Confidence Score</th>
                       </tr>
                     </thead>
@@ -963,6 +1093,7 @@ function ActionSummarySections({
                           action === "Add more" ||
                           action === "Buy New";
                         const scan = getTechnicalScanForStock(technicalScans, stock);
+                        const setup = formatTechnicalSetup(scan, stock.representative);
                         return (
                           <tr key={stock.key} className="bg-white/40">
                             <td className="whitespace-nowrap px-3 py-2 align-top">
@@ -988,7 +1119,7 @@ function ActionSummarySections({
                               {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
                             </td>
                             <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan, stock.representative))}>
-                              {formatTechnicalSetup(scan, stock.representative)}
+                              <TechnicalSetupLink setup={setup} />
                             </td>
                             <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan, stock.representative))}>
                               {formatTechnicalConfidence(scan, stock.representative)}
@@ -1022,9 +1153,10 @@ function RebalanceCell({
   technicalScan?: TechnicalScanResult | null;
 }) {
   if (header === "Technical Setup") {
+    const setup = formatTechnicalSetup(technicalScan || null, row);
     return (
       <span className={cn("font-medium", getTechnicalScanClass(technicalScan || null, row))}>
-        {formatTechnicalSetup(technicalScan || null, row)}
+        <TechnicalSetupLink setup={setup} />
       </span>
     );
   }
@@ -1233,8 +1365,16 @@ export function FinalActionablesConsole({
   portfolio: RebalancePortfolioKey;
   market: SwingTradeMarket;
 }) {
-  const [runs, setRuns] = useState<RunResponse[]>([]);
-  const [loading, setLoading] = useState(true);
+  const runCacheKey = useMemo(
+    () => buildFinalActionablesCacheKey(portfolio, market),
+    [portfolio, market],
+  );
+  const cachedRunsOnFirstRender = useMemo(
+    () => readFinalActionablesRunCache(runCacheKey),
+    [runCacheKey],
+  );
+  const [runs, setRuns] = useState<RunResponse[]>(() => cachedRunsOnFirstRender ?? []);
+  const [loading, setLoading] = useState(() => !cachedRunsOnFirstRender);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showRunDetails, setShowRunDetails] = useState(false);
@@ -1249,6 +1389,7 @@ export function FinalActionablesConsole({
     try {
       const response = await fetchAllFullRuns();
       setRuns(response);
+      cacheFinalActionablesRuns(runCacheKey, response, market);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to load rebalance runs.",
@@ -1256,19 +1397,24 @@ export function FinalActionablesConsole({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [market, runCacheKey]);
 
   const loadTechnicalScanHistory = useCallback(async () => {
     const response = await fetchAllFullRuns();
     setRuns(response);
+    cacheFinalActionablesRuns(runCacheKey, response, market);
     return buildTechnicalScanHistory(response);
-  }, []);
+  }, [market, runCacheKey]);
 
   useEffect(() => {
     let ignore = false;
+
     fetchAllFullRuns()
       .then((response) => {
-        if (!ignore) setRuns(response);
+        if (!ignore) {
+          setRuns(response);
+          cacheFinalActionablesRuns(runCacheKey, response, market);
+        }
       })
       .catch((err: unknown) => {
         if (!ignore) {
@@ -1286,7 +1432,7 @@ export function FinalActionablesConsole({
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [market, runCacheKey]);
 
   const groupedRuns = useMemo(() => {
     const marketRuns = runs
@@ -1508,7 +1654,11 @@ export function FinalActionablesConsole({
                             key={header}
                             className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700"
                           >
-                            {header}
+                            {header === "Technical Setup" ? (
+                              <TechnicalSetupsHeaderLink>Technical Setup</TechnicalSetupsHeaderLink>
+                            ) : (
+                              header
+                            )}
                           </th>
                         ))}
                       </tr>
