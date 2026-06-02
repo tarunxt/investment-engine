@@ -1223,23 +1223,6 @@ function stockSymbolMatches(value: string | null | undefined, stock: StockConsen
   return normalized !== "UNKNOWN" && normalized === normalizeStockSymbol(stock.symbol);
 }
 
-function getPortfolioDetailsForStock(
-  detailsData: StockDetailsData,
-  stock: StockConsensus,
-) {
-  const snapshot = detailsData.portfolioSnapshot;
-  if (!snapshot) return [];
-
-  if ("holdings" in snapshot) {
-    return snapshot.holdings.filter((holding) => {
-      if ("tradingsymbol" in holding) return stockSymbolMatches(holding.tradingsymbol, stock);
-      return stockSymbolMatches(holding.symbol, stock);
-    });
-  }
-
-  return [];
-}
-
 function getAnalysisTableRowsForStock(
   tables: Array<{ title: string; columns: string[]; rows: Record<string, string>[] }> | undefined,
   stock: StockConsensus,
@@ -1251,11 +1234,17 @@ function getAnalysisTableRowsForStock(
   );
 }
 
-function KeyValueGrid({ values }: { values: Array<[string, ReactNode]> }) {
+function KeyValueGrid({
+  values,
+  itemClassName,
+}: {
+  values: Array<[string, ReactNode]>;
+  itemClassName?: string;
+}) {
   return (
     <dl className="grid gap-2 sm:grid-cols-2">
       {values.map(([label, value]) => (
-        <div key={label} className="rounded-lg border border-gray-100 bg-gray-50 p-2">
+        <div key={label} className={cn("rounded-lg border p-2", itemClassName ?? "border-gray-100 bg-gray-50")}>
           <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</dt>
           <dd className="mt-1 break-words text-sm text-gray-800">{value || "—"}</dd>
         </div>
@@ -1274,7 +1263,6 @@ function StockDetailsButton({
   detailsData: StockDetailsData;
 }) {
   const [open, setOpen] = useState(false);
-  const portfolioRows = getPortfolioDetailsForStock(detailsData, stock);
   const eventRows = getAnalysisTableRowsForStock(
     detailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...detailsData.eventsAnalysis.table }] : [],
     stock,
@@ -1315,7 +1303,7 @@ function StockDetailsButton({
                   {stock.symbol}
                 </h2>
                 <p className="text-sm text-gray-500">
-                  Portfolio, swing/all LLM runs, technical scan, threats, and events context captured in prior flows.
+                  Swing/all LLM runs, technical scan, threats, and events context captured in prior flows.
                 </p>
               </div>
               <button
@@ -1335,9 +1323,10 @@ function StockDetailsButton({
                 </div>
               ) : null}
 
-              <section>
-                <h3 className="mb-2 font-semibold text-gray-900">Final action & technical scan</h3>
+              <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
+                <h3 className="mb-3 font-semibold text-blue-950">Final action & technical scan</h3>
                 <KeyValueGrid
+                  itemClassName="border-blue-100 bg-white/75"
                   values={[
                     ["Consensus action", stock.consensusAction],
                     ["Consensus", `${stock.actionCounts[stock.consensusAction]}/${stock.totalSuggestions}`],
@@ -1349,32 +1338,11 @@ function StockDetailsButton({
                 />
               </section>
 
-              <section>
-                <h3 className="mb-2 font-semibold text-gray-900">Portfolio snapshot</h3>
-                {portfolioRows.length ? (
-                  <div className="space-y-2">
-                    {portfolioRows.map((row, index) => (
-                      <KeyValueGrid
-                        key={index}
-                        values={Object.entries(row)
-                          .filter(([, value]) => value !== null && value !== undefined && value !== "")
-                          .slice(0, 16)
-                          .map(([key, value]) => [key.replace(/_/g, " "), String(value)])}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-gray-500">
-                    No matching latest portfolio holding was found for this stock.
-                  </p>
-                )}
-              </section>
-
-              <section>
-                <h3 className="mb-2 font-semibold text-gray-900">Swing / rebalance all-runs LLM breakup</h3>
-                <div className="overflow-x-auto rounded-lg border">
+              <section className="rounded-xl border border-violet-100 bg-violet-50/70 p-4">
+                <h3 className="mb-3 font-semibold text-violet-950">Swing / rebalance all-runs LLM breakup</h3>
+                <div className="overflow-x-auto rounded-lg border border-violet-100 bg-white/75">
                   <table className="min-w-full text-xs">
-                    <thead className="bg-gray-50 text-left text-gray-600">
+                    <thead className="bg-violet-100/70 text-left text-violet-900">
                       <tr>
                         <th className="px-3 py-2">Run / LLM</th>
                         <th className="px-3 py-2">Action</th>
@@ -1383,7 +1351,7 @@ function StockDetailsButton({
                         <th className="px-3 py-2">Rationale</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-violet-100">
                       {stock.rows.map((row) => (
                         <tr key={`${row.meta.runId}-${row.meta.jobId}-details`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top">
@@ -1401,36 +1369,42 @@ function StockDetailsButton({
                 </div>
               </section>
 
-              <section>
-                <h3 className="mb-2 font-semibold text-gray-900">Threats</h3>
+              <section className="rounded-xl border border-rose-100 bg-rose-50/70 p-4">
+                <h3 className="mb-3 font-semibold text-rose-950">Threats</h3>
                 {threatRows.length ? (
                   <div className="space-y-2">
                     {threatRows.map((item, index) => (
-                      <div key={`${item.title}-${index}`} className="rounded-lg border p-3">
-                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{item.title}</div>
-                        <KeyValueGrid values={Object.entries(item.row).map(([key, value]) => [key, value])} />
+                      <div key={`${item.title}-${index}`} className="rounded-lg border border-rose-100 bg-white/75 p-3">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-700">{item.title}</div>
+                        <KeyValueGrid
+                          itemClassName="border-rose-100 bg-rose-50/60"
+                          values={Object.entries(item.row).map(([key, value]) => [key, value])}
+                        />
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-gray-500">
+                  <p className="rounded-lg border border-rose-100 bg-white/75 p-3 text-rose-700">
                     No matching threat rows were found in the latest threats scan.
                   </p>
                 )}
               </section>
 
-              <section>
-                <h3 className="mb-2 font-semibold text-gray-900">Events</h3>
+              <section className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
+                <h3 className="mb-3 font-semibold text-emerald-950">Events</h3>
                 {eventRows.length ? (
                   <div className="space-y-2">
                     {eventRows.map((item, index) => (
-                      <div key={`${item.title}-${index}`} className="rounded-lg border p-3">
-                        <KeyValueGrid values={Object.entries(item.row).map(([key, value]) => [key, value])} />
+                      <div key={`${item.title}-${index}`} className="rounded-lg border border-emerald-100 bg-white/75 p-3">
+                        <KeyValueGrid
+                          itemClassName="border-emerald-100 bg-emerald-50/60"
+                          values={Object.entries(item.row).map(([key, value]) => [key, value])}
+                        />
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-gray-500">
+                  <p className="rounded-lg border border-emerald-100 bg-white/75 p-3 text-emerald-700">
                     No matching event rows were found in the latest events scan.
                   </p>
                 )}
