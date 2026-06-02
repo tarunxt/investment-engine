@@ -2082,7 +2082,7 @@ export function FinalActionablesConsole({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <EventScanRunControls
-              buttonLabel="Technical Scan"
+              buttonLabel="Run Technical Scan"
               defaultTarget={null}
               disabled={loading || !consensus.length}
               historicalEstimatedCostInrByTarget={technicalScanCostByTarget}

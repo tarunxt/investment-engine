@@ -52,6 +52,13 @@ function formatCapturedAt(value: string) {
   });
 }
 
+function formatSnapshotTime(value: string) {
+  return new Date(value).toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    timeStyle: 'short',
+  });
+}
+
 function toneClass(value: number) {
   if (value > 0) return 'text-emerald-600';
   if (value < 0) return 'text-red-600';
@@ -403,6 +410,8 @@ export function PortfolioSnapshotsPanel({
             <div className="text-right text-xs text-gray-500">
               <p>Viewing snapshot</p>
               <p className="font-medium text-gray-700">{formatSnapshotDate(selectedSnapshot.snapshot_date)}</p>
+              <p className="mt-1">Snapshot time</p>
+              <p className="font-medium text-gray-700">{formatSnapshotTime(selectedSnapshot.captured_at)}</p>
             </div>
             <Button onClick={onSync} disabled={!connected || syncing}>
               {syncing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
