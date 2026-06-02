@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
@@ -23,6 +24,7 @@ import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isRunInSwingTradeMarket } from "@/lib/runPresentation";
+import { URLs } from "@/lib/urls";
 import {
   buildRebalanceInputBundle,
   buildRebalancePrompt,
@@ -636,32 +638,41 @@ function RebalanceInputBox({
                         key={run.id}
                         className="overflow-hidden rounded-xl border border-emerald-100 bg-white/75 shadow-sm"
                       >
-                        <button
-                          type="button"
-                          onClick={() => toggleSwingRunCollapsed(run.id)}
-                          aria-expanded={!isRunCollapsed}
-                          className="flex w-full flex-col gap-2 border-b border-emerald-50 bg-emerald-50/70 px-4 py-3 text-left transition hover:bg-emerald-100/70 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <span>
-                            <span className="block text-sm font-semibold text-gray-950">
-                              Run #{run.id} · {market === "us" ? "IndMoney US" : "Zerodha"}
+                        <div className="flex border-b border-emerald-50 bg-emerald-50/70 transition hover:bg-emerald-100/70">
+                          <Link
+                            href={URLs.routes.console.runDetail(run.id)}
+                            className="flex min-w-0 flex-1 flex-col gap-2 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 sm:flex-row sm:items-center sm:justify-between sm:pr-3"
+                            aria-label={`Open details for Run #${run.id}`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold text-gray-950">
+                                Run #{run.id} · {market === "us" ? "IndMoney US" : "Zerodha"}
+                              </span>
+                              <span className="mt-1 block text-xs text-gray-600">
+                                Created {formatInputTimestamp(run.created_at)} ·
+                                export sheet {run.export_sheet_name || "n/a"}
+                              </span>
                             </span>
-                            <span className="mt-1 block text-xs text-gray-600">
-                              Created {formatInputTimestamp(run.created_at)} ·
-                              export sheet {run.export_sheet_name || "n/a"}
+                            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                              {selectedRunJobCount.toLocaleString("en-IN")} of {run.run_jobs.length.toLocaleString("en-IN")} models
                             </span>
-                          </span>
-                          <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
-                            {selectedRunJobCount.toLocaleString("en-IN")} of {run.run_jobs.length.toLocaleString("en-IN")} models
-                            <span className="rounded-full border border-emerald-200 bg-white p-1 text-emerald-700 shadow-sm">
+                          </Link>
+                          <div className="flex items-center px-4 py-3 pl-0 sm:pl-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleSwingRunCollapsed(run.id)}
+                              aria-expanded={!isRunCollapsed}
+                              aria-label={`${isRunCollapsed ? "Expand" : "Collapse"} Run #${run.id} model outputs`}
+                              className="rounded-full border border-emerald-200 bg-white p-1 text-emerald-700 shadow-sm transition hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                            >
                               {isRunCollapsed ? (
                                 <ChevronDown className="size-4" />
                               ) : (
                                 <ChevronUp className="size-4" />
                               )}
-                            </span>
-                          </span>
-                        </button>
+                            </button>
+                          </div>
+                        </div>
                         {!isRunCollapsed ? (
                           <div className="divide-y divide-emerald-50">
                             {run.run_jobs.map((link) => {
