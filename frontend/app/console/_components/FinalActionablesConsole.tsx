@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowLeft, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Info, RefreshCw, X } from "lucide-react";
 
 import {
   parseInvestmentRecommendationContent,
@@ -31,7 +31,17 @@ import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { apiService } from "@/services/api";
-import type { PortfolioAnalysisHistoryItem, ProviderModelTarget, RunResponse } from "@/types/api";
+import type {
+  IndMoneyUsEventsAnalysis,
+  IndMoneyUsPortfolioSnapshotDetail,
+  IndMoneyUsThreatAnalysis,
+  PortfolioAnalysisHistoryItem,
+  ProviderModelTarget,
+  RunResponse,
+  ZerodhaEventsAnalysis,
+  ZerodhaPortfolioSnapshotDetail,
+  ZerodhaThreatAnalysis,
+} from "@/types/api";
 
 type ActionCategory = "Sell All" | "Trim" | "Hold" | "Add more" | "Buy New";
 
@@ -81,6 +91,13 @@ type TechnicalScanResult = {
 };
 
 type TechnicalScanMap = Record<string, TechnicalScanResult>;
+
+type StockDetailsData = {
+  portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null;
+  eventsAnalysis: ZerodhaEventsAnalysis | IndMoneyUsEventsAnalysis | null;
+  threatsAnalysis: ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis | null;
+  error: string | null;
+};
 
 const TECHNICAL_SCAN_MARKER = "## Technical Scan Input Bundle";
 const TECHNICAL_SCAN_TABLE_COLUMNS = [
@@ -885,6 +902,29 @@ function formatTechnicalConfidence(scan: TechnicalScanResult | null, row?: Canon
   return approvedSetup ? approvedSetup.confidence.toFixed(1) : getFallbackTechnicalConfidence(row);
 }
 
+function getSortableConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  const parsed = parseNumericCell(formatTechnicalConfidence(scan, row));
+  return parsed ?? Number.NEGATIVE_INFINITY;
+}
+
+function sortStocksByConfidence(
+  stocks: StockConsensus[],
+  technicalScans: TechnicalScanMap,
+) {
+  return [...stocks].sort((a, b) => {
+    const bConfidence = getSortableConfidence(
+      getTechnicalScanForStock(technicalScans, b),
+      b.representative,
+    );
+    const aConfidence = getSortableConfidence(
+      getTechnicalScanForStock(technicalScans, a),
+      a.representative,
+    );
+    if (bConfidence !== aConfidence) return bConfidence - aConfidence;
+    return a.symbol.localeCompare(b.symbol);
+  });
+}
+
 function getTechnicalScanClass(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
   return getApprovedTechnicalSetupClass(resolveApprovedTechnicalSetup(scan, row));
 }
@@ -1065,20 +1105,248 @@ function summarizeRationales(rows: LlmBreakupRow[]) {
     .join(" | ");
 }
 
+function stockSymbolMatches(value: string | null | undefined, stock: StockConsensus) {
+  const normalized = normalizeStockSymbol(value || "");
+  return normalized !== "UNKNOWN" && normalized === normalizeStockSymbol(stock.symbol);
+}
+
+function getPortfolioDetailsForStock(
+  detailsData: StockDetailsData,
+  stock: StockConsensus,
+) {
+  const snapshot = detailsData.portfolioSnapshot;
+  if (!snapshot) return [];
+
+  if ("holdings" in snapshot) {
+    return snapshot.holdings.filter((holding) => {
+      if ("tradingsymbol" in holding) return stockSymbolMatches(holding.tradingsymbol, stock);
+      return stockSymbolMatches(holding.symbol, stock);
+    });
+  }
+
+  return [];
+}
+
+function getAnalysisTableRowsForStock(
+  tables: Array<{ title: string; columns: string[]; rows: Record<string, string>[] }> | undefined,
+  stock: StockConsensus,
+) {
+  return (tables ?? []).flatMap((table) =>
+    table.rows
+      .filter((row) => Object.values(row).some((value) => stockSymbolMatches(value, stock)))
+      .map((row) => ({ ...table, row })),
+  );
+}
+
+function KeyValueGrid({ values }: { values: Array<[string, ReactNode]> }) {
+  return (
+    <dl className="grid gap-2 sm:grid-cols-2">
+      {values.map(([label, value]) => (
+        <div key={label} className="rounded-lg border border-gray-100 bg-gray-50 p-2">
+          <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</dt>
+          <dd className="mt-1 break-words text-sm text-gray-800">{value || "—"}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function StockDetailsButton({
+  stock,
+  technicalScan,
+  detailsData,
+}: {
+  stock: StockConsensus;
+  technicalScan: TechnicalScanResult | null;
+  detailsData: StockDetailsData;
+}) {
+  const [open, setOpen] = useState(false);
+  const portfolioRows = getPortfolioDetailsForStock(detailsData, stock);
+  const eventRows = getAnalysisTableRowsForStock(
+    detailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...detailsData.eventsAnalysis.table }] : [],
+    stock,
+  );
+  const threatRows = getAnalysisTableRowsForStock(detailsData.threatsAnalysis?.report?.tables, stock);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen(true);
+        }}
+        className="mr-2 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        aria-label={`Open ${stock.symbol} captured details`}
+        title={`Open ${stock.symbol} captured details`}
+      >
+        <Info className="h-3 w-3" />
+      </button>
+
+      {open ? (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={`stock-details-${stock.key}`}
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Captured stock details</p>
+                <h2 id={`stock-details-${stock.key}`} className="mt-1 text-xl font-bold text-gray-900">
+                  {stock.symbol}
+                </h2>
+                <p className="text-sm text-gray-500">
+                  Portfolio, swing/all LLM runs, technical scan, threats, and events context captured in prior flows.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                aria-label="Close stock details"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[75vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
+              {detailsData.error ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                  Some latest captured details could not be loaded: {detailsData.error}
+                </div>
+              ) : null}
+
+              <section>
+                <h3 className="mb-2 font-semibold text-gray-900">Final action & technical scan</h3>
+                <KeyValueGrid
+                  values={[
+                    ["Consensus action", stock.consensusAction],
+                    ["Consensus", `${stock.actionCounts[stock.consensusAction]}/${stock.totalSuggestions}`],
+                    ["Technical setup", formatTechnicalSetup(technicalScan, stock.representative)],
+                    ["Confidence score", formatTechnicalConfidence(technicalScan, stock.representative)],
+                    ["Trigger level", technicalScan?.triggerLevel || "—"],
+                    ["Invalidation level", technicalScan?.invalidationLevel || "—"],
+                  ]}
+                />
+              </section>
+
+              <section>
+                <h3 className="mb-2 font-semibold text-gray-900">Portfolio snapshot</h3>
+                {portfolioRows.length ? (
+                  <div className="space-y-2">
+                    {portfolioRows.map((row, index) => (
+                      <KeyValueGrid
+                        key={index}
+                        values={Object.entries(row)
+                          .filter(([, value]) => value !== null && value !== undefined && value !== "")
+                          .slice(0, 16)
+                          .map(([key, value]) => [key.replace(/_/g, " "), String(value)])}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-gray-500">
+                    No matching latest portfolio holding was found for this stock.
+                  </p>
+                )}
+              </section>
+
+              <section>
+                <h3 className="mb-2 font-semibold text-gray-900">Swing / rebalance all-runs LLM breakup</h3>
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-gray-50 text-left text-gray-600">
+                      <tr>
+                        <th className="px-3 py-2">Run / LLM</th>
+                        <th className="px-3 py-2">Action</th>
+                        <th className="px-3 py-2">Units</th>
+                        <th className="px-3 py-2">Amount</th>
+                        <th className="px-3 py-2">Rationale</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {stock.rows.map((row) => (
+                        <tr key={`${row.meta.runId}-${row.meta.jobId}-details`}>
+                          <td className="whitespace-nowrap px-3 py-2 align-top">
+                            Run #{row.meta.runId}<br />{row.meta.provider} {row.meta.model}<br />
+                            <span className="text-gray-400">{formatDateTime(row.meta.createdAt)}</span>
+                          </td>
+                          <td className="px-3 py-2 align-top">{row.cells[ACTION_HEADER] || "—"}</td>
+                          <td className="px-3 py-2 align-top">{row.cells["Units to Buy"] || row.cells["Units Change"] || "—"}</td>
+                          <td className="px-3 py-2 align-top">{row.cells["Total Buy Amount"] || "—"}</td>
+                          <td className="min-w-80 px-3 py-2 align-top">{row.cells["Rationale Remarks"] || row.cells["Technical Setup"] || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="mb-2 font-semibold text-gray-900">Threats</h3>
+                {threatRows.length ? (
+                  <div className="space-y-2">
+                    {threatRows.map((item, index) => (
+                      <div key={`${item.title}-${index}`} className="rounded-lg border p-3">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{item.title}</div>
+                        <KeyValueGrid values={Object.entries(item.row).map(([key, value]) => [key, value])} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-gray-500">
+                    No matching threat rows were found in the latest threats scan.
+                  </p>
+                )}
+              </section>
+
+              <section>
+                <h3 className="mb-2 font-semibold text-gray-900">Events</h3>
+                {eventRows.length ? (
+                  <div className="space-y-2">
+                    {eventRows.map((item, index) => (
+                      <div key={`${item.title}-${index}`} className="rounded-lg border p-3">
+                        <KeyValueGrid values={Object.entries(item.row).map(([key, value]) => [key, value])} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-gray-500">
+                    No matching event rows were found in the latest events scan.
+                  </p>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function ActionSummarySections({
   consensus,
   market,
   technicalScans,
+  detailsData,
 }: {
   consensus: StockConsensus[];
   market: SwingTradeMarket;
   technicalScans: TechnicalScanMap;
+  detailsData: StockDetailsData;
 }) {
   return (
     <div className="space-y-4">
       {ACTION_CATEGORIES.map((action) => {
-        const stocks = consensus.filter(
-          (item) => item.consensusAction === action,
+        const stocks = sortStocksByConfidence(
+          consensus.filter((item) => item.consensusAction === action),
+          technicalScans,
         );
         return (
           <Card
@@ -1121,6 +1389,11 @@ function ActionSummarySections({
                         return (
                           <tr key={stock.key} className="bg-white/40">
                             <td className="whitespace-nowrap px-3 py-2 align-top">
+                              <StockDetailsButton
+                                stock={stock}
+                                technicalScan={scan}
+                                detailsData={detailsData}
+                              />
                               <TradingViewSymbolLink
                                 symbol={stock.symbol}
                                 market={market}
@@ -1403,6 +1676,12 @@ export function FinalActionablesConsole({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showRunDetails, setShowRunDetails] = useState(false);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
+  const [detailsData, setDetailsData] = useState<StockDetailsData>({
+    portfolioSnapshot: null,
+    eventsAnalysis: null,
+    threatsAnalysis: null,
+    error: null,
+  });
   const usdInrRate = useUsdInrRate();
 
   const loadRuns = useCallback(async (showLoading = true) => {
@@ -1457,6 +1736,48 @@ export function FinalActionablesConsole({
       ignore = true;
     };
   }, [market, runCacheKey]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadCapturedDetails() {
+      try {
+        const [portfolioResponse, eventsResponse, threatsResponse] = await Promise.all([
+          portfolio === "zerodha"
+            ? apiService.zerodhaPortfolioOverview()
+            : apiService.indmoneyUsPortfolioOverview(),
+          portfolio === "zerodha"
+            ? apiService.zerodhaEventsLatest()
+            : apiService.indmoneyUsEventsLatest(),
+          portfolio === "zerodha"
+            ? apiService.zerodhaThreatsLatest()
+            : apiService.indmoneyUsThreatsLatest(),
+        ]);
+
+        if (!ignore) {
+          setDetailsData({
+            portfolioSnapshot: portfolioResponse.latest,
+            eventsAnalysis: eventsResponse.analysis,
+            threatsAnalysis: threatsResponse.analysis,
+            error: null,
+          });
+        }
+      } catch (err) {
+        if (!ignore) {
+          setDetailsData((current) => ({
+            ...current,
+            error: err instanceof Error ? err.message : "Failed to load captured stock details.",
+          }));
+        }
+      }
+    }
+
+    void loadCapturedDetails();
+
+    return () => {
+      ignore = true;
+    };
+  }, [portfolio]);
 
   const groupedRuns = useMemo(() => {
     const marketRuns = runs
@@ -1646,6 +1967,7 @@ export function FinalActionablesConsole({
               consensus={consensus}
               market={market}
               technicalScans={technicalScans}
+              detailsData={detailsData}
             />
           </>
         )}
@@ -1685,7 +2007,7 @@ export function FinalActionablesConsole({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {consensus.map((stock) => {
+                      {sortStocksByConfidence(consensus, technicalScans).map((stock) => {
                         const isExpanded = expanded.has(stock.key);
                         return (
                           <FragmentRows
@@ -1695,6 +2017,7 @@ export function FinalActionablesConsole({
                             onToggle={() => toggleExpanded(stock.key)}
                             market={market}
                             technicalScan={getTechnicalScanForStock(technicalScans, stock)}
+                            detailsData={detailsData}
                           />
                         );
                       })}
@@ -1723,12 +2046,14 @@ function FragmentRows({
   onToggle,
   market,
   technicalScan,
+  detailsData,
 }: {
   stock: StockConsensus;
   isExpanded: boolean;
   onToggle: () => void;
   market: SwingTradeMarket;
   technicalScan: TechnicalScanResult | null;
+  detailsData: StockDetailsData;
 }) {
   return (
     <>
@@ -1756,12 +2081,28 @@ function FragmentRows({
             key={`${stock.key}-${header}`}
             className="px-3 py-2 align-top text-gray-700"
           >
-            <RebalanceCell
-              row={stock.representative}
-              header={header}
-              market={market}
-              technicalScan={technicalScan}
-            />
+            {header === "Stock Symbol" ? (
+              <span className="inline-flex items-center whitespace-nowrap">
+                <StockDetailsButton
+                  stock={stock}
+                  technicalScan={technicalScan}
+                  detailsData={detailsData}
+                />
+                <RebalanceCell
+                  row={stock.representative}
+                  header={header}
+                  market={market}
+                  technicalScan={technicalScan}
+                />
+              </span>
+            ) : (
+              <RebalanceCell
+                row={stock.representative}
+                header={header}
+                market={market}
+                technicalScan={technicalScan}
+              />
+            )}
           </td>
         ))}
       </tr>
