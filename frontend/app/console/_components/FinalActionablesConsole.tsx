@@ -66,6 +66,9 @@ type ActionEstimate = {
 export type SetupStockDetail = {
   key: string;
   name: string;
+  symbol: string;
+  exchange: string;
+  market: SwingTradeMarket;
   currentUnits: string;
   action: ActionCategory;
 };
@@ -1076,6 +1079,7 @@ function getTechnicalScanClass(scan: TechnicalScanResult | null, row?: Canonical
 export function getSetupStockGroups(
   consensus: StockConsensus[],
   technicalScans: TechnicalScanMap,
+  market: SwingTradeMarket,
 ) {
   const groups = new Map<string, Map<string, SetupStockDetail>>();
 
@@ -1087,6 +1091,9 @@ export function getSetupStockGroups(
     stockMap.set(stock.key, {
       key: stock.key,
       name: stock.symbol,
+      symbol: stock.symbol,
+      exchange: stock.exchange,
+      market,
       currentUnits: stock.representative["Current Units"] || "—",
       action: stock.consensusAction,
     });
@@ -1335,10 +1342,12 @@ function KeyValueGrid({
 
 function StockDetailsButton({
   stock,
+  market,
   technicalScan,
   detailsData,
 }: {
   stock: StockConsensus;
+  market: SwingTradeMarket;
   technicalScan: TechnicalScanResult | null;
   detailsData: StockDetailsData;
 }) {
@@ -1380,7 +1389,14 @@ function StockDetailsButton({
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Captured stock details</p>
                 <h2 id={`stock-details-${stock.key}`} className="mt-1 text-xl font-bold text-gray-900">
-                  {stock.symbol}
+                  <TradingViewSymbolLink
+                    symbol={stock.symbol}
+                    market={market}
+                    exchange={stock.exchange}
+                    className="underline-offset-4 transition hover:text-blue-700 hover:underline"
+                  >
+                    {stock.symbol}
+                  </TradingViewSymbolLink>
                 </h2>
                 <p className="text-sm text-gray-500">
                   Swing/all LLM runs, technical scan, threats, and events context captured in prior flows.
@@ -1563,6 +1579,7 @@ function ActionSummarySections({
                             <td className="whitespace-nowrap px-3 py-2 align-top">
                               <StockDetailsButton
                                 stock={stock}
+                                market={market}
                                 technicalScan={scan}
                                 detailsData={detailsData}
                               />
@@ -1995,8 +2012,8 @@ export function FinalActionablesConsole({
   const totalStocksConsolidated = consensus.length;
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
   const setupStockGroups = useMemo(
-    () => getSetupStockGroups(consensus, technicalScans),
-    [consensus, technicalScans],
+    () => getSetupStockGroups(consensus, technicalScans, market),
+    [consensus, market, technicalScans],
   );
   const technicalScanHistory = useMemo(() => buildTechnicalScanHistory(runs), [runs]);
   const technicalScanIsActive = useMemo(() => hasActiveTechnicalScan(runs), [runs]);
@@ -2296,7 +2313,14 @@ function SetupStocksModal({
                 return (
                   <tr key={stock.key} className={actionClasses.row}>
                     <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.nameCell}`}>
-                      {stock.name}
+                      <TradingViewSymbolLink
+                        symbol={stock.symbol || stock.name}
+                        market={stock.market}
+                        exchange={stock.exchange}
+                        className="underline-offset-4 hover:text-blue-700 hover:underline"
+                      >
+                        {stock.name}
+                      </TradingViewSymbolLink>
                     </td>
                     <td className={`whitespace-nowrap px-3 py-2 ${actionClasses.cell}`}>
                       {stock.currentUnits}
@@ -2364,6 +2388,7 @@ function FragmentRows({
               <span className="inline-flex items-center whitespace-nowrap">
                 <StockDetailsButton
                   stock={stock}
+                  market={market}
                   technicalScan={technicalScan}
                   detailsData={detailsData}
                 />
