@@ -667,16 +667,6 @@ function findApprovedSetupInText(value?: string | null) {
   }) ?? null;
 }
 
-function findApprovedSetupsInText(value?: string | null) {
-  const lookup = normalizeSetupLookupKey(value);
-  if (!lookup) return [];
-
-  return APPROVED_TECHNICAL_SETUPS.filter((setup) => {
-    const setupKey = normalizeSetupLookupKey(setup.setup);
-    return lookup.includes(setupKey) || setupKey.includes(lookup);
-  });
-}
-
 function inferApprovedSetupFromText(
   value: string,
   preferredDirection?: "bullish" | "bearish" | "neutral" | null,
@@ -1017,28 +1007,11 @@ function formatTechnicalSetup(scan: TechnicalScanResult | null, row?: CanonicalR
   return resolveApprovedTechnicalSetup(scan, row)?.setup || getFallbackTechnicalSetup(row);
 }
 
-function getSetupNamesTaggedForStock(
+function getDisplayedSetupNameForStock(
   stock: StockConsensus,
   technicalScan: TechnicalScanResult | null,
 ) {
-  const setupNames = new Set<string>();
-  const addSetup = (setup?: (SetupRow & { direction: "bullish" | "bearish" }) | null) => {
-    if (setup) setupNames.add(setup.setup);
-  };
-  const addSetupsFromText = (value?: string | null) => {
-    findApprovedSetupsInText(value).forEach(addSetup);
-  };
-
-  addSetup(resolveApprovedTechnicalSetup(technicalScan, stock.representative));
-  addSetupsFromText(technicalScan?.primarySetup);
-  addSetupsFromText(technicalScan?.secondarySetups);
-
-  stock.rows.forEach((row) => {
-    addSetup(resolveApprovedTechnicalSetup(null, row.cells));
-    addSetupsFromText(row.cells["Technical Setup"]);
-  });
-
-  return Array.from(setupNames);
+  return formatTechnicalSetup(technicalScan, stock.representative);
 }
 
 function formatTechnicalConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
@@ -1094,8 +1067,10 @@ export function getSetupStockGroups(
   };
 
   consensus.forEach((stock) => {
-    getSetupNamesTaggedForStock(stock, getTechnicalScanForStock(technicalScans, stock))
-      .forEach((setup) => addStockToSetup(setup, stock));
+    addStockToSetup(
+      getDisplayedSetupNameForStock(stock, getTechnicalScanForStock(technicalScans, stock)),
+      stock,
+    );
   });
 
   return Array.from(groups.entries()).reduce(
