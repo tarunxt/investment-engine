@@ -1906,7 +1906,7 @@ export function DashboardFinalActionablesTables() {
     const actionRows = actionRowsByMarket[market];
 
     return (
-      <div className="rounded-[28px] border border-slate-200 bg-white/80 p-4 shadow-sm">
+      <div id={market === "us" ? "final-actionable-us" : "final-actionable-zerodha"} className="scroll-mt-24 rounded-[28px] border border-slate-200 bg-white/80 p-4 shadow-sm">
         <div className="mb-4">
           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
             {market === "us" ? "US" : "Zerodha India"}
@@ -2018,7 +2018,7 @@ export function DashboardFinalActionablesTables() {
   };
 
   return (
-    <section className="rounded-[32px] border border-slate-200 bg-white shadow-sm">
+    <section id="final-actionables" className="rounded-[32px] border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">

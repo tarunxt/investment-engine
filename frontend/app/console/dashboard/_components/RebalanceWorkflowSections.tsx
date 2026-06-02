@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AlertCircle, CheckCircle2, Clock3, Loader2, Play, X } from 'lucide-react';
 
 import {
@@ -25,6 +26,7 @@ import {
 } from '@/lib/swingTrade';
 import { isRunInSwingTradeMarket } from '@/lib/runPresentation';
 import { apiService } from '@/services/api';
+import { URLs } from '@/lib/urls';
 import type {
   IndMoneyUsPortfolioSnapshotCreateRequest,
   IndMoneyUsThreatAnalysis,
@@ -41,6 +43,8 @@ type WorkflowStageKey = 'sync' | 'swing' | 'threats' | 'rebalance' | 'technical'
 type StageState = 'idle' | 'running' | 'completed' | 'failed';
 type StageInfo = {
   state: StageState;
+  startedAt?: string | null;
+  endedAt?: string | null;
   completedAt?: string | null;
   provider?: string | null;
   model?: string | null;
@@ -49,6 +53,9 @@ type StageInfo = {
   costUsd?: number | null;
   costInr?: number | null;
   error?: string | null;
+  activeRunId?: number | null;
+  completedLlms?: number | null;
+  totalLlms?: number | null;
 };
 type WorkflowState = Record<WorkflowStageKey, StageInfo>;
 type IndMoneySyncMode = 'reuse' | 'paste';
@@ -70,10 +77,10 @@ const STAGE_ORDER: WorkflowStageKey[] = ['sync', 'swing', 'threats', 'rebalance'
 
 const STAGE_COPY: Record<WorkflowStageKey, { idle: string; running: string; completed: string }> = {
   sync: { idle: 'Sync Portfolio', running: 'Syncing Portfolio', completed: 'Portfolio Synced' },
-  swing: { idle: 'Swing Scan', running: 'Running Swing Scan', completed: 'Ran Swing Scan' },
-  threats: { idle: 'Threats', running: 'Running Threats', completed: 'Ran Threats' },
-  rebalance: { idle: 'Rebalance', running: 'Running Rebalance', completed: 'Ran Rebalance' },
-  technical: { idle: 'Technical Scan', running: 'Running Technical Scan', completed: 'Ran Technical Scan' },
+  swing: { idle: 'Swing Scan', running: 'Running Swing Scan', completed: 'Swing Scan' },
+  threats: { idle: 'Threats', running: 'Running Threats', completed: 'Threats Scan' },
+  rebalance: { idle: 'Rebalance', running: 'Running Rebalance', completed: 'Rebalance' },
+  technical: { idle: 'Technical Scan', running: 'Running Technical Scan', completed: 'Technical Scan' },
   actionables: { idle: 'Actionables', running: 'Updating Actionables', completed: 'Actionables Updated' },
 };
 
@@ -164,7 +171,7 @@ function getRunTargetsFromStoredMix(providers: ProviderInfo[]) {
   );
 
   const autoMix = parsed.find((mix) => mix?.name?.toLowerCase() === AUTO_REBALANCE_MIX_NAME.toLowerCase());
-  const sourceTargets = autoMix?.targets?.length ? autoMix.targets : Array.from(compatible);
+  const sourceTargets = autoMix?.targets?.length ? autoMix.targets : [];
 
   return sourceTargets
     .filter((target) => compatible.has(target))
@@ -184,14 +191,22 @@ function getGpt4oMiniTarget(providers: ProviderInfo[]): ProviderModelTarget | nu
   return provider ? { provider: provider.name, model: GPT_4O_MINI_MODEL } : null;
 }
 
-async function waitForRunCompletion(runId: number) {
+async function waitForRunCompletion(
+  runId: number,
+  onProgress?: (run: RunResponse) => void,
+  shouldStop?: () => boolean,
+) {
   for (let attempt = 0; attempt < MAX_RUN_POLLS; attempt += 1) {
+    if (shouldStop?.()) throw new Error(`Run #${runId} was cancelled by user.`);
     const run = await apiService.getRun(runId);
+    onProgress?.(run);
     const status = (run.status || '').toLowerCase();
     if (status === 'completed' || status === 'failed') return run;
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(`Run #${runId} did not finish before the dashboard timeout.`);
+  const lastRun = await apiService.getRun(runId);
+  onProgress?.(lastRun);
+  return lastRun;
 }
 
 async function waitForThreatCompletion(
@@ -237,13 +252,39 @@ function buildRunPayload({
   };
 }
 
+function formatDuration(start?: string | null, end?: string | null, now = Date.now()) {
+  const started = parseTimestampMs(start);
+  if (!started) return null;
+  const ended = end ? parseTimestampMs(end) : now;
+  if (!ended) return null;
+  const totalSeconds = Math.max(0, Math.floor((ended - started) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':');
+}
+
+function getRunProgress(run: RunResponse) {
+  const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+  return {
+    completedLlms: jobs.filter((job) => ['completed', 'failed'].includes((job.status || '').toLowerCase())).length,
+    totalLlms: jobs.length,
+  };
+}
+
 function WorkflowStageTile({
   stage,
   info,
+  now,
+  selectable,
+  selected,
   onClick,
 }: {
   stage: WorkflowStageKey;
   info: StageInfo;
+  now: number;
+  selectable?: boolean;
+  selected?: boolean;
   onClick?: () => void;
 }) {
   const isRunning = info.state === 'running';
@@ -253,9 +294,13 @@ function WorkflowStageTile({
       type="button"
       onClick={onClick}
       disabled={!onClick || isRunning}
-      className={`relative min-h-36 rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${getStageClasses(info.state)}`}
+      className={`relative min-h-36 rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${getStageClasses(info.state)} ${selectable && selected ? 'ring-2 ring-slate-950' : ''} ${selectable && !selected ? 'opacity-55' : ''}`}
     >
-      {isCompleted ? (
+      {selectable ? (
+        <span className="absolute right-3 top-3 rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+          {selected ? 'Run' : 'Skip'}
+        </span>
+      ) : isCompleted ? (
         <CheckCircle2 className="absolute right-3 top-3 size-5 text-emerald-600" />
       ) : null}
       <div className="flex items-center gap-2 pr-7 text-sm font-semibold">
@@ -264,11 +309,13 @@ function WorkflowStageTile({
       </div>
       <div className="mt-3 space-y-1 text-xs leading-5 text-slate-600">
         {info.completedAt ? <p>Timestamp: {formatTimestamp(info.completedAt)}</p> : null}
+        {formatDuration(info.startedAt, info.endedAt, now) ? <p>Duration: {formatDuration(info.startedAt, info.endedAt, now)}</p> : null}
+        {info.totalLlms ? <p>{info.completedLlms ?? 0}/{info.totalLlms} LLMs completed</p> : null}
         {stage !== 'sync' && (info.provider || info.model || info.runStatus || info.exportStatus || info.costUsd || info.error) ? (
           <>
-            <p>LLM: {[info.provider, info.model].filter(Boolean).join(' / ') || 'Not available'}</p>
-            <p>LLM Run Status: {info.runStatus ?? 'Not available'}</p>
-            <p>Sheets Export Status: {info.exportStatus ?? 'Not available'}</p>
+            <p>LLM: {[info.provider, info.model].filter(Boolean).join(' / ') || 'LLM details not available yet'}</p>
+            <p>LLM Run Status: {info.runStatus ?? 'Waiting for job status'}</p>
+            <p>Sheets Export Status: {info.exportStatus ?? 'No sheet export status yet'}</p>
             <p>Cost (USD / INR): {info.costUsd ? `$${info.costUsd.toFixed(4)}` : 'n/a'} / {info.costInr ? `₹${info.costInr.toFixed(2)}` : 'n/a'}</p>
             {info.error ? <p className="text-red-700">Error: {info.error}</p> : null}
           </>
@@ -361,6 +408,7 @@ function IndMoneySnapshotDialog({
 }
 
 export function RebalanceWorkflowSections({ onDashboardRefresh }: { onDashboardRefresh: () => Promise<void> }) {
+  const router = useRouter();
   const [states, setStates] = useState<Record<WorkflowPortfolio, WorkflowState>>({
     zerodha: initialWorkflowState(),
     indmoneyUs: initialWorkflowState(),
@@ -368,6 +416,19 @@ export function RebalanceWorkflowSections({ onDashboardRefresh }: { onDashboardR
   const [runningPortfolio, setRunningPortfolio] = useState<WorkflowPortfolio | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [now, setNow] = useState(0);
+  const [specificMode, setSpecificMode] = useState<Record<WorkflowPortfolio, boolean>>({ zerodha: false, indmoneyUs: false });
+  const [selectedStages, setSelectedStages] = useState<Record<WorkflowPortfolio, Set<WorkflowStageKey>>>(() => ({
+    zerodha: new Set(STAGE_ORDER),
+    indmoneyUs: new Set(STAGE_ORDER),
+  }));
+  const activeRunIdsRef = useRef<number[]>([]);
+  const cancelRequestedRef = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const isBusy = Boolean(runningPortfolio);
 
@@ -385,116 +446,279 @@ export function RebalanceWorkflowSections({ onDashboardRefresh }: { onDashboardR
     setStates((current) => ({ ...current, [portfolio]: initialWorkflowState() }));
   }, []);
 
+  const completeSkippedStage = useCallback((portfolio: WorkflowPortfolio, stage: WorkflowStageKey, note = 'Using latest saved output') => {
+    const timestamp = new Date().toISOString();
+    updateStage(portfolio, stage, {
+      state: 'completed',
+      startedAt: timestamp,
+      endedAt: timestamp,
+      completedAt: timestamp,
+      runStatus: note,
+      error: null,
+    });
+  }, [updateStage]);
+
+  const markRunning = useCallback((portfolio: WorkflowPortfolio, stage: WorkflowStageKey, extra?: Partial<StageInfo>) => {
+    const timestamp = new Date().toISOString();
+    updateStage(portfolio, stage, {
+      state: 'running',
+      startedAt: timestamp,
+      endedAt: null,
+      completedAt: null,
+      error: null,
+      ...extra,
+    });
+  }, [updateStage]);
+
+  const markCompleted = useCallback((portfolio: WorkflowPortfolio, stage: WorkflowStageKey, info: Partial<StageInfo>) => {
+    const timestamp = new Date().toISOString();
+    updateStage(portfolio, stage, {
+      state: 'completed',
+      endedAt: timestamp,
+      completedAt: info.completedAt ?? timestamp,
+      activeRunId: null,
+      ...info,
+    });
+  }, [updateStage]);
+
+  const shouldRunStage = useCallback((portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
+    return !specificMode[portfolio] || selectedStages[portfolio].has(stage);
+  }, [selectedStages, specificMode]);
+
+  const toggleStageSelection = useCallback((portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
+    setSelectedStages((current) => {
+      const nextSet = new Set(current[portfolio]);
+      if (nextSet.has(stage)) nextSet.delete(stage);
+      else nextSet.add(stage);
+      return { ...current, [portfolio]: nextSet };
+    });
+  }, []);
+
+  const cancelActiveWorkflow = useCallback(async () => {
+    cancelRequestedRef.current = true;
+    const runIds = Array.from(new Set(activeRunIdsRef.current));
+    await Promise.allSettled(runIds.map((runId) => apiService.cancelRun(runId)));
+    if (runningPortfolio) {
+      STAGE_ORDER.forEach((stage) => {
+        const info = states[runningPortfolio][stage];
+        if (info.state === 'running') {
+          updateStage(runningPortfolio, stage, {
+            state: 'failed',
+            endedAt: new Date().toISOString(),
+            runStatus: 'cancelled',
+            error: 'Killed by user. Any queued/pending LLM jobs were marked failed; in-flight provider calls are ignored if they return later.',
+          });
+        }
+      });
+    }
+    setRunningPortfolio(null);
+  }, [runningPortfolio, states, updateStage]);
+
+  const promptToContinueAfterProblem = useCallback((stage: WorkflowStageKey, details: string) => {
+    return window.confirm(
+      `${getStageLabel(stage, 'idle')} did not complete cleanly.\n\n${details}\n\nDo you want to continue to the next stage using the latest available saved output where possible?`,
+    );
+  }, []);
+
+  const waitForRunWithStageHandling = useCallback(async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey, runId: number) => {
+    activeRunIdsRef.current = Array.from(new Set([...activeRunIdsRef.current, runId]));
+    updateStage(portfolio, stage, { activeRunId: runId });
+
+    while (true) {
+      const run = await waitForRunCompletion(
+        runId,
+        (progressRun) => updateStage(portfolio, stage, getRunProgress(progressRun)),
+        () => cancelRequestedRef.current,
+      );
+      const status = (run.status || '').toLowerCase();
+      if (status === 'completed') return run;
+
+      const progress = getRunProgress(run);
+      const error = summarizeRun(run).error;
+      const timeoutLike = status !== 'failed';
+      const detail = timeoutLike
+        ? `Run #${runId} is still processing after the dashboard polling window. Heavy prompts can take longer. Completed so far: ${progress.completedLlms}/${progress.totalLlms} LLMs.`
+        : `Run #${runId} ended with status "${run.status}". Completed so far: ${progress.completedLlms}/${progress.totalLlms} LLMs. ${error ? `Error: ${error}` : ''}`;
+
+      if (progress.completedLlms > 0) {
+        const waitLonger = window.confirm(`${detail}\n\nPress OK to keep waiting. Press Cancel to continue with completed LLMs and kill pending/processing LLM jobs.`);
+        if (waitLonger) continue;
+        await apiService.cancelRun(runId);
+        return apiService.getRun(runId);
+      }
+
+      throw new Error(`${detail}\n\nNo LLM output is available yet, so this stage cannot safely continue without user approval.`);
+    }
+  }, [updateStage]);
+
+  const navigateForStage = useCallback((portfolio: WorkflowPortfolio, stage: WorkflowStageKey, info?: StageInfo) => {
+    if (info?.state === 'failed' && info.error) {
+      window.alert(info.error);
+      return;
+    }
+    const zerodha = portfolio === 'zerodha';
+    const hrefByStage: Record<WorkflowStageKey, string> = {
+      sync: zerodha ? URLs.routes.console.zerodha() : URLs.routes.console.indmoneyUs(),
+      swing: zerodha ? `${URLs.routes.console.zerodhaSwingTrade()}#recent-jobs` : `${URLs.routes.console.indmoneyUsSwingTrade()}#recent-jobs`,
+      threats: zerodha ? URLs.routes.console.zerodhaThreats() : URLs.routes.console.indmoneyUsThreats(),
+      rebalance: zerodha ? URLs.routes.console.zerodhaRebalance() : URLs.routes.console.indmoneyUsRebalance(),
+      technical: URLs.routes.console.dashboard(),
+      actionables: zerodha ? `${URLs.routes.console.dashboard()}#final-actionable-zerodha` : `${URLs.routes.console.dashboard()}#final-actionable-us`,
+    };
+    router.push(hrefByStage[stage]);
+  }, [router]);
+
   const runWorkflow = useCallback(async (portfolio: WorkflowPortfolio, indmoneyPayload?: IndMoneyUsPortfolioSnapshotCreateRequest) => {
     const market: SwingTradeMarket = portfolio === 'zerodha' ? 'india' : 'us';
     setRunningPortfolio(portfolio);
     resetPortfolio(portfolio);
+    activeRunIdsRef.current = [];
+    cancelRequestedRef.current = false;
 
     let currentStage: WorkflowStageKey = 'sync';
 
     try {
       currentStage = 'sync';
-      updateStage(portfolio, 'sync', { state: 'running', error: null });
-      if (portfolio === 'zerodha') {
-        const synced = await apiService.zerodhaSyncPortfolio();
-        const overview = await apiService.zerodhaPortfolioOverview();
-        updateStage(portfolio, 'sync', { state: 'completed', completedAt: overview.latest?.captured_at, runStatus: synced.status });
-      } else if (indmoneyPayload) {
-        const snapshot = await apiService.indmoneyUsCreatePortfolioSnapshot(indmoneyPayload);
-        updateStage(portfolio, 'sync', { state: 'completed', completedAt: snapshot.captured_at, runStatus: snapshot.parse_status });
+      if (shouldRunStage(portfolio, 'sync')) {
+        markRunning(portfolio, 'sync');
+        if (portfolio === 'zerodha') {
+          const synced = await apiService.zerodhaSyncPortfolio();
+          const overview = await apiService.zerodhaPortfolioOverview();
+          markCompleted(portfolio, 'sync', { completedAt: overview.latest?.captured_at, runStatus: synced.status });
+        } else if (indmoneyPayload) {
+          const snapshot = await apiService.indmoneyUsCreatePortfolioSnapshot(indmoneyPayload);
+          markCompleted(portfolio, 'sync', { completedAt: snapshot.captured_at, runStatus: snapshot.parse_status });
+        } else {
+          const overview = await apiService.indmoneyUsPortfolioOverview();
+          markCompleted(portfolio, 'sync', { completedAt: overview.latest?.captured_at, runStatus: overview.latest?.parse_status ?? 'last snapshot' });
+        }
+        await onDashboardRefresh();
       } else {
-        const overview = await apiService.indmoneyUsPortfolioOverview();
-        updateStage(portfolio, 'sync', { state: 'completed', completedAt: overview.latest?.captured_at, runStatus: overview.latest?.parse_status ?? 'last snapshot' });
+        completeSkippedStage(portfolio, 'sync', 'Using last synced portfolio');
       }
-      await onDashboardRefresh();
 
       const providers = await apiService.getProviders({ prompt: buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market)) });
       const modelMixTargets = getRunTargetsFromStoredMix(providers);
-      if (modelMixTargets.length === 0) throw new Error(`No compatible targets found for ${AUTO_REBALANCE_MIX_NAME}.`);
+      if (modelMixTargets.length === 0) {
+        throw new Error(`No compatible targets found in "${AUTO_REBALANCE_MIX_NAME}". Open the model mix picker and add the exact LLMs you want the swing scan and rebalance stages to use; the dashboard no longer falls back to every compatible LLM.`);
+      }
       const gpt4oMiniTarget = getGpt4oMiniTarget(providers);
-      if (!gpt4oMiniTarget) throw new Error(`${GPT_4O_MINI_MODEL} is not available from a configured provider.`);
+      if (!gpt4oMiniTarget) throw new Error(`${GPT_4O_MINI_MODEL} is not available from a configured provider. This means the provider is not configured, the model is not listed for that provider, or the model compatibility check marked it unavailable.`);
 
       currentStage = 'swing';
-      updateStage(portfolio, 'swing', { state: 'running', error: null });
-      const swingRun = await apiService.createRun(buildRunPayload({
-        prompt: buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market)),
-        targets: modelMixTargets,
-        sheetName: getSwingTradeDefaultExportSheetName(market),
-      }));
-      const completedSwingRun = await waitForRunCompletion(swingRun.id);
-      if ((completedSwingRun.status || '').toLowerCase() !== 'completed') throw new Error(`Swing scan failed: ${summarizeRun(completedSwingRun).error ?? 'Run failed.'}`);
-      updateStage(portfolio, 'swing', { state: 'completed', ...summarizeRun(completedSwingRun) });
+      if (shouldRunStage(portfolio, 'swing')) {
+        markRunning(portfolio, 'swing', { totalLlms: modelMixTargets.length, completedLlms: 0 });
+        const swingRun = await apiService.createRun(buildRunPayload({
+          prompt: buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market)),
+          targets: modelMixTargets,
+          sheetName: getSwingTradeDefaultExportSheetName(market),
+        }));
+        const completedSwingRun = await waitForRunWithStageHandling(portfolio, 'swing', swingRun.id);
+        markCompleted(portfolio, 'swing', { ...summarizeRun(completedSwingRun), ...getRunProgress(completedSwingRun) });
+      } else {
+        completeSkippedStage(portfolio, 'swing', 'Using latest completed swing scan');
+      }
 
       currentStage = 'threats';
-      updateStage(portfolio, 'threats', { state: 'running', error: null });
-      const queuedThreat = portfolio === 'zerodha'
-        ? await apiService.zerodhaRunThreats(gpt4oMiniTarget)
-        : await apiService.indmoneyUsRunThreats(gpt4oMiniTarget);
-      const completedThreat = await waitForThreatCompletion(portfolio, queuedThreat.job_id);
-      if ((completedThreat.status || '').toLowerCase() !== 'completed') throw new Error(`Threats scan failed: ${completedThreat.error_message ?? 'Job failed.'}`);
-      updateStage(portfolio, 'threats', { state: 'completed', ...summarizeThreat(completedThreat) });
+      if (shouldRunStage(portfolio, 'threats')) {
+        markRunning(portfolio, 'threats', { totalLlms: 1, completedLlms: 0 });
+        const queuedThreat = portfolio === 'zerodha'
+          ? await apiService.zerodhaRunThreats(gpt4oMiniTarget)
+          : await apiService.indmoneyUsRunThreats(gpt4oMiniTarget);
+        const completedThreat = await waitForThreatCompletion(portfolio, queuedThreat.job_id);
+        if ((completedThreat.status || '').toLowerCase() !== 'completed') throw new Error(`Threats scan failed: ${completedThreat.error_message ?? 'Job failed.'}`);
+        markCompleted(portfolio, 'threats', { ...summarizeThreat(completedThreat), completedLlms: 1, totalLlms: 1 });
+      } else {
+        completeSkippedStage(portfolio, 'threats', 'Using latest threats scan');
+      }
 
       currentStage = 'rebalance';
-      updateStage(portfolio, 'rebalance', { state: 'running', error: null });
-      const [portfolioRes, threatsRes, runsRes] = await Promise.all([
-        portfolio === 'zerodha' ? apiService.zerodhaPortfolioOverview() : apiService.indmoneyUsPortfolioOverview(),
-        portfolio === 'zerodha' ? apiService.zerodhaThreatsLatest() : apiService.indmoneyUsThreatsLatest(),
-        apiService.getRuns({ page: 1, limit: 50, summary: true }),
-      ]);
-      const previousClose = getPreviousMarketClose(market);
-      const recentCompletedRuns = runsRes.items
-        .filter((run) => (run.status || '').toLowerCase() === 'completed')
-        .filter((run) => parseTimestampMs(run.created_at) > previousClose.getTime())
-        .slice(0, 24);
-      const fullRunCandidates = await Promise.all(recentCompletedRuns.map((run) => apiService.getRun(run.id)));
-      const swingRuns = fullRunCandidates.filter((run) => isRunInSwingTradeMarket(run.prompt, market)).slice(0, 12);
-      const inputBundle = buildRebalanceInputBundle({
-        market,
-        previousClose,
-        portfolio: portfolioRes.latest,
-        threats: threatsRes.analysis,
-        swingRuns,
-        swingDisplayMode: 'full',
-      });
-      const rebalanceRun = await apiService.createRun(buildRunPayload({
-        prompt: `${buildRebalancePrompt(market)}\n\n---\n\n${inputBundle}`.trim(),
-        targets: modelMixTargets,
-        sheetName: getRebalanceDefaultExportSheetName(market),
-      }));
-      const completedRebalanceRun = await waitForRunCompletion(rebalanceRun.id);
-      if ((completedRebalanceRun.status || '').toLowerCase() !== 'completed') throw new Error(`Rebalance failed: ${summarizeRun(completedRebalanceRun).error ?? 'Run failed.'}`);
-      updateStage(portfolio, 'rebalance', { state: 'completed', ...summarizeRun(completedRebalanceRun) });
+      if (shouldRunStage(portfolio, 'rebalance')) {
+        markRunning(portfolio, 'rebalance', { totalLlms: modelMixTargets.length, completedLlms: 0 });
+        const [portfolioRes, threatsRes, runsRes] = await Promise.all([
+          portfolio === 'zerodha' ? apiService.zerodhaPortfolioOverview() : apiService.indmoneyUsPortfolioOverview(),
+          portfolio === 'zerodha' ? apiService.zerodhaThreatsLatest() : apiService.indmoneyUsThreatsLatest(),
+          apiService.getRuns({ page: 1, limit: 50, summary: true }),
+        ]);
+        const previousClose = getPreviousMarketClose(market);
+        const recentCompletedRuns = runsRes.items
+          .filter((run) => (run.status || '').toLowerCase() === 'completed')
+          .filter((run) => parseTimestampMs(run.created_at) > previousClose.getTime())
+          .slice(0, 24);
+        const fullRunCandidates = await Promise.all(recentCompletedRuns.map((run) => apiService.getRun(run.id)));
+        const swingRuns = fullRunCandidates.filter((run) => isRunInSwingTradeMarket(run.prompt, market)).slice(0, 12);
+        const inputBundle = buildRebalanceInputBundle({
+          market,
+          previousClose,
+          portfolio: portfolioRes.latest,
+          threats: threatsRes.analysis,
+          swingRuns,
+          swingDisplayMode: 'full',
+        });
+        const rebalanceRun = await apiService.createRun(buildRunPayload({
+          prompt: `${buildRebalancePrompt(market)}\n\n---\n\n${inputBundle}`.trim(),
+          targets: modelMixTargets,
+          sheetName: getRebalanceDefaultExportSheetName(market),
+        }));
+        const completedRebalanceRun = await waitForRunWithStageHandling(portfolio, 'rebalance', rebalanceRun.id);
+        markCompleted(portfolio, 'rebalance', { ...summarizeRun(completedRebalanceRun), ...getRunProgress(completedRebalanceRun) });
+      } else {
+        completeSkippedStage(portfolio, 'rebalance', 'Using latest rebalance output');
+      }
 
       currentStage = 'technical';
-      updateStage(portfolio, 'technical', { state: 'running', error: null });
-      const allRuns = await fetchAllFullRuns();
-      const consensus = buildConsensusRows(getLatestMatchingRebalanceRuns(allRuns, market), market);
-      if (consensus.length === 0) throw new Error('No fresh rebalance consensus rows were available for technical scan.');
-      const technicalRun = await apiService.createRun(buildRunPayload({
-        prompt: buildTechnicalScanPrompt(consensus, market),
-        targets: [gpt4oMiniTarget],
-      }));
-      const completedTechnicalRun = await waitForRunCompletion(technicalRun.id);
-      if ((completedTechnicalRun.status || '').toLowerCase() !== 'completed') throw new Error(`Technical scan failed: ${summarizeRun(completedTechnicalRun).error ?? 'Run failed.'}`);
-      updateStage(portfolio, 'technical', { state: 'completed', ...summarizeRun(completedTechnicalRun) });
+      if (shouldRunStage(portfolio, 'technical')) {
+        markRunning(portfolio, 'technical', { totalLlms: 1, completedLlms: 0 });
+        const allRuns = await fetchAllFullRuns();
+        const consensus = buildConsensusRows(getLatestMatchingRebalanceRuns(allRuns, market), market);
+        if (consensus.length === 0) throw new Error('No fresh rebalance consensus rows were available for technical scan. Run or keep the Rebalance stage selected, or allow this stage to use the latest completed rebalance output.');
+        const technicalRun = await apiService.createRun(buildRunPayload({
+          prompt: buildTechnicalScanPrompt(consensus, market),
+          targets: [gpt4oMiniTarget],
+        }));
+        const completedTechnicalRun = await waitForRunWithStageHandling(portfolio, 'technical', technicalRun.id);
+        markCompleted(portfolio, 'technical', { ...summarizeRun(completedTechnicalRun), ...getRunProgress(completedTechnicalRun) });
+      } else {
+        completeSkippedStage(portfolio, 'technical', 'Using latest technical scan');
+      }
 
       currentStage = 'actionables';
-      updateStage(portfolio, 'actionables', { state: 'running', error: null });
-      await onDashboardRefresh();
-      updateStage(portfolio, 'actionables', { state: 'completed', completedAt: new Date().toISOString(), runStatus: 'fresh data loaded' });
+      if (shouldRunStage(portfolio, 'actionables')) {
+        markRunning(portfolio, 'actionables');
+        await onDashboardRefresh();
+        markCompleted(portfolio, 'actionables', { runStatus: 'fresh data loaded' });
+      } else {
+        completeSkippedStage(portfolio, 'actionables', 'Leaving current actionables unchanged');
+      }
     } catch (error) {
       const message = normalizeError(error);
-      updateStage(portfolio, currentStage, { state: 'failed', error: message, runStatus: 'failed' });
+      updateStage(portfolio, currentStage, { state: 'failed', endedAt: new Date().toISOString(), error: message, runStatus: 'failed' });
+      if (!cancelRequestedRef.current && promptToContinueAfterProblem(currentStage, message)) {
+        completeSkippedStage(portfolio, currentStage, 'Skipped after user approval');
+      }
     } finally {
-      setRunningPortfolio(null);
+      activeRunIdsRef.current = [];
+      if (!cancelRequestedRef.current) setRunningPortfolio(null);
     }
-  }, [onDashboardRefresh, resetPortfolio, updateStage]);
+  }, [completeSkippedStage, markCompleted, markRunning, onDashboardRefresh, promptToContinueAfterProblem, resetPortfolio, shouldRunStage, updateStage, waitForRunWithStageHandling]);
 
   const handleIndMoneyContinue = useCallback((mode: IndMoneySyncMode, payload?: IndMoneyUsPortfolioSnapshotCreateRequest) => {
     setDialogError(null);
     setDialogOpen(false);
     void runWorkflow('indmoneyUs', mode === 'paste' ? payload : undefined);
   }, [runWorkflow]);
+
+  const lastRunByPortfolio = useMemo(() => {
+    const result: Record<WorkflowPortfolio, string | null> = { zerodha: null, indmoneyUs: null };
+    (Object.keys(states) as WorkflowPortfolio[]).forEach((portfolio) => {
+      const latest = STAGE_ORDER
+        .map((stage) => states[portfolio][stage].completedAt)
+        .filter(Boolean)
+        .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0];
+      result[portfolio] = latest ?? null;
+    });
+    return result;
+  }, [states]);
 
   const sections = useMemo(
     () => [
@@ -514,23 +738,44 @@ export function RebalanceWorkflowSections({ onDashboardRefresh }: { onDashboardR
                 <h2 className="text-lg font-semibold text-slate-950">{section.title}</h2>
                 <p className="mt-1 text-sm text-slate-500">{section.subtitle}</p>
               </div>
-              <Button
-                type="button"
-                disabled={isBusy}
-                onClick={() => {
-                  if (section.portfolio === 'indmoneyUs') {
-                    setDialogError(null);
-                    setDialogOpen(true);
-                    return;
-                  }
-                  void runWorkflow('zerodha');
-                }}
-                className="rounded-full bg-slate-950 text-white hover:bg-slate-800"
-              >
-                {runningPortfolio === section.portfolio ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Play className="mr-2 size-4" />}
-                {section.title}
-              </Button>
+              <div className="flex flex-col items-start gap-2 sm:items-end">
+                <Button
+                  type="button"
+                  disabled={isBusy && runningPortfolio !== section.portfolio}
+                  onClick={() => {
+                    if (runningPortfolio === section.portfolio) {
+                      void cancelActiveWorkflow();
+                      return;
+                    }
+                    if (section.portfolio === 'indmoneyUs') {
+                      setDialogError(null);
+                      setDialogOpen(true);
+                      return;
+                    }
+                    void runWorkflow('zerodha');
+                  }}
+                  className={runningPortfolio === section.portfolio ? 'rounded-full bg-red-600 text-white hover:bg-red-500' : 'rounded-full bg-slate-950 text-white hover:bg-slate-800'}
+                >
+                  {runningPortfolio === section.portfolio ? <X className="mr-2 size-4" /> : <Play className="mr-2 size-4" />}
+                  {runningPortfolio === section.portfolio ? `Kill ${section.portfolio === 'zerodha' ? 'Zerodha' : 'IndMoney'} Rebalance` : section.title}
+                </Button>
+                <p className="text-xs text-slate-500">Last run on {formatTimestamp(lastRunByPortfolio[section.portfolio])}</p>
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => setSpecificMode((current) => ({ ...current, [section.portfolio]: !current[section.portfolio] }))}
+                  className="text-xs font-semibold text-slate-700 underline-offset-4 hover:underline disabled:opacity-50"
+                >
+                  Run specific Stages
+                </button>
+              </div>
             </div>
+
+            {specificMode[section.portfolio] ? (
+              <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Select the stages to run. Unselected stages stay linear but use the latest saved output wherever the next stage needs input.
+              </p>
+            ) : null}
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {STAGE_ORDER.map((stage) => (
@@ -538,7 +783,12 @@ export function RebalanceWorkflowSections({ onDashboardRefresh }: { onDashboardR
                   key={stage}
                   stage={stage}
                   info={states[section.portfolio][stage]}
-                  onClick={stage === 'sync' && section.portfolio === 'indmoneyUs' && !isBusy ? () => setDialogOpen(true) : undefined}
+                  now={now}
+                  selectable={specificMode[section.portfolio] && !isBusy}
+                  selected={selectedStages[section.portfolio].has(stage)}
+                  onClick={specificMode[section.portfolio] && !isBusy
+                    ? () => toggleStageSelection(section.portfolio, stage)
+                    : () => navigateForStage(section.portfolio, stage, states[section.portfolio][stage])}
                 />
               ))}
             </div>

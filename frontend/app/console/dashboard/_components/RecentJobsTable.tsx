@@ -202,7 +202,7 @@ export function RecentJobsTable() {
   };
 
   return (
-    <section className="min-w-0 border border-gray-200 bg-white shadow-sm">
+    <section id="recent-jobs" className="min-w-0 scroll-mt-24 border border-gray-200 bg-white shadow-sm">
       <div className="flex flex-col gap-1 border-b border-gray-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-950">
