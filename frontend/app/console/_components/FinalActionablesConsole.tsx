@@ -10,6 +10,7 @@ import {
   type RebalanceHeader,
 } from "@/components/InvestmentRecommendationTable";
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
+import { ScanHistoryButton } from "@/components/shared/ScanHistoryButton";
 import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { Button } from "@/components/ui/button";
@@ -21,8 +22,9 @@ import {
 import type { SwingTradeMarket } from "@/lib/swingTrade";
 import { BULLISH_SETUPS, BEARISH_SETUPS } from "@/lib/technicalSetups";
 import { cn } from "@/lib/utils";
+import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { apiService } from "@/services/api";
-import type { ProviderModelTarget, RunResponse } from "@/types/api";
+import type { PortfolioAnalysisHistoryItem, ProviderModelTarget, RunResponse } from "@/types/api";
 
 type ActionCategory = "Sell All" | "Trim" | "Hold" | "Add more" | "Buy New";
 
@@ -421,6 +423,32 @@ function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
     acc[getStockIdentityKey(row.exchangeSymbol, row.stockSymbol)] = row;
     return acc;
   }, {});
+}
+
+function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistoryItem[] {
+  return runs
+    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .flatMap((run) =>
+      (run.run_jobs ?? []).flatMap((link) => {
+        const job = link.job;
+        if (!job) return [];
+        return [
+          {
+            job_id: link.job_id,
+            status: job.status,
+            provider: job.provider,
+            model: job.model,
+            snapshot_date: null,
+            captured_at: null,
+            created_at: job.created_at,
+            updated_at: job.updated_at,
+            estimated_cost: job.estimated_cost,
+            error_message: job.error_message,
+          },
+        ];
+      }),
+    )
+    .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at));
 }
 
 function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsensus) {
@@ -942,6 +970,7 @@ export function FinalActionablesConsole({
   const [showRunDetails, setShowRunDetails] = useState(false);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
   const [technicalScanMessage, setTechnicalScanMessage] = useState<string | null>(null);
+  const usdInrRate = useUsdInrRate();
 
   const loadRuns = useCallback(async (showLoading = true) => {
     if (showLoading) {
@@ -958,6 +987,12 @@ export function FinalActionablesConsole({
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const loadTechnicalScanHistory = useCallback(async () => {
+    const response = await fetchAllFullRuns();
+    setRuns(response);
+    return buildTechnicalScanHistory(response);
   }, []);
 
   useEffect(() => {
@@ -1011,6 +1046,18 @@ export function FinalActionablesConsole({
     0,
   );
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
+  const technicalScanHistory = useMemo(() => buildTechnicalScanHistory(runs), [runs]);
+  const technicalScanCostByTarget = useMemo(() => {
+    const costs: Record<string, number> = {};
+    technicalScanHistory.forEach((item) => {
+      if (item.status !== "completed" || typeof item.estimated_cost !== "number") return;
+      const key = `${item.provider}::${item.model}`;
+      if (costs[key] === undefined) {
+        costs[key] = Math.round(item.estimated_cost * usdInrRate * 100) / 100;
+      }
+    });
+    return costs;
+  }, [technicalScanHistory, usdInrRate]);
   const copy = PAGE_COPY[portfolio];
 
   const handleTechnicalScan = async (target: ProviderModelTarget | null) => {
@@ -1067,8 +1114,17 @@ export function FinalActionablesConsole({
               buttonLabel="Technical Scan"
               defaultTarget={null}
               disabled={loading || !consensus.length}
+              historicalEstimatedCostInrByTarget={technicalScanCostByTarget}
               onRun={handleTechnicalScan}
+              pickerButtonClassName="border-gray-200 bg-white text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50 focus:ring-blue-500"
               running={technicalScanRunning}
+            />
+            <ScanHistoryButton
+              title="Technical scan history"
+              emptyMessage="No technical scan runs found yet."
+              loadHistory={loadTechnicalScanHistory}
+              usdInrRate={usdInrRate}
+              buttonClassName="border-gray-200 bg-white text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50 focus:ring-blue-500"
             />
             <Button
               onClick={() => void loadRuns()}
