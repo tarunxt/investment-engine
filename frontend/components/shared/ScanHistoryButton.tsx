@@ -34,9 +34,21 @@ function normalizeError(err: unknown) {
   return 'Unable to load scan history right now.';
 }
 
+function parseTimestampMs(value: string | null | undefined) {
+  if (!value) return 0;
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const parsed = /[zZ]|[+-]\d{2}:\d{2}$/.test(normalized)
+    ? new Date(normalized)
+    : new Date(`${normalized}Z`);
+  const ms = parsed.getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 function formatTs(iso: string | null | undefined) {
   if (!iso) return '-';
-  return new Date(iso).toLocaleString('en-IN', {
+  const ms = parseTimestampMs(iso);
+  if (!ms) return iso;
+  return new Date(ms).toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -61,6 +73,10 @@ function formatKnownCostSubtext(costUsd: number) {
 
 function hasKnownCost(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isActiveStatus(status: string) {
+  return ['pending', 'processing', 'scheduled'].includes(status);
 }
 
 function statusBadgeClassName(status: string) {
@@ -105,6 +121,19 @@ export function ScanHistoryButton({
     setOpen(true);
     void refreshHistory();
   }, [refreshHistory]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const hasActiveRun = history.some((item) => isActiveStatus(item.status));
+    if (!hasActiveRun) return;
+
+    const interval = window.setInterval(() => {
+      void refreshHistory();
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [history, open, refreshHistory]);
 
   useEffect(() => {
     if (!open) return;

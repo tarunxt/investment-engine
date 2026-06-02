@@ -86,6 +86,12 @@ const TECHNICAL_SCAN_TABLE_COLUMNS = [
   "Trigger Level",
   "Invalidation Level",
 ] as const;
+const TECHNICAL_SCAN_ACTIVE_STATUSES = new Set([
+  "pending",
+  "processing",
+  "scheduled",
+]);
+const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 
 
 const ACTION_CATEGORIES: ActionCategory[] = [
@@ -323,6 +329,22 @@ function normalizeScanCell(value?: string | null) {
   return String(value || "").replace(/^`+|`+$/g, "").trim();
 }
 
+function normalizeScanHeader(value?: string | null) {
+  return normalizeScanCell(value)
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizeScanKey(value?: string | null) {
+  return normalizeScanCell(value)
+    .toUpperCase()
+    .replace(/^(NSE|BSE|NASDAQ|NYSE)[:\s-]+/, "")
+    .replace(/\.(NS|BO)$/, "")
+    .replace(/[^A-Z0-9]+/g, "");
+}
+
 function splitMarkdownRow(line: string) {
   return line
     .trim()
@@ -345,21 +367,29 @@ function parseTechnicalScanResponse(
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (!line.includes("|") || !/stock symbol/i.test(line) || !/primary setup/i.test(line)) {
-      continue;
-    }
+    if (!line.includes("|")) continue;
 
-    const headers = splitMarkdownRow(line).map((header) => header.toLowerCase());
+    const headers = splitMarkdownRow(line).map(normalizeScanHeader);
+    const hasStockColumn = headers.some((header) =>
+      ["stock symbol", "symbol", "stock", "ticker"].includes(header),
+    );
+    const hasSetupColumn = headers.some((header) =>
+      header.includes("setup") || header === "technical setup",
+    );
+    if (!hasStockColumn || !hasSetupColumn) continue;
+
     const getIndex = (names: string[]) =>
-      headers.findIndex((header) => names.some((name) => header === name || header.includes(name)));
+      headers.findIndex((header) =>
+        names.some((name) => header === name || header.includes(name)),
+      );
     const exchangeIndex = getIndex(["exchange symbol", "exchange"]);
-    const symbolIndex = getIndex(["stock symbol", "symbol"]);
-    const primaryIndex = getIndex(["primary setup"]);
-    const secondaryIndex = getIndex(["secondary setups", "secondary setup"]);
-    const biasIndex = getIndex(["bias"]);
+    const symbolIndex = getIndex(["stock symbol", "symbol", "ticker", "stock"]);
+    const primaryIndex = getIndex(["primary setup", "technical setup", "setup"]);
+    const secondaryIndex = getIndex(["secondary setups", "secondary setup", "other setups"]);
+    const biasIndex = getIndex(["bias", "sentiment"]);
     const confidenceIndex = getIndex(["confidence score", "confidence"]);
-    const triggerIndex = getIndex(["trigger level", "trigger"]);
-    const invalidationIndex = getIndex(["invalidation level", "invalidation"]);
+    const triggerIndex = getIndex(["trigger level", "trigger", "entry level", "entry range"]);
+    const invalidationIndex = getIndex(["invalidation level", "invalidation", "stop loss", "stop"]);
 
     let rowIndex = index + 1;
     if (rowIndex < lines.length && isMarkdownSeparator(splitMarkdownRow(lines[rowIndex]))) {
@@ -372,11 +402,13 @@ function parseTechnicalScanResponse(
       const cells = splitMarkdownRow(rowLine);
       if (isMarkdownSeparator(cells) || cells.length < 3) continue;
       const stockSymbol = normalizeScanCell(cells[symbolIndex] || "");
-      if (!stockSymbol || /^stock symbol$/i.test(stockSymbol)) continue;
-      const exchangeSymbol = normalizeScanCell(cells[exchangeIndex] || "");
-      const primarySetup = normalizeScanCell(cells[primaryIndex] || "");
-      const secondarySetups = normalizeScanCell(cells[secondaryIndex] || "");
-      const rawBias = normalizeScanCell(cells[biasIndex] || `${primarySetup} ${secondarySetups}`).toLowerCase();
+      if (!stockSymbol || /^stock(?: symbol)?$/i.test(stockSymbol)) continue;
+      const exchangeSymbol = exchangeIndex >= 0 ? normalizeScanCell(cells[exchangeIndex] || "") : "";
+      const primarySetup = primaryIndex >= 0 ? normalizeScanCell(cells[primaryIndex] || "") : "";
+      const secondarySetups = secondaryIndex >= 0 ? normalizeScanCell(cells[secondaryIndex] || "") : "";
+      const rawBias = (biasIndex >= 0
+        ? normalizeScanCell(cells[biasIndex] || "")
+        : `${primarySetup} ${secondarySetups}`).toLowerCase();
       const bias = rawBias.includes("bear")
         ? "bearish"
         : rawBias.includes("bull")
@@ -388,10 +420,10 @@ function parseTechnicalScanResponse(
         exchangeSymbol,
         primarySetup,
         secondarySetups,
-        confidenceScore: normalizeScanCell(cells[confidenceIndex] || ""),
+        confidenceScore: confidenceIndex >= 0 ? normalizeScanCell(cells[confidenceIndex] || "") : "",
         bias,
-        triggerLevel: normalizeScanCell(cells[triggerIndex] || ""),
-        invalidationLevel: normalizeScanCell(cells[invalidationIndex] || ""),
+        triggerLevel: triggerIndex >= 0 ? normalizeScanCell(cells[triggerIndex] || "") : "",
+        invalidationLevel: invalidationIndex >= 0 ? normalizeScanCell(cells[invalidationIndex] || "") : "",
         ...meta,
       });
     }
@@ -421,6 +453,7 @@ function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
 
   return scanRows.reduce<TechnicalScanMap>((acc, row) => {
     acc[getStockIdentityKey(row.exchangeSymbol, row.stockSymbol)] = row;
+    acc[`SYMBOL:${normalizeScanKey(row.stockSymbol)}`] = row;
     return acc;
   }, {});
 }
@@ -452,7 +485,41 @@ function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistor
 }
 
 function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsensus) {
-  return scanMap[getStockIdentityKey(stock.exchange, stock.symbol)] ?? scanMap[getStockIdentityKey("UNKNOWN", stock.symbol)] ?? null;
+  return (
+    scanMap[getStockIdentityKey(stock.exchange, stock.symbol)]
+    ?? scanMap[getStockIdentityKey("UNKNOWN", stock.symbol)]
+    ?? scanMap[`SYMBOL:${normalizeScanKey(stock.symbol)}`]
+    ?? null
+  );
+}
+
+function hasActiveTechnicalScan(runs: RunResponse[]) {
+  return runs.some((run) =>
+    run.prompt?.includes(TECHNICAL_SCAN_MARKER)
+    && (
+      TECHNICAL_SCAN_ACTIVE_STATUSES.has(run.status)
+      || (run.run_jobs ?? []).some((link) =>
+        TECHNICAL_SCAN_ACTIVE_STATUSES.has(link.job?.status || ""),
+      )
+    ),
+  );
+}
+
+function isTechnicalScanRunComplete(run: RunResponse) {
+  return (
+    !TECHNICAL_SCAN_ACTIVE_STATUSES.has(run.status)
+    && (run.run_jobs ?? []).every((link) =>
+      !TECHNICAL_SCAN_ACTIVE_STATUSES.has(link.job?.status || ""),
+    )
+  );
+}
+
+async function waitForTechnicalScanRunCompletion(runId: number) {
+  for (;;) {
+    await new Promise((resolve) => window.setTimeout(resolve, TECHNICAL_SCAN_POLL_INTERVAL_MS));
+    const run = await apiService.getRun(runId);
+    if (isTechnicalScanRunComplete(run)) return run;
+  }
 }
 
 function formatTechnicalSetup(scan: TechnicalScanResult | null) {
@@ -969,7 +1036,6 @@ export function FinalActionablesConsole({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showRunDetails, setShowRunDetails] = useState(false);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
-  const [technicalScanMessage, setTechnicalScanMessage] = useState<string | null>(null);
   const usdInrRate = useUsdInrRate();
 
   const loadRuns = useCallback(async (showLoading = true) => {
@@ -1047,6 +1113,18 @@ export function FinalActionablesConsole({
   );
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
   const technicalScanHistory = useMemo(() => buildTechnicalScanHistory(runs), [runs]);
+  const technicalScanIsActive = useMemo(() => hasActiveTechnicalScan(runs), [runs]);
+
+  useEffect(() => {
+    if (!technicalScanIsActive || technicalScanRunning) return;
+
+    const interval = window.setInterval(() => {
+      void loadRuns(false);
+    }, TECHNICAL_SCAN_POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(interval);
+  }, [loadRuns, technicalScanIsActive, technicalScanRunning]);
+
   const technicalScanCostByTarget = useMemo(() => {
     const costs: Record<string, number> = {};
     technicalScanHistory.forEach((item) => {
@@ -1063,14 +1141,14 @@ export function FinalActionablesConsole({
   const handleTechnicalScan = async (target: ProviderModelTarget | null) => {
     if (!target || !consensus.length) return;
     setTechnicalScanRunning(true);
-    setTechnicalScanMessage(null);
     try {
       const run = await apiService.createRun({
         prompt: buildTechnicalScanPrompt(consensus, market),
         targets: [target],
         allow_parallel: true,
       });
-      setTechnicalScanMessage(`Queued technical scan run #${run.id} with ${target.provider}/${target.model}. Refresh after it completes to map the latest setup data.`);
+      await loadRuns(false);
+      await waitForTechnicalScanRunCompletion(run.id);
       await loadRuns(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to queue technical scan.");
@@ -1147,13 +1225,6 @@ export function FinalActionablesConsole({
           </Card>
         ) : null}
 
-        {technicalScanMessage ? (
-          <Card className="border-blue-200 bg-blue-50">
-            <CardContent className="pt-6 text-sm text-blue-700">
-              {technicalScanMessage}
-            </CardContent>
-          </Card>
-        ) : null}
 
         {showRunDetails ? (
           <RunGroupDetails
