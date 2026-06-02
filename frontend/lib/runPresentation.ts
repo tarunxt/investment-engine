@@ -33,14 +33,12 @@ const EXPORTED_ROWS_RE = /(\d+)\s*\/\s*(\d+)\s*exported/i;
 
 const SWING_TRADE_MARKET_PATTERNS: Record<SwingTradeMarket, RegExp[]> = {
   india: [
-    /\[rebalance_flow:india\]/i,
     /\bzerodha\b/i,
     /\bindia(?:n)?\b[^.\n]{0,220}\b(?:portfolio|holdings|equity|equities|stocks|swing[-\s]?trade|rebalance)\b/i,
     /\b(?:portfolio|holdings|equity|equities|stocks|swing[-\s]?trade|rebalance)\b[^.\n]{0,220}\bindia(?:n)?\b/i,
     /\baggressive swing[-\s]?trad[^.\n]{0,180}\bindia(?:n)?\b/i,
   ],
   us: [
-    /\[rebalance_flow:us\]/i,
     /\bindmoney\s*us\b/i,
     /\b(?:us|u\.s\.|usa|united states)\b[^.\n]{0,220}\b(?:portfolio|holdings|equity|equities|stocks|swing[-\s]?trade|rebalance)\b/i,
     /\b(?:portfolio|holdings|equity|equities|stocks|swing[-\s]?trade|rebalance)\b[^.\n]{0,220}\b(?:us|u\.s\.|usa|united states)\b/i,
@@ -50,7 +48,13 @@ const SWING_TRADE_MARKET_PATTERNS: Record<SwingTradeMarket, RegExp[]> = {
 
 const PORTFOLIO_LABELS: Record<SwingTradeMarket, string> = {
   india: 'Zerodha',
-  us: 'IndMoney US',
+  us: 'IndMoney',
+};
+
+const TECHNICAL_SCAN_MARKER_RE = /##\s*Technical Scan Input Bundle/i;
+const REBALANCE_MARKET_MARKERS: Record<SwingTradeMarket, RegExp> = {
+  india: /\[rebalance_flow:india\]/i,
+  us: /\[rebalance_flow:us\]/i,
 };
 
 function isSheetsPresentationState(value: string): value is SheetsPresentationState {
@@ -140,6 +144,8 @@ function getBaseSheetsState({
 export function inferSwingTradeMarketFromPrompt(prompt?: string | null): SwingTradeMarket | null {
   const text = prompt?.trim();
   if (!text) return null;
+  if (TECHNICAL_SCAN_MARKER_RE.test(text)) return null;
+  if (Object.values(REBALANCE_MARKET_MARKERS).some((pattern) => pattern.test(text))) return null;
 
   if (SWING_TRADE_MARKET_PATTERNS.india.some((pattern) => pattern.test(text))) {
     return 'india';
@@ -164,12 +170,31 @@ export function getPortfolioLabelForMarket(market?: SwingTradeMarket | null) {
   return PORTFOLIO_LABELS[market] ?? null;
 }
 
+export function getRunScopeLabelFromPrompt(prompt?: string | null) {
+  const text = prompt?.trim();
+  if (!text) return null;
+
+  const rebalanceMarket = (Object.keys(REBALANCE_MARKET_MARKERS) as SwingTradeMarket[]).find((market) =>
+    REBALANCE_MARKET_MARKERS[market].test(text),
+  );
+  if (rebalanceMarket) {
+    return `${getPortfolioLabelForMarket(rebalanceMarket)} Rebalance`;
+  }
+
+  const swingMarket = inferSwingTradeMarketFromPrompt(text);
+  if (swingMarket) {
+    return `${getPortfolioLabelForMarket(swingMarket)} Swing`;
+  }
+
+  return null;
+}
+
 export function formatRunLabel(runId: number, scopeLabel?: string | null) {
   return scopeLabel ? `#${runId} ${scopeLabel}` : `#${runId}`;
 }
 
 export function getRunLabelFromPrompt(runId: number, prompt?: string | null) {
-  return formatRunLabel(runId, getPortfolioLabelForMarket(inferSwingTradeMarketFromPrompt(prompt)));
+  return formatRunLabel(runId, getRunScopeLabelFromPrompt(prompt));
 }
 
 export function getRunDetailPathFromPrompt(runId: number, prompt?: string | null) {

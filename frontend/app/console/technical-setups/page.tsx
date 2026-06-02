@@ -31,8 +31,7 @@ import type { SwingTradeMarket } from '@/lib/swingTrade';
 import type { RunResponse } from '@/types/api';
 
 const COLUMNS: Array<{ key: SortKey; label: string; align?: 'left' | 'right' }> = [
-  { key: 'setup', label: 'Setup' },
-  { key: 'bias', label: 'Bias', align: 'right' },
+  { key: 'setup', label: 'Setup (SellAll, Add More, Trim, Buy New, Hold)' },
   { key: 'confidence', label: 'Confidence', align: 'right' },
   { key: 'bestUse', label: 'Best use' },
   { key: 'trigger', label: 'Entry trigger' },
@@ -238,13 +237,6 @@ function SetupTable({
                     <SetupNameCell row={row} group={setupGroups[row.setup]} onSetupClick={onSetupClick} />
                   </td>
                   <td
-                    className={`${baseCellClass} text-right ${
-                      targetClasses?.mutedCell || populatedToneClasses?.mutedCell || 'text-gray-700'
-                    }`}
-                  >
-                    {row.bias}
-                  </td>
-                  <td
                     className={`${baseCellClass} text-right font-semibold ${
                       targetClasses?.scoreCell || populatedToneClasses?.scoreCell || 'text-gray-950'
                     }`}
@@ -324,8 +316,8 @@ const SETUP_ACTION_COUNT_ORDER: Array<{
   className: string;
   label: string;
 }> = [
-  { action: 'Sell All', className: 'text-red-700', label: 'Sell All' },
-  { action: 'Add more', className: 'text-emerald-700', label: 'Buy More' },
+  { action: 'Sell All', className: 'text-red-700', label: 'SellAll' },
+  { action: 'Add more', className: 'text-emerald-700', label: 'Add More' },
   { action: 'Trim', className: 'text-red-400', label: 'Trim' },
   { action: 'Buy New', className: 'text-emerald-400', label: 'Buy New' },
   { action: 'Hold', className: 'text-yellow-700', label: 'Hold' },
@@ -367,7 +359,7 @@ function SetupActionCountBreakdown({ group }: { group: SetupStockGroup }) {
           <span className={className}>{counts[action]}</span>
         </span>
       ))}
-      <span>=</span>
+      <span> = </span>
       <span>{total}</span>
       <span>)</span>
     </span>
