@@ -28,6 +28,7 @@ import {
   type SortState,
 } from '@/lib/technicalSetups';
 import type { SwingTradeMarket } from '@/lib/swingTrade';
+import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import type { RunResponse } from '@/types/api';
 
 const COLUMNS: Array<{ key: SortKey; label: string; align?: 'left' | 'right' }> = [
@@ -313,7 +314,7 @@ function buildFinalActionablesSetupGroups(runs: RunResponse[]) {
   const groupsByMarket = (['india', 'us'] as SwingTradeMarket[]).map((market) => {
     const latestRuns = getLatestFinalActionableRuns(runs, market);
     const consensus = buildConsensusRows(latestRuns, market);
-    return getSetupStockGroups(consensus, technicalScans);
+    return getSetupStockGroups(consensus, technicalScans, market);
   });
 
   return mergeSetupGroups(groupsByMarket);
@@ -446,7 +447,14 @@ function SetupStocksModal({ group, onClose }: { group: SetupStockGroup | null; o
                 return (
                   <tr key={stock.key} className={actionClasses.row}>
                     <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.nameCell}`}>
-                      {stock.name}
+                      <TradingViewSymbolLink
+                        symbol={stock.symbol || stock.name}
+                        market={stock.market}
+                        exchange={stock.exchange}
+                        className="underline-offset-4 hover:text-blue-700 hover:underline"
+                      >
+                        {stock.name}
+                      </TradingViewSymbolLink>
                     </td>
                     <td className={`whitespace-nowrap px-3 py-2 ${actionClasses.cell}`}>
                       {stock.currentUnits}
