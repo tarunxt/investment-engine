@@ -404,7 +404,7 @@ function SetupStocksModal({ group, onClose }: { group: SetupStockGroup | null; o
       onClick={onClose}
     >
       <div
-        className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl"
+        className="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
@@ -429,6 +429,7 @@ function SetupStocksModal({ group, onClose }: { group: SetupStockGroup | null; o
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="px-3 py-2 font-semibold">Name</th>
                 <th className="px-3 py-2 font-semibold">Current Units</th>
+                <th className="px-3 py-2 font-semibold">Current Investment</th>
                 <th className="px-3 py-2 font-semibold">Action Suggested in Rebalance</th>
               </tr>
             </thead>
@@ -450,6 +451,9 @@ function SetupStocksModal({ group, onClose }: { group: SetupStockGroup | null; o
                     </td>
                     <td className={`whitespace-nowrap px-3 py-2 ${actionClasses.cell}`}>
                       {stock.currentUnits}
+                    </td>
+                    <td className={`whitespace-nowrap px-3 py-2 ${actionClasses.cell}`}>
+                      {stock.currentInvestment}
                     </td>
                     <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.cell}`}>
                       {stock.action}

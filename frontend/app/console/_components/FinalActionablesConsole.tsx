@@ -70,6 +70,7 @@ export type SetupStockDetail = {
   exchange: string;
   market: SwingTradeMarket;
   currentUnits: string;
+  currentInvestment: string;
   action: ActionCategory;
 };
 
@@ -1068,6 +1069,7 @@ export function getSetupStockGroups(
       exchange: stock.exchange,
       market,
       currentUnits: stock.representative["Current Units"] || "—",
+      currentInvestment: getFormattedCurrentInvestmentAmount(stock.representative, market),
       action: stock.consensusAction,
     });
     groups.set(normalizedSetup, stockMap);
