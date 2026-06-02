@@ -16,6 +16,8 @@ export type PortfolioCardMetric = {
   tone?: 'default' | 'positive' | 'negative';
 };
 
+export type PortfolioCardStatusPillTone = 'default' | 'success' | 'warning' | 'danger';
+
 export type PortfolioCardTopHolding = {
   id: string;
   symbol: string;
@@ -49,6 +51,27 @@ const ACCENT_STYLES = {
   },
 } as const;
 
+function statusPillToneClass(tone: PortfolioCardStatusPillTone | undefined) {
+  if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+  if (tone === 'warning') return 'border-yellow-200 bg-yellow-50 text-yellow-900';
+  if (tone === 'danger') return 'border-red-200 bg-red-50 text-red-900';
+  return 'border-slate-200 bg-white/85 text-slate-700';
+}
+
+function statusPillLabelClass(tone: PortfolioCardStatusPillTone | undefined) {
+  if (tone === 'success') return 'text-emerald-600';
+  if (tone === 'warning') return 'text-yellow-700';
+  if (tone === 'danger') return 'text-red-600';
+  return 'text-slate-400';
+}
+
+function statusPillValueClass(tone: PortfolioCardStatusPillTone | undefined) {
+  if (tone === 'success') return 'text-emerald-950';
+  if (tone === 'warning') return 'text-yellow-950';
+  if (tone === 'danger') return 'text-red-950';
+  return 'text-slate-900';
+}
+
 function metricToneClass(market: DashboardMarket, tone: PortfolioCardMetric['tone']) {
   const palette = ACCENT_STYLES[market].metric;
   if (tone === 'positive') return palette.positive;
@@ -70,7 +93,7 @@ export function MarketPortfolioCard({
   market: DashboardMarket;
   title: string;
   description: string;
-  statusPills: Array<{ label: string; value: string; detail?: string }>;
+  statusPills: Array<{ label: string; value: string; detail?: string; tone?: PortfolioCardStatusPillTone }>;
   metrics: PortfolioCardMetric[];
   topHoldings: PortfolioCardTopHolding[];
   portfolioHref: string;
@@ -104,14 +127,17 @@ export function MarketPortfolioCard({
             {statusPills.map((pill) => (
               <div
                 key={`${pill.label}-${pill.value}`}
-                className="rounded-full border border-slate-200 bg-white/85 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-700 shadow-sm"
+                className={cn(
+                  'rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] shadow-sm',
+                  statusPillToneClass(pill.tone),
+                )}
               >
                 <div className="flex items-start justify-center gap-1.5">
-                  <span className="text-slate-400">{pill.label}</span>
-                  <span className="flex flex-col items-center text-slate-900">
+                  <span className={statusPillLabelClass(pill.tone)}>{pill.label}</span>
+                  <span className={cn('flex flex-col items-center', statusPillValueClass(pill.tone))}>
                     <span>{pill.value}</span>
                     {pill.detail ? (
-                      <span className="mt-1 text-[10px] font-medium normal-case tracking-[0.06em] text-slate-500">
+                      <span className="mt-1 text-[10px] font-medium normal-case tracking-[0.06em] opacity-75">
                         {pill.detail}
                       </span>
                     ) : null}
