@@ -82,8 +82,8 @@ export type SetupStockGroup = {
 const SETUP_STOCK_ACTION_PRIORITY: Record<ActionCategory, number> = {
   "Sell All": 0,
   "Add more": 1,
-  Trim: 2,
-  "Buy New": 3,
+  "Buy New": 2,
+  Trim: 3,
   Hold: 4,
 };
 
@@ -324,10 +324,10 @@ function TechnicalSetupLink({
 
 const ACTION_CATEGORIES: ActionCategory[] = [
   "Sell All",
-  "Trim",
-  "Hold",
   "Add more",
   "Buy New",
+  "Trim",
+  "Hold",
 ];
 const ACTION_HEADER: RebalanceHeader =
   "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
@@ -371,11 +371,23 @@ type ConsolidatedDisplayHeader =
 
 const CATEGORY_BADGE_CLASS: Record<ActionCategory, string> = {
   "Sell All": "border-red-200 bg-red-50 text-red-700",
-  Trim: "border-orange-200 bg-orange-50 text-orange-700",
-  Hold: "border-slate-200 bg-slate-50 text-slate-700",
   "Add more": "border-blue-200 bg-blue-50 text-blue-700",
   "Buy New": "border-emerald-200 bg-emerald-50 text-emerald-700",
+  Trim: "border-orange-200 bg-orange-50 text-orange-700",
+  Hold: "border-slate-200 bg-slate-50 text-slate-700",
 };
+
+const ACTION_CATEGORY_LABEL: Record<ActionCategory, string> = {
+  "Sell All": "Sell All",
+  "Add more": "Add More",
+  "Buy New": "Buy New",
+  Trim: "Trim",
+  Hold: "Hold",
+};
+
+export function finalActionCategoryDomId(action: ActionCategory) {
+  return `final-actionables-${ACTION_CATEGORY_LABEL[action].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+}
 
 const PAGE_COPY: Record<
   RebalancePortfolioKey,
@@ -1515,10 +1527,11 @@ function ActionSummarySections({
         return (
           <Card
             key={action}
-            className={cn("border", CATEGORY_BADGE_CLASS[action])}
+            id={finalActionCategoryDomId(action)}
+            className={cn("scroll-mt-24 border", CATEGORY_BADGE_CLASS[action])}
           >
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">{action}</CardTitle>
+              <CardTitle className="text-sm">{ACTION_CATEGORY_LABEL[action]}</CardTitle>
             </CardHeader>
             <CardContent className="text-xs">
               <div className="mb-3 font-semibold">

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { ArrowDown, ArrowUp, ChevronsUpDown, X } from 'lucide-react';
 
 import {
@@ -9,6 +10,7 @@ import {
   compareSetupStocksByAction,
   extractRebalanceInputFingerprint,
   fetchAllFullRuns,
+  finalActionCategoryDomId,
   getSetupStockActionClasses,
   getSetupStockGroups,
   isCompletedRebalanceRun,
@@ -29,10 +31,11 @@ import {
 } from '@/lib/technicalSetups';
 import type { SwingTradeMarket } from '@/lib/swingTrade';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
+import { URLs } from '@/lib/urls';
 import type { RunResponse } from '@/types/api';
 
 const COLUMNS: Array<{ key: SortKey; label: string; align?: 'left' | 'right' }> = [
-  { key: 'setup', label: 'Setup (SellAll, Add More, Trim, Buy New, Hold)' },
+  { key: 'setup', label: 'Setup (SellAll, Add More, Buy New, Trim, Hold)' },
   { key: 'confidence', label: 'Confidence', align: 'right' },
   { key: 'bestUse', label: 'Best use' },
   { key: 'trigger', label: 'Entry trigger' },
@@ -319,8 +322,8 @@ const SETUP_ACTION_COUNT_ORDER: Array<{
 }> = [
   { action: 'Sell All', className: 'text-red-700', label: 'SellAll' },
   { action: 'Add more', className: 'text-emerald-700', label: 'Add More' },
-  { action: 'Trim', className: 'text-red-400', label: 'Trim' },
   { action: 'Buy New', className: 'text-emerald-400', label: 'Buy New' },
+  { action: 'Trim', className: 'text-red-400', label: 'Trim' },
   { action: 'Hold', className: 'text-yellow-700', label: 'Hold' },
 ];
 
@@ -392,6 +395,19 @@ function SetupNameCell({
   );
 }
 
+
+function getFinalActionablesHref(stock: SetupStockGroup['stocks'][number]) {
+  const baseHref = stock.market === 'india'
+    ? URLs.routes.console.zerodhaFinalActionables()
+    : URLs.routes.console.indmoneyUsFinalActionables();
+
+  return `${baseHref}#${finalActionCategoryDomId(stock.action)}`;
+}
+
+function getActionLabel(action: ActionCategory) {
+  return action === 'Add more' ? 'Add More' : action;
+}
+
 function SetupStocksModal({ group, onClose }: { group: SetupStockGroup | null; onClose: () => void }) {
   if (!group) return null;
 
@@ -456,7 +472,13 @@ function SetupStocksModal({ group, onClose }: { group: SetupStockGroup | null; o
                       {stock.currentInvestment}
                     </td>
                     <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.cell}`}>
-                      {stock.action}
+                      <Link
+                        href={getFinalActionablesHref(stock)}
+                        className="underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        onClick={onClose}
+                      >
+                        {getActionLabel(stock.action)}
+                      </Link>
                     </td>
                   </tr>
                 );
