@@ -58,8 +58,22 @@ type LlmBreakupRow = {
 
 type ActionEstimate = {
   currentUnits: number | null;
+  currentInvestmentAmount: number | null;
   units: number | null;
   amount: number | null;
+};
+
+type SetupStockDetail = {
+  key: string;
+  name: string;
+  currentUnits: string;
+  currentInvestmentAmount: string;
+  action: ActionCategory;
+};
+
+type SetupStockGroup = {
+  setup: string;
+  stocks: SetupStockDetail[];
 };
 
 type StockConsensus = {
@@ -216,11 +230,32 @@ function TechnicalSetupsHeaderLink({ children }: { children: ReactNode }) {
 function TechnicalSetupLink({
   setup,
   className,
+  setupGroup,
+  onSetupClick,
 }: {
   setup: string;
   className?: string;
+  setupGroup?: SetupStockGroup;
+  onSetupClick?: (group: SetupStockGroup) => void;
 }) {
   if (!setup) return null;
+
+  const label = setupGroup ? `${setup} (${setupGroup.stocks.length})` : setup;
+
+  if (setupGroup && onSetupClick) {
+    return (
+      <button
+        type="button"
+        className={cn("text-left underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500", className)}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSetupClick(setupGroup);
+        }}
+      >
+        {label}
+      </button>
+    );
+  }
 
   return (
     <Link
@@ -228,7 +263,7 @@ function TechnicalSetupLink({
       className={cn("underline-offset-4 transition hover:text-blue-700 hover:underline", className)}
       onClick={stopRowToggle}
     >
-      {setup}
+      {label}
     </Link>
   );
 }
@@ -242,16 +277,24 @@ const ACTION_CATEGORIES: ActionCategory[] = [
 ];
 const ACTION_HEADER: RebalanceHeader =
   "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
+const CURRENT_INVESTMENT_AMOUNT_HEADER = "Current Investment Amount";
 const ACTION_ESTIMATE_CATEGORIES = new Set<ActionCategory>([
   "Sell All",
   "Trim",
   "Add more",
   "Buy New",
 ]);
+const REBALANCE_DISPLAY_HEADERS = [
+  ...REBALANCE_HEADER_ORDER.slice(0, 3),
+  CURRENT_INVESTMENT_AMOUNT_HEADER,
+  ...REBALANCE_HEADER_ORDER.slice(3),
+] as const;
+
 const CONSOLIDATED_DISPLAY_HEADERS = [
   "Exchange Symbol",
   "Stock Symbol",
   "Current Units",
+  CURRENT_INVESTMENT_AMOUNT_HEADER,
   "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
   "Units to Sell/Buy",
   "Amount",
@@ -374,6 +417,13 @@ function getActionUnits(row: CanonicalRow, action: ActionCategory) {
   return null;
 }
 
+function getCurrentInvestmentAmount(row: CanonicalRow) {
+  const currentUnits = parseNumericCell(row["Current Units"]);
+  const price = parseNumericCell(row["Price Per Unit"]);
+  if (currentUnits === null || price === null) return null;
+  return Math.abs(currentUnits * price);
+}
+
 function getActionAmount(
   row: CanonicalRow,
   units: number | null,
@@ -401,6 +451,9 @@ function summarizeActionEstimate(
   const currentUnitValues = matchingRows
     .map((row) => parseNumericCell(row.cells["Current Units"]))
     .filter((value): value is number => value !== null);
+  const currentInvestmentValues = matchingRows
+    .map((row) => getCurrentInvestmentAmount(row.cells))
+    .filter((value): value is number => value !== null);
   const unitValues = matchingRows
     .map((row) => getActionUnits(row.cells, action))
     .filter((value): value is number => value !== null);
@@ -412,6 +465,7 @@ function summarizeActionEstimate(
 
   return {
     currentUnits: average(currentUnitValues),
+    currentInvestmentAmount: average(currentInvestmentValues),
     units: average(unitValues),
     amount: average(amountValues),
   };
@@ -450,6 +504,12 @@ function getDisplayActionEstimate(row: CanonicalRow) {
 
 function formatDisplayAmount(value: number | null, market: SwingTradeMarket) {
   return value === null ? "—" : formatCurrency(value, market);
+}
+
+function getFormattedCurrentInvestmentAmount(row: CanonicalRow, market: SwingTradeMarket) {
+  const explicitValue = normalizeWhitespace(row[CURRENT_INVESTMENT_AMOUNT_HEADER]);
+  if (explicitValue) return explicitValue;
+  return formatDisplayAmount(getCurrentInvestmentAmount(row), market);
 }
 
 function normalizeStockSymbol(value?: string | null) {
@@ -929,6 +989,55 @@ function getTechnicalScanClass(scan: TechnicalScanResult | null, row?: Canonical
   return getApprovedTechnicalSetupClass(resolveApprovedTechnicalSetup(scan, row));
 }
 
+function getSetupStockGroups(
+  consensus: StockConsensus[],
+  technicalScans: TechnicalScanMap,
+  market: SwingTradeMarket,
+) {
+  const groups = new Map<string, Map<string, SetupStockDetail>>();
+
+  const addStockToSetup = (setup: string, stock: StockConsensus) => {
+    const normalizedSetup = normalizeEmptyTechnicalValue(setup);
+    if (!normalizedSetup) return;
+
+    const stockMap = groups.get(normalizedSetup) ?? new Map<string, SetupStockDetail>();
+    stockMap.set(stock.key, {
+      key: stock.key,
+      name: stock.symbol,
+      currentUnits: stock.representative["Current Units"] || "—",
+      currentInvestmentAmount: getFormattedCurrentInvestmentAmount(stock.representative, market),
+      action: stock.consensusAction,
+    });
+    groups.set(normalizedSetup, stockMap);
+  };
+
+  consensus.forEach((stock) => {
+    addStockToSetup(formatTechnicalSetup(getTechnicalScanForStock(technicalScans, stock), stock.representative), stock);
+    stock.rows.forEach((row) => {
+      addStockToSetup(formatTechnicalSetup(null, row.cells), stock);
+    });
+  });
+
+  return Array.from(groups.entries()).reduce(
+    (acc, [setup, stockMap]) => {
+      acc[setup] = {
+        setup,
+        stocks: Array.from(stockMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+      };
+      return acc;
+    },
+    {} as Record<string, SetupStockGroup>,
+  );
+}
+
+function getSetupStockGroup(
+  setupGroups: Record<string, SetupStockGroup> | undefined,
+  setup: string,
+) {
+  if (!setupGroups) return undefined;
+  return setupGroups[setup];
+}
+
 function setupListMarkdown() {
   const formatRows = (label: string, rows: typeof BULLISH_SETUPS) => [
     `### ${label}`,
@@ -1059,6 +1168,10 @@ function buildConsensusRows(
       const consensusEstimate = actionAverages[consensusAction];
       representative["Current Units"] = formatQuantity(
         consensusEstimate.currentUnits ?? parseNumericCell(first["Current Units"]),
+      );
+      representative[CURRENT_INVESTMENT_AMOUNT_HEADER] = formatDisplayAmount(
+        consensusEstimate.currentInvestmentAmount ?? getCurrentInvestmentAmount(first),
+        market,
       );
       representative["Units to Sell/Buy"] = ACTION_ESTIMATE_CATEGORIES.has(
         consensusAction,
@@ -1368,6 +1481,7 @@ function ActionSummarySections({
                         <th className="px-3 py-2 font-semibold">Stock</th>
                         <th className="px-3 py-2 font-semibold">Consensus</th>
                         <th className="px-3 py-2 font-semibold">Current Units</th>
+                        <th className="px-3 py-2 font-semibold">Current Investment Amount</th>
                         <th className="px-3 py-2 font-semibold">Units to {getActionVerb(action)}</th>
                         <th className="px-3 py-2 font-semibold">Amount</th>
                         <th className="px-3 py-2 font-semibold">
@@ -1410,13 +1524,20 @@ function ActionSummarySections({
                               {formatQuantity(estimate.currentUnits)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                              {formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentInvestmentAmount(stock.representative), market)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                               {showActionColumns ? formatQuantity(estimate.units) : "—"}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                               {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
                             </td>
                             <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan, stock.representative))}>
-                              <TechnicalSetupLink setup={setup} />
+                              <TechnicalSetupLink
+                                setup={setup}
+                                setupGroup={getSetupStockGroup(setupGroups, setup)}
+                                onSetupClick={onSetupClick}
+                              />
                             </td>
                             <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan, stock.representative))}>
                               {formatTechnicalConfidence(scan, stock.representative)}
@@ -1443,17 +1564,25 @@ function RebalanceCell({
   header,
   market,
   technicalScan,
+  setupGroups,
+  onSetupClick,
 }: {
   row: CanonicalRow;
   header: ConsolidatedDisplayHeader;
   market: SwingTradeMarket;
   technicalScan?: TechnicalScanResult | null;
+  setupGroups?: Record<string, SetupStockGroup>;
+  onSetupClick?: (group: SetupStockGroup) => void;
 }) {
   if (header === "Technical Setup") {
     const setup = formatTechnicalSetup(technicalScan || null, row);
     return (
       <span className={cn("font-medium", getTechnicalScanClass(technicalScan || null, row))}>
-        <TechnicalSetupLink setup={setup} />
+        <TechnicalSetupLink
+          setup={setup}
+          setupGroup={getSetupStockGroup(setupGroups, setup)}
+          onSetupClick={onSetupClick}
+        />
       </span>
     );
   }
@@ -1463,6 +1592,9 @@ function RebalanceCell({
         {formatTechnicalConfidence(technicalScan || null, row)}
       </span>
     );
+  }
+  if (header === CURRENT_INVESTMENT_AMOUNT_HEADER) {
+    return getFormattedCurrentInvestmentAmount(row, market);
   }
   const actionEstimate = getDisplayActionEstimate(row);
   const cellValue =
@@ -1803,6 +1935,10 @@ export function FinalActionablesConsole({
   );
   const totalStocksConsolidated = consensus.length;
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
+  const setupStockGroups = useMemo(
+    () => getSetupStockGroups(consensus, technicalScans, market),
+    [consensus, market, technicalScans],
+  );
   const technicalScanHistory = useMemo(() => buildTechnicalScanHistory(runs), [runs]);
   const technicalScanIsActive = useMemo(() => hasActiveTechnicalScan(runs), [runs]);
 
@@ -2036,6 +2172,74 @@ export function FinalActionablesConsole({
           </Card>
         ) : null}
       </main>
+      <SetupStocksModal
+        group={selectedSetupGroup}
+        onClose={() => setSelectedSetupGroup(null)}
+      />
+    </div>
+  );
+}
+
+function SetupStocksModal({
+  group,
+  onClose,
+}: {
+  group: SetupStockGroup | null;
+  onClose: () => void;
+}) {
+  if (!group) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="setup-stocks-modal-title"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Technical setup stocks</p>
+            <h2 id="setup-stocks-modal-title" className="mt-1 text-lg font-semibold text-gray-950">
+              {group.setup} ({group.stocks.length})
+            </h2>
+          </div>
+          <button
+            type="button"
+            className="rounded-full p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onClick={onClose}
+            aria-label="Close setup stocks popup"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="overflow-auto p-5">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                <th className="px-3 py-2 font-semibold">Name</th>
+                <th className="px-3 py-2 font-semibold">Current Units</th>
+                <th className="px-3 py-2 font-semibold">Current Investment Amount</th>
+                <th className="px-3 py-2 font-semibold">Action Suggested in Rebalance</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {group.stocks.map((stock) => (
+                <tr key={stock.key}>
+                  <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-900">{stock.name}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.currentUnits}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.currentInvestmentAmount}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.action}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2119,7 +2323,7 @@ function FragmentRows({
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">
                       Run / LLM
                     </th>
-                    {REBALANCE_HEADER_ORDER.map((header) => (
+                    {REBALANCE_DISPLAY_HEADERS.map((header) => (
                       <th
                         key={`breakup-${stock.key}-${header}`}
                         className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700"
@@ -2143,7 +2347,7 @@ function FragmentRows({
                           {formatDateTime(row.meta.createdAt)}
                         </div>
                       </td>
-                      {REBALANCE_HEADER_ORDER.map((header) => (
+                      {REBALANCE_DISPLAY_HEADERS.map((header) => (
                         <td
                           key={`${row.meta.runId}-${row.meta.jobId}-${header}`}
                           className="px-3 py-2 align-top text-gray-700"
@@ -2152,6 +2356,8 @@ function FragmentRows({
                             row={row.cells}
                             header={header}
                             market={market}
+                            setupGroups={setupGroups}
+                            onSetupClick={onSetupClick}
                           />
                         </td>
                       ))}
