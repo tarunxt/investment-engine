@@ -58,6 +58,19 @@ function formatCapturedAt(value: string) {
   });
 }
 
+function formatSnapshotTime(value: string) {
+  return new Date(value).toLocaleTimeString('en-IN', {
+    timeStyle: 'short',
+  });
+}
+
+function formatShortSnapshotDate(value: string) {
+  return new Date(`${value}T00:00:00`).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
 function toneClass(value: number | null | undefined) {
   if (value == null) return 'text-gray-500';
   if (value > 0) return 'text-emerald-600';
@@ -66,7 +79,7 @@ function toneClass(value: number | null | undefined) {
 }
 
 function statusClass(status: string) {
-  if (status === 'parsed') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+  if (status === 'parsed') return 'border border-emerald-700 bg-emerald-600 text-white ring-emerald-700';
   if (status === 'partial') return 'bg-amber-50 text-amber-700 ring-amber-200';
   return 'bg-gray-50 text-gray-700 ring-gray-200';
 }
@@ -264,7 +277,7 @@ function EmptyState() {
   );
 }
 
-function SnapshotHistory({
+function SnapshotHistoryChart({
   history,
   selectedSnapshotId,
   onSelect,
@@ -273,65 +286,113 @@ function SnapshotHistory({
   selectedSnapshotId: number | null;
   onSelect: (snapshotId: number) => void;
 }) {
+  const chartData = [...history]
+    .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
+    .map((snapshot) => ({
+      ...snapshot,
+      value: snapshot.current_value || 0,
+    }));
+
+  if (chartData.length === 0) {
+    return null;
+  }
+
+  const values = chartData.map((snapshot) => snapshot.value);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const valueRange = maxValue - minValue || 1;
+  const width = 1000;
+  const height = 300;
+  const padding = { top: 18, right: 28, bottom: 44, left: 76 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const points = chartData.map((snapshot, index) => {
+    const x = padding.left + (chartData.length === 1 ? plotWidth / 2 : (index / (chartData.length - 1)) * plotWidth);
+    const y = padding.top + (1 - (snapshot.value - minValue) / valueRange) * plotHeight;
+
+    return { ...snapshot, x, y };
+  });
+  const path = points.map((point) => `${point.x},${point.y}`).join(' ');
+  const yTicks = [maxValue, minValue + valueRange / 2, minValue];
+  const selectedPoint = points.find((point) => point.id === selectedSnapshotId) ?? points.at(-1);
+
   return (
-    <div className="border border-gray-200 bg-white shadow-sm">
-      <div className="border-b border-gray-200 px-5 py-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Saved History</span>
+    <div className="flex h-full flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Daily History</span>
+          <p className="mt-1 text-sm text-gray-500">Current value trend across saved INDmoney snapshots.</p>
+        </div>
+        {selectedPoint ? (
+          <div className="text-sm sm:text-right">
+            <p className="font-semibold text-gray-950">{formatCurrency(selectedPoint.value)}</p>
+            <p className="text-xs text-gray-500">
+              {formatSnapshotDate(selectedPoint.snapshot_date)} · Saved {formatSnapshotTime(selectedPoint.captured_at)}
+            </p>
+          </div>
+        ) : null}
       </div>
-      <div className="max-h-[32rem] overflow-y-auto">
-        {history.map((snapshot) => {
-          const isActive = selectedSnapshotId === snapshot.id;
-          const reportedHoldings = snapshot.reported_holdings_count ?? snapshot.holdings_count;
 
-          return (
-            <button
-              key={snapshot.id}
-              onClick={() => onSelect(snapshot.id)}
-              className={cn(
-                'w-full border-b border-gray-100 px-5 py-4 text-left transition-colors last:border-b-0',
-                isActive ? 'bg-gray-950 text-white' : 'hover:bg-gray-50',
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className={cn('text-sm font-semibold', isActive ? 'text-white' : 'text-gray-900')}>
-                    {formatSnapshotDate(snapshot.snapshot_date)}
-                  </p>
-                  <p className={cn('mt-1 text-xs', isActive ? 'text-gray-300' : 'text-gray-500')}>
-                    Saved {formatCapturedAt(snapshot.captured_at)}
-                  </p>
-                </div>
-                <span
-                  className={cn(
-                    'inline-flex items-center px-2 py-0.5 text-[11px] font-semibold uppercase ring-1',
-                    isActive ? 'bg-white/10 text-white ring-white/20' : statusClass(snapshot.parse_status),
-                  )}
+      <div className="mt-4 min-h-[24rem] flex-1 overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Daily INDmoney portfolio current value history" className="h-full min-h-[24rem] min-w-[44rem]">
+          <defs>
+            <linearGradient id="indmoney-history-area" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {yTicks.map((tick, index) => {
+            const y = padding.top + (1 - (tick - minValue) / valueRange) * plotHeight;
+
+            return (
+              <g key={`${tick}-${index}`}>
+                <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="#e5e7eb" strokeDasharray="4 4" />
+                <text x={padding.left - 12} y={y + 4} textAnchor="end" className="fill-gray-400 text-[11px]">
+                  {formatCurrency(tick)}
+                </text>
+              </g>
+            );
+          })}
+          {points.length > 0 ? (
+            <>
+              <polygon
+                points={`${padding.left},${padding.top + plotHeight} ${path} ${width - padding.right},${padding.top + plotHeight}`}
+                fill="url(#indmoney-history-area)"
+              />
+              <polyline points={path} fill="none" stroke="#059669" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+            </>
+          ) : null}
+          {points.map((point) => {
+            const isActive = selectedSnapshotId === point.id;
+
+            return (
+              <g key={point.id} className="cursor-pointer" onClick={() => onSelect(point.id)}>
+                <title>{`${formatSnapshotDate(point.snapshot_date)} · ${formatCurrency(point.value)}`}</title>
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r={isActive ? 8 : 5}
+                  fill={isActive ? '#020617' : '#10b981'}
+                  stroke="white"
+                  strokeWidth="3"
+                />
+                <text
+                  x={point.x}
+                  y={height - 20}
+                  textAnchor="middle"
+                  className={cn('fill-gray-400 text-[11px]', isActive && 'fill-gray-950 font-semibold')}
                 >
-                  {snapshot.parse_status}
-                </span>
-              </div>
-
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <p className={cn(isActive ? 'text-gray-400' : 'text-gray-500')}>Current value</p>
-                  <p className={cn('font-medium', isActive ? 'text-white' : 'text-gray-900')}>
-                    {formatCurrency(snapshot.current_value)}
-                  </p>
-                </div>
-                <div>
-                  <p className={cn(isActive ? 'text-gray-400' : 'text-gray-500')}>Holdings</p>
-                  <p className={cn('font-medium', isActive ? 'text-white' : 'text-gray-900')}>
-                    {snapshot.holdings_count}/{reportedHoldings}
-                  </p>
-                </div>
-              </div>
-            </button>
-          );
-        })}
+                  {formatShortSnapshotDate(point.snapshot_date)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
       </div>
     </div>
   );
 }
+
 
 function CompactHoldingsTable({
   title,
@@ -597,7 +658,7 @@ export function IndMoneyUsSnapshotsPanel({
       <div className="border border-gray-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-gray-950">INDmoney US Portfolio</h2>
+            <h2 className="text-lg font-semibold text-gray-950">INDmoney US Portfolio Snapshot</h2>
             <p className="mt-1 text-sm text-gray-500">
               Manual daily snapshots parsed into holdings, allocation, returns, and market context.
             </p>
@@ -607,7 +668,7 @@ export function IndMoneyUsSnapshotsPanel({
               <p>Viewing snapshot</p>
               <p className="font-medium text-gray-700">{formatCapturedAt(selectedSnapshot.captured_at)}</p>
             </div>
-            <span className={cn('inline-flex items-center px-2.5 py-1 text-xs font-semibold uppercase ring-1', statusClass(selectedSnapshot.parse_status))}>
+            <span className={cn('inline-flex min-w-[6.5rem] items-center justify-center px-2.5 py-1 text-xs font-semibold uppercase tracking-wider ring-1', statusClass(selectedSnapshot.parse_status))}>
               {selectedSnapshot.parse_status}
             </span>
           </div>
@@ -626,42 +687,49 @@ export function IndMoneyUsSnapshotsPanel({
           </div>
         ) : null}
 
-        <div className="grid gap-4 px-5 py-5 md:grid-cols-2 xl:grid-cols-3">
-          <MetricCard
-            label="Current Value"
-            value={formatCurrency(selectedSnapshot.current_value ?? selectedSnapshot.derived.parsed_holdings_current_value)}
-            sublabel={`Saved ${formatSnapshotDate(selectedSnapshot.snapshot_date)}`}
-            icon={Wallet}
-          />
-          <MetricCard
-            label="Invested Value"
-            value={formatCurrency(selectedSnapshot.invested_value ?? selectedSnapshot.derived.parsed_holdings_invested_value)}
-            icon={PiggyBank}
-          />
-          <MetricCard
-            label="Total Returns"
-            value={formatCurrency(selectedSnapshot.total_return_value ?? selectedSnapshot.derived.parsed_holdings_total_pnl)}
-            sublabel={formatPercent(selectedSnapshot.total_return_percent)}
-            tone={totalReturnTone}
-            icon={TrendingUp}
-          />
-          <MetricCard
-            label="1D Returns"
-            value={formatCurrency(selectedSnapshot.day_return_value)}
-            sublabel={formatPercent(selectedSnapshot.day_return_percent)}
-            tone={dayReturnTone}
-            icon={Activity}
-          />
-          <MetricCard
-            label="Wallet"
-            value={formatCurrency(selectedSnapshot.wallet_balance)}
-            icon={Wallet}
-          />
-          <MetricCard
-            label="Holdings"
-            value={`${formatCount(selectedSnapshot.holdings_count)} / ${formatCount(reportedHoldings)}`}
-            sublabel={`${selectedSnapshot.derived.profitable_holdings_count} profitable, ${selectedSnapshot.derived.loss_making_holdings_count} losing`}
-            icon={Target}
+        <div className="grid gap-5 px-5 py-5 xl:grid-cols-[20rem,minmax(0,1fr)]">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+            <MetricCard
+              label="Current Value"
+              value={formatCurrency(selectedSnapshot.current_value ?? selectedSnapshot.derived.parsed_holdings_current_value)}
+              sublabel={`Saved ${formatSnapshotDate(selectedSnapshot.snapshot_date)}`}
+              icon={Wallet}
+            />
+            <MetricCard
+              label="Invested Value"
+              value={formatCurrency(selectedSnapshot.invested_value ?? selectedSnapshot.derived.parsed_holdings_invested_value)}
+              icon={PiggyBank}
+            />
+            <MetricCard
+              label="Total Returns"
+              value={formatCurrency(selectedSnapshot.total_return_value ?? selectedSnapshot.derived.parsed_holdings_total_pnl)}
+              sublabel={formatPercent(selectedSnapshot.total_return_percent)}
+              tone={totalReturnTone}
+              icon={TrendingUp}
+            />
+            <MetricCard
+              label="1D Returns"
+              value={formatCurrency(selectedSnapshot.day_return_value)}
+              sublabel={formatPercent(selectedSnapshot.day_return_percent)}
+              tone={dayReturnTone}
+              icon={Activity}
+            />
+            <MetricCard
+              label="Wallet"
+              value={formatCurrency(selectedSnapshot.wallet_balance)}
+              icon={Wallet}
+            />
+            <MetricCard
+              label="Holdings"
+              value={`${formatCount(selectedSnapshot.holdings_count)} / ${formatCount(reportedHoldings)}`}
+              sublabel={`${selectedSnapshot.derived.profitable_holdings_count} profitable, ${selectedSnapshot.derived.loss_making_holdings_count} losing`}
+              icon={Target}
+            />
+          </div>
+          <SnapshotHistoryChart
+            history={history}
+            selectedSnapshotId={selectedSnapshotId}
+            onSelect={onSelectSnapshot}
           />
         </div>
       </div>
@@ -679,14 +747,7 @@ export function IndMoneyUsSnapshotsPanel({
         </div>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[18rem,minmax(0,1fr)]">
-        <SnapshotHistory
-          history={history}
-          selectedSnapshotId={selectedSnapshotId}
-          onSelect={onSelectSnapshot}
-        />
-
-        <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-5">
           <div className="border border-gray-200 bg-white shadow-sm">
             <div className="flex flex-col gap-2 border-b border-gray-200 px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -828,6 +889,5 @@ export function IndMoneyUsSnapshotsPanel({
           </div>
         </div>
       </div>
-    </div>
   );
 }

@@ -355,8 +355,8 @@ function SnapshotHistoryChart({
   const maxValue = Math.max(...values);
   const valueRange = maxValue - minValue || 1;
   const width = 1000;
-  const height = 230;
-  const padding = { top: 18, right: 28, bottom: 54, left: 76 };
+  const height = 300;
+  const padding = { top: 18, right: 28, bottom: 44, left: 76 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const points = chartData.map((snapshot, index) => {
@@ -370,7 +370,7 @@ function SnapshotHistoryChart({
   const selectedPoint = points.find((point) => point.snapshot_date === selectedSnapshotDate) ?? points.at(-1);
 
   return (
-    <div className="border-t border-gray-200 px-5 py-5">
+    <div className="flex h-full flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Daily History</span>
@@ -386,8 +386,8 @@ function SnapshotHistoryChart({
         )}
       </div>
 
-      <div className="mt-4 overflow-x-auto">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Daily portfolio holdings value history" className="min-w-[44rem]">
+      <div className="mt-4 min-h-[18rem] flex-1 overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Daily portfolio holdings value history" className="h-full min-h-[18rem] min-w-[44rem]">
           <defs>
             <linearGradient id="zerodha-history-area" x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="#10b981" stopOpacity="0.22" />
@@ -584,36 +584,38 @@ export function PortfolioSnapshotsPanel({
             {error}
           </div>
         )}
-        <div className="grid gap-4 px-5 py-5 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            label="Holdings Value"
-            value={formatCurrency(selectedSnapshot.holdings_market_value)}
-            icon={Wallet}
-          />
-          <MetricCard
-            label="Holdings P&L"
-            value={formatCurrency(selectedSnapshot.holdings_pnl)}
-            icon={Briefcase}
-            tone={selectedSnapshot.holdings_pnl >= 0 ? 'positive' : 'negative'}
-          />
-          <MetricCard
-            label="Day Change"
-            value={formatCurrency(selectedSnapshot.holdings_day_change_value)}
-            icon={selectedSnapshot.holdings_day_change_value >= 0 ? TrendingUp : TrendingDown}
-            tone={selectedSnapshot.holdings_day_change_value >= 0 ? 'positive' : 'negative'}
-          />
-          <MetricCard
-            label="Net Position M2M"
-            value={formatCurrency(selectedSnapshot.positions_m2m)}
-            icon={Activity}
-            tone={selectedSnapshot.positions_m2m >= 0 ? 'positive' : 'negative'}
+        <div className="grid gap-5 px-5 py-5 xl:grid-cols-[20rem,minmax(0,1fr)]">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+            <MetricCard
+              label="Holdings Value"
+              value={formatCurrency(selectedSnapshot.holdings_market_value)}
+              icon={Wallet}
+            />
+            <MetricCard
+              label="Holdings P&L"
+              value={formatCurrency(selectedSnapshot.holdings_pnl)}
+              icon={Briefcase}
+              tone={selectedSnapshot.holdings_pnl >= 0 ? 'positive' : 'negative'}
+            />
+            <MetricCard
+              label="Day Change"
+              value={formatCurrency(selectedSnapshot.holdings_day_change_value)}
+              icon={selectedSnapshot.holdings_day_change_value >= 0 ? TrendingUp : TrendingDown}
+              tone={selectedSnapshot.holdings_day_change_value >= 0 ? 'positive' : 'negative'}
+            />
+            <MetricCard
+              label="Net Position M2M"
+              value={formatCurrency(selectedSnapshot.positions_m2m)}
+              icon={Activity}
+              tone={selectedSnapshot.positions_m2m >= 0 ? 'positive' : 'negative'}
+            />
+          </div>
+          <SnapshotHistoryChart
+            history={history}
+            selectedSnapshotDate={selectedSnapshotDate}
+            onSelect={onSelectSnapshot}
           />
         </div>
-        <SnapshotHistoryChart
-          history={history}
-          selectedSnapshotDate={selectedSnapshotDate}
-          onSelect={onSelectSnapshot}
-        />
       </div>
 
       <div className="flex flex-col gap-5">
