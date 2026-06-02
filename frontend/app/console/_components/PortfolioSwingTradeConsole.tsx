@@ -62,7 +62,7 @@ export function PortfolioSwingTradeConsole({
       promptPreset={promptPreset}
       defaultExportSheetName={getSwingTradeDefaultExportSheetName(market)}
       runScopeMarket={market}
-      runScopeLabel={copy.title}
+      runScopeLabel={market === 'us' ? 'IndMoney Swing' : 'Zerodha Swing'}
     >
       <div className="mx-auto flex flex-col gap-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

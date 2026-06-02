@@ -864,7 +864,7 @@ export function PortfolioRebalanceConsole({
       promptPreset={promptPreset}
       defaultExportSheetName={getRebalanceDefaultExportSheetName(market)}
       runScopeMarket={market}
-      runScopeLabel={copy.title}
+      runScopeLabel={market === 'us' ? 'IndMoney Rebalance' : 'Zerodha Rebalance'}
       runScopeKind="rebalance"
     >
       <div className="mx-auto flex flex-col gap-6">
