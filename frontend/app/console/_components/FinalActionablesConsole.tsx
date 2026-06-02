@@ -130,7 +130,7 @@ export function getSetupStockActionClasses(action: ActionCategory) {
   return SETUP_STOCK_ACTION_CLASSES[action];
 }
 
-type StockConsensus = {
+export type StockConsensus = {
   key: string;
   exchange: string;
   symbol: string;
@@ -1127,7 +1127,7 @@ function setupListMarkdown() {
   return `${formatRows("Bullish Setups", BULLISH_SETUPS)}\n\n${formatRows("Bearish / Sell-Trim Setups", BEARISH_SETUPS)}`;
 }
 
-function buildTechnicalScanPrompt(stocks: StockConsensus[], market: SwingTradeMarket) {
+export function buildTechnicalScanPrompt(stocks: StockConsensus[], market: SwingTradeMarket) {
   const stockRows = stocks
     .map(
       (stock) =>
