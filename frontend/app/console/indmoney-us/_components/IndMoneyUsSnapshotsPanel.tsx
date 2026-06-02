@@ -333,8 +333,8 @@ function SnapshotHistoryChart({
         ) : null}
       </div>
 
-      <div className="mt-4 min-h-[24rem] flex-1 overflow-x-auto">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Daily INDmoney portfolio current value history" className="h-full min-h-[24rem] min-w-[44rem]">
+      <div className="mt-4 min-h-[18rem] flex-1 overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Daily INDmoney portfolio current value history" className="h-full min-h-[18rem] min-w-[44rem]">
           <defs>
             <linearGradient id="indmoney-history-area" x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="#10b981" stopOpacity="0.22" />
@@ -687,8 +687,8 @@ export function IndMoneyUsSnapshotsPanel({
           </div>
         ) : null}
 
-        <div className="grid gap-5 px-5 py-5 xl:grid-cols-[20rem,minmax(0,1fr)]">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+        <div className="grid gap-5 px-5 py-5 xl:grid-cols-2">
+          <div className="grid gap-4">
             <MetricCard
               label="Current Value"
               value={formatCurrency(selectedSnapshot.current_value ?? selectedSnapshot.derived.parsed_holdings_current_value)}
