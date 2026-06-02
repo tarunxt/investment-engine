@@ -325,8 +325,23 @@ function getStockIdentityKey(exchange: string, symbol: string) {
   return `${(exchange || "UNKNOWN").trim().toUpperCase()}:${(symbol || "UNKNOWN").trim().toUpperCase()}`;
 }
 
+function stripMarkdownLinks(value: string) {
+  return value.replace(/\[([^\]]+)]\((?:[^)(]+|\([^)(]*\))*\)/g, "$1");
+}
+
+function stripInlineCitations(value: string) {
+  return value
+    .replace(/【[^】]*】/g, "")
+    .replace(/\[(?:\d+(?:\s*[,;-]\s*\d+)*|source|ref|reference|citation)\]/gi, "")
+    .replace(/(?:^|\s)(?:source|ref|citation):\s*\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeScanCell(value?: string | null) {
-  return String(value || "").replace(/^`+|`+$/g, "").trim();
+  return stripInlineCitations(stripMarkdownLinks(String(value || "")))
+    .replace(/^`+|`+$/g, "")
+    .trim();
 }
 
 function normalizeScanHeader(value?: string | null) {
@@ -373,24 +388,24 @@ function parseTechnicalScanResponse(
     const hasStockColumn = headers.some((header) =>
       ["stock symbol", "symbol", "stock", "ticker"].includes(header),
     );
-    const hasSetupColumn = headers.some((header) =>
-      header.includes("setup") || header === "technical setup",
-    );
+    const hasSetupColumn = headers.some((header) => header.includes("setup"));
     if (!hasStockColumn || !hasSetupColumn) continue;
 
     const getIndex = (names: string[]) =>
       headers.findIndex((header) =>
         names.some((name) => header === name || header.includes(name)),
       );
-    const exchangeIndex = getIndex(["exchange symbol", "exchange"]);
-    const symbolIndex = getIndex(["stock symbol", "symbol", "ticker", "stock"]);
-    const primaryIndex = getIndex(["primary setup", "technical setup", "setup"]);
+    const exchangeIndex = getIndex(["exchange symbol", "exchange", "market"]);
+    const symbolIndex = getIndex(["stock symbol", "ticker symbol", "symbol", "ticker", "stock"]);
+    const primaryIndex = getIndex(["primary setup", "technical setup", "setup name", "setup"]);
     const secondaryIndex = getIndex(["secondary setups", "secondary setup", "other setups"]);
-    const biasIndex = getIndex(["bias", "sentiment"]);
+    const biasIndex = getIndex(["bias", "sentiment", "direction"]);
     const confidenceIndex = getIndex(["confidence score", "confidence"]);
     const triggerIndex = getIndex(["trigger level", "trigger", "entry level", "entry range"]);
     const invalidationIndex = getIndex(["invalidation level", "invalidation", "stop loss", "stop"]);
+    if (symbolIndex < 0 || primaryIndex < 0) continue;
 
+    const parsedFromTable: TechnicalScanResult[] = [];
     let rowIndex = index + 1;
     if (rowIndex < lines.length && isMarkdownSeparator(splitMarkdownRow(lines[rowIndex]))) {
       rowIndex += 1;
@@ -404,7 +419,7 @@ function parseTechnicalScanResponse(
       const stockSymbol = normalizeScanCell(cells[symbolIndex] || "");
       if (!stockSymbol || /^stock(?: symbol)?$/i.test(stockSymbol)) continue;
       const exchangeSymbol = exchangeIndex >= 0 ? normalizeScanCell(cells[exchangeIndex] || "") : "";
-      const primarySetup = primaryIndex >= 0 ? normalizeScanCell(cells[primaryIndex] || "") : "";
+      const primarySetup = normalizeScanCell(cells[primaryIndex] || "");
       const secondarySetups = secondaryIndex >= 0 ? normalizeScanCell(cells[secondaryIndex] || "") : "";
       const rawBias = (biasIndex >= 0
         ? normalizeScanCell(cells[biasIndex] || "")
@@ -415,7 +430,7 @@ function parseTechnicalScanResponse(
           ? "bullish"
           : "neutral";
 
-      results.push({
+      parsedFromTable.push({
         stockSymbol,
         exchangeSymbol,
         primarySetup,
@@ -427,7 +442,8 @@ function parseTechnicalScanResponse(
         ...meta,
       });
     }
-    break;
+
+    results.push(...parsedFromTable);
   }
 
   return results;
@@ -485,12 +501,20 @@ function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistor
 }
 
 function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsensus) {
-  return (
-    scanMap[getStockIdentityKey(stock.exchange, stock.symbol)]
-    ?? scanMap[getStockIdentityKey("UNKNOWN", stock.symbol)]
-    ?? scanMap[`SYMBOL:${normalizeScanKey(stock.symbol)}`]
-    ?? null
-  );
+  const symbolCandidates = [
+    stock.symbol,
+    stock.representative["Stock Symbol"],
+    stock.representative["Stock Name"],
+  ].filter((value): value is string => Boolean(value));
+
+  for (const symbol of symbolCandidates) {
+    const exactScan = scanMap[getStockIdentityKey(stock.exchange, symbol)]
+      ?? scanMap[getStockIdentityKey("UNKNOWN", symbol)]
+      ?? scanMap[`SYMBOL:${normalizeScanKey(symbol)}`];
+    if (exactScan) return exactScan;
+  }
+
+  return null;
 }
 
 function hasActiveTechnicalScan(runs: RunResponse[]) {
