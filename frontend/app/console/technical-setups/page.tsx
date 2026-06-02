@@ -6,8 +6,10 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, X } from 'lucide-react';
 import {
   buildConsensusRows,
   buildTechnicalScanMap,
+  compareSetupStocksByAction,
   extractRebalanceInputFingerprint,
   fetchAllFullRuns,
+  getSetupStockActionClasses,
   getSetupStockGroups,
   isCompletedRebalanceRun,
   type SetupStockGroup,
@@ -227,7 +229,7 @@ function mergeSetupGroups(groups: Array<Record<string, SetupStockGroup>>) {
     (acc, [setup, stocks]) => {
       acc[setup] = {
         setup,
-        stocks: Array.from(stocks.values()).sort((a, b) => a.name.localeCompare(b.name)),
+        stocks: Array.from(stocks.values()).sort(compareSetupStocksByAction),
       };
       return acc;
     },
@@ -313,13 +315,23 @@ function SetupStocksModal({ group, onClose }: { group: SetupStockGroup | null; o
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {group.stocks.map((stock) => (
-                <tr key={stock.key}>
-                  <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-900">{stock.name}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.currentUnits}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.action}</td>
-                </tr>
-              ))}
+              {group.stocks.map((stock) => {
+                const actionClasses = getSetupStockActionClasses(stock.action);
+
+                return (
+                  <tr key={stock.key} className={actionClasses.row}>
+                    <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.nameCell}`}>
+                      {stock.name}
+                    </td>
+                    <td className={`whitespace-nowrap px-3 py-2 ${actionClasses.cell}`}>
+                      {stock.currentUnits}
+                    </td>
+                    <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.cell}`}>
+                      {stock.action}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -43,7 +43,7 @@ import type {
   ZerodhaThreatAnalysis,
 } from "@/types/api";
 
-type ActionCategory = "Sell All" | "Trim" | "Hold" | "Add more" | "Buy New";
+export type ActionCategory = "Sell All" | "Trim" | "Hold" | "Add more" | "Buy New";
 
 type LlmBreakupRow = {
   cells: CanonicalRow;
@@ -74,6 +74,57 @@ export type SetupStockGroup = {
   setup: string;
   stocks: SetupStockDetail[];
 };
+
+const SETUP_STOCK_ACTION_PRIORITY: Record<ActionCategory, number> = {
+  "Sell All": 0,
+  "Add more": 1,
+  Trim: 2,
+  "Buy New": 3,
+  Hold: 4,
+};
+
+const SETUP_STOCK_ACTION_CLASSES: Record<
+  ActionCategory,
+  { row: string; nameCell: string; cell: string }
+> = {
+  "Sell All": {
+    row: "bg-red-100",
+    nameCell: "text-red-950",
+    cell: "text-red-900",
+  },
+  "Add more": {
+    row: "bg-emerald-100",
+    nameCell: "text-emerald-950",
+    cell: "text-emerald-900",
+  },
+  Trim: {
+    row: "bg-red-50",
+    nameCell: "text-red-950",
+    cell: "text-red-800",
+  },
+  "Buy New": {
+    row: "bg-emerald-50",
+    nameCell: "text-emerald-950",
+    cell: "text-emerald-800",
+  },
+  Hold: {
+    row: "bg-yellow-50",
+    nameCell: "text-yellow-950",
+    cell: "text-yellow-800",
+  },
+};
+
+export function compareSetupStocksByAction(a: SetupStockDetail, b: SetupStockDetail) {
+  const actionComparison =
+    SETUP_STOCK_ACTION_PRIORITY[a.action] - SETUP_STOCK_ACTION_PRIORITY[b.action];
+  if (actionComparison !== 0) return actionComparison;
+
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+}
+
+export function getSetupStockActionClasses(action: ActionCategory) {
+  return SETUP_STOCK_ACTION_CLASSES[action];
+}
 
 type StockConsensus = {
   key: string;
@@ -1051,7 +1102,7 @@ export function getSetupStockGroups(
     (acc, [setup, stockMap]) => {
       acc[setup] = {
         setup,
-        stocks: Array.from(stockMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+        stocks: Array.from(stockMap.values()).sort(compareSetupStocksByAction),
       };
       return acc;
     },
@@ -2239,13 +2290,23 @@ function SetupStocksModal({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {group.stocks.map((stock) => (
-                <tr key={stock.key}>
-                  <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-900">{stock.name}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.currentUnits}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-700">{stock.action}</td>
-                </tr>
-              ))}
+              {group.stocks.map((stock) => {
+                const actionClasses = getSetupStockActionClasses(stock.action);
+
+                return (
+                  <tr key={stock.key} className={actionClasses.row}>
+                    <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.nameCell}`}>
+                      {stock.name}
+                    </td>
+                    <td className={`whitespace-nowrap px-3 py-2 ${actionClasses.cell}`}>
+                      {stock.currentUnits}
+                    </td>
+                    <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.cell}`}>
+                      {stock.action}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
