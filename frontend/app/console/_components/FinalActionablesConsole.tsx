@@ -20,7 +20,7 @@ import {
   type RebalancePortfolioKey,
 } from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
-import { BULLISH_SETUPS, BEARISH_SETUPS } from "@/lib/technicalSetups";
+import { BULLISH_SETUPS, BEARISH_SETUPS, type SetupRow } from "@/lib/technicalSetups";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { apiService } from "@/services/api";
@@ -360,6 +360,140 @@ function normalizeScanKey(value?: string | null) {
     .replace(/[^A-Z0-9]+/g, "");
 }
 
+
+const APPROVED_TECHNICAL_SETUPS: Array<SetupRow & { direction: "bullish" | "bearish" }> = [
+  ...BULLISH_SETUPS.map((setup) => ({ ...setup, direction: "bullish" as const })),
+  ...BEARISH_SETUPS.map((setup) => ({ ...setup, direction: "bearish" as const })),
+];
+
+function normalizeSetupLookupKey(value?: string | null) {
+  return normalizeScanCell(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(?:technical setup|setup|pattern|primary|secondary)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function getApprovedSetupByName(value?: string | null) {
+  const lookup = normalizeSetupLookupKey(value);
+  if (!lookup) return null;
+
+  return APPROVED_TECHNICAL_SETUPS.find(
+    (setup) => normalizeSetupLookupKey(setup.setup) === lookup,
+  ) ?? null;
+}
+
+function findApprovedSetupInText(value?: string | null) {
+  const lookup = normalizeSetupLookupKey(value);
+  if (!lookup) return null;
+
+  return APPROVED_TECHNICAL_SETUPS.find((setup) => {
+    const setupKey = normalizeSetupLookupKey(setup.setup);
+    return lookup.includes(setupKey) || setupKey.includes(lookup);
+  }) ?? null;
+}
+
+function inferApprovedSetupFromText(
+  value: string,
+  preferredDirection?: "bullish" | "bearish" | "neutral" | null,
+) {
+  const lookup = normalizeSetupLookupKey(value);
+  if (!lookup) return null;
+
+  const bearishAliases: Array<[RegExp, string]> = [
+    [/relative\s+(?:weakness|underperformance)|underperform|significant\s+loss|weak\s+momentum|poor\s+earnings|valuation\s+concerns/, "Relative weakness breakdown"],
+    [/downtrend|falling\s+channel|sell\s+bounce/, "Top of falling channel"],
+    [/lower\s+high|weakening\s+trend|corrective\s+phase|choppy\s+trend|pre\s+earnings\s+risk/, "Lower-high pullback"],
+    [/resistance|rejection|supply/, "Resistance rejection"],
+    [/support\s+break|breakdown/, "Support breakdown"],
+    [/bear\s+flag|consolidation\s+after\s+rally/, "Bear flag"],
+    [/double\s+top|\bm\s+pattern/, "Double top / M pattern"],
+    [/head\s+(?:and|&)\s+shoulders/, "Head & shoulders"],
+    [/descending\s+triangle/, "Descending triangle"],
+    [/200\s*(?:dma|day)|moving\s+average/, "200 DMA rejection"],
+    [/vwap/, "VWAP rejection"],
+    [/gap\s*up|gap\s*fade/, "Gap-up fade"],
+    [/parabolic|blow\s*off/, "Parabolic blow-off top"],
+    [/rsi|divergence/, "RSI bearish divergence at resistance"],
+  ];
+  const bullishAliases: Array<[RegExp, string]> = [
+    [/relative\s+strength|outperform/, "Relative strength breakout"],
+    [/higher\s+low|pullback|dip/, "Higher-low pullback"],
+    [/breakout\s*(?:and|\+)\s*retest|retest/, "Breakout + retest"],
+    [/resistance\s+break|breakout|momentum/, "Resistance breakout"],
+    [/support|demand|bounce/, "Support bounce"],
+    [/bull\s+flag|consolidation\s+after\s+rally/, "Bull flag"],
+    [/double\s+bottom|\bw\s+pattern/, "Double bottom / W pattern"],
+    [/inverse\s+head\s+(?:and|&)\s+shoulders/, "Inverse head & shoulders"],
+    [/ascending\s+triangle/, "Ascending triangle"],
+    [/200\s*(?:dma|day)|moving\s+average/, "200 DMA reclaim"],
+    [/vwap/, "VWAP reclaim"],
+    [/gap\s*up|gap\s*and\s*go/, "Gap-up hold / gap-and-go"],
+    [/rsi|divergence/, "RSI bullish divergence at support"],
+  ];
+
+  const aliasGroups = preferredDirection === "bullish"
+    ? [bullishAliases, bearishAliases]
+    : [bearishAliases, bullishAliases];
+
+  for (const aliases of aliasGroups) {
+    for (const [pattern, setupName] of aliases) {
+      if (pattern.test(lookup)) return getApprovedSetupByName(setupName);
+    }
+  }
+
+  return null;
+}
+
+function getDefaultApprovedSetup(
+  scan: TechnicalScanResult | null,
+  row?: CanonicalRow | null,
+) {
+  const action = normalizeAction(row?.[ACTION_HEADER] || "");
+  if (scan?.bias === "bearish" || action === "Sell All" || action === "Trim") {
+    return getApprovedSetupByName("Lower-high pullback");
+  }
+  return getApprovedSetupByName("Higher-low pullback");
+}
+
+function resolveApprovedTechnicalSetup(
+  scan: TechnicalScanResult | null,
+  row?: CanonicalRow | null,
+) {
+  const setupCandidates = [
+    scan?.primarySetup,
+    scan?.secondarySetups,
+    row?.["Technical Setup"],
+  ];
+  const preferredDirection = scan?.bias
+    || (normalizeAction(row?.[ACTION_HEADER] || "") === "Sell All" || normalizeAction(row?.[ACTION_HEADER] || "") === "Trim"
+      ? "bearish"
+      : "bullish");
+
+  for (const candidate of setupCandidates) {
+    const exactSetup = getApprovedSetupByName(candidate);
+    if (exactSetup) return exactSetup;
+  }
+
+  for (const candidate of setupCandidates) {
+    const textSetup = findApprovedSetupInText(candidate);
+    if (textSetup) return textSetup;
+  }
+
+  for (const candidate of setupCandidates) {
+    const inferredSetup = inferApprovedSetupFromText(candidate || "", preferredDirection);
+    if (inferredSetup) return inferredSetup;
+  }
+
+  return getDefaultApprovedSetup(scan, row);
+}
+
+function getApprovedTechnicalSetupClass(setup?: (SetupRow & { direction: "bullish" | "bearish" }) | null) {
+  if (!setup) return "text-gray-400";
+  return setup.direction === "bearish" ? "text-red-700" : "text-emerald-700";
+}
+
 function getScanSymbolCandidates(...values: Array<string | null | undefined>) {
   const candidates = new Set<string>();
 
@@ -597,21 +731,16 @@ function getFallbackTechnicalConfidence(row?: CanonicalRow | null) {
 }
 
 function formatTechnicalSetup(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
-  if (!scan) return getFallbackTechnicalSetup(row);
-  const secondary = normalizeEmptyTechnicalValue(scan.secondarySetups);
-  const primary = normalizeEmptyTechnicalValue(scan.primarySetup) || "No clean setup";
-  return secondary ? `${primary}; ${secondary}` : primary;
+  return resolveApprovedTechnicalSetup(scan, row)?.setup || getFallbackTechnicalSetup(row);
 }
 
 function formatTechnicalConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
-  return normalizeEmptyTechnicalValue(scan?.confidenceScore) || getFallbackTechnicalConfidence(row);
+  const approvedSetup = resolveApprovedTechnicalSetup(scan, row);
+  return approvedSetup ? approvedSetup.confidence.toFixed(1) : getFallbackTechnicalConfidence(row);
 }
 
-function getTechnicalScanClass(scan: TechnicalScanResult | null) {
-  if (!scan) return "text-gray-400";
-  if (scan.bias === "bullish") return "text-emerald-700";
-  if (scan.bias === "bearish") return "text-red-700";
-  return "text-gray-700";
+function getTechnicalScanClass(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  return getApprovedTechnicalSetupClass(resolveApprovedTechnicalSetup(scan, row));
 }
 
 function setupListMarkdown() {
@@ -635,7 +764,7 @@ function buildTechnicalScanPrompt(stocks: StockConsensus[], market: SwingTradeMa
     )
     .join("\n");
 
-  return `${TECHNICAL_SCAN_MARKER}\nMarket: ${market === "us" ? "US equities" : "India equities"}\n\nStock list:\n| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |\n|---|---|---|---:|\n${stockRows}\n\nApproved Technical Setups list from sidebar:\n${setupListMarkdown()}\n\nAct as a top-tier technical analyst and swing-trading strategist.\n\nObjective:\nFor the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.\n\nImportant rules:\n- Use current fresh internet data only. Do not rely on stale memory.\n- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.\n- Check at least daily chart data. If possible, also consider weekly chart for broader trend.\n- Tag only from the approved setup names above. Do not invent new setup names.\n- Every stock must receive a Primary Setup. Use "No clean setup" only if the setup is unclear after checking the chart.\n- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups.\n- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.\n- Give a confidence score for the stock-specific tag based on chart clarity, volume confirmation, trend alignment, and invalidation level.\n- Always mention the exact trigger level and invalidation level wherever possible.\n- Do not give generic advice. Make the tagging specific to the latest chart structure.\n\nReturn ONLY this markdown table and no extra prose:\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.join(" | ")} |\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.map(() => "---").join(" | ")} |\n| EXCHANGE | SYMBOL | Approved setup name or No clean setup | Optional approved setup names | Bullish/Bearish/Neutral | 0-100 | exact price/level | exact price/level |`;
+  return `${TECHNICAL_SCAN_MARKER}\nMarket: ${market === "us" ? "US equities" : "India equities"}\n\nStock list:\n| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |\n|---|---|---|---:|\n${stockRows}\n\nApproved Technical Setups list from sidebar:\n${setupListMarkdown()}\n\nAct as a top-tier technical analyst and swing-trading strategist.\n\nObjective:\nFor the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.\n\nImportant rules:\n- Use current fresh internet data only. Do not rely on stale memory.\n- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.\n- Check at least daily chart data. If possible, also consider weekly chart for broader trend.\n- Tag only from the approved setup names above. Do not invent, paraphrase, or abbreviate setup names.\n- Every stock must receive a Primary Setup that exactly matches one Setup value from the approved Technical Setups list above.\n- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups; every setup name must exactly match an approved Setup value.\n- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.\n- For Confidence Score, copy the numeric Confidence value from the approved Technical Setups list for the same Primary Setup. Return only the number, without /10, %, avg text, or LLM counts.\n- Always mention the exact trigger level and invalidation level wherever possible.\n- Do not give generic advice. Make the tagging specific to the latest chart structure.\n\nReturn ONLY this markdown table and no extra prose:\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.join(" | ")} |\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.map(() => "---").join(" | ")} |\n| EXCHANGE | SYMBOL | Exact approved primary setup name | Optional exact approved setup names | Bullish/Bearish/Neutral | approved confidence number only | exact price/level | exact price/level |`;
 }
 
 function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
@@ -858,10 +987,10 @@ function ActionSummarySections({
                             <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                               {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
                             </td>
-                            <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan))}>
+                            <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan, stock.representative))}>
                               {formatTechnicalSetup(scan, stock.representative)}
                             </td>
-                            <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan))}>
+                            <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan, stock.representative))}>
                               {formatTechnicalConfidence(scan, stock.representative)}
                             </td>
                           </tr>
@@ -894,14 +1023,14 @@ function RebalanceCell({
 }) {
   if (header === "Technical Setup") {
     return (
-      <span className={cn("font-medium", getTechnicalScanClass(technicalScan || null))}>
+      <span className={cn("font-medium", getTechnicalScanClass(technicalScan || null, row))}>
         {formatTechnicalSetup(technicalScan || null, row)}
       </span>
     );
   }
   if (header === "Confidence Score") {
     return (
-      <span className={cn("font-semibold", getTechnicalScanClass(technicalScan || null))}>
+      <span className={cn("font-semibold", getTechnicalScanClass(technicalScan || null, row))}>
         {formatTechnicalConfidence(technicalScan || null, row)}
       </span>
     );
