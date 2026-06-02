@@ -323,6 +323,7 @@ export const URLs = {
       polymarketBot: () => "/console/polymarket-bot",
       googleSheets: () => "/console/google-sheets",
       apis: () => "/console/apis",
+      technicalSetups: () => "/console/technical-setups",
     },
 
     profile: {
