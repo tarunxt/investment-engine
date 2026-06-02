@@ -29,6 +29,7 @@ import {
     HiOutlineCube,
     HiOutlineTrendingUp,
     HiOutlineUser,
+    HiOutlineChartBar,
     HiOutlineViewGrid,
 } from 'react-icons/hi';
 import { URLs } from '@/lib/urls';
@@ -120,6 +121,12 @@ const DEFAULT_NAVIGATION: NavigationEntry[] = [
         icon: HiOutlineCube,
     },
     {
+        id: 'technical-setups',
+        name: 'Technical Setups',
+        href: URLs.routes.console.technicalSetups(),
+        icon: HiOutlineChartBar,
+    },
+    {
         id: 'google-sheets',
         name: 'Google Sheets',
         href: URLs.routes.console.googleSheets(),
@@ -161,9 +168,22 @@ function reconcileNavigationOrder(order: string[]) {
     }
 
     for (const id of DEFAULT_NAVIGATION_ORDER) {
-        if (!seen.has(id)) {
-            normalized.push(id);
+        if (seen.has(id)) {
+            continue;
         }
+
+        const defaultIndex = DEFAULT_NAVIGATION_ORDER.indexOf(id);
+        const previousDefaultId = DEFAULT_NAVIGATION_ORDER
+            .slice(0, defaultIndex)
+            .findLast((candidateId) => seen.has(candidateId));
+
+        if (!previousDefaultId) {
+            normalized.unshift(id);
+        } else {
+            normalized.splice(normalized.indexOf(previousDefaultId) + 1, 0, id);
+        }
+
+        seen.add(id);
     }
 
     return normalized;
