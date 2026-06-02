@@ -9,6 +9,7 @@ import {
   type CanonicalRow,
   type RebalanceHeader,
 } from "@/components/InvestmentRecommendationTable";
+import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { Button } from "@/components/ui/button";
@@ -18,9 +19,10 @@ import {
   type RebalancePortfolioKey,
 } from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
+import { BULLISH_SETUPS, BEARISH_SETUPS } from "@/lib/technicalSetups";
 import { cn } from "@/lib/utils";
 import { apiService } from "@/services/api";
-import type { RunResponse } from "@/types/api";
+import type { ProviderModelTarget, RunResponse } from "@/types/api";
 
 type ActionCategory = "Sell All" | "Trim" | "Hold" | "Add more" | "Buy New";
 
@@ -53,6 +55,37 @@ type StockConsensus = {
   rows: LlmBreakupRow[];
 };
 
+type TechnicalScanResult = {
+  stockSymbol: string;
+  exchangeSymbol: string;
+  primarySetup: string;
+  secondarySetups: string;
+  confidenceScore: string;
+  bias: "bullish" | "bearish" | "neutral";
+  triggerLevel: string;
+  invalidationLevel: string;
+  runId: number;
+  jobId: number;
+  provider: string;
+  model: string;
+  createdAt: string;
+};
+
+type TechnicalScanMap = Record<string, TechnicalScanResult>;
+
+const TECHNICAL_SCAN_MARKER = "## Technical Scan Input Bundle";
+const TECHNICAL_SCAN_TABLE_COLUMNS = [
+  "Exchange Symbol",
+  "Stock Symbol",
+  "Primary Setup",
+  "Secondary Setups",
+  "Bias",
+  "Confidence Score",
+  "Trigger Level",
+  "Invalidation Level",
+] as const;
+
+
 const ACTION_CATEGORIES: ActionCategory[] = [
   "Sell All",
   "Trim",
@@ -75,6 +108,8 @@ const CONSOLIDATED_DISPLAY_HEADERS = [
   "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
   "Units to Sell/Buy",
   "Amount",
+  "Technical Setup",
+  "Confidence Score",
   ...REBALANCE_HEADER_ORDER.filter(
     (header) =>
       ![
@@ -255,21 +290,6 @@ function getActionVerb(action: ActionCategory) {
   return action === "Sell All" || action === "Trim" ? "sell" : "buy";
 }
 
-function getActionEstimateLabel(
-  stock: StockConsensus,
-  action: ActionCategory,
-  market: SwingTradeMarket,
-) {
-  const estimate = stock.actionAverages[action];
-  if (
-    !ACTION_ESTIMATE_CATEGORIES.has(action) ||
-    (!estimate.units && !estimate.amount)
-  ) {
-    return null;
-  }
-  return `${formatQuantity(estimate.units)} units to ${getActionVerb(action)} (${formatCurrency(estimate.amount, market)})`;
-}
-
 function getDisplayActionEstimate(row: CanonicalRow) {
   const action = normalizeAction(row[ACTION_HEADER] || "");
   if (!action || !ACTION_ESTIMATE_CATEGORIES.has(action)) return null;
@@ -291,6 +311,162 @@ function getStockKey(row: CanonicalRow) {
     .trim()
     .toUpperCase();
   return `${exchange}:${symbol}`;
+}
+
+function getStockIdentityKey(exchange: string, symbol: string) {
+  return `${(exchange || "UNKNOWN").trim().toUpperCase()}:${(symbol || "UNKNOWN").trim().toUpperCase()}`;
+}
+
+function normalizeScanCell(value?: string | null) {
+  return String(value || "").replace(/^`+|`+$/g, "").trim();
+}
+
+function splitMarkdownRow(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => normalizeScanCell(cell));
+}
+
+function isMarkdownSeparator(cells: string[]) {
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
+}
+
+function parseTechnicalScanResponse(
+  response: string,
+  meta: Pick<TechnicalScanResult, "runId" | "jobId" | "provider" | "model" | "createdAt">,
+): TechnicalScanResult[] {
+  const lines = response.split(/\r?\n/);
+  const results: TechnicalScanResult[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.includes("|") || !/stock symbol/i.test(line) || !/primary setup/i.test(line)) {
+      continue;
+    }
+
+    const headers = splitMarkdownRow(line).map((header) => header.toLowerCase());
+    const getIndex = (names: string[]) =>
+      headers.findIndex((header) => names.some((name) => header === name || header.includes(name)));
+    const exchangeIndex = getIndex(["exchange symbol", "exchange"]);
+    const symbolIndex = getIndex(["stock symbol", "symbol"]);
+    const primaryIndex = getIndex(["primary setup"]);
+    const secondaryIndex = getIndex(["secondary setups", "secondary setup"]);
+    const biasIndex = getIndex(["bias"]);
+    const confidenceIndex = getIndex(["confidence score", "confidence"]);
+    const triggerIndex = getIndex(["trigger level", "trigger"]);
+    const invalidationIndex = getIndex(["invalidation level", "invalidation"]);
+
+    let rowIndex = index + 1;
+    if (rowIndex < lines.length && isMarkdownSeparator(splitMarkdownRow(lines[rowIndex]))) {
+      rowIndex += 1;
+    }
+
+    for (; rowIndex < lines.length; rowIndex += 1) {
+      const rowLine = lines[rowIndex];
+      if (!rowLine.includes("|")) break;
+      const cells = splitMarkdownRow(rowLine);
+      if (isMarkdownSeparator(cells) || cells.length < 3) continue;
+      const stockSymbol = normalizeScanCell(cells[symbolIndex] || "");
+      if (!stockSymbol || /^stock symbol$/i.test(stockSymbol)) continue;
+      const exchangeSymbol = normalizeScanCell(cells[exchangeIndex] || "");
+      const primarySetup = normalizeScanCell(cells[primaryIndex] || "");
+      const secondarySetups = normalizeScanCell(cells[secondaryIndex] || "");
+      const rawBias = normalizeScanCell(cells[biasIndex] || `${primarySetup} ${secondarySetups}`).toLowerCase();
+      const bias = rawBias.includes("bear")
+        ? "bearish"
+        : rawBias.includes("bull")
+          ? "bullish"
+          : "neutral";
+
+      results.push({
+        stockSymbol,
+        exchangeSymbol,
+        primarySetup,
+        secondarySetups,
+        confidenceScore: normalizeScanCell(cells[confidenceIndex] || ""),
+        bias,
+        triggerLevel: normalizeScanCell(cells[triggerIndex] || ""),
+        invalidationLevel: normalizeScanCell(cells[invalidationIndex] || ""),
+        ...meta,
+      });
+    }
+    break;
+  }
+
+  return results;
+}
+
+function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
+  const scanRows = runs
+    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .flatMap((run) =>
+      (run.run_jobs ?? []).flatMap((link) => {
+        const job = link.job;
+        if (!job || job.status !== "completed" || !job.response) return [];
+        return parseTechnicalScanResponse(job.response, {
+          runId: run.id,
+          jobId: link.job_id,
+          provider: job.provider,
+          model: job.model,
+          createdAt: job.created_at,
+        });
+      }),
+    )
+    .sort((a, b) => parseTimestampMs(a.createdAt) - parseTimestampMs(b.createdAt));
+
+  return scanRows.reduce<TechnicalScanMap>((acc, row) => {
+    acc[getStockIdentityKey(row.exchangeSymbol, row.stockSymbol)] = row;
+    return acc;
+  }, {});
+}
+
+function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsensus) {
+  return scanMap[getStockIdentityKey(stock.exchange, stock.symbol)] ?? scanMap[getStockIdentityKey("UNKNOWN", stock.symbol)] ?? null;
+}
+
+function formatTechnicalSetup(scan: TechnicalScanResult | null) {
+  if (!scan) return "";
+  const secondary = scan.secondarySetups && scan.secondarySetups !== "—" ? `; ${scan.secondarySetups}` : "";
+  return `${scan.primarySetup || "No clean setup"}${secondary}`;
+}
+
+function formatTechnicalConfidence(scan: TechnicalScanResult | null) {
+  if (!scan) return "";
+  return scan.confidenceScore || "";
+}
+
+function getTechnicalScanClass(scan: TechnicalScanResult | null) {
+  if (!scan) return "text-gray-400";
+  if (scan.bias === "bullish") return "text-emerald-700";
+  if (scan.bias === "bearish") return "text-red-700";
+  return "text-gray-700";
+}
+
+function setupListMarkdown() {
+  const formatRows = (label: string, rows: typeof BULLISH_SETUPS) => [
+    `### ${label}`,
+    "| Setup | Bias | Confidence | Best use | Trigger | Invalidation |",
+    "|---|---:|---:|---|---|---|",
+    ...rows.map(
+      (row) =>
+        `| ${row.setup} | ${row.bias} | ${row.confidence.toFixed(1)}/10 | ${row.bestUse} | ${row.trigger} | ${row.invalidation} |`,
+    ),
+  ].join("\n");
+  return `${formatRows("Bullish Setups", BULLISH_SETUPS)}\n\n${formatRows("Bearish / Sell-Trim Setups", BEARISH_SETUPS)}`;
+}
+
+function buildTechnicalScanPrompt(stocks: StockConsensus[], market: SwingTradeMarket) {
+  const stockRows = stocks
+    .map(
+      (stock) =>
+        `| ${stock.exchange || (market === "us" ? "US" : "NSE")} | ${stock.symbol} | ${stock.consensusAction} | ${stock.totalSuggestions} |`,
+    )
+    .join("\n");
+
+  return `${TECHNICAL_SCAN_MARKER}\nMarket: ${market === "us" ? "US equities" : "India equities"}\n\nStock list:\n| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |\n|---|---|---|---:|\n${stockRows}\n\nApproved Technical Setups list from sidebar:\n${setupListMarkdown()}\n\nAct as a top-tier technical analyst and swing-trading strategist.\n\nObjective:\nFor the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.\n\nImportant rules:\n- Use current fresh internet data only. Do not rely on stale memory.\n- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.\n- Check at least daily chart data. If possible, also consider weekly chart for broader trend.\n- Tag only from the approved setup names above. Do not invent new setup names.\n- Every stock must receive a Primary Setup. Use "No clean setup" only if the setup is unclear after checking the chart.\n- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups.\n- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.\n- Give a confidence score for the stock-specific tag based on chart clarity, volume confirmation, trend alignment, and invalidation level.\n- Always mention the exact trigger level and invalidation level wherever possible.\n- Do not give generic advice. Make the tagging specific to the latest chart structure.\n\nReturn ONLY this markdown table and no extra prose:\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.join(" | ")} |\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.map(() => "---").join(" | ")} |\n| EXCHANGE | SYMBOL | Approved setup name or No clean setup | Optional approved setup names | Bullish/Bearish/Neutral | 0-100 | exact price/level | exact price/level |`;
 }
 
 function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
@@ -442,12 +618,14 @@ function summarizeRationales(rows: LlmBreakupRow[]) {
 function ActionSummarySections({
   consensus,
   market,
+  technicalScans,
 }: {
   consensus: StockConsensus[];
   market: SwingTradeMarket;
+  technicalScans: TechnicalScanMap;
 }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-5">
+    <div className="space-y-4">
       {ACTION_CATEGORIES.map((action) => {
         const stocks = consensus.filter(
           (item) => item.consensusAction === action,
@@ -460,60 +638,72 @@ function ActionSummarySections({
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">{action}</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-xs">
-              <div className="font-semibold">
+            <CardContent className="text-xs">
+              <div className="mb-3 font-semibold">
                 {stocks.length} stock{stocks.length === 1 ? "" : "s"}
               </div>
-              <div className="space-y-1 text-gray-700">
-                {stocks.length ? (
-                  stocks.map((stock) => {
-                    const estimateLabel = getActionEstimateLabel(
-                      stock,
-                      action,
-                      market,
-                    );
-                    const estimate = stock.actionAverages[action];
-                    const showActionColumns =
-                      action === "Sell All" ||
-                      action === "Trim" ||
-                      action === "Add more" ||
-                      action === "Buy New";
-                    return (
-                      <div key={stock.key} className="space-y-0.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <TradingViewSymbolLink
-                            symbol={stock.symbol}
-                            market={market}
-                            exchange={stock.exchange}
-                            className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
-                          >
-                            {stock.symbol}
-                          </TradingViewSymbolLink>
-                          <span>
-                            {stock.actionCounts[action]}/
-                            {stock.totalSuggestions}
-                          </span>
-                        </div>
-                        {showActionColumns ? (
-                          <div className="grid grid-cols-3 gap-1 text-[11px] text-gray-500">
-                            <span>Current: {formatQuantity(estimate.currentUnits)}</span>
-                            <span>
-                              Units to {getActionVerb(action)}: {formatQuantity(estimate.units)}
-                            </span>
-                            <span>Amount: {formatDisplayAmount(estimate.amount, market)}</span>
-                          </div>
-                        ) : estimateLabel ? (
-                          <div className="text-[11px] text-gray-500">
-                            Avg: {estimateLabel}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <span>No consensus stocks.</span>
-                )}
-              </div>
+              {stocks.length ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                        <th className="px-3 py-2 font-semibold">Stock</th>
+                        <th className="px-3 py-2 font-semibold">Consensus</th>
+                        <th className="px-3 py-2 font-semibold">Current Units</th>
+                        <th className="px-3 py-2 font-semibold">Units to {getActionVerb(action)}</th>
+                        <th className="px-3 py-2 font-semibold">Amount</th>
+                        <th className="px-3 py-2 font-semibold">Technical Setup</th>
+                        <th className="px-3 py-2 font-semibold">Confidence Score</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {stocks.map((stock) => {
+                        const estimate = stock.actionAverages[action];
+                        const showActionColumns =
+                          action === "Sell All" ||
+                          action === "Trim" ||
+                          action === "Add more" ||
+                          action === "Buy New";
+                        const scan = getTechnicalScanForStock(technicalScans, stock);
+                        return (
+                          <tr key={stock.key} className="bg-white/40">
+                            <td className="whitespace-nowrap px-3 py-2 align-top">
+                              <TradingViewSymbolLink
+                                symbol={stock.symbol}
+                                market={market}
+                                exchange={stock.exchange}
+                                className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
+                              >
+                                {stock.symbol}
+                              </TradingViewSymbolLink>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                              {stock.actionCounts[action]}/{stock.totalSuggestions}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                              {formatQuantity(estimate.currentUnits)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                              {showActionColumns ? formatQuantity(estimate.units) : "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                              {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
+                            </td>
+                            <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan))}>
+                              {formatTechnicalSetup(scan)}
+                            </td>
+                            <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan))}>
+                              {formatTechnicalConfidence(scan)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <span className="text-gray-600">No consensus stocks.</span>
+              )}
             </CardContent>
           </Card>
         );
@@ -526,11 +716,27 @@ function RebalanceCell({
   row,
   header,
   market,
+  technicalScan,
 }: {
   row: CanonicalRow;
   header: ConsolidatedDisplayHeader;
   market: SwingTradeMarket;
+  technicalScan?: TechnicalScanResult | null;
 }) {
+  if (header === "Technical Setup") {
+    return (
+      <span className={cn("font-medium", getTechnicalScanClass(technicalScan || null))}>
+        {formatTechnicalSetup(technicalScan || null)}
+      </span>
+    );
+  }
+  if (header === "Confidence Score") {
+    return (
+      <span className={cn("font-semibold", getTechnicalScanClass(technicalScan || null))}>
+        {formatTechnicalConfidence(technicalScan || null)}
+      </span>
+    );
+  }
   const actionEstimate = getDisplayActionEstimate(row);
   const cellValue =
     header === "Units to Sell/Buy"
@@ -734,6 +940,8 @@ export function FinalActionablesConsole({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showRunDetails, setShowRunDetails] = useState(false);
+  const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
+  const [technicalScanMessage, setTechnicalScanMessage] = useState<string | null>(null);
 
   const loadRuns = useCallback(async (showLoading = true) => {
     if (showLoading) {
@@ -802,7 +1010,27 @@ export function FinalActionablesConsole({
     (sum, stock) => sum + stock.totalSuggestions,
     0,
   );
+  const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
   const copy = PAGE_COPY[portfolio];
+
+  const handleTechnicalScan = async (target: ProviderModelTarget | null) => {
+    if (!target || !consensus.length) return;
+    setTechnicalScanRunning(true);
+    setTechnicalScanMessage(null);
+    try {
+      const run = await apiService.createRun({
+        prompt: buildTechnicalScanPrompt(consensus, market),
+        targets: [target],
+        allow_parallel: true,
+      });
+      setTechnicalScanMessage(`Queued technical scan run #${run.id} with ${target.provider}/${target.model}. Refresh after it completes to map the latest setup data.`);
+      await loadRuns(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to queue technical scan.");
+    } finally {
+      setTechnicalScanRunning(false);
+    }
+  };
 
   const toggleExpanded = (key: string) => {
     setExpanded((current) => {
@@ -834,22 +1062,39 @@ export function FinalActionablesConsole({
               {copy.description}
             </p>
           </div>
-          <Button
-            onClick={() => void loadRuns()}
-            variant="outline"
-            disabled={loading}
-          >
-            <RefreshCw
-              className={cn("mr-2 h-4 w-4", loading ? "animate-spin" : "")}
+          <div className="flex flex-wrap items-center gap-2">
+            <EventScanRunControls
+              buttonLabel="Technical Scan"
+              defaultTarget={null}
+              disabled={loading || !consensus.length}
+              onRun={handleTechnicalScan}
+              running={technicalScanRunning}
             />
-            Refresh
-          </Button>
+            <Button
+              onClick={() => void loadRuns()}
+              variant="outline"
+              disabled={loading}
+            >
+              <RefreshCw
+                className={cn("mr-2 h-4 w-4", loading ? "animate-spin" : "")}
+              />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {error ? (
           <Card className="border-red-200 bg-red-50">
             <CardContent className="pt-6 text-sm text-red-700">
               {error}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {technicalScanMessage ? (
+          <Card className="border-blue-200 bg-blue-50">
+            <CardContent className="pt-6 text-sm text-blue-700">
+              {technicalScanMessage}
             </CardContent>
           </Card>
         ) : null}
@@ -900,7 +1145,11 @@ export function FinalActionablesConsole({
               </CardContent>
             </Card>
 
-            <ActionSummarySections consensus={consensus} market={market} />
+            <ActionSummarySections
+              consensus={consensus}
+              market={market}
+              technicalScans={technicalScans}
+            />
           </>
         )}
 
@@ -944,6 +1193,7 @@ export function FinalActionablesConsole({
                             isExpanded={isExpanded}
                             onToggle={() => toggleExpanded(stock.key)}
                             market={market}
+                            technicalScan={getTechnicalScanForStock(technicalScans, stock)}
                           />
                         );
                       })}
@@ -971,11 +1221,13 @@ function FragmentRows({
   isExpanded,
   onToggle,
   market,
+  technicalScan,
 }: {
   stock: StockConsensus;
   isExpanded: boolean;
   onToggle: () => void;
   market: SwingTradeMarket;
+  technicalScan: TechnicalScanResult | null;
 }) {
   return (
     <>
@@ -1007,6 +1259,7 @@ function FragmentRows({
               row={stock.representative}
               header={header}
               market={market}
+              technicalScan={technicalScan}
             />
           </td>
         ))}
