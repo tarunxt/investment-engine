@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const LOCAL_API_FALLBACK = "http://localhost:8000";
+const VERCEL_BACKEND_ROUTE_PREFIX = "/_/backend";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 const PLACEHOLDER_HOST_SNIPPETS = ["yourdomain.com", "example.com"];
 const FORWARDED_HEADER_BLOCKLIST = new Set([
@@ -13,6 +14,7 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
   "x-forwarded-proto",
 ]);
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
+const RETRYABLE_PROXY_STATUSES = new Set([502, 503, 504]);
 
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
@@ -44,20 +46,28 @@ function inferApiBaseUrlFromRequest(request: NextRequest) {
     return LOCAL_API_FALLBACK;
   }
 
-  const rootHostname = host.replace(/^www\./, "");
-  return `${request.nextUrl.protocol}//api.${rootHostname}`;
+  return `${request.nextUrl.protocol}//${request.nextUrl.host}${VERCEL_BACKEND_ROUTE_PREFIX}`;
 }
 
-function resolveBackendApiBaseUrl(request: NextRequest) {
+function resolveConfiguredBackendApiBaseUrl() {
   const configured = parseConfiguredUrl(
-    process.env.API_URL || process.env.NEXT_PUBLIC_API_URL,
+    process.env.BACKEND_API_URL ||
+      process.env.API_URL ||
+      process.env.NEXT_PUBLIC_API_URL,
   );
 
   if (configured && !isPlaceholderHostname(configured.hostname)) {
     return trimTrailingSlash(configured.toString());
   }
 
-  return inferApiBaseUrlFromRequest(request);
+  return null;
+}
+
+function resolveBackendApiBaseUrls(request: NextRequest) {
+  const urls = [resolveConfiguredBackendApiBaseUrl(), inferApiBaseUrlFromRequest(request)].filter(
+    (url): url is string => Boolean(url),
+  );
+  return Array.from(new Set(urls));
 }
 
 function buildForwardHeaders(request: NextRequest) {
@@ -80,35 +90,60 @@ function buildResponseHeaders(response: Response) {
   return headers;
 }
 
+function buildTargetUrl(baseUrl: string, path: string, request: NextRequest) {
+  const targetUrl = new URL(`${baseUrl}/${path}`);
+  targetUrl.search = request.nextUrl.search;
+  return targetUrl;
+}
+
 async function proxyBackendRequest(request: NextRequest, context: RouteContext) {
   const params = await context.params;
   const path = (params.path ?? []).map(encodeURIComponent).join("/");
-  const targetUrl = new URL(`${resolveBackendApiBaseUrl(request)}/${path}`);
-  targetUrl.search = request.nextUrl.search;
+  const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer();
+  let lastErrorMessage: string | null = null;
+  let lastResponse: Response | null = null;
 
-  try {
-    const response = await fetch(targetUrl, {
-      method: request.method,
-      headers: buildForwardHeaders(request),
-      body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
-      cache: "no-store",
-    });
+  for (const baseUrl of resolveBackendApiBaseUrls(request)) {
+    const targetUrl = buildTargetUrl(baseUrl, path, request);
 
-    return new NextResponse(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: buildResponseHeaders(response),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json(
-      {
-        message: "Unable to reach backend API through the frontend proxy.",
-        detail: message,
-      },
-      { status: 502 },
-    );
+    try {
+      const response = await fetch(targetUrl, {
+        method: request.method,
+        headers: buildForwardHeaders(request),
+        body,
+        cache: "no-store",
+      });
+
+      if (RETRYABLE_PROXY_STATUSES.has(response.status)) {
+        lastResponse = response;
+        continue;
+      }
+
+      return new NextResponse(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: buildResponseHeaders(response),
+      });
+    } catch (error) {
+      lastErrorMessage = error instanceof Error ? error.message : String(error);
+    }
   }
+
+  if (lastResponse) {
+    return new NextResponse(lastResponse.body, {
+      status: lastResponse.status,
+      statusText: lastResponse.statusText,
+      headers: buildResponseHeaders(lastResponse),
+    });
+  }
+
+  return NextResponse.json(
+    {
+      message: "Unable to reach backend API through the frontend proxy.",
+      detail: lastErrorMessage ?? "No backend API target was available.",
+    },
+    { status: 502 },
+  );
 }
 
 export const dynamic = "force-dynamic";
