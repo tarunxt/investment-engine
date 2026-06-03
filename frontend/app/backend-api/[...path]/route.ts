@@ -40,13 +40,17 @@ function isPlaceholderHostname(hostname: string) {
   return PLACEHOLDER_HOST_SNIPPETS.some((snippet) => hostname.includes(snippet));
 }
 
-function inferApiBaseUrlFromRequest(request: NextRequest) {
+function inferApiBaseUrlsFromRequest(request: NextRequest) {
   const host = request.nextUrl.hostname;
   if (LOCAL_HOSTNAMES.has(host)) {
-    return LOCAL_API_FALLBACK;
+    return [LOCAL_API_FALLBACK];
   }
 
-  return `${request.nextUrl.protocol}//${request.nextUrl.host}${VERCEL_BACKEND_ROUTE_PREFIX}`;
+  const rootHostname = host.replace(/^www\./, "");
+  return [
+    `${request.nextUrl.protocol}//api.${rootHostname}`,
+    `${request.nextUrl.protocol}//${request.nextUrl.host}${VERCEL_BACKEND_ROUTE_PREFIX}`,
+  ];
 }
 
 function resolveConfiguredBackendApiBaseUrl() {
@@ -64,9 +68,10 @@ function resolveConfiguredBackendApiBaseUrl() {
 }
 
 function resolveBackendApiBaseUrls(request: NextRequest) {
-  const urls = [resolveConfiguredBackendApiBaseUrl(), inferApiBaseUrlFromRequest(request)].filter(
-    (url): url is string => Boolean(url),
-  );
+  const urls = [
+    resolveConfiguredBackendApiBaseUrl(),
+    ...inferApiBaseUrlsFromRequest(request),
+  ].filter((url): url is string => Boolean(url));
   return Array.from(new Set(urls));
 }
 

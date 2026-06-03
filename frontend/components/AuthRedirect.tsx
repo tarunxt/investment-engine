@@ -18,9 +18,5 @@ export function AuthRedirect({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, loading, redirectTo, router]);
 
-  if (isClientAuthBypassed || isAuthenticated) {
-    return null;
-  }
-
   return <>{children}</>;
 }
