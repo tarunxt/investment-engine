@@ -7,6 +7,7 @@ import { sessionStorage } from '@/services/session';
  */
 const LOCAL_API_FALLBACK = "http://localhost:8000";
 const LOCAL_FRONTEND_FALLBACK = "http://localhost:3000";
+const BROWSER_API_PROXY_BASE = "/backend-api";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 const PLACEHOLDER_HOST_SNIPPETS = ["yourdomain.com", "example.com"];
 
@@ -83,14 +84,46 @@ function inferBrowserApiBaseUrl() {
   return `${protocol}//api.${rootHostname}`;
 }
 
-function resolveApiBaseUrl() {
-  const configuredClientUrl = resolveConfiguredBrowserUrl(process.env.NEXT_PUBLIC_API_URL);
-  if (configuredClientUrl) {
-    return configuredClientUrl;
+function resolveConfiguredClientApiBaseUrl() {
+  return resolveConfiguredBrowserUrl(process.env.NEXT_PUBLIC_API_URL);
+}
+
+function resolveConfiguredServerApiBaseUrl() {
+  const configured = parseConfiguredUrl(
+    process.env.BACKEND_API_URL || process.env.API_URL,
+  );
+
+  if (!configured) {
+    return null;
   }
 
+  return trimTrailingSlash(configured.toString());
+}
+
+function shouldUseBrowserApiProxy() {
   if (typeof window === "undefined") {
-    return trimTrailingSlash(process.env.API_URL || LOCAL_API_FALLBACK);
+    return false;
+  }
+
+  if (process.env.NEXT_PUBLIC_DISABLE_API_PROXY === "true") {
+    return false;
+  }
+
+  return !LOCAL_HOSTNAMES.has(window.location.hostname);
+}
+
+function resolveApiBaseUrl() {
+  if (typeof window === "undefined") {
+    return resolveConfiguredServerApiBaseUrl() || LOCAL_API_FALLBACK;
+  }
+
+  if (shouldUseBrowserApiProxy()) {
+    return BROWSER_API_PROXY_BASE;
+  }
+
+  const configuredClientUrl = resolveConfiguredClientApiBaseUrl();
+  if (configuredClientUrl) {
+    return configuredClientUrl;
   }
 
   return inferBrowserApiBaseUrl() || LOCAL_API_FALLBACK;
@@ -110,7 +143,17 @@ function resolveFrontendBaseUrl() {
 }
 
 function resolveWebSocketBaseUrl() {
-  return resolveApiBaseUrl().replace(/^http/, "ws");
+  const configuredClientUrl = resolveConfiguredClientApiBaseUrl();
+  if (configuredClientUrl) {
+    return configuredClientUrl.replace(/^http/, "ws");
+  }
+
+  if (typeof window === "undefined") {
+    const configuredServerUrl = resolveConfiguredServerApiBaseUrl() || LOCAL_API_FALLBACK;
+    return configuredServerUrl.replace(/^http/, "ws");
+  }
+
+  return (inferBrowserApiBaseUrl() || LOCAL_API_FALLBACK).replace(/^http/, "ws");
 }
 
 /**
