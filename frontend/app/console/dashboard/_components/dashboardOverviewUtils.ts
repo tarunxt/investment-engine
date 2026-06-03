@@ -90,9 +90,42 @@ function extractDateTimestamp(value: string) {
   return Number.POSITIVE_INFINITY;
 }
 
+function normalizeUnknownErrorDetail(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => normalizeUnknownErrorDetail(item))
+      .filter((item): item is string => Boolean(item));
+    return parts.length > 0 ? parts.join('; ') : null;
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const message = normalizeUnknownErrorDetail(record.message);
+    if (message) return message;
+
+    const detail = normalizeUnknownErrorDetail(record.detail);
+    if (detail) return detail;
+
+    const loc = normalizeUnknownErrorDetail(record.loc);
+    const msg = normalizeUnknownErrorDetail(record.msg);
+    if (loc && msg) return `${loc}: ${msg}`;
+    if (msg) return msg;
+  }
+
+  return null;
+}
+
 export function normalizeError(error: unknown) {
-  if (error instanceof Error) return error.message;
-  return 'Something went wrong';
+  if (error instanceof Error) {
+    return normalizeUnknownErrorDetail(error.message) ?? 'Something went wrong';
+  }
+
+  return normalizeUnknownErrorDetail(error) ?? 'Something went wrong';
 }
 
 export function formatTs(value: string | null | undefined, timeZone = 'Asia/Kolkata') {
