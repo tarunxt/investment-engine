@@ -153,6 +153,14 @@ class ZerodhaService:
         )
         return data or {}
 
+    def get_margins_sync(self, access_token: str) -> dict[str, Any]:
+        data = self._request_sync(
+            "GET",
+            "/user/margins",
+            access_token=access_token,
+        )
+        return data or {}
+
     async def place_order(self, access_token: str, order_data: dict) -> dict:
         data = await self._request_async(
             "POST",

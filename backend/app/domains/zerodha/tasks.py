@@ -86,9 +86,11 @@ def sync_portfolio_snapshot_task(self, user_id: int, source: str = "manual"):
         try:
             holdings = _svc.get_holdings_sync(token)
             positions = _svc.get_positions_sync(token)
+            margins = _svc.get_margins_sync(token)
             snapshot_data = build_portfolio_snapshot(
                 holdings,
                 positions,
+                margins,
                 captured_at=now,
                 source=source,
             )
@@ -101,6 +103,7 @@ def sync_portfolio_snapshot_task(self, user_id: int, source: str = "manual"):
                     "snapshot_date": snapshot.snapshot_date.isoformat(),
                     "captured_at": snapshot.captured_at.isoformat(),
                     "holdings_count": snapshot.holdings_count,
+                    "available_margin": snapshot.available_margin,
                     "net_positions_count": snapshot.net_positions_count,
                     "day_positions_count": snapshot.day_positions_count,
                 },

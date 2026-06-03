@@ -59,6 +59,7 @@ def _snapshot_summary(
         holdings_market_value=snapshot.holdings_market_value,
         holdings_pnl=snapshot.holdings_pnl,
         holdings_day_change_value=snapshot.holdings_day_change_value,
+        available_margin=snapshot.available_margin or 0.0,
         positions_pnl=snapshot.positions_pnl,
         positions_m2m=snapshot.positions_m2m,
     )
