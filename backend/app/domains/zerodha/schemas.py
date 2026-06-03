@@ -135,6 +135,7 @@ class ZerodhaPortfolioSnapshotSummaryResponse(BaseModel):
     holdings_market_value: float
     holdings_pnl: float
     holdings_day_change_value: float
+    available_margin: float = 0
     positions_pnl: float
     positions_m2m: float
 

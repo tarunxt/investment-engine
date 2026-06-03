@@ -51,6 +51,7 @@ class ZerodhaPortfolioSnapshot(Base, TimestampMixin):
     holdings_market_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     holdings_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     holdings_day_change_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    available_margin: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     positions_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     positions_m2m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 

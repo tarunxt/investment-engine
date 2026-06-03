@@ -392,6 +392,7 @@ export interface ZerodhaPortfolioSnapshotSummary {
   holdings_market_value: number;
   holdings_pnl: number;
   holdings_day_change_value: number;
+  available_margin: number;
   positions_pnl: number;
   positions_m2m: number;
 }

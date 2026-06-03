@@ -124,6 +124,7 @@ def normalize_position(item: dict[str, Any]) -> dict[str, Any]:
 def build_portfolio_snapshot(
     holdings_payload: list[dict[str, Any]],
     positions_payload: dict[str, Any],
+    margins_payload: dict[str, Any] | None = None,
     *,
     captured_at: datetime | None = None,
     source: str = "manual",
@@ -144,6 +145,13 @@ def build_portfolio_snapshot(
         reverse=True,
     )
 
+    equity_margins = (margins_payload or {}).get("equity") or {}
+    available_margin = _as_float(
+        equity_margins.get("available", {}).get("live_balance")
+        if isinstance(equity_margins.get("available"), dict)
+        else equity_margins.get("available_margin")
+    )
+
     return {
         "snapshot_date": snapshot_date_from_datetime(captured_at),
         "captured_at": captured_at,
@@ -156,6 +164,7 @@ def build_portfolio_snapshot(
         "holdings_day_change_value": round(
             sum(item["day_change_value"] for item in holdings), 2
         ),
+        "available_margin": round(available_margin, 2),
         "positions_pnl": round(sum(item["pnl"] for item in net_positions), 2),
         "positions_m2m": round(sum(item["m2m"] for item in net_positions), 2),
         "holdings": holdings,

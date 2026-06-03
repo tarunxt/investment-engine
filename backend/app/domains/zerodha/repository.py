@@ -185,6 +185,7 @@ class SyncZerodhaPortfolioSnapshotRepository:
         snapshot.holdings_market_value = snapshot_data["holdings_market_value"]
         snapshot.holdings_pnl = snapshot_data["holdings_pnl"]
         snapshot.holdings_day_change_value = snapshot_data["holdings_day_change_value"]
+        snapshot.available_margin = snapshot_data.get("available_margin", 0.0)
         snapshot.positions_pnl = snapshot_data["positions_pnl"]
         snapshot.positions_m2m = snapshot_data["positions_m2m"]
         snapshot.holdings = snapshot_data["holdings"]
