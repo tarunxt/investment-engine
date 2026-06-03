@@ -96,9 +96,19 @@ async def seed_system_prompts(db: AsyncSession) -> None:
 
         body = prompt_file.read_text(encoding="utf-8").strip()
         result = await db.execute(
-            select(Prompt).where(Prompt.is_system == True, Prompt.name == seed.name)  # noqa: E712
+            select(Prompt)
+            .where(Prompt.is_system == True, Prompt.name == seed.name)  # noqa: E712
+            .order_by(Prompt.id.asc())
         )
-        existing = result.scalar_one_or_none()
+        existing_prompts = result.scalars().all()
+        existing = existing_prompts[0] if existing_prompts else None
+
+        if len(existing_prompts) > 1:
+            logger.warning(
+                "Found %s system prompts named %s; updating the oldest prompt and leaving duplicates untouched",
+                len(existing_prompts),
+                seed.name,
+            )
 
         if existing:
             body_changed = existing.body != body
