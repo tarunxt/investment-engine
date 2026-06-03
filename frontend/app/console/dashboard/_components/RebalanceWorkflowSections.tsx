@@ -21,12 +21,6 @@ import {
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
 import {
-  RebalanceWorkflowChart,
-  type RebalanceStageOutput,
-  type RebalanceStageStatus,
-  type RebalanceWorkflowStage,
-} from "@/components/RebalanceWorkflowChart";
-import {
   buildRebalanceInputBundle,
   buildRebalancePrompt,
   getPreviousMarketClose,
@@ -868,259 +862,348 @@ function IndMoneySnapshotDialog({
   );
 }
 
-function formatWorkflowDate(value?: string | null) {
-  if (!value) return "Not recorded";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
+function ZerodhaRebalanceFlowCard() {
+  const legendItems = [
+    {
+      label: "Primary workflow",
+      detail: "queued execution path",
+      color: "#2563eb",
+      dash: undefined,
+    },
+    {
+      label: "Opportunity signal",
+      detail: "positive candidates and confirmations",
+      color: "#0f766e",
+      dash: "5 7",
+    },
+    {
+      label: "Risk / guardrail",
+      detail: "threats, blocks, and sell pressure",
+      color: "#dc2626",
+      dash: "7 6",
+    },
+  ];
 
-function mapStageStatus(
-  info: StageInfo | undefined,
-  selected: boolean,
-  selectable: boolean,
-): RebalanceStageStatus {
-  if (selectable && !selected) return "skipped";
-  if (!info || info.state === "idle" || info.state === "queued") return "pending";
-  if (info.state === "running") return "running";
-  if (info.state === "failed") return "blocked";
-  if (info.error || info.exportStatus === "failed") return "warning";
-  return "completed";
-}
+  const stageNodes = [
+    {
+      label: "Sync",
+      note: "Pull holdings, cash, prices",
+      x: 66,
+      y: 206,
+      fill: "#475569",
+    },
+    {
+      label: "Threats",
+      note: "Drawdown + risk flags",
+      x: 280,
+      y: 104,
+      fill: "#dc2626",
+    },
+    {
+      label: "Swing",
+      note: "Momentum + buy setup",
+      x: 280,
+      y: 286,
+      fill: "#0f766e",
+    },
+    {
+      label: "Rebalance",
+      note: "Target vs current",
+      x: 510,
+      y: 206,
+      fill: "#2563eb",
+    },
+    {
+      label: "Technical",
+      note: "Entry / exit checks",
+      x: 704,
+      y: 206,
+      fill: "#0f766e",
+    },
+    {
+      label: "Actionables",
+      note: "Orders + watchlist",
+      x: 892,
+      y: 206,
+      fill: "#2563eb",
+    },
+  ];
 
-function buildStageOutputs(stage: WorkflowStageKey, info: StageInfo): RebalanceStageOutput[] {
-  const outputs: RebalanceStageOutput[] = [];
-
-  outputs.push({
-    label: "Workflow state",
-    value: info.runStatus ?? info.state,
-    tone: info.state === "failed" ? "danger" : info.state === "completed" ? "success" : "default",
-  });
-
-  if (info.activeRunId || info.lastRunId) {
-    outputs.push({
-      label: info.activeRunId ? "Active run" : "Last run",
-      value: `#${info.activeRunId ?? info.lastRunId}`,
-      tone: info.activeRunId ? "default" : "muted",
-    });
-  }
-
-  if (info.completedLlms !== null && info.completedLlms !== undefined) {
-    outputs.push({
-      label: "LLM completion",
-      value: `${info.completedLlms}/${info.totalLlms ?? info.completedLlms} models completed`,
-      tone:
-        info.totalLlms && info.completedLlms < info.totalLlms ? "warning" : "success",
-    });
-  }
-
-  if (info.recommendedStocks !== null && info.recommendedStocks !== undefined) {
-    outputs.push({
-      label: "Candidates",
-      value: `${info.recommendedStocks} recommendations surfaced`,
-      tone: "success",
-    });
-  }
-
-  if (info.provider || info.model) {
-    outputs.push({
-      label: "Provider / model",
-      value: [info.provider, info.model].filter(Boolean).join(" · "),
-      tone: "default",
-    });
-  }
-
-  if (info.costUsd !== null && info.costUsd !== undefined) {
-    outputs.push({
-      label: "Estimated cost",
-      value: `$${info.costUsd.toFixed(4)}${
-        info.costInr !== null && info.costInr !== undefined
-          ? ` / ₹${info.costInr.toFixed(2)}`
-          : ""
-      }`,
-      tone: "muted",
-    });
-  }
-
-  if (info.completedAt || info.endedAt || info.startedAt) {
-    outputs.push({
-      label: info.completedAt || info.endedAt ? "Last updated" : "Started",
-      value: formatWorkflowDate(info.completedAt ?? info.endedAt ?? info.startedAt),
-      tone: "muted",
-    });
-  }
-
-  if (info.error) {
-    outputs.push({ label: "Error", value: info.error, tone: "danger" });
-  }
-
-  if (outputs.length <= 1) {
-    const fallback: Record<WorkflowStageKey, RebalanceStageOutput[]> = {
-      sync: [
-        { label: "Holdings", value: "Positions, cash, and prices feed both lanes", tone: "default" },
-        { label: "Next", value: "Risk and opportunity checks start downstream", tone: "muted" },
-      ],
-      threats: [
-        { label: "Risk output", value: "Threats can trim, skip, or block unsafe trades", tone: "danger" },
-        { label: "Run details", value: "Drawdown, news, concentration, and risk flags", tone: "warning" },
-      ],
-      swing: [
-        { label: "Opportunity output", value: "Momentum and setup candidates", tone: "success" },
-        { label: "Run details", value: "Buy/add confirmations for rebalance input", tone: "default" },
-      ],
-      rebalance: [
-        { label: "Decision output", value: "Target vs current weights, cash, trims, and adds", tone: "default" },
-        { label: "Run details", value: "Consensus rows and LLM cost tracking", tone: "muted" },
-      ],
-      technical: [
-        { label: "Validation output", value: "Entry, exit, volume, and price checks", tone: "success" },
-        { label: "Run details", value: "Technical guardrail context for final actionables", tone: "default" },
-      ],
-      actionables: [
-        { label: "Buy / add", value: "Approved order candidates", tone: "success" },
-        { label: "Sell / trim", value: "Risk-led exits and reductions", tone: "danger" },
-        { label: "Hold / watch", value: "Watchlist or no-trade rows", tone: "muted" },
-      ],
-    };
-    return fallback[stage];
-  }
-
-  return outputs;
-}
-
-function ZerodhaRebalanceFlowCard({
-  state,
-  selectedStages,
-  specificMode,
-}: {
-  state: WorkflowState;
-  selectedStages: Set<WorkflowStageKey>;
-  specificMode: boolean;
-}) {
-  const stages = useMemo<RebalanceWorkflowStage[]>(() => {
-    const stageStatus = (stage: WorkflowStageKey) =>
-      mapStageStatus(state[stage], selectedStages.has(stage), specificMode);
-
-    return [
-      {
-        id: "sync",
-        title: "Sync",
-        subtitle: "Pull holdings, cash, prices",
-        icon: "sync",
-        status: stageStatus("sync"),
-        position: { x: 0, y: 170 },
-        outputs: buildStageOutputs("sync", state.sync),
-      },
-      {
-        id: "risk",
-        title: "Risk lane",
-        subtitle: "Threats reduce exposure or block unsafe trades",
-        icon: "risk",
-        status: stageStatus("threats"),
-        position: { x: 260, y: 35 },
-        outputs: buildStageOutputs("threats", state.threats),
-      },
-      {
-        id: "opportunity",
-        title: "Opportunity lane",
-        subtitle: "Swing setups raise buy/add candidates",
-        icon: "opportunity",
-        status: stageStatus("swing"),
-        position: { x: 260, y: 310 },
-        outputs: buildStageOutputs("swing", state.swing),
-      },
-      {
-        id: "rebalance",
-        title: "Rebalance",
-        subtitle: "Target vs current weights",
-        icon: "rebalance",
-        status: stageStatus("rebalance"),
-        position: { x: 560, y: 175 },
-        outputs: buildStageOutputs("rebalance", state.rebalance),
-      },
-      {
-        id: "allocation",
-        title: "Allocation",
-        subtitle: "Weights + cash decision",
-        icon: "allocation",
-        status: stageStatus("rebalance"),
-        position: { x: 805, y: 35 },
-        outputs: [
-          { label: "Sizing", value: "Target weight vs current exposure", tone: "default" },
-          { label: "Cash", value: "Cash buffer is preserved before orders", tone: "muted" },
-          ...buildStageOutputs("rebalance", state.rebalance).slice(0, 1),
-        ],
-      },
-      {
-        id: "guardrails",
-        title: "Execution guardrails",
-        subtitle: "Price trend, volume, stop checks",
-        icon: "guardrails",
-        status:
-          state.threats.state === "failed" || state.technical.state === "failed"
-            ? "blocked"
-            : stageStatus("technical"),
-        position: { x: 1040, y: 70 },
-        outputs: [
-          { label: "Risk gate", value: "Blocks unsafe entries or exits", tone: "danger" },
-          { label: "Liquidity", value: "Volume, trend, and stop checks", tone: "warning" },
-          ...buildStageOutputs("technical", state.technical).slice(0, 1),
-        ],
-      },
-      {
-        id: "technical",
-        title: "Technical",
-        subtitle: "Entry / exit checks",
-        icon: "technical",
-        status: stageStatus("technical"),
-        position: { x: 820, y: 310 },
-        outputs: buildStageOutputs("technical", state.technical),
-      },
-      {
-        id: "actionables",
-        title: "Actionables",
-        subtitle: "Orders + watchlist",
-        icon: "actionables",
-        status: stageStatus("actionables"),
-        position: { x: 1265, y: 190 },
-        outputs: buildStageOutputs("actionables", state.actionables),
-      },
-    ];
-  }, [selectedStages, specificMode, state]);
+  const actionOutputs = [
+    { label: "Buy / add", y: 116 },
+    { label: "Sell / trim", y: 206 },
+    { label: "Hold / watch", y: 296 },
+  ];
 
   return (
-    <div className="rounded-[1.75rem] border border-slate-200 bg-white p-[clamp(1rem,2vw,1.5rem)] shadow-sm">
+    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
       <div>
-        <h2 className="text-[clamp(1.05rem,1.6vw,1.35rem)] font-semibold text-slate-950">
+        <h2 className="text-lg font-semibold text-slate-950">
           Zerodha Rebalance Flow
         </h2>
-        <p className="mt-[0.35em] text-[clamp(0.82rem,1.1vw,0.95rem)] text-slate-500">
-          Interactive path for how synced Zerodha positions become risk checks,
+        <p className="mt-1 text-sm text-slate-500">
+          Annotated path for how synced Zerodha positions become risk checks,
           opportunity signals, allocation decisions, technical validation, and
-          final actionables. Open any stage card for inline run details.
+          final actionables.
         </p>
       </div>
 
-      <div className="mt-[1rem] grid gap-[0.6rem] rounded-[1rem] border border-slate-200 bg-slate-50 p-[0.85rem] text-[clamp(0.75rem,1vw,0.85rem)] text-slate-600 sm:grid-cols-3">
-        <div className="flex items-center gap-[0.5rem]">
-          <span className="h-[0.25rem] w-[4rem] rounded-full bg-blue-600" />
-          <span><strong className="text-slate-800">Primary workflow</strong> — queued execution path</span>
-        </div>
-        <div className="flex items-center gap-[0.5rem]">
-          <span className="h-[0.25rem] w-[4rem] rounded-full border-t-[0.25rem] border-dashed border-teal-700" />
-          <span><strong className="text-slate-800">Opportunity signal</strong> — positive confirmations</span>
-        </div>
-        <div className="flex items-center gap-[0.5rem]">
-          <span className="h-[0.25rem] w-[4rem] rounded-full border-t-[0.25rem] border-dashed border-red-600" />
-          <span><strong className="text-slate-800">Risk / guardrail</strong> — threats and blocks</span>
+      <div className="mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 sm:grid-cols-3">
+        {legendItems.map((item) => (
+          <div key={item.label} className="flex items-center gap-2">
+            <svg aria-hidden="true" viewBox="0 0 72 16" className="h-4 w-16 shrink-0">
+              <line
+                x1="4"
+                y1="8"
+                x2="62"
+                y2="8"
+                stroke={item.color}
+                strokeDasharray={item.dash}
+                strokeLinecap="round"
+                strokeWidth="4"
+              />
+              <path d="M62,2 L70,8 L62,14 Z" fill={item.color} />
+            </svg>
+            <span>
+              <span className="font-semibold text-slate-800">{item.label}</span>
+              <span className="text-slate-500"> — {item.detail}</span>
+            </span>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 sm:col-span-3">
+          <span className="inline-flex size-4 rounded bg-slate-400" />
+          <span>
+            <span className="font-semibold text-slate-800">Rounded cards</span>
+            <span className="text-slate-500">
+              {" "}
+              group related checks; terminal cards are downstream outputs.
+            </span>
+          </span>
         </div>
       </div>
 
-      <div className="mt-[1.25rem]">
-        <RebalanceWorkflowChart stages={stages} />
+      <div className="mt-5 overflow-x-auto rounded-[24px] border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4">
+        <svg
+          viewBox="0 0 1000 430"
+          role="img"
+          aria-labelledby="zerodha-flow-title zerodha-flow-desc"
+          className="min-w-[900px]"
+        >
+          <title id="zerodha-flow-title">Annotated Zerodha rebalance flow</title>
+          <desc id="zerodha-flow-desc">
+            Zerodha sync feeds risk and opportunity inputs. Risk guardrails and
+            opportunity signals converge into the rebalance engine, then flow to
+            technical validation and buy, sell, or hold actionables. Blue solid
+            arrows are the primary workflow, teal dotted arrows are opportunity
+            signals, and red dashed arrows are risk guardrails.
+          </desc>
+          <defs>
+            <marker
+              id="rebalance-flow-arrow-blue"
+              markerHeight="10"
+              markerWidth="10"
+              orient="auto"
+              refX="9"
+              refY="5"
+            >
+              <path d="M0,0 L10,5 L0,10 Z" fill="#2563eb" />
+            </marker>
+            <marker
+              id="rebalance-flow-arrow-green"
+              markerHeight="10"
+              markerWidth="10"
+              orient="auto"
+              refX="9"
+              refY="5"
+            >
+              <path d="M0,0 L10,5 L0,10 Z" fill="#0f766e" />
+            </marker>
+            <marker
+              id="rebalance-flow-arrow-red"
+              markerHeight="10"
+              markerWidth="10"
+              orient="auto"
+              refX="9"
+              refY="5"
+            >
+              <path d="M0,0 L10,5 L0,10 Z" fill="#dc2626" />
+            </marker>
+            <filter id="flow-card-shadow" x="-10%" y="-10%" width="120%" height="130%">
+              <feDropShadow dx="0" dy="8" stdDeviation="8" floodColor="#0f172a" floodOpacity="0.08" />
+            </filter>
+          </defs>
+
+          <rect x="24" y="22" width="952" height="386" rx="24" fill="#f8fafc" stroke="#e2e8f0" />
+          <rect x="160" y="46" width="320" height="146" rx="18" fill="#ffffff" stroke="#bfdbfe" strokeWidth="2" filter="url(#flow-card-shadow)" />
+          <text x="186" y="78" fill="#1e293b" fontSize="18" fontWeight="800">
+            Risk input lane
+          </text>
+          <text x="186" y="102" fill="#64748b" fontSize="12" fontWeight="600">
+            Threats reduce exposure or block unsafe trades.
+          </text>
+
+          <rect x="160" y="230" width="320" height="146" rx="18" fill="#ffffff" stroke="#99f6e4" strokeWidth="2" filter="url(#flow-card-shadow)" />
+          <text x="186" y="262" fill="#1e293b" fontSize="18" fontWeight="800">
+            Opportunity input lane
+          </text>
+          <text x="186" y="286" fill="#64748b" fontSize="12" fontWeight="600">
+            Swing setups raise buy/add candidates.
+          </text>
+
+          <rect x="526" y="58" width="178" height="86" rx="16" fill="#eff6ff" stroke="#bfdbfe" />
+          <text x="615" y="88" textAnchor="middle" fill="#1e3a8a" fontSize="13" fontWeight="800">
+            Allocation decision
+          </text>
+          <text x="615" y="112" textAnchor="middle" fill="#475569" fontSize="12">
+            target vs current
+          </text>
+          <text x="615" y="130" textAnchor="middle" fill="#475569" fontSize="12">
+            weights + cash
+          </text>
+
+          <rect x="730" y="58" width="178" height="86" rx="16" fill="#ecfdf5" stroke="#99f6e4" />
+          <text x="819" y="88" textAnchor="middle" fill="#14532d" fontSize="13" fontWeight="800">
+            Execution guardrails
+          </text>
+          <text x="819" y="112" textAnchor="middle" fill="#475569" fontSize="12">
+            price trend, volume,
+          </text>
+          <text x="819" y="130" textAnchor="middle" fill="#475569" fontSize="12">
+            and stop checks
+          </text>
+
+          <path
+            d="M92 206 C122 190 132 132 166 104"
+            fill="none"
+            stroke="#dc2626"
+            strokeDasharray="7 6"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#rebalance-flow-arrow-red)"
+          />
+          <path
+            d="M92 206 C122 222 132 270 166 286"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="5 7"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#rebalance-flow-arrow-green)"
+          />
+          <path
+            d="M304 104 C386 104 430 130 492 190"
+            fill="none"
+            stroke="#dc2626"
+            strokeDasharray="7 6"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#rebalance-flow-arrow-red)"
+          />
+          <path
+            d="M304 286 C386 286 430 250 492 214"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="5 7"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#rebalance-flow-arrow-green)"
+          />
+          <path
+            d="M536 206 L682 206"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="5"
+            markerEnd="url(#rebalance-flow-arrow-blue)"
+          />
+          <path
+            d="M728 206 L858 206"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="5"
+          />
+          <path
+            d="M858 116 L858 296"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="5"
+          />
+          {actionOutputs.map((output) => (
+            <g key={output.label}>
+              <path
+                d={`M858 ${output.y} L934 ${output.y}`}
+                fill="none"
+                stroke="#2563eb"
+                strokeLinecap="round"
+                strokeWidth="5"
+                markerEnd="url(#rebalance-flow-arrow-blue)"
+              />
+              <rect x="922" y={output.y - 19} width="58" height="38" rx="10" fill="#ffffff" stroke="#dbeafe" />
+              <text x="951" y={output.y + 4} textAnchor="middle" fill="#334155" fontSize="11" fontWeight="800">
+                {output.label}
+              </text>
+            </g>
+          ))}
+
+          <path
+            d="M492 190 C545 142 560 115 526 101"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="3"
+            markerEnd="url(#rebalance-flow-arrow-blue)"
+          />
+          <path
+            d="M682 206 C736 172 768 144 782 144"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="5 7"
+            strokeLinecap="round"
+            strokeWidth="3"
+            markerEnd="url(#rebalance-flow-arrow-green)"
+          />
+
+          {stageNodes.map((stage) => (
+            <g key={stage.label}>
+              <circle cx={stage.x} cy={stage.y} r="27" fill={stage.fill} opacity="0.12" />
+              <rect
+                x={stage.x - 18}
+                y={stage.y - 18}
+                width="36"
+                height="36"
+                rx="10"
+                fill={stage.fill}
+              />
+              <text x={stage.x} y={stage.y + 52} textAnchor="middle" fill="#1e293b" fontSize="13" fontWeight="800">
+                {stage.label}
+              </text>
+              <text x={stage.x} y={stage.y + 70} textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="600">
+                {stage.note}
+              </text>
+            </g>
+          ))}
+
+          <g>
+            <rect x="356" y="128" width="116" height="42" rx="12" fill="#fef2f2" stroke="#fecaca" />
+            <text x="414" y="146" textAnchor="middle" fill="#991b1b" fontSize="11" fontWeight="800">
+              trim / skip
+            </text>
+            <text x="414" y="162" textAnchor="middle" fill="#991b1b" fontSize="11" fontWeight="700">
+              if risk is high
+            </text>
+          </g>
+          <g>
+            <rect x="356" y="310" width="116" height="42" rx="12" fill="#ecfdf5" stroke="#99f6e4" />
+            <text x="414" y="328" textAnchor="middle" fill="#14532d" fontSize="11" fontWeight="800">
+              add candidate
+            </text>
+            <text x="414" y="344" textAnchor="middle" fill="#14532d" fontSize="11" fontWeight="700">
+              if setup passes
+            </text>
+          </g>
+        </svg>
       </div>
     </div>
   );
@@ -2147,11 +2230,7 @@ export function RebalanceWorkflowSections({
           {renderSectionCard(zerodhaSection)}
           {renderSectionCard(indmoneySection)}
         </div>
-        <ZerodhaRebalanceFlowCard
-          state={states.zerodha}
-          selectedStages={selectedStages.zerodha}
-          specificMode={specificMode.zerodha}
-        />
+        <ZerodhaRebalanceFlowCard />
       </section>
 
       <IndMoneySnapshotDialog

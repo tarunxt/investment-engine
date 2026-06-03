@@ -131,19 +131,3 @@
     @apply font-sans;
   }
 }
-
-@layer components {
-  .rebalance-workflow-chart {
-    container-type: inline-size;
-  }
-
-  .rebalance-workflow-node {
-    container-type: inline-size;
-    font-size: clamp(0.88rem, 1.2cqw, 1rem);
-  }
-
-  .rebalance-workflow-chart .react-flow__edge-text {
-    font-size: clamp(0.72rem, 1cqw, 0.85rem);
-    font-weight: 800;
-  }
-}
