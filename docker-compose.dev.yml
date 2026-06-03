@@ -26,7 +26,6 @@ services:
       NEXT_PUBLIC_DISABLE_AUTH: "true"
       CHOKIDAR_USEPOLLING: "true"
       NODE_OPTIONS: "--max-old-space-size=8192"
-      BACKEND_API_URL: ${BACKEND_API_URL:-http://backend:8000}
 
     command: npm run dev
 
