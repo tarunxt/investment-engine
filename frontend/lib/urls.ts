@@ -7,6 +7,7 @@ import { sessionStorage } from '@/services/session';
  */
 const LOCAL_API_FALLBACK = "http://localhost:8000";
 const LOCAL_FRONTEND_FALLBACK = "http://localhost:3000";
+const BROWSER_API_PROXY_BASE = "/backend-api";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 const PLACEHOLDER_HOST_SNIPPETS = ["yourdomain.com", "example.com"];
 
@@ -83,7 +84,23 @@ function inferBrowserApiBaseUrl() {
   return `${protocol}//api.${rootHostname}`;
 }
 
+function shouldUseBrowserApiProxy() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  if (process.env.NEXT_PUBLIC_DISABLE_API_PROXY === "true") {
+    return false;
+  }
+
+  return !LOCAL_HOSTNAMES.has(window.location.hostname);
+}
+
 function resolveApiBaseUrl() {
+  if (shouldUseBrowserApiProxy()) {
+    return BROWSER_API_PROXY_BASE;
+  }
+
   const configuredClientUrl = resolveConfiguredBrowserUrl(process.env.NEXT_PUBLIC_API_URL);
   if (configuredClientUrl) {
     return configuredClientUrl;
