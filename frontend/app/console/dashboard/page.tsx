@@ -345,18 +345,34 @@ export default function DashboardPage() {
     0,
   );
   const zerodhaAvailableMargin = indiaSnapshot?.available_margin ?? 0;
+  const zerodhaTotalValue = zerodhaInvestedValue + zerodhaAvailableMargin;
   const indmoneyInvestedValue = usSnapshot?.invested_value ?? 0;
+  const indmoneyPortfolioValue = usSnapshot?.current_value ?? 0;
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
-  const totalInvestmentValue =
-    zerodhaInvestedValue +
-    zerodhaAvailableMargin +
-    (indmoneyInvestedValue + indmoneyAvailableFunds) * usdInrRate;
-  const totalInvestmentDetail = [
-    `Zerodha invested ${formatInr(zerodhaInvestedValue)}`,
-    `margin ${formatInr(zerodhaAvailableMargin)}`,
-    `INDmoney invested ${formatUsd(indmoneyInvestedValue)}`,
-    `funds ${formatUsd(indmoneyAvailableFunds)}`,
-  ].join(" + ");
+  const indmoneyTotalUsd = indmoneyPortfolioValue + indmoneyAvailableFunds;
+  const indmoneyTotalInr = indmoneyTotalUsd * usdInrRate;
+  const totalInvestmentValue = zerodhaTotalValue + indmoneyTotalInr;
+  const totalInvestmentRows = [
+    {
+      label: "Zerodha",
+      detail: `${formatInr(zerodhaInvestedValue)} portfolio + ${formatInr(
+        zerodhaAvailableMargin,
+      )} margin`,
+      total: formatInr(zerodhaTotalValue),
+    },
+    {
+      label: "INDmoney",
+      detail: `${formatUsd(indmoneyPortfolioValue)} total portfolio + ${formatUsd(
+        indmoneyAvailableFunds,
+      )} available funds`,
+      total: `${formatUsd(indmoneyTotalUsd)} / ${formatInr(indmoneyTotalInr)}`,
+    },
+    {
+      label: "Total",
+      detail: "Zerodha + INDmoney",
+      total: formatInr(totalInvestmentValue),
+    },
+  ];
   if (
     loading &&
     !indiaSnapshot &&
@@ -427,8 +443,23 @@ export default function DashboardPage() {
               <div className="mt-3 text-3xl font-semibold text-white">
                 {formatInr(totalInvestmentValue)}
               </div>
-              <div className="mt-2 text-xs leading-5 text-slate-300">
-                {totalInvestmentDetail}
+              <div className="mt-3 space-y-2 text-xs text-slate-300">
+                {totalInvestmentRows.map((row) => (
+                  <div
+                    key={row.label}
+                    className="grid gap-1 border-t border-white/10 pt-2 first:border-t-0 first:pt-0"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold text-slate-200">
+                        {row.label}
+                      </span>
+                      <span className="text-right font-semibold text-white">
+                        {row.total}
+                      </span>
+                    </div>
+                    <div className="leading-5 text-slate-300">{row.detail}</div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
