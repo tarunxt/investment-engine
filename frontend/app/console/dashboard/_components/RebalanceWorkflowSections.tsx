@@ -6,7 +6,6 @@ import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import {
   AlertCircle,
   CheckCircle2,
-  Clock3,
   Info,
   Loader2,
   Play,
@@ -55,7 +54,7 @@ type WorkflowStageKey =
   | "rebalance"
   | "technical"
   | "actionables";
-type StageState = "idle" | "running" | "completed" | "failed";
+type StageState = "idle" | "queued" | "running" | "completed" | "failed";
 type StageInfo = {
   state: StageState;
   startedAt?: string | null;
@@ -93,11 +92,12 @@ const GPT_4O_MINI_MODEL = "gpt-4o-mini";
 const POLL_INTERVAL_MS = 3000;
 const MAX_RUN_POLLS = 160;
 const MAX_JOB_POLLS = 120;
+const WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
 
 const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",
-  "swing",
   "threats",
+  "swing",
   "rebalance",
   "technical",
   "actionables",
@@ -118,8 +118,8 @@ const STAGE_COPY: Record<
     completed: "Swing Scan",
   },
   threats: {
-    idle: "Threats",
-    running: "Running Threats",
+    idle: "Threats Scan",
+    running: "Running Threats Scan",
     completed: "Threats Scan",
   },
   rebalance: {
@@ -144,6 +144,66 @@ function initialWorkflowState(): WorkflowState {
     acc[stage] = { state: "idle" };
     return acc;
   }, {} as WorkflowState);
+}
+
+
+type PersistedWorkflow = {
+  states: Record<WorkflowPortfolio, WorkflowState>;
+  runningPortfolio: WorkflowPortfolio | null;
+  specificMode: Record<WorkflowPortfolio, boolean>;
+  selectedStages: Record<WorkflowPortfolio, WorkflowStageKey[]>;
+  savedAt: string;
+};
+
+function buildInitialStates() {
+  return {
+    zerodha: initialWorkflowState(),
+    indmoneyUs: initialWorkflowState(),
+  };
+}
+
+function readPersistedWorkflow(): PersistedWorkflow | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(WORKFLOW_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedWorkflow;
+    if (!parsed?.states?.zerodha || !parsed?.states?.indmoneyUs) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function persistWorkflow(snapshot: PersistedWorkflow) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Progress persistence is best-effort; the visible in-memory state remains authoritative.
+  }
+}
+
+function getQueuedStages(
+  portfolio: WorkflowPortfolio,
+  states: Record<WorkflowPortfolio, WorkflowState>,
+  runningPortfolio: WorkflowPortfolio | null,
+  specificMode: Record<WorkflowPortfolio, boolean>,
+  selectedStages: Record<WorkflowPortfolio, Set<WorkflowStageKey>>,
+) {
+  if (runningPortfolio !== portfolio) return new Set<WorkflowStageKey>();
+  const runningIndex = STAGE_ORDER.findIndex(
+    (stage) => states[portfolio][stage].state === "running",
+  );
+  const activeIndex = runningIndex >= 0 ? runningIndex : -1;
+  return new Set(
+    STAGE_ORDER.filter((stage, index) => {
+      const info = states[portfolio][stage];
+      if (info.state !== "idle" && info.state !== "queued") return false;
+      if (index <= activeIndex) return false;
+      return specificMode[portfolio] ? selectedStages[portfolio].has(stage) : true;
+    }),
+  );
 }
 
 function sleep(ms: number) {
@@ -172,6 +232,7 @@ function formatTimestamp(value?: string | null) {
 
 function getStageLabel(stage: WorkflowStageKey, state: StageState) {
   if (state === "running") return STAGE_COPY[stage].running;
+  if (state === "queued") return `Queued ${STAGE_COPY[stage].idle}`;
   if (state === "completed") return STAGE_COPY[stage].completed;
   return STAGE_COPY[stage].idle;
 }
@@ -181,6 +242,8 @@ function getStageClasses(state: StageState) {
     return "border-emerald-300 bg-emerald-50 text-emerald-950 shadow-emerald-100";
   if (state === "running")
     return "border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100";
+  if (state === "queued")
+    return "border-sky-300 bg-sky-50 text-sky-950 shadow-sky-100 ring-1 ring-sky-200";
   if (state === "failed")
     return "border-red-300 bg-red-50 text-red-950 shadow-red-100";
   return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
@@ -566,8 +629,9 @@ function WorkflowStageTile({
   onInfoClick?: () => void;
 }) {
   const isRunning = info.state === "running";
+  const isQueued = info.state === "queued";
   const isCompleted = info.state === "completed";
-  const showRunTag = selectable && selected;
+  const showRunTag = selectable && selected && !isQueued;
   return (
     <button
       type="button"
@@ -579,15 +643,23 @@ function WorkflowStageTile({
         <span className="absolute right-3 top-3 rounded-full border border-green-500 bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
           Run
         </span>
+      ) : isQueued ? (
+        <span className="absolute right-3 top-3 rounded-full border border-sky-500 bg-sky-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+          Queued
+        </span>
       ) : isCompleted ? (
         <CheckCircle2 className="absolute right-3 top-3 size-5 text-emerald-600" />
       ) : null}
       <div className="flex items-start gap-2 pr-7 text-sm font-semibold">
         {isRunning ? (
           <Loader2 className="size-4 animate-spin text-amber-600" />
-        ) : (
-          <Clock3 className="size-4 text-slate-400" />
-        )}
+        ) : isQueued ? (
+          <Play className="size-4 text-sky-600" />
+        ) : info.state === "failed" ? (
+          <AlertCircle className="size-4 text-red-600" />
+        ) : isCompleted ? (
+          <CheckCircle2 className="size-4 text-emerald-600" />
+        ) : null}
         {getStageLabel(stage, info.state)}
         {onInfoClick ? (
           <span
@@ -613,7 +685,7 @@ function WorkflowStageTile({
         ) : null}
       </div>
       <div className="mt-3 w-full space-y-1 text-xs leading-5 text-slate-600">
-        {info.state === "idle" ? (
+        {info.state === "idle" || info.state === "queued" ? (
           getIdleStageRows(stage, info).map((row) => (
             <p key={row.label}>
               <span className="font-semibold text-slate-500">{row.label}:</span>{" "}
@@ -797,28 +869,42 @@ export function RebalanceWorkflowSections({
 }) {
   const router = useRouter();
   const usdInrRate = useUsdInrRate();
+  const [initialPersisted] = useState<PersistedWorkflow | null>(() =>
+    readPersistedWorkflow(),
+  );
   const [states, setStates] = useState<
     Record<WorkflowPortfolio, WorkflowState>
-  >({
-    zerodha: initialWorkflowState(),
-    indmoneyUs: initialWorkflowState(),
-  });
-  const [runningPortfolio, setRunningPortfolio] =
-    useState<WorkflowPortfolio | null>(null);
+  >(() => initialPersisted?.states ?? buildInitialStates());
+  const [runningPortfolio, setRunningPortfolio] = useState<WorkflowPortfolio | null>(
+    () => initialPersisted?.runningPortfolio ?? null,
+  );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const [specificMode, setSpecificMode] = useState<
     Record<WorkflowPortfolio, boolean>
-  >({ zerodha: false, indmoneyUs: false });
+  >(() => initialPersisted?.specificMode ?? { zerodha: false, indmoneyUs: false });
   const [selectedStages, setSelectedStages] = useState<
     Record<WorkflowPortfolio, Set<WorkflowStageKey>>
   >(() => ({
-    zerodha: new Set(),
-    indmoneyUs: new Set(),
+    zerodha: new Set(initialPersisted?.selectedStages?.zerodha ?? []),
+    indmoneyUs: new Set(initialPersisted?.selectedStages?.indmoneyUs ?? []),
   }));
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
+
+  useEffect(() => {
+    persistWorkflow({
+      states,
+      runningPortfolio,
+      specificMode,
+      selectedStages: {
+        zerodha: Array.from(selectedStages.zerodha),
+        indmoneyUs: Array.from(selectedStages.indmoneyUs),
+      },
+      savedAt: new Date().toISOString(),
+    });
+  }, [runningPortfolio, selectedStages, specificMode, states]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -966,13 +1052,20 @@ export function RebalanceWorkflowSections({
       stage: WorkflowStageKey,
       info: Partial<StageInfo>,
     ) => {
-      setStates((current) => ({
-        ...current,
-        [portfolio]: {
-          ...current[portfolio],
-          [stage]: { ...current[portfolio][stage], ...info },
-        },
-      }));
+      setStates((current) => {
+        const next = {
+          ...current,
+          [portfolio]: {
+            ...current[portfolio],
+            [stage]: { ...current[portfolio][stage], ...info },
+          },
+        };
+        const persisted = readPersistedWorkflow();
+        if (persisted) {
+          persistWorkflow({ ...persisted, states: next, savedAt: new Date().toISOString() });
+        }
+        return next;
+      });
     },
     [],
   );
@@ -993,9 +1086,9 @@ export function RebalanceWorkflowSections({
       const timestamp = new Date().toISOString();
       updateStage(portfolio, stage, {
         state: specificMode[portfolio] ? "idle" : "completed",
-        startedAt: specificMode[portfolio] ? null : timestamp,
-        endedAt: specificMode[portfolio] ? null : timestamp,
-        completedAt: specificMode[portfolio] ? null : timestamp,
+        ...(specificMode[portfolio]
+          ? {}
+          : { startedAt: timestamp, endedAt: timestamp, completedAt: timestamp }),
         runStatus: note,
         error: null,
       });
@@ -1040,6 +1133,92 @@ export function RebalanceWorkflowSections({
     },
     [updateStage, usdInrRate],
   );
+
+  useEffect(() => {
+    if (!runningPortfolio) return;
+    const runningEntries = STAGE_ORDER.flatMap((stage) => {
+      const info = states[runningPortfolio][stage];
+      return info.state === "running" && info.activeRunId
+        ? [{ stage, runId: info.activeRunId }]
+        : [];
+    });
+    if (runningEntries.length === 0) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      await Promise.allSettled(
+        runningEntries.map(async ({ stage, runId }) => {
+          if (stage === "threats") {
+            const analysis =
+              runningPortfolio === "zerodha"
+                ? await apiService.zerodhaThreatJob(runId)
+                : await apiService.indmoneyUsThreatJob(runId);
+            if (cancelled) return;
+            const status = (analysis.status || "").toLowerCase();
+            updateStage(runningPortfolio, stage, {
+              ...withInrCost(summarizeThreat(analysis), usdInrRate),
+              completedLlms: status === "completed" ? 1 : 0,
+              totalLlms: 1,
+            });
+            if (status === "completed") {
+              markCompleted(runningPortfolio, stage, {
+                ...summarizeThreat(analysis),
+                completedLlms: 1,
+                totalLlms: 1,
+              });
+            } else if (status === "failed") {
+              updateStage(runningPortfolio, stage, {
+                state: "failed",
+                endedAt: new Date().toISOString(),
+                error: analysis.error_message ?? "Threats scan failed.",
+                runStatus: analysis.status,
+              });
+            }
+            return;
+          }
+
+          const run = await apiService.getRun(runId);
+          if (cancelled) return;
+          const status = (run.status || "").toLowerCase();
+          const runSummary = withInrCost(
+            { ...summarizeRun(run), ...getRunProgress(run), lastRunId: run.id },
+            usdInrRate,
+          );
+          updateStage(runningPortfolio, stage, runSummary);
+          if (status === "completed") {
+            const market: SwingTradeMarket =
+              runningPortfolio === "zerodha" ? "india" : "us";
+            markCompleted(runningPortfolio, stage, {
+              ...runSummary,
+              recommendedStocks:
+                stage === "swing"
+                  ? countUniqueStocksFromRun(run)
+                  : stage === "rebalance"
+                    ? buildConsensusRows(
+                        getLatestMatchingRebalanceRuns([run], market),
+                        market,
+                      ).length || null
+                    : undefined,
+            });
+          } else if (status === "failed") {
+            updateStage(runningPortfolio, stage, {
+              ...runSummary,
+              state: "failed",
+              endedAt: new Date().toISOString(),
+              error: summarizeRun(run).error ?? `Run #${run.id} failed.`,
+            });
+          }
+        }),
+      );
+    };
+
+    void poll();
+    const timer = window.setInterval(() => void poll(), POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [markCompleted, runningPortfolio, states, updateStage, usdInrRate]);
 
   const toggleSpecificMode = useCallback((portfolio: WorkflowPortfolio) => {
     setSpecificMode((current) => {
@@ -1275,12 +1454,12 @@ export function RebalanceWorkflowSections({
         const needsSingleModel =
           shouldRunCurrentStage("threats") ||
           shouldRunCurrentStage("technical");
-        if (needsModelMix) {
+        if (needsSingleModel && shouldRunCurrentStage("threats")) {
+          currentStage = "threats";
+        } else if (needsModelMix) {
           currentStage = shouldRunCurrentStage("swing") ? "swing" : "rebalance";
         } else if (needsSingleModel) {
-          currentStage = shouldRunCurrentStage("threats")
-            ? "threats"
-            : "technical";
+          currentStage = "technical";
         }
 
         const providers =
@@ -1307,6 +1486,35 @@ export function RebalanceWorkflowSections({
           throw new Error(
             `${GPT_4O_MINI_MODEL} is not available from a configured provider. This means the provider is not configured, the model is not listed for that provider, or the model compatibility check marked it unavailable.`,
           );
+
+        currentStage = "threats";
+        if (shouldRunCurrentStage("threats")) {
+          markRunning(portfolio, "threats", { totalLlms: 1, completedLlms: 0 });
+          const queuedThreat =
+            portfolio === "zerodha"
+              ? await apiService.zerodhaRunThreats(gpt4oMiniTarget!)
+              : await apiService.indmoneyUsRunThreats(gpt4oMiniTarget!);
+          updateStage(portfolio, "threats", { activeRunId: queuedThreat.job_id });
+          const completedThreat = await waitForThreatCompletion(
+            portfolio,
+            queuedThreat.job_id,
+          );
+          if ((completedThreat.status || "").toLowerCase() !== "completed")
+            throw new Error(
+              `Threats scan failed: ${completedThreat.error_message ?? "Job failed."}`,
+            );
+          markCompleted(portfolio, "threats", {
+            ...summarizeThreat(completedThreat),
+            completedLlms: 1,
+            totalLlms: 1,
+          });
+        } else {
+          completeSkippedStage(
+            portfolio,
+            "threats",
+            "Using latest threats scan",
+          );
+        }
 
         currentStage = "swing";
         if (shouldRunCurrentStage("swing")) {
@@ -1340,34 +1548,6 @@ export function RebalanceWorkflowSections({
             portfolio,
             "swing",
             "Using latest completed swing scan",
-          );
-        }
-
-        currentStage = "threats";
-        if (shouldRunCurrentStage("threats")) {
-          markRunning(portfolio, "threats", { totalLlms: 1, completedLlms: 0 });
-          const queuedThreat =
-            portfolio === "zerodha"
-              ? await apiService.zerodhaRunThreats(gpt4oMiniTarget!)
-              : await apiService.indmoneyUsRunThreats(gpt4oMiniTarget!);
-          const completedThreat = await waitForThreatCompletion(
-            portfolio,
-            queuedThreat.job_id,
-          );
-          if ((completedThreat.status || "").toLowerCase() !== "completed")
-            throw new Error(
-              `Threats scan failed: ${completedThreat.error_message ?? "Job failed."}`,
-            );
-          markCompleted(portfolio, "threats", {
-            ...summarizeThreat(completedThreat),
-            completedLlms: 1,
-            totalLlms: 1,
-          });
-        } else {
-          completeSkippedStage(
-            portfolio,
-            "threats",
-            "Using latest threats scan",
           );
         }
 
@@ -1578,7 +1758,15 @@ export function RebalanceWorkflowSections({
   return (
     <>
       <section className="grid gap-6 xl:grid-cols-2">
-        {sections.map((section) => (
+        {sections.map((section) => {
+          const queuedStages = getQueuedStages(
+            section.portfolio,
+            states,
+            runningPortfolio,
+            specificMode,
+            selectedStages,
+          );
+          return (
           <div
             key={section.portfolio}
             className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm"
@@ -1655,7 +1843,11 @@ export function RebalanceWorkflowSections({
                 <WorkflowStageTile
                   key={stage}
                   stage={stage}
-                  info={states[section.portfolio][stage]}
+                  info={
+                    queuedStages.has(stage)
+                      ? { ...states[section.portfolio][stage], state: "queued" }
+                      : states[section.portfolio][stage]
+                  }
                   now={now}
                   selectable={specificMode[section.portfolio] && !isBusy}
                   selected={selectedStages[section.portfolio].has(stage)}
@@ -1678,7 +1870,8 @@ export function RebalanceWorkflowSections({
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
       </section>
 
       <IndMoneySnapshotDialog
