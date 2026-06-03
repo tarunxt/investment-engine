@@ -424,7 +424,10 @@ function sortRunsByLatestTimestamp(runs: RunResponse[]) {
   );
 }
 
-function isCompletedTechnicalScanRun(run: RunResponse, market: SwingTradeMarket) {
+function isCompletedTechnicalScanRun(
+  run: RunResponse,
+  market: SwingTradeMarket,
+) {
   if ((run.status || "").toLowerCase() !== "completed") return false;
   if (!/##\s*Technical Scan Input Bundle/i.test(run.prompt)) return false;
   return market === "us"
@@ -448,7 +451,10 @@ function countUniqueStocksFromRun(run: RunResponse) {
         .map((cell) => cell.trim())
         .filter(Boolean);
       const symbol = cells[2] || cells[1];
-      if (symbol && !/^(?:stock symbol|symbol|n\/?a|—|-)$/.test(symbol.toLowerCase())) {
+      if (
+        symbol &&
+        !/^(?:stock symbol|symbol|n\/?a|—|-)$/.test(symbol.toLowerCase())
+      ) {
         symbols.add(symbol.toUpperCase());
       }
     });
@@ -475,7 +481,9 @@ function summarizeCompletedRunForIdle(
 }
 
 function formatInrCost(value?: number | null) {
-  return typeof value === "number" && value > 0 ? `₹${value.toFixed(2)}` : "n/a";
+  return typeof value === "number" && value > 0
+    ? `₹${value.toFixed(2)}`
+    : "n/a";
 }
 
 function formatLlmCompletion(info: StageInfo) {
@@ -484,7 +492,9 @@ function formatLlmCompletion(info: StageInfo) {
 }
 
 function formatLlmRun(info: StageInfo) {
-  return [info.provider, info.model].filter(Boolean).join(" / ") || "Not available";
+  return (
+    [info.provider, info.model].filter(Boolean).join(" / ") || "Not available"
+  );
 }
 
 function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
@@ -493,10 +503,16 @@ function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
   }
   if (stage === "swing") {
     return [
-      { label: "Last swing job", value: info.lastRunId ? `#${info.lastRunId}` : "Not available" },
+      {
+        label: "Last swing job",
+        value: info.lastRunId ? `#${info.lastRunId}` : "Not available",
+      },
       { label: "Timestamp", value: formatTimestamp(info.completedAt) },
       { label: "LLMs completed", value: formatLlmCompletion(info) },
-      { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
+      {
+        label: "Stocks recommended",
+        value: info.recommendedStocks?.toString() ?? "n/a",
+      },
       { label: "Cost incurred", value: formatInrCost(info.costInr) },
     ];
   }
@@ -509,10 +525,16 @@ function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
   }
   if (stage === "rebalance") {
     return [
-      { label: "Last rebalance job", value: info.lastRunId ? `#${info.lastRunId}` : "Not available" },
+      {
+        label: "Last rebalance job",
+        value: info.lastRunId ? `#${info.lastRunId}` : "Not available",
+      },
       { label: "Timestamp", value: formatTimestamp(info.completedAt) },
       { label: "LLMs completed", value: formatLlmCompletion(info) },
-      { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
+      {
+        label: "Stocks recommended",
+        value: info.recommendedStocks?.toString() ?? "n/a",
+      },
       { label: "Cost incurred", value: formatInrCost(info.costInr) },
     ];
   }
@@ -551,7 +573,7 @@ function WorkflowStageTile({
       type="button"
       onClick={onClick}
       disabled={!onClick || isRunning}
-      className={`relative min-h-36 rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-emerald-400 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-2 ring-emerald-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
+      className={`relative flex min-h-36 flex-col items-start justify-start rounded-2xl border p-4 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-emerald-400 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-2 ring-emerald-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
     >
       {showRunTag ? (
         <span className="absolute right-3 top-3 rounded-full border border-green-500 bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
@@ -560,7 +582,7 @@ function WorkflowStageTile({
       ) : isCompleted ? (
         <CheckCircle2 className="absolute right-3 top-3 size-5 text-emerald-600" />
       ) : null}
-      <div className="flex items-center gap-2 pr-7 text-sm font-semibold">
+      <div className="flex items-start gap-2 pr-7 text-sm font-semibold">
         {isRunning ? (
           <Loader2 className="size-4 animate-spin text-amber-600" />
         ) : (
@@ -590,7 +612,7 @@ function WorkflowStageTile({
           </span>
         ) : null}
       </div>
-      <div className="mt-3 space-y-1 text-xs leading-5 text-slate-600">
+      <div className="mt-3 w-full space-y-1 text-xs leading-5 text-slate-600">
         {info.state === "idle" ? (
           getIdleStageRows(stage, info).map((row) => (
             <p key={row.label}>
@@ -605,7 +627,9 @@ function WorkflowStageTile({
               <p>Timestamp: {formatTimestamp(info.completedAt)}</p>
             ) : null}
             {formatDuration(info.startedAt, info.endedAt, now) ? (
-              <p>Duration: {formatDuration(info.startedAt, info.endedAt, now)}</p>
+              <p>
+                Duration: {formatDuration(info.startedAt, info.endedAt, now)}
+              </p>
             ) : null}
             {info.totalLlms ? (
               <p>
@@ -628,7 +652,9 @@ function WorkflowStageTile({
                   {[info.provider, info.model].filter(Boolean).join(" / ") ||
                     "LLM details not available yet"}
                 </p>
-                <p>LLM Run Status: {info.runStatus ?? "Waiting for job status"}</p>
+                <p>
+                  LLM Run Status: {info.runStatus ?? "Waiting for job status"}
+                </p>
                 <p>
                   Sheets Export Status:{" "}
                   {info.exportStatus ?? "No sheet export status yet"}
@@ -802,18 +828,26 @@ export function RebalanceWorkflowSections({
   const isBusy = Boolean(runningPortfolio);
 
   const loadLatestIdleStageInfo = useCallback(async () => {
-    const [zerodhaOverview, indmoneyOverview, zerodhaThreat, indmoneyThreat, runs] =
-      await Promise.all([
-        apiService.zerodhaPortfolioOverview(),
-        apiService.indmoneyUsPortfolioOverview(),
-        apiService.zerodhaThreatsLatest(),
-        apiService.indmoneyUsThreatsLatest(),
-        fetchAllFullRuns(),
-      ]);
+    const [
+      zerodhaOverview,
+      indmoneyOverview,
+      zerodhaThreat,
+      indmoneyThreat,
+      runs,
+    ] = await Promise.all([
+      apiService.zerodhaPortfolioOverview(),
+      apiService.indmoneyUsPortfolioOverview(),
+      apiService.zerodhaThreatsLatest(),
+      apiService.indmoneyUsThreatsLatest(),
+      fetchAllFullRuns(),
+    ]);
 
-    const nextByPortfolio = (["zerodha", "indmoneyUs"] as WorkflowPortfolio[]).reduce(
+    const nextByPortfolio = (
+      ["zerodha", "indmoneyUs"] as WorkflowPortfolio[]
+    ).reduce(
       (acc, portfolio) => {
-        const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
+        const market: SwingTradeMarket =
+          portfolio === "zerodha" ? "india" : "us";
         const latestSwingRun = sortRunsByLatestTimestamp(
           runs.filter(
             (run) =>
@@ -830,17 +864,24 @@ export function RebalanceWorkflowSections({
         const latestRebalanceRuns = latestRebalanceRun
           ? getLatestMatchingRebalanceRuns(runs, market)
           : [];
-        const latestActionablesTimestamp = [latestTechnicalRun, latestRebalanceRun]
+        const latestActionablesTimestamp = [
+          latestTechnicalRun,
+          latestRebalanceRun,
+        ]
           .map((run) => (run ? getLatestRunTimestamp(run) : null))
           .filter(Boolean)
           .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0];
 
-        const overview = portfolio === "zerodha" ? zerodhaOverview : indmoneyOverview;
-        const threat = portfolio === "zerodha" ? zerodhaThreat.analysis : indmoneyThreat.analysis;
+        const overview =
+          portfolio === "zerodha" ? zerodhaOverview : indmoneyOverview;
+        const threat =
+          portfolio === "zerodha"
+            ? zerodhaThreat.analysis
+            : indmoneyThreat.analysis;
         const syncStatus =
           portfolio === "zerodha"
             ? "last synced portfolio"
-            : indmoneyOverview.latest?.parse_status ?? "last snapshot";
+            : (indmoneyOverview.latest?.parse_status ?? "last snapshot");
 
         acc[portfolio] = {
           sync: {
@@ -856,7 +897,8 @@ export function RebalanceWorkflowSections({
             ? withInrCost(
                 {
                   ...summarizeThreat(threat),
-                  completedLlms: (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
+                  completedLlms:
+                    (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
                   totalLlms: 1,
                 },
                 usdInrRate,
@@ -869,7 +911,10 @@ export function RebalanceWorkflowSections({
               ? buildConsensusRows(latestRebalanceRuns, market).length
               : null,
           ),
-          technical: summarizeCompletedRunForIdle(latestTechnicalRun, usdInrRate),
+          technical: summarizeCompletedRunForIdle(
+            latestTechnicalRun,
+            usdInrRate,
+          ),
           actionables: {
             completedAt: latestActionablesTimestamp ?? null,
             runStatus: latestActionablesTimestamp
@@ -879,22 +924,27 @@ export function RebalanceWorkflowSections({
         };
         return acc;
       },
-      {} as Record<WorkflowPortfolio, Record<WorkflowStageKey, Partial<StageInfo>>>,
+      {} as Record<
+        WorkflowPortfolio,
+        Record<WorkflowStageKey, Partial<StageInfo>>
+      >,
     );
 
     setStates((current) => {
       const next = { ...current };
-      (["zerodha", "indmoneyUs"] as WorkflowPortfolio[]).forEach((portfolio) => {
-        next[portfolio] = { ...current[portfolio] };
-        STAGE_ORDER.forEach((stage) => {
-          if (current[portfolio][stage].state !== "idle") return;
-          next[portfolio][stage] = {
-            ...current[portfolio][stage],
-            ...nextByPortfolio[portfolio][stage],
-            state: "idle",
-          };
-        });
-      });
+      (["zerodha", "indmoneyUs"] as WorkflowPortfolio[]).forEach(
+        (portfolio) => {
+          next[portfolio] = { ...current[portfolio] };
+          STAGE_ORDER.forEach((stage) => {
+            if (current[portfolio][stage].state !== "idle") return;
+            next[portfolio][stage] = {
+              ...current[portfolio][stage],
+              ...nextByPortfolio[portfolio][stage],
+              state: "idle",
+            };
+          });
+        },
+      );
       return next;
     });
   }, [usdInrRate]);
@@ -1375,10 +1425,11 @@ export function RebalanceWorkflowSections({
             ...summarizeRun(completedRebalanceRun),
             ...getRunProgress(completedRebalanceRun),
             lastRunId: completedRebalanceRun.id,
-            recommendedStocks: buildConsensusRows(
-              getLatestMatchingRebalanceRuns([completedRebalanceRun], market),
-              market,
-            ).length || null,
+            recommendedStocks:
+              buildConsensusRows(
+                getLatestMatchingRebalanceRuns([completedRebalanceRun], market),
+                market,
+              ).length || null,
           });
         } else {
           completeSkippedStage(
