@@ -74,13 +74,17 @@ const devAuthDisabled =
 const apiDebugEnabled = process.env.NEXT_PUBLIC_API_DEBUG === "true";
 
 export class APIError extends Error {
+  public readonly message: string;
+
   constructor(
     public status: number,
-    public message: string,
+    message: string | null | undefined,
     public details?: unknown,
   ) {
-    super(message);
+    const normalizedMessage = message?.trim() || `Request failed with HTTP ${status}`;
+    super(normalizedMessage);
     this.name = "APIError";
+    this.message = normalizedMessage;
   }
 }
 
@@ -93,6 +97,33 @@ export class NetworkError extends Error {
     super(`Unable to reach ${url} (${method}). ${originalMessage}`);
     this.name = "NetworkError";
   }
+}
+
+function stringifyApiDetail(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => stringifyApiDetail(item))
+      .filter((item): item is string => Boolean(item));
+    return parts.length > 0 ? parts.join("; ") : null;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const nestedMessage = stringifyApiDetail(record.message) ?? stringifyApiDetail(record.detail);
+    if (nestedMessage) return nestedMessage;
+
+    const loc = stringifyApiDetail(record.loc);
+    const msg = stringifyApiDetail(record.msg);
+    if (loc && msg) return `${loc}: ${msg}`;
+    if (msg) return msg;
+  }
+
+  return null;
 }
 
 // Helper function to get auth token
@@ -174,9 +205,13 @@ class apiServiceClass implements IApiService {
         const errorData = await response.json().catch(() => ({
           message: response.statusText,
         }));
+        const errorMessage =
+          stringifyApiDetail(errorData) ??
+          response.statusText?.trim() ??
+          `Request failed with HTTP ${response.status}`;
 
         this.error(`❌ API Error ${response.status}:`, errorData);
-        throw new APIError(response.status, errorData.message || errorData.detail, errorData);
+        throw new APIError(response.status, errorMessage, errorData);
       }
 
       const data = await response.json();
