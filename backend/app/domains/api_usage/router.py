@@ -15,6 +15,13 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.google_sheets.service import GoogleSheetsService
 from app.domains.jobs.models import Job
+from app.domains.runs.models import Run, RunJob
+from app.domains.api_usage.schemas import (
+    LlmPerformanceGroup,
+    LlmPerformanceResponse,
+    LlmScanPerformanceItem,
+    LlmScanSummary,
+)
 from app.core.config import get_gemini_api_keys, settings, settings_loaded_at_utc
 from app.infrastructure.database.session import get_async_db
 
@@ -24,6 +31,89 @@ router = APIRouter(prefix="/api-usage", tags=["api-usage"])
 IST = ZoneInfo("Asia/Kolkata")
 logger = logging.getLogger(__name__)
 _google_sheets_service = GoogleSheetsService()
+
+SCAN_MARKERS: tuple[tuple[str, str], ...] = (
+    ("[ZERODHA_EVENTS]", "Zerodha event scan"),
+    ("[ZERODHA_THREATS]", "Zerodha threat scan"),
+    ("[INDMONEY_US_EVENTS]", "INDmoney US event scan"),
+    ("[INDMONEY_US_THREATS]", "INDmoney US threat scan"),
+    ("[REBALANCE_TABLE_REPAIR]", "Portfolio rebalance repair"),
+)
+TERMINAL_FAILED_STATUSES = {"failed", "cancelled"}
+TERMINAL_PASSED_STATUSES = {"completed"}
+EXPORT_PASSED_STATUSES = {"completed", "success", "succeeded", "exported"}
+EXPORT_FAILED_STATUSES = {"failed", "error"}
+
+
+def _scan_type_for_job(job: Job, run_job: RunJob | None) -> str:
+    if run_job is not None:
+        stage_label = f"stage {run_job.stage}"
+        return f"Multi-LLM run {stage_label}"
+
+    prompt = job.prompt or ""
+    for marker, label in SCAN_MARKERS:
+        if marker in prompt:
+            return label
+
+    return "Single LLM job"
+
+
+def _duration_ms(started_at: datetime | None, finished_at: datetime | None) -> int | None:
+    if not started_at or not finished_at:
+        return None
+    return max(0, int((finished_at - started_at).total_seconds() * 1000))
+
+
+def _sheet_export_passed(export_status: str | None) -> bool | None:
+    if not export_status:
+        return None
+    normalized = export_status.lower()
+    if normalized in EXPORT_PASSED_STATUSES:
+        return True
+    if normalized in EXPORT_FAILED_STATUSES:
+        return False
+    return None
+
+
+def _build_llm_scan_summary(scan_type: str, scans: list[LlmScanPerformanceItem]) -> LlmScanSummary:
+    durations = [scan.time_taken_ms for scan in scans if scan.time_taken_ms is not None]
+    return LlmScanSummary(
+        scan_type=scan_type,
+        total_scans=len(scans),
+        processing_passed=sum(1 for scan in scans if scan.processing_passed),
+        processing_failed=sum(1 for scan in scans if scan.status.lower() in TERMINAL_FAILED_STATUSES),
+        sheet_export_passed=sum(1 for scan in scans if scan.sheet_export_passed is True),
+        sheet_export_failed=sum(1 for scan in scans if scan.sheet_export_passed is False),
+        total_cost=round(sum(scan.estimated_cost or 0 for scan in scans), 6),
+        avg_time_taken_ms=round(sum(durations) / len(durations)) if durations else None,
+    )
+
+
+def _build_llm_group(provider: str, model: str, scans: list[LlmScanPerformanceItem]) -> LlmPerformanceGroup:
+    durations = [scan.time_taken_ms for scan in scans if scan.time_taken_ms is not None]
+    scans_by_type: dict[str, list[LlmScanPerformanceItem]] = {}
+    for scan in scans:
+        scans_by_type.setdefault(scan.scan_type, []).append(scan)
+
+    summaries = [
+        _build_llm_scan_summary(scan_type, sorted(type_scans, key=lambda item: item.created_at, reverse=True))
+        for scan_type, type_scans in sorted(scans_by_type.items())
+    ]
+
+    return LlmPerformanceGroup(
+        provider=provider,
+        model=model,
+        llm_key=f"{provider}:{model}",
+        total_scans=len(scans),
+        processing_passed=sum(1 for scan in scans if scan.processing_passed),
+        processing_failed=sum(1 for scan in scans if scan.status.lower() in TERMINAL_FAILED_STATUSES),
+        sheet_export_passed=sum(1 for scan in scans if scan.sheet_export_passed is True),
+        sheet_export_failed=sum(1 for scan in scans if scan.sheet_export_passed is False),
+        total_cost=round(sum(scan.estimated_cost or 0 for scan in scans), 6),
+        avg_time_taken_ms=round(sum(durations) / len(durations)) if durations else None,
+        scan_summaries=summaries,
+        scans=sorted(scans, key=lambda item: item.created_at, reverse=True),
+    )
 
 USD_INR_FALLBACK = 83.50
 FX_SOURCE = "https://open.er-api.com/v6/latest/USD"
@@ -298,3 +388,69 @@ async def api_usage_summary(
         "fx_source": fx_source,
         "items": [asdict(item) for item in items],
     }
+
+
+@router.get("/llms/performance", response_model=LlmPerformanceResponse)
+async def llm_performance(
+    limit: int = Query(default=500, ge=1, le=1000),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(Job, RunJob, Run)
+            .outerjoin(RunJob, RunJob.job_id == Job.id)
+            .outerjoin(Run, Run.id == RunJob.run_id)
+            .where(Job.user_id == current_user.id)
+            .order_by(Job.created_at.desc(), Job.id.desc())
+            .limit(limit)
+        )
+    ).all()
+
+    scans_by_llm: dict[tuple[str, str], list[LlmScanPerformanceItem]] = {}
+    for job, run_job, run in rows:
+        status = job.status.value if hasattr(job.status, "value") else str(job.status)
+        export_status = job.export_status or (run.export_status if run is not None else None)
+        sheet_export_passed = _sheet_export_passed(export_status)
+        normalized_status = status.lower()
+        processing_passed = (
+            True
+            if normalized_status in TERMINAL_PASSED_STATUSES
+            else False if normalized_status in TERMINAL_FAILED_STATUSES else None
+        )
+        error_message = job.error_message or (run.export_error if run is not None else None)
+        export_error = job.export_error or (run.export_error if run is not None else None)
+        item = LlmScanPerformanceItem(
+            job_id=job.id,
+            run_id=run.id if run is not None else None,
+            stage=run_job.stage if run_job is not None else None,
+            scan_type=_scan_type_for_job(job, run_job),
+            provider=job.provider,
+            model=job.model,
+            status=status,
+            processing_passed=processing_passed,
+            sheet_export_passed=sheet_export_passed,
+            export_status=export_status,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            exported_at=job.exported_at or (run.exported_at if run is not None else None),
+            time_taken_ms=_duration_ms(job.created_at, job.updated_at),
+            tokens_in=job.tokens_in,
+            tokens_out=job.tokens_out,
+            estimated_cost=job.estimated_cost,
+            error_message=error_message,
+            export_error=export_error,
+        )
+        scans_by_llm.setdefault((job.provider, job.model), []).append(item)
+
+    groups = [
+        _build_llm_group(provider, model, scans)
+        for (provider, model), scans in sorted(scans_by_llm.items())
+    ]
+
+    return LlmPerformanceResponse(
+        total_llms=len(groups),
+        total_scans=sum(group.total_scans for group in groups),
+        generated_at=datetime.now(ZoneInfo("UTC")),
+        groups=groups,
+    )

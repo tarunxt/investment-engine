@@ -1,5 +1,6 @@
 import {
     LoginResponse,
+    LlmPerformanceResponse,
     RegisterResponse,
     UserResponse,
     JobResponse,
@@ -90,6 +91,7 @@ export interface IApiService {
 
     // Provider endpoints
     getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]>;
+    getLlmPerformance(params?: { limit?: number }): Promise<LlmPerformanceResponse>;
 
     // Google Sheets endpoints
     googleSheetsAuthUrl(): Promise<GoogleSheetsAuthUrlResponse>;

@@ -167,6 +167,62 @@ export interface ApiUsageSummaryResponse {
   items: ApiUsageItem[];
 }
 
+
+export interface LlmScanPerformanceItem {
+  job_id: number;
+  run_id?: number | null;
+  stage?: number | null;
+  scan_type: string;
+  provider: string;
+  model: string;
+  status: string;
+  processing_passed?: boolean | null;
+  sheet_export_passed?: boolean | null;
+  export_status?: string | null;
+  created_at: string;
+  updated_at: string;
+  exported_at?: string | null;
+  time_taken_ms?: number | null;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  estimated_cost?: number | null;
+  error_message?: string | null;
+  export_error?: string | null;
+}
+
+export interface LlmScanSummary {
+  scan_type: string;
+  total_scans: number;
+  processing_passed: number;
+  processing_failed: number;
+  sheet_export_passed: number;
+  sheet_export_failed: number;
+  total_cost: number;
+  avg_time_taken_ms?: number | null;
+}
+
+export interface LlmPerformanceGroup {
+  provider: string;
+  model: string;
+  llm_key: string;
+  total_scans: number;
+  processing_passed: number;
+  processing_failed: number;
+  sheet_export_passed: number;
+  sheet_export_failed: number;
+  total_cost: number;
+  avg_time_taken_ms?: number | null;
+  scan_summaries: LlmScanSummary[];
+  scans: LlmScanPerformanceItem[];
+}
+
+export interface LlmPerformanceResponse {
+  total_llms: number;
+  total_scans: number;
+  generated_at: string;
+  groups: LlmPerformanceGroup[];
+}
+
 // ==================== Job Types ====================
 
 export interface JobCreate {

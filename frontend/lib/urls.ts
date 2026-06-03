@@ -262,6 +262,7 @@ export const URLs = {
   },
   apiUsage: {
     summary: () => `${resolveApiBaseUrl()}/api-usage/summary`,
+    llmPerformance: () => `${resolveApiBaseUrl()}/api-usage/llms/performance`,
   },
 
   // Schedule endpoints
@@ -323,6 +324,7 @@ export const URLs = {
       polymarketBot: () => "/console/polymarket-bot",
       googleSheets: () => "/console/google-sheets",
       apis: () => "/console/apis",
+      llms: () => "/console/llms",
       technicalSetups: () => "/console/technical-setups",
     },
 
