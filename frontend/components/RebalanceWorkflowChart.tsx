@@ -2,18 +2,6 @@
 
 import { memo, useMemo, useState } from "react";
 import {
-  Background,
-  Controls,
-  Handle,
-  MarkerType,
-  MiniMap,
-  Position,
-  ReactFlow,
-  type Edge,
-  type Node,
-  type NodeProps,
-} from "@xyflow/react";
-import {
   Activity,
   AlertTriangle,
   BarChart3,
@@ -61,8 +49,6 @@ export type RebalanceWorkflowEdge = {
   kind: RebalanceEdgeKind;
   label?: string;
 };
-
-type WorkflowNodeData = RebalanceWorkflowStage;
 
 const ICONS = {
   sync: GitBranch,
@@ -140,18 +126,21 @@ function outputToneClass(tone: RebalanceStageOutput["tone"]) {
   }
 }
 
-const StageNode = memo(function StageNode({ data }: NodeProps<Node<WorkflowNodeData>>) {
+const NODE_WIDTH = 232;
+const NODE_HEIGHT = 150;
+const CANVAS_WIDTH = 1520;
+const CANVAS_HEIGHT = 570;
+
+const StageNode = memo(function StageNode({ stage }: { stage: RebalanceWorkflowStage }) {
   const [open, setOpen] = useState(false);
-  const Icon = ICONS[data.icon] ?? ClipboardList;
-  const styles = STATUS_STYLES[data.status];
+  const Icon = ICONS[stage.icon] ?? ClipboardList;
+  const styles = STATUS_STYLES[stage.status];
 
   return (
     <article
       className={`rebalance-workflow-node min-w-[13rem] max-w-[18rem] rounded-[1.35rem] border p-[clamp(0.8rem,3cqi,1rem)] shadow-lg ${styles.card}`}
-      aria-label={`${data.title} stage, ${styles.label}`}
+      aria-label={`${stage.title} stage, ${styles.label}`}
     >
-      <Handle type="target" position={Position.Left} className="!size-2 !border-0 !bg-transparent" />
-      <Handle type="source" position={Position.Right} className="!size-2 !border-0 !bg-transparent" />
       <div className="flex items-start gap-[0.75em]">
         <span className={`inline-flex size-[2.35em] shrink-0 items-center justify-center rounded-[0.85em] ring-1 ${styles.icon}`}>
           <Icon className="size-[1.15em]" aria-hidden="true" />
@@ -160,18 +149,18 @@ const StageNode = memo(function StageNode({ data }: NodeProps<Node<WorkflowNodeD
           <div className="flex items-start justify-between gap-[0.5em]">
             <div>
               <h3 className="text-[clamp(0.95rem,5cqi,1.15rem)] font-black leading-tight tracking-[-0.02em]">
-                {data.title}
+                {stage.title}
               </h3>
-              {data.subtitle ? (
+              {stage.subtitle ? (
                 <p className="mt-[0.25em] text-[clamp(0.75rem,3.5cqi,0.875rem)] font-semibold leading-snug text-slate-500">
-                  {data.subtitle}
+                  {stage.subtitle}
                 </p>
               ) : null}
             </div>
             <button
               type="button"
               aria-expanded={open}
-              aria-label={`Toggle ${data.title} run details`}
+              aria-label={`Toggle ${stage.title} run details`}
               className="nodrag nopan inline-flex size-[2em] shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/80 text-slate-600 shadow-sm transition hover:bg-white hover:text-slate-950"
               onClick={(event) => {
                 event.stopPropagation();
@@ -197,7 +186,7 @@ const StageNode = memo(function StageNode({ data }: NodeProps<Node<WorkflowNodeD
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          {data.outputs.map((output) => (
+          {stage.outputs.map((output) => (
             <div
               key={`${output.label}-${output.value}`}
               className={`rounded-[0.75em] border px-[0.75em] py-[0.55em] ${outputToneClass(output.tone)}`}
@@ -211,8 +200,6 @@ const StageNode = memo(function StageNode({ data }: NodeProps<Node<WorkflowNodeD
     </article>
   );
 });
-
-const nodeTypes = { stage: StageNode };
 
 export const DEFAULT_REBALANCE_WORKFLOW_STAGES: RebalanceWorkflowStage[] = [
   {
@@ -328,6 +315,16 @@ export const DEFAULT_REBALANCE_WORKFLOW_EDGES: RebalanceWorkflowEdge[] = [
   { id: "technical-actionables", source: "technical", target: "actionables", kind: "primary" },
 ];
 
+function buildEdgePath(source: RebalanceWorkflowStage, target: RebalanceWorkflowStage) {
+  const startX = source.position.x + NODE_WIDTH;
+  const startY = source.position.y + NODE_HEIGHT / 2;
+  const endX = target.position.x;
+  const endY = target.position.y + NODE_HEIGHT / 2;
+  const controlOffset = Math.max(80, Math.abs(endX - startX) * 0.45);
+
+  return `M ${startX} ${startY} C ${startX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`;
+}
+
 export function RebalanceWorkflowChart({
   stages = DEFAULT_REBALANCE_WORKFLOW_STAGES,
   edges = DEFAULT_REBALANCE_WORKFLOW_EDGES,
@@ -337,83 +334,89 @@ export function RebalanceWorkflowChart({
   edges?: RebalanceWorkflowEdge[];
   showMiniMap?: boolean;
 }) {
-  const flowNodes = useMemo<Node<WorkflowNodeData>[]>(
-    () =>
-      stages.map((stage) => ({
-        id: stage.id,
-        type: "stage",
-        position: stage.position,
-        data: stage,
-        draggable: false,
-        selectable: false,
-      })),
-    [stages],
-  );
+  const stageById = useMemo(() => new Map(stages.map((stage) => [stage.id, stage])), [stages]);
 
-  const flowEdges = useMemo<Edge[]>(
+  const renderedEdges = useMemo(
     () =>
-      edges.map((edge) => {
-        const edgeStyle = EDGE_STYLES[edge.kind];
-        return {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          label: edge.label,
-          type: "smoothstep",
-          animated: edge.kind !== "primary",
-          selectable: false,
-          style: {
-            stroke: edgeStyle.color,
-            strokeWidth: edge.kind === "primary" ? 4 : 3,
-            strokeDasharray: edgeStyle.dash,
-          },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: edgeStyle.color,
-            width: 18,
-            height: 18,
-          },
-        } satisfies Edge;
+      edges.flatMap((edge) => {
+        const source = stageById.get(edge.source);
+        const target = stageById.get(edge.target);
+        if (!source || !target) return [];
+
+        return [{ edge, source, target, path: buildEdgePath(source, target) }];
       }),
-    [edges],
+    [edges, stageById],
   );
 
   return (
-    <div className="rebalance-workflow-chart h-[clamp(32rem,58vw,45rem)] min-h-[32rem] w-full overflow-hidden rounded-[1.5rem] border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-blue-50/40">
-      <ReactFlow
-        nodes={flowNodes}
-        edges={flowEdges}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.14, includeHiddenNodes: false }}
-        minZoom={0.35}
-        maxZoom={1.35}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        connectOnClick={false}
-        proOptions={{ hideAttribution: true }}
+    <div className="rebalance-workflow-chart h-[clamp(32rem,58vw,45rem)] min-h-[32rem] w-full overflow-auto rounded-[1.5rem] border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-blue-50/40">
+      <div
+        className="relative min-h-full"
+        style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
+        role="region"
         aria-label="Interactive Zerodha rebalance workflow graph"
       >
-        <Background gap={24} size={1.2} color="#dbeafe" />
-        <Controls showInteractive={false} position="bottom-left" />
+        <div
+          className="absolute inset-0 opacity-70"
+          style={{
+            backgroundImage: "radial-gradient(circle, #dbeafe 1.2px, transparent 1.2px)",
+            backgroundSize: "24px 24px",
+          }}
+          aria-hidden="true"
+        />
+        <svg
+          className="pointer-events-none absolute inset-0 size-full overflow-visible"
+          viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`}
+          aria-hidden="true"
+        >
+          <defs>
+            {Object.entries(EDGE_STYLES).map(([kind, style]) => (
+              <marker
+                key={kind}
+                id={`rebalance-arrow-${kind}`}
+                markerWidth="10"
+                markerHeight="10"
+                refX="8"
+                refY="5"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill={style.color} />
+              </marker>
+            ))}
+          </defs>
+          {renderedEdges.map(({ edge, path }) => {
+            const edgeStyle = EDGE_STYLES[edge.kind];
+            return (
+              <path
+                key={edge.id}
+                d={path}
+                fill="none"
+                stroke={edgeStyle.color}
+                strokeWidth={edge.kind === "primary" ? 4 : 3}
+                strokeDasharray={edgeStyle.dash}
+                markerEnd={`url(#rebalance-arrow-${edge.kind})`}
+              />
+            );
+          })}
+        </svg>
+
+        {stages.map((stage) => (
+          <div
+            key={stage.id}
+            className="absolute"
+            style={{ left: stage.position.x, top: stage.position.y, width: NODE_WIDTH }}
+          >
+            <StageNode stage={stage} />
+          </div>
+        ))}
+
         {showMiniMap ? (
-          <MiniMap
-            pannable={false}
-            zoomable={false}
-            position="bottom-right"
-            nodeColor={(node) => {
-              const status = (node.data as WorkflowNodeData).status;
-              if (status === "completed") return "#10b981";
-              if (status === "running") return "#2563eb";
-              if (status === "warning") return "#f59e0b";
-              if (status === "blocked") return "#dc2626";
-              if (status === "skipped") return "#94a3b8";
-              return "#cbd5e1";
-            }}
-          />
+          <div className="absolute bottom-4 right-4 rounded-xl border border-slate-200 bg-white/85 px-3 py-2 text-xs font-bold text-slate-500 shadow-sm backdrop-blur">
+            Scroll or resize to inspect the full workflow
+          </div>
         ) : null}
-      </ReactFlow>
+      </div>
     </div>
   );
 }

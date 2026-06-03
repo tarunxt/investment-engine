@@ -22,11 +22,7 @@ export default function AuthLayout({
         }
     }, [isAuthenticated, loading, redirectTo, router]);
 
-    if (loading) {
-        return null;
-    }
-
-    if (isClientAuthBypassed || isAuthenticated) {
+    if (!loading && (isClientAuthBypassed || isAuthenticated)) {
         return null;
     }
 
