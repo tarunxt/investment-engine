@@ -863,13 +863,76 @@ function IndMoneySnapshotDialog({
 }
 
 function ZerodhaRebalanceFlowCard() {
-  const flowStages = [
-    { label: "Sync", x: 7, y: 50 },
-    { label: "Threats", x: 25, y: 30 },
-    { label: "Swing", x: 25, y: 70 },
-    { label: "Rebalance", x: 48, y: 50 },
-    { label: "Technical", x: 70, y: 50 },
-    { label: "Actionables", x: 91, y: 50 },
+  const legendItems = [
+    {
+      label: "Primary workflow",
+      detail: "queued execution path",
+      color: "#2563eb",
+      dash: undefined,
+    },
+    {
+      label: "Opportunity signal",
+      detail: "positive candidates and confirmations",
+      color: "#0f766e",
+      dash: "5 7",
+    },
+    {
+      label: "Risk / guardrail",
+      detail: "threats, blocks, and sell pressure",
+      color: "#dc2626",
+      dash: "7 6",
+    },
+  ];
+
+  const stageNodes = [
+    {
+      label: "Sync",
+      note: "Pull holdings, cash, prices",
+      x: 66,
+      y: 206,
+      fill: "#475569",
+    },
+    {
+      label: "Threats",
+      note: "Drawdown + risk flags",
+      x: 280,
+      y: 104,
+      fill: "#dc2626",
+    },
+    {
+      label: "Swing",
+      note: "Momentum + buy setup",
+      x: 280,
+      y: 286,
+      fill: "#0f766e",
+    },
+    {
+      label: "Rebalance",
+      note: "Target vs current",
+      x: 510,
+      y: 206,
+      fill: "#2563eb",
+    },
+    {
+      label: "Technical",
+      note: "Entry / exit checks",
+      x: 704,
+      y: 206,
+      fill: "#0f766e",
+    },
+    {
+      label: "Actionables",
+      note: "Orders + watchlist",
+      x: 892,
+      y: 206,
+      fill: "#2563eb",
+    },
+  ];
+
+  const actionOutputs = [
+    { label: "Buy / add", y: 116 },
+    { label: "Sell / trim", y: 206 },
+    { label: "Hold / watch", y: 296 },
   ];
 
   return (
@@ -879,246 +942,267 @@ function ZerodhaRebalanceFlowCard() {
           Zerodha Rebalance Flow
         </h2>
         <p className="mt-1 text-sm text-slate-500">
-          Visual path for the Zerodha auto-rebalance workflow stages and their
-          downstream outputs.
+          Annotated path for how synced Zerodha positions become risk checks,
+          opportunity signals, allocation decisions, technical validation, and
+          final actionables.
         </p>
       </div>
 
-      <div className="mt-5 overflow-x-auto rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+      <div className="mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 sm:grid-cols-3">
+        {legendItems.map((item) => (
+          <div key={item.label} className="flex items-center gap-2">
+            <svg aria-hidden="true" viewBox="0 0 72 16" className="h-4 w-16 shrink-0">
+              <line
+                x1="4"
+                y1="8"
+                x2="62"
+                y2="8"
+                stroke={item.color}
+                strokeDasharray={item.dash}
+                strokeLinecap="round"
+                strokeWidth="4"
+              />
+              <path d="M62,2 L70,8 L62,14 Z" fill={item.color} />
+            </svg>
+            <span>
+              <span className="font-semibold text-slate-800">{item.label}</span>
+              <span className="text-slate-500"> — {item.detail}</span>
+            </span>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 sm:col-span-3">
+          <span className="inline-flex size-4 rounded bg-slate-400" />
+          <span>
+            <span className="font-semibold text-slate-800">Rounded cards</span>
+            <span className="text-slate-500">
+              {" "}
+              group related checks; terminal cards are downstream outputs.
+            </span>
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-5 overflow-x-auto rounded-[24px] border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4">
         <svg
-          viewBox="0 0 920 360"
+          viewBox="0 0 1000 430"
           role="img"
-          aria-label="Zerodha rebalance flowchart from sync to threats, swing, rebalance, technical scan, and final actionables"
-          className="min-w-[720px]"
+          aria-labelledby="zerodha-flow-title zerodha-flow-desc"
+          className="min-w-[900px]"
         >
+          <title id="zerodha-flow-title">Annotated Zerodha rebalance flow</title>
+          <desc id="zerodha-flow-desc">
+            Zerodha sync feeds risk and opportunity inputs. Risk guardrails and
+            opportunity signals converge into the rebalance engine, then flow to
+            technical validation and buy, sell, or hold actionables. Blue solid
+            arrows are the primary workflow, teal dotted arrows are opportunity
+            signals, and red dashed arrows are risk guardrails.
+          </desc>
           <defs>
             <marker
-              id="flow-arrow-green"
-              markerHeight="8"
-              markerWidth="8"
+              id="rebalance-flow-arrow-blue"
+              markerHeight="10"
+              markerWidth="10"
               orient="auto"
-              refX="7"
-              refY="4"
+              refX="9"
+              refY="5"
             >
-              <path d="M0,0 L8,4 L0,8 Z" fill="#0f766e" />
+              <path d="M0,0 L10,5 L0,10 Z" fill="#2563eb" />
             </marker>
             <marker
-              id="flow-arrow-blue"
-              markerHeight="8"
-              markerWidth="8"
+              id="rebalance-flow-arrow-green"
+              markerHeight="10"
+              markerWidth="10"
               orient="auto"
-              refX="7"
-              refY="4"
+              refX="9"
+              refY="5"
             >
-              <path d="M0,0 L8,4 L0,8 Z" fill="#2563eb" />
+              <path d="M0,0 L10,5 L0,10 Z" fill="#0f766e" />
             </marker>
             <marker
-              id="flow-arrow-red"
-              markerHeight="8"
-              markerWidth="8"
+              id="rebalance-flow-arrow-red"
+              markerHeight="10"
+              markerWidth="10"
               orient="auto"
-              refX="7"
-              refY="4"
+              refX="9"
+              refY="5"
             >
-              <path d="M0,0 L8,4 L0,8 Z" fill="#dc2626" />
+              <path d="M0,0 L10,5 L0,10 Z" fill="#dc2626" />
             </marker>
+            <filter id="flow-card-shadow" x="-10%" y="-10%" width="120%" height="130%">
+              <feDropShadow dx="0" dy="8" stdDeviation="8" floodColor="#0f172a" floodOpacity="0.08" />
+            </filter>
           </defs>
 
-          <rect
-            x="165"
-            y="28"
-            width="250"
-            height="132"
-            rx="12"
-            fill="#ffffff"
-            stroke="#cbd5e1"
-            strokeWidth="2"
-          />
-          <text x="185" y="55" fill="#334155" fontSize="14" fontWeight="700">
-            Risk inputs
+          <rect x="24" y="22" width="952" height="386" rx="24" fill="#f8fafc" stroke="#e2e8f0" />
+          <rect x="160" y="46" width="320" height="146" rx="18" fill="#ffffff" stroke="#bfdbfe" strokeWidth="2" filter="url(#flow-card-shadow)" />
+          <text x="186" y="78" fill="#1e293b" fontSize="18" fontWeight="800">
+            Risk input lane
           </text>
-          <rect
-            x="120"
-            y="200"
-            width="340"
-            height="120"
-            rx="12"
-            fill="#ffffff"
-            stroke="#cbd5e1"
-            strokeWidth="2"
-          />
-          <text x="140" y="226" fill="#334155" fontSize="14" fontWeight="700">
-            Opportunity inputs
+          <text x="186" y="102" fill="#64748b" fontSize="12" fontWeight="600">
+            Threats reduce exposure or block unsafe trades.
+          </text>
+
+          <rect x="160" y="230" width="320" height="146" rx="18" fill="#ffffff" stroke="#99f6e4" strokeWidth="2" filter="url(#flow-card-shadow)" />
+          <text x="186" y="262" fill="#1e293b" fontSize="18" fontWeight="800">
+            Opportunity input lane
+          </text>
+          <text x="186" y="286" fill="#64748b" fontSize="12" fontWeight="600">
+            Swing setups raise buy/add candidates.
+          </text>
+
+          <rect x="526" y="58" width="178" height="86" rx="16" fill="#eff6ff" stroke="#bfdbfe" />
+          <text x="615" y="88" textAnchor="middle" fill="#1e3a8a" fontSize="13" fontWeight="800">
+            Allocation decision
+          </text>
+          <text x="615" y="112" textAnchor="middle" fill="#475569" fontSize="12">
+            target vs current
+          </text>
+          <text x="615" y="130" textAnchor="middle" fill="#475569" fontSize="12">
+            weights + cash
+          </text>
+
+          <rect x="730" y="58" width="178" height="86" rx="16" fill="#ecfdf5" stroke="#99f6e4" />
+          <text x="819" y="88" textAnchor="middle" fill="#14532d" fontSize="13" fontWeight="800">
+            Execution guardrails
+          </text>
+          <text x="819" y="112" textAnchor="middle" fill="#475569" fontSize="12">
+            price trend, volume,
+          </text>
+          <text x="819" y="130" textAnchor="middle" fill="#475569" fontSize="12">
+            and stop checks
           </text>
 
           <path
-            d="M78 180 C125 168 132 105 166 94"
+            d="M92 206 C122 190 132 132 166 104"
             fill="none"
             stroke="#dc2626"
-            strokeDasharray="6 6"
+            strokeDasharray="7 6"
             strokeLinecap="round"
             strokeWidth="4"
-            markerEnd="url(#flow-arrow-red)"
+            markerEnd="url(#rebalance-flow-arrow-red)"
           />
           <path
-            d="M78 180 C126 190 118 246 148 262"
+            d="M92 206 C122 222 132 270 166 286"
             fill="none"
             stroke="#0f766e"
-            strokeDasharray="4 7"
+            strokeDasharray="5 7"
             strokeLinecap="round"
             strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
+            markerEnd="url(#rebalance-flow-arrow-green)"
           />
           <path
-            d="M260 92 C300 70 326 54 374 52"
-            fill="none"
-            stroke="#2563eb"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-blue)"
-          />
-          <path
-            d="M260 92 C304 106 332 112 380 116"
-            fill="none"
-            stroke="#2563eb"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-blue)"
-          />
-          <path
-            d="M260 92 L330 92"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M260 92 L326 126"
+            d="M304 104 C386 104 430 130 492 190"
             fill="none"
             stroke="#dc2626"
-            strokeDasharray="6 6"
+            strokeDasharray="7 6"
             strokeLinecap="round"
             strokeWidth="4"
-            markerEnd="url(#flow-arrow-red)"
+            markerEnd="url(#rebalance-flow-arrow-red)"
           />
           <path
-            d="M260 92 L326 152"
-            fill="none"
-            stroke="#dc2626"
-            strokeDasharray="6 6"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-red)"
-          />
-          <path
-            d="M405 92 C470 92 505 95 558 112"
+            d="M304 286 C386 286 430 250 492 214"
             fill="none"
             stroke="#0f766e"
-            strokeDasharray="4 7"
+            strokeDasharray="5 7"
             strokeLinecap="round"
             strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
+            markerEnd="url(#rebalance-flow-arrow-green)"
           />
           <path
-            d="M405 160 C475 210 518 246 570 260"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M190 260 L262 260 L335 260 L425 260"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M190 260 L238 292"
-            fill="none"
-            stroke="#dc2626"
-            strokeDasharray="6 6"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-red)"
-          />
-          <path
-            d="M460 260 L575 260"
+            d="M536 206 L682 206"
             fill="none"
             stroke="#2563eb"
             strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-blue)"
+            strokeWidth="5"
+            markerEnd="url(#rebalance-flow-arrow-blue)"
           />
           <path
-            d="M598 260 L682 260"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M704 260 L810 260"
+            d="M728 206 L858 206"
             fill="none"
             stroke="#2563eb"
             strokeLinecap="round"
-            strokeWidth="4"
+            strokeWidth="5"
           />
           <path
-            d="M810 202 L810 318"
+            d="M858 116 L858 296"
             fill="none"
             stroke="#2563eb"
             strokeLinecap="round"
-            strokeWidth="4"
+            strokeWidth="5"
           />
-          <path d="M810 202 L860 202" fill="none" stroke="#2563eb" strokeWidth="4" markerEnd="url(#flow-arrow-blue)" />
-          <path d="M810 260 L860 260" fill="none" stroke="#2563eb" strokeWidth="4" markerEnd="url(#flow-arrow-blue)" />
-          <path d="M810 318 L860 318" fill="none" stroke="#2563eb" strokeWidth="4" markerEnd="url(#flow-arrow-blue)" />
-
-          {flowStages.map((stage) => (
-            <g key={stage.label}>
-              <rect
-                x={(stage.x / 100) * 920 - 11}
-                y={(stage.y / 100) * 360 - 11}
-                width="22"
-                height="22"
-                rx="3"
-                fill="#94a3b8"
+          {actionOutputs.map((output) => (
+            <g key={output.label}>
+              <path
+                d={`M858 ${output.y} L934 ${output.y}`}
+                fill="none"
+                stroke="#2563eb"
+                strokeLinecap="round"
+                strokeWidth="5"
+                markerEnd="url(#rebalance-flow-arrow-blue)"
               />
-              <text
-                x={(stage.x / 100) * 920}
-                y={(stage.y / 100) * 360 + 30}
-                textAnchor="middle"
-                fill="#475569"
-                fontSize="12"
-                fontWeight="700"
-              >
-                {stage.label}
+              <rect x="922" y={output.y - 19} width="58" height="38" rx="10" fill="#ffffff" stroke="#dbeafe" />
+              <text x="951" y={output.y + 4} textAnchor="middle" fill="#334155" fontSize="11" fontWeight="800">
+                {output.label}
               </text>
             </g>
           ))}
-          {[
-            [374, 52],
-            [380, 116],
-            [330, 92],
-            [326, 126],
-            [326, 152],
-            [425, 260],
-            [238, 292],
-            [860, 202],
-            [860, 260],
-            [860, 318],
-          ].map(([x, y]) => (
-            <rect key={`${x}-${y}`} x={x - 10} y={y - 10} width="20" height="20" rx="3" fill="#94a3b8" />
+
+          <path
+            d="M492 190 C545 142 560 115 526 101"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="3"
+            markerEnd="url(#rebalance-flow-arrow-blue)"
+          />
+          <path
+            d="M682 206 C736 172 768 144 782 144"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="5 7"
+            strokeLinecap="round"
+            strokeWidth="3"
+            markerEnd="url(#rebalance-flow-arrow-green)"
+          />
+
+          {stageNodes.map((stage) => (
+            <g key={stage.label}>
+              <circle cx={stage.x} cy={stage.y} r="27" fill={stage.fill} opacity="0.12" />
+              <rect
+                x={stage.x - 18}
+                y={stage.y - 18}
+                width="36"
+                height="36"
+                rx="10"
+                fill={stage.fill}
+              />
+              <text x={stage.x} y={stage.y + 52} textAnchor="middle" fill="#1e293b" fontSize="13" fontWeight="800">
+                {stage.label}
+              </text>
+              <text x={stage.x} y={stage.y + 70} textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="600">
+                {stage.note}
+              </text>
+            </g>
           ))}
+
+          <g>
+            <rect x="356" y="128" width="116" height="42" rx="12" fill="#fef2f2" stroke="#fecaca" />
+            <text x="414" y="146" textAnchor="middle" fill="#991b1b" fontSize="11" fontWeight="800">
+              trim / skip
+            </text>
+            <text x="414" y="162" textAnchor="middle" fill="#991b1b" fontSize="11" fontWeight="700">
+              if risk is high
+            </text>
+          </g>
+          <g>
+            <rect x="356" y="310" width="116" height="42" rx="12" fill="#ecfdf5" stroke="#99f6e4" />
+            <text x="414" y="328" textAnchor="middle" fill="#14532d" fontSize="11" fontWeight="800">
+              add candidate
+            </text>
+            <text x="414" y="344" textAnchor="middle" fill="#14532d" fontSize="11" fontWeight="700">
+              if setup passes
+            </text>
+          </g>
         </svg>
       </div>
     </div>
