@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import {
   AlertCircle,
   CheckCircle2,
@@ -68,8 +69,10 @@ type StageInfo = {
   costInr?: number | null;
   error?: string | null;
   activeRunId?: number | null;
+  lastRunId?: number | null;
   completedLlms?: number | null;
   totalLlms?: number | null;
+  recommendedStocks?: number | null;
 };
 type WorkflowState = Record<WorkflowStageKey, StageInfo>;
 type IndMoneySyncMode = "reuse" | "paste";
@@ -391,6 +394,138 @@ function getRunProgress(run: RunResponse) {
   };
 }
 
+function getCompletedLlmProgress(run: RunResponse) {
+  const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+  return {
+    completedLlms: jobs.filter(
+      (job) => (job.status || "").toLowerCase() === "completed",
+    ).length,
+    totalLlms: jobs.length,
+  };
+}
+
+function withInrCost(info: Partial<StageInfo>, usdInrRate: number) {
+  if (typeof info.costUsd !== "number" || info.costUsd <= 0) return info;
+  return {
+    ...info,
+    costInr: info.costInr ?? info.costUsd * usdInrRate,
+  };
+}
+
+function getLatestRunTimestamp(run: RunResponse) {
+  return run.updated_at ?? run.exported_at ?? run.created_at;
+}
+
+function sortRunsByLatestTimestamp(runs: RunResponse[]) {
+  return [...runs].sort(
+    (a, b) =>
+      parseTimestampMs(getLatestRunTimestamp(b)) -
+      parseTimestampMs(getLatestRunTimestamp(a)),
+  );
+}
+
+function isCompletedTechnicalScanRun(run: RunResponse, market: SwingTradeMarket) {
+  if ((run.status || "").toLowerCase() !== "completed") return false;
+  if (!/##\s*Technical Scan Input Bundle/i.test(run.prompt)) return false;
+  return market === "us"
+    ? /Market:\s*US equities/i.test(run.prompt)
+    : /Market:\s*India equities/i.test(run.prompt);
+}
+
+function countUniqueStocksFromRun(run: RunResponse) {
+  const symbols = new Set<string>();
+  (run.run_jobs ?? []).forEach((link) => {
+    const job = link.job;
+    if ((job?.status || "").toLowerCase() !== "completed") return;
+    const response = job.response ?? "";
+    response.split("\n").forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("|")) return;
+      if (/^\|?\s*:?-{3,}/.test(trimmed)) return;
+      if (/Stock Symbol/i.test(trimmed)) return;
+      const cells = trimmed
+        .split("|")
+        .map((cell) => cell.trim())
+        .filter(Boolean);
+      const symbol = cells[2] || cells[1];
+      if (symbol && !/^(?:stock symbol|symbol|n\/?a|—|-)$/.test(symbol.toLowerCase())) {
+        symbols.add(symbol.toUpperCase());
+      }
+    });
+  });
+  return symbols.size || null;
+}
+
+function summarizeCompletedRunForIdle(
+  run: RunResponse | undefined,
+  usdInrRate: number,
+  recommendedStocks?: number | null,
+): Partial<StageInfo> {
+  if (!run) return {};
+  return withInrCost(
+    {
+      ...summarizeRun(run),
+      ...getCompletedLlmProgress(run),
+      completedAt: getLatestRunTimestamp(run),
+      lastRunId: run.id,
+      recommendedStocks: recommendedStocks ?? null,
+    },
+    usdInrRate,
+  );
+}
+
+function formatInrCost(value?: number | null) {
+  return typeof value === "number" && value > 0 ? `₹${value.toFixed(2)}` : "n/a";
+}
+
+function formatLlmCompletion(info: StageInfo) {
+  if (!info.totalLlms) return "Not available";
+  return `${info.completedLlms ?? 0}/${info.totalLlms}`;
+}
+
+function formatLlmRun(info: StageInfo) {
+  return [info.provider, info.model].filter(Boolean).join(" / ") || "Not available";
+}
+
+function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
+  if (stage === "sync") {
+    return [{ label: "Last sync", value: formatTimestamp(info.completedAt) }];
+  }
+  if (stage === "swing") {
+    return [
+      { label: "Last swing job", value: info.lastRunId ? `#${info.lastRunId}` : "Not available" },
+      { label: "Timestamp", value: formatTimestamp(info.completedAt) },
+      { label: "LLMs completed", value: formatLlmCompletion(info) },
+      { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
+      { label: "Cost incurred", value: formatInrCost(info.costInr) },
+    ];
+  }
+  if (stage === "threats") {
+    return [
+      { label: "Last scan", value: formatTimestamp(info.completedAt) },
+      { label: "LLM run", value: formatLlmRun(info) },
+      { label: "Cost incurred", value: formatInrCost(info.costInr) },
+    ];
+  }
+  if (stage === "rebalance") {
+    return [
+      { label: "Last rebalance job", value: info.lastRunId ? `#${info.lastRunId}` : "Not available" },
+      { label: "Timestamp", value: formatTimestamp(info.completedAt) },
+      { label: "LLMs completed", value: formatLlmCompletion(info) },
+      { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
+      { label: "Cost incurred", value: formatInrCost(info.costInr) },
+    ];
+  }
+  if (stage === "technical") {
+    return [
+      { label: "Last scan", value: formatTimestamp(info.completedAt) },
+      { label: "LLM run", value: formatLlmRun(info) },
+      { label: "Cost incurred", value: formatInrCost(info.costInr) },
+    ];
+  }
+  return [{ label: "Last updated", value: formatTimestamp(info.completedAt) }];
+}
+
 function WorkflowStageTile({
   stage,
   info,
@@ -456,45 +591,60 @@ function WorkflowStageTile({
         ) : null}
       </div>
       <div className="mt-3 space-y-1 text-xs leading-5 text-slate-600">
-        {info.completedAt ? (
-          <p>Timestamp: {formatTimestamp(info.completedAt)}</p>
-        ) : null}
-        {formatDuration(info.startedAt, info.endedAt, now) ? (
-          <p>Duration: {formatDuration(info.startedAt, info.endedAt, now)}</p>
-        ) : null}
-        {info.totalLlms ? (
-          <p>
-            {info.completedLlms ?? 0}/{info.totalLlms} LLMs completed
-          </p>
-        ) : null}
-        {stage !== "sync" &&
-        (info.provider ||
-          info.model ||
-          info.runStatus ||
-          info.exportStatus ||
-          info.costUsd ||
-          info.error) ? (
+        {info.state === "idle" ? (
+          getIdleStageRows(stage, info).map((row) => (
+            <p key={row.label}>
+              <span className="font-semibold text-slate-500">{row.label}:</span>{" "}
+              {row.value}
+            </p>
+          ))
+        ) : (
           <>
-            <p>
-              LLM:{" "}
-              {[info.provider, info.model].filter(Boolean).join(" / ") ||
-                "LLM details not available yet"}
-            </p>
-            <p>LLM Run Status: {info.runStatus ?? "Waiting for job status"}</p>
-            <p>
-              Sheets Export Status:{" "}
-              {info.exportStatus ?? "No sheet export status yet"}
-            </p>
-            <p>
-              Cost (USD / INR):{" "}
-              {info.costUsd ? `$${info.costUsd.toFixed(4)}` : "n/a"} /{" "}
-              {info.costInr ? `₹${info.costInr.toFixed(2)}` : "n/a"}
-            </p>
-            {info.error ? (
-              <p className="text-red-700">Error: {info.error}</p>
+            {info.lastRunId ? <p>Job Number: #{info.lastRunId}</p> : null}
+            {info.completedAt ? (
+              <p>Timestamp: {formatTimestamp(info.completedAt)}</p>
+            ) : null}
+            {formatDuration(info.startedAt, info.endedAt, now) ? (
+              <p>Duration: {formatDuration(info.startedAt, info.endedAt, now)}</p>
+            ) : null}
+            {info.totalLlms ? (
+              <p>
+                {info.completedLlms ?? 0}/{info.totalLlms} LLMs completed
+              </p>
+            ) : null}
+            {info.recommendedStocks ? (
+              <p>Stocks recommended: {info.recommendedStocks}</p>
+            ) : null}
+            {stage !== "sync" &&
+            (info.provider ||
+              info.model ||
+              info.runStatus ||
+              info.exportStatus ||
+              info.costUsd ||
+              info.error) ? (
+              <>
+                <p>
+                  LLM:{" "}
+                  {[info.provider, info.model].filter(Boolean).join(" / ") ||
+                    "LLM details not available yet"}
+                </p>
+                <p>LLM Run Status: {info.runStatus ?? "Waiting for job status"}</p>
+                <p>
+                  Sheets Export Status:{" "}
+                  {info.exportStatus ?? "No sheet export status yet"}
+                </p>
+                <p>
+                  Cost (USD / INR):{" "}
+                  {info.costUsd ? `$${info.costUsd.toFixed(4)}` : "n/a"} /{" "}
+                  {info.costInr ? `₹${info.costInr.toFixed(2)}` : "n/a"}
+                </p>
+                {info.error ? (
+                  <p className="text-red-700">Error: {info.error}</p>
+                ) : null}
+              </>
             ) : null}
           </>
-        ) : null}
+        )}
       </div>
     </button>
   );
@@ -620,6 +770,7 @@ export function RebalanceWorkflowSections({
   onDashboardRefresh: () => Promise<void>;
 }) {
   const router = useRouter();
+  const usdInrRate = useUsdInrRate();
   const [states, setStates] = useState<
     Record<WorkflowPortfolio, WorkflowState>
   >({
@@ -649,6 +800,115 @@ export function RebalanceWorkflowSections({
   }, []);
 
   const isBusy = Boolean(runningPortfolio);
+
+  const loadLatestIdleStageInfo = useCallback(async () => {
+    const [zerodhaOverview, indmoneyOverview, zerodhaThreat, indmoneyThreat, runs] =
+      await Promise.all([
+        apiService.zerodhaPortfolioOverview(),
+        apiService.indmoneyUsPortfolioOverview(),
+        apiService.zerodhaThreatsLatest(),
+        apiService.indmoneyUsThreatsLatest(),
+        fetchAllFullRuns(),
+      ]);
+
+    const nextByPortfolio = (["zerodha", "indmoneyUs"] as WorkflowPortfolio[]).reduce(
+      (acc, portfolio) => {
+        const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
+        const latestSwingRun = sortRunsByLatestTimestamp(
+          runs.filter(
+            (run) =>
+              (run.status || "").toLowerCase() === "completed" &&
+              isRunInSwingTradeMarket(run.prompt, market),
+          ),
+        )[0];
+        const latestRebalanceRun = sortRunsByLatestTimestamp(
+          runs.filter((run) => isCompletedRebalanceRun(run, market)),
+        )[0];
+        const latestTechnicalRun = sortRunsByLatestTimestamp(
+          runs.filter((run) => isCompletedTechnicalScanRun(run, market)),
+        )[0];
+        const latestRebalanceRuns = latestRebalanceRun
+          ? getLatestMatchingRebalanceRuns(runs, market)
+          : [];
+        const latestActionablesTimestamp = [latestTechnicalRun, latestRebalanceRun]
+          .map((run) => (run ? getLatestRunTimestamp(run) : null))
+          .filter(Boolean)
+          .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0];
+
+        const overview = portfolio === "zerodha" ? zerodhaOverview : indmoneyOverview;
+        const threat = portfolio === "zerodha" ? zerodhaThreat.analysis : indmoneyThreat.analysis;
+        const syncStatus =
+          portfolio === "zerodha"
+            ? "last synced portfolio"
+            : indmoneyOverview.latest?.parse_status ?? "last snapshot";
+
+        acc[portfolio] = {
+          sync: {
+            completedAt: overview.latest?.captured_at ?? null,
+            runStatus: syncStatus,
+          },
+          swing: summarizeCompletedRunForIdle(
+            latestSwingRun,
+            usdInrRate,
+            latestSwingRun ? countUniqueStocksFromRun(latestSwingRun) : null,
+          ),
+          threats: threat
+            ? withInrCost(
+                {
+                  ...summarizeThreat(threat),
+                  completedLlms: (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
+                  totalLlms: 1,
+                },
+                usdInrRate,
+              )
+            : {},
+          rebalance: summarizeCompletedRunForIdle(
+            latestRebalanceRun,
+            usdInrRate,
+            latestRebalanceRuns.length
+              ? buildConsensusRows(latestRebalanceRuns, market).length
+              : null,
+          ),
+          technical: summarizeCompletedRunForIdle(latestTechnicalRun, usdInrRate),
+          actionables: {
+            completedAt: latestActionablesTimestamp ?? null,
+            runStatus: latestActionablesTimestamp
+              ? "derived from latest rebalance/technical scan"
+              : null,
+          },
+        };
+        return acc;
+      },
+      {} as Record<WorkflowPortfolio, Record<WorkflowStageKey, Partial<StageInfo>>>,
+    );
+
+    setStates((current) => {
+      const next = { ...current };
+      (["zerodha", "indmoneyUs"] as WorkflowPortfolio[]).forEach((portfolio) => {
+        next[portfolio] = { ...current[portfolio] };
+        STAGE_ORDER.forEach((stage) => {
+          if (current[portfolio][stage].state !== "idle") return;
+          next[portfolio][stage] = {
+            ...current[portfolio][stage],
+            ...nextByPortfolio[portfolio][stage],
+            state: "idle",
+          };
+        });
+      });
+      return next;
+    });
+  }, [usdInrRate]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadLatestIdleStageInfo().catch(() => {
+        // The workflow tiles keep their built-in "Not available" fallbacks if
+        // any dashboard source is temporarily unavailable.
+      });
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [loadLatestIdleStageInfo]);
 
   const updateStage = useCallback(
     (
@@ -719,15 +979,16 @@ export function RebalanceWorkflowSections({
       info: Partial<StageInfo>,
     ) => {
       const timestamp = new Date().toISOString();
+      const infoWithInrCost = withInrCost(info, usdInrRate);
       updateStage(portfolio, stage, {
         state: "completed",
         endedAt: timestamp,
-        completedAt: info.completedAt ?? timestamp,
+        completedAt: infoWithInrCost.completedAt ?? timestamp,
         activeRunId: null,
-        ...info,
+        ...infoWithInrCost,
       });
     },
-    [updateStage],
+    [updateStage, usdInrRate],
   );
 
   const toggleSpecificMode = useCallback((portfolio: WorkflowPortfolio) => {
@@ -1021,6 +1282,8 @@ export function RebalanceWorkflowSections({
           markCompleted(portfolio, "swing", {
             ...summarizeRun(completedSwingRun),
             ...getRunProgress(completedSwingRun),
+            lastRunId: completedSwingRun.id,
+            recommendedStocks: countUniqueStocksFromRun(completedSwingRun),
           });
         } else {
           completeSkippedStage(
@@ -1111,6 +1374,11 @@ export function RebalanceWorkflowSections({
           markCompleted(portfolio, "rebalance", {
             ...summarizeRun(completedRebalanceRun),
             ...getRunProgress(completedRebalanceRun),
+            lastRunId: completedRebalanceRun.id,
+            recommendedStocks: buildConsensusRows(
+              getLatestMatchingRebalanceRuns([completedRebalanceRun], market),
+              market,
+            ).length || null,
           });
         } else {
           completeSkippedStage(
@@ -1149,6 +1417,7 @@ export function RebalanceWorkflowSections({
           markCompleted(portfolio, "technical", {
             ...summarizeRun(completedTechnicalRun),
             ...getRunProgress(completedTechnicalRun),
+            lastRunId: completedTechnicalRun.id,
           });
         } else {
           completeSkippedStage(
