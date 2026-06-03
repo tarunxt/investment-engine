@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import {
+  AlertCircle,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  Target,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -213,6 +219,62 @@ function formatUsdValueAsInr(
   return formatInr(value * usdInrRate);
 }
 
+function PortfolioCommandSummary({
+  totalValue,
+  zerodhaValue,
+  zerodhaPortfolioValue,
+  zerodhaMargin,
+  indmoneyPortfolioValue,
+  indmoneyFundsValue,
+}: {
+  totalValue: number;
+  zerodhaValue: number;
+  zerodhaPortfolioValue: number | null | undefined;
+  zerodhaMargin: number;
+  indmoneyPortfolioValue: number | null | undefined;
+  indmoneyFundsValue: number | null | undefined;
+}) {
+  return (
+    <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 shadow-2xl shadow-slate-950/15 backdrop-blur">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
+        <div className="min-w-[210px] flex-1">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">
+            <Target className="size-3.5" />
+            Total Investments
+          </div>
+          <div className="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">
+            {formatInr(totalValue)}
+          </div>
+        </div>
+
+        <div className="grid flex-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
+            <div className="text-xs font-semibold text-white">Zerodha</div>
+            <div className="mt-1 text-sm font-bold text-white">
+              {formatInr(zerodhaValue)}
+            </div>
+            <div className="mt-3 text-xs leading-5 text-slate-200">
+              {formatInr(zerodhaPortfolioValue)} portfolio +{" "}
+              {formatInr(zerodhaMargin)} margin
+            </div>
+          </div>
+
+          <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
+            <div className="text-xs font-semibold text-white">INDmoney</div>
+            <div className="mt-1 text-sm font-bold text-white">
+              {formatInr(indmoneyPortfolioValue)}
+            </div>
+            <div className="mt-3 text-xs leading-5 text-slate-200">
+              {formatInr(indmoneyPortfolioValue)} total portfolio +{" "}
+              {formatInr(indmoneyFundsValue)} available funds
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildUsTopHoldings(
   overview: IndMoneyUsPortfolioOverviewResponse | null,
   usdInrRate: number,
@@ -346,7 +408,19 @@ export default function DashboardPage() {
     0,
   );
   const zerodhaAvailableMargin = indiaSnapshot?.available_margin ?? 0;
+  const zerodhaCommandValue =
+    (indiaSnapshot?.holdings_market_value ?? 0) + zerodhaAvailableMargin;
   const indmoneyInvestedValue = usSnapshot?.invested_value ?? 0;
+  const indmoneyPortfolioValueInr =
+    usSnapshot?.current_value == null
+      ? undefined
+      : usSnapshot.current_value * usdInrRate;
+  const indmoneyAvailableFundsValueInr =
+    usSnapshot?.wallet_balance == null
+      ? undefined
+      : usSnapshot.wallet_balance * usdInrRate;
+  const indmoneyCommandValue = indmoneyPortfolioValueInr ?? 0;
+  const totalCommandValue = zerodhaCommandValue + indmoneyCommandValue;
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
   if (
     loading &&
@@ -368,7 +442,7 @@ export default function DashboardPage() {
       <section className="relative overflow-hidden rounded-[36px] border border-slate-200 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.22),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.22),_transparent_35%)]" />
 
-        <div className="relative px-6 py-7 lg:px-8">
+        <div className="relative grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_minmax(460px,0.95fr)] lg:items-center lg:px-8">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
               <Sparkles className="size-3.5" />
@@ -398,6 +472,15 @@ export default function DashboardPage() {
               </Button>
             </div>
           </div>
+
+          <PortfolioCommandSummary
+            totalValue={totalCommandValue}
+            zerodhaValue={zerodhaCommandValue}
+            zerodhaPortfolioValue={indiaSnapshot?.holdings_market_value}
+            zerodhaMargin={zerodhaAvailableMargin}
+            indmoneyPortfolioValue={indmoneyPortfolioValueInr}
+            indmoneyFundsValue={indmoneyAvailableFundsValueInr}
+          />
         </div>
       </section>
 
