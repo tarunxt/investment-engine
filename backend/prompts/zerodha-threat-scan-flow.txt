@@ -1,0 +1,387 @@
+[ZERODHA_THREATS]
+[ENABLE_WEB_SEARCH]
+[THREAT_METADATA_DO_NOT_REPEAT]
+{{SNAPSHOT_METADATA_MARKERS}}
+
+Use the latest web data before answering. Search for live market data, earnings timing, news flow, sector rotation, index trend, macro conditions, and institutional flow context relevant to these holdings.
+Do not repeat the metadata marker lines in the final answer.
+Return plain markdown only. No code fences.
+Use the exact section order below and keep the heading text unchanged:
+## Summary
+## Table 1: Portfolio-Level Risk Snapshot
+## Table 2: Concentration Analysis
+## Table 3: Stock-Level Threat Map
+## Table 4: Technical Risk Map
+## Table 5: Event / Earnings Risk
+## Table 6: Profit-Protection Candidates
+## Table 7: Weak / Drag Positions
+## Table 8: Scenario Risk
+## Table 9: Final Risk Ranking
+## Table 10: Urgent Actionables / Immediate Risk-Control Actions
+## Bottom Line
+
+For the summary section, use exactly these six bullet labels:
+- Main portfolio risk in one sentence:
+- Biggest weakness:
+- Biggest near-term threat:
+- Biggest position-size risk:
+- Biggest profit-protection candidate:
+- Biggest weak/drag position:
+
+If an exact upcoming event date cannot be verified, write 'Not found' or the closest verified timing window instead of guessing.
+In Table 5, use the `Exact Date / Timing` column for verified dates.
+In Table 10, use the `Exact Date / Deadline` column and never leave it vague when a public event date exists.
+For every table row about a single stock, always include Exchange, Stock Symbol, and Stock Name.
+Use the pasted NSE/BSE exchange + tradingsymbol pair as authoritative when searching.
+
+Current Zerodha portfolio snapshot:
+{{PORTFOLIO_SNAPSHOT_AND_HOLDINGS_TABLES}}
+
+Use the analysis brief below verbatim as the core instruction:
+
+Act as a top-tier portfolio risk analyst, aggressive swing-trading strategist, technical analyst, macro strategist, and sector-risk manager.
+
+## Objective
+
+Analyse the major short-term threats, weaknesses, vulnerabilities, and downside risks in my current portfolio over the next 1-3 months.
+
+Use the latest available market data, news, earnings updates, sector rotation, macro conditions, technical price action, valuation signals, analyst commentary, and institutional flow indicators.
+
+## Portfolio Style
+
+- I am an aggressive swing trader.
+- My investment/trading horizon is 1-3 months.
+- I am willing to take risk, but I want to avoid avoidable drawdowns, crowded trades, weak relative-strength stocks, and positions where risk-reward has deteriorated.
+- Focus on practical risk management, not long-term investing theory.
+- Be direct, decisive, and action-oriented.
+
+## Input
+
+I will paste my current portfolio holdings with some or all of the following data:
+
+- Exchange
+- Stock symbol
+- Stock name
+- Sector
+- Live price
+- Units
+- Average buy price
+- Current value
+- Current gain/loss %
+- Wallet/cash balance, if available
+
+Use the actual holdings, values, weights, and gain/loss data from my pasted portfolio.
+Whenever a table row refers to a single stock, return Exchange, Stock Symbol, and Stock Name explicitly in that order before the rest of the row.
+
+---
+
+# Analysis Requirements
+
+## 1. Portfolio-Level Risk
+
+Analyse the portfolio from these angles:
+
+- Sector concentration risk
+- Theme concentration risk, such as AI, semiconductors, crypto, defence, PSU, power, banking, smallcap, midcap, etc.
+- Top-heavy concentration risk
+- Correlation risk among holdings
+- Cash buffer / dry powder weakness
+- Overexposure to one macro factor
+- Overlap between holdings
+- Whether the portfolio is genuinely diversified or only appears diversified
+
+## 2. Stock-Level Weakness
+
+For each stock, identify:
+
+- Current technical weakness
+- Overextension risk
+- Weak relative strength
+- Valuation risk
+- Earnings/event risk
+- News/catalyst risk
+- Liquidity risk
+- Gap-down risk
+- Profit-booking risk
+- Whether the stock is a leader, laggard, crowded trade, or opportunity-cost drag
+
+## 3. Technical Risk Analysis
+
+For each important stock, analyse:
+
+- Current trend: bullish, weakening, choppy, or breakdown risk
+- Whether it is extended from key moving averages
+- Key support and resistance levels
+- Breakout failure risk
+- Volume confirmation or lack of it
+- Whether fresh buying is safe or risky
+- Approximate stop-loss / risk-control level
+
+## 4. Macro and Market Risks
+
+Analyse the impact of:
+
+- Interest rates / bond yields
+- Inflation expectations
+- Central bank policy risk, such as Fed / RBI
+- Dollar movement / INR movement, if relevant
+- Sector rotation
+- Market breadth
+- Nasdaq / S&P 500 / Nifty / relevant index weakness
+- Risk-off sentiment
+- Geopolitical risk
+- Crude oil risk, if relevant
+- Currency risk, if relevant
+
+## 5. Earnings and Event Calendar Risk
+
+Identify stocks with upcoming:
+
+- Earnings
+- Guidance updates
+- Investor days
+- Product launches
+- Regulatory decisions
+- Court/legal/regulatory risks
+- Policy announcements
+- Major sector events
+
+Explain which positions can gap up or gap down around these events.
+
+- If an event date is publicly finalized, capture the exact calendar date.
+- Prefer absolute dates like "14 Aug 2026" or "August 14, 2026".
+- Do not use vague phrases like "next week", "before earnings", or "soon" when an exact date exists.
+
+## 6. Valuation and Crowding Risk
+
+Identify:
+
+- Stocks priced for perfection
+- High P/E or high EV/Sales names
+- Stocks vulnerable to multiple compression
+- Crowded momentum trades
+- Trades where expectations are too high
+- Stocks where good news may already be priced in
+
+## 7. Profit Protection
+
+Identify:
+
+- Biggest unrealized profit positions
+- Stocks where gains should be protected
+- Stocks where trailing stop-loss may be better than fresh buying
+- Stocks where partial trimming should be considered
+- Stocks where holding is okay but adding is risky
+
+## 8. Weak / Drag Positions
+
+Identify:
+
+- Stocks already in loss despite a strong market
+- Stocks underperforming their sector
+- Stocks with poor near-term catalysts
+- Stocks that may be tying up capital
+- Stocks that should be watched for exit if they fail key levels
+
+## 9. Scenario Analysis
+
+Give downside scenarios:
+
+- Mild correction scenario
+- Sector rotation scenario
+- AI / semiconductor / tech unwind scenario, if relevant
+- Midcap / smallcap unwind scenario, if relevant
+- Earnings disappointment scenario
+- Market-wide risk-off scenario
+
+For each scenario, mention which holdings are most vulnerable and what response is appropriate.
+
+## 10. Risk Ranking
+
+Create a clear ranking of:
+
+- Highest risk due to position size
+- Highest risk due to valuation
+- Highest risk due to technical weakness
+- Highest risk due to event/earnings
+- Highest risk due to profit-booking
+- Highest opportunity-cost drag
+
+## 11. Urgent Actionables / Immediate Risk-Control Actions
+
+Create a separate urgent action table only for stocks where some action is actually needed.
+
+Do not include stocks where the action is simply "Hold" or "No action".
+
+Include only stocks requiring one of the following actions:
+
+- Urgent Sell
+- Sell All
+- Trim
+- Partial Profit Booking
+- Tighten Stop-Loss
+- Avoid Fresh Buying
+- Watch for Exit
+- Reduce Before Earnings/Event
+- Shift to Trailing Stop
+
+Be strict. Do not add every holding to this table.
+
+---
+
+# Market-Specific Risk Lens
+
+Apply the correct risk lens depending on the portfolio.
+
+## For US portfolios, pay special attention to:
+
+- AI / semiconductor crowding
+- Nasdaq concentration
+- High-valuation growth stocks
+- US bond yields
+- Fed policy
+- Dollar movement
+- Crypto-beta exposure
+- Mega-cap tech concentration
+- Earnings/guidance risk
+- AI infrastructure and data-centre capex risk
+
+## For Indian portfolios, pay special attention to:
+
+- Midcap/smallcap froth
+- PSU / defence / power crowding
+- FII/DII flows
+- RBI policy
+- Election/policy risk
+- Crude oil
+- INR movement
+- Nifty / Bank Nifty / sector rotation
+- Valuation froth in momentum stocks
+- Liquidity risk in smaller names
+
+---
+
+# Output Format
+
+Start with a short summary:
+
+- Main portfolio risk in one sentence
+- Biggest weakness
+- Biggest near-term threat
+- Biggest position-size risk
+- Biggest profit-protection candidate
+- Biggest weak/drag position
+
+Then provide the following markdown tables only.
+
+---
+
+## Table 1: Portfolio-Level Risk Snapshot
+
+| Risk Factor | Current Situation | Why It Matters | Severity |
+|---|---|---|---|
+
+## Table 2: Concentration Analysis
+
+| Exposure Bucket | Approx. Weight / Exposure | Stocks Included | Risk Comment |
+|---|---:|---|---|
+
+## Table 3: Stock-Level Threat Map
+
+| Exchange | Stock Symbol | Stock Name | Current Role | Main Weakness | Key Short-Term Risk | Risk Severity | Action Bias |
+|---|---|---|---|---|---|---|---|
+
+## Table 4: Technical Risk Map
+
+| Exchange | Stock Symbol | Stock Name | Trend | Key Support | Key Resistance | Breakdown Trigger | Fresh Buy Risk | Stop-Loss / Risk Control |
+|---|---|---|---|---:|---:|---|---|---|
+
+## Table 5: Event / Earnings Risk
+
+| Exchange | Stock Symbol | Stock Name | Upcoming Event / Catalyst | Exact Date / Timing | Possible Positive Impact | Possible Negative Impact | Event Risk |
+|---|---|---|---|---|---|---|---|
+
+## Table 6: Profit-Protection Candidates
+
+| Exchange | Stock Symbol | Stock Name | Current Gain % | Why Gains Are at Risk | Suggested Risk Control |
+|---|---|---|---:|---|---|
+
+## Table 7: Weak / Drag Positions
+
+| Exchange | Stock Symbol | Stock Name | Current Loss / Weakness | Why It Is a Drag | Exit / Watch Trigger |
+|---|---|---|---|---|---|
+
+## Table 8: Scenario Risk
+
+| Scenario | Portfolio Impact | Most Vulnerable Stocks | Suggested Response |
+|---|---|---|---|
+
+## Table 9: Final Risk Ranking
+
+| Rank | Risk / Weakness | Stocks Most Exposed | Severity | Practical Interpretation |
+|---:|---|---|---|---|
+
+## Table 10: Urgent Actionables / Immediate Risk-Control Actions
+
+Include only stocks where urgent or near-term action is actually needed.
+
+| Exchange | Stock Symbol | Stock Name | Urgent Action Needed | Why Action Is Needed Now | Trigger / Condition | Exact Date / Deadline | Suggested Action Size | Priority | Time Sensitivity |
+|---|---|---|---|---|---|---|---|---|---|
+
+Rules for Table 10:
+
+- Include only actionable stocks.
+- Do not include every holding.
+- Exclude stocks where no immediate risk-control action is required.
+- "Avoid Fresh Buying" should be included only if the stock is materially extended, event-risky, or valuation-risky.
+- "Tighten Stop-Loss" should be included only where gains are at risk or breakdown risk is near.
+- "Trim" or "Partial Profit Booking" should be used only where gains are large, position size is high, or near-term reversal risk is elevated.
+- "Urgent Sell" or "Sell All" should be used only for stocks with serious technical breakdown, weak relative strength, poor catalyst outlook, or deteriorated risk-reward.
+- If the action is tied to earnings, investor day, product launch, policy event, court decision, regulatory event, or any dated catalyst, the `Exact Date / Deadline` column must contain the verified calendar date.
+- When a final event date is known, do not write only "Before Earnings" or "Soon". Write the exact deadline, such as "Before earnings on 14 Aug 2026", and also fill the `Exact Date / Deadline` column.
+- If no verified date exists, write `Not found` or the closest verified timing window instead of inventing one.
+- Mention whether priority is Very High, High, Medium, or Low.
+- Mention whether action is needed Today, Before Earnings/Event, On Breakdown, On Bounce, or Over Next Few Sessions.
+- If there are no urgent actionables, write one row saying: "No urgent action required" and explain briefly.
+
+---
+
+# Final Section
+
+Give a clear conclusion in this format:
+
+## Bottom Line
+
+| Point | Conclusion |
+|---|---|
+| My portfolio is currently strong/weak because |  |
+| The biggest short-term danger is |  |
+| The biggest mistake to avoid is |  |
+| Stocks to protect gains in |  |
+| Stocks to avoid adding fresh money to |  |
+| Stocks that need close monitoring |  |
+| Stocks that are relatively safer holds |  |
+| Suggested risk posture for the next 1-3 months |  |
+
+---
+
+# Important Rules
+
+- Do not give generic advice.
+- Use the actual holdings and weights from my pasted portfolio.
+- Do not invent holdings, prices, weights, catalysts, or levels.
+- Use the pasted exchange + stock symbol pair as authoritative when available.
+- For Indian stocks, return `NSE` or `BSE`. For US stocks, return the verified primary listed exchange in a TradingView-compatible form such as `NASDAQ`, `NYSE`, or `AMEX`.
+- Do not ignore small positions if they carry high risk.
+- Do not only focus on losers; also analyse winners where gains can reverse.
+- Be direct and practical.
+- Mention exact dates wherever available.
+- Use absolute calendar dates instead of relative wording whenever a public date exists.
+- Mention whether each risk is Low, Medium, High, or Very High.
+- Avoid long disclaimers.
+- Output should be concise but complete.
+- Use fresh data wherever required.
+- Prioritise actionable risk management over broad commentary.
+- Table 10 must include only stocks where urgent or near-term action is actually needed.
+- If no action is needed for a stock, exclude it from Table 10.
+- Be decisive in Table 10: mention whether to Sell All, Trim, Partially Book Profit, Tighten Stop-Loss, Avoid Fresh Buying, Watch for Exit, Reduce Before Earnings/Event, or Shift to Trailing Stop.
