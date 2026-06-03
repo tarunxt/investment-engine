@@ -1,0 +1,32 @@
+[TECHNICAL_SCAN]
+Market: {{MARKET_LABEL}}
+
+Stock list:
+| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |
+|---|---|---|---:|
+{{STOCK_ROWS}}
+
+Approved Technical Setups list from sidebar:
+{{APPROVED_TECHNICAL_SETUPS_MARKDOWN}}
+
+Act as a top-tier technical analyst and swing-trading strategist.
+
+Objective:
+For the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.
+
+Important rules:
+- Use current fresh internet data only. Do not rely on stale memory.
+- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.
+- Check at least daily chart data. If possible, also consider weekly chart for broader trend.
+- Tag only from the approved setup names above. Do not invent, paraphrase, or abbreviate setup names.
+- Every stock must receive a Primary Setup that exactly matches one Setup value from the approved Technical Setups list above.
+- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups; every setup name must exactly match an approved Setup value.
+- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.
+- For Confidence Score, copy the numeric Confidence value from the approved Technical Setups list for the same Primary Setup. Return only the number, without /10, %, avg text, or LLM counts.
+- Always mention the exact trigger level and invalidation level wherever possible.
+- Do not give generic advice. Make the tagging specific to the latest chart structure.
+
+Return ONLY this markdown table and no extra prose:
+| Exchange Symbol | Stock Symbol | Primary Setup | Secondary Setups | Bias | Confidence Score | Trigger Level | Invalidation Level |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| EXCHANGE | SYMBOL | Exact approved primary setup name | Optional exact approved setup names | Bullish/Bearish/Neutral | approved confidence number only | exact price/level | exact price/level |
