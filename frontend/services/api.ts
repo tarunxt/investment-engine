@@ -33,6 +33,7 @@ import {
   JobCreate,
   JobResponse,
   LoginResponse,
+  LlmPerformanceResponse,
   PromptCreate,
   PromptResponse,
   PromptUpdate,
@@ -552,6 +553,15 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<ApiUsageSummaryResponse>(
       `${URLs.apiUsage.summary()}${query ? `?${query}` : ''}`,
+    );
+  }
+
+  getLlmPerformance(params?: { limit?: number }): Promise<LlmPerformanceResponse> {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return this.get<LlmPerformanceResponse>(
+      `${URLs.apiUsage.llmPerformance()}${query ? `?${query}` : ''}`,
     );
   }
 

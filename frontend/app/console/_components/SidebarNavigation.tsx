@@ -121,6 +121,12 @@ const DEFAULT_NAVIGATION: NavigationEntry[] = [
         icon: HiOutlineCube,
     },
     {
+        id: 'llms',
+        name: 'LLMs',
+        href: URLs.routes.console.llms(),
+        icon: HiOutlineCube,
+    },
+    {
         id: 'technical-setups',
         name: 'Technical Setups',
         href: URLs.routes.console.technicalSetups(),
