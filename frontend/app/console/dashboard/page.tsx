@@ -7,7 +7,6 @@ import {
   Radar,
   RefreshCw,
   Sparkles,
-  TrendingUp,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -393,7 +392,7 @@ export default function DashboardPage() {
       <section className="relative overflow-hidden rounded-[36px] border border-slate-200 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.22),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.22),_transparent_35%)]" />
 
-        <div className="relative grid gap-6 px-6 py-7 lg:grid-cols-[1.2fr_0.8fr] lg:px-8">
+        <div className="relative grid gap-6 px-6 py-7 lg:grid-cols-[0.85fr_1.15fr] lg:px-8">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
               <Sparkles className="size-3.5" />
@@ -424,42 +423,39 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
-                <TrendingUp className="size-3.5" />
-                Markets Covered
-              </div>
-              <div className="mt-3 text-3xl font-semibold text-white">2</div>
-              <div className="mt-2 text-sm text-slate-300">
-                Zerodha India and INDmoney US
-              </div>
-            </div>
-            <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
-                <Radar className="size-3.5" />
-                Total Investments
-              </div>
-              <div className="mt-3 text-3xl font-semibold text-white">
-                {formatInr(totalInvestmentValue)}
-              </div>
-              <div className="mt-3 space-y-2 text-xs text-slate-300">
-                {totalInvestmentRows.map((row) => (
-                  <div
-                    key={row.label}
-                    className="grid gap-1 border-t border-white/10 pt-2 first:border-t-0 first:pt-0"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-semibold text-slate-200">
-                        {row.label}
-                      </span>
-                      <span className="text-right font-semibold text-white">
-                        {row.total}
-                      </span>
-                    </div>
-                    <div className="leading-5 text-slate-300">{row.detail}</div>
+          <div className="flex items-center">
+            <div className="w-full rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur lg:p-6">
+              <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+                <div>
+                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+                    <Radar className="size-3.5" />
+                    Total Investments
                   </div>
-                ))}
+                  <div className="mt-3 text-3xl font-semibold text-white">
+                    {formatInr(totalInvestmentValue)}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 text-xs text-slate-300 sm:grid-cols-3">
+                  {totalInvestmentRows.map((row) => (
+                    <div
+                      key={row.label}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-3 sm:block">
+                        <span className="font-semibold text-slate-200">
+                          {row.label}
+                        </span>
+                        <span className="text-right font-semibold text-white sm:mt-1 sm:block sm:text-left">
+                          {row.total}
+                        </span>
+                      </div>
+                      <div className="mt-2 leading-5 text-slate-300">
+                        {row.detail}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
