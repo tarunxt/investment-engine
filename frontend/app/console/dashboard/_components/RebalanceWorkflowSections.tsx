@@ -862,6 +862,269 @@ function IndMoneySnapshotDialog({
   );
 }
 
+function ZerodhaRebalanceFlowCard() {
+  const flowStages = [
+    { label: "Sync", x: 7, y: 50 },
+    { label: "Threats", x: 25, y: 30 },
+    { label: "Swing", x: 25, y: 70 },
+    { label: "Rebalance", x: 48, y: 50 },
+    { label: "Technical", x: 70, y: 50 },
+    { label: "Actionables", x: 91, y: 50 },
+  ];
+
+  return (
+    <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-950">
+          Zerodha Rebalance Flow
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Visual path for the Zerodha auto-rebalance workflow stages and their
+          downstream outputs.
+        </p>
+      </div>
+
+      <div className="mt-5 overflow-x-auto rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+        <svg
+          viewBox="0 0 920 360"
+          role="img"
+          aria-label="Zerodha rebalance flowchart from sync to threats, swing, rebalance, technical scan, and final actionables"
+          className="min-w-[720px]"
+        >
+          <defs>
+            <marker
+              id="flow-arrow-green"
+              markerHeight="8"
+              markerWidth="8"
+              orient="auto"
+              refX="7"
+              refY="4"
+            >
+              <path d="M0,0 L8,4 L0,8 Z" fill="#0f766e" />
+            </marker>
+            <marker
+              id="flow-arrow-blue"
+              markerHeight="8"
+              markerWidth="8"
+              orient="auto"
+              refX="7"
+              refY="4"
+            >
+              <path d="M0,0 L8,4 L0,8 Z" fill="#2563eb" />
+            </marker>
+            <marker
+              id="flow-arrow-red"
+              markerHeight="8"
+              markerWidth="8"
+              orient="auto"
+              refX="7"
+              refY="4"
+            >
+              <path d="M0,0 L8,4 L0,8 Z" fill="#dc2626" />
+            </marker>
+          </defs>
+
+          <rect
+            x="165"
+            y="28"
+            width="250"
+            height="132"
+            rx="12"
+            fill="#ffffff"
+            stroke="#cbd5e1"
+            strokeWidth="2"
+          />
+          <text x="185" y="55" fill="#334155" fontSize="14" fontWeight="700">
+            Risk inputs
+          </text>
+          <rect
+            x="120"
+            y="200"
+            width="340"
+            height="120"
+            rx="12"
+            fill="#ffffff"
+            stroke="#cbd5e1"
+            strokeWidth="2"
+          />
+          <text x="140" y="226" fill="#334155" fontSize="14" fontWeight="700">
+            Opportunity inputs
+          </text>
+
+          <path
+            d="M78 180 C125 168 132 105 166 94"
+            fill="none"
+            stroke="#dc2626"
+            strokeDasharray="6 6"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-red)"
+          />
+          <path
+            d="M78 180 C126 190 118 246 148 262"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="4 7"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-green)"
+          />
+          <path
+            d="M260 92 C300 70 326 54 374 52"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-blue)"
+          />
+          <path
+            d="M260 92 C304 106 332 112 380 116"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-blue)"
+          />
+          <path
+            d="M260 92 L330 92"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="4 7"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-green)"
+          />
+          <path
+            d="M260 92 L326 126"
+            fill="none"
+            stroke="#dc2626"
+            strokeDasharray="6 6"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-red)"
+          />
+          <path
+            d="M260 92 L326 152"
+            fill="none"
+            stroke="#dc2626"
+            strokeDasharray="6 6"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-red)"
+          />
+          <path
+            d="M405 92 C470 92 505 95 558 112"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="4 7"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-green)"
+          />
+          <path
+            d="M405 160 C475 210 518 246 570 260"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="4 7"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-green)"
+          />
+          <path
+            d="M190 260 L262 260 L335 260 L425 260"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="4 7"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-green)"
+          />
+          <path
+            d="M190 260 L238 292"
+            fill="none"
+            stroke="#dc2626"
+            strokeDasharray="6 6"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-red)"
+          />
+          <path
+            d="M460 260 L575 260"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-blue)"
+          />
+          <path
+            d="M598 260 L682 260"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="4 7"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-green)"
+          />
+          <path
+            d="M704 260 L810 260"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="4"
+          />
+          <path
+            d="M810 202 L810 318"
+            fill="none"
+            stroke="#2563eb"
+            strokeLinecap="round"
+            strokeWidth="4"
+          />
+          <path d="M810 202 L860 202" fill="none" stroke="#2563eb" strokeWidth="4" markerEnd="url(#flow-arrow-blue)" />
+          <path d="M810 260 L860 260" fill="none" stroke="#2563eb" strokeWidth="4" markerEnd="url(#flow-arrow-blue)" />
+          <path d="M810 318 L860 318" fill="none" stroke="#2563eb" strokeWidth="4" markerEnd="url(#flow-arrow-blue)" />
+
+          {flowStages.map((stage) => (
+            <g key={stage.label}>
+              <rect
+                x={(stage.x / 100) * 920 - 11}
+                y={(stage.y / 100) * 360 - 11}
+                width="22"
+                height="22"
+                rx="3"
+                fill="#94a3b8"
+              />
+              <text
+                x={(stage.x / 100) * 920}
+                y={(stage.y / 100) * 360 + 30}
+                textAnchor="middle"
+                fill="#475569"
+                fontSize="12"
+                fontWeight="700"
+              >
+                {stage.label}
+              </text>
+            </g>
+          ))}
+          {[
+            [374, 52],
+            [380, 116],
+            [330, 92],
+            [326, 126],
+            [326, 152],
+            [425, 260],
+            [238, 292],
+            [860, 202],
+            [860, 260],
+            [860, 318],
+          ].map(([x, y]) => (
+            <rect key={`${x}-${y}`} x={x - 10} y={y - 10} width="20" height="20" rx="3" fill="#94a3b8" />
+          ))}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 export function RebalanceWorkflowSections({
   onDashboardRefresh,
 }: {
@@ -1709,6 +1972,7 @@ export function RebalanceWorkflowSections({
     ],
   );
 
+
   const handleIndMoneyContinue = useCallback(
     (
       mode: IndMoneySyncMode,
@@ -1742,12 +2006,14 @@ export function RebalanceWorkflowSections({
       {
         portfolio: "zerodha" as const,
         title: "Run Zerodha Rebalance",
+        buttonLabel: "Run Zerodha Auto-Rebalance",
         subtitle:
           "Queue the India sync, scans, rebalance, technical scan, and final actionable refresh.",
       },
       {
         portfolio: "indmoneyUs" as const,
         title: "Run IndMoney Rebalance",
+        buttonLabel: "Run Indmoney Auto-Rebalance",
         subtitle:
           "Use the latest INDmoney snapshot or paste a fresh screen before the US rebalance workflow.",
       },
@@ -1755,123 +2021,132 @@ export function RebalanceWorkflowSections({
     [],
   );
 
+  const renderSectionCard = (section: (typeof sections)[number]) => {
+    const queuedStages = getQueuedStages(
+      section.portfolio,
+      states,
+      runningPortfolio,
+      specificMode,
+      selectedStages,
+    );
+
+    return (
+      <div
+        key={section.portfolio}
+        className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950">
+              {section.title}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {section.subtitle}
+            </p>
+          </div>
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            <Button
+              type="button"
+              disabled={isBusy && runningPortfolio !== section.portfolio}
+              onClick={() => {
+                if (runningPortfolio === section.portfolio) {
+                  void cancelActiveWorkflow();
+                  return;
+                }
+                if (section.portfolio === "indmoneyUs") {
+                  setDialogError(null);
+                  setDialogOpen(true);
+                  return;
+                }
+                void runWorkflow("zerodha");
+              }}
+              className={
+                runningPortfolio === section.portfolio
+                  ? "rounded-full bg-red-600 text-white hover:bg-red-500"
+                  : "rounded-full bg-slate-950 text-white hover:bg-slate-800"
+              }
+            >
+              {runningPortfolio === section.portfolio ? (
+                <X className="mr-2 size-4" />
+              ) : (
+                <Play className="mr-2 size-4" />
+              )}
+              {runningPortfolio === section.portfolio
+                ? `Kill ${section.portfolio === "zerodha" ? "Zerodha" : "IndMoney"} Rebalance`
+                : section.buttonLabel}
+            </Button>
+            <p className="text-xs text-slate-500">
+              Last run on {formatTimestamp(lastRunByPortfolio[section.portfolio])}
+            </p>
+            <button
+              type="button"
+              disabled={isBusy}
+              onClick={() => toggleSpecificMode(section.portfolio)}
+              className={
+                specificMode[section.portfolio]
+                  ? "rounded-full bg-blue-950 px-3 py-1 text-xs font-extrabold text-white shadow-sm hover:bg-blue-900 disabled:opacity-50"
+                  : "text-xs font-semibold text-slate-700 underline-offset-4 hover:underline disabled:opacity-50"
+              }
+            >
+              Run specific Stages
+            </button>
+          </div>
+        </div>
+
+        {specificMode[section.portfolio] ? (
+          <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Select only the stages to run. No stages are selected by default;
+            unselected stages are skipped and use the latest saved output only
+            when a later selected stage needs context.
+          </p>
+        ) : null}
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {STAGE_ORDER.map((stage) => (
+            <WorkflowStageTile
+              key={stage}
+              stage={stage}
+              info={
+                queuedStages.has(stage)
+                  ? { ...states[section.portfolio][stage], state: "queued" }
+                  : states[section.portfolio][stage]
+              }
+              now={now}
+              selectable={specificMode[section.portfolio] && !isBusy}
+              selected={selectedStages[section.portfolio].has(stage)}
+              onClick={
+                specificMode[section.portfolio] && !isBusy
+                  ? () => toggleStageSelection(section.portfolio, stage)
+                  : () =>
+                      navigateForStage(
+                        section.portfolio,
+                        stage,
+                        states[section.portfolio][stage],
+                      )
+              }
+              onInfoClick={
+                stage !== "sync" && stage !== "actionables"
+                  ? () => void showStageLlmInfo(stage)
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const zerodhaSection = sections[0];
+  const indmoneySection = sections[1];
+
   return (
     <>
       <section className="grid gap-6 xl:grid-cols-2">
-        {sections.map((section) => {
-          const queuedStages = getQueuedStages(
-            section.portfolio,
-            states,
-            runningPortfolio,
-            specificMode,
-            selectedStages,
-          );
-          return (
-          <div
-            key={section.portfolio}
-            className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">
-                  {section.title}
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {section.subtitle}
-                </p>
-              </div>
-              <div className="flex flex-col items-start gap-2 sm:items-end">
-                <Button
-                  type="button"
-                  disabled={isBusy && runningPortfolio !== section.portfolio}
-                  onClick={() => {
-                    if (runningPortfolio === section.portfolio) {
-                      void cancelActiveWorkflow();
-                      return;
-                    }
-                    if (section.portfolio === "indmoneyUs") {
-                      setDialogError(null);
-                      setDialogOpen(true);
-                      return;
-                    }
-                    void runWorkflow("zerodha");
-                  }}
-                  className={
-                    runningPortfolio === section.portfolio
-                      ? "rounded-full bg-red-600 text-white hover:bg-red-500"
-                      : "rounded-full bg-slate-950 text-white hover:bg-slate-800"
-                  }
-                >
-                  {runningPortfolio === section.portfolio ? (
-                    <X className="mr-2 size-4" />
-                  ) : (
-                    <Play className="mr-2 size-4" />
-                  )}
-                  {runningPortfolio === section.portfolio
-                    ? `Kill ${section.portfolio === "zerodha" ? "Zerodha" : "IndMoney"} Rebalance`
-                    : section.title}
-                </Button>
-                <p className="text-xs text-slate-500">
-                  Last run on{" "}
-                  {formatTimestamp(lastRunByPortfolio[section.portfolio])}
-                </p>
-                <button
-                  type="button"
-                  disabled={isBusy}
-                  onClick={() => toggleSpecificMode(section.portfolio)}
-                  className={
-                    specificMode[section.portfolio]
-                      ? "rounded-full bg-blue-950 px-3 py-1 text-xs font-extrabold text-white shadow-sm hover:bg-blue-900 disabled:opacity-50"
-                      : "text-xs font-semibold text-slate-700 underline-offset-4 hover:underline disabled:opacity-50"
-                  }
-                >
-                  Run specific Stages
-                </button>
-              </div>
-            </div>
-
-            {specificMode[section.portfolio] ? (
-              <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                Select only the stages to run. No stages are selected by
-                default; unselected stages are skipped and use the latest saved
-                output only when a later selected stage needs context.
-              </p>
-            ) : null}
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {STAGE_ORDER.map((stage) => (
-                <WorkflowStageTile
-                  key={stage}
-                  stage={stage}
-                  info={
-                    queuedStages.has(stage)
-                      ? { ...states[section.portfolio][stage], state: "queued" }
-                      : states[section.portfolio][stage]
-                  }
-                  now={now}
-                  selectable={specificMode[section.portfolio] && !isBusy}
-                  selected={selectedStages[section.portfolio].has(stage)}
-                  onClick={
-                    specificMode[section.portfolio] && !isBusy
-                      ? () => toggleStageSelection(section.portfolio, stage)
-                      : () =>
-                          navigateForStage(
-                            section.portfolio,
-                            stage,
-                            states[section.portfolio][stage],
-                          )
-                  }
-                  onInfoClick={
-                    stage !== "sync" && stage !== "actionables"
-                      ? () => void showStageLlmInfo(stage)
-                      : undefined
-                  }
-                />
-              ))}
-            </div>
-          </div>
-          );
-        })}
+        <div className="grid gap-6">
+          {renderSectionCard(zerodhaSection)}
+          <ZerodhaRebalanceFlowCard />
+        </div>
+        {renderSectionCard(indmoneySection)}
       </section>
 
       <IndMoneySnapshotDialog
