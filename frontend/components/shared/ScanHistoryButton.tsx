@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { History, Loader2, RefreshCw, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { APIError } from '@/services/api';
 
 type ScanHistoryItem = {
   job_id: number;
+  run_id?: number | null;
   status: string;
   provider: string;
   model: string;
@@ -99,6 +101,7 @@ export function ScanHistoryButton({
   title,
   usdInrRate,
 }: ScanHistoryButtonProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<ScanHistoryItem[]>([]);
@@ -157,6 +160,14 @@ export function ScanHistoryButton({
   const totalKnownCostInr = useMemo(
     () => history.reduce((total, item) => total + ((item.estimated_cost ?? 0) * usdInrRate), 0),
     [history, usdInrRate],
+  );
+
+  const handleOpenDetails = useCallback(
+    (item: ScanHistoryItem) => {
+      setOpen(false);
+      router.push(item.run_id ? `/console/runs/${item.run_id}` : `/console/jobs/${item.job_id}`);
+    },
+    [router],
   );
 
   return (
@@ -248,9 +259,12 @@ export function ScanHistoryButton({
                 {history.length > 0 ? (
                   <div className="space-y-3">
                     {history.map((item) => (
-                      <div
+                      <button
                         key={item.job_id}
-                        className="rounded-[22px] border border-slate-200 bg-white px-4 py-4 shadow-sm"
+                        type="button"
+                        onClick={() => handleOpenDetails(item)}
+                        aria-label={`Open details for ${item.run_id ? `run #${item.run_id}` : `job #${item.job_id}`}`}
+                        className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/35 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
@@ -305,7 +319,7 @@ export function ScanHistoryButton({
                             {item.error_message}
                           </div>
                         ) : null}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ) : null}

@@ -535,6 +535,7 @@ export interface PortfolioEventTable {
 
 export interface PortfolioAnalysisHistoryItem {
   job_id: number;
+  run_id?: number | null;
   status: string;
   provider: string;
   model: string;

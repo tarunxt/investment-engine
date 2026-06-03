@@ -935,6 +935,7 @@ function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistor
         return [
           {
             job_id: link.job_id,
+            run_id: run.id,
             status: job.status,
             provider: job.provider,
             model: job.model,
