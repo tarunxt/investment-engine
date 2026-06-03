@@ -419,7 +419,7 @@ function WorkflowStageTile({
       className={`relative min-h-36 rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-emerald-400 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-2 ring-emerald-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
     >
       {showRunTag ? (
-        <span className="absolute right-3 top-3 rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+        <span className="absolute right-3 top-3 rounded-full border border-green-500 bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
           Run
         </span>
       ) : isCompleted ? (
@@ -729,6 +729,19 @@ export function RebalanceWorkflowSections({
     },
     [updateStage],
   );
+
+  const toggleSpecificMode = useCallback((portfolio: WorkflowPortfolio) => {
+    setSpecificMode((current) => {
+      const nextEnabled = !current[portfolio];
+      if (nextEnabled) {
+        setSelectedStages((selected) => ({
+          ...selected,
+          [portfolio]: new Set(),
+        }));
+      }
+      return { ...current, [portfolio]: nextEnabled };
+    });
+  }, []);
 
   const toggleStageSelection = useCallback(
     (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
@@ -1297,12 +1310,7 @@ export function RebalanceWorkflowSections({
                 <button
                   type="button"
                   disabled={isBusy}
-                  onClick={() =>
-                    setSpecificMode((current) => ({
-                      ...current,
-                      [section.portfolio]: !current[section.portfolio],
-                    }))
-                  }
+                  onClick={() => toggleSpecificMode(section.portfolio)}
                   className={
                     specificMode[section.portfolio]
                       ? "rounded-full bg-blue-950 px-3 py-1 text-xs font-extrabold text-white shadow-sm hover:bg-blue-900 disabled:opacity-50"
@@ -1316,8 +1324,9 @@ export function RebalanceWorkflowSections({
 
             {specificMode[section.portfolio] ? (
               <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                Select the stages to run. Unselected stages stay linear but use
-                the latest saved output wherever the next stage needs input.
+                Select only the stages to run. No stages are selected by
+                default; unselected stages are skipped and use the latest saved
+                output only when a later selected stage needs context.
               </p>
             ) : null}
 
