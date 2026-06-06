@@ -2330,8 +2330,8 @@ export function RebalanceWorkflowSections({
         key={section.portfolio}
         className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm"
       >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold text-slate-950">
               {section.title}
             </h2>
@@ -2339,7 +2339,7 @@ export function RebalanceWorkflowSections({
               {section.subtitle}
             </p>
           </div>
-          <div className="flex flex-col items-start gap-2 sm:items-end">
+          <div className="flex w-full flex-col items-start gap-2 xl:w-auto xl:items-end">
             <Button
               type="button"
               disabled={isBusy && runningPortfolio !== section.portfolio}
@@ -2357,8 +2357,8 @@ export function RebalanceWorkflowSections({
               }}
               className={
                 runningPortfolio === section.portfolio
-                  ? "rounded-full bg-red-600 text-white hover:bg-red-500"
-                  : "rounded-full bg-slate-950 text-white hover:bg-slate-800"
+                  ? "h-auto w-full justify-center whitespace-normal rounded-full py-2 text-center leading-5 bg-red-600 text-white hover:bg-red-500 xl:w-auto"
+                  : "h-auto w-full justify-center whitespace-normal rounded-full py-2 text-center leading-5 bg-slate-950 text-white hover:bg-slate-800 xl:w-auto"
               }
             >
               {runningPortfolio === section.portfolio ? (
@@ -2437,11 +2437,12 @@ export function RebalanceWorkflowSections({
   return (
     <>
       <section className="grid gap-6 xl:grid-cols-2">
-        <div className="grid gap-6">
-          {renderSectionCard(zerodhaSection)}
-          <ZerodhaRebalanceFlowCard />
-        </div>
+        {renderSectionCard(zerodhaSection)}
         {renderSectionCard(indmoneySection)}
+      </section>
+
+      <section className="mt-6">
+        <ZerodhaRebalanceFlowCard />
       </section>
 
       <IndMoneySnapshotDialog
