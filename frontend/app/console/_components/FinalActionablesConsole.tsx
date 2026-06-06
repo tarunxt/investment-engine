@@ -1950,88 +1950,29 @@ function ActionSummarySections({
             id={finalActionCategoryDomId(action)}
             className={cn("scroll-mt-24 border", CATEGORY_BADGE_CLASS[action])}
           >
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">{ACTION_CATEGORY_LABEL[action]}</CardTitle>
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle className="text-sm">{ACTION_CATEGORY_LABEL[action]}</CardTitle>
+                <span className="text-xs font-semibold text-slate-600">
+                  {stocks.length} stock{stocks.length === 1 ? "" : "s"}
+                </span>
+              </div>
             </CardHeader>
             <CardContent className="text-xs">
-              <div className="mb-3 font-semibold">
-                {stocks.length} stock{stocks.length === 1 ? "" : "s"}
-              </div>
               {stocks.length ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
-                        <th className="px-3 py-2 font-semibold">Stock</th>
-                        <th className="px-3 py-2 font-semibold">Consensus</th>
-                        <th className="px-3 py-2 font-semibold">Current Units</th>
-                        <th className="px-3 py-2 font-semibold">Current Investment Amount</th>
-                        <th className="px-3 py-2 font-semibold">Units to {getActionVerb(action)}</th>
-                        <th className="px-3 py-2 font-semibold">Amount</th>
-                        <th className="px-3 py-2 font-semibold">
-                          <TechnicalSetupsHeaderLink>Technical Setup</TechnicalSetupsHeaderLink>
-                        </th>
-                        <th className="px-3 py-2 font-semibold">Confidence Score</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {stocks.map((stock) => {
-                        const estimate = stock.actionAverages[action];
-                        const showActionColumns =
-                          action === "Sell All" ||
-                          action === "Trim" ||
-                          action === "Add more" ||
-                          action === "Buy New";
-                        const scan = getTechnicalScanForStock(technicalScans, stock);
-                        const setup = formatTechnicalSetup(scan, stock.representative);
-                        return (
-                          <tr key={stock.key} className="bg-white/40">
-                            <td className="whitespace-nowrap px-3 py-2 align-top">
-                              <StockDetailsButton
-                                stock={stock}
-                                market={market}
-                                technicalScan={scan}
-                                detailsData={detailsData}
-                              />
-                              <TradingViewSymbolLink
-                                symbol={stock.symbol}
-                                market={market}
-                                exchange={stock.exchange}
-                                className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
-                              >
-                                {stock.symbol}
-                              </TradingViewSymbolLink>
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                              {stock.actionCounts[action]}/{stock.totalSuggestions}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                              {formatQuantity(estimate.currentUnits)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                              {formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentInvestmentAmount(stock.representative), market)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                              {showActionColumns ? formatQuantity(estimate.units) : "—"}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                              {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
-                            </td>
-                            <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan, stock.representative))}>
-                              <TechnicalSetupLink
-                                setup={setup}
-                                setupGroup={getSetupStockGroup(setupGroups, setup)}
-                                onSetupClick={onSetupClick}
-                              />
-                            </td>
-                            <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan, stock.representative))}>
-                              {formatTechnicalConfidence(scan, stock.representative)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+                  {stocks.map((stock) => (
+                    <ActionSummaryStockTile
+                      key={stock.key}
+                      action={action}
+                      stock={stock}
+                      market={market}
+                      technicalScan={getTechnicalScanForStock(technicalScans, stock)}
+                      setupGroups={setupGroups}
+                      detailsData={detailsData}
+                      onSetupClick={onSetupClick}
+                    />
+                  ))}
                 </div>
               ) : (
                 <span className="text-gray-600">No consensus stocks.</span>
@@ -2041,6 +1982,119 @@ function ActionSummarySections({
         );
       })}
     </div>
+  );
+}
+
+function ActionSummaryStockTile({
+  action,
+  stock,
+  market,
+  technicalScan,
+  setupGroups,
+  detailsData,
+  onSetupClick,
+}: {
+  action: ActionCategory;
+  stock: StockConsensus;
+  market: SwingTradeMarket;
+  technicalScan: TechnicalScanResult | null;
+  setupGroups: Record<string, SetupStockGroup>;
+  detailsData: StockDetailsData;
+  onSetupClick: (group: SetupStockGroup) => void;
+}) {
+  const estimate = stock.actionAverages[action];
+  const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
+  const setup = formatTechnicalSetup(technicalScan, stock.representative);
+  const confidence = formatTechnicalConfidence(technicalScan, stock.representative) || "—";
+
+  return (
+    <article className="rounded-2xl border border-white/80 bg-white/75 p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <StockDetailsButton
+              stock={stock}
+              market={market}
+              technicalScan={technicalScan}
+              detailsData={detailsData}
+            />
+            <TradingViewSymbolLink
+              symbol={stock.symbol}
+              market={market}
+              exchange={stock.exchange}
+              className="truncate text-sm font-semibold underline-offset-4 hover:text-blue-700 hover:underline"
+            >
+              {stock.symbol}
+            </TradingViewSymbolLink>
+          </div>
+          <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-slate-500">
+            {stock.exchange || (market === "us" ? "US" : "NSE")}
+          </div>
+        </div>
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+          {stock.actionCounts[action]}/{stock.totalSuggestions}
+        </span>
+      </div>
+
+      <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+          <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Current Units
+          </dt>
+          <dd className="mt-1 text-sm font-medium text-slate-900">
+            {formatQuantity(estimate.currentUnits)}
+          </dd>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+          <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Current Investment Amount
+          </dt>
+          <dd className="mt-1 text-sm font-medium text-slate-900">
+            {formatDisplayAmount(
+              estimate.currentInvestmentAmount ??
+                getCurrentInvestmentAmount(stock.representative),
+              market,
+            )}
+          </dd>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+          <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Units to {getActionVerb(action)}
+          </dt>
+          <dd className="mt-1 text-sm font-medium text-slate-900">
+            {showActionColumns ? formatQuantity(estimate.units) : "—"}
+          </dd>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+          <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Amount
+          </dt>
+          <dd className="mt-1 text-sm font-medium text-slate-900">
+            {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
+          </dd>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 sm:col-span-2">
+          <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Technical Setup
+          </dt>
+          <dd className={cn("mt-1 text-sm font-medium", getTechnicalScanClass(technicalScan, stock.representative))}>
+            <TechnicalSetupLink
+              setup={setup}
+              setupGroup={getSetupStockGroup(setupGroups, setup)}
+              onSetupClick={onSetupClick}
+            />
+          </dd>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 sm:col-span-2">
+          <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Confidence Score
+          </dt>
+          <dd className={cn("mt-1 text-sm font-semibold", getTechnicalScanClass(technicalScan, stock.representative))}>
+            {confidence}
+          </dd>
+        </div>
+      </dl>
+    </article>
   );
 }
 
