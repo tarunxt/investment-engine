@@ -103,39 +103,77 @@ const STAGE_ORDER: WorkflowStageKey[] = [
   "actionables",
 ];
 
-const STAGE_COPY: Record<
+const STAGE_METADATA: Record<
   WorkflowStageKey,
-  { idle: string; running: string; completed: string }
+  {
+    step: string;
+    idle: string;
+    running: string;
+    completed: string;
+    tileDescription: string;
+    chartTitle: string;
+    chartLines: string[];
+  }
 > = {
   sync: {
+    step: "01",
     idle: "Sync Portfolio",
     running: "Syncing Portfolio",
     completed: "Portfolio Synced",
+    tileDescription:
+      "Refresh Zerodha holdings, cash, and exposure before any risk or opportunity logic runs.",
+    chartTitle: "Sync",
+    chartLines: ["Latest holdings, cash,", "and exposure snapshot"],
   },
   swing: {
-    idle: "Swing Scan",
-    running: "Running Swing Scan",
-    completed: "Swing Scan",
+    step: "03",
+    idle: "Swing Opportunities",
+    running: "Running Swing Opportunity Scan",
+    completed: "Swing Opportunities Ready",
+    tileDescription:
+      "Surface fresh setups, momentum, and catalyst-driven names worth new capital or adds.",
+    chartTitle: "Swing",
+    chartLines: ["Momentum, catalysts,", "and opportunity signals"],
   },
   threats: {
-    idle: "Threats Scan",
-    running: "Running Threats Scan",
-    completed: "Threats Scan",
+    step: "02",
+    idle: "Threats & Guardrails",
+    running: "Running Threats & Guardrails",
+    completed: "Threats & Guardrails Ready",
+    tileDescription:
+      "Score macro, sector, and position-level risks that can block adds, force trims, or raise cash.",
+    chartTitle: "Threats",
+    chartLines: ["Macro, sector, and", "position-level guardrails"],
   },
   rebalance: {
-    idle: "Rebalance",
-    running: "Running Rebalance",
-    completed: "Rebalance",
+    step: "04",
+    idle: "Rebalance Draft",
+    running: "Building Rebalance Draft",
+    completed: "Rebalance Draft Ready",
+    tileDescription:
+      "Merge sync, threats, and swing conviction into target weights, adds, trims, and holds.",
+    chartTitle: "Rebalance",
+    chartLines: ["Merge signals into target", "weights, adds, trims, holds"],
   },
   technical: {
-    idle: "Technical Scan",
-    running: "Running Technical Scan",
-    completed: "Technical Scan",
+    step: "05",
+    idle: "Technical Validation",
+    running: "Running Technical Validation",
+    completed: "Technical Validation Ready",
+    tileDescription:
+      "Validate entry quality, trim timing, and whether each proposed action still fits the chart.",
+    chartTitle: "Technical",
+    chartLines: ["Validate entries, trims,", "and execution timing"],
   },
   actionables: {
-    idle: "Actionables",
-    running: "Updating Actionables",
-    completed: "Actionables Updated",
+    step: "06",
+    idle: "Final Actionables",
+    running: "Preparing Final Actionables",
+    completed: "Final Actionables Ready",
+    tileDescription:
+      "Publish the validated buy/add, sell/trim, and hold/watch outputs for execution.",
+    chartTitle: "Actionables",
+    chartLines: ["Publish trade-ready", "buy, sell, and watch outputs"],
   },
 };
 
@@ -231,10 +269,10 @@ function formatTimestamp(value?: string | null) {
 }
 
 function getStageLabel(stage: WorkflowStageKey, state: StageState) {
-  if (state === "running") return STAGE_COPY[stage].running;
-  if (state === "queued") return `Queued ${STAGE_COPY[stage].idle}`;
-  if (state === "completed") return STAGE_COPY[stage].completed;
-  return STAGE_COPY[stage].idle;
+  if (state === "running") return STAGE_METADATA[stage].running;
+  if (state === "queued") return `Queued ${STAGE_METADATA[stage].idle}`;
+  if (state === "completed") return STAGE_METADATA[stage].completed;
+  return STAGE_METADATA[stage].idle;
 }
 
 function getStageClasses(state: StageState) {
@@ -562,7 +600,7 @@ function formatLlmRun(info: StageInfo) {
 
 function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
   if (stage === "sync") {
-    return [{ label: "Last sync", value: formatTimestamp(info.completedAt) }];
+    return [{ label: "Latest sync", value: formatTimestamp(info.completedAt) }];
   }
   if (stage === "swing") {
     return [
@@ -581,7 +619,7 @@ function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
   }
   if (stage === "threats") {
     return [
-      { label: "Last scan", value: formatTimestamp(info.completedAt) },
+      { label: "Latest guardrail scan", value: formatTimestamp(info.completedAt) },
       { label: "LLM run", value: formatLlmRun(info) },
       { label: "Cost incurred", value: formatInrCost(info.costInr) },
     ];
@@ -603,12 +641,17 @@ function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
   }
   if (stage === "technical") {
     return [
-      { label: "Last scan", value: formatTimestamp(info.completedAt) },
+      { label: "Latest validation", value: formatTimestamp(info.completedAt) },
       { label: "LLM run", value: formatLlmRun(info) },
       { label: "Cost incurred", value: formatInrCost(info.costInr) },
     ];
   }
-  return [{ label: "Last updated", value: formatTimestamp(info.completedAt) }];
+  return [
+    {
+      label: "Latest actionables refresh",
+      value: formatTimestamp(info.completedAt),
+    },
+  ];
 }
 
 function WorkflowStageTile({
@@ -632,12 +675,13 @@ function WorkflowStageTile({
   const isQueued = info.state === "queued";
   const isCompleted = info.state === "completed";
   const showRunTag = selectable && selected && !isQueued;
+  const stageMeta = STAGE_METADATA[stage];
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={!onClick || isRunning}
-      className={`relative flex min-h-36 flex-col items-start justify-start rounded-2xl border p-4 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-emerald-400 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-2 ring-emerald-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
+      className={`relative flex min-h-44 flex-col items-start justify-start rounded-2xl border p-4 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-emerald-400 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-2 ring-emerald-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
     >
       {showRunTag ? (
         <span className="absolute right-3 top-3 rounded-full border border-green-500 bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
@@ -650,6 +694,9 @@ function WorkflowStageTile({
       ) : isCompleted ? (
         <CheckCircle2 className="absolute right-3 top-3 size-5 text-emerald-600" />
       ) : null}
+      <span className="mb-2 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">
+        Step {stageMeta.step}
+      </span>
       <div className="flex items-start gap-2 pr-7 text-sm font-semibold">
         {isRunning ? (
           <Loader2 className="size-4 animate-spin text-amber-600" />
@@ -677,13 +724,16 @@ function WorkflowStageTile({
               }
             }}
             className="inline-flex size-5 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100"
-            aria-label={`Show ${getStageLabel(stage, "idle")} LLM details`}
+            aria-label={`Show ${stageMeta.idle} LLM details`}
             title="LLM models and expected cost"
           >
             <Info className="size-3" />
           </span>
         ) : null}
       </div>
+      <p className="mt-2 text-xs leading-5 text-slate-500">
+        {stageMeta.tileDescription}
+      </p>
       <div className="mt-3 w-full space-y-1 text-xs leading-5 text-slate-600">
         {info.state === "idle" || info.state === "queued" ? (
           getIdleStageRows(stage, info).map((row) => (
@@ -863,13 +913,133 @@ function IndMoneySnapshotDialog({
 }
 
 function ZerodhaRebalanceFlowCard() {
-  const flowStages = [
-    { label: "Sync", x: 7, y: 50 },
-    { label: "Threats", x: 25, y: 30 },
-    { label: "Swing", x: 25, y: 70 },
-    { label: "Rebalance", x: 48, y: 50 },
-    { label: "Technical", x: 70, y: 50 },
-    { label: "Actionables", x: 91, y: 50 },
+  const legendItems = [
+    {
+      label: "Primary workflow",
+      description: "Blue solid arrows show the main stage handoff.",
+      sample: (
+        <span className="h-0.5 w-12 rounded-full bg-blue-600" aria-hidden="true" />
+      ),
+    },
+    {
+      label: "Opportunity signals",
+      description: "Teal dotted arrows carry swing conviction into rebalance.",
+      sample: (
+        <span
+          className="h-0 w-12 border-t-2 border-dotted border-teal-600"
+          aria-hidden="true"
+        />
+      ),
+    },
+    {
+      label: "Risk / guardrails",
+      description: "Red dashed arrows highlight constraints and safety checks.",
+      sample: (
+        <span
+          className="h-0 w-12 border-t-2 border-dashed border-red-500"
+          aria-hidden="true"
+        />
+      ),
+    },
+    {
+      label: "Grouped cards",
+      description: "Rounded cards group lanes, guardrails, and final outputs.",
+      sample: (
+        <span
+          className="h-8 w-12 rounded-2xl border border-slate-300 bg-slate-100"
+          aria-hidden="true"
+        />
+      ),
+    },
+  ];
+
+  const stageCards = [
+    {
+      stage: "sync",
+      x: 64,
+      y: 214,
+      width: 190,
+      height: 92,
+      fill: "#eff6ff",
+      stroke: "#93c5fd",
+      accent: "#1d4ed8",
+    },
+    {
+      stage: "threats",
+      x: 326,
+      y: 98,
+      width: 220,
+      height: 92,
+      fill: "#fff1f2",
+      stroke: "#fda4af",
+      accent: "#be123c",
+    },
+    {
+      stage: "swing",
+      x: 326,
+      y: 354,
+      width: 220,
+      height: 92,
+      fill: "#ecfeff",
+      stroke: "#5eead4",
+      accent: "#0f766e",
+    },
+    {
+      stage: "rebalance",
+      x: 634,
+      y: 214,
+      width: 220,
+      height: 92,
+      fill: "#eff6ff",
+      stroke: "#93c5fd",
+      accent: "#1d4ed8",
+    },
+    {
+      stage: "technical",
+      x: 886,
+      y: 214,
+      width: 220,
+      height: 92,
+      fill: "#f8fafc",
+      stroke: "#94a3b8",
+      accent: "#334155",
+    },
+  ] satisfies Array<{
+    stage: WorkflowStageKey;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    fill: string;
+    stroke: string;
+    accent: string;
+  }>;
+
+  const downstreamOutputs = [
+    {
+      title: "Buy / Add",
+      subtitleLines: ["Validated adds with", "supportive setup quality."],
+      y: 170,
+      fill: "#f0fdf4",
+      stroke: "#86efac",
+      accent: "#15803d",
+    },
+    {
+      title: "Sell / Trim",
+      subtitleLines: ["Risk-led reductions or", "technically weak names."],
+      y: 255,
+      fill: "#fff1f2",
+      stroke: "#fda4af",
+      accent: "#be123c",
+    },
+    {
+      title: "Hold / Watch",
+      subtitleLines: ["Neutral names needing", "confirmation before action."],
+      y: 340,
+      fill: "#fffbeb",
+      stroke: "#fcd34d",
+      accent: "#b45309",
+    },
   ];
 
   return (
@@ -879,21 +1049,46 @@ function ZerodhaRebalanceFlowCard() {
           Zerodha Rebalance Flow
         </h2>
         <p className="mt-1 text-sm text-slate-500">
-          Visual path for the Zerodha auto-rebalance workflow stages and their
-          downstream outputs.
+          Follow how the latest sync splits into risk and opportunity lanes,
+          converges in rebalance, and exits as validated actionables.
         </p>
       </div>
 
-      <div className="mt-5 overflow-x-auto rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+      <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+        <div className="grid gap-3 rounded-[20px] border border-slate-200 bg-white/90 p-4 sm:grid-cols-2 xl:grid-cols-4">
+          {legendItems.map((item) => (
+            <div key={item.label} className="flex items-start gap-3">
+              <span className="mt-1 flex h-8 w-12 items-center justify-center">
+                {item.sample}
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-slate-900">{item.label}</p>
+                <p className="text-xs leading-5 text-slate-500">{item.description}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
         <svg
-          viewBox="0 0 920 360"
+          viewBox="0 0 1360 520"
           role="img"
-          aria-label="Zerodha rebalance flowchart from sync to threats, swing, rebalance, technical scan, and final actionables"
-          className="min-w-[720px]"
+          aria-labelledby="zerodha-rebalance-flow-title zerodha-rebalance-flow-desc"
+          className="min-w-[1040px]"
         >
+          <title id="zerodha-rebalance-flow-title">
+            Zerodha rebalance workflow from sync through threats, swing,
+            rebalance, technical validation, and final actionables.
+          </title>
+          <desc id="zerodha-rebalance-flow-desc">
+            The sync stage feeds a risk and guardrail lane plus an opportunity
+            lane. Those inputs combine in rebalance, move through technical
+            validation, and finally publish buy or add, sell or trim, and hold
+            or watch outputs.
+          </desc>
           <defs>
             <marker
-              id="flow-arrow-green"
+              id="flow-arrow-teal"
               markerHeight="8"
               markerWidth="8"
               orient="auto"
@@ -925,52 +1120,75 @@ function ZerodhaRebalanceFlowCard() {
           </defs>
 
           <rect
-            x="165"
-            y="28"
-            width="250"
-            height="132"
-            rx="12"
-            fill="#ffffff"
-            stroke="#cbd5e1"
+            x="12"
+            y="12"
+            width="1336"
+            height="496"
+            rx="32"
+            fill="#f8fafc"
+            stroke="#e2e8f0"
             strokeWidth="2"
           />
-          <text x="185" y="55" fill="#334155" fontSize="14" fontWeight="700">
-            Risk inputs
-          </text>
           <rect
-            x="120"
-            y="200"
-            width="340"
-            height="120"
-            rx="12"
+            x="286"
+            y="52"
+            width="300"
+            height="184"
+            rx="28"
+            fill="#fff5f5"
+            stroke="#fecaca"
+            strokeWidth="2"
+          />
+          <rect
+            x="286"
+            y="284"
+            width="300"
+            height="184"
+            rx="28"
+            fill="#ecfeff"
+            stroke="#99f6e4"
+            strokeWidth="2"
+          />
+          <rect
+            x="1124"
+            y="92"
+            width="200"
+            height="336"
+            rx="28"
             fill="#ffffff"
             stroke="#cbd5e1"
             strokeWidth="2"
           />
-          <text x="140" y="226" fill="#334155" fontSize="14" fontWeight="700">
-            Opportunity inputs
+
+          <text x="316" y="88" fill="#881337" fontSize="15" fontWeight="700">
+            Risk / guardrail lane
+          </text>
+          <text x="316" y="112" fill="#9f1239" fontSize="12">
+            Threats decide what should block adds, force trims, or preserve cash.
+          </text>
+          <text x="316" y="320" fill="#115e59" fontSize="15" fontWeight="700">
+            Opportunity lane
+          </text>
+          <text x="316" y="344" fill="#0f766e" fontSize="12">
+            Swing scan surfaces where fresh capital or adds have the best setup.
+          </text>
+          <text x="1152" y="128" fill="#334155" fontSize="12" fontWeight="700">
+            Step 06
+          </text>
+          <text x="1152" y="152" fill="#0f172a" fontSize="18" fontWeight="700">
+            Actionables
+          </text>
+          <text x="1152" y="174" fill="#475569" fontSize="12">
+            <tspan x="1152" dy="0">
+              Publish the validated outputs
+            </tspan>
+            <tspan x="1152" dy="16">
+              traders actually execute.
+            </tspan>
           </text>
 
           <path
-            d="M78 180 C125 168 132 105 166 94"
-            fill="none"
-            stroke="#dc2626"
-            strokeDasharray="6 6"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-red)"
-          />
-          <path
-            d="M78 180 C126 190 118 246 148 262"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M260 92 C300 70 326 54 374 52"
+            d="M254 242 C290 242 290 144 326 144"
             fill="none"
             stroke="#2563eb"
             strokeLinecap="round"
@@ -978,7 +1196,7 @@ function ZerodhaRebalanceFlowCard() {
             markerEnd="url(#flow-arrow-blue)"
           />
           <path
-            d="M260 92 C304 106 332 112 380 116"
+            d="M436 190 C436 242 436 302 436 354"
             fill="none"
             stroke="#2563eb"
             strokeLinecap="round"
@@ -986,70 +1204,7 @@ function ZerodhaRebalanceFlowCard() {
             markerEnd="url(#flow-arrow-blue)"
           />
           <path
-            d="M260 92 L330 92"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M260 92 L326 126"
-            fill="none"
-            stroke="#dc2626"
-            strokeDasharray="6 6"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-red)"
-          />
-          <path
-            d="M260 92 L326 152"
-            fill="none"
-            stroke="#dc2626"
-            strokeDasharray="6 6"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-red)"
-          />
-          <path
-            d="M405 92 C470 92 505 95 558 112"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M405 160 C475 210 518 246 570 260"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M190 260 L262 260 L335 260 L425 260"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M190 260 L238 292"
-            fill="none"
-            stroke="#dc2626"
-            strokeDasharray="6 6"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-red)"
-          />
-          <path
-            d="M460 260 L575 260"
+            d="M546 400 C598 400 598 260 634 260"
             fill="none"
             stroke="#2563eb"
             strokeLinecap="round"
@@ -1057,69 +1212,209 @@ function ZerodhaRebalanceFlowCard() {
             markerEnd="url(#flow-arrow-blue)"
           />
           <path
-            d="M598 260 L682 260"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="4 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-green)"
-          />
-          <path
-            d="M704 260 L810 260"
+            d="M854 260 H886"
             fill="none"
             stroke="#2563eb"
             strokeLinecap="round"
             strokeWidth="4"
+            markerEnd="url(#flow-arrow-blue)"
           />
           <path
-            d="M810 202 L810 318"
+            d="M1106 260 H1124"
             fill="none"
             stroke="#2563eb"
             strokeLinecap="round"
             strokeWidth="4"
+            markerEnd="url(#flow-arrow-blue)"
           />
-          <path d="M810 202 L860 202" fill="none" stroke="#2563eb" strokeWidth="4" markerEnd="url(#flow-arrow-blue)" />
-          <path d="M810 260 L860 260" fill="none" stroke="#2563eb" strokeWidth="4" markerEnd="url(#flow-arrow-blue)" />
-          <path d="M810 318 L860 318" fill="none" stroke="#2563eb" strokeWidth="4" markerEnd="url(#flow-arrow-blue)" />
 
-          {flowStages.map((stage) => (
-            <g key={stage.label}>
+          <path
+            d="M546 144 C612 160 628 212 634 232"
+            fill="none"
+            stroke="#dc2626"
+            strokeDasharray="7 7"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-red)"
+          />
+          <path
+            d="M546 400 C612 382 624 314 634 286"
+            fill="none"
+            stroke="#0f766e"
+            strokeDasharray="2 10"
+            strokeLinecap="round"
+            strokeWidth="4"
+            markerEnd="url(#flow-arrow-teal)"
+          />
+
+          <path
+            d="M794 168 L794 214"
+            fill="none"
+            stroke="#dc2626"
+            strokeDasharray="7 7"
+            strokeLinecap="round"
+            strokeWidth="3"
+          />
+          <path
+            d="M998 306 L998 340"
+            fill="none"
+            stroke="#dc2626"
+            strokeDasharray="7 7"
+            strokeLinecap="round"
+            strokeWidth="3"
+          />
+
+          <path
+            d="M724 152 H864"
+            fill="none"
+            stroke="#cbd5e1"
+            strokeDasharray="4 8"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+          <text x="564" y="132" fill="#9f1239" fontSize="12" fontWeight="700">
+            Risk inputs into rebalance
+          </text>
+          <text x="564" y="154" fill="#881337" fontSize="12">
+            Threat score, downside flags, concentration and cash discipline.
+          </text>
+          <text x="564" y="402" fill="#115e59" fontSize="12" fontWeight="700">
+            Opportunity signals into rebalance
+          </text>
+          <text x="564" y="424" fill="#0f766e" fontSize="12">
+            Setup quality, momentum, catalysts, and relative strength.
+          </text>
+
+          <rect
+            x="688"
+            y="96"
+            width="212"
+            height="72"
+            rx="18"
+            fill="#ffffff"
+            stroke="#fca5a5"
+            strokeDasharray="7 6"
+            strokeWidth="2"
+          />
+          <text x="708" y="122" fill="#991b1b" fontSize="12" fontWeight="700">
+            Allocation guardrails
+          </text>
+          <text x="708" y="142" fill="#b91c1c" fontSize="12">
+            Cash buffer, sector caps, and position sizing stay explicit.
+          </text>
+
+          <rect
+            x="906"
+            y="340"
+            width="216"
+            height="72"
+            rx="18"
+            fill="#ffffff"
+            stroke="#fca5a5"
+            strokeDasharray="7 6"
+            strokeWidth="2"
+          />
+          <text x="926" y="366" fill="#991b1b" fontSize="12" fontWeight="700">
+            Execution guardrails
+          </text>
+          <text x="926" y="386" fill="#b91c1c" fontSize="12">
+            Confirm trend, respect staged exits, or leave names on watch.
+          </text>
+
+          {stageCards.map((stageCard) => {
+            const stageMeta = STAGE_METADATA[stageCard.stage];
+            return (
+              <g key={stageCard.stage}>
+                <rect
+                  x={stageCard.x}
+                  y={stageCard.y}
+                  width={stageCard.width}
+                  height={stageCard.height}
+                  rx="24"
+                  fill={stageCard.fill}
+                  stroke={stageCard.stroke}
+                  strokeWidth="2.5"
+                />
+                <rect
+                  x={stageCard.x + 16}
+                  y={stageCard.y + 16}
+                  width="66"
+                  height="24"
+                  rx="12"
+                  fill="#ffffff"
+                  opacity="0.92"
+                />
+                <text
+                  x={stageCard.x + 49}
+                  y={stageCard.y + 32}
+                  textAnchor="middle"
+                  fill={stageCard.accent}
+                  fontSize="12"
+                  fontWeight="700"
+                >
+                  Step {stageMeta.step}
+                </text>
+                <text
+                  x={stageCard.x + 18}
+                  y={stageCard.y + 56}
+                  fill="#0f172a"
+                  fontSize="18"
+                  fontWeight="700"
+                >
+                  {stageMeta.chartTitle}
+                </text>
+                <text
+                  x={stageCard.x + 18}
+                  y={stageCard.y + 74}
+                  fill="#475569"
+                  fontSize="12"
+                >
+                  {stageMeta.chartLines.map((line, index) => (
+                    <tspan
+                      key={`${stageCard.stage}-${line}`}
+                      x={stageCard.x + 18}
+                      dy={index === 0 ? 0 : 16}
+                    >
+                      {line}
+                    </tspan>
+                  ))}
+                </text>
+              </g>
+            );
+          })}
+
+          {downstreamOutputs.map((output) => (
+            <g key={output.title}>
               <rect
-                x={(stage.x / 100) * 920 - 11}
-                y={(stage.y / 100) * 360 - 11}
-                width="22"
-                height="22"
-                rx="3"
-                fill="#94a3b8"
+                x="1148"
+                y={output.y}
+                width="152"
+                height="64"
+                rx="20"
+                fill={output.fill}
+                stroke={output.stroke}
+                strokeWidth="2"
               />
               <text
-                x={(stage.x / 100) * 920}
-                y={(stage.y / 100) * 360 + 30}
-                textAnchor="middle"
-                fill="#475569"
-                fontSize="12"
+                x="1170"
+                y={output.y + 26}
+                fill={output.accent}
+                fontSize="13"
                 fontWeight="700"
               >
-                {stage.label}
+                {output.title}
+              </text>
+              <text x="1170" y={output.y + 44} fill="#475569" fontSize="11.5">
+                {output.subtitleLines.map((line, index) => (
+                  <tspan key={`${output.title}-${line}`} x="1170" dy={index === 0 ? 0 : 14}>
+                    {line}
+                  </tspan>
+                ))}
               </text>
             </g>
           ))}
-          {[
-            [374, 52],
-            [380, 116],
-            [330, 92],
-            [326, 126],
-            [326, 152],
-            [425, 260],
-            [238, 292],
-            [860, 202],
-            [860, 260],
-            [860, 318],
-          ].map(([x, y]) => (
-            <rect key={`${x}-${y}`} x={x - 10} y={y - 10} width="20" height="20" rx="3" fill="#94a3b8" />
-          ))}
         </svg>
+        </div>
       </div>
     </div>
   );
