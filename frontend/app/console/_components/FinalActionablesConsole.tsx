@@ -63,6 +63,57 @@ type ActionEstimate = {
   amount: number | null;
 };
 
+type ScoreMatrixEntry = {
+  id: string;
+  source: string;
+  action: ActionCategory | null;
+  actionScore: number | null;
+  unitsChange: number | null;
+  note: string;
+  isSummary?: boolean;
+  isCalculated?: boolean;
+};
+
+type ScoreMatrixRuleEvaluation = {
+  id: string;
+  label: string;
+  when: string;
+  action: ActionCategory;
+  unitsStrategy: string;
+  summary: string;
+  matched: boolean;
+};
+
+type ScoreMatrixContext = {
+  currentUnits: number | null;
+  meanScore: number | null;
+  meanUnitsChange: number | null;
+  modeAction: ActionCategory | null;
+  bullishVotes: number;
+  bearishVotes: number;
+  holdVotes: number;
+  totalVotes: number;
+  bullishMeanUnits: number | null;
+  bearishMeanUnits: number | null;
+};
+
+type ScoreMatrixDetail = {
+  stockKey: string;
+  stockSymbol: string;
+  stockExchange: string;
+  currentUnits: number | null;
+  modeAction: ActionCategory | null;
+  meanScore: number | null;
+  meanUnitsChange: number | null;
+  meanModeAction: ActionCategory | null;
+  meanModeUnitsChange: number | null;
+  calculatedAction: ActionCategory;
+  calculatedUnitsChange: number | null;
+  matchedRuleId: string;
+  rows: ScoreMatrixEntry[];
+  rules: ScoreMatrixRuleEvaluation[];
+};
+
 export type SetupStockDetail = {
   key: string;
   name: string;
@@ -385,6 +436,40 @@ const ACTION_CATEGORY_LABEL: Record<ActionCategory, string> = {
   Hold: "Hold",
 };
 
+const ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
+  "Sell All": -2,
+  Trim: -1,
+  Hold: 0,
+  "Add more": 1,
+  "Buy New": 2,
+};
+
+function FinalActionTag({
+  action,
+  className,
+}: {
+  action: ActionCategory;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap",
+        CATEGORY_BADGE_CLASS[action],
+        className,
+      )}
+    >
+      {ACTION_CATEGORY_LABEL[action]}
+    </span>
+  );
+}
+
+function FinalActionValue({ value }: { value?: string | null }) {
+  const action = normalizeAction(value || "");
+  if (!action) return <span>{value || "—"}</span>;
+  return <FinalActionTag action={action} />;
+}
+
 export function finalActionCategoryDomId(action: ActionCategory) {
   return `final-actionables-${ACTION_CATEGORY_LABEL[action].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 }
@@ -557,6 +642,43 @@ function getActionVerb(action: ActionCategory) {
   return action === "Sell All" || action === "Trim" ? "sell" : "buy";
 }
 
+function formatSignedQuantity(value: number | null) {
+  if (value === null) return "—";
+  if (value === 0) return "0";
+  const formatted = formatQuantity(Math.abs(value));
+  return `${value > 0 ? "+" : "-"}${formatted}`;
+}
+
+function formatActionScore(value: number | null) {
+  return value === null ? "—" : value.toFixed(2);
+}
+
+function getSignedUnitsChange(
+  row: CanonicalRow,
+  actionOverride?: ActionCategory | null,
+) {
+  const action = actionOverride ?? normalizeAction(row[ACTION_HEADER] || "");
+  const currentUnits = parseNumericCell(row["Current Units"]);
+  const unitsChange = parseNumericCell(row["Units Change"]);
+  const unitsToBuy = parseNumericCell(row["Units to Buy"]);
+
+  if (action === "Sell All") {
+    if (currentUnits !== null) return -Math.abs(currentUnits);
+    if (unitsChange !== null) return -Math.abs(unitsChange);
+    return unitsToBuy !== null ? -Math.abs(unitsToBuy) : null;
+  }
+  if (action === "Trim") {
+    if (unitsChange !== null) return -Math.abs(unitsChange);
+    return unitsToBuy !== null ? -Math.abs(unitsToBuy) : null;
+  }
+  if (action === "Add more" || action === "Buy New") {
+    if (unitsToBuy !== null) return Math.abs(unitsToBuy);
+    return unitsChange !== null ? Math.abs(unitsChange) : null;
+  }
+  if (action === "Hold") return 0;
+  return null;
+}
+
 function getDisplayActionEstimate(row: CanonicalRow) {
   const action = normalizeAction(row[ACTION_HEADER] || "");
   if (!action || !ACTION_ESTIMATE_CATEGORIES.has(action)) return null;
@@ -570,6 +692,301 @@ function getDisplayActionEstimate(row: CanonicalRow) {
 
 function formatDisplayAmount(value: number | null, market: SwingTradeMarket) {
   return value === null ? "—" : formatCurrency(value, market);
+}
+
+function getModeAction(actions: ActionCategory[], meanScore: number | null) {
+  if (!actions.length) return null;
+
+  const counts = ACTION_CATEGORIES.reduce(
+    (acc, action) => {
+      acc[action] = 0;
+      return acc;
+    },
+    {} as Record<ActionCategory, number>,
+  );
+
+  actions.forEach((action) => {
+    counts[action] += 1;
+  });
+
+  return ACTION_CATEGORIES.reduce<ActionCategory | null>((winner, action) => {
+    if (!counts[action]) return winner;
+    if (!winner) return action;
+    if (counts[action] > counts[winner]) return action;
+    if (counts[action] < counts[winner]) return winner;
+
+    if (meanScore !== null) {
+      const actionDistance = Math.abs(ACTION_SCORE_BY_CATEGORY[action] - meanScore);
+      const winnerDistance = Math.abs(ACTION_SCORE_BY_CATEGORY[winner] - meanScore);
+      if (actionDistance < winnerDistance) return action;
+      if (actionDistance > winnerDistance) return winner;
+    }
+
+    return ACTION_CATEGORIES.indexOf(action) < ACTION_CATEGORIES.indexOf(winner)
+      ? action
+      : winner;
+  }, null);
+}
+
+function getFallbackMatrixAction(context: ScoreMatrixContext) {
+  if (!context.modeAction) return "Hold";
+  if (context.modeAction === "Buy New" && (context.currentUnits ?? 0) > 0) {
+    return "Add more";
+  }
+  if ((context.modeAction === "Sell All" || context.modeAction === "Trim") && (context.currentUnits ?? 0) <= 0) {
+    return "Hold";
+  }
+  return context.modeAction;
+}
+
+function resolveMatrixUnitsForAction(
+  action: ActionCategory,
+  context: ScoreMatrixContext,
+) {
+  if (action === "Sell All") {
+    if ((context.currentUnits ?? 0) > 0) return -Math.abs(context.currentUnits || 0);
+    if (context.bearishMeanUnits !== null) return -Math.abs(context.bearishMeanUnits);
+    return context.meanUnitsChange !== null ? -Math.abs(context.meanUnitsChange) : null;
+  }
+
+  if (action === "Trim") {
+    if (context.bearishMeanUnits !== null) return -Math.abs(context.bearishMeanUnits);
+    if (context.meanUnitsChange !== null) return -Math.abs(context.meanUnitsChange);
+    return (context.currentUnits ?? 0) > 0 ? -Math.abs(context.currentUnits || 0) : 0;
+  }
+
+  if (action === "Hold") return 0;
+
+  if (context.bullishMeanUnits !== null) return Math.abs(context.bullishMeanUnits);
+  return context.meanUnitsChange !== null ? Math.abs(context.meanUnitsChange) : null;
+}
+
+function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
+  const meanScore = context.meanScore ?? 0;
+  const hasPosition = (context.currentUnits ?? 0) > 0;
+  const fallbackAction = getFallbackMatrixAction(context);
+  const fallbackUnitsStrategy =
+    fallbackAction === "Hold"
+      ? "Keep units change at 0."
+      : fallbackAction === "Sell All"
+        ? "Sell the full current position when available."
+        : fallbackAction === "Trim"
+          ? "Trim using the average bearish units change."
+          : "Use the average bullish units change.";
+
+  const rules: Array<Omit<ScoreMatrixRuleEvaluation, "matched"> & { matches: boolean }> = [
+    {
+      id: "deep-bearish-exit",
+      label: "Deep bearish exit",
+      when: "Mode is Sell All or every vote is bearish, mean score is at or below -1.25, and a position exists.",
+      action: "Sell All",
+      unitsStrategy: "Sell the full current position.",
+      summary: "Strong bearish alignment resolves to a full exit.",
+      matches:
+        hasPosition
+        && meanScore <= -1.25
+        && (context.modeAction === "Sell All" || context.bearishVotes === context.totalVotes),
+    },
+    {
+      id: "bearish-reduce",
+      label: "Bearish reduce",
+      when: "Mean score is below -0.35, bearish votes meet or exceed bullish votes, and a position exists.",
+      action: "Trim",
+      unitsStrategy: "Trim using the average bearish units change.",
+      summary: "Moderate bearish consensus reduces exposure instead of exiting completely.",
+      matches:
+        hasPosition
+        && meanScore < -0.35
+        && context.bearishVotes >= context.bullishVotes,
+    },
+    {
+      id: "neutral-hold",
+      label: "Neutral hold",
+      when: "Mean score stays between -0.35 and 0.35, or Hold is the dominant mode.",
+      action: "Hold",
+      unitsStrategy: "Keep units change at 0.",
+      summary: "Mixed or balanced signals collapse to Hold.",
+      matches:
+        Math.abs(meanScore) <= 0.35
+        || context.modeAction === "Hold"
+        || context.holdVotes > Math.max(context.bullishVotes, context.bearishVotes),
+    },
+    {
+      id: "strong-bullish-fresh-entry",
+      label: "Strong bullish fresh entry",
+      when: "Mean score is at or above 1.25 and there is no current position.",
+      action: "Buy New",
+      unitsStrategy: "Use the average bullish units change as the initial buy size.",
+      summary: "A strongly bullish score with no open position becomes Buy New.",
+      matches: !hasPosition && meanScore >= 1.25,
+    },
+    {
+      id: "bullish-add",
+      label: "Bullish add",
+      when: "Mean score is at or above 0.35, bullish votes meet or exceed bearish votes, and a position exists.",
+      action: "Add more",
+      unitsStrategy: "Use the average bullish units change to size the add.",
+      summary: "Bullish bias on an existing position becomes Add more.",
+      matches:
+        hasPosition
+        && meanScore >= 0.35
+        && context.bullishVotes >= context.bearishVotes,
+    },
+    {
+      id: "bullish-fresh-entry",
+      label: "Bullish fresh entry",
+      when: "Mean score is at or above 0.35, bullish votes meet or exceed bearish votes, and there is no current position.",
+      action: "Buy New",
+      unitsStrategy: "Use the average bullish units change as the new entry size.",
+      summary: "Bullish bias without an open position becomes Buy New.",
+      matches:
+        !hasPosition
+        && meanScore >= 0.35
+        && context.bullishVotes >= context.bearishVotes,
+    },
+    {
+      id: "bearish-no-position",
+      label: "Bearish with no position",
+      when: "Mean score is below -0.35 but there is no current position to trim or sell.",
+      action: "Hold",
+      unitsStrategy: "Keep units change at 0 because there is nothing to reduce.",
+      summary: "Bearish signals without an open position stay at Hold.",
+      matches: !hasPosition && meanScore < -0.35,
+    },
+    {
+      id: "mode-fallback",
+      label: "Mode fallback",
+      when: "Fallback when none of the stronger score-matrix rules match.",
+      action: fallbackAction,
+      unitsStrategy: fallbackUnitsStrategy,
+      summary: "Falls back to the mode action, adjusted for whether a position already exists.",
+      matches: true,
+    },
+  ];
+
+  const matchedRuleIndex = rules.findIndex((rule) => rule.matches);
+
+  return rules.map((rule, index) => ({
+    id: rule.id,
+    label: rule.label,
+    when: rule.when,
+    action: rule.action,
+    unitsStrategy: rule.unitsStrategy,
+    summary: rule.summary,
+    matched: index === matchedRuleIndex,
+  }));
+}
+
+function buildScoreMatrixDetail(stock: StockConsensus): ScoreMatrixDetail {
+  const entries: ScoreMatrixEntry[] = stock.rows.map((row) => {
+    const action = normalizeAction(row.cells[ACTION_HEADER] || "");
+    return {
+      id: `${row.meta.runId}-${row.meta.jobId}-matrix`,
+      source: `Run #${row.meta.runId}`,
+      action,
+      actionScore: action ? ACTION_SCORE_BY_CATEGORY[action] : null,
+      unitsChange: getSignedUnitsChange(row.cells, action),
+      note: `${row.meta.provider} ${row.meta.model} · ${formatDateTime(row.meta.createdAt)}`,
+    };
+  });
+
+  const currentUnits = average(
+    stock.rows
+      .map((row) => parseNumericCell(row.cells["Current Units"]))
+      .filter((value): value is number => value !== null),
+  ) ?? parseNumericCell(stock.representative["Current Units"]);
+
+  const meanScore = average(
+    entries
+      .map((entry) => entry.actionScore)
+      .filter((value): value is number => value !== null),
+  );
+  const meanUnitsChange = average(
+    entries
+      .map((entry) => entry.unitsChange)
+      .filter((value): value is number => value !== null),
+  );
+  const modeAction = getModeAction(
+    entries
+      .map((entry) => entry.action)
+      .filter((value): value is ActionCategory => value !== null),
+    meanScore,
+  );
+
+  const bullishVotes = entries.filter(
+    (entry) => entry.action === "Add more" || entry.action === "Buy New",
+  ).length;
+  const bearishVotes = entries.filter(
+    (entry) => entry.action === "Sell All" || entry.action === "Trim",
+  ).length;
+  const holdVotes = entries.filter((entry) => entry.action === "Hold").length;
+  const totalVotes = entries.filter((entry) => entry.action !== null).length;
+  const bullishMeanUnits = average(
+    entries
+      .map((entry) => entry.unitsChange)
+      .filter((value): value is number => value !== null && value > 0),
+  );
+  const bearishMeanUnits = average(
+    entries
+      .map((entry) => entry.unitsChange)
+      .filter((value): value is number => value !== null && value < 0)
+      .map((value) => Math.abs(value)),
+  );
+
+  const context: ScoreMatrixContext = {
+    currentUnits,
+    meanScore,
+    meanUnitsChange,
+    modeAction,
+    bullishVotes,
+    bearishVotes,
+    holdVotes,
+    totalVotes,
+    bullishMeanUnits,
+    bearishMeanUnits,
+  };
+  const rules = evaluateScoreMatrixRules(context);
+  const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
+  const calculatedAction = matchedRule.action;
+  const calculatedUnitsChange = resolveMatrixUnitsForAction(calculatedAction, context);
+
+  return {
+    stockKey: stock.key,
+    stockSymbol: stock.symbol,
+    stockExchange: stock.exchange,
+    currentUnits,
+    modeAction,
+    meanScore,
+    meanUnitsChange,
+    meanModeAction: modeAction,
+    meanModeUnitsChange: meanUnitsChange,
+    calculatedAction,
+    calculatedUnitsChange,
+    matchedRuleId: matchedRule.id,
+    rules,
+    rows: [
+      ...entries,
+      {
+        id: `${stock.key}-matrix-mean-mode`,
+        source: "Consolidated (Mean and Mode)",
+        action: modeAction,
+        actionScore: meanScore,
+        unitsChange: meanUnitsChange,
+        note: "Action follows the mode. Units Change uses the signed mean across all LLM rows.",
+        isSummary: true,
+      },
+      {
+        id: `${stock.key}-matrix-calculated`,
+        source: "Consolidated (Calculated)",
+        action: calculatedAction,
+        actionScore: meanScore,
+        unitsChange: calculatedUnitsChange,
+        note: matchedRule.summary,
+        isSummary: true,
+        isCalculated: true,
+      },
+    ],
+  };
 }
 
 function getFormattedCurrentInvestmentAmount(row: CanonicalRow, market: SwingTradeMarket) {
@@ -1414,7 +1831,7 @@ function StockDetailsButton({
                 <KeyValueGrid
                   itemClassName="border-blue-100 bg-white/75"
                   values={[
-                    ["Consensus action", stock.consensusAction],
+                    ["Consensus action", <FinalActionTag key="consensus-action" action={stock.consensusAction} />],
                     ["Consensus", `${stock.actionCounts[stock.consensusAction]}/${stock.totalSuggestions}`],
                     ["Technical setup", formatTechnicalSetup(technicalScan, stock.representative)],
                     ["Confidence score", formatTechnicalConfidence(technicalScan, stock.representative)],
@@ -1444,7 +1861,9 @@ function StockDetailsButton({
                             Run #{row.meta.runId}<br />{row.meta.provider} {row.meta.model}<br />
                             <span className="text-gray-400">{formatDateTime(row.meta.createdAt)}</span>
                           </td>
-                          <td className="px-3 py-2 align-top">{row.cells[ACTION_HEADER] || "—"}</td>
+                          <td className="px-3 py-2 align-top">
+                            <FinalActionValue value={row.cells[ACTION_HEADER]} />
+                          </td>
                           <td className="px-3 py-2 align-top">{row.cells["Units to Buy"] || row.cells["Units Change"] || "—"}</td>
                           <td className="px-3 py-2 align-top">{row.cells["Total Buy Amount"] || "—"}</td>
                           <td className="min-w-80 px-3 py-2 align-top">{row.cells["Rationale Remarks"] || row.cells["Technical Setup"] || "—"}</td>
@@ -1632,6 +2051,7 @@ function RebalanceCell({
   technicalScan,
   setupGroups,
   onSetupClick,
+  preferActionTag,
 }: {
   row: CanonicalRow;
   header: ConsolidatedDisplayHeader;
@@ -1639,6 +2059,7 @@ function RebalanceCell({
   technicalScan?: TechnicalScanResult | null;
   setupGroups?: Record<string, SetupStockGroup>;
   onSetupClick?: (group: SetupStockGroup) => void;
+  preferActionTag?: boolean;
 }) {
   if (header === "Technical Setup") {
     const setup = formatTechnicalSetup(technicalScan || null, row);
@@ -1662,6 +2083,10 @@ function RebalanceCell({
   if (header === CURRENT_INVESTMENT_AMOUNT_HEADER) {
     return getFormattedCurrentInvestmentAmount(row, market);
   }
+  if (header === ACTION_HEADER && preferActionTag) {
+    const action = normalizeAction(row[header] || "");
+    if (action) return <FinalActionTag action={action} />;
+  }
   const actionEstimate = getDisplayActionEstimate(row);
   const cellValue =
     header === "Units to Sell/Buy"
@@ -1684,6 +2109,260 @@ function RebalanceCell({
     );
   }
   return cellValue || "";
+}
+
+function ScoreMatrixSection({
+  stock,
+  onOpenDetail,
+}: {
+  stock: StockConsensus;
+  onOpenDetail: (detail: ScoreMatrixDetail) => void;
+}) {
+  const detail = useMemo(() => buildScoreMatrixDetail(stock), [stock]);
+  const matchedRule = detail.rules.find((rule) => rule.matched);
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+      <div className="mb-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          Consolidated score matrix
+        </div>
+        <p className="mt-1 text-xs leading-5 text-slate-600">
+          The Mean and Mode row keeps the mode action and the signed mean units change. The
+          Calculated row applies an explicit score matrix to the same signals. Click the
+          calculated action to inspect the matched rule.
+        </p>
+        {matchedRule ? (
+          <div className="mt-2 text-xs font-medium text-blue-700">
+            Matched rule: {matchedRule.label}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="min-w-full text-xs">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-100/80 text-left uppercase tracking-wide text-slate-600">
+              <th className="px-3 py-2 font-semibold">Source</th>
+              <th className="px-3 py-2 font-semibold">Action</th>
+              <th className="px-3 py-2 font-semibold">Action Score</th>
+              <th className="px-3 py-2 font-semibold">Units Change</th>
+              <th className="px-3 py-2 font-semibold">Notes</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {detail.rows.map((row) => (
+              <tr
+                key={row.id}
+                className={cn(
+                  row.isCalculated
+                    ? "bg-blue-50/70"
+                    : row.isSummary
+                      ? "bg-slate-50"
+                      : "bg-white",
+                )}
+              >
+                <td className="whitespace-nowrap px-3 py-2 align-top font-medium text-slate-900">
+                  {row.source}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 align-top">
+                  {row.isCalculated && row.action ? (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onClick={() => onOpenDetail(detail)}
+                    >
+                      <FinalActionTag action={row.action} />
+                      <span className="text-[11px] font-semibold text-blue-700">View rule</span>
+                    </button>
+                  ) : row.action ? (
+                    <FinalActionTag action={row.action} />
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 align-top text-slate-700">
+                  {formatActionScore(row.actionScore)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 align-top font-medium text-slate-700">
+                  {formatSignedQuantity(row.unitsChange)}
+                </td>
+                <td className="min-w-[18rem] px-3 py-2 align-top text-slate-600">
+                  {row.note}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ScoreMatrixModal({
+  detail,
+  onClose,
+}: {
+  detail: ScoreMatrixDetail | null;
+  onClose: () => void;
+}) {
+  if (!detail) return null;
+
+  const matchedRule = detail.rules.find((rule) => rule.matched) ?? null;
+  const sourceRows = detail.rows.filter((row) => !row.isSummary);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="score-matrix-modal-title"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+              Consolidated score matrix
+            </p>
+            <h2 id="score-matrix-modal-title" className="mt-1 text-xl font-bold text-slate-950">
+              {detail.stockSymbol} ({detail.stockExchange || "Unknown exchange"})
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Inspect how the calculated final action was derived from the LLM breakup rows.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Close score matrix popup"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
+          {matchedRule ? (
+            <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
+                  Matched rule
+                </div>
+                <h3 className="mt-1 text-base font-semibold text-blue-950">
+                  {matchedRule.label}
+                </h3>
+                <p className="mt-1 text-sm text-blue-900">{matchedRule.summary}</p>
+              </div>
+              <KeyValueGrid
+                itemClassName="border-blue-100 bg-white/80"
+                values={[
+                  [
+                    "Mode action",
+                    detail.modeAction ? <FinalActionTag key="mode-action" action={detail.modeAction} /> : "—",
+                  ],
+                  ["Mean score", formatActionScore(detail.meanScore)],
+                  ["Mean units change", formatSignedQuantity(detail.meanUnitsChange)],
+                  ["Current units", formatQuantity(detail.currentUnits)],
+                  ["Calculated action", <FinalActionTag key="calculated-action" action={detail.calculatedAction} />],
+                  [
+                    "Calculated units change",
+                    formatSignedQuantity(detail.calculatedUnitsChange),
+                  ],
+                ]}
+              />
+            </section>
+          ) : null}
+
+          <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <h3 className="mb-3 font-semibold text-slate-950">Score matrix rules</h3>
+            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="min-w-full text-xs">
+                <thead className="bg-slate-100/80 text-left uppercase tracking-wide text-slate-600">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Rule</th>
+                    <th className="px-3 py-2 font-semibold">When it applies</th>
+                    <th className="px-3 py-2 font-semibold">Action</th>
+                    <th className="px-3 py-2 font-semibold">Units Change</th>
+                    <th className="px-3 py-2 font-semibold">Reason</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {detail.rules.map((rule) => (
+                    <tr
+                      key={rule.id}
+                      className={cn(
+                        rule.matched
+                          ? "bg-blue-50/80 ring-1 ring-inset ring-blue-200"
+                          : "bg-white",
+                      )}
+                    >
+                      <td className="whitespace-nowrap px-3 py-2 align-top font-medium text-slate-900">
+                        {rule.label}
+                      </td>
+                      <td className="min-w-[20rem] px-3 py-2 align-top text-slate-700">
+                        {rule.when}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 align-top">
+                        <FinalActionTag action={rule.action} />
+                      </td>
+                      <td className="min-w-[15rem] px-3 py-2 align-top text-slate-700">
+                        {rule.unitsStrategy}
+                      </td>
+                      <td className="min-w-[16rem] px-3 py-2 align-top text-slate-600">
+                        {rule.summary}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-violet-100 bg-violet-50/60 p-4">
+            <h3 className="mb-3 font-semibold text-violet-950">Rows feeding the matrix</h3>
+            <div className="overflow-x-auto rounded-lg border border-violet-100 bg-white/80">
+              <table className="min-w-full text-xs">
+                <thead className="bg-violet-100/70 text-left uppercase tracking-wide text-violet-900">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Source</th>
+                    <th className="px-3 py-2 font-semibold">Action</th>
+                    <th className="px-3 py-2 font-semibold">Action Score</th>
+                    <th className="px-3 py-2 font-semibold">Units Change</th>
+                    <th className="px-3 py-2 font-semibold">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-violet-100">
+                  {sourceRows.map((row) => (
+                    <tr key={row.id}>
+                      <td className="whitespace-nowrap px-3 py-2 align-top font-medium text-slate-900">
+                        {row.source}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 align-top">
+                        {row.action ? <FinalActionTag action={row.action} /> : "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 align-top text-slate-700">
+                        {formatActionScore(row.actionScore)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 align-top text-slate-700">
+                        {formatSignedQuantity(row.unitsChange)}
+                      </td>
+                      <td className="min-w-[18rem] px-3 py-2 align-top text-slate-600">
+                        {row.note}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RunGroupDetails({
@@ -2089,6 +2768,7 @@ export function FinalActionablesConsole({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showRunDetails, setShowRunDetails] = useState(false);
   const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
+  const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
   const [detailsData, setDetailsData] = useState<StockDetailsData>({
     portfolioSnapshot: null,
@@ -2440,6 +3120,7 @@ export function FinalActionablesConsole({
                             setupGroups={setupStockGroups}
                             detailsData={detailsData}
                             onSetupClick={setSelectedSetupGroup}
+                            onMatrixDetailOpen={setSelectedMatrixDetail}
                           />
                         );
                       })}
@@ -2461,6 +3142,10 @@ export function FinalActionablesConsole({
       <SetupStocksModal
         group={selectedSetupGroup}
         onClose={() => setSelectedSetupGroup(null)}
+      />
+      <ScoreMatrixModal
+        detail={selectedMatrixDetail}
+        onClose={() => setSelectedMatrixDetail(null)}
       />
     </div>
   );
@@ -2532,7 +3217,7 @@ function SetupStocksModal({
                       {stock.currentUnits}
                     </td>
                     <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.cell}`}>
-                      {stock.action}
+                      <FinalActionTag action={stock.action} />
                     </td>
                   </tr>
                 );
@@ -2554,6 +3239,7 @@ function FragmentRows({
   setupGroups,
   detailsData,
   onSetupClick,
+  onMatrixDetailOpen,
 }: {
   stock: StockConsensus;
   isExpanded: boolean;
@@ -2563,6 +3249,7 @@ function FragmentRows({
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
   onSetupClick: (group: SetupStockGroup) => void;
+  onMatrixDetailOpen: (detail: ScoreMatrixDetail) => void;
 }) {
   return (
     <>
@@ -2619,58 +3306,68 @@ function FragmentRows({
       {isExpanded ? (
         <tr className="bg-gray-50/70">
           <td colSpan={CONSOLIDATED_DISPLAY_HEADERS.length + 1} className="px-3 py-4">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
-              LLM-wise breakup leading to consolidation
-            </div>
-            <div className="overflow-x-auto rounded-lg border bg-white">
-              <table className="min-w-max text-xs">
-                <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
-                      Run / LLM
-                    </th>
-                    {REBALANCE_DISPLAY_HEADERS.map((header) => (
-                      <th
-                        key={`breakup-${stock.key}-${header}`}
-                        className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700"
-                      >
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {stock.rows.map((row) => (
-                    <tr key={`${row.meta.runId}-${row.meta.jobId}`}>
-                      <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                        <div className="font-semibold">
-                          Run #{row.meta.runId}
-                        </div>
-                        <div>
-                          {row.meta.provider} {row.meta.model}
-                        </div>
-                        <div className="text-gray-400">
-                          {formatDateTime(row.meta.createdAt)}
-                        </div>
-                      </td>
-                      {REBALANCE_DISPLAY_HEADERS.map((header) => (
-                        <td
-                          key={`${row.meta.runId}-${row.meta.jobId}-${header}`}
-                          className="px-3 py-2 align-top text-gray-700"
-                        >
-                          <RebalanceCell
-                            row={row.cells}
-                            header={header}
-                            market={market}
-                            setupGroups={setupGroups}
-                            onSetupClick={onSetupClick}
-                          />
-                        </td>
+            <div className="space-y-4">
+              <ScoreMatrixSection
+                stock={stock}
+                onOpenDetail={onMatrixDetailOpen}
+              />
+
+              <div>
+                <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                  LLM-wise breakup leading to consolidation
+                </div>
+                <div className="overflow-x-auto rounded-lg border bg-white">
+                  <table className="min-w-max text-xs">
+                    <thead>
+                      <tr className="border-b bg-gray-50">
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                          Run / LLM
+                        </th>
+                        {REBALANCE_DISPLAY_HEADERS.map((header) => (
+                          <th
+                            key={`breakup-${stock.key}-${header}`}
+                            className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700"
+                          >
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {stock.rows.map((row) => (
+                        <tr key={`${row.meta.runId}-${row.meta.jobId}`}>
+                          <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                            <div className="font-semibold">
+                              Run #{row.meta.runId}
+                            </div>
+                            <div>
+                              {row.meta.provider} {row.meta.model}
+                            </div>
+                            <div className="text-gray-400">
+                              {formatDateTime(row.meta.createdAt)}
+                            </div>
+                          </td>
+                          {REBALANCE_DISPLAY_HEADERS.map((header) => (
+                            <td
+                              key={`${row.meta.runId}-${row.meta.jobId}-${header}`}
+                              className="px-3 py-2 align-top text-gray-700"
+                            >
+                              <RebalanceCell
+                                row={row.cells}
+                                header={header}
+                                market={market}
+                                setupGroups={setupGroups}
+                                onSetupClick={onSetupClick}
+                                preferActionTag
+                              />
+                            </td>
+                          ))}
+                        </tr>
                       ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </td>
         </tr>
