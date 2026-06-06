@@ -84,6 +84,13 @@ type ScoreMatrixRuleEvaluation = {
   matched: boolean;
 };
 
+type DetailedRationaleScoreRow = {
+  id: string;
+  parameter: string;
+  score: number | null;
+  multiplier: number;
+};
+
 type ScoreMatrixContext = {
   currentUnits: number | null;
   meanScore: number | null;
@@ -112,6 +119,9 @@ type ScoreMatrixDetail = {
   matchedRuleId: string;
   rows: ScoreMatrixEntry[];
   rules: ScoreMatrixRuleEvaluation[];
+  detailedRationaleRows: DetailedRationaleScoreRow[];
+  detailedRationaleFinalScore: number | null;
+  detailedRationaleDenominator: number;
 };
 
 export type SetupStockDetail = {
@@ -444,6 +454,27 @@ const ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
   "Buy New": 2,
 };
 
+const FINAL_ACTION_RATIONALE_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
+  "Sell All": -2.5,
+  Trim: -1.5,
+  Hold: 0,
+  "Buy New": 1.5,
+  "Add more": 2.5,
+};
+
+const ACTION_SCORE_TABLE_ROWS: Array<{ label: string; score: number }> = [
+  { label: "Sell All", score: -2.5 },
+  { label: "Trim", score: -1.5 },
+  { label: "Hold", score: 0 },
+  { label: "Buy / Buy New", score: 1.5 },
+  { label: "Add/Add more", score: 2.5 },
+];
+
+const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; multiplier: number }> = [
+  { label: "Bullish", multiplier: 1 },
+  { label: "Bearish", multiplier: -1 },
+];
+
 function FinalActionTag({
   action,
   className,
@@ -651,6 +682,101 @@ function formatSignedQuantity(value: number | null) {
 
 function formatActionScore(value: number | null) {
   return value === null ? "—" : value.toFixed(2);
+}
+
+function formatScoreValue(value: number | null) {
+  if (value === null) return "—";
+  if (Number.isInteger(value)) return value.toFixed(0);
+  return value.toFixed(2);
+}
+
+function getAverageNumericCell(rows: LlmBreakupRow[], header: RebalanceHeader) {
+  return average(
+    rows
+      .map((row) => parseNumericCell(row.cells[header]))
+      .filter((value): value is number => value !== null),
+  );
+}
+
+function getTechnicalScanMultiplier(scan: TechnicalScanResult | null) {
+  if (!scan) return 0;
+  if (scan.bias === "bullish") return 1;
+  if (scan.bias === "bearish") return -1;
+  return 0;
+}
+
+function calculateWeightedRationaleScore(rows: DetailedRationaleScoreRow[]) {
+  const weightedRows = rows.filter((row) => row.multiplier !== 0);
+  const denominator = weightedRows.reduce((sum, row) => sum + Math.abs(row.multiplier), 0);
+  if (!denominator) return { finalScore: null, denominator: 0 };
+  const numerator = weightedRows.reduce(
+    (sum, row) => sum + (row.score ?? 0) * row.multiplier,
+    0,
+  );
+  return { finalScore: numerator / denominator, denominator };
+}
+
+function buildDetailedRationaleScoreRows(
+  stock: StockConsensus,
+  technicalScan: TechnicalScanResult | null,
+  meanModeAction: ActionCategory | null,
+): DetailedRationaleScoreRow[] {
+  const technicalConfidence = parseNumericCell(
+    formatTechnicalConfidence(technicalScan, stock.representative),
+  );
+
+  return [
+    {
+      id: "cruxx",
+      parameter: "Average of Score Rationale Cruxx",
+      score: getAverageNumericCell(stock.rows, "Rationale Remarks"),
+      multiplier: 3,
+    },
+    {
+      id: "technical-short",
+      parameter: "Average of Score Rationale - Technical Setup (Short Term 1–3 Months)",
+      score: getAverageNumericCell(stock.rows, "Rationale - Technical setup (short term (1-3 months)"),
+      multiplier: 3,
+    },
+    {
+      id: "technical-medium",
+      parameter: "Average of Score Rationale - Technical Setup (Medium Term)",
+      score: getAverageNumericCell(stock.rows, "Rationale - Technical setup (medium term)"),
+      multiplier: 2,
+    },
+    {
+      id: "technical-long",
+      parameter: "Average of Score Rationale - Technical Setup (Long Term)",
+      score: getAverageNumericCell(stock.rows, "Rationale - Technical setup (long term term)"),
+      multiplier: 1,
+    },
+    {
+      id: "fundamentals-short",
+      parameter: "Average of Score Rationale - Fundamentals Short Term",
+      score: getAverageNumericCell(stock.rows, "Rationale - Fundamentals Short term"),
+      multiplier: 3,
+    },
+    {
+      id: "fundamentals-medium-long",
+      parameter: "Average of Score Rationale - Fundamentals Medium/Long Term",
+      score: getAverageNumericCell(stock.rows, "Rationale - Fundamentals Medium/Long Term"),
+      multiplier: 1,
+    },
+    {
+      id: "technical-scan-confidence",
+      parameter: "Technical Scan Confidence Score",
+      score: technicalConfidence,
+      multiplier: getTechnicalScanMultiplier(technicalScan),
+    },
+    {
+      id: "mean-mode-action",
+      parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in final Consolidated (Mean and Mode) row",
+      score: meanModeAction
+        ? FINAL_ACTION_RATIONALE_SCORE_BY_CATEGORY[meanModeAction]
+        : null,
+      multiplier: 4,
+    },
+  ];
 }
 
 function getSignedUnitsChange(
@@ -877,7 +1003,10 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
   }));
 }
 
-function buildScoreMatrixDetail(stock: StockConsensus): ScoreMatrixDetail {
+function buildScoreMatrixDetail(
+  stock: StockConsensus,
+  technicalScan: TechnicalScanResult | null = null,
+): ScoreMatrixDetail {
   const entries: ScoreMatrixEntry[] = stock.rows.map((row) => {
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
     return {
@@ -949,6 +1078,13 @@ function buildScoreMatrixDetail(stock: StockConsensus): ScoreMatrixDetail {
   const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
   const calculatedAction = matchedRule.action;
   const calculatedUnitsChange = resolveMatrixUnitsForAction(calculatedAction, context);
+  const detailedRationaleRows = buildDetailedRationaleScoreRows(
+    stock,
+    technicalScan,
+    modeAction,
+  );
+  const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
+    calculateWeightedRationaleScore(detailedRationaleRows);
 
   return {
     stockKey: stock.key,
@@ -964,6 +1100,9 @@ function buildScoreMatrixDetail(stock: StockConsensus): ScoreMatrixDetail {
     calculatedUnitsChange,
     matchedRuleId: matchedRule.id,
     rules,
+    detailedRationaleRows,
+    detailedRationaleFinalScore,
+    detailedRationaleDenominator,
     rows: [
       ...entries,
       {
@@ -2167,12 +2306,17 @@ function RebalanceCell({
 
 function ScoreMatrixSection({
   stock,
+  technicalScan,
   onOpenDetail,
 }: {
   stock: StockConsensus;
+  technicalScan: TechnicalScanResult | null;
   onOpenDetail: (detail: ScoreMatrixDetail) => void;
 }) {
-  const detail = useMemo(() => buildScoreMatrixDetail(stock), [stock]);
+  const detail = useMemo(
+    () => buildScoreMatrixDetail(stock, technicalScan),
+    [stock, technicalScan],
+  );
   const matchedRule = detail.rules.find((rule) => rule.matched);
 
   return (
@@ -2253,6 +2397,110 @@ function ScoreMatrixSection({
   );
 }
 
+function DetailedRationaleScoreSection({ detail }: { detail: ScoreMatrixDetail }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <h3 className="font-semibold text-slate-950">Detailed Calculated Rationale Score</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Weighted score-rationale averages, technical scan confidence, and the Mean and Mode final action score.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-xs sm:text-sm">
+          <thead className="bg-slate-50 text-left text-slate-700">
+            <tr>
+              <th className="px-4 py-2 font-semibold">Parameter</th>
+              <th className="whitespace-nowrap px-4 py-2 text-right font-semibold">Score</th>
+              <th className="whitespace-nowrap px-4 py-2 text-right font-semibold">Multiplier</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {detail.detailedRationaleRows.map((row) => (
+              <tr key={row.id}>
+                <td className="min-w-[24rem] px-4 py-2 text-slate-900">{row.parameter}</td>
+                <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
+                  {formatScoreValue(row.score)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
+                  {row.multiplier}
+                </td>
+              </tr>
+            ))}
+            <tr className="bg-slate-50 font-semibold text-slate-950">
+              <td className="px-4 py-3 text-right">Final score</td>
+              <td className="whitespace-nowrap px-4 py-3 text-right">
+                {formatActionScore(detail.detailedRationaleFinalScore)}
+              </td>
+              <td className="whitespace-nowrap px-4 py-3 text-right">
+                / {detail.detailedRationaleDenominator || "—"}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ScoreReferenceTables() {
+  return (
+    <section className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="font-semibold text-slate-950">Action (Buy/Add/Sell All/Trim/Hold/Buy New) &amp; Score</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-slate-700">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Action (Buy/Add/Sell All/Trim/Hold/Buy New)</th>
+                <th className="px-4 py-2 text-right font-semibold">Score</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {ACTION_SCORE_TABLE_ROWS.map((row) => (
+                <tr key={row.label}>
+                  <td className="px-4 py-2 text-slate-900">{row.label}</td>
+                  <td className="px-4 py-2 text-right font-medium text-slate-900">
+                    {formatScoreValue(row.score)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="font-semibold text-slate-950">Technical Scan Confidence Score</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-slate-700">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Technical Scan</th>
+                <th className="px-4 py-2 text-right font-semibold">Multiplier</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {TECHNICAL_SCAN_MULTIPLIER_ROWS.map((row) => (
+                <tr key={row.label}>
+                  <td className="px-4 py-2 text-slate-900">{row.label}</td>
+                  <td className="px-4 py-2 text-right font-medium text-slate-900">
+                    {row.multiplier}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ScoreMatrixModal({
   detail,
   onClose,
@@ -2283,10 +2531,12 @@ function ScoreMatrixModal({
               Consolidated score matrix
             </p>
             <h2 id="score-matrix-modal-title" className="mt-1 text-xl font-bold text-slate-950">
-              {detail.stockSymbol} ({detail.stockExchange || "Unknown exchange"})
+              Final Action Rule
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Inspect how the calculated final action was derived from the LLM breakup rows.
+              {detail.stockExchange || "Unknown exchange"} · {detail.stockSymbol} · calculated score {formatActionScore(detail.detailedRationaleFinalScore)} maps to{" "}
+              <FinalActionTag action={detail.calculatedAction} />
+              {" "}with units change {formatSignedQuantity(detail.calculatedUnitsChange)}.
             </p>
           </div>
           <button
@@ -2300,6 +2550,10 @@ function ScoreMatrixModal({
         </div>
 
         <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
+          <DetailedRationaleScoreSection detail={detail} />
+
+          <ScoreReferenceTables />
+
           {matchedRule ? (
             <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
               <div className="mb-3">
@@ -2332,7 +2586,7 @@ function ScoreMatrixModal({
           ) : null}
 
           <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-            <h3 className="mb-3 font-semibold text-slate-950">Score matrix rules</h3>
+            <h3 className="mb-3 text-center text-lg font-bold text-slate-950">Calculated Score matrix</h3>
             <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
               <table className="min-w-full text-xs">
                 <thead className="bg-slate-100/80 text-left uppercase tracking-wide text-slate-600">
@@ -3363,6 +3617,7 @@ function FragmentRows({
             <div className="space-y-4">
               <ScoreMatrixSection
                 stock={stock}
+                technicalScan={technicalScan}
                 onOpenDetail={onMatrixDetailOpen}
               />
 
