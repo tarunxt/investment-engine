@@ -446,7 +446,7 @@ export default function DashboardPage() {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
               <Sparkles className="size-3.5" />
-              India + US Control Room
+              Investments Control Room
             </div>
             <h1 className="mt-4 max-w-3xl font-serif text-3xl tracking-tight text-white md:text-4xl">
               Portfolio Command Center
