@@ -49,7 +49,6 @@ import type {
   ProviderModelTarget,
   RunCreate,
   RunResponse,
-  ZerodhaPlaceOrderResponse,
   ZerodhaThreatAnalysis,
 } from "@/types/api";
 import { normalizeError } from "./dashboardOverviewUtils";
@@ -102,10 +101,10 @@ type StageInfo = {
 };
 type ZerodhaBasketOrderKind = "Market" | "Limit" | "After market";
 type ZerodhaBasketSubmission = {
-  placed: number;
-  failed: number;
-  amo: number;
-  results: Array<{ order: ZerodhaBasketPreviewOrder; response?: ZerodhaPlaceOrderResponse; error?: string }>;
+  redirected: number;
+  kiteUrl: string;
+  clipboardCopied: boolean;
+  orders: ZerodhaBasketPreviewOrder[];
 };
 type ZerodhaBasketPreviewOrder = {
   id: string;
@@ -553,6 +552,7 @@ const ZERODHA_ORDER_KINDS: ZerodhaBasketOrderKind[] = [
   "After market",
 ];
 
+const KITE_ORDERS_URL = "https://kite.zerodha.com/orders";
 const INDIA_MARKET_TIME_ZONE = "Asia/Kolkata";
 const INDIA_MARKET_OPEN_MINUTES = 9 * 60 + 15;
 const INDIA_MARKET_CLOSE_MINUTES = 15 * 60 + 30;
@@ -580,22 +580,45 @@ function getIndiaMarketStatus(now = new Date()) {
   };
 }
 
-function mapZerodhaBasketOrderRequest(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
-  const limitPrice = order.price && order.price > 0 ? order.price : undefined;
+function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
   const orderType = order.orderKind === "Market" && marketOpen ? "MARKET" : "LIMIT";
   return {
-    tradingsymbol: order.symbol,
-    exchange: order.exchange,
-    transaction_type: order.side,
-    order_type: orderType as "MARKET" | "LIMIT",
-    quantity: Math.max(1, Math.floor(order.units ?? 0)),
-    product: "CNC",
-    validity: "DAY",
-    price: orderType === "LIMIT" ? limitPrice : undefined,
-    market_protection: orderType === "MARKET" ? 1 : undefined,
-    variety: order.orderKind === "After market" || !marketOpen ? "amo" as const : "regular" as const,
-    auto_amo_when_closed: true,
+    orderType,
+    variety: order.orderKind === "After market" || !marketOpen ? "AMO" : "Regular",
   };
+}
+
+function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], marketOpen: boolean) {
+  const lines = [
+    "Cred-X Zerodha order basket for Kite",
+    "Paste/reference this in Kite while placing the orders manually:",
+    "",
+    "Exchange, Symbol, Side, Qty, Order Type, Variety, Product, Validity, Price",
+  ];
+
+  orders.forEach((order) => {
+    const execution = getZerodhaBasketOrderExecution(order, marketOpen);
+    const price = execution.orderType === "LIMIT" && order.price ? order.price.toFixed(2) : "";
+    lines.push([
+      order.exchange,
+      order.symbol,
+      order.side,
+      Math.max(1, Math.floor(order.units ?? 0)),
+      execution.orderType,
+      execution.variety,
+      "CNC",
+      "DAY",
+      price,
+    ].join(", "));
+  });
+
+  return lines.join("\n");
+}
+
+async function copyZerodhaKiteBasketToClipboard(orders: ZerodhaBasketPreviewOrder[], marketOpen: boolean) {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) return false;
+  await navigator.clipboard.writeText(buildZerodhaKiteClipboardText(orders, marketOpen));
+  return true;
 }
 
 function parseBasketNumber(value?: string | null) {
@@ -1831,7 +1854,7 @@ function ZerodhaBasketPreviewDialog({
       disabled={!selectedOrders.length || placing}
       className="rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50"
     >
-      {placing ? "Placing…" : "Place Order"}
+      {placing ? "Opening…" : "Open Kite"}
     </Button>
   );
 
@@ -1847,7 +1870,7 @@ function ZerodhaBasketPreviewDialog({
               Zerodha India Place Order Basket
             </h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All, Trim, Add more, and Buy New actionables are pre-selected. The popup checks NSE/BSE hours and uses Zerodha AMO automatically when the regular market is closed.
+              Sell All, Trim, Add more, and Buy New actionables are pre-selected. Review the basket here, then open Kite to place the selected orders from the Zerodha portal.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -1880,9 +1903,16 @@ function ZerodhaBasketPreviewDialog({
 
               {submission ? (
                 <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                  Placed {submission.placed} order{submission.placed === 1 ? "" : "s"}
-                  {submission.amo ? ` (${submission.amo} via AMO)` : ""}.
-                  {submission.failed ? ` ${submission.failed} failed; review row-level errors before retrying.` : ""}
+                  Opened Kite for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
+                  {submission.clipboardCopied ? " A Kite order checklist was copied to your clipboard." : " Use the table below as your manual entry checklist in Kite."}
+                  <a
+                    href={submission.kiteUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-2 font-bold underline decoration-blue-300 underline-offset-2"
+                  >
+                    Open Kite again
+                  </a>
                 </div>
               ) : null}
 
@@ -1964,12 +1994,8 @@ function ZerodhaBasketPreviewDialog({
                           </select>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
-                          {submission?.results.find((result) => result.order.id === order.id)?.error ? (
-                            <span className="text-red-700">Failed</span>
-                          ) : submission?.results.find((result) => result.order.id === order.id)?.response ? (
-                            <span className="text-emerald-700">
-                              {submission.results.find((result) => result.order.id === order.id)?.response?.variety === "amo" ? "AMO placed" : "Placed"}
-                            </span>
+                          {submission?.orders.some((submittedOrder) => submittedOrder.id === order.id) ? (
+                            <span className="text-blue-700">Opened in Kite</span>
                           ) : (
                             <span>Pending</span>
                           )}
@@ -1989,7 +2015,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex flex-col gap-3 border-t border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Orders are sent through Kite Connect. Market orders are used only while NSE/BSE regular market appears open; closed-market submissions are sent as AMO limit orders using the displayed price.
+            Selected rows now redirect to the Kite portal instead of using direct Kite Connect placement. Market rows are only suggested while NSE/BSE regular market appears open; closed-market rows should be entered as AMO limit orders using the displayed price.
           </div>
           {renderPlaceOrderButton()}
         </div>
@@ -3400,45 +3426,45 @@ export function RebalanceWorkflowSections({
   const placeSelectedZerodhaBasketOrders = useCallback(async () => {
     const selectedOrders = zerodhaBasketOrders.filter((order) => selectedZerodhaBasketIds.has(order.id));
     if (!selectedOrders.length) {
-      window.alert("Select at least one Zerodha basket row before placing an order.");
+      window.alert("Select at least one Zerodha basket row before opening Kite.");
       return;
     }
     const marketStatus = getIndiaMarketStatus();
     const invalidLimitOrders = selectedOrders.filter((order) => (order.orderKind !== "Market" || !marketStatus.open) && (!order.price || order.price <= 0));
     if (invalidLimitOrders.length) {
-      window.alert("Cannot place limit/AMO orders without a valid displayed price. Unselect rows with missing prices and retry.");
+      window.alert("Cannot prepare limit/AMO rows without a valid displayed price. Unselect rows with missing prices and retry.");
       return;
     }
     const shouldContinue = window.confirm(
-      `${marketStatus.label}\n\nThis will submit ${selectedOrders.length} live Zerodha order${selectedOrders.length === 1 ? "" : "s"}. Continue?`,
+      `${marketStatus.label}\n\nThis will open Kite for ${selectedOrders.length} selected Zerodha order${selectedOrders.length === 1 ? "" : "s"}. Review and place orders inside Kite. Continue?`,
     );
     if (!shouldContinue) return;
 
     setZerodhaBasketPlacing(true);
     setZerodhaBasketSubmission(null);
+    setZerodhaBasketError(null);
+    const kiteWindow = window.open(KITE_ORDERS_URL, "_blank");
+    if (!kiteWindow) {
+      setZerodhaBasketPlacing(false);
+      setZerodhaBasketError("Your browser blocked the Kite popup. Allow popups for this site, or open https://kite.zerodha.com/orders manually.");
+      return;
+    }
+    kiteWindow.opener = null;
+
     try {
-      const results = await Promise.all(
-        selectedOrders.map(async (order) => {
-          try {
-            const response = await apiService.zerodhaPlaceOrder(mapZerodhaBasketOrderRequest(order, marketStatus.open));
-            return { order, response };
-          } catch (error) {
-            return { order, error: normalizeError(error) };
-          }
-        }),
-      );
-      const submission = {
-        placed: results.filter((result) => result.response?.order_id).length,
-        failed: results.filter((result) => result.error).length,
-        amo: results.filter((result) => result.response?.variety === "amo" || result.response?.auto_converted_to_amo).length,
-        results,
-      };
-      setZerodhaBasketSubmission(submission);
-      if (submission.failed) {
-        setZerodhaBasketError(`${submission.failed} Zerodha order${submission.failed === 1 ? "" : "s"} failed. Successful orders were not retried.`);
-      } else {
-        setZerodhaBasketError(null);
+      let clipboardCopied = false;
+      try {
+        clipboardCopied = await copyZerodhaKiteBasketToClipboard(selectedOrders, marketStatus.open);
+      } catch {
+        clipboardCopied = false;
       }
+
+      setZerodhaBasketSubmission({
+        redirected: selectedOrders.length,
+        kiteUrl: KITE_ORDERS_URL,
+        clipboardCopied,
+        orders: selectedOrders,
+      });
     } finally {
       setZerodhaBasketPlacing(false);
     }
