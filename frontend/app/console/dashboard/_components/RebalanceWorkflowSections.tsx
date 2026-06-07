@@ -14,9 +14,11 @@ import { AlertCircle, CheckCircle2, Loader2, Play, X } from "lucide-react";
 import {
   buildConsensusRows,
   buildTechnicalScanPrompt,
+  type ActionCategory,
   extractRebalanceInputFingerprint,
   fetchAllFullRuns,
   isCompletedRebalanceRun,
+  type StockConsensus,
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
 import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
@@ -37,6 +39,7 @@ import {
 import { isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import { APIError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
+import { cn } from "@/lib/utils";
 import type {
   IndMoneyUsPortfolioSnapshotCreateRequest,
   JobResponse,
@@ -94,6 +97,18 @@ type StageInfo = {
   completedLlms?: number | null;
   totalLlms?: number | null;
   recommendedStocks?: number | null;
+};
+type ZerodhaBasketOrderKind = "Market" | "Limit" | "GTT" | "After market";
+type ZerodhaBasketPreviewOrder = {
+  id: string;
+  exchange: string;
+  symbol: string;
+  action: ActionCategory;
+  side: "BUY" | "SELL";
+  units: number | null;
+  price: number | null;
+  amount: number | null;
+  orderKind: ZerodhaBasketOrderKind;
 };
 type WorkflowState = Record<WorkflowStageKey, StageInfo>;
 type IndMoneySyncMode = "reuse" | "paste";
@@ -516,6 +531,81 @@ function getLatestMatchingRebalanceRuns(
   return marketRuns.filter(
     (run) => extractRebalanceInputFingerprint(run.prompt) === fingerprint,
   );
+}
+
+const ZERODHA_BASKET_ACTIONS = new Set<ActionCategory>([
+  "Sell All",
+  "Trim",
+  "Add more",
+  "Buy New",
+]);
+const ZERODHA_ORDER_KINDS: ZerodhaBasketOrderKind[] = [
+  "Market",
+  "Limit",
+  "GTT",
+  "After market",
+];
+const ZERODHA_BASKET_URL = "https://kite.zerodha.com/orders/baskets";
+
+function parseBasketNumber(value?: string | null) {
+  const match = String(value || "")
+    .replace(/,/g, "")
+    .match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getBasketPrice(stock: StockConsensus, amount: number | null, units: number | null) {
+  if (amount !== null && units !== null && units !== 0) return Math.abs(amount / units);
+  return parseBasketNumber(stock.representative["Price Per Unit"]);
+}
+
+function formatBasketQuantity(value: number | null) {
+  if (value === null) return "—";
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 3 }).format(value);
+}
+
+function formatBasketCurrency(value: number | null) {
+  if (value === null) return "—";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function buildZerodhaBasketPreviewOrders(stocks: StockConsensus[]): ZerodhaBasketPreviewOrder[] {
+  return stocks
+    .filter((stock) => ZERODHA_BASKET_ACTIONS.has(stock.consensusAction))
+    .map((stock) => {
+      const estimate = stock.actionAverages[stock.consensusAction];
+      const units = estimate.units;
+      const amount = estimate.amount;
+      const side: "BUY" | "SELL" = stock.consensusAction === "Sell All" || stock.consensusAction === "Trim" ? "SELL" : "BUY";
+      return {
+        id: `zerodha:${stock.key}`,
+        exchange: stock.exchange || stock.representative["Exchange Symbol"]?.split(/\s+/)[0] || "NSE",
+        symbol: stock.symbol,
+        action: stock.consensusAction,
+        side,
+        units,
+        price: getBasketPrice(stock, amount, units),
+        amount,
+        orderKind: "Market" as const,
+      };
+    })
+    .filter((order) => order.units !== null && order.units > 0)
+    .sort((a, b) => {
+      const actionOrder = ["Sell All", "Trim", "Add more", "Buy New"].indexOf(a.action) - ["Sell All", "Trim", "Add more", "Buy New"].indexOf(b.action);
+      if (actionOrder !== 0) return actionOrder;
+      return a.symbol.localeCompare(b.symbol, undefined, { sensitivity: "base" });
+    });
+}
+
+function isActionablesFresh(completedAt: string | null | undefined, now: number) {
+  const completedMs = completedAt ? parseTimestampMs(completedAt) : 0;
+  return Boolean(completedMs && now - completedMs >= 0 && now - completedMs < 60 * 60 * 1000);
 }
 
 function targetKey(target: ProviderModelTarget) {
@@ -1291,6 +1381,7 @@ function WorkflowStageTile({
   onPromptClick,
   onOutputClick,
   onSyncNowClick,
+  onPlaceOrderClick,
 }: {
   stage: WorkflowStageKey;
   info: StageInfo;
@@ -1303,6 +1394,7 @@ function WorkflowStageTile({
   onPromptClick?: () => void;
   onOutputClick?: () => void;
   onSyncNowClick?: () => void;
+  onPlaceOrderClick?: () => void;
 }) {
   const isRunning = info.state === "running";
   const isQueued = info.state === "queued";
@@ -1318,6 +1410,7 @@ function WorkflowStageTile({
         ? "bg-white opacity-100"
         : ""
     : "";
+  const isFreshActionables = isActionablesFresh(info.completedAt, now);
 
   return (
     <button
@@ -1503,6 +1596,32 @@ function WorkflowStageTile({
         </span>
       ) : null}
 
+      {onPlaceOrderClick && stage === "actionables" ? (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.stopPropagation();
+            onPlaceOrderClick();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              onPlaceOrderClick();
+            }
+          }}
+          className={cn(
+            "mt-6 inline-flex h-10 items-center justify-center rounded-full px-6 text-sm font-semibold text-white shadow-md transition",
+            isFreshActionables
+              ? "bg-emerald-600 shadow-emerald-600/25 hover:bg-emerald-700"
+              : "bg-blue-600 shadow-blue-600/25 hover:bg-blue-700",
+          )}
+        >
+          Place Order
+        </span>
+      ) : null}
+
       <div className="mt-auto flex w-full items-end justify-between gap-3 pt-5">
         {showPromptShortcut ? (
           <span
@@ -1552,6 +1671,190 @@ function WorkflowStageTile({
         ) : null}
       </div>
     </button>
+  );
+}
+
+function ZerodhaBasketPreviewDialog({
+  open,
+  loading,
+  error,
+  orders,
+  selectedIds,
+  onClose,
+  onToggle,
+  onToggleAll,
+  onOrderKindChange,
+  onPlaceOrder,
+}: {
+  open: boolean;
+  loading: boolean;
+  error: string | null;
+  orders: ZerodhaBasketPreviewOrder[];
+  selectedIds: Set<string>;
+  onClose: () => void;
+  onToggle: (id: string) => void;
+  onToggleAll: () => void;
+  onOrderKindChange: (id: string, orderKind: ZerodhaBasketOrderKind) => void;
+  onPlaceOrder: () => void;
+}) {
+  if (!open) return null;
+
+  const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
+  const selectedBuyAmount = selectedOrders
+    .filter((order) => order.side === "BUY")
+    .reduce((sum, order) => sum + (order.amount ?? 0), 0);
+  const selectedSellAmount = selectedOrders
+    .filter((order) => order.side === "SELL")
+    .reduce((sum, order) => sum + (order.amount ?? 0), 0);
+  const allSelected = orders.length > 0 && selectedIds.size === orders.length;
+
+  const renderPlaceOrderButton = () => (
+    <Button
+      type="button"
+      onClick={onPlaceOrder}
+      disabled={!selectedOrders.length}
+      className="rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50"
+    >
+      Place Order
+    </Button>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+      <div className="max-h-[90vh] w-full max-w-7xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-400">
+              Zerodha Basket Preview
+            </div>
+            <h3 className="mt-2 text-xl font-bold text-slate-950">
+              Zerodha India Place Order Basket
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Sell All, Trim, Add more, and Buy New actionables are pre-selected. Uncheck any row before opening Zerodha.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {renderPlaceOrderButton()}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-slate-200 p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              aria-label="Close Zerodha basket preview"
+            >
+              <X className="size-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[72vh] overflow-auto p-5">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
+              <Loader2 className="size-4 animate-spin" /> Preparing Zerodha basket…
+            </div>
+          ) : error ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {error}
+            </div>
+          ) : orders.length ? (
+            <>
+              <div className="mb-5 grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Selected Orders</div>
+                  <div className="mt-2 text-2xl font-black text-slate-950">{selectedOrders.length}/{orders.length}</div>
+                </div>
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                  <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Buy Basket</div>
+                  <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedBuyAmount)}</div>
+                </div>
+                <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
+                  <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
+                  <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedSellAmount)}</div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <table className="min-w-[72rem] w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                      <th className="px-4 py-3 font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={onToggleAll}
+                          aria-label="Select or deselect all Zerodha basket orders"
+                          className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                      </th>
+                      <th className="px-4 py-3 font-semibold">Stock</th>
+                      <th className="px-4 py-3 font-semibold">Action</th>
+                      <th className="px-4 py-3 font-semibold">Side</th>
+                      <th className="px-4 py-3 font-semibold">Units</th>
+                      <th className="px-4 py-3 font-semibold">Price</th>
+                      <th className="px-4 py-3 font-semibold">Amount</th>
+                      <th className="px-4 py-3 font-semibold">Order Type</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {orders.map((order) => (
+                      <tr key={order.id} className="bg-white">
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(order.id)}
+                            onChange={() => onToggle(order.id)}
+                            aria-label={`Select ${order.exchange} ${order.symbol}`}
+                            className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950">
+                          <span className="mr-2 text-xs font-semibold text-slate-500">{order.exchange}</span>
+                          {order.symbol}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">{order.action}</td>
+                        <td className="px-4 py-3">
+                          <span className={cn(
+                            "rounded-full px-3 py-1 text-xs font-bold",
+                            order.side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
+                          )}>
+                            {order.side}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketQuantity(order.units)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount)}</td>
+                        <td className="px-4 py-3">
+                          <select
+                            value={order.orderKind}
+                            onChange={(event) => onOrderKindChange(order.id, event.target.value as ZerodhaBasketOrderKind)}
+                            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          >
+                            {ZERODHA_ORDER_KINDS.map((orderKind) => (
+                              <option key={orderKind} value={orderKind}>{orderKind}</option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
+              No Sell All, Trim, Add more, or Buy New Zerodha actionables are available yet.
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-3 border-t border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            This screen prepares the basket preview only. Review quantity, price, product, validity, and order type in Zerodha before placing live orders.
+          </div>
+          {renderPlaceOrderButton()}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2847,6 +3150,11 @@ export function RebalanceWorkflowSections({
     title: string;
     body: string;
   } | null>(null);
+  const [zerodhaBasketOpen, setZerodhaBasketOpen] = useState(false);
+  const [zerodhaBasketLoading, setZerodhaBasketLoading] = useState(false);
+  const [zerodhaBasketError, setZerodhaBasketError] = useState<string | null>(null);
+  const [zerodhaBasketOrders, setZerodhaBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
+  const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
   const pauseRequestedRef = useRef(false);
@@ -2894,6 +3202,70 @@ export function RebalanceWorkflowSections({
   }, []);
 
   const isBusy = Boolean(runningPortfolio);
+
+  const openZerodhaBasketPreview = useCallback(async () => {
+    setZerodhaBasketOpen(true);
+    setZerodhaBasketLoading(true);
+    setZerodhaBasketError(null);
+    try {
+      const [runs, overview] = await Promise.all([
+        fetchAllFullRuns(),
+        apiService.zerodhaPortfolioOverview(),
+      ]);
+      const stocks = buildConsensusRows(
+        getLatestMatchingRebalanceRuns(runs, "india"),
+        "india",
+        overview.latest,
+      );
+      const orders = buildZerodhaBasketPreviewOrders(stocks);
+      setZerodhaBasketOrders(orders);
+      setSelectedZerodhaBasketIds(new Set(orders.map((order) => order.id)));
+    } catch (error) {
+      setZerodhaBasketOrders([]);
+      setSelectedZerodhaBasketIds(new Set());
+      setZerodhaBasketError(`Could not prepare Zerodha basket: ${normalizeError(error)}`);
+    } finally {
+      setZerodhaBasketLoading(false);
+    }
+  }, []);
+
+  const toggleZerodhaBasketOrder = useCallback((id: string) => {
+    setSelectedZerodhaBasketIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAllZerodhaBasketOrders = useCallback(() => {
+    setSelectedZerodhaBasketIds((current) => {
+      if (current.size === zerodhaBasketOrders.length) return new Set();
+      return new Set(zerodhaBasketOrders.map((order) => order.id));
+    });
+  }, [zerodhaBasketOrders]);
+
+  const updateZerodhaBasketOrderKind = useCallback(
+    (id: string, orderKind: ZerodhaBasketOrderKind) => {
+      setZerodhaBasketOrders((current) =>
+        current.map((order) => (order.id === id ? { ...order, orderKind } : order)),
+      );
+    },
+    [],
+  );
+
+  const placeSelectedZerodhaBasketOrders = useCallback(() => {
+    const selectedOrders = zerodhaBasketOrders.filter((order) => selectedZerodhaBasketIds.has(order.id));
+    if (!selectedOrders.length) {
+      window.alert("Select at least one Zerodha basket row before placing an order.");
+      return;
+    }
+    window.sessionStorage.setItem(
+      "investor:zerodha-basket-preview:v1",
+      JSON.stringify({ orders: selectedOrders, preparedAt: new Date().toISOString() }),
+    );
+    window.open(ZERODHA_BASKET_URL, "_blank", "noopener,noreferrer");
+  }, [selectedZerodhaBasketIds, zerodhaBasketOrders]);
 
   const loadLatestIdleStageInfo = useCallback(async () => {
     const [
@@ -4624,6 +4996,11 @@ export function RebalanceWorkflowSections({
                     }
                   : undefined
               }
+              onPlaceOrderClick={
+                stage === "actionables" && section.portfolio === "zerodha"
+                  ? () => void openZerodhaBasketPreview()
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -4683,6 +5060,19 @@ export function RebalanceWorkflowSections({
         onToggleAll={toggleAllInputCandidates}
         onResetDefaults={resetDefaultInputCandidates}
         onClose={() => setInputDialog(null)}
+      />
+
+      <ZerodhaBasketPreviewDialog
+        open={zerodhaBasketOpen}
+        loading={zerodhaBasketLoading}
+        error={zerodhaBasketError}
+        orders={zerodhaBasketOrders}
+        selectedIds={selectedZerodhaBasketIds}
+        onClose={() => setZerodhaBasketOpen(false)}
+        onToggle={toggleZerodhaBasketOrder}
+        onToggleAll={toggleAllZerodhaBasketOrders}
+        onOrderKindChange={updateZerodhaBasketOrderKind}
+        onPlaceOrder={placeSelectedZerodhaBasketOrders}
       />
 
       {promptDialog ? (
