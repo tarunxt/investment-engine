@@ -947,17 +947,6 @@ function getModeAction(actions: ActionCategory[], meanScore: number | null) {
   }, null);
 }
 
-function getFallbackMatrixAction(context: ScoreMatrixContext) {
-  if (!context.modeAction) return "Hold";
-  if (context.modeAction === "Buy New" && (context.currentUnits ?? 0) > 0) {
-    return "Add more";
-  }
-  if ((context.modeAction === "Sell All" || context.modeAction === "Trim") && (context.currentUnits ?? 0) <= 0) {
-    return "Hold";
-  }
-  return context.modeAction;
-}
-
 function resolveMatrixUnitsForAction(
   action: ActionCategory,
   context: ScoreMatrixContext,
@@ -969,9 +958,11 @@ function resolveMatrixUnitsForAction(
   }
 
   if (action === "Trim") {
+    const currentUnits = context.currentUnits ?? 0;
+    if (currentUnits > 0) return -Math.abs(currentUnits * 0.5);
     if (context.bearishMeanUnits !== null) return -Math.abs(context.bearishMeanUnits);
     if (context.meanUnitsChange !== null) return -Math.abs(context.meanUnitsChange);
-    return (context.currentUnits ?? 0) > 0 ? -Math.abs(context.currentUnits || 0) : 0;
+    return 0;
   }
 
   if (action === "Hold") return 0;
@@ -981,105 +972,67 @@ function resolveMatrixUnitsForAction(
 }
 
 function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
-  const meanScore = context.meanScore ?? 0;
+  const meanScore = Math.max(-3, Math.min(3, context.meanScore ?? 0));
   const hasPosition = (context.currentUnits ?? 0) > 0;
-  const fallbackAction = getFallbackMatrixAction(context);
-  const fallbackUnitsStrategy =
-    fallbackAction === "Hold"
-      ? "Keep units change at 0."
-      : fallbackAction === "Sell All"
-        ? "Sell the full current position when available."
-        : fallbackAction === "Trim"
-          ? "Trim using the average bearish units change."
-          : "Use the average bullish units change.";
+  const positiveAction: ActionCategory = hasPosition ? "Add more" : "Buy New";
+  const positiveUnitsStrategy = hasPosition
+    ? "Add more using the average bullish units change."
+    : "Buy New using the average bullish units change.";
 
   const rules: Array<Omit<ScoreMatrixRuleEvaluation, "matched"> & { matches: boolean }> = [
     {
-      id: "deep-bearish-exit",
-      label: "Deep bearish exit",
-      when: "Mode is Sell All or every vote is bearish, mean score is at or below -1.25, and a position exists.",
-      action: "Sell All",
-      unitsStrategy: "Sell the full current position.",
-      summary: "Strong bearish alignment resolves to a full exit.",
-      matches:
-        hasPosition
-        && meanScore <= -1.25
-        && (context.modeAction === "Sell All" || context.bearishVotes === context.totalVotes),
+      id: "score-2-to-3",
+      label: "2–3",
+      when: "Calculated Score is from 2 up to 3.",
+      action: positiveAction,
+      unitsStrategy: positiveUnitsStrategy,
+      summary: `Strong bullish score resolves to ${ACTION_CATEGORY_LABEL[positiveAction]}.`,
+      matches: meanScore >= 2 && meanScore <= 3,
     },
     {
-      id: "bearish-reduce",
-      label: "Bearish reduce",
-      when: "Mean score is below -0.35, bearish votes meet or exceed bullish votes, and a position exists.",
+      id: "score-1-to-2",
+      label: "1–2",
+      when: "Calculated Score is from 1 up to 2.",
+      action: positiveAction,
+      unitsStrategy: positiveUnitsStrategy,
+      summary: `Moderate bullish score resolves to ${ACTION_CATEGORY_LABEL[positiveAction]}.`,
+      matches: meanScore >= 1 && meanScore < 2,
+    },
+    {
+      id: "score-0-to-1",
+      label: "0–1",
+      when: "Calculated Score is from 0 up to 1.",
+      action: "Hold",
+      unitsStrategy: "Keep Units Change at 0.",
+      summary: "Mildly positive score stays at Hold.",
+      matches: meanScore >= 0 && meanScore < 1,
+    },
+    {
+      id: "score-minus-1-to-0",
+      label: "(-1)–0",
+      when: "Calculated Score is from -1 up to 0.",
+      action: "Hold",
+      unitsStrategy: "Keep Units Change at 0.",
+      summary: "Mildly negative score stays at Hold.",
+      matches: meanScore >= -1 && meanScore < 0,
+    },
+    {
+      id: "score-minus-2-to-minus-1",
+      label: "(-2)–(-1)",
+      when: "Calculated Score is from -2 up to -1.",
       action: "Trim",
-      unitsStrategy: "Trim using the average bearish units change.",
-      summary: "Moderate bearish consensus reduces exposure instead of exiting completely.",
-      matches:
-        hasPosition
-        && meanScore < -0.35
-        && context.bearishVotes >= context.bullishVotes,
+      unitsStrategy: "Trim 50% of current units.",
+      summary: "Moderate bearish score trims half of the current position.",
+      matches: meanScore >= -2 && meanScore < -1,
     },
     {
-      id: "neutral-hold",
-      label: "Neutral hold",
-      when: "Mean score stays between -0.35 and 0.35, or Hold is the dominant mode.",
-      action: "Hold",
-      unitsStrategy: "Keep units change at 0.",
-      summary: "Mixed or balanced signals collapse to Hold.",
-      matches:
-        Math.abs(meanScore) <= 0.35
-        || context.modeAction === "Hold"
-        || context.holdVotes > Math.max(context.bullishVotes, context.bearishVotes),
-    },
-    {
-      id: "strong-bullish-fresh-entry",
-      label: "Strong bullish fresh entry",
-      when: "Mean score is at or above 1.25 and there is no current position.",
-      action: "Buy New",
-      unitsStrategy: "Use the average bullish units change as the initial buy size.",
-      summary: "A strongly bullish score with no open position becomes Buy New.",
-      matches: !hasPosition && meanScore >= 1.25,
-    },
-    {
-      id: "bullish-add",
-      label: "Bullish add",
-      when: "Mean score is at or above 0.35, bullish votes meet or exceed bearish votes, and a position exists.",
-      action: "Add more",
-      unitsStrategy: "Use the average bullish units change to size the add.",
-      summary: "Bullish bias on an existing position becomes Add more.",
-      matches:
-        hasPosition
-        && meanScore >= 0.35
-        && context.bullishVotes >= context.bearishVotes,
-    },
-    {
-      id: "bullish-fresh-entry",
-      label: "Bullish fresh entry",
-      when: "Mean score is at or above 0.35, bullish votes meet or exceed bearish votes, and there is no current position.",
-      action: "Buy New",
-      unitsStrategy: "Use the average bullish units change as the new entry size.",
-      summary: "Bullish bias without an open position becomes Buy New.",
-      matches:
-        !hasPosition
-        && meanScore >= 0.35
-        && context.bullishVotes >= context.bearishVotes,
-    },
-    {
-      id: "bearish-no-position",
-      label: "Bearish with no position",
-      when: "Mean score is below -0.35 but there is no current position to trim or sell.",
-      action: "Hold",
-      unitsStrategy: "Keep units change at 0 because there is nothing to reduce.",
-      summary: "Bearish signals without an open position stay at Hold.",
-      matches: !hasPosition && meanScore < -0.35,
-    },
-    {
-      id: "mode-fallback",
-      label: "Mode fallback",
-      when: "Fallback when none of the stronger score-matrix rules match.",
-      action: fallbackAction,
-      unitsStrategy: fallbackUnitsStrategy,
-      summary: "Falls back to the mode action, adjusted for whether a position already exists.",
-      matches: true,
+      id: "score-minus-3-to-minus-2",
+      label: "(-3)–(-2)",
+      when: "Calculated Score is from -3 up to -2.",
+      action: "Sell All",
+      unitsStrategy: "Sell 100% of current units.",
+      summary: "Strong bearish score exits the full current position.",
+      matches: meanScore >= -3 && meanScore < -2,
     },
   ];
 
@@ -1209,7 +1162,7 @@ function buildScoreMatrixDetail(
       },
       {
         id: `${stock.key}-matrix-calculated`,
-        source: "Consolidated (Calculated)",
+        source: "Consolidated (Formula)",
         action: calculatedAction,
         actionScore: meanScore,
         unitsChange: calculatedUnitsChange,
@@ -2638,8 +2591,8 @@ function ScoreMatrixSection({
         </div>
         <p className="mt-1 text-xs leading-5 text-slate-600">
           The Mean and Mode row keeps the mode action and the signed mean units change. The
-          Calculated row applies an explicit score matrix to the same signals. Click the
-          calculated action to inspect the matched rule.
+          Formula row applies the Calculated Score matrix to fill the final Action and Units
+          Change. Click the formula action to inspect the matched score range.
         </p>
         {matchedRule ? (
           <div className="mt-2 text-xs font-medium text-blue-700">
@@ -2665,9 +2618,9 @@ function ScoreMatrixSection({
                 key={row.id}
                 className={cn(
                   row.isCalculated
-                    ? "bg-blue-50/70"
+                    ? "bg-rose-100/80"
                     : row.isSummary
-                      ? "bg-slate-50"
+                      ? "bg-amber-100/70"
                       : "bg-white",
                 )}
               >
@@ -2682,7 +2635,7 @@ function ScoreMatrixSection({
                       onClick={() => onOpenDetail(detail)}
                     >
                       <FinalActionTag action={row.action} />
-                      <span className="text-[11px] font-semibold text-blue-700">View rule</span>
+                      <span className="text-[11px] font-semibold text-blue-700">View matrix</span>
                     </button>
                   ) : row.action ? (
                     <FinalActionTag action={row.action} />
@@ -2898,47 +2851,50 @@ function ScoreMatrixModal({
 
           <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
             <h3 className="mb-3 text-center text-lg font-bold text-slate-950">Calculated Score matrix</h3>
-            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-              <table className="min-w-full text-xs">
-                <thead className="bg-slate-100/80 text-left uppercase tracking-wide text-slate-600">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">Rule</th>
-                    <th className="px-3 py-2 font-semibold">When it applies</th>
-                    <th className="px-3 py-2 font-semibold">Action</th>
-                    <th className="px-3 py-2 font-semibold">Units Change</th>
-                    <th className="px-3 py-2 font-semibold">Reason</th>
+            <div className="overflow-x-auto rounded-lg border border-slate-300 bg-white">
+              <table className="mx-auto min-w-[34rem] text-sm">
+                <thead className="text-left text-slate-950">
+                  <tr className="border-b-2 border-slate-900">
+                    <th className="px-3 py-2 text-center font-bold">Score range</th>
+                    <th className="px-3 py-2 font-bold">Action</th>
+                    <th className="px-3 py-2 font-bold">Units Change</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-200">
                   {detail.rules.map((rule) => (
                     <tr
                       key={rule.id}
                       className={cn(
                         rule.matched
-                          ? "bg-blue-50/80 ring-1 ring-inset ring-blue-200"
+                          ? "bg-blue-50/90 ring-2 ring-inset ring-blue-400"
                           : "bg-white",
                       )}
                     >
-                      <td className="whitespace-nowrap px-3 py-2 align-top font-medium text-slate-900">
+                      <td className="whitespace-nowrap px-3 py-2 text-center font-semibold text-slate-900">
                         {rule.label}
                       </td>
-                      <td className="min-w-[20rem] px-3 py-2 align-top text-slate-700">
-                        {rule.when}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 align-top">
+                      <td className="whitespace-nowrap px-3 py-2">
                         <FinalActionTag action={rule.action} />
                       </td>
-                      <td className="min-w-[15rem] px-3 py-2 align-top text-slate-700">
-                        {rule.unitsStrategy}
-                      </td>
-                      <td className="min-w-[16rem] px-3 py-2 align-top text-slate-600">
-                        {rule.summary}
+                      <td className="whitespace-nowrap px-3 py-2 text-right font-medium text-slate-800">
+                        {rule.action === "Hold"
+                          ? "0"
+                          : rule.action === "Trim"
+                            ? "50%"
+                            : rule.action === "Sell All"
+                              ? "100%"
+                              : ""}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <p className="mt-3 text-xs leading-5 text-slate-600">
+              The highlighted score range drives the Consolidated (Formula) action and units change.
+              Positive ranges buy or add from the LLM sizing; Hold keeps units at 0; Trim sells 50%;
+              Sell All exits 100%.
+            </p>
           </section>
 
           <section className="rounded-xl border border-violet-100 bg-violet-50/60 p-4">
