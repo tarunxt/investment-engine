@@ -2295,6 +2295,15 @@ const RATIONALE_SECTION_GROUPS: Array<{
   },
 ];
 
+const RATIONALE_TEXT_HEADERS: RebalanceHeader[] = [
+  "Rationale Cruxx",
+  "Rationale Technical Setup Short Term 1–3 Months",
+  "Rationale - Technical Setup (Medium Term)",
+  "Rationale - Technical Setup (Long Term)",
+  "Rationale - Fundamentals Short Term",
+  "Rationale - Fundamentals Medium/Long Term",
+];
+
 const RATIONALE_SCORE_HEADERS: RebalanceHeader[] = [
   "Score Rationale Cruxx",
   "Score Rationale Technical Setup Short Term 1–3 Months",
@@ -3726,14 +3735,19 @@ function buildSummaryRowCells(
   action: ActionCategory | null,
   unitsChange: number | null,
 ): CanonicalRow {
-  return {
+  const summaryCells = {
     ...stock.representative,
     [ACTION_HEADER]: action ? ACTION_CATEGORY_LABEL[action] : "",
     "Units Change": unitsChange === null ? "" : String(unitsChange),
     "Final Units": unitsChange === null || detail.currentUnits === null ? "" : String(detail.currentUnits + unitsChange),
-    "Rationale Cruxx": "",
     "Units to Buy": unitsChange !== null && unitsChange > 0 ? String(unitsChange) : stock.representative["Units to Buy"] || "",
   };
+
+  RATIONALE_TEXT_HEADERS.forEach((header) => {
+    summaryCells[header] = "";
+  });
+
+  return summaryCells;
 }
 
 function getCalculationCellSortValue(value: ReactNode) {
