@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, Triangle, X } from "lucide-react";
 
 import {
   parseInvestmentRecommendationContent,
@@ -814,6 +814,118 @@ function getBuyActionAmountTotal(rows: DashboardActionRow[]) {
 
 function formatActionScore(value: number | null) {
   return value === null ? "—" : value.toFixed(2);
+}
+
+type ScoreSymbolDefinition = {
+  id: string;
+  rangeLabel: string;
+  symbolLabel: string;
+  direction: "up" | "down";
+  className: string;
+  matches: (score: number) => boolean;
+};
+
+const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
+  {
+    id: "greater-than-2",
+    rangeLabel: ">2",
+    symbolLabel: "Up triangle (Green)",
+    direction: "up",
+    className: "text-emerald-600",
+    matches: (score) => score > 2,
+  },
+  {
+    id: "1-to-2",
+    rangeLabel: "1-2",
+    symbolLabel: "Up triangle (Light Green)",
+    direction: "up",
+    className: "text-lime-500",
+    matches: (score) => score >= 1 && score <= 2,
+  },
+  {
+    id: "0-to-1",
+    rangeLabel: "0-1",
+    symbolLabel: "Up triangle (Yellow)",
+    direction: "up",
+    className: "text-amber-400",
+    matches: (score) => score >= 0 && score < 1,
+  },
+  {
+    id: "minus-1-to-0",
+    rangeLabel: "(-1) - 0",
+    symbolLabel: "Down triangle (Yellow)",
+    direction: "down",
+    className: "text-amber-400",
+    matches: (score) => score >= -1 && score < 0,
+  },
+  {
+    id: "minus-2-to-minus-1",
+    rangeLabel: "(-2) -(-1)",
+    symbolLabel: "Down triangle (Light red)",
+    direction: "down",
+    className: "text-rose-400",
+    matches: (score) => score >= -2 && score < -1,
+  },
+  {
+    id: "minus-3-to-minus-2",
+    rangeLabel: "(-3) -(-2)",
+    symbolLabel: "Down triangle (Red)",
+    direction: "down",
+    className: "text-red-600",
+    matches: (score) => score >= -3 && score < -2,
+  },
+];
+
+function getScoreSymbolDefinition(score: number | null) {
+  if (score === null || !Number.isFinite(score)) return null;
+  const boundedScore = Math.max(-3, Math.min(3, score));
+  return SCORE_SYMBOL_MATRIX_ROWS.find((row) => row.matches(boundedScore)) ?? null;
+}
+
+function ScoreSymbol({ score, className }: { score: number | null; className?: string }) {
+  const symbol = getScoreSymbolDefinition(score);
+
+  if (!symbol) {
+    return <span className={cn("whitespace-nowrap text-slate-400", className)}>—</span>;
+  }
+
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-slate-900", className)}>
+      <Triangle
+        className={cn("size-3.5 fill-current", symbol.className, symbol.direction === "down" ? "rotate-180" : "")}
+        aria-hidden="true"
+      />
+      <span>{formatActionScore(score)}</span>
+    </span>
+  );
+}
+
+function ScoreMatrixButton({
+  detail,
+  onOpenDetail,
+  className,
+}: {
+  detail: ScoreMatrixDetail;
+  onOpenDetail: (detail: ScoreMatrixDetail) => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpenDetail(detail);
+      }}
+      className={cn(
+        "rounded px-1.5 py-0.5 transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500",
+        className,
+      )}
+      aria-label={`Open consolidated score matrix for ${detail.stockSymbol}`}
+      title={`Open consolidated score matrix for ${detail.stockSymbol}`}
+    >
+      <ScoreSymbol score={detail.calculatedScore} />
+    </button>
+  );
 }
 
 function formatScoreValue(value: number | null) {
@@ -2183,6 +2295,27 @@ const RATIONALE_SECTION_GROUPS: Array<{
   },
 ];
 
+const RATIONALE_SCORE_HEADERS: RebalanceHeader[] = [
+  "Score Rationale Cruxx",
+  "Score Rationale Technical Setup Short Term 1–3 Months",
+  "Score Rationale - Technical Setup (Medium Term)",
+  "Score Rationale - Technical Setup (Long Term)",
+  "Score Rationale - Fundamentals Short Term",
+  "Score Rationale - Fundamentals Medium/Long Term",
+];
+
+function getRowRationaleDisplayScore(row: CanonicalRow) {
+  return average(
+    RATIONALE_SCORE_HEADERS.map((header) => parseNumericCell(row[header])).filter(
+      (value): value is number => value !== null,
+    ),
+  );
+}
+
+function CapturedRationaleScoreCell({ row }: { row: CanonicalRow }) {
+  return <ScoreSymbol score={getRowRationaleDisplayScore(row)} />;
+}
+
 function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
   const groups = RATIONALE_SECTION_GROUPS.map((group) => {
     const seenLabels = new Set<string>();
@@ -2452,6 +2585,7 @@ function StockDetailsButton({
                         <th className="px-3 py-2">Action</th>
                         <th className="px-3 py-2">Units</th>
                         <th className="px-3 py-2">Amount</th>
+                        <th className="px-3 py-2">Score</th>
                         <th className="px-3 py-2">Rationale</th>
                       </tr>
                     </thead>
@@ -2467,6 +2601,7 @@ function StockDetailsButton({
                           </td>
                           <td className="px-3 py-2 align-top">{row.cells["Units to Buy"] || row.cells["Units Change"] || "—"}</td>
                           <td className="px-3 py-2 align-top">{row.cells["Total Buy Amount"] || "—"}</td>
+                          <td className="whitespace-nowrap px-3 py-2 align-top"><CapturedRationaleScoreCell row={row.cells} /></td>
                           <td className="min-w-80 px-3 py-2 align-top"><CapturedRationalesCell row={row.cells} /></td>
                         </tr>
                       ))}
@@ -2943,7 +3078,7 @@ function DetailedRationaleScoreSection({
 
 function ScoreReferenceTables() {
   return (
-    <section className="grid gap-4 lg:grid-cols-2">
+    <section className="grid gap-4 lg:grid-cols-3">
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="font-semibold text-slate-950">Action (Buy/Add/Sell All/Trim/Hold/Buy New) &amp; Score</h3>
@@ -2988,6 +3123,38 @@ function ScoreReferenceTables() {
                   <td className="px-4 py-2 text-slate-900">{row.label}</td>
                   <td className="px-4 py-2 text-right font-medium text-slate-900">
                     {row.multiplier}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="font-semibold text-slate-950">Score Symbol matrix</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-slate-700">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Score range</th>
+                <th className="px-4 py-2 font-semibold">Symbol</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {SCORE_SYMBOL_MATRIX_ROWS.map((row) => (
+                <tr key={row.id}>
+                  <td className="whitespace-nowrap px-4 py-2 text-slate-900">{row.rangeLabel}</td>
+                  <td className="px-4 py-2 font-medium text-slate-900">
+                    <span className="inline-flex items-center gap-2">
+                      <Triangle
+                        className={cn("size-3.5 fill-current", row.className, row.direction === "down" ? "rotate-180" : "")}
+                        aria-hidden="true"
+                      />
+                      {row.symbolLabel}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -3969,6 +4136,7 @@ type DashboardActionRow = {
   formulaAction: ActionCategory;
   formulaScore: number | null;
   formulaEstimate: ActionEstimate;
+  detail: ScoreMatrixDetail;
 };
 
 type DashboardActionSortKey =
@@ -4063,6 +4231,7 @@ function buildDashboardActionRows(
       formulaAction,
       formulaScore: detail.calculatedScore,
       formulaEstimate: buildFormulaActionEstimate(stock, formulaAction, detail.calculatedUnitsChange, market),
+      detail,
     };
   });
 }
@@ -4174,6 +4343,7 @@ export function DashboardFinalActionablesTables() {
   const [error, setError] = useState<string | null>(null);
   const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
   const [calculationsMarket, setCalculationsMarket] = useState<SwingTradeMarket | null>(null);
+  const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
     india: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
     us: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
@@ -4360,8 +4530,6 @@ export function DashboardFinalActionablesTables() {
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Value" sortKey="currentValue" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label={`Units to ${getActionVerb(action)}`} sortKey="units" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Amount" sortKey="amount" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Technical Setup" sortKey="technicalSetup" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Confidence Score" sortKey="confidence" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
@@ -4370,7 +4538,6 @@ export function DashboardFinalActionablesTables() {
                               const estimate = row.formulaEstimate;
                               const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
                               const scan = getTechnicalScanForStock(technicalScans, stock);
-                              const setup = formatTechnicalSetup(scan, stock.representative);
                               return (
                                 <tr key={`${market}-${stock.key}`} className="bg-white/40">
                                   <td className="whitespace-nowrap px-3 py-2 align-top">
@@ -4392,7 +4559,7 @@ export function DashboardFinalActionablesTables() {
                                     </span>
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-gray-800">
-                                    {formatActionScore(row.formulaScore)}
+                                    <ScoreMatrixButton detail={row.detail} onOpenDetail={setSelectedMatrixDetail} />
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                                     <ConsensusBreakupButton stock={stock} action={action} />
@@ -4409,12 +4576,6 @@ export function DashboardFinalActionablesTables() {
                                   <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                                     {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
                                   </td>
-                                  <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan, stock.representative))}>
-                                    <TechnicalSetupLink setup={setup} />
-                                  </td>
-                                  <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan, stock.representative))}>
-                                    {formatTechnicalConfidence(scan, stock.representative)}
-                                  </td>
                                 </tr>
                               );
                             })}
@@ -4428,7 +4589,6 @@ export function DashboardFinalActionablesTables() {
                                 <td className="whitespace-nowrap px-3 py-3 font-black text-emerald-950">
                                   {formatDisplayAmount(buyAmountTotal, market)}
                                 </td>
-                                <td colSpan={2} className="px-3 py-3" />
                               </tr>
                             </tfoot>
                           ) : null}
@@ -4506,6 +4666,7 @@ export function DashboardFinalActionablesTables() {
         technicalScans={technicalScans}
         detailsData={calculationsMarket ? detailsDataByMarket[calculationsMarket] : detailsDataByMarket.india}
       />
+      <ScoreMatrixModal detail={selectedMatrixDetail} onClose={() => setSelectedMatrixDetail(null)} />
     </section>
   );
 }
