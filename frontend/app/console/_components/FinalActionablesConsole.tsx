@@ -2017,7 +2017,6 @@ const RATIONALE_SECTION_GROUPS: Array<{
   },
   {
     title: "Technical setup",
-    subtitle: "Short, medium, and long-term setup",
     className: "border-blue-200 bg-blue-50/80 text-blue-700",
     titleClassName: "text-blue-800",
     items: [
@@ -2030,7 +2029,6 @@ const RATIONALE_SECTION_GROUPS: Array<{
   },
   {
     title: "Fundamental Setup",
-    subtitle: "Short and medium/long-term fundamentals",
     className: "border-emerald-200 bg-emerald-50/80 text-emerald-700",
     titleClassName: "text-emerald-800",
     items: [
