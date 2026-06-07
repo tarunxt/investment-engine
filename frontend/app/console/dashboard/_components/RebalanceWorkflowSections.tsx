@@ -109,6 +109,7 @@ const MAX_JOB_POLLS = 120;
 const WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
 const STAGE_LLM_SELECTION_STORAGE_KEY = "investor:dashboard-stage-llms:v1";
 const WORKFLOW_COMPLETION_RESET_DELAY_MS = 5000;
+export const ZERODHA_DASHBOARD_SYNC_NOW_EVENT = "investor:dashboard:zerodha-sync-now";
 
 const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",
@@ -117,6 +118,13 @@ const STAGE_ORDER: WorkflowStageKey[] = [
   "rebalance",
   "technical",
   "actionables",
+];
+
+const COST_BEARING_STAGES: WorkflowStageKey[] = [
+  "threats",
+  "swing",
+  "rebalance",
+  "technical",
 ];
 
 const STAGE_METADATA: Record<
@@ -312,13 +320,13 @@ function getStageLabel(stage: WorkflowStageKey, state: StageState) {
 
 function getStageClasses(state: StageState) {
   if (state === "completed")
-    return "border-emerald-300 bg-white text-slate-950 shadow-slate-100";
+    return "border-emerald-300 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-1 ring-emerald-100";
   if (state === "running")
-    return "border-amber-300 bg-white text-slate-950 shadow-slate-100";
+    return "border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100 ring-1 ring-amber-100";
   if (state === "queued")
-    return "border-sky-200 bg-white text-slate-950 shadow-slate-100 ring-1 ring-sky-100";
+    return "border-sky-200 bg-sky-50 text-sky-950 shadow-sky-100 ring-1 ring-sky-100";
   if (state === "failed")
-    return "border-red-300 bg-white text-slate-950 shadow-slate-100";
+    return "border-red-300 bg-red-50 text-red-950 shadow-red-100 ring-1 ring-red-100";
   return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
 }
 
@@ -758,6 +766,56 @@ function getStageCostInr(info: StageInfo, usdInrRate: number) {
   if (typeof info.costInr === "number" && info.costInr > 0) return info.costInr;
   if (typeof info.costUsd === "number" && info.costUsd > 0) return info.costUsd * usdInrRate;
   return 0;
+}
+
+function getWorkflowRunCost(state: WorkflowState, usdInrRate: number) {
+  return COST_BEARING_STAGES.reduce(
+    (total, stage) => total + getStageCostInr(state[stage], usdInrRate),
+    0,
+  );
+}
+
+function getWorkflowRunDuration(state: WorkflowState, now = Date.now()) {
+  const starts = COST_BEARING_STAGES.map((stage) => parseTimestampMs(state[stage].startedAt)).filter(Boolean);
+  const ends = COST_BEARING_STAGES.map((stage) => parseTimestampMs(state[stage].endedAt ?? state[stage].completedAt)).filter(Boolean);
+  if (!starts.length) return null;
+  return formatDuration(
+    new Date(Math.min(...starts)).toISOString(),
+    ends.length ? new Date(Math.max(...ends)).toISOString() : null,
+    now,
+  );
+}
+
+function getRunDuration(run: RunResponse) {
+  const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+  const startMs = Math.min(
+    ...[parseTimestampMs(run.created_at), ...jobs.map((job) => parseTimestampMs(job.created_at))]
+      .filter(Boolean),
+  );
+  const endMs = Math.max(
+    ...[parseTimestampMs(run.updated_at), ...jobs.map((job) => parseTimestampMs(job.updated_at))]
+      .filter(Boolean),
+  );
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
+  return formatDuration(new Date(startMs).toISOString(), new Date(endMs).toISOString());
+}
+
+function getRunOutputSummary(run: RunResponse) {
+  const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+  const completed = jobs.filter((job) => (job.status || "").toLowerCase() === "completed").length;
+  const failed = jobs.filter((job) => (job.status || "").toLowerCase() === "failed").length;
+  const partial = jobs.filter((job) => {
+    const status = (job.status || "").toLowerCase();
+    return status === "partial" || (Boolean(job.response?.trim()) && status !== "completed");
+  }).length;
+  const costUsd = jobs.reduce((total, job) => total + (job.estimated_cost ?? 0), 0);
+  const duration = getRunDuration(run);
+  return [
+    `Run #${run.id} · ${formatTimestamp(run.created_at)} · LLMs used: ${jobs.length}`,
+    `Completed: ${completed} · Partial: ${partial} · Failed: ${failed}`,
+    duration ? `Time taken: ${duration}` : null,
+    costUsd > 0 ? `Cost incurred: $${costUsd.toFixed(4)}` : null,
+  ].filter(Boolean).join("\n");
 }
 
 function formatLlmCompletion(info: StageInfo) {
@@ -2074,6 +2132,7 @@ export function RebalanceWorkflowSections({
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [indMoneySyncOnly, setIndMoneySyncOnly] = useState(false);
   const [now, setNow] = useState(0);
+  const [workflowPaused, setWorkflowPaused] = useState(false);
   const [specificMode, setSpecificMode] = useState<
     Record<WorkflowPortfolio, boolean>
   >(() => ({
@@ -2732,9 +2791,12 @@ export function RebalanceWorkflowSections({
         )[0];
         const jobs = latestRun?.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
         body = jobs.length
-          ? jobs
-              .map((job) => `# Run ${latestRun?.id} / Job ${job?.id} · ${job?.provider ?? "LLM"}/${job?.model ?? "model"}\n\n${job?.response?.trim() || job?.error_message || "No response text saved."}`)
-              .join("\n\n---\n\n")
+          ? [
+              `## Last run summary\n${latestRun ? getRunOutputSummary(latestRun) : "Not available"}`,
+              jobs
+                .map((job) => `# Run ${latestRun?.id} / Job ${job?.id} · ${job?.provider ?? "LLM"}/${job?.model ?? "model"}\n\n${job?.response?.trim() || job?.error_message || "No response text saved."}`)
+                .join("\n\n---\n\n"),
+            ].join("\n\n---\n\n")
           : "No saved LLM output is available yet.";
       }
       setOutputDialog({ portfolio, stage, title, body, loading: false, error: null });
@@ -2855,6 +2917,7 @@ export function RebalanceWorkflowSections({
       activeRunIdsRef.current = [];
       cancelRequestedRef.current = false;
       pauseRequestedRef.current = false;
+      setWorkflowPaused(false);
 
       let currentStage: WorkflowStageKey = "sync";
       let generatedThreatMarkdown = "";
@@ -3188,12 +3251,10 @@ export function RebalanceWorkflowSections({
           );
         }
         if (pauseRequestedRef.current) pauseRequestedRef.current = false;
+        setWorkflowPaused(false);
         window.setTimeout(() => {
           setStates((current) => {
-            const lastCost = STAGE_ORDER.reduce(
-              (total, stage) => total + getStageCostInr(current[portfolio][stage], usdInrRate),
-              0,
-            );
+            const lastCost = getWorkflowRunCost(current[portfolio], usdInrRate);
             setLastAutoRebalanceCosts((costs) => ({ ...costs, [portfolio]: lastCost }));
             return {
               ...current,
@@ -3293,6 +3354,15 @@ export function RebalanceWorkflowSections({
   );
 
 
+  useEffect(() => {
+    const handleDashboardSync = () => {
+      if (runningPortfolio) return;
+      void syncPortfolioNow("zerodha");
+    };
+    window.addEventListener(ZERODHA_DASHBOARD_SYNC_NOW_EVENT, handleDashboardSync);
+    return () => window.removeEventListener(ZERODHA_DASHBOARD_SYNC_NOW_EVENT, handleDashboardSync);
+  }, [runningPortfolio, syncPortfolioNow]);
+
   const handleIndMoneyContinue = useCallback(
     (
       mode: IndMoneySyncMode,
@@ -3347,6 +3417,7 @@ export function RebalanceWorkflowSections({
   );
 
   const renderSectionCard = (section: (typeof sections)[number]) => {
+    const isSectionRunning = runningPortfolio === section.portfolio;
     const queuedStages = getQueuedStages(
       section.portfolio,
       states,
@@ -3371,24 +3442,51 @@ export function RebalanceWorkflowSections({
           </div>
           <div className="flex w-full flex-col items-start gap-2 xl:w-auto xl:items-end">
             <div className="flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
-            <Button
-              type="button"
-              disabled={isBusy}
-              onClick={() => {
-                if (isBusy) return;
-                if (section.portfolio === "indmoneyUs") {
-                  setDialogError(null);
-                  setIndMoneySyncOnly(false);
-                  setDialogOpen(true);
-                  return;
-                }
-                void runWorkflow("zerodha");
-              }}
-              className="h-auto w-full justify-center whitespace-normal rounded-full bg-slate-950 py-2 text-center leading-5 text-white hover:bg-slate-800 disabled:opacity-50 xl:w-auto"
-            >
-              <Play className="mr-2 size-4" />
-              {section.buttonLabel}
-            </Button>
+              {isSectionRunning ? (
+                <>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      pauseRequestedRef.current = !pauseRequestedRef.current;
+                      setWorkflowPaused(pauseRequestedRef.current);
+                    }}
+                    className="h-auto w-full justify-center whitespace-normal rounded-full bg-orange-500 py-2 text-center leading-5 text-white hover:bg-orange-600 xl:w-auto"
+                  >
+                    {workflowPaused ? "Resume" : "Pause"}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      cancelRequestedRef.current = true;
+                      pauseRequestedRef.current = false;
+                      setWorkflowPaused(false);
+                    }}
+                    className="h-auto w-full justify-center whitespace-normal rounded-full bg-red-600 py-2 text-center leading-5 text-white hover:bg-red-700 xl:w-auto"
+                  >
+                    <X className="mr-2 size-4" />
+                    Kill Rebalance
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => {
+                    if (isBusy) return;
+                    if (section.portfolio === "indmoneyUs") {
+                      setDialogError(null);
+                      setIndMoneySyncOnly(false);
+                      setDialogOpen(true);
+                      return;
+                    }
+                    void runWorkflow("zerodha");
+                  }}
+                  className="h-auto w-full justify-center whitespace-normal rounded-full bg-slate-950 py-2 text-center leading-5 text-white hover:bg-slate-800 disabled:opacity-50 xl:w-auto"
+                >
+                  <Play className="mr-2 size-4" />
+                  {section.buttonLabel}
+                </Button>
+              )}
             </div>
             <p className="text-xs text-slate-500">
               Last run on {formatTimestamp(lastRunByPortfolio[section.portfolio])}
@@ -3467,12 +3565,9 @@ export function RebalanceWorkflowSections({
           ))}
         </div>
         <p className="mt-4 text-right text-xs font-semibold text-slate-700">
+          {getWorkflowRunDuration(states[section.portfolio], now) ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · ` : ""}
           Total cost incurred in last Auto-rebalance in INR: {formatInrCost(
-            lastAutoRebalanceCosts[section.portfolio] ??
-              STAGE_ORDER.reduce(
-                (total, stage) => total + getStageCostInr(states[section.portfolio][stage], usdInrRate),
-                0,
-              ),
+            getWorkflowRunCost(states[section.portfolio], usdInrRate) || lastAutoRebalanceCosts[section.portfolio],
           )}
         </p>
       </div>

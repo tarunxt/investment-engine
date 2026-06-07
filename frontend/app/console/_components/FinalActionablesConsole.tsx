@@ -45,15 +45,24 @@ import type {
 
 export type ActionCategory = "Sell All" | "Trim" | "Hold" | "Add more" | "Buy New";
 
+type LlmMeta = {
+  runId: number;
+  jobId: number;
+  provider: string;
+  model: string;
+  createdAt: string;
+  status: string;
+  error?: string | null;
+};
+
 type LlmBreakupRow = {
   cells: CanonicalRow;
-  meta: {
-    runId: number;
-    jobId: number;
-    provider: string;
-    model: string;
-    createdAt: string;
-  };
+  meta: LlmMeta;
+};
+
+type ConsensusBreakupEntry = {
+  meta: LlmMeta;
+  row: LlmBreakupRow | null;
 };
 
 type ActionEstimate = {
@@ -208,6 +217,7 @@ export type StockConsensus = {
   totalSuggestions: number;
   representative: CanonicalRow;
   rows: LlmBreakupRow[];
+  breakupEntries: ConsensusBreakupEntry[];
 };
 
 type TechnicalScanResult = {
@@ -406,6 +416,16 @@ const ACTION_ESTIMATE_CATEGORIES = new Set<ActionCategory>([
   "Add more",
   "Buy New",
 ]);
+const LLM_BREAKUP_RATIONALE_HEADERS = [
+  "Rationale Remarks",
+  "Rationale - Technical setup (short term (1–3 months))",
+  "Rationale - Technical setup (short term (1-3 months))",
+  "Rationale - Technical setup (medium term)",
+  "Rationale - Technical setup (long term term)",
+  "Rationale - Technical setup (long term)",
+  "Rationale - Fundamentals Short term",
+  "Rationale - Fundamentals Medium/Long Term",
+] as const;
 const REBALANCE_DISPLAY_HEADERS = [
   ...REBALANCE_HEADER_ORDER.slice(0, 3),
   CURRENT_INVESTMENT_AMOUNT_HEADER,
@@ -1801,6 +1821,26 @@ export async function fetchAllFullRuns() {
   ];
 }
 
+function getRunJobMetas(run: RunResponse): LlmMeta[] {
+  return (run.run_jobs ?? []).flatMap((link) => {
+    const job = link.job;
+    if (!job) return [];
+    return [{
+      runId: run.id,
+      jobId: link.job_id,
+      provider: job.provider,
+      model: job.model,
+      createdAt: job.created_at,
+      status: job.status || "unknown",
+      error: job.error_message ?? null,
+    }];
+  });
+}
+
+function getMetaKey(meta: Pick<LlmMeta, "runId" | "jobId">) {
+  return `${meta.runId}:${meta.jobId}`;
+}
+
 function parseRunRows(run: RunResponse): LlmBreakupRow[] {
   return (run.run_jobs ?? []).flatMap((link) => {
     const job = link.job;
@@ -1822,6 +1862,8 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
         provider: job.provider,
         model: job.model,
         createdAt: job.created_at,
+        status: job.status || "completed",
+        error: job.error_message ?? null,
       },
     }));
   });
@@ -1834,6 +1876,7 @@ export function buildConsensusRows(
 ): StockConsensus[] {
   const grouped = new Map<string, LlmBreakupRow[]>();
   const currentValueSnapshots = buildCurrentValueSnapshotMap(portfolioSnapshot, market);
+  const llmMetas = runs.flatMap(getRunJobMetas);
 
   runs.flatMap(parseRunRows).forEach((row) => {
     if (!Object.values(row.cells).some((value) => value.trim())) return;
@@ -1870,11 +1913,18 @@ export function buildConsensusRows(
         return winner;
       }, "Hold" as ActionCategory);
 
+      const rowByMeta = new Map(rows.map((row) => [getMetaKey(row.meta), row]));
+      const breakupEntries = (llmMetas.length ? llmMetas : rows.map((row) => row.meta)).map((meta) => ({
+        meta,
+        row: rowByMeta.get(getMetaKey(meta)) ?? null,
+      }));
+      const totalSuggestions = Math.max(breakupEntries.length, rows.length);
+
       const first = getRepresentativeConsensusRow(rows);
       const representative = { ...first };
       representative[ACTION_HEADER] =
         ACTION_CATEGORIES.filter((action) => actionCounts[action] > 0)
-          .map((action) => `${action} (${actionCounts[action]}/${rows.length})`)
+          .map((action) => `${action} (${actionCounts[action]}/${totalSuggestions})`)
           .join("; ") || "No action consensus";
       representative["Confidence Score (0-100)"] = summarizeNumeric(
         rows,
@@ -1905,9 +1955,10 @@ export function buildConsensusRows(
         consensusAction,
         actionCounts,
         actionAverages,
-        totalSuggestions: rows.length,
+        totalSuggestions,
         representative,
         rows,
+        breakupEntries,
       };
     })
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
@@ -1966,6 +2017,122 @@ function KeyValueGrid({
         </div>
       ))}
     </dl>
+  );
+}
+
+function formatRecommendationLabel(value: string) {
+  const action = normalizeAction(value);
+  return action ? ACTION_CATEGORY_LABEL[action] : value || "No recommendation";
+}
+
+function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
+  const rationales = LLM_BREAKUP_RATIONALE_HEADERS.map((header) => ({
+    header,
+    value: row[header] || "",
+  })).filter((item) => item.value.trim());
+
+  if (!rationales.length) {
+    return <span>{row["Technical Setup"] || "—"}</span>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {rationales.map(({ header, value }) => (
+        <div key={header}>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">{header}</div>
+          <div className="mt-0.5 whitespace-pre-wrap break-words text-red-600">{value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ConsensusBreakupButton({
+  stock,
+  action,
+}: {
+  stock: StockConsensus;
+  action: ActionCategory;
+}) {
+  const [open, setOpen] = useState(false);
+  const consensusText = `${stock.actionCounts[action]}/${stock.totalSuggestions}`;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen(true);
+        }}
+        className="rounded px-1.5 py-0.5 font-semibold text-blue-700 underline underline-offset-2 transition hover:bg-blue-50 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        aria-label={`Show ${stock.symbol} LLM recommendation breakup`}
+        title={`Show ${stock.symbol} LLM recommendation breakup`}
+      >
+        {consensusText}
+      </button>
+      {open ? (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${stock.symbol} consensus breakup`}
+          onClick={() => setOpen(false)}
+        >
+          <div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Consensus breakup</p>
+                <h2 className="mt-1 text-xl font-bold text-gray-900">{stock.symbol} · {formatRecommendationLabel(action)}</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Recommendation from each LLM included in this stock&apos;s consolidated actionables run.
+                </p>
+              </div>
+              <button type="button" onClick={() => setOpen(false)} className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close consensus breakup">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+              <div className="space-y-2">
+                {stock.breakupEntries.map((entry, index) => {
+                  const rowAction = entry.row ? normalizeAction(entry.row.cells[ACTION_HEADER] || "") : null;
+                  const isMatch = rowAction === action;
+                  return (
+                    <div key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-slate-900">
+                            {index + 1}. {entry.meta.provider || "Unknown provider"} · {entry.meta.model || "Unknown model"}
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                            <span>Run #{entry.meta.runId}</span>
+                            <span>Job #{entry.meta.jobId}</span>
+                            <span>{formatDateTime(entry.meta.createdAt)}</span>
+                          </div>
+                        </div>
+                        <span className={cn(
+                          "shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold",
+                          isMatch ? CATEGORY_BADGE_CLASS[action] : "bg-slate-100 text-slate-700",
+                        )}>
+                          {entry.row ? formatRecommendationLabel(entry.row.cells[ACTION_HEADER] || "") : "Not mentioned"}
+                        </span>
+                      </div>
+                      {entry.row ? (
+                        <div className="mt-3 text-xs text-slate-700">
+                          <CapturedRationalesCell row={entry.row.cells} />
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-xs text-slate-500">This LLM did not mention this stock in its parsed output.</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -2088,7 +2255,7 @@ function StockDetailsButton({
                           </td>
                           <td className="px-3 py-2 align-top">{row.cells["Units to Buy"] || row.cells["Units Change"] || "—"}</td>
                           <td className="px-3 py-2 align-top">{row.cells["Total Buy Amount"] || "—"}</td>
-                          <td className="min-w-80 px-3 py-2 align-top">{row.cells["Rationale Remarks"] || row.cells["Technical Setup"] || "—"}</td>
+                          <td className="min-w-80 px-3 py-2 align-top"><CapturedRationalesCell row={row.cells} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -2254,7 +2421,7 @@ function ActionSummaryStockTile({
           </div>
         </div>
         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-          {stock.actionCounts[action]}/{stock.totalSuggestions}
+          <ConsensusBreakupButton stock={stock} action={action} />
         </span>
       </div>
 
@@ -3062,7 +3229,7 @@ export function DashboardFinalActionablesTables() {
                                     </TradingViewSymbolLink>
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {stock.actionCounts[action]}/{stock.totalSuggestions}
+                                    <ConsensusBreakupButton stock={stock} action={action} />
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                                     {formatQuantity(estimate.currentUnits)}
@@ -3757,14 +3924,29 @@ function FragmentRows({
                               key={`${row.meta.runId}-${row.meta.jobId}-${header}`}
                               className="px-3 py-2 align-top text-gray-700"
                             >
-                              <RebalanceCell
-                                row={row.cells}
-                                header={header}
-                                market={market}
-                                setupGroups={setupGroups}
-                                onSetupClick={onSetupClick}
-                                preferActionTag
-                              />
+                              {header === ACTION_HEADER ? (
+                                <div className="space-y-1">
+                                  <RebalanceCell
+                                    row={row.cells}
+                                    header={header}
+                                    market={market}
+                                    setupGroups={setupGroups}
+                                    onSetupClick={onSetupClick}
+                                    preferActionTag
+                                  />
+                                </div>
+                              ) : LLM_BREAKUP_RATIONALE_HEADERS.includes(header as (typeof LLM_BREAKUP_RATIONALE_HEADERS)[number]) ? (
+                                <CapturedRationalesCell row={row.cells} />
+                              ) : (
+                                <RebalanceCell
+                                  row={row.cells}
+                                  header={header}
+                                  market={market}
+                                  setupGroups={setupGroups}
+                                  onSetupClick={onSetupClick}
+                                  preferActionTag
+                                />
+                              )}
                             </td>
                           ))}
                         </tr>

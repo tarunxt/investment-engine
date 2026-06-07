@@ -27,7 +27,7 @@ import {
   type PortfolioCardTopHolding,
 } from "./_components/MarketPortfolioCard";
 import { ThreatMarketCard } from "./_components/ThreatMarketCard";
-import { RebalanceWorkflowSections } from "./_components/RebalanceWorkflowSections";
+import { RebalanceWorkflowSections, ZERODHA_DASHBOARD_SYNC_NOW_EVENT } from "./_components/RebalanceWorkflowSections";
 import {
   countThreatSeverities,
   extractUrgentActionRows,
@@ -462,7 +462,10 @@ export default function DashboardPage() {
 
             <div className="mt-5 flex flex-wrap gap-3">
               <Button
-                onClick={() => void loadDashboard(false)}
+                onClick={() => {
+                  window.dispatchEvent(new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT));
+                  void loadDashboard(false);
+                }}
                 disabled={refreshing}
                 className="rounded-full bg-amber-400 text-slate-950 hover:bg-amber-300"
               >
