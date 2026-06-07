@@ -1332,38 +1332,58 @@ function getStageOutputRoute(
   return routeByStage[stage];
 }
 
-function SelectInputsIcon({ className }: { className?: string }) {
+function BoxArrowIcon({
+  className,
+  variant,
+}: {
+  className?: string;
+  variant: "input" | "output";
+}) {
+  const isInput = variant === "input";
+
   return (
     <svg
       aria-hidden="true"
       className={className}
-      viewBox="0 0 512 512"
+      viewBox="0 0 64 64"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
       <path
-        d="M188 188V88h236v336H188V324"
+        d={
+          isInput
+            ? "M12 12h40v40H12M12 12v13M12 39v13"
+            : "M12 12h40M12 12v40M12 52h40M52 12v13M52 39v13"
+        }
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="36"
+        strokeWidth="5"
       />
       <path
-        d="M88 256h300"
+        d={isInput ? "M7 32h32" : "M22 32h35"}
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="36"
+        strokeWidth="5"
       />
       <path
-        d="M300 144l112 112-112 112"
+        d={isInput ? "M29 22l10 10-10 10" : "M47 22l10 10-10 10"}
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="36"
+        strokeWidth="5"
       />
     </svg>
   );
+}
+
+function SelectInputsIcon({ className }: { className?: string }) {
+  return <BoxArrowIcon className={className} variant="input" />;
+}
+
+function ViewOutputIcon({ className }: { className?: string }) {
+  return <BoxArrowIcon className={className} variant="output" />;
 }
 
 function LlmDetailsIcon(props: SVGProps<SVGSVGElement>) {
@@ -1376,14 +1396,21 @@ function LlmDetailsIcon(props: SVGProps<SVGSVGElement>) {
       {...props}
     >
       <path
-        d="M500 60c-118 0-221 79-252 193-111 15-197 110-197 225 0 63 25 121 67 163-26 47-39 100-39 154 0 173 140 313 313 313 44 0 87-9 126-27 59 72 148 114 242 114 160 0 294-121 311-279 116-31 197-136 197-257 0-66-24-129-66-178 17-40 26-83 26-127 0-179-145-324-324-324-34 0-67 5-99 16C745 18 676 0 603 0 565 0 530 7 500 60Z"
+        d="M614.6 83.8c-101.3 0-190.5 54-240 134.8-95.2-19.7-195.8 17.6-250.1 111.8-50.7 87.8-42.7 191.1 10.9 269.5-53.5 78.5-61.5 181.8-10.8 269.6 54.3 94.1 154.8 131.4 250 111.7 49.5 80.8 138.7 134.9 240 134.9 108.7 0 194-63.4 236.1-149 95.2 19.6 195.7-17.7 250-111.8 50.7-87.8 42.7-191.1-10.8-269.5 53.5-78.5 61.5-181.8 10.8-269.6-54.3-94.1-154.8-131.4-250-111.7-49.5-80.8-138.7-134.7-236.1-120.7Z"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth="72"
       />
       <path
-        d="M468 341 779 154M468 341v166m0 0 300-181 302 181M468 507 247 641m221-134 300 181m0-362v180m0 182v171M247 641l300 180 221-133m0 0 302-181m-302 181 302 181"
+        d="M405 764V436l286-164 286 164v328L691 928 405 764Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="72"
+      />
+      <path
+        d="M405 436 691 600l286-164M691 600v328M405 764l286-164"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -1454,7 +1481,7 @@ function WorkflowStageTile({
   const stageMeta = STAGE_METADATA[stage];
   const showPromptShortcut = Boolean(onPromptClick);
   const iconButtonClasses =
-    "inline-flex size-10 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-slate-800 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 hover:text-blue-700";
+    "inline-flex size-10 items-center justify-center rounded-full border border-blue-200 bg-white text-slate-800 shadow-sm transition hover:border-blue-400 hover:bg-white hover:text-blue-700";
   const selectionClasses = selectable
     ? selected
       ? "ring-2 ring-blue-500"
@@ -1510,7 +1537,7 @@ function WorkflowStageTile({
               onInfoClick();
             }
           }}
-          className={`absolute right-5 top-5 ${iconButtonClasses} text-blue-700`}
+          className={`absolute right-5 top-5 ${iconButtonClasses}`}
           aria-label={`Show ${stageMeta.idle} LLM details`}
           title="LLM models and expected cost"
         >
@@ -1533,7 +1560,7 @@ function WorkflowStageTile({
               onCalculationsClick();
             }
           }}
-          className={`absolute right-5 top-5 ${iconButtonClasses} text-blue-700`}
+          className={`absolute right-5 top-5 ${iconButtonClasses}`}
           aria-label={`Open ${stageMeta.idle} Actionables Calculations`}
           title="Actionables Calculations"
         >
@@ -1741,7 +1768,7 @@ function WorkflowStageTile({
             aria-label={`View output for ${stageMeta.idle}`}
             title="View Output"
           >
-            <SelectInputsIcon className="size-6" />
+            <ViewOutputIcon className="size-6" />
           </span>
         ) : null}
       </div>
