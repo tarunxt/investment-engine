@@ -1665,7 +1665,7 @@ function WorkflowStageTile({
               onSyncNowClick();
             }
           }}
-          className="mt-6 inline-flex h-10 items-center justify-center rounded-full bg-blue-600 px-6 text-sm font-semibold text-white shadow-md shadow-blue-600/25 transition hover:bg-blue-700"
+          className="mt-6 inline-flex h-10 items-center justify-center self-center rounded-full bg-blue-600 px-6 text-sm font-semibold text-white shadow-md shadow-blue-600/25 transition hover:bg-blue-700"
         >
           Sync Now
         </span>
@@ -1687,7 +1687,7 @@ function WorkflowStageTile({
             }
           }}
           className={cn(
-            "mt-6 inline-flex h-10 items-center justify-center rounded-full px-6 text-sm font-semibold text-white shadow-md transition",
+            "mt-6 inline-flex h-10 items-center justify-center self-center rounded-full px-6 text-sm font-semibold text-white shadow-md transition",
             isFreshActionables
               ? "bg-emerald-600 shadow-emerald-600/25 hover:bg-emerald-700"
               : "bg-blue-600 shadow-blue-600/25 hover:bg-blue-700",
@@ -5183,7 +5183,7 @@ export function RebalanceWorkflowSections({
             />
           ))}
         </div>
-        <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-extrabold text-emerald-950">
+        <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-normal text-emerald-950">
           {getWorkflowRunDuration(states[section.portfolio], now)
             ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · `
             : ""}
