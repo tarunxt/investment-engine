@@ -69,10 +69,6 @@ function formatKnownCost(costUsd: number, usdInrRate: number) {
   return `₹${(costUsd * usdInrRate).toFixed(2)}`;
 }
 
-function formatKnownCostSubtext(costUsd: number) {
-  return `$${costUsd.toFixed(4)}`;
-}
-
 function hasKnownCost(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -295,11 +291,6 @@ export function ScanHistoryButton({
                                   ? 'Pending'
                                   : 'Not captured'}
                             </div>
-                            {hasKnownCost(item.estimated_cost) ? (
-                              <div className="mt-1 text-xs text-slate-500">
-                                {formatKnownCostSubtext(item.estimated_cost)}
-                              </div>
-                            ) : null}
                           </div>
                         </div>
 

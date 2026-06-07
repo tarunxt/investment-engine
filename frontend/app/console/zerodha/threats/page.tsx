@@ -55,14 +55,6 @@ function formatInr(value: number | null | undefined) {
   }).format(value || 0);
 }
 
-function formatUsd(value: number | null | undefined) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 4,
-  }).format(value || 0);
-}
-
 function formatInrCost(value: number, usdInrRate: number) {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -511,9 +503,6 @@ export default function ZerodhaThreatsPage() {
                     ? formatInrCost(analysis.estimated_cost, usdInrRate)
                     : 'Not captured'}
                 </div>
-                {hasKnownCost(analysis.estimated_cost) ? (
-                  <div className="text-xs text-slate-500">{formatUsd(analysis.estimated_cost)}</div>
-                ) : null}
               </div>
             </div>
           </div>

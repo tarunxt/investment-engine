@@ -280,10 +280,7 @@ export default function ApisPage() {
                   <td className="px-4 py-3 text-gray-800">{item.daily_requests}</td>
                   <td className="px-4 py-3 text-gray-800">{item.daily_tokens_in}</td>
                   <td className="px-4 py-3 text-gray-800">{item.daily_tokens_out}</td>
-                  <td className="px-4 py-3 text-gray-800">
-                    <div>${item.daily_estimated_cost.toFixed(6)}</div>
-                    <div className="text-xs text-gray-500">₹{item.daily_estimated_cost_inr.toFixed(4)}</div>
-                  </td>
+                  <td className="px-4 py-3 text-gray-800">₹{item.daily_estimated_cost_inr.toFixed(4)}</td>
                   <td className="px-4 py-3 text-gray-600">{item.daily_limit_requests ?? 'Provider plan'}</td>
                   <td className="px-4 py-3 text-gray-600">{item.notes ?? '-'}</td>
                 </tr>
