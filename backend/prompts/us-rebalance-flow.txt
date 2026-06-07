@@ -45,7 +45,7 @@ Return exactly this table:
 If a recommendation candidate is not selected, exclude it. If current holding has insufficient current data, still include it and use Hold, Trim, or Watch-based logic. Do not output a partial table.
 
 [VALIDATION CHECKLIST]
-Verify every current symbol appears exactly once; Units Change and Final Units math; Sell All final units = 0; Hold Units Change = 0; each score column is one of -3,-2,-1,0,1,2,3. Score columns must be one of -3, -2, -1, 0, 1, 2, 3 only, where -3=very bearish, -2=bearish, -1=slightly bearish, 0=neutral, 1=slightly bullish, 2=bullish, 3=very bullish. Each score must justify its adjacent rationale.
+Verify every current symbol appears exactly once; Units Change and Final Units math; Sell All final units = 0; Hold Units Change = 0; each rationale score column follows the Rationale Score rule. Rationale Score rule: whenever any `Score Rationale ...` / rationale-score column is requested, return only one of these 7 integer choices: -3 (minus three)=very bearish, -2 (minus two)=bearish, -1 (minus one)=slightly bearish, 0=neutral, 1=slightly bullish, 2=bullish, 3=very bullish. Do not return decimals, ranges, percentages, words, or values outside these integers. Each rationale score must justify its adjacent rationale.
 
 [FINAL OUTPUT RESTRICTION]
 Return only the title and one markdown table. No introduction, explanation, notes, bullets, disclaimer, code fences, or text after the table.

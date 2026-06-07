@@ -2135,7 +2135,7 @@ function InputSelectionDialog({
     technical:
       "Use the upcoming Rebalance Scan output plus the latest completed rebalance output so Technical Scan validates the freshest proposed adds, trims, exits, and holds.",
     actionables:
-      "Use the upcoming Technical Scan output plus the latest completed technical scan so final actionables can include current chart validation.",
+      "Use the upcoming Technical Scan output plus the latest completed Rebalance Scan and Technical Scan outputs so final actionables can combine portfolio rebalance intent with current chart validation.",
   };
 
   return (
@@ -3837,15 +3837,21 @@ export function RebalanceWorkflowSections({
               ),
             );
           } else {
-            candidates = candidates.concat(
-              buildRunJobCandidates(
-                sortRunsByLatestTimestamp(
-                  runs.filter((run) =>
-                    isCompletedTechnicalScanRun(run, market),
-                  ),
-                ),
-                "Technical Scan",
+            const rebalanceCandidates = buildRunJobCandidates(
+              sortRunsByLatestTimestamp(
+                runs.filter((run) => isCompletedRebalanceRun(run, market)),
               ),
+              "Rebalance Scan",
+            );
+            const technicalCandidates = buildRunJobCandidates(
+              sortRunsByLatestTimestamp(
+                runs.filter((run) => isCompletedTechnicalScanRun(run, market)),
+              ),
+              "Technical Scan",
+            );
+            candidates = candidates.concat(
+              rebalanceCandidates,
+              technicalCandidates,
             );
           }
         }
@@ -3858,11 +3864,21 @@ export function RebalanceWorkflowSections({
           const defaultIds =
             stage === "rebalance"
               ? candidates.map((candidate) => candidate.id)
-              : ([
-                  nextCandidate.id,
-                  candidates.find((candidate) => candidate.source !== "next")
-                    ?.id,
-                ].filter(Boolean) as string[]);
+              : stage === "actionables"
+                ? ([
+                    nextCandidate.id,
+                    candidates.find((candidate) =>
+                      candidate.label.startsWith("Rebalance Scan"),
+                    )?.id,
+                    candidates.find((candidate) =>
+                      candidate.label.startsWith("Technical Scan"),
+                    )?.id,
+                  ].filter(Boolean) as string[])
+                : ([
+                    nextCandidate.id,
+                    candidates.find((candidate) => candidate.source !== "next")
+                      ?.id,
+                  ].filter(Boolean) as string[]);
           if (stage !== "rebalance" && currentSet.size > 0 && !onlyReservedNext)
             return current;
           return {

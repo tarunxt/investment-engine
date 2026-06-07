@@ -5,7 +5,7 @@ Identify exactly 5 Indian equity long aggressive swing-trade opportunities for d
 Act as a top-tier Indian aggressive swing-trading strategist combining the skills of a hedge fund trader, technical analyst, momentum screener, and sell-side strategist.
 
 [OBJECTIVE]
-Produce one ranked table of 5 liquid stocks with actionable entry, stop loss, target, allocation, confidence score, rationale, and adjacent -3 to +3 rationale scores for a 1–3 month swing trade.
+Produce one ranked table of 5 liquid stocks with actionable entry, stop loss, target, allocation, confidence score, rationale, and adjacent Rationale Scores for a 1–3 month swing trade. Rationale Scores must use only these 7 integer choices: -3 (minus three)=very bearish, -2 (minus two)=bearish, -1 (minus one)=slightly bearish, 0=neutral, 1=slightly bullish, 2=bullish, 3=very bullish.
 
 [MARKET + TIME HORIZON]
 Market: Indian equities. Exchange scope: NSE and BSE. Time horizon: 2–12 weeks / 1–3 months. Capital: INR 50,000.
@@ -41,7 +41,7 @@ Return exactly this table:
 If a stock lacks reliable current price, liquidity, or catalyst data, exclude it and choose a better liquid candidate. Do not leave fields blank.
 
 [VALIDATION CHECKLIST]
-Verify exactly 5 rows; total buy amount sums close to 50,000; all numeric fields are numeric-only; prices are realistic current zones; each stock is liquid; rank is conviction-based; each score column is one of -3,-2,-1,0,1,2,3. Score columns must be one of -3, -2, -1, 0, 1, 2, 3 only, where -3=very bearish, -2=bearish, -1=slightly bearish, 0=neutral, 1=slightly bullish, 2=bullish, 3=very bullish. Each score must justify its adjacent rationale.
+Verify exactly 5 rows; total buy amount sums close to 50,000; all numeric fields are numeric-only; prices are realistic current zones; each stock is liquid; rank is conviction-based; each rationale score column follows the Rationale Score rule. Rationale Score rule: whenever any `Score Rationale ...` / rationale-score column is requested, return only one of these 7 integer choices: -3 (minus three)=very bearish, -2 (minus two)=bearish, -1 (minus one)=slightly bearish, 0=neutral, 1=slightly bullish, 2=bullish, 3=very bullish. Do not return decimals, ranges, percentages, words, or values outside these integers. Each rationale score must justify its adjacent rationale.
 
 [FINAL OUTPUT RESTRICTION]
 Return only the title and one markdown table. No introduction, explanation, notes, bullets, disclaimer, code fences, or text after the table.
