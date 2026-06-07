@@ -1,7 +1,6 @@
 "use client";
 
 import { type SVGProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import {
   AlertCircle,
@@ -23,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import {
   buildRebalanceInputBundle,
   buildRebalancePrompt,
+  ensureRebalanceFlowMarker,
   getPreviousMarketClose,
   getRebalanceDefaultExportSheetName,
 } from "@/lib/rebalance";
@@ -55,7 +55,7 @@ type WorkflowStageKey =
   | "technical"
   | "actionables";
 type StageState = "idle" | "queued" | "running" | "completed" | "failed";
-type InputSelectionStage = "swing" | "rebalance" | "technical";
+type InputSelectionStage = "swing" | "rebalance" | "technical" | "actionables";
 type InputSelectionCandidate = {
   id: string;
   source: "next" | "threat" | "run-job";
@@ -648,6 +648,7 @@ function buildNextCandidate(stage: InputSelectionStage): InputSelectionCandidate
     swing: "Next Threat Scan output",
     rebalance: "Next Swing Scan output",
     technical: "Next Rebalance Scan output",
+    actionables: "Next Technical Scan output",
   };
   return {
     id: `${stage}:next`,
@@ -994,7 +995,7 @@ function WorkflowStageTile({
     <button
       type="button"
       onClick={() => {
-        if (!isRunning) onClick?.();
+        onClick?.();
       }}
       disabled={!onClick}
       className={`relative flex min-h-44 flex-col items-start justify-start rounded-2xl border p-4 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-blue-400 bg-white text-slate-950 shadow-slate-100 ring-2 ring-blue-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
@@ -1325,6 +1326,7 @@ function InputSelectionDialog({
     swing: "Select Threat Scan inputs",
     rebalance: "Select Swing Scan inputs",
     technical: "Select Rebalance Scan inputs",
+    actionables: "Select Technical Scan inputs",
   };
 
   return (
@@ -2113,7 +2115,6 @@ export function RebalanceWorkflowSections({
 }: {
   onDashboardRefresh: () => Promise<void>;
 }) {
-  const router = useRouter();
   const usdInrRate = useUsdInrRate();
   const [initialPersisted] = useState<PersistedWorkflow | null>(() =>
     readPersistedWorkflow(),
@@ -2152,11 +2153,13 @@ export function RebalanceWorkflowSections({
       swing: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.swing ?? ["swing:next"] : ["swing:next"]),
       rebalance: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.rebalance ?? ["rebalance:next"] : ["rebalance:next"]),
       technical: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.technical ?? ["technical:next"] : ["technical:next"]),
+      actionables: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.actionables ?? ["actionables:next"] : ["actionables:next"]),
     },
     indmoneyUs: {
       swing: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.swing ?? ["swing:next"] : ["swing:next"]),
       rebalance: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.rebalance ?? ["rebalance:next"] : ["rebalance:next"]),
       technical: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.technical ?? ["technical:next"] : ["technical:next"]),
+      actionables: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.actionables ?? ["actionables:next"] : ["actionables:next"]),
     },
   }));
   const [lastAutoRebalanceCosts, setLastAutoRebalanceCosts] = useState<
@@ -2588,11 +2591,18 @@ export function RebalanceWorkflowSections({
                 "Swing Scan",
               ),
             );
-          } else {
+          } else if (stage === "technical") {
             candidates = candidates.concat(
               buildRunJobCandidates(
                 sortRunsByLatestTimestamp(runs.filter((run) => isCompletedRebalanceRun(run, market))),
                 "Rebalance Scan",
+              ),
+            );
+          } else {
+            candidates = candidates.concat(
+              buildRunJobCandidates(
+                sortRunsByLatestTimestamp(runs.filter((run) => isCompletedTechnicalScanRun(run, market))),
+                "Technical Scan",
               ),
             );
           }
@@ -2624,7 +2634,7 @@ export function RebalanceWorkflowSections({
 
   const openInputSelection = useCallback(
     (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
-      if (stage !== "swing" && stage !== "rebalance" && stage !== "technical") return;
+      if (stage !== "swing" && stage !== "rebalance" && stage !== "technical" && stage !== "actionables") return;
       const inputStage = stage as InputSelectionStage;
       setInputDialog({ portfolio, stage: inputStage });
       void loadInputCandidates(portfolio, inputStage).catch((error) => {
@@ -2873,13 +2883,11 @@ export function RebalanceWorkflowSections({
           ? URLs.routes.console.zerodhaRebalance()
           : URLs.routes.console.indmoneyUsRebalance(),
         technical: URLs.routes.console.dashboard(),
-        actionables: zerodha
-          ? `${URLs.routes.console.dashboard()}#final-actionable-zerodha`
-          : `${URLs.routes.console.dashboard()}#final-actionable-us`,
+        actionables: `${URLs.routes.console.dashboard()}#final-actionables`,
       };
-      router.push(hrefByStage[stage]);
+      window.open(hrefByStage[stage], "_blank", "noopener,noreferrer");
     },
-    [router],
+    [],
   );
 
   const runWorkflow = useCallback(
@@ -3153,7 +3161,7 @@ export function RebalanceWorkflowSections({
           const rebalanceRun = await apiService.createRun(
             buildRunPayload({
               prompt:
-                `${buildRebalancePrompt(market)}\n\n---\n\n${inputBundle}`.trim(),
+                `${ensureRebalanceFlowMarker(buildRebalancePrompt(market), market)}\n\n---\n\n${inputBundle}`.trim(),
               targets: rebalanceTargets,
               sheetName: getRebalanceDefaultExportSheetName(market),
             }),
@@ -3543,7 +3551,10 @@ export function RebalanceWorkflowSections({
                   : undefined
               }
               onInputClick={
-                stage === "swing" || stage === "rebalance" || stage === "technical"
+                stage === "swing" ||
+                stage === "rebalance" ||
+                stage === "technical" ||
+                stage === "actionables"
                   ? () => openInputSelection(section.portfolio, stage)
                   : undefined
               }
