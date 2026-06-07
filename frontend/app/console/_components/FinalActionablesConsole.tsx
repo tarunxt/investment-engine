@@ -3713,6 +3713,25 @@ function buildActionablesCalculationRowGroups(
   });
 }
 
+function ScrollableCalculationCell({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "max-h-24 max-w-full overflow-auto whitespace-normal break-words pr-1",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 function SortableCalculationHeader({
   header,
   sortState,
@@ -3877,12 +3896,20 @@ function ActionablesCalculationsModal({
           </div>
           <div className="max-h-[76vh] overflow-auto p-5">
             {rowGroups.length ? (
-              <table className="min-w-max border-collapse text-sm">
+              <table className="w-max table-fixed border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-100 text-left">
                   <tr>
                     {ACTIONABLES_CALCULATION_HEADERS.map((header) => (
-                      <th key={header} className="min-w-36 border border-slate-300 px-3 py-3 align-bottom">
-                        <SortableCalculationHeader header={header} sortState={sortState} onSort={toggleSort} />
+                      <th
+                        key={header}
+                        className={cn(
+                          "border border-slate-300 px-3 py-3 align-bottom",
+                          header === "Stock Info" ? "w-[17rem] min-w-[17rem]" : "w-[26rem] min-w-[26rem]",
+                        )}
+                      >
+                        <ScrollableCalculationCell className="max-h-16">
+                          <SortableCalculationHeader header={header} sortState={sortState} onSort={toggleSort} />
+                        </ScrollableCalculationCell>
                       </th>
                     ))}
                   </tr>
@@ -3895,14 +3922,18 @@ function ActionablesCalculationsModal({
                           {rowIndex === 0 ? (
                             <td
                               rowSpan={group.rows.length}
-                              className="sticky left-0 z-[1] min-w-[17rem] border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
+                              className="sticky left-0 z-[1] w-[17rem] min-w-[17rem] overflow-hidden border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
                             >
-                              {group.stockInfo}
+                              <ScrollableCalculationCell className="max-h-36">
+                                {group.stockInfo}
+                              </ScrollableCalculationCell>
                             </td>
                           ) : null}
                           {ACTIONABLES_CALCULATION_HEADERS.filter((header) => header !== "Stock Info").map((header) => (
-                            <td key={`${row.id}-${header}`} className="max-w-[26rem] whitespace-nowrap border border-slate-900 px-3 py-1.5 align-top text-slate-900">
-                              {row.values[header]}
+                            <td key={`${row.id}-${header}`} className="w-[26rem] max-w-[26rem] overflow-hidden border border-slate-900 px-3 py-1.5 align-top text-slate-900">
+                              <ScrollableCalculationCell>
+                                {row.values[header]}
+                              </ScrollableCalculationCell>
                             </td>
                           ))}
                         </tr>
