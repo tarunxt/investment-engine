@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, ExternalLink, Info, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, Info, RefreshCw, X } from "lucide-react";
 
 import {
   parseInvestmentRecommendationContent,
@@ -455,6 +455,24 @@ const CATEGORY_BADGE_CLASS: Record<ActionCategory, string> = {
   Hold: getStandardActionBadgeClass("Hold"),
   "Buy New": getStandardActionBadgeClass("Buy New"),
   "Add more": getStandardActionBadgeClass("Add more"),
+};
+
+const CONSENSUS_BREAKUP_ACTION_SORT: Record<ActionCategory, number> = {
+  "Sell All": 0,
+  Trim: 1,
+  "Add more": 2,
+  "Buy New": 3,
+  Hold: 4,
+};
+
+const NOT_MENTIONED_SORT_INDEX = 5;
+
+const CONSENSUS_BREAKUP_ROW_CLASS: Record<ActionCategory, string> = {
+  "Sell All": "border-red-200 bg-red-50/70",
+  Trim: "border-red-100 bg-red-50/50",
+  "Add more": "border-emerald-200 bg-emerald-50/70",
+  "Buy New": "border-emerald-100 bg-emerald-50/50",
+  Hold: "border-yellow-200 bg-yellow-50/80",
 };
 
 const ACTION_CATEGORY_LABEL: Record<ActionCategory, string> = {
@@ -1871,11 +1889,13 @@ export function buildConsensusRows(
       }, "Hold" as ActionCategory);
 
       const rowByMeta = new Map(rows.map((row) => [getMetaKey(row.meta), row]));
-      const breakupEntries = (llmMetas.length ? llmMetas : rows.map((row) => row.meta)).map((meta) => ({
-        meta,
-        row: rowByMeta.get(getMetaKey(meta)) ?? null,
-      }));
-      const totalSuggestions = Math.max(breakupEntries.length, rows.length);
+      const breakupEntries = (llmMetas.length ? llmMetas : rows.map((row) => row.meta))
+        .map((meta) => ({
+          meta,
+          row: rowByMeta.get(getMetaKey(meta)) ?? null,
+        }))
+        .sort(compareConsensusBreakupEntries);
+      const totalSuggestions = llmMetas.length || rows.length;
 
       const first = getRepresentativeConsensusRow(rows);
       const representative = { ...first };
@@ -2061,69 +2081,24 @@ function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
   );
 }
 
-function ConsensusOutputSummary({
-  stock,
-  action,
-}: {
-  stock: StockConsensus;
-  action: ActionCategory;
-}) {
-  const voteSummary = ACTION_CATEGORIES.filter(
-    (candidate) => stock.actionCounts[candidate] > 0,
-  )
-    .map(
-      (candidate) =>
-        `${formatRecommendationLabel(candidate)} ${stock.actionCounts[candidate]}/${stock.totalSuggestions}`,
-    )
-    .join(" · ");
+function getConsensusBreakupAction(entry: ConsensusBreakupEntry) {
+  return entry.row ? normalizeAction(entry.row.cells[ACTION_HEADER] || "") : null;
+}
 
-  return (
-    <section className="mb-4 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">
-            Consolidated output summary
-          </p>
-          <h3 className="mt-1 text-lg font-bold text-slate-950">
-            All-LLM consolidated recommendation for {stock.symbol}
-          </h3>
-        </div>
-        <span
-          className={cn(
-            "rounded-full px-3 py-1 text-xs font-semibold",
-            CATEGORY_BADGE_CLASS[action],
-          )}
-        >
-          {formatRecommendationLabel(action)} · {stock.actionCounts[action]}/{stock.totalSuggestions}
-        </span>
-      </div>
+function compareConsensusBreakupEntries(a: ConsensusBreakupEntry, b: ConsensusBreakupEntry) {
+  const actionA = getConsensusBreakupAction(a);
+  const actionB = getConsensusBreakupAction(b);
+  const actionComparison =
+    (actionA ? CONSENSUS_BREAKUP_ACTION_SORT[actionA] : NOT_MENTIONED_SORT_INDEX) -
+    (actionB ? CONSENSUS_BREAKUP_ACTION_SORT[actionB] : NOT_MENTIONED_SORT_INDEX);
+  if (actionComparison !== 0) return actionComparison;
 
-      <KeyValueGrid
-        itemClassName="border-indigo-100 bg-white/80"
-        values={[
-          ["Recommendation mix", voteSummary || "No action consensus"],
-          ["Current units", stock.representative["Current Units"] || "—"],
-          [
-            "Current value",
-            stock.representative[CURRENT_INVESTMENT_AMOUNT_HEADER] || "—",
-          ],
-          ["Units to sell/buy", stock.representative["Units to Sell/Buy"] || "—"],
-          ["Amount", stock.representative["Amount"] || "—"],
-          [
-            "Confidence",
-            stock.representative["Confidence Score (0-100)"] || "—",
-          ],
-        ]}
-      />
+  const providerComparison = (a.meta.provider || "").localeCompare(b.meta.provider || "", undefined, {
+    sensitivity: "base",
+  });
+  if (providerComparison !== 0) return providerComparison;
 
-      <div className="mt-3 rounded-xl border border-indigo-100 bg-white/80 p-3">
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
-          Consolidated rationale
-        </div>
-        <CapturedRationalesCell row={stock.representative} />
-      </div>
-    </section>
-  );
+  return (a.meta.model || "").localeCompare(b.meta.model || "", undefined, { sensitivity: "base" });
 }
 
 function ConsensusBreakupButton({
@@ -2158,52 +2133,58 @@ function ConsensusBreakupButton({
           aria-label={`${stock.symbol} consensus breakup`}
           onClick={() => setOpen(false)}
         >
-          <div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Consensus breakup</p>
-                <h2 className="mt-1 text-xl font-bold text-gray-900">{stock.symbol} · {formatRecommendationLabel(action)}</h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  Recommendation from each LLM included in this stock&apos;s consolidated actionables run.
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-600">Consensus breakup</p>
+                <h2 className="mt-1 flex flex-wrap items-baseline gap-2 text-2xl font-bold text-gray-900">
+                  <span>{stock.symbol} · {consensusText}</span>
+                  <span className={cn("rounded-full border px-2.5 py-1 text-sm font-bold", CATEGORY_BADGE_CLASS[action])}>
+                    {formatRecommendationLabel(action)}
+                  </span>
+                </h2>
+                <p className="mt-2 text-sm text-gray-500">
+                  Recommendation from every LLM included in the consolidated actionables run; missing stock mentions are marked as Not mentioned.
                 </p>
               </div>
               <button type="button" onClick={() => setOpen(false)} className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close consensus breakup">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
-              <ConsensusOutputSummary stock={stock} action={action} />
-              <div className="space-y-2">
+            <div className="max-h-[75vh] overflow-y-auto px-5 py-4">
+              <div className="space-y-3">
                 {stock.breakupEntries.map((entry, index) => {
-                  const rowAction = entry.row ? normalizeAction(entry.row.cells[ACTION_HEADER] || "") : null;
-                  const isMatch = rowAction === action;
+                  const rowAction = getConsensusBreakupAction(entry);
+                  const recommendationLabel = rowAction ? formatRecommendationLabel(rowAction) : "Not mentioned";
                   return (
-                    <div key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-semibold text-slate-900">
-                            {index + 1}. {entry.meta.provider || "Unknown provider"} · {entry.meta.model || "Unknown model"}
+                    <div
+                      key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`}
+                      className={cn(
+                        "rounded-xl border px-4 py-3",
+                        rowAction ? CONSENSUS_BREAKUP_ROW_CLASS[rowAction] : "border-slate-200 bg-slate-50",
+                      )}
+                    >
+                      <div className="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                        <div className="min-w-0">
+                          <div className="truncate text-base font-bold text-slate-900">
+                            {index + 1}. {entry.meta.provider || "Unknown provider"} {entry.meta.model || "Unknown model"}
                           </div>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                            <span>Run #{entry.meta.runId}</span>
-                            <span>Job #{entry.meta.jobId}</span>
-                            <span>{formatDateTime(entry.meta.createdAt)}</span>
+                          <div className="mt-0.5 text-sm text-slate-500">
+                            Run #{entry.meta.runId} · Job #{entry.meta.jobId}
                           </div>
                         </div>
-                        <span className={cn(
-                          "shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold",
-                          isMatch ? CATEGORY_BADGE_CLASS[action] : "bg-slate-100 text-slate-700",
-                        )}>
-                          {entry.row ? formatRecommendationLabel(entry.row.cells[ACTION_HEADER] || "") : "Not mentioned"}
+                        <div className="whitespace-nowrap text-sm text-slate-500">
+                          {formatDateTime(entry.meta.createdAt)}
+                        </div>
+                        <span
+                          className={cn(
+                            "justify-self-start rounded-full border px-3 py-1 text-sm font-bold sm:justify-self-end",
+                            rowAction ? CATEGORY_BADGE_CLASS[rowAction] : "border-slate-200 bg-slate-100 text-slate-600",
+                          )}
+                        >
+                          {recommendationLabel}
                         </span>
                       </div>
-                      {entry.row ? (
-                        <div className="mt-3 text-xs text-slate-700">
-                          <CapturedRationalesCell row={entry.row.cells} />
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-xs text-slate-500">This LLM did not mention this stock in its parsed output.</p>
-                      )}
                     </div>
                   );
                 })}
@@ -3197,6 +3178,8 @@ type DashboardActionSortState = {
   direction: "asc" | "desc";
 };
 
+const EMPTY_SELECTED_DASHBOARD_ACTION_IDS = new Set<string>();
+
 function getDashboardActionRowId(market: SwingTradeMarket, stock: StockConsensus) {
   return `${market}:${stock.key}`;
 }
@@ -3240,7 +3223,7 @@ function compareDashboardActionRows(
   action: ActionCategory,
   sortState: DashboardActionSortState,
   technicalScans: TechnicalScanMap,
-  selectedIds: Set<string>,
+  selectedIds: Set<string> = EMPTY_SELECTED_DASHBOARD_ACTION_IDS,
 ) {
   const leftValue = getDashboardActionSortValue(left, action, sortState.key, technicalScans, selectedIds);
   const rightValue = getDashboardActionSortValue(right, action, sortState.key, technicalScans, selectedIds);
@@ -3305,7 +3288,6 @@ export function DashboardFinalActionablesTables() {
   }>({ india: null, us: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
   const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
     india: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
@@ -3405,26 +3387,6 @@ export function DashboardFinalActionablesTables() {
     })),
   }), [portfolioSnapshots.india, portfolioSnapshots.us, runs]);
 
-  const toggleOrderSelection = useCallback((id: string) => {
-    setSelectedOrderIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleAllOrderRows = useCallback((ids: string[], checked: boolean) => {
-    setSelectedOrderIds((current) => {
-      const next = new Set(current);
-      ids.forEach((id) => {
-        if (checked) next.add(id);
-        else next.delete(id);
-      });
-      return next;
-    });
-  }, []);
-
   const toggleActionSort = useCallback((tableKey: string, key: DashboardActionSortKey) => {
     setSortStates((current) => {
       const existing = current[tableKey] ?? { key: "confidence" as DashboardActionSortKey, direction: "desc" as const };
@@ -3436,24 +3398,6 @@ export function DashboardFinalActionablesTables() {
       };
     });
   }, []);
-
-  const selectedOrders = useMemo(() => [
-    ...actionRowsByMarket.india,
-    ...actionRowsByMarket.us,
-  ].filter((row) => selectedOrderIds.has(row.id)), [actionRowsByMarket.india, actionRowsByMarket.us, selectedOrderIds]);
-
-  const openOrderBasket = useCallback((market: SwingTradeMarket) => {
-    const rows = selectedOrders.filter((row) => row.market === market);
-    if (!rows.length) {
-      window.alert("Select at least one actionable row before placing an order.");
-      return;
-    }
-    if (market !== "india") {
-      window.alert("US basket placement is not wired to a broker yet. Use the selected rows as your execution checklist.");
-      return;
-    }
-    window.open(URLs.routes.console.zerodha(), "_blank", "noopener,noreferrer");
-  }, [selectedOrders]);
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
@@ -3480,12 +3424,7 @@ export function DashboardFinalActionablesTables() {
               const sortState = sortStates[tableKey] ?? { key: "confidence", direction: "desc" as const };
               const rows = actionRows
                 .filter(({ stock }) => stock.consensusAction === action)
-                .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans, selectedOrderIds));
-              const selectableRowIds = rows
-                .filter(({ stock }) => ACTION_ESTIMATE_CATEGORIES.has(stock.consensusAction))
-                .map((row) => row.id);
-              const allVisibleSelected = selectableRowIds.length > 0 && selectableRowIds.every((id) => selectedOrderIds.has(id));
-
+                .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans));
               return (
                 <Card
                   key={`${market}-${action}`}
@@ -3506,17 +3445,6 @@ export function DashboardFinalActionablesTables() {
                         <table className="min-w-[64rem] text-xs">
                           <thead>
                             <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
-                              <th className="px-3 py-2 font-semibold">
-                                <label className="inline-flex items-center gap-1">
-                                  <input
-                                    type="checkbox"
-                                    checked={allVisibleSelected}
-                                    disabled={selectableRowIds.length === 0}
-                                    onChange={(event) => toggleAllOrderRows(selectableRowIds, event.target.checked)}
-                                  />
-                                  Place?
-                                </label>
-                              </th>
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Stock" sortKey="stock" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Consensus" sortKey="consensus" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Units" sortKey="currentUnits" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
@@ -3528,22 +3456,13 @@ export function DashboardFinalActionablesTables() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
-                            {rows.map(({ id, stock }) => {
+                            {rows.map(({ stock }) => {
                               const estimate = stock.actionAverages[action];
                               const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
                               const scan = getTechnicalScanForStock(technicalScans, stock);
                               const setup = formatTechnicalSetup(scan, stock.representative);
                               return (
                                 <tr key={`${market}-${stock.key}`} className="bg-white/40">
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedOrderIds.has(id)}
-                                      disabled={!showActionColumns}
-                                      onChange={() => toggleOrderSelection(id)}
-                                      aria-label={`Select ${stock.symbol} for order placement`}
-                                    />
-                                  </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top">
                                     <span className="inline-flex items-center whitespace-nowrap">
                                       <StockDetailsButton
@@ -3597,17 +3516,6 @@ export function DashboardFinalActionablesTables() {
               );
             })
           )}
-        </div>
-        <div className="mt-4 flex justify-end">
-          <Button
-            type="button"
-            onClick={() => openOrderBasket(market)}
-            disabled={!selectedOrders.some((row) => row.market === market)}
-            className="rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-300"
-          >
-            <ExternalLink className="mr-2 size-4" />
-            Place Order
-          </Button>
         </div>
       </div>
     );
