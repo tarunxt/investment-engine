@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, X } from "lucide-react";
 
@@ -3391,7 +3391,6 @@ type ActionablesCalculationRow = {
   rowClassName: string;
   detail?: ScoreMatrixDetail;
   isFormula?: boolean;
-  isScore?: boolean;
 };
 
 const ACTIONABLES_CALCULATION_HEADERS = [
@@ -3489,7 +3488,6 @@ function buildActionablesCalculationRows(
       rowClassName: string;
       detail?: ScoreMatrixDetail;
       isFormula?: boolean;
-      isScore?: boolean;
     }> = [
       ...stock.rows.map((row) => ({
         id: `${stock.key}-${row.meta.runId}-${row.meta.jobId}`,
@@ -3514,15 +3512,6 @@ function buildActionablesCalculationRows(
         detail,
         isFormula: true,
       },
-      {
-        id: `${stock.key}-calculated-score`,
-        jobRun: getStockSummaryJobRunLabel(stock),
-        llmName: `Calculated Score = ${formatActionScore(detail.calculatedScore)}`,
-        cells: { ...formulaCells, [ACTION_HEADER]: "depends on Calculated Score Matrix" },
-        rowClassName: "bg-rose-50/70 text-blue-700 font-semibold",
-        detail,
-        isScore: true,
-      },
     ];
 
     return sourceRows.map((source) => {
@@ -3541,19 +3530,24 @@ function buildActionablesCalculationRows(
         if (header === "Stock Info" || header === "Job / Run No (Timestamp)" || header === "LLMs") return;
         if (header === ACTION_HEADER && source.isFormula && source.detail) {
           values[header] = (
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              onClick={() => onMatrixOpen?.(source.detail!)}
-            >
-              <FinalActionTag action={source.detail.calculatedAction} />
-              <span className="text-[11px] font-semibold text-blue-700">Matrix</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onClick={() => onMatrixOpen?.(source.detail!)}
+              >
+                <FinalActionTag action={source.detail.calculatedAction} />
+                <span className="text-[11px] font-semibold text-blue-700">Matrix</span>
+              </button>
+              <span className="whitespace-nowrap text-xs font-bold text-blue-700">
+                Final Score = {formatActionScore(source.detail.calculatedScore)}
+              </span>
+            </div>
           );
           sortValues[header] = ACTION_CATEGORY_LABEL[source.detail.calculatedAction];
           return;
         }
-        if (header === ACTION_HEADER && !source.isScore) {
+        if (header === ACTION_HEADER) {
           const action = normalizeAction(source.cells[ACTION_HEADER] || "");
           values[header] = action ? <FinalActionTag action={action} /> : source.cells[ACTION_HEADER] || "";
           sortValues[header] = action ? ACTION_CATEGORY_LABEL[action] : source.cells[ACTION_HEADER] || "";
@@ -3583,19 +3577,6 @@ function buildActionablesCalculationRows(
           sortValues[header] = parseNumericCell(confidence) ?? confidence;
           return;
         }
-        if (source.isScore && header === "Score Rationale Cruxx") {
-          values[header] = (
-            <button
-              type="button"
-              className="font-semibold text-blue-700 underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
-              onClick={() => onMatrixOpen?.(source.detail!)}
-            >
-              Calculated Score = {formatActionScore(source.detail?.calculatedScore ?? null)}
-            </button>
-          );
-          sortValues[header] = source.detail?.calculatedScore ?? Number.NEGATIVE_INFINITY;
-          return;
-        }
         const cellValue = source.cells[header as RebalanceHeader] || "";
         values[header] = cellValue;
         sortValues[header] = getCalculationCellSortValue(cellValue);
@@ -3611,7 +3592,6 @@ function buildActionablesCalculationRows(
         rowClassName: source.rowClassName,
         detail: source.detail,
         isFormula: source.isFormula,
-        isScore: source.isScore,
       };
     });
   });
@@ -3849,25 +3829,32 @@ function ActionablesCalculationsModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {rowGroups.map((group) =>
-                    group.rows.map((row, rowIndex) => (
-                      <tr key={row.id} className={cn(row.rowClassName, rowIndex === 0 ? "border-t-2 border-slate-900" : "border-t border-slate-900")}>
-                        {rowIndex === 0 ? (
-                          <td
-                            rowSpan={group.rows.length}
-                            className="sticky left-0 z-[1] min-w-[17rem] border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
-                          >
-                            {group.stockInfo}
-                          </td>
-                        ) : null}
-                        {ACTIONABLES_CALCULATION_HEADERS.filter((header) => header !== "Stock Info").map((header) => (
-                          <td key={`${row.id}-${header}`} className="max-w-[26rem] whitespace-nowrap border border-slate-900 px-3 py-1.5 align-top text-slate-900">
-                            {row.values[header]}
-                          </td>
-                        ))}
-                      </tr>
-                    )),
-                  )}
+                  {rowGroups.map((group, groupIndex) => (
+                    <Fragment key={group.stockKey}>
+                      {group.rows.map((row, rowIndex) => (
+                        <tr key={row.id} className={cn(row.rowClassName, rowIndex === 0 ? "border-t-2 border-slate-900" : "border-t border-slate-900")}>
+                          {rowIndex === 0 ? (
+                            <td
+                              rowSpan={group.rows.length}
+                              className="sticky left-0 z-[1] min-w-[17rem] border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
+                            >
+                              {group.stockInfo}
+                            </td>
+                          ) : null}
+                          {ACTIONABLES_CALCULATION_HEADERS.filter((header) => header !== "Stock Info").map((header) => (
+                            <td key={`${row.id}-${header}`} className="max-w-[26rem] whitespace-nowrap border border-slate-900 px-3 py-1.5 align-top text-slate-900">
+                              {row.values[header]}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      {groupIndex < rowGroups.length - 1 ? (
+                        <tr aria-hidden="true" className="h-3 bg-white">
+                          <td colSpan={ACTIONABLES_CALCULATION_HEADERS.length} className="border-0 bg-white p-0" />
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  ))}
                 </tbody>
               </table>
             ) : (
