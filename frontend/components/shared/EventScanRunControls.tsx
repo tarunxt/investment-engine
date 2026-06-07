@@ -7,12 +7,21 @@ import { Bot, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { apiService, APIError } from "@/services/api";
+import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import type { ProviderInfo, ProviderModelTarget } from "@/types/api";
 
 const DEFAULT_EVENT_TARGET: ProviderModelTarget = {
   provider: "openai",
   model: "gpt-4o-mini",
+};
+const MODEL_MIX_STORAGE_KEY = "investor:model-mixes:v1";
+
+type SavedModelMix = {
+  id: string;
+  name: string;
+  targets: string[];
+  updated_at?: string;
 };
 
 interface EventScanRunControlsProps {
@@ -31,6 +40,43 @@ interface PickerPosition {
   left: number;
   width: number;
   maxHeight: number;
+}
+
+function readSavedModelMixes(): SavedModelMix[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(MODEL_MIX_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (mix) =>
+          mix &&
+          typeof mix.id === "string" &&
+          typeof mix.name === "string" &&
+          Array.isArray(mix.targets),
+      )
+      .map((mix) => ({
+        id: mix.id,
+        name: mix.name,
+        targets: mix.targets.filter(
+          (target: unknown) => typeof target === "string",
+        ),
+        updated_at:
+          typeof mix.updated_at === "string" ? mix.updated_at : undefined,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedModelMixes(mixes: SavedModelMix[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(MODEL_MIX_STORAGE_KEY, JSON.stringify(mixes));
+  } catch {
+    // Keep the picker usable if localStorage is unavailable.
+  }
 }
 
 function normalizeError(err: unknown) {
@@ -116,6 +162,15 @@ export function EventScanRunControls({
   );
   const [selectedTarget, setSelectedTarget] =
     useState<ProviderModelTarget | null>(null);
+  const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
+    readSavedModelMixes(),
+  );
+  const [selectedMixId, setSelectedMixId] = useState("");
+
+  const persistSavedMixes = useCallback((mixes: SavedModelMix[]) => {
+    setSavedMixes(mixes);
+    writeSavedModelMixes(mixes);
+  }, []);
 
   const updatePickerPosition = useCallback(() => {
     if (!containerRef.current || typeof window === "undefined") {
@@ -174,6 +229,7 @@ export function EventScanRunControls({
 
   useEffect(() => {
     if (!pickerOpen) return;
+    window.setTimeout(() => setSavedMixes(readSavedModelMixes()), 0);
 
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -237,6 +293,120 @@ export function EventScanRunControls({
     },
     [historicalEstimatedCostInrByTarget, providers, selectedProvider],
   );
+  const compatibleTargets = new Set(
+    providers.flatMap((provider) =>
+      provider.models
+        .filter(
+          (model) =>
+            provider.configured &&
+            provider.model_compatibility?.[model]?.compatible !== false,
+        )
+        .map((model) => `${provider.name}::${model}`),
+    ),
+  );
+  const activeTargetKey = targetKey(activeTarget);
+  const modelMixControls = (
+    <LlmModelMixControls
+      mixes={savedMixes}
+      selectedMixId={selectedMixId}
+      onApply={(id) => {
+        if (!id || id === "none") {
+          setSelectedMixId("");
+          return;
+        }
+        const mix = savedMixes.find((item) => item.id === id);
+        if (!mix) return;
+        const compatibleMixTargets = mix.targets.filter((target) =>
+          compatibleTargets.has(target),
+        );
+        const [firstTarget] = compatibleMixTargets;
+        if (!firstTarget) {
+          window.alert(
+            "No models in this mix are compatible with current API access.",
+          );
+          return;
+        }
+        if (
+          compatibleMixTargets.length < mix.targets.length ||
+          compatibleMixTargets.length > 1
+        ) {
+          window.alert(
+            "This chooser runs one LLM at a time, so the first compatible model in the mix was selected.",
+          );
+        }
+        const [provider, model] = firstTarget.split("::");
+        if (!provider || !model) return;
+        setSelectedTarget({ provider, model });
+        setSelectedMixId(id);
+      }}
+      onSave={() => {
+        if (!activeTargetKey) {
+          window.alert("Select a model before saving a mix.");
+          return;
+        }
+        const name = window.prompt("Name this model mix:");
+        if (!name) return;
+        const cleaned = name.trim();
+        if (!cleaned) return;
+        const now = new Date().toISOString();
+        const targets = [activeTargetKey];
+        const existing = savedMixes.find(
+          (mix) => mix.name.toLowerCase() === cleaned.toLowerCase(),
+        );
+        if (existing) {
+          const updated = {
+            ...existing,
+            name: cleaned,
+            targets,
+            updated_at: now,
+          };
+          persistSavedMixes(
+            savedMixes.map((mix) => (mix.id === existing.id ? updated : mix)),
+          );
+          setSelectedMixId(existing.id);
+          return;
+        }
+        const created = {
+          id: `mix_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+          name: cleaned,
+          targets,
+          updated_at: now,
+        };
+        persistSavedMixes([created, ...savedMixes]);
+        setSelectedMixId(created.id);
+      }}
+      onEdit={() => {
+        if (!selectedMixId) return;
+        const current = savedMixes.find((mix) => mix.id === selectedMixId);
+        if (!current) return;
+        const name = window.prompt("Edit model mix name:", current.name);
+        if (!name?.trim()) return;
+        persistSavedMixes(
+          savedMixes.map((mix) =>
+            mix.id === selectedMixId
+              ? {
+                  ...mix,
+                  name: name.trim(),
+                  updated_at: new Date().toISOString(),
+                }
+              : mix,
+          ),
+        );
+      }}
+      onDelete={() => {
+        if (!selectedMixId) return;
+        const current = savedMixes.find((mix) => mix.id === selectedMixId);
+        if (
+          !window.confirm(`Delete model mix "${current?.name || selectedMixId}"?`)
+        ) {
+          return;
+        }
+        persistSavedMixes(savedMixes.filter((mix) => mix.id !== selectedMixId));
+        setSelectedMixId("");
+      }}
+    />
+  );
+
   const runButtonLoading = Boolean(running);
   const runButtonDisabled = Boolean(disabled || running);
   const runButtonLabel = running
@@ -316,6 +486,7 @@ export function EventScanRunControls({
                     loading={loadingProviders}
                     emptyMessage="No configured LLM models are available for this analysis yet."
                     showBulkActions={false}
+                    modelMixControls={modelMixControls}
                     onToggle={(key) => {
                       const [provider, model] = key.split("::");
                       if (!provider || !model) return;

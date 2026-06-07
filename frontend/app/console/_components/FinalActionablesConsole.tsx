@@ -2061,6 +2061,71 @@ function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
   );
 }
 
+function ConsensusOutputSummary({
+  stock,
+  action,
+}: {
+  stock: StockConsensus;
+  action: ActionCategory;
+}) {
+  const voteSummary = ACTION_CATEGORIES.filter(
+    (candidate) => stock.actionCounts[candidate] > 0,
+  )
+    .map(
+      (candidate) =>
+        `${formatRecommendationLabel(candidate)} ${stock.actionCounts[candidate]}/${stock.totalSuggestions}`,
+    )
+    .join(" · ");
+
+  return (
+    <section className="mb-4 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">
+            Consolidated output summary
+          </p>
+          <h3 className="mt-1 text-lg font-bold text-slate-950">
+            All-LLM consolidated recommendation for {stock.symbol}
+          </h3>
+        </div>
+        <span
+          className={cn(
+            "rounded-full px-3 py-1 text-xs font-semibold",
+            CATEGORY_BADGE_CLASS[action],
+          )}
+        >
+          {formatRecommendationLabel(action)} · {stock.actionCounts[action]}/{stock.totalSuggestions}
+        </span>
+      </div>
+
+      <KeyValueGrid
+        itemClassName="border-indigo-100 bg-white/80"
+        values={[
+          ["Recommendation mix", voteSummary || "No action consensus"],
+          ["Current units", stock.representative["Current Units"] || "—"],
+          [
+            "Current value",
+            stock.representative[CURRENT_INVESTMENT_AMOUNT_HEADER] || "—",
+          ],
+          ["Units to sell/buy", stock.representative["Units to Sell/Buy"] || "—"],
+          ["Amount", stock.representative["Amount"] || "—"],
+          [
+            "Confidence",
+            stock.representative["Confidence Score (0-100)"] || "—",
+          ],
+        ]}
+      />
+
+      <div className="mt-3 rounded-xl border border-indigo-100 bg-white/80 p-3">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+          Consolidated rationale
+        </div>
+        <CapturedRationalesCell row={stock.representative} />
+      </div>
+    </section>
+  );
+}
+
 function ConsensusBreakupButton({
   stock,
   action,
@@ -2107,6 +2172,7 @@ function ConsensusBreakupButton({
               </button>
             </div>
             <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+              <ConsensusOutputSummary stock={stock} action={action} />
               <div className="space-y-2">
                 {stock.breakupEntries.map((entry, index) => {
                   const rowAction = entry.row ? normalizeAction(entry.row.cells[ACTION_HEADER] || "") : null;
