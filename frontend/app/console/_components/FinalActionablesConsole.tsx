@@ -3241,6 +3241,10 @@ export function DashboardFinalActionablesTables() {
   const [error, setError] = useState<string | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
+  const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
+    india: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
+    us: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
+  });
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -3256,6 +3260,10 @@ export function DashboardFinalActionablesTables() {
         india: zerodhaOverview.latest,
         us: indmoneyOverview.latest,
       });
+      setDetailsDataByMarket((current) => ({
+        india: { ...current.india, portfolioSnapshot: zerodhaOverview.latest },
+        us: { ...current.us, portfolioSnapshot: indmoneyOverview.latest },
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load final actionables.");
     } finally {
@@ -3272,6 +3280,52 @@ export function DashboardFinalActionablesTables() {
   }, [loadRuns]);
 
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadCapturedDetails() {
+      try {
+        const [zerodhaEvents, zerodhaThreats, indmoneyEvents, indmoneyThreats] = await Promise.all([
+          apiService.zerodhaEventsLatest(),
+          apiService.zerodhaThreatsLatest(),
+          apiService.indmoneyUsEventsLatest(),
+          apiService.indmoneyUsThreatsLatest(),
+        ]);
+
+        if (!ignore) {
+          setDetailsDataByMarket((current) => ({
+            india: {
+              ...current.india,
+              eventsAnalysis: zerodhaEvents.analysis,
+              threatsAnalysis: zerodhaThreats.analysis,
+              error: null,
+            },
+            us: {
+              ...current.us,
+              eventsAnalysis: indmoneyEvents.analysis,
+              threatsAnalysis: indmoneyThreats.analysis,
+              error: null,
+            },
+          }));
+        }
+      } catch (err) {
+        if (!ignore) {
+          const message = err instanceof Error ? err.message : "Failed to load captured stock details.";
+          setDetailsDataByMarket((current) => ({
+            india: { ...current.india, error: message },
+            us: { ...current.us, error: message },
+          }));
+        }
+      }
+    }
+
+    void loadCapturedDetails();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
   const actionRowsByMarket = useMemo(() => ({
     india: buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india).map((stock) => ({
       id: getDashboardActionRowId("india", stock),
@@ -3337,6 +3391,7 @@ export function DashboardFinalActionablesTables() {
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
+    const detailsData = detailsDataByMarket[market];
 
     return (
       <div id={market === "us" ? "final-actionable-us" : "final-actionable-zerodha"} className="scroll-mt-24 rounded-[28px] border border-slate-200 bg-white/80 p-4 shadow-sm">
@@ -3424,14 +3479,22 @@ export function DashboardFinalActionablesTables() {
                                     />
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top">
-                                    <TradingViewSymbolLink
-                                      symbol={stock.symbol}
-                                      market={market}
-                                      exchange={stock.exchange}
-                                      className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
-                                    >
-                                      {stock.symbol}
-                                    </TradingViewSymbolLink>
+                                    <span className="inline-flex items-center whitespace-nowrap">
+                                      <StockDetailsButton
+                                        stock={stock}
+                                        market={market}
+                                        technicalScan={scan}
+                                        detailsData={detailsData}
+                                      />
+                                      <TradingViewSymbolLink
+                                        symbol={stock.symbol}
+                                        market={market}
+                                        exchange={stock.exchange}
+                                        className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
+                                      >
+                                        {stock.symbol}
+                                      </TradingViewSymbolLink>
+                                    </span>
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                                     <ConsensusBreakupButton stock={stock} action={action} />
