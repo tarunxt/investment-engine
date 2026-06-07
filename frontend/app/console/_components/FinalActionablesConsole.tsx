@@ -1803,7 +1803,7 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
     const job = link.job;
     if (!job) return [];
     const response = job.response;
-    if (job.status !== "completed" || !response) return [];
+    if (!isUsableModelOutputStatus(job.status) || !response) return [];
     const parsed = parseInvestmentRecommendationContent(response, {
       provider: job.provider,
       model: job.model,
@@ -2959,7 +2959,7 @@ function RunGroupDetails({
   const completedLlmJobs = runs.reduce(
     (sum, run) =>
       sum +
-      (run.run_jobs ?? []).filter((link) => link.job?.status === "completed")
+      (run.run_jobs ?? []).filter((link) => isUsableModelOutputStatus(link.job?.status))
         .length,
     0,
   );

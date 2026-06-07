@@ -1081,6 +1081,22 @@ def execute_ai_job(self, job_id: int) -> None:
                         content = repaired_content
                     content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
                 if rebalance_table_issue:
+                    if rebalance_table_issue.startswith("partial rebalance table") and _parsed_rebalance_rows:
+                        repo.update_status(
+                            job,
+                            JobStatus.PARTIAL,
+                            response=content,
+                            error_message=f"{job.provider}/{job.model} returned {rebalance_table_issue}",
+                            tokens_in=tokens_in,
+                            tokens_out=tokens_out,
+                            estimated_cost=estimated_cost,
+                        )
+                        _publish_job_update(job)
+                        _refresh_run_status(db, job_id)
+                        WorkerLogHelper.log_task_complete(
+                            "execute_ai_job", "n/a", (monotonic() - started_at) * 1000, job_id
+                        )
+                        return
                     raise RuntimeError(
                         f"{job.provider}/{job.model} returned {rebalance_table_issue}"
                     )
