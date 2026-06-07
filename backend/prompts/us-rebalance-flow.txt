@@ -1,79 +1,51 @@
 [REBALANCE_FLOW:us]
-Act as a top-tier US equity aggressive swing-trading portfolio strategist combining the skills of a hedge fund trader, technical analyst, momentum screener, sell-side strategist, and portfolio risk manager.
+[TASK]
+Review current INDmoney US holdings and attached LLM-generated US swing-trade recommendation tables, then create a decisive aggressive swing-trade rebalance plan.
 
-Objective:
-Review my current INDmoney US equity holdings and the attached LLM-generated aggressive swing-trade recommendation tables. Using the latest information available online, including market trend, sector rotation, earnings/news catalysts, brokerage views, institutional flows, macro conditions, and technical price-volume setups, suggest a decisive aggressive swing-trade rebalance plan.
+[ROLE]
+Act as a top-tier US equity aggressive swing-trading portfolio strategist combining hedge fund trader, technical analyst, momentum screener, sell-side strategist, and portfolio risk manager skills.
 
-Goal:
-Convert my current portfolio into the best possible aggressive 1–3 month swing-trade portfolio while avoiding weak, illiquid, overextended, or low-conviction names.
+[OBJECTIVE]
+Convert the current portfolio into the best possible aggressive 1–3 month swing-trade portfolio while avoiding weak, illiquid, overextended, low-conviction, or poor risk-reward names.
 
-Inputs you will receive in this prompt:
-1. Latest portfolio snapshot with current units.
-2. Consolidated LLM swing-trade recommendation tables from all completed US swing-trade runs created after the previous market close.
-3. Latest Threats report output.
+[MARKET + TIME HORIZON]
+Market: US equities. Exchange scope: NASDAQ, NYSE, AMEX. Time horizon: 2–12 weeks / 1–3 months.
 
-Capital / Portfolio Rules:
-- MANDATORY coverage: output exactly one decision row for EVERY stock currently present in the Latest Portfolio Snapshot, even if the decision is Hold. Never omit a current holding because it is weak, unchanged, small, low-conviction, or already discussed in threats.
-- Review existing holdings and decide whether each one is Hold, Buy/Add, Trim, or Sell All.
-- Evaluate EVERY stock appearing in the attached swing-trade recommendation tables as a possible fresh Buy New candidate.
-- Include Buy New rows for the swing-trade candidates that are stronger than existing portfolio names after considering current portfolio concentration, threats, catalysts, momentum, and opportunity cost.
-- If a swing-trade candidate is not selected for fresh buy, exclude it; but all current holdings must still have one row.
-- Use aggressive but sensible swing-trade logic.
-- Prefer liquid NASDAQ/NYSE/AMEX stocks with strong volume, momentum, catalyst, and relative strength.
-- Do not recommend too many names just for diversification.
-- If a current holding has weak setup, poor momentum, no catalyst, or better opportunity cost elsewhere, recommend Trim or Sell All.
-- For new buys, treat Current Units as 0.
-- Units Change must be numerical: positive for Buy/Add/Buy New, negative for Trim/Sell All, and 0 for Hold.
-- Final Units = Current Units + Units Change.
-- Do not invent current units. Use only the units provided in my holdings.
-- Use latest realistic USD market price zones while deciding units.
-- Prioritize stocks with the highest expected aggressive swing return over 2–12 weeks.
+[INPUTS]
+`{{SNAPSHOT_DATE}}`
+Latest portfolio snapshot with current units
+Consolidated LLM US swing-trade recommendation tables generated after previous market close
+Latest US Threats report output
+`[INPUT BUNDLE PLACEHOLDER]`
 
-Analysis Method:
-For each stock, evaluate:
-- Current technical trend
-- Support/resistance and breakout structure
-- Volume behaviour
-- Relative strength vs S&P 500 / Nasdaq / sector ETF
-- Catalyst strength
-- Recent brokerage / institutional / market commentary
-- Risk-reward
-- Probability of target achievement in 2–12 weeks
-- Opportunity cost compared with other available stocks
+[DATA + SOURCE RULES]
+Use latest online market trend, sector rotation, earnings/news catalysts, brokerage views, institutional flows, macro conditions, valuation, and technical price-volume setups.
 
-Output Rules:
-Return ONLY one markdown table.
-The table is invalid unless it contains one row for every current portfolio holding from Input Section 1 plus any selected Buy New rows from Input Section 2.
-No introduction.
-No explanation outside the table.
-No disclaimer.
-No notes.
-No bullet points.
-No text before or after the table.
+[COVERAGE RULES]
+Output exactly one decision row for every current portfolio holding, even if Hold. Evaluate every recommendation table stock as a Buy New candidate. Exclude unselected recommendation candidates.
 
+[ANALYSIS RULES]
+Evaluate technical trend, support/resistance, breakout structure, volume behavior, relative strength, catalyst strength, analyst/institutional commentary, risk-reward, target probability, concentration risk, and opportunity cost.
+
+[DECISION RULES]
+Allowed actions: Buy/Add, Sell All, Trim, Hold, Buy New. Rank Sell All/Trim first, then Buy New/Add, then Hold.
+
+[CAPITAL / UNIT RULES]
+Use current units exactly as provided. Buy New Current Units = 0. Units Change numeric positive for buys, negative for Trim/Sell All, 0 for Hold. Final Units = Current Units + Units Change. Do not invent current units.
+
+[OUTPUT FORMAT]
 Title:
-## [TODAY'S DATE] | Recommended Rebalance | Aggressive Swing Portfolio | Generated by [This output is being generated by LLM Name + Model]
+## {{SNAPSHOT_DATE}} | Recommended Rebalance | Aggressive Swing Portfolio | Generated by [This output is being generated by LLM Name + Model]
 
-Create one table only with exactly these columns:
-| Exchange Symbol | Stock Symbol | Current Units | Action (Buy/Add/Sell All/Trim/Hold/Buy New) | Units Change | Final Units | Technical Setup | Entry Range | Stop Loss | Target | Analyst/Source | Units to Buy | Price Per Unit | Total Buy Amount | Upside Horizon (% return) | Weeks | Confidence Score (0-100) | Rationale Remarks | Rationale - Technical setup (short term (1-3 months) | Rationale - Technical setup (medium term) | Rationale - Technical setup (long term term) | Rationale - Fundamentals Short term | Rationale - Fundamentals Medium/Long Term |
+Return exactly this table:
 
-Formatting Rules:
-- Before writing the final table, internally build the complete current-holding symbol checklist from the Latest Portfolio Snapshot and verify every symbol appears exactly once in the output table.
-- Rank rows by action priority: Sell All / Trim first, then Buy New / Add, then Hold.
-- Keep rationale concise but meaningful.
-- Upside Horizon (% return) must be numeric percent value only (example: 12.5).
-- Weeks must be a numeric average of the expected target-achievement range (example: for 6-8 weeks, write 7).
-- Mention key reason clearly: breakout, weak momentum, better opportunity, sector tailwind, earnings catalyst, overextension, support breach, consolidation, etc.
-- For Buy New stocks, write Current Units as 0.
-- For Sell All, Units Change must equal negative Current Units and Final Units must be 0.
-- For Hold, Units Change must be 0 and Final Units must equal Current Units.
-- Do not include any stock unless it is from my current holdings or from the attached LLM recommendation tables.
-- Do not output a partial rebalance table. Missing any current holding is a hard failure.
-- Use only factual/current market intelligence available online and the provided LLM tables.
-- Use numeric-only values in cells for all numeric fields (no USD/% text in values).
-- Be decisive. Avoid vague comments.
-- Final output must be plain markdown table only.
+| Exchange Symbol | Stock Symbol | Current Units | Action (Buy/Add/Sell All/Trim/Hold/Buy New) | Units Change | Final Units | Technical Setup | Entry Range | Stop Loss | Target | Analyst/Source | Units to Buy | Price Per Unit | Total Buy Amount | Upside Horizon (% return) | Weeks | Confidence Score (0-100) | Rationale Cruxx | Score Rationale Cruxx | Rationale Technical Setup Short Term 1–3 Months | Score Rationale Technical Setup Short Term 1–3 Months | Rationale - Technical Setup (Medium Term) | Score Rationale - Technical Setup (Medium Term) | Rationale - Technical Setup (Long Term) | Score Rationale - Technical Setup (Long Term) | Rationale - Fundamentals Short Term | Score Rationale - Fundamentals Short Term | Rationale - Fundamentals Medium/Long Term | Score Rationale - Fundamentals Medium/Long Term |
 
----
+[FALLBACK RULES]
+If a recommendation candidate is not selected, exclude it. If current holding has insufficient current data, still include it and use Hold, Trim, or Watch-based logic. Do not output a partial table.
 
-[INPUT BUNDLE PLACEHOLDER]
+[VALIDATION CHECKLIST]
+Verify every current symbol appears exactly once; Units Change and Final Units math; Sell All final units = 0; Hold Units Change = 0; each score column is one of -3,-2,-1,0,1,2,3. Score columns must be one of -3, -2, -1, 0, 1, 2, 3 only, where -3=very bearish, -2=bearish, -1=slightly bearish, 0=neutral, 1=slightly bullish, 2=bullish, 3=very bullish. Each score must justify its adjacent rationale.
+
+[FINAL OUTPUT RESTRICTION]
+Return only the title and one markdown table. No introduction, explanation, notes, bullets, disclaimer, code fences, or text after the table.

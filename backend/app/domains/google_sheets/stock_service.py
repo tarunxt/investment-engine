@@ -43,12 +43,20 @@ KEY_MAP = {
     "confidence score 0 100": "confidence_score",
     "confidence score": "confidence_score",
     "rationale remarks": "rationale_remarks",
+    "rationale cruxx": "rationale_remarks",
+    "score rationale remarks": "score_rationale_cruxx",
+    "score rationale cruxx": "score_rationale_cruxx",
     "rationale technical setup short term 1 3 months": "rationale_technical_short_term",
+    "score rationale technical setup short term 1 3 months": "score_rationale_technical_short_term",
     "rationale technical setup medium term": "rationale_technical_medium_term",
+    "score rationale technical setup medium term": "score_rationale_technical_medium_term",
     "rationale technical setup long term term": "rationale_technical_long_term",
     "rationale technical setup long term": "rationale_technical_long_term",
+    "score rationale technical setup long term": "score_rationale_technical_long_term",
     "rationale fundamentals short term": "rationale_fundamentals_short_term",
+    "score rationale fundamentals short term": "score_rationale_fundamentals_short_term",
     "rationale fundamentals medium long term": "rationale_fundamentals_medium_long_term",
+    "score rationale fundamentals medium long term": "score_rationale_fundamentals_medium_long_term",
     "run #": "run_number",
     "run number": "run_number",
     "run date": "run_date",
@@ -72,11 +80,17 @@ HEADERLESS_CANONICAL_KEYS = [
     "weeks",
     "confidence_score",
     "rationale_remarks",
+    "score_rationale_cruxx",
     "rationale_technical_medium_term",
+    "score_rationale_technical_medium_term",
     "rationale_technical_long_term",
+    "score_rationale_technical_long_term",
     "rationale_fundamentals_short_term",
+    "score_rationale_fundamentals_short_term",
     "rationale_fundamentals_medium_long_term",
+    "score_rationale_fundamentals_medium_long_term",
     "rationale_technical_short_term",
+    "score_rationale_technical_short_term",
     "run_number",
     "run_date",
     "run_time",
@@ -104,10 +118,14 @@ HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER = [
     "weeks",
     "confidence_score",
     "rationale_remarks",
+    "score_rationale_cruxx",
     "rationale_technical_medium_term",
     "rationale_fundamentals_short_term",
+    "score_rationale_fundamentals_short_term",
     "rationale_fundamentals_medium_long_term",
+    "score_rationale_fundamentals_medium_long_term",
     "rationale_technical_short_term",
+    "score_rationale_technical_short_term",
     "run_number",
     "run_date",
     "run_time",
@@ -118,14 +136,8 @@ HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_WITH_LLM = [
     "llm",
 ]
 
-HEADERLESS_CANONICAL_KEY_VARIANTS = (
-    HEADERLESS_CANONICAL_KEYS_WITH_LLM,
-    HEADERLESS_CANONICAL_KEYS,
-    HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_WITH_LLM,
-    HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER,
-)
 
-STOCK_SHEET_KEY_ORDER = [
+HEADERLESS_CANONICAL_KEYS_LEGACY = [
     "llm_name_model",
     "exchange_symbol",
     "stock_symbol",
@@ -147,6 +159,86 @@ STOCK_SHEET_KEY_ORDER = [
     "rationale_fundamentals_short_term",
     "rationale_fundamentals_medium_long_term",
     "rationale_technical_short_term",
+    "run_number",
+    "run_date",
+    "run_time",
+]
+
+HEADERLESS_CANONICAL_KEYS_LEGACY_WITH_LLM = [
+    *HEADERLESS_CANONICAL_KEYS_LEGACY,
+    "llm",
+]
+
+HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_LEGACY = [
+    "llm_name_model",
+    "exchange_symbol",
+    "stock_symbol",
+    "stock_name",
+    "technical_setup",
+    "entry_range",
+    "stop_loss",
+    "target",
+    "analyst_source",
+    "units_to_buy",
+    "price_per_unit",
+    "total_buy_amount",
+    "upside_horizon",
+    "weeks",
+    "confidence_score",
+    "rationale_remarks",
+    "rationale_technical_medium_term",
+    "rationale_fundamentals_short_term",
+    "rationale_fundamentals_medium_long_term",
+    "rationale_technical_short_term",
+    "run_number",
+    "run_date",
+    "run_time",
+]
+
+HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_LEGACY_WITH_LLM = [
+    *HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_LEGACY,
+    "llm",
+]
+
+HEADERLESS_CANONICAL_KEY_VARIANTS = (
+    HEADERLESS_CANONICAL_KEYS_WITH_LLM,
+    HEADERLESS_CANONICAL_KEYS,
+    HEADERLESS_CANONICAL_KEYS_LEGACY_WITH_LLM,
+    HEADERLESS_CANONICAL_KEYS_LEGACY,
+    HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_WITH_LLM,
+    HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER,
+    HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_LEGACY_WITH_LLM,
+    HEADERLESS_CANONICAL_KEYS_DEEPSEEK_CODER_LEGACY,
+)
+
+STOCK_SHEET_KEY_ORDER = [
+    "llm_name_model",
+    "exchange_symbol",
+    "stock_symbol",
+    "stock_name",
+    "technical_setup",
+    "entry_range",
+    "stop_loss",
+    "target",
+    "analyst_source",
+    "units_to_buy",
+    "price_per_unit",
+    "total_buy_amount",
+    "upside_horizon",
+    "weeks",
+    "confidence_score",
+    "rationale_remarks",
+    "score_rationale_cruxx",
+    "rationale_technical_medium_term",
+    "score_rationale_technical_medium_term",
+    "rationale_technical_long_term",
+    "score_rationale_technical_long_term",
+    "rationale_fundamentals_short_term",
+    "score_rationale_fundamentals_short_term",
+    "rationale_fundamentals_medium_long_term",
+    "score_rationale_fundamentals_medium_long_term",
+    "rationale_technical_short_term",
+    "score_rationale_technical_short_term",
 ]
 
 REBALANCE_SHEET_KEY_ORDER = [
@@ -168,13 +260,18 @@ REBALANCE_SHEET_KEY_ORDER = [
     "weeks",
     "confidence_score",
     "rationale_remarks",
+    "score_rationale_cruxx",
     "rationale_technical_short_term",
+    "score_rationale_technical_short_term",
     "rationale_technical_medium_term",
+    "score_rationale_technical_medium_term",
     "rationale_technical_long_term",
+    "score_rationale_technical_long_term",
     "rationale_fundamentals_short_term",
+    "score_rationale_fundamentals_short_term",
     "rationale_fundamentals_medium_long_term",
+    "score_rationale_fundamentals_medium_long_term",
 ]
-
 STOCK_SHEET_NUMERIC_KEYS = {
     "current_units",
     "units_change",
@@ -185,6 +282,12 @@ STOCK_SHEET_NUMERIC_KEYS = {
     "upside_horizon",
     "weeks",
     "confidence_score",
+    "score_rationale_cruxx",
+    "score_rationale_technical_short_term",
+    "score_rationale_technical_medium_term",
+    "score_rationale_technical_long_term",
+    "score_rationale_fundamentals_short_term",
+    "score_rationale_fundamentals_medium_long_term",
 }
 
 
@@ -351,6 +454,9 @@ def is_complete_stock_row(stock: dict[str, Any]) -> bool:
     """Return True when every export column is populated with a usable value."""
     for key in _required_keys_for_row(stock):
         value = stock.get(key)
+        if key.startswith("score_rationale_") and not str(value or "").strip():
+            # Backward compatibility: older completed runs did not include adjacent rationale score columns.
+            continue
         if key in STOCK_SHEET_NUMERIC_KEYS:
             if _to_number(value) is None:
                 return False
@@ -588,12 +694,18 @@ def format_stocks_for_sheet(stocks: list[dict[str, Any]]) -> tuple[list[str], li
         "upside_horizon": "Upside Horizon (% return)",
         "weeks": "Weeks",
         "confidence_score": "Confidence Score (0-100)",
-        "rationale_remarks": "Rationale Remarks",
-        "rationale_technical_short_term": "Rationale - Technical setup (short term (1-3 months)",
-        "rationale_technical_medium_term": "Rationale - Technical setup (medium term)",
-        "rationale_technical_long_term": "Rationale - Technical setup (long term term)",
-        "rationale_fundamentals_short_term": "Rationale - Fundamentals Short term",
+        "rationale_remarks": "Rationale Cruxx",
+        "score_rationale_cruxx": "Score Rationale Cruxx",
+        "rationale_technical_short_term": "Rationale Technical Setup Short Term 1–3 Months",
+        "score_rationale_technical_short_term": "Score Rationale Technical Setup Short Term 1–3 Months",
+        "rationale_technical_medium_term": "Rationale - Technical Setup (Medium Term)",
+        "score_rationale_technical_medium_term": "Score Rationale - Technical Setup (Medium Term)",
+        "rationale_technical_long_term": "Rationale - Technical Setup (Long Term)",
+        "score_rationale_technical_long_term": "Score Rationale - Technical Setup (Long Term)",
+        "rationale_fundamentals_short_term": "Rationale - Fundamentals Short Term",
+        "score_rationale_fundamentals_short_term": "Score Rationale - Fundamentals Short Term",
         "rationale_fundamentals_medium_long_term": "Rationale - Fundamentals Medium/Long Term",
+        "score_rationale_fundamentals_medium_long_term": "Score Rationale - Fundamentals Medium/Long Term",
         "run_number": "Run #",
         "run_date": "Run Date",
         "run_time": "Run Time",

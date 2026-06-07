@@ -409,13 +409,11 @@ const ACTION_ESTIMATE_CATEGORIES = new Set<ActionCategory>([
   "Buy New",
 ]);
 const LLM_BREAKUP_RATIONALE_HEADERS = [
-  "Rationale Remarks",
-  "Rationale - Technical setup (short term (1–3 months))",
-  "Rationale - Technical setup (short term (1-3 months))",
-  "Rationale - Technical setup (medium term)",
-  "Rationale - Technical setup (long term term)",
-  "Rationale - Technical setup (long term)",
-  "Rationale - Fundamentals Short term",
+  "Rationale Cruxx",
+  "Rationale Technical Setup Short Term 1–3 Months",
+  "Rationale - Technical Setup (Medium Term)",
+  "Rationale - Technical Setup (Long Term)",
+  "Rationale - Fundamentals Short Term",
   "Rationale - Fundamentals Medium/Long Term",
 ] as const;
 const REBALANCE_DISPLAY_HEADERS = [
@@ -840,37 +838,37 @@ function buildDetailedRationaleScoreRows(
     {
       id: "cruxx",
       parameter: "Average of Score Rationale Cruxx",
-      score: getAverageNumericCell(stock.rows, "Rationale Remarks"),
+      score: getAverageNumericCell(stock.rows, "Score Rationale Cruxx"),
       multiplier: 3,
     },
     {
       id: "technical-short",
       parameter: "Average of Score Rationale - Technical Setup (Short Term 1–3 Months)",
-      score: getAverageNumericCell(stock.rows, "Rationale - Technical setup (short term (1-3 months)"),
+      score: getAverageNumericCell(stock.rows, "Score Rationale Technical Setup Short Term 1–3 Months"),
       multiplier: 3,
     },
     {
       id: "technical-medium",
       parameter: "Average of Score Rationale - Technical Setup (Medium Term)",
-      score: getAverageNumericCell(stock.rows, "Rationale - Technical setup (medium term)"),
+      score: getAverageNumericCell(stock.rows, "Score Rationale - Technical Setup (Medium Term)"),
       multiplier: 2,
     },
     {
       id: "technical-long",
       parameter: "Average of Score Rationale - Technical Setup (Long Term)",
-      score: getAverageNumericCell(stock.rows, "Rationale - Technical setup (long term term)"),
+      score: getAverageNumericCell(stock.rows, "Score Rationale - Technical Setup (Long Term)"),
       multiplier: 1,
     },
     {
       id: "fundamentals-short",
       parameter: "Average of Score Rationale - Fundamentals Short Term",
-      score: getAverageNumericCell(stock.rows, "Rationale - Fundamentals Short term"),
+      score: getAverageNumericCell(stock.rows, "Score Rationale - Fundamentals Short Term"),
       multiplier: 3,
     },
     {
       id: "fundamentals-medium-long",
       parameter: "Average of Score Rationale - Fundamentals Medium/Long Term",
-      score: getAverageNumericCell(stock.rows, "Rationale - Fundamentals Medium/Long Term"),
+      score: getAverageNumericCell(stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
       multiplier: 1,
     },
     {
@@ -1907,7 +1905,7 @@ export function buildConsensusRows(
         rows,
         "Confidence Score (0-100)",
       );
-      representative["Rationale Remarks"] = summarizeRationales(rows);
+      representative["Rationale Cruxx"] = summarizeRationales(rows);
       const consensusEstimate = actionAverages[consensusAction];
       representative["Current Units"] = formatQuantity(
         consensusEstimate.currentUnits ?? getCurrentUnits(first, currentValueSnapshots),
@@ -1957,7 +1955,7 @@ function summarizeRationales(rows: LlmBreakupRow[]) {
     .slice(0, 3)
     .map(
       (row) =>
-        `${row.meta.provider} ${row.meta.model}: ${row.cells["Rationale Remarks"] || row.cells["Technical Setup"] || "No rationale"}`,
+        `${row.meta.provider} ${row.meta.model}: ${row.cells["Rationale Cruxx"] || row.cells["Rationale Remarks"] || row.cells["Technical Setup"] || "No rationale"}`,
     )
     .join(" | ");
 }
@@ -2013,18 +2011,18 @@ const RATIONALE_SECTION_GROUPS: Array<{
     title: "Cruxx",
     className: "border-rose-200 bg-rose-50/80 text-rose-700",
     titleClassName: "text-rose-800",
-    items: [{ header: "Rationale Remarks", label: null }],
+    items: [{ header: "Rationale Cruxx", label: null }],
   },
   {
     title: "Technical setup",
     className: "border-blue-200 bg-blue-50/80 text-blue-700",
     titleClassName: "text-blue-800",
     items: [
-      { header: "Rationale - Technical setup (short term (1–3 months))", label: "Short" },
-      { header: "Rationale - Technical setup (short term (1-3 months))", label: "Short" },
-      { header: "Rationale - Technical setup (medium term)", label: "Medium" },
-      { header: "Rationale - Technical setup (long term term)", label: "Long" },
-      { header: "Rationale - Technical setup (long term)", label: "Long" },
+      { header: "Rationale Technical Setup Short Term 1–3 Months", label: "Short" },
+      { header: "Rationale Technical Setup Short Term 1–3 Months", label: "Short" },
+      { header: "Rationale - Technical Setup (Medium Term)", label: "Medium" },
+      { header: "Rationale - Technical Setup (Long Term)", label: "Long" },
+      { header: "Rationale - Technical Setup (Long Term)", label: "Long" },
     ],
   },
   {
@@ -2032,7 +2030,7 @@ const RATIONALE_SECTION_GROUPS: Array<{
     className: "border-emerald-200 bg-emerald-50/80 text-emerald-700",
     titleClassName: "text-emerald-800",
     items: [
-      { header: "Rationale - Fundamentals Short term", label: "Short" },
+      { header: "Rationale - Fundamentals Short Term", label: "Short" },
       { header: "Rationale - Fundamentals Medium/Long Term", label: "Medium" },
     ],
   },
