@@ -33,6 +33,8 @@ class ZerodhaPlaceOrderRequest(BaseModel):
     price: float = 0
     trigger_price: float = 0
     market_protection: float = 0
+    variety: str = "regular"  # regular | amo
+    auto_amo_when_closed: bool = True
 
     @field_validator("quantity")
     @classmethod
@@ -55,9 +57,20 @@ class ZerodhaPlaceOrderRequest(BaseModel):
             raise ValueError("order_type must be MARKET, LIMIT, SL, or SL-M")
         return v
 
+    @field_validator("variety")
+    @classmethod
+    def validate_variety(cls, v: str) -> str:
+        normalized = v.lower()
+        if normalized not in ("regular", "amo"):
+            raise ValueError("variety must be regular or amo")
+        return normalized
+
 
 class ZerodhaPlaceOrderResponse(BaseModel):
     order_id: str
+    variety: str = "regular"
+    market_open: bool = True
+    auto_converted_to_amo: bool = False
 
 
 class ZerodhaPortfolioHolding(BaseModel):

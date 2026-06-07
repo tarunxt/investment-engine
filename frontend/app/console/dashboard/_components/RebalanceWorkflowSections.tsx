@@ -48,6 +48,7 @@ import type {
   ProviderModelTarget,
   RunCreate,
   RunResponse,
+  ZerodhaPlaceOrderResponse,
   ZerodhaThreatAnalysis,
 } from "@/types/api";
 import { normalizeError } from "./dashboardOverviewUtils";
@@ -98,7 +99,13 @@ type StageInfo = {
   totalLlms?: number | null;
   recommendedStocks?: number | null;
 };
-type ZerodhaBasketOrderKind = "Market" | "Limit" | "GTT" | "After market";
+type ZerodhaBasketOrderKind = "Market" | "Limit" | "After market";
+type ZerodhaBasketSubmission = {
+  placed: number;
+  failed: number;
+  amo: number;
+  results: Array<{ order: ZerodhaBasketPreviewOrder; response?: ZerodhaPlaceOrderResponse; error?: string }>;
+};
 type ZerodhaBasketPreviewOrder = {
   id: string;
   exchange: string;
@@ -542,10 +549,53 @@ const ZERODHA_BASKET_ACTIONS = new Set<ActionCategory>([
 const ZERODHA_ORDER_KINDS: ZerodhaBasketOrderKind[] = [
   "Market",
   "Limit",
-  "GTT",
   "After market",
 ];
-const ZERODHA_BASKET_URL = "https://kite.zerodha.com/orders/baskets";
+
+const INDIA_MARKET_TIME_ZONE = "Asia/Kolkata";
+const INDIA_MARKET_OPEN_MINUTES = 9 * 60 + 15;
+const INDIA_MARKET_CLOSE_MINUTES = 15 * 60 + 30;
+
+function getIndiaMarketStatus(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: INDIA_MARKET_TIME_ZONE,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  const weekday = value("weekday");
+  const hour = Number(value("hour"));
+  const minute = Number(value("minute"));
+  const minutes = hour * 60 + minute;
+  const isWeekday = !["Sat", "Sun"].includes(weekday);
+  const open = isWeekday && minutes >= INDIA_MARKET_OPEN_MINUTES && minutes <= INDIA_MARKET_CLOSE_MINUTES;
+  return {
+    open,
+    label: open
+      ? "NSE/BSE regular market appears open now."
+      : "NSE/BSE regular market appears closed now. Selected regular orders will be submitted as Zerodha AMO.",
+  };
+}
+
+function mapZerodhaBasketOrderRequest(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
+  const limitPrice = order.price && order.price > 0 ? order.price : undefined;
+  const orderType = order.orderKind === "Market" && marketOpen ? "MARKET" : "LIMIT";
+  return {
+    tradingsymbol: order.symbol,
+    exchange: order.exchange,
+    transaction_type: order.side,
+    order_type: orderType as "MARKET" | "LIMIT",
+    quantity: Math.max(1, Math.floor(order.units ?? 0)),
+    product: "CNC",
+    validity: "DAY",
+    price: orderType === "LIMIT" ? limitPrice : undefined,
+    market_protection: orderType === "MARKET" ? 1 : undefined,
+    variety: order.orderKind === "After market" || !marketOpen ? "amo" as const : "regular" as const,
+    auto_amo_when_closed: true,
+  };
+}
 
 function parseBasketNumber(value?: string | null) {
   const match = String(value || "")
@@ -1685,6 +1735,8 @@ function ZerodhaBasketPreviewDialog({
   onToggleAll,
   onOrderKindChange,
   onPlaceOrder,
+  placing,
+  submission,
 }: {
   open: boolean;
   loading: boolean;
@@ -1696,6 +1748,8 @@ function ZerodhaBasketPreviewDialog({
   onToggleAll: () => void;
   onOrderKindChange: (id: string, orderKind: ZerodhaBasketOrderKind) => void;
   onPlaceOrder: () => void;
+  placing: boolean;
+  submission: ZerodhaBasketSubmission | null;
 }) {
   if (!open) return null;
 
@@ -1707,15 +1761,16 @@ function ZerodhaBasketPreviewDialog({
     .filter((order) => order.side === "SELL")
     .reduce((sum, order) => sum + (order.amount ?? 0), 0);
   const allSelected = orders.length > 0 && selectedIds.size === orders.length;
+  const marketStatus = getIndiaMarketStatus();
 
   const renderPlaceOrderButton = () => (
     <Button
       type="button"
       onClick={onPlaceOrder}
-      disabled={!selectedOrders.length}
+      disabled={!selectedOrders.length || placing}
       className="rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50"
     >
-      Place Order
+      {placing ? "Placing…" : "Place Order"}
     </Button>
   );
 
@@ -1731,7 +1786,7 @@ function ZerodhaBasketPreviewDialog({
               Zerodha India Place Order Basket
             </h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All, Trim, Add more, and Buy New actionables are pre-selected. Uncheck any row before opening Zerodha.
+              Sell All, Trim, Add more, and Buy New actionables are pre-selected. The popup checks NSE/BSE hours and uses Zerodha AMO automatically when the regular market is closed.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -1758,6 +1813,18 @@ function ZerodhaBasketPreviewDialog({
             </div>
           ) : orders.length ? (
             <>
+              <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm font-semibold", marketStatus.open ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800")}>
+                {marketStatus.label}
+              </div>
+
+              {submission ? (
+                <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                  Placed {submission.placed} order{submission.placed === 1 ? "" : "s"}
+                  {submission.amo ? ` (${submission.amo} via AMO)` : ""}.
+                  {submission.failed ? ` ${submission.failed} failed; review row-level errors before retrying.` : ""}
+                </div>
+              ) : null}
+
               <div className="mb-5 grid gap-3 md:grid-cols-3">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Selected Orders</div>
@@ -1793,6 +1860,7 @@ function ZerodhaBasketPreviewDialog({
                       <th className="px-4 py-3 font-semibold">Price</th>
                       <th className="px-4 py-3 font-semibold">Amount</th>
                       <th className="px-4 py-3 font-semibold">Order Type</th>
+                      <th className="px-4 py-3 font-semibold">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1834,6 +1902,17 @@ function ZerodhaBasketPreviewDialog({
                             ))}
                           </select>
                         </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
+                          {submission?.results.find((result) => result.order.id === order.id)?.error ? (
+                            <span className="text-red-700">Failed</span>
+                          ) : submission?.results.find((result) => result.order.id === order.id)?.response ? (
+                            <span className="text-emerald-700">
+                              {submission.results.find((result) => result.order.id === order.id)?.response?.variety === "amo" ? "AMO placed" : "Placed"}
+                            </span>
+                          ) : (
+                            <span>Pending</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1849,7 +1928,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex flex-col gap-3 border-t border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            This screen prepares the basket preview only. Review quantity, price, product, validity, and order type in Zerodha before placing live orders.
+            Orders are sent through Kite Connect. Market orders are used only while NSE/BSE regular market appears open; closed-market submissions are sent as AMO limit orders using the displayed price.
           </div>
           {renderPlaceOrderButton()}
         </div>
@@ -3152,6 +3231,8 @@ export function RebalanceWorkflowSections({
   } | null>(null);
   const [zerodhaBasketOpen, setZerodhaBasketOpen] = useState(false);
   const [zerodhaBasketLoading, setZerodhaBasketLoading] = useState(false);
+  const [zerodhaBasketPlacing, setZerodhaBasketPlacing] = useState(false);
+  const [zerodhaBasketSubmission, setZerodhaBasketSubmission] = useState<ZerodhaBasketSubmission | null>(null);
   const [zerodhaBasketError, setZerodhaBasketError] = useState<string | null>(null);
   const [zerodhaBasketOrders, setZerodhaBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
@@ -3207,6 +3288,7 @@ export function RebalanceWorkflowSections({
     setZerodhaBasketOpen(true);
     setZerodhaBasketLoading(true);
     setZerodhaBasketError(null);
+    setZerodhaBasketSubmission(null);
     try {
       const [runs, overview] = await Promise.all([
         fetchAllFullRuns(),
@@ -3254,17 +3336,51 @@ export function RebalanceWorkflowSections({
     [],
   );
 
-  const placeSelectedZerodhaBasketOrders = useCallback(() => {
+  const placeSelectedZerodhaBasketOrders = useCallback(async () => {
     const selectedOrders = zerodhaBasketOrders.filter((order) => selectedZerodhaBasketIds.has(order.id));
     if (!selectedOrders.length) {
       window.alert("Select at least one Zerodha basket row before placing an order.");
       return;
     }
-    window.sessionStorage.setItem(
-      "investor:zerodha-basket-preview:v1",
-      JSON.stringify({ orders: selectedOrders, preparedAt: new Date().toISOString() }),
+    const marketStatus = getIndiaMarketStatus();
+    const invalidLimitOrders = selectedOrders.filter((order) => (order.orderKind !== "Market" || !marketStatus.open) && (!order.price || order.price <= 0));
+    if (invalidLimitOrders.length) {
+      window.alert("Cannot place limit/AMO orders without a valid displayed price. Unselect rows with missing prices and retry.");
+      return;
+    }
+    const shouldContinue = window.confirm(
+      `${marketStatus.label}\n\nThis will submit ${selectedOrders.length} live Zerodha order${selectedOrders.length === 1 ? "" : "s"}. Continue?`,
     );
-    window.open(ZERODHA_BASKET_URL, "_blank", "noopener,noreferrer");
+    if (!shouldContinue) return;
+
+    setZerodhaBasketPlacing(true);
+    setZerodhaBasketSubmission(null);
+    try {
+      const results = await Promise.all(
+        selectedOrders.map(async (order) => {
+          try {
+            const response = await apiService.zerodhaPlaceOrder(mapZerodhaBasketOrderRequest(order, marketStatus.open));
+            return { order, response };
+          } catch (error) {
+            return { order, error: normalizeError(error) };
+          }
+        }),
+      );
+      const submission = {
+        placed: results.filter((result) => result.response?.order_id).length,
+        failed: results.filter((result) => result.error).length,
+        amo: results.filter((result) => result.response?.variety === "amo" || result.response?.auto_converted_to_amo).length,
+        results,
+      };
+      setZerodhaBasketSubmission(submission);
+      if (submission.failed) {
+        setZerodhaBasketError(`${submission.failed} Zerodha order${submission.failed === 1 ? "" : "s"} failed. Successful orders were not retried.`);
+      } else {
+        setZerodhaBasketError(null);
+      }
+    } finally {
+      setZerodhaBasketPlacing(false);
+    }
   }, [selectedZerodhaBasketIds, zerodhaBasketOrders]);
 
   const loadLatestIdleStageInfo = useCallback(async () => {
@@ -4075,9 +4191,13 @@ export function RebalanceWorkflowSections({
         rebalance: zerodha
           ? URLs.routes.console.zerodhaRebalance()
           : URLs.routes.console.indmoneyUsRebalance(),
-        technical: URLs.routes.console.dashboard(),
+        technical: `${URLs.routes.console.dashboard()}#final-actionables`,
         actionables: `${URLs.routes.console.dashboard()}#final-actionables`,
       };
+      if ((stage === "technical" || stage === "actionables") && window.location.pathname === URLs.routes.console.dashboard()) {
+        document.getElementById("final-actionables")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
       window.open(hrefByStage[stage], "_blank", "noopener,noreferrer");
     },
     [],
@@ -4095,6 +4215,85 @@ export function RebalanceWorkflowSections({
     },
     [],
   );
+
+  const buildZerodhaPopupFeatures = useCallback(() => {
+    const width = 560;
+    const height = 760;
+    const left = Math.max(window.screenX + (window.outerWidth - width) / 2, 0);
+    const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0);
+    return `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`;
+  }, []);
+
+  const ensureZerodhaConnectedForSync = useCallback(async (preOpenedPopup?: Window | null) => {
+    const status = await apiService.zerodhaStatus();
+    if (status.connected) {
+      preOpenedPopup?.close();
+      return;
+    }
+
+    const login = await apiService.zerodhaLoginUrl();
+    if (!login.configured || !login.login_url) {
+      preOpenedPopup?.close();
+      throw new Error("Zerodha is not configured on this server.");
+    }
+
+    const canReusePreOpenedPopup = Boolean(preOpenedPopup && !preOpenedPopup.closed);
+    const popup = canReusePreOpenedPopup
+      ? preOpenedPopup
+      : window.open(
+          login.login_url,
+          "zerodha-connect",
+          buildZerodhaPopupFeatures(),
+        );
+
+    if (!popup) {
+      throw new Error(
+        "Zerodha login popup was blocked. Allow popups and click Sync Now or Refresh Board again.",
+      );
+    }
+
+    if (canReusePreOpenedPopup) {
+      popup.location.href = login.login_url;
+    }
+    popup.focus();
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timeoutMs = 5 * 60 * 1000;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener("message", handleMessage);
+        window.clearInterval(popupPoll);
+        window.clearTimeout(timeout);
+        if (error) reject(error);
+        else resolve();
+      };
+      const handleMessage = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return;
+        const data = event.data as
+          | { type?: string; message?: string }
+          | null
+          | undefined;
+        if (data?.type === "zerodha_connected") {
+          finish();
+        } else if (data?.type === "zerodha_error") {
+          finish(new Error(data.message || "Zerodha connection failed."));
+        }
+      };
+      const popupPoll = window.setInterval(() => {
+        if (popup.closed) {
+          finish(new Error("Zerodha login popup was closed before connection completed."));
+        }
+      }, 500);
+      const timeout = window.setTimeout(() => {
+        finish(new Error("Zerodha login timed out before connection completed."));
+      }, timeoutMs);
+      window.addEventListener("message", handleMessage);
+    });
+
+    await sleep(1200);
+  }, [buildZerodhaPopupFeatures]);
 
   const runWorkflow = useCallback(
     async (
@@ -4139,6 +4338,11 @@ export function RebalanceWorkflowSections({
       pauseRequestedRef.current = false;
       setWorkflowPaused(false);
 
+      const zerodhaPopup =
+        portfolio === "zerodha" && shouldRunCurrentStage("sync")
+          ? window.open("about:blank", "zerodha-connect", buildZerodhaPopupFeatures())
+          : null;
+
       let currentStage: WorkflowStageKey = "sync";
       let generatedThreatMarkdown = "";
       let generatedSwingRun: RunResponse | null = null;
@@ -4149,6 +4353,7 @@ export function RebalanceWorkflowSections({
         if (shouldRunCurrentStage("sync")) {
           markRunning(portfolio, "sync");
           if (portfolio === "zerodha") {
+            await ensureZerodhaConnectedForSync(zerodhaPopup);
             const synced = await apiService.zerodhaSyncPortfolio();
             const overview = await apiService.zerodhaPortfolioOverview();
             markCompleted(portfolio, "sync", {
@@ -4614,9 +4819,11 @@ export function RebalanceWorkflowSections({
       }
     },
     [
+      buildZerodhaPopupFeatures,
       completeSkippedStage,
       markCompleted,
       markRunning,
+      ensureZerodhaConnectedForSync,
       onDashboardRefresh,
       promptToContinueAfterProblem,
       resetPortfolio,
@@ -4628,85 +4835,6 @@ export function RebalanceWorkflowSections({
       waitForRunWithStageHandling,
     ],
   );
-
-  const buildZerodhaPopupFeatures = useCallback(() => {
-    const width = 560;
-    const height = 760;
-    const left = Math.max(window.screenX + (window.outerWidth - width) / 2, 0);
-    const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0);
-    return `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`;
-  }, []);
-
-  const ensureZerodhaConnectedForSync = useCallback(async (preOpenedPopup?: Window | null) => {
-    const status = await apiService.zerodhaStatus();
-    if (status.connected) {
-      preOpenedPopup?.close();
-      return;
-    }
-
-    const login = await apiService.zerodhaLoginUrl();
-    if (!login.configured || !login.login_url) {
-      preOpenedPopup?.close();
-      throw new Error("Zerodha is not configured on this server.");
-    }
-
-    const canReusePreOpenedPopup = Boolean(preOpenedPopup && !preOpenedPopup.closed);
-    const popup = canReusePreOpenedPopup
-      ? preOpenedPopup
-      : window.open(
-          login.login_url,
-          "zerodha-connect",
-          buildZerodhaPopupFeatures(),
-        );
-
-    if (!popup) {
-      throw new Error(
-        "Zerodha login popup was blocked. Allow popups and click Sync Now or Refresh Board again.",
-      );
-    }
-
-    if (canReusePreOpenedPopup) {
-      popup.location.href = login.login_url;
-    }
-    popup.focus();
-
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const timeoutMs = 5 * 60 * 1000;
-      const finish = (error?: Error) => {
-        if (settled) return;
-        settled = true;
-        window.removeEventListener("message", handleMessage);
-        window.clearInterval(popupPoll);
-        window.clearTimeout(timeout);
-        if (error) reject(error);
-        else resolve();
-      };
-      const handleMessage = (event: MessageEvent) => {
-        if (event.origin !== window.location.origin) return;
-        const data = event.data as
-          | { type?: string; message?: string }
-          | null
-          | undefined;
-        if (data?.type === "zerodha_connected") {
-          finish();
-        } else if (data?.type === "zerodha_error") {
-          finish(new Error(data.message || "Zerodha connection failed."));
-        }
-      };
-      const popupPoll = window.setInterval(() => {
-        if (popup.closed) {
-          finish(new Error("Zerodha login popup was closed before connection completed."));
-        }
-      }, 500);
-      const timeout = window.setTimeout(() => {
-        finish(new Error("Zerodha login timed out before connection completed."));
-      }, timeoutMs);
-      window.addEventListener("message", handleMessage);
-    });
-
-    await sleep(1200);
-  }, [buildZerodhaPopupFeatures]);
 
   const syncPortfolioNow = useCallback(
     async (
@@ -5073,6 +5201,8 @@ export function RebalanceWorkflowSections({
         onToggleAll={toggleAllZerodhaBasketOrders}
         onOrderKindChange={updateZerodhaBasketOrderKind}
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
+        placing={zerodhaBasketPlacing}
+        submission={zerodhaBasketSubmission}
       />
 
       {promptDialog ? (

@@ -744,10 +744,15 @@ export interface ZerodhaPlaceOrderRequest {
   price?: number;
   trigger_price?: number;
   market_protection?: number;
+  variety?: 'regular' | 'amo';
+  auto_amo_when_closed?: boolean;
 }
 
 export interface ZerodhaPlaceOrderResponse {
   order_id: string;
+  variety?: 'regular' | 'amo';
+  market_open?: boolean;
+  auto_converted_to_amo?: boolean;
 }
 
 export interface ZerodhaThreatSummary {

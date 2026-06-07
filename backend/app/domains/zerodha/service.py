@@ -161,10 +161,16 @@ class ZerodhaService:
         )
         return data or {}
 
-    async def place_order(self, access_token: str, order_data: dict) -> dict:
+    async def place_order(
+        self,
+        access_token: str,
+        order_data: dict,
+        *,
+        variety: str = "regular",
+    ) -> dict:
         data = await self._request_async(
             "POST",
-            "/orders/regular",
+            f"/orders/{variety}",
             access_token=access_token,
             data=order_data,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
