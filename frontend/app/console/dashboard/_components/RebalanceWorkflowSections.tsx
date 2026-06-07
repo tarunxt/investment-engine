@@ -97,6 +97,7 @@ type StageInfo = {
 };
 type WorkflowState = Record<WorkflowStageKey, StageInfo>;
 type IndMoneySyncMode = "reuse" | "paste";
+type PromptPreviewStage = "threats" | "swing" | "rebalance" | "technical";
 
 type SavedModelMix = {
   id: string;
@@ -698,22 +699,49 @@ function buildNextCandidate(
   stage: InputSelectionStage,
 ): InputSelectionCandidate {
   const labelByStage: Record<InputSelectionStage, string> = {
-    threats: "Next synced portfolio snapshot",
-    swing: "Next Threat Scan output",
-    rebalance: "Next Swing Scan output",
-    technical: "Next Rebalance Scan output",
-    actionables: "Next Technical Scan output",
+    threats: "Upcoming portfolio snapshot",
+    swing: "Upcoming Threat Scan output",
+    rebalance: "Upcoming Swing Scan output",
+    technical: "Upcoming Rebalance Scan output",
+    actionables: "Upcoming Technical Scan output",
   };
   return {
     id: `${stage}:next`,
     source: "next",
     label: labelByStage[stage],
-    jobNo: "Next run",
+    jobNo: "Upcoming run",
     timestamp: null,
     status: "reserved",
     costUsd: null,
     error: null,
   };
+}
+
+function getStagePromptPreview(portfolio: WorkflowPortfolio, stage: PromptPreviewStage) {
+  const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
+  const portfolioName = portfolio === "zerodha" ? "Zerodha" : "INDmoney US";
+  if (stage === "threats") {
+    const marker = portfolio === "zerodha" ? "[ZERODHA_THREATS]" : "[INDMONEY_US_THREATS]";
+    return `${marker}
+[ENABLE_WEB_SEARCH]
+[THREAT_METADATA_DO_NOT_REPEAT]
+
+${portfolioName} Threat Scan Flow
+
+This dashboard queues the server-side ${portfolioName} threat prompt through the threat-scan worker endpoint. The runtime prompt includes the latest selected portfolio snapshot, web-search markers, and the normalized threat analysis instructions stored with the backend threat flow.`;
+  }
+  if (stage === "swing") {
+    return buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market));
+  }
+  if (stage === "rebalance") {
+    return `${ensureRebalanceFlowMarker(buildRebalancePrompt(market), market)}
+
+---
+
+## Rebalance Input Bundle
+Runtime inputs are appended here from the Select Inputs popup: latest portfolio snapshot, latest Threat Scan output, and all selected Swing Scan outputs run after the previous market close.`;
+  }
+  return buildTechnicalScanPrompt([], market);
 }
 
 function filterRunToSelectedJobs(
@@ -1260,6 +1288,7 @@ function WorkflowStageTile({
   onClick,
   onInfoClick,
   onInputClick,
+  onPromptClick,
   onOutputClick,
   onSyncNowClick,
 }: {
@@ -1271,6 +1300,7 @@ function WorkflowStageTile({
   onClick?: () => void;
   onInfoClick?: () => void;
   onInputClick?: () => void;
+  onPromptClick?: () => void;
   onOutputClick?: () => void;
   onSyncNowClick?: () => void;
 }) {
@@ -1278,7 +1308,7 @@ function WorkflowStageTile({
   const isQueued = info.state === "queued";
   const isCompleted = info.state === "completed";
   const stageMeta = STAGE_METADATA[stage];
-  const showPromptShortcut = stage !== "sync" && Boolean(onClick);
+  const showPromptShortcut = Boolean(onPromptClick);
   const iconButtonClasses =
     "inline-flex size-10 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-slate-800 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 hover:text-blue-700";
   const selectionClasses = selectable
@@ -1480,13 +1510,13 @@ function WorkflowStageTile({
             tabIndex={0}
             onClick={(event) => {
               event.stopPropagation();
-              onClick?.();
+              onPromptClick?.();
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 event.stopPropagation();
-                onClick?.();
+                onPromptClick?.();
               }
             }}
             className="inline-flex size-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-950 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
@@ -1682,11 +1712,23 @@ function InputSelectionDialog({
   if (!open || !stage) return null;
 
   const titleByStage: Record<InputSelectionStage, string> = {
-    threats: "Select Portfolio inputs",
-    swing: "Select Threat Scan inputs",
-    rebalance: "Select Swing Scan inputs",
-    technical: "Select Rebalance Scan inputs",
-    actionables: "Select Technical Scan inputs",
+    threats: "Select Threat Scan inputs",
+    swing: "Select Swing Scan inputs",
+    rebalance: "Select Rebalance Scan inputs",
+    technical: "Select Technical Scan inputs",
+    actionables: "Select Actionables inputs",
+  };
+  const rationaleByStage: Record<InputSelectionStage, string> = {
+    threats:
+      "Use the upcoming synced portfolio snapshot plus the latest saved snapshot so the threat model can score the freshest holdings and cash context.",
+    swing:
+      "Use the upcoming Threat Scan output plus the latest completed threat report so Swing Scan can avoid names blocked by current guardrails while still having fallback risk context.",
+    rebalance:
+      "Select all Swing Scan outputs run after the previous market close by default, plus the upcoming Swing Scan output when this workflow generates one, so Rebalance reviews the full fresh consensus candidate pool.",
+    technical:
+      "Use the upcoming Rebalance Scan output plus the latest completed rebalance output so Technical Scan validates the freshest proposed adds, trims, exits, and holds.",
+    actionables:
+      "Use the upcoming Technical Scan output plus the latest completed technical scan so final actionables can include current chart validation.",
   };
 
   return (
@@ -1702,10 +1744,8 @@ function InputSelectionDialog({
               prompt.
             </p>
             <div className="mt-3 max-w-3xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium leading-6 text-amber-800">
-              <span className="font-extrabold">Default rationale:</span> reserve
-              the upcoming stage output from this workflow and include the latest
-              completed outputs so the next stage reviews the freshest consensus
-              candidates.
+              <span className="font-extrabold">Input selection rationale:</span>{" "}
+              {rationaleByStage[stage]}
             </div>
           </div>
           <button
@@ -2801,6 +2841,12 @@ export function RebalanceWorkflowSections({
     routeUrl?: string | null;
     run?: RunResponse | null;
   } | null>(null);
+  const [promptDialog, setPromptDialog] = useState<{
+    portfolio: WorkflowPortfolio;
+    stage: PromptPreviewStage;
+    title: string;
+    body: string;
+  } | null>(null);
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
   const pauseRequestedRef = useRef(false);
@@ -3296,7 +3342,6 @@ export function RebalanceWorkflowSections({
           const currentSet = current[portfolio][stage];
           const onlyReservedNext =
             currentSet.size === 1 && currentSet.has(nextCandidate.id);
-          if (currentSet.size > 0 && !onlyReservedNext) return current;
           const defaultIds =
             stage === "rebalance"
               ? candidates.map((candidate) => candidate.id)
@@ -3305,6 +3350,8 @@ export function RebalanceWorkflowSections({
                   candidates.find((candidate) => candidate.source !== "next")
                     ?.id,
                 ].filter(Boolean) as string[]);
+          if (stage !== "rebalance" && currentSet.size > 0 && !onlyReservedNext)
+            return current;
           return {
             ...current,
             [portfolio]: {
@@ -3660,6 +3707,19 @@ export function RebalanceWorkflowSections({
         actionables: `${URLs.routes.console.dashboard()}#final-actionables`,
       };
       window.open(hrefByStage[stage], "_blank", "noopener,noreferrer");
+    },
+    [],
+  );
+
+  const showStagePrompt = useCallback(
+    (portfolio: WorkflowPortfolio, stage: PromptPreviewStage) => {
+      const portfolioLabel = portfolio === "zerodha" ? "Zerodha" : "INDmoney US";
+      setPromptDialog({
+        portfolio,
+        stage,
+        title: `${portfolioLabel} ${getStageTileLabel(stage)} prompt`,
+        body: getStagePromptPreview(portfolio, stage),
+      });
     },
     [],
   );
@@ -4542,6 +4602,14 @@ export function RebalanceWorkflowSections({
                   ? () => openInputSelection(section.portfolio, stage)
                   : undefined
               }
+              onPromptClick={
+                stage === "threats" ||
+                stage === "swing" ||
+                stage === "rebalance" ||
+                stage === "technical"
+                  ? () => showStagePrompt(section.portfolio, stage)
+                  : undefined
+              }
               onOutputClick={() =>
                 void showStageOutput(section.portfolio, stage)
               }
@@ -4618,6 +4686,34 @@ export function RebalanceWorkflowSections({
         onResetDefaults={resetDefaultInputCandidates}
         onClose={() => setInputDialog(null)}
       />
+
+      {promptDialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950">
+                  {promptDialog.title}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Prompt template used by this Auto-Rebalance stage. Runtime input bundles are added when the workflow runs.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPromptDialog(null)}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close prompt view"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap p-5 text-sm leading-6 text-slate-700">
+              {promptDialog.body}
+            </pre>
+          </div>
+        </div>
+      ) : null}
 
       {outputDialog ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
