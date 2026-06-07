@@ -18,6 +18,9 @@ class Prompt(Base, TimestampMixin):
     user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    source_prompt_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("prompts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
@@ -25,4 +28,7 @@ class Prompt(Base, TimestampMixin):
     is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    user: Mapped[User | None] = relationship("User", back_populates="prompts")
+    user: Mapped[User | None] = relationship("User", back_populates="prompts", foreign_keys=[user_id])
+    source_prompt: Mapped[Prompt | None] = relationship(
+        "Prompt", remote_side=[id], foreign_keys=[source_prompt_id]
+    )

@@ -90,6 +90,7 @@ export interface UpdateProfileRequest {
 export interface PromptResponse {
   id: number;
   user_id: number | null;
+  source_prompt_id: number | null;
   name: string;
   description: string | null;
   body: string;
@@ -105,6 +106,7 @@ export interface PromptCreate {
   description?: string;
   body: string;
   is_system?: boolean;
+  source_prompt_id?: number;
 }
 
 export interface PromptUpdate {
