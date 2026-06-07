@@ -61,6 +61,21 @@ type LlmBreakupRow = {
   meta: LlmMeta;
 };
 
+type ActionablesInputSelectionKind = "rebalance" | "technical";
+
+type ActionablesInputCandidate = {
+  id: string;
+  kind: ActionablesInputSelectionKind;
+  label: string;
+  jobNo: string;
+  timestamp: string | null;
+  status: string;
+  costUsd: number | null;
+  error: string | null;
+  runId: number;
+  jobId: number;
+};
+
 type ConsensusBreakupEntry = {
   meta: LlmMeta;
   row: LlmBreakupRow | null;
@@ -897,6 +912,51 @@ function ScoreSymbol({ score, className }: { score: number | null; className?: s
       />
       <span>{formatActionScore(score)}</span>
     </span>
+  );
+}
+
+function ScoreTriangleIcon({ score, className }: { score: number | null; className?: string }) {
+  const symbol = getScoreSymbolDefinition(score);
+  if (!symbol) return null;
+
+  return (
+    <Triangle
+      className={cn("mt-0.5 size-3.5 shrink-0 fill-current", symbol.className, symbol.direction === "down" ? "rotate-180" : "", className)}
+      aria-hidden="true"
+    />
+  );
+}
+
+function SelectInputsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      aria-hidden="true"
+      className={className}
+      fill="none"
+    >
+      <path
+        d="M11 10h31v44H11z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="5"
+      />
+      <path
+        d="M7 32h32"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="5"
+      />
+      <path
+        d="M29 22l10 10-10 10"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="5"
+      />
+    </svg>
   );
 }
 
@@ -2035,6 +2095,99 @@ export function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMark
   );
 }
 
+function hasUsableTechnicalScanLlmOutput(run: RunResponse) {
+  return (run.run_jobs ?? []).some(
+    (link) =>
+      isUsableModelOutputStatus(link.job?.status) &&
+      Boolean(link.job?.response?.trim()),
+  );
+}
+
+function isCompletedTechnicalScanRun(run: RunResponse, market: SwingTradeMarket) {
+  const prompt = run.prompt || "";
+  return (
+    prompt.includes(TECHNICAL_SCAN_MARKER) &&
+    prompt.includes(market === "us" ? "Market: US equities" : "Market: India equities") &&
+    (isUsableModelOutputStatus(run.status) || hasUsableTechnicalScanLlmOutput(run))
+  );
+}
+
+function getRunJobCandidateId(kind: ActionablesInputSelectionKind, runId: number, jobId: number) {
+  return `${kind}:${runId}:${jobId}`;
+}
+
+function buildActionablesInputCandidates(runs: RunResponse[], market: SwingTradeMarket) {
+  const buildCandidatesForKind = (
+    kind: ActionablesInputSelectionKind,
+    label: string,
+    matchingRuns: RunResponse[],
+  ): ActionablesInputCandidate[] =>
+    matchingRuns.flatMap((run) =>
+      (run.run_jobs ?? []).flatMap((link) => {
+        const job = link.job;
+        if (!job) return [];
+        return [{
+          id: getRunJobCandidateId(kind, run.id, link.job_id),
+          kind,
+          label: `${label} · ${job.provider}/${job.model}`,
+          jobNo: `#${run.id} / #${link.job_id}`,
+          timestamp: job.created_at || run.created_at || null,
+          status: job.status || run.status || "unknown",
+          costUsd: job.estimated_cost ?? null,
+          error: job.error_message ?? null,
+          runId: run.id,
+          jobId: link.job_id,
+        }];
+      }),
+    );
+
+  return [
+    ...buildCandidatesForKind(
+      "rebalance",
+      "Rebalance Scan",
+      runs.filter((run) => isCompletedRebalanceRun(run, market)),
+    ),
+    ...buildCandidatesForKind(
+      "technical",
+      "Technical Scan",
+      runs.filter((run) => isCompletedTechnicalScanRun(run, market)),
+    ),
+  ].sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
+}
+
+function getDefaultActionablesInputIds(candidates: ActionablesInputCandidate[], runs: RunResponse[], market: SwingTradeMarket) {
+  const latestRebalanceRuns = getLatestMatchingRuns(runs, market);
+  const latestRebalanceRunIds = new Set(latestRebalanceRuns.map((run) => run.id));
+  const latestTechnicalRunId = runs
+    .filter((run) => isCompletedTechnicalScanRun(run, market))
+    .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at))[0]?.id;
+
+  const ids = candidates
+    .filter((candidate) => {
+      if (candidate.kind === "rebalance") return latestRebalanceRunIds.has(candidate.runId);
+      return candidate.runId === latestTechnicalRunId;
+    })
+    .map((candidate) => candidate.id);
+
+  if (ids.length) return ids;
+  const latestRebalance = candidates.find((candidate) => candidate.kind === "rebalance")?.id;
+  const latestTechnical = candidates.find((candidate) => candidate.kind === "technical")?.id;
+  return [latestRebalance, latestTechnical].filter(Boolean) as string[];
+}
+
+function filterRunsBySelectedActionablesInputs(
+  runs: RunResponse[],
+  kind: ActionablesInputSelectionKind,
+  selectedIds: Set<string>,
+) {
+  return runs.flatMap((run) => {
+    const runJobs = (run.run_jobs ?? []).filter((link) =>
+      selectedIds.has(getRunJobCandidateId(kind, run.id, link.job_id)),
+    );
+    return runJobs.length ? [{ ...run, run_jobs: runJobs }] : [];
+  });
+}
+
 export async function fetchAllFullRuns() {
   const firstPage = await apiService.getFullRuns({ page: 1, limit: 100 });
   if (firstPage.pages <= 1) return firstPage.items;
@@ -2313,6 +2466,15 @@ const RATIONALE_SCORE_HEADERS: RebalanceHeader[] = [
   "Score Rationale - Fundamentals Medium/Long Term",
 ];
 
+const RATIONALE_SCORE_HEADER_BY_RATIONALE_HEADER: Partial<Record<RebalanceHeader, RebalanceHeader>> = {
+  "Rationale Cruxx": "Score Rationale Cruxx",
+  "Rationale Technical Setup Short Term 1–3 Months": "Score Rationale Technical Setup Short Term 1–3 Months",
+  "Rationale - Technical Setup (Medium Term)": "Score Rationale - Technical Setup (Medium Term)",
+  "Rationale - Technical Setup (Long Term)": "Score Rationale - Technical Setup (Long Term)",
+  "Rationale - Fundamentals Short Term": "Score Rationale - Fundamentals Short Term",
+  "Rationale - Fundamentals Medium/Long Term": "Score Rationale - Fundamentals Medium/Long Term",
+};
+
 function getRowRationaleDisplayScore(row: CanonicalRow) {
   return average(
     RATIONALE_SCORE_HEADERS.map((header) => parseNumericCell(row[header])).filter(
@@ -2329,7 +2491,11 @@ function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
   const groups = RATIONALE_SECTION_GROUPS.map((group) => {
     const seenLabels = new Set<string>();
     const items = group.items
-      .map((item) => ({ ...item, value: row[item.header] || "" }))
+      .map((item) => ({
+        ...item,
+        score: parseNumericCell(row[RATIONALE_SCORE_HEADER_BY_RATIONALE_HEADER[item.header] ?? item.header]),
+        value: row[item.header] || "",
+      }))
       .filter((item) => item.value.trim())
       .filter((item) => {
         const key = `${item.label ?? ""}:${normalizeWhitespace(item.value)}`;
@@ -2353,10 +2519,13 @@ function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
           </div>
           {group.subtitle ? <div className="mt-0.5 text-[10px] font-medium opacity-80">{group.subtitle}</div> : null}
           <div className="mt-1.5 space-y-1 text-xs leading-5">
-            {group.items.map(({ header, label, value }) => (
-              <p key={`${header}-${label ?? "plain"}`} className="whitespace-pre-wrap break-words">
-                {label ? <span className="font-semibold">{label}: </span> : null}
-                {value}
+            {group.items.map(({ header, label, score, value }) => (
+              <p key={`${header}-${label ?? "plain"}`} className="flex items-start gap-1.5 whitespace-pre-wrap break-words">
+                <ScoreTriangleIcon score={score} />
+                <span>
+                  {label ? <span className="font-semibold">{label}: </span> : null}
+                  {value}
+                </span>
               </p>
             ))}
           </div>
@@ -4091,6 +4260,138 @@ function ActionablesFormulaModal({ open, onClose }: { open: boolean; onClose: ()
   );
 }
 
+function ActionablesInputSelectionDialog({
+  open,
+  candidates,
+  selectedIds,
+  usdInrRate,
+  onToggle,
+  onToggleAll,
+  onResetDefaults,
+  onClose,
+}: {
+  open: boolean;
+  candidates: ActionablesInputCandidate[];
+  selectedIds: Set<string>;
+  usdInrRate: number;
+  onToggle: (id: string) => void;
+  onToggleAll: () => void;
+  onResetDefaults: () => void;
+  onClose: () => void;
+}) {
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const allSelected = candidates.length > 0 && candidates.every((candidate) => selectedIds.has(candidate.id));
+  const someSelected = candidates.some((candidate) => selectedIds.has(candidate.id));
+  const selectedCount = candidates.filter((candidate) => selectedIds.has(candidate.id)).length;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [allSelected, someSelected]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-6">
+          <div>
+            <h3 className="text-2xl font-extrabold tracking-tight text-slate-950">Select Actionables inputs</h3>
+            <p className="mt-2 text-base text-slate-500">
+              Choose which previous-stage outputs should be included in the calculations table.
+            </p>
+            <div className="mt-3 max-w-3xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium leading-6 text-amber-800">
+              <span className="font-extrabold">Input selection rationale:</span>{" "}
+              Use selected Rebalance Scan outputs and Technical Scan outputs so final actionables combine portfolio rebalance intent with chart validation.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close input selection"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="mx-6 mb-4 flex items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
+          <span>{selectedCount} output{selectedCount === 1 ? "" : "s"} selected.</span>
+          <button
+            type="button"
+            onClick={onResetDefaults}
+            className="rounded-full border border-slate-300 bg-white px-5 py-2 text-xs font-extrabold uppercase tracking-[0.18em] text-slate-900 shadow-sm hover:bg-slate-50"
+          >
+            Reset defaults
+          </button>
+        </div>
+        <div className="mx-6 max-h-[58vh] overflow-auto rounded-2xl border border-slate-200">
+          {candidates.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 p-8 text-sm text-slate-500">
+              No eligible Rebalance Scan or Technical Scan outputs are available yet.
+            </div>
+          ) : (
+            <table className="w-full min-w-[860px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="w-12 px-3 py-3">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={onToggleAll}
+                      aria-label="Select or deselect all inputs"
+                    />
+                  </th>
+                  <th className="px-3 py-3">Job / Run No</th>
+                  <th className="px-3 py-3">Timestamp</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">LLM / Source</th>
+                  <th className="px-3 py-3">Cost (INR)</th>
+                  <th className="px-3 py-3">Error</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {candidates.map((candidate) => (
+                  <tr key={candidate.id} className={candidate.kind === "technical" ? "bg-blue-50/60" : "bg-white"}>
+                    <td className="px-3 py-3 align-top">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(candidate.id)}
+                        onChange={() => onToggle(candidate.id)}
+                        aria-label={`Select ${candidate.label}`}
+                      />
+                    </td>
+                    <td className="px-3 py-3 align-top font-semibold text-slate-900">{candidate.jobNo}</td>
+                    <td className="px-3 py-3 align-top text-slate-600">{candidate.timestamp ? formatDateTime(candidate.timestamp) : "—"}</td>
+                    <td className="px-3 py-3 align-top">
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{candidate.status}</span>
+                    </td>
+                    <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
+                    <td className="px-3 py-3 align-top text-slate-600">
+                      {typeof candidate.costUsd === "number" ? `₹${(candidate.costUsd * usdInrRate).toFixed(2)}` : "n/a"}
+                    </td>
+                    <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">{candidate.error || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="flex justify-end px-6 py-5">
+          <Button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-slate-950 px-7 font-extrabold uppercase tracking-[0.18em] text-white hover:bg-slate-800"
+          >
+            Done
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ActionablesCalculationsModal({
   open,
   onClose,
@@ -4099,6 +4400,7 @@ function ActionablesCalculationsModal({
   stocks,
   technicalScans,
   setupGroups,
+  runs,
   detailsData,
   onSetupClick,
 }: {
@@ -4109,6 +4411,7 @@ function ActionablesCalculationsModal({
   stocks: StockConsensus[];
   technicalScans: TechnicalScanMap;
   setupGroups?: Record<string, SetupStockGroup>;
+  runs?: RunResponse[];
   detailsData?: StockDetailsData;
   onSetupClick?: (group: SetupStockGroup) => void;
 }) {
@@ -4117,14 +4420,56 @@ function ActionablesCalculationsModal({
   const [draggedHeader, setDraggedHeader] = useState<ActionablesCalculationHeader | null>(null);
   const resizeStateRef = useRef<{ header: ActionablesCalculationHeader; startX: number; startWidth: number } | null>(null);
   const [formulaOpen, setFormulaOpen] = useState(false);
+  const [inputSelectionOpen, setInputSelectionOpen] = useState(false);
+  const [selectedInputIds, setSelectedInputIds] = useState<Set<string> | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
+  const usdInrRate = useUsdInrRate();
+  const allRuns = useMemo(() => runs ?? [], [runs]);
+  const inputCandidates = useMemo(
+    () => buildActionablesInputCandidates(allRuns, market),
+    [allRuns, market],
+  );
+  const defaultInputIds = useMemo(
+    () => getDefaultActionablesInputIds(inputCandidates, allRuns, market),
+    [allRuns, inputCandidates, market],
+  );
+
+  const effectiveSelectedInputIds = useMemo(
+    () => selectedInputIds ?? new Set(defaultInputIds),
+    [defaultInputIds, selectedInputIds],
+  );
+
+  const selectedRebalanceRuns = useMemo(
+    () => filterRunsBySelectedActionablesInputs(allRuns, "rebalance", effectiveSelectedInputIds),
+    [allRuns, effectiveSelectedInputIds],
+  );
+  const selectedTechnicalRuns = useMemo(
+    () => filterRunsBySelectedActionablesInputs(allRuns, "technical", effectiveSelectedInputIds),
+    [allRuns, effectiveSelectedInputIds],
+  );
+  const hasSelectableRebalanceInputs = inputCandidates.some((candidate) => candidate.kind === "rebalance");
+  const hasSelectableTechnicalInputs = inputCandidates.some((candidate) => candidate.kind === "technical");
+  const displayedStocks = useMemo(
+    () => hasSelectableRebalanceInputs
+      ? buildConsensusRows(selectedRebalanceRuns, market, detailsData?.portfolioSnapshot)
+      : stocks,
+    [detailsData?.portfolioSnapshot, hasSelectableRebalanceInputs, market, selectedRebalanceRuns, stocks],
+  );
+  const displayedTechnicalScans = useMemo(
+    () => hasSelectableTechnicalInputs ? buildTechnicalScanMap(selectedTechnicalRuns) : technicalScans,
+    [hasSelectableTechnicalInputs, selectedTechnicalRuns, technicalScans],
+  );
+  const displayedSetupGroups = useMemo(
+    () => getSetupStockGroups(displayedStocks, displayedTechnicalScans, market),
+    [displayedStocks, displayedTechnicalScans, market],
+  );
   const rows = useMemo(
-    () => buildActionablesCalculationRows(stocks, market, technicalScans, setupGroups, onSetupClick, setSelectedMatrixDetail),
-    [market, onSetupClick, setupGroups, stocks, technicalScans],
+    () => buildActionablesCalculationRows(displayedStocks, market, displayedTechnicalScans, displayedSetupGroups ?? setupGroups, onSetupClick, setSelectedMatrixDetail),
+    [displayedSetupGroups, displayedStocks, displayedTechnicalScans, market, onSetupClick, setupGroups],
   );
   const rowGroups = useMemo(
-    () => buildActionablesCalculationRowGroups(rows, sortState, market, technicalScans, detailsData),
-    [detailsData, market, rows, sortState, technicalScans],
+    () => buildActionablesCalculationRowGroups(rows, sortState, market, displayedTechnicalScans, detailsData),
+    [detailsData, displayedTechnicalScans, market, rows, sortState],
   );
 
   useEffect(() => {
@@ -4207,10 +4552,21 @@ function ActionablesCalculationsModal({
       >
         <div className="w-full max-w-[96vw] rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
           <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Actionables Calculations</p>
-              <h2 id="actionables-calculations-modal-title" className="mt-1 text-2xl font-bold text-slate-950">{title} Excel layout</h2>
-              <p className="mt-1 text-sm text-slate-500">Grouped in the same rebalance export column order with sortable Excel-style headers.</p>
+            <div className="flex items-start gap-3">
+              <button
+                type="button"
+                onClick={() => setInputSelectionOpen(true)}
+                className="mt-1 inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-white text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                aria-label="Select inputs for Actionables Calculations"
+                title="Select Inputs"
+              >
+                <SelectInputsIcon className="size-6" />
+              </button>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Actionables Calculations</p>
+                <h2 id="actionables-calculations-modal-title" className="mt-1 text-2xl font-bold text-slate-950">{title} Excel layout</h2>
+                <p className="mt-1 text-sm text-slate-500">Grouped in the same rebalance export column order with sortable Excel-style headers.</p>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button type="button" onClick={() => setFormulaOpen(true)} className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500" title="Show logics and formulas">
@@ -4223,7 +4579,7 @@ function ActionablesCalculationsModal({
             </div>
           </div>
           <div className="border-b border-blue-100 bg-blue-50/50 px-5 py-3 text-sm text-blue-900">
-            LLMs consolidated in this view: {Math.max(...stocks.map((stock) => stock.rows.length), 0)}. Stocks: {stocks.length}.
+            LLMs consolidated in this view: {Math.max(...displayedStocks.map((stock) => stock.rows.length), 0)}. Stocks: {displayedStocks.length}.
           </div>
           <div className="max-h-[76vh] overflow-auto p-5">
             {rowGroups.length ? (
@@ -4319,6 +4675,29 @@ function ActionablesCalculationsModal({
           </div>
         </div>
       </div>
+      <ActionablesInputSelectionDialog
+        open={inputSelectionOpen}
+        candidates={inputCandidates}
+        selectedIds={effectiveSelectedInputIds}
+        usdInrRate={usdInrRate}
+        onToggle={(id) => {
+          setSelectedInputIds((current) => {
+            const next = new Set(current ?? effectiveSelectedInputIds);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+          });
+        }}
+        onToggleAll={() => {
+          setSelectedInputIds((current) => {
+            const currentIds = current ?? effectiveSelectedInputIds;
+            const allSelected = inputCandidates.every((candidate) => currentIds.has(candidate.id));
+            return allSelected ? new Set() : new Set(inputCandidates.map((candidate) => candidate.id));
+          });
+        }}
+        onResetDefaults={() => setSelectedInputIds(null)}
+        onClose={() => setInputSelectionOpen(false)}
+      />
       <ActionablesFormulaModal open={formulaOpen} onClose={() => setFormulaOpen(false)} />
       <ScoreMatrixModal detail={selectedMatrixDetail} onClose={() => setSelectedMatrixDetail(null)} />
     </>
@@ -4864,6 +5243,7 @@ export function DashboardFinalActionablesTables() {
         market={calculationsMarket ?? "india"}
         stocks={(calculationsMarket ? actionRowsByMarket[calculationsMarket] : actionRowsByMarket.india).map((row) => row.stock)}
         technicalScans={technicalScans}
+        runs={runs}
         detailsData={calculationsMarket ? detailsDataByMarket[calculationsMarket] : detailsDataByMarket.india}
       />
       <ScoreMatrixModal detail={selectedMatrixDetail} onClose={() => setSelectedMatrixDetail(null)} />
@@ -5287,6 +5667,7 @@ export function FinalActionablesConsole({
         stocks={consensus}
         technicalScans={technicalScans}
         setupGroups={setupStockGroups}
+        runs={runs}
         detailsData={detailsData}
         onSetupClick={setSelectedSetupGroup}
       />
