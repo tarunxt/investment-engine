@@ -13,6 +13,7 @@ class JobStatus(str, enum.Enum):
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
+    PARTIAL = "partial"
     FAILED = "failed"
 
     # Statuses considered "active" (need polling / not terminal)
@@ -22,4 +23,4 @@ class JobStatus(str, enum.Enum):
 
     @classmethod
     def terminal(cls) -> frozenset["JobStatus"]:
-        return frozenset({cls.COMPLETED, cls.FAILED})
+        return frozenset({cls.COMPLETED, cls.PARTIAL, cls.FAILED})
