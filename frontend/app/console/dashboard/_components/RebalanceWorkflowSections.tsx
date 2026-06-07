@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
-import { AlertCircle, CheckCircle2, Loader2, Play, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, FileSpreadsheet, Loader2, Play, X } from "lucide-react";
 
 import {
   buildConsensusRows,
@@ -1432,6 +1432,7 @@ function WorkflowStageTile({
   onOutputClick,
   onSyncNowClick,
   onPlaceOrderClick,
+  onCalculationsClick,
 }: {
   stage: WorkflowStageKey;
   info: StageInfo;
@@ -1445,6 +1446,7 @@ function WorkflowStageTile({
   onOutputClick?: () => void;
   onSyncNowClick?: () => void;
   onPlaceOrderClick?: () => void;
+  onCalculationsClick?: () => void;
 }) {
   const isRunning = info.state === "running";
   const isQueued = info.state === "queued";
@@ -1513,6 +1515,29 @@ function WorkflowStageTile({
           title="LLM models and expected cost"
         >
           <LlmDetailsIcon className="size-6" />
+        </span>
+      ) : null}
+
+      {onCalculationsClick ? (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.stopPropagation();
+            onCalculationsClick();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              onCalculationsClick();
+            }
+          }}
+          className={`absolute right-5 top-5 ${iconButtonClasses} text-blue-700`}
+          aria-label={`Open ${stageMeta.idle} Actionables Calculations`}
+          title="Actionables Calculations"
+        >
+          <FileSpreadsheet className="size-6" />
         </span>
       ) : null}
 
@@ -5127,6 +5152,16 @@ export function RebalanceWorkflowSections({
               onPlaceOrderClick={
                 stage === "actionables" && section.portfolio === "zerodha"
                   ? () => void openZerodhaBasketPreview()
+                  : undefined
+              }
+              onCalculationsClick={
+                stage === "actionables"
+                  ? () => {
+                      window.dispatchEvent(new CustomEvent("open-actionables-calculations", {
+                        detail: { market: section.portfolio === "zerodha" ? "india" : "us" },
+                      }));
+                      window.location.hash = "final-actionables";
+                    }
                   : undefined
               }
             />
