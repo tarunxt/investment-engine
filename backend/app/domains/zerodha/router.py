@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +35,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/zerodha", tags=["zerodha"])
 _svc = ZerodhaService()
+
+INDIA_MARKET_EXCHANGES = {"NSE", "BSE"}
+INDIA_MARKET_TZ = timezone(timedelta(hours=5, minutes=30))
+INDIA_MARKET_OPEN = time(9, 15)
+INDIA_MARKET_CLOSE = time(15, 30)
+
+
+def _is_regular_market_open(exchange: str, now: datetime | None = None) -> bool:
+    """Return whether regular equity market orders are currently accepted.
+
+    We intentionally keep this deterministic and conservative for Zerodha India
+    equity basket orders. Exchange holidays are still enforced by Kite; outside
+    normal weekday NSE/BSE hours we use AMO when requested by the client.
+    """
+    if exchange.upper() not in INDIA_MARKET_EXCHANGES:
+        return True
+    current = (now or datetime.now(tz=timezone.utc)).astimezone(INDIA_MARKET_TZ)
+    if current.weekday() >= 5:
+        return False
+    current_time = current.time()
+    return INDIA_MARKET_OPEN <= current_time <= INDIA_MARKET_CLOSE
 
 
 def _client_ip(request: Request) -> str | None:
@@ -283,9 +304,14 @@ async def place_order(
     if not token:
         raise HTTPException(401, detail="Not connected to Zerodha. Please login first.")
 
+    exchange = body.exchange.upper()
+    requested_variety = body.variety.lower()
+    market_open = _is_regular_market_open(exchange)
+    variety = "amo" if requested_variety == "regular" and body.auto_amo_when_closed and not market_open else requested_variety
+
     order_data: dict[str, str] = {
         "tradingsymbol": body.tradingsymbol.upper(),
-        "exchange": body.exchange.upper(),
+        "exchange": exchange,
         "transaction_type": body.transaction_type,
         "order_type": body.order_type,
         "quantity": str(body.quantity),
@@ -307,11 +333,14 @@ async def place_order(
         "order_type": order_data["order_type"],
         "quantity": body.quantity,
         "product": order_data["product"],
+        "variety": variety,
+        "market_open": market_open,
+        "auto_converted_to_amo": requested_variety != variety,
     }
     await audit.log(current_user.id, "token_used", ip, {"operation": "place_order", **order_meta})
 
     try:
-        result = await _svc.place_order(token, order_data)
+        result = await _svc.place_order(token, order_data, variety=variety)
     except KiteError as exc:
         await audit.log(current_user.id, "place_order_failed", ip, {"error": exc.message, **order_meta})
         await db.commit()
@@ -327,7 +356,12 @@ async def place_order(
     await db.commit()
 
     logger.info("Order placed for user %s: %s", current_user.id, result)
-    return ZerodhaPlaceOrderResponse(order_id=order_id)
+    return ZerodhaPlaceOrderResponse(
+        order_id=order_id,
+        variety=variety,
+        market_open=market_open,
+        auto_converted_to_amo=requested_variety != variety,
+    )
 
 
 @router.delete("/disconnect")
