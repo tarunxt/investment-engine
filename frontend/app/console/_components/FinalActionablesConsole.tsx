@@ -106,6 +106,7 @@ type DetailedRationaleScoreRow = {
   parameter: string;
   score: number | null;
   multiplier: number;
+  denominatorWeight?: number;
 };
 
 type ScoreMatrixContext = {
@@ -498,6 +499,14 @@ const ACTION_SCORE_TABLE_ROWS: Array<{ label: string; score: number }> = [
   { label: "Add/Add more", score: 2.5 },
 ];
 
+const DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
+  "Sell All": -2.5,
+  Trim: -1.5,
+  Hold: 0,
+  "Buy New": 1.5,
+  "Add more": 2.5,
+};
+
 const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; multiplier: number }> = [
   { label: "Bullish", multiplier: 1 },
   { label: "Bearish", multiplier: -1 },
@@ -807,7 +816,10 @@ function getAverageNumericCell(rows: LlmBreakupRow[], header: RebalanceHeader) {
 
 function calculateWeightedRationaleScore(rows: DetailedRationaleScoreRow[]) {
   const weightedRows = rows.filter((row) => row.multiplier !== 0);
-  const denominator = weightedRows.reduce((sum, row) => sum + Math.abs(row.multiplier), 0);
+  const denominator = weightedRows.reduce(
+    (sum, row) => sum + (row.denominatorWeight ?? Math.abs(row.multiplier)),
+    0,
+  );
   if (!denominator) return { finalScore: null, denominator: 0 };
   const numerator = weightedRows.reduce(
     (sum, row) => sum + (row.score ?? 0) * row.multiplier,
@@ -816,9 +828,38 @@ function calculateWeightedRationaleScore(rows: DetailedRationaleScoreRow[]) {
   return { finalScore: numerator / denominator, denominator };
 }
 
+function getTechnicalScanScoreMultiplier(
+  technicalScan: TechnicalScanResult | null,
+  row: CanonicalRow,
+  score: number | null,
+) {
+  if (score === null) return 0;
+
+  const approvedSetup = resolveApprovedTechnicalSetup(technicalScan, row);
+  if (approvedSetup?.direction === "bearish") return -1;
+  if (approvedSetup?.direction === "bullish") return 1;
+  if (technicalScan?.bias === "bearish") return -1;
+  if (technicalScan?.bias === "bullish") return 1;
+  return 0;
+}
+
 function buildDetailedRationaleScoreRows(
   stock: StockConsensus,
+  technicalScan: TechnicalScanResult | null,
+  meanModeAction: ActionCategory | null,
 ): DetailedRationaleScoreRow[] {
+  const technicalConfidenceScore = parseNumericCell(
+    formatTechnicalConfidence(technicalScan, stock.representative),
+  );
+  const technicalConfidenceMultiplier = getTechnicalScanScoreMultiplier(
+    technicalScan,
+    stock.representative,
+    technicalConfidenceScore,
+  );
+  const meanModeActionScore = meanModeAction
+    ? DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY[meanModeAction]
+    : null;
+
   return [
     {
       id: "cruxx",
@@ -855,6 +896,19 @@ function buildDetailedRationaleScoreRows(
       parameter: "Average of Score Rationale - Fundamentals Medium/Long Term",
       score: getAverageNumericCell(stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
       multiplier: 1,
+    },
+    {
+      id: "technical-scan-confidence",
+      parameter: "Technical Scan Confidence Score",
+      score: technicalConfidenceScore,
+      multiplier: technicalConfidenceMultiplier,
+      denominatorWeight: technicalConfidenceMultiplier === 0 ? 0 : 2,
+    },
+    {
+      id: "mean-mode-action",
+      parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in final Consolidated (Mean and Mode) row",
+      score: meanModeActionScore,
+      multiplier: 4,
     },
   ];
 }
@@ -1040,7 +1094,6 @@ function buildScoreMatrixDetail(
   stock: StockConsensus,
   technicalScan: TechnicalScanResult | null = null,
 ): ScoreMatrixDetail {
-  void technicalScan;
   const entries: ScoreMatrixEntry[] = stock.rows.map((row) => {
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
     return {
@@ -1096,7 +1149,7 @@ function buildScoreMatrixDetail(
       .map((value) => Math.abs(value)),
   );
 
-  const detailedRationaleRows = buildDetailedRationaleScoreRows(stock);
+  const detailedRationaleRows = buildDetailedRationaleScoreRows(stock, technicalScan, modeAction);
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
     calculateWeightedRationaleScore(detailedRationaleRows);
   const calculatedScore = detailedRationaleFinalScore ?? meanScore;

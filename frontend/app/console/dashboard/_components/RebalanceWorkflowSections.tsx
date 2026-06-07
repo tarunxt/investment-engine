@@ -1488,7 +1488,6 @@ function WorkflowStageTile({
   onCalculationsClick?: () => void;
 }) {
   const isRunning = info.state === "running";
-  const isQueued = info.state === "queued";
   const isCompleted = info.state === "completed";
   const stageMeta = STAGE_METADATA[stage];
   const showPromptShortcut = Boolean(onPromptClick);
@@ -1584,8 +1583,6 @@ function WorkflowStageTile({
         <div className="flex min-w-0 items-center justify-center gap-2">
           {isRunning ? (
             <Loader2 className="size-4 shrink-0 animate-spin text-amber-600" />
-          ) : isQueued ? (
-            <Play className="size-4 shrink-0 text-sky-600" />
           ) : info.state === "failed" ? (
             <AlertCircle className="size-4 shrink-0 text-red-600" />
           ) : isCompleted ? (
