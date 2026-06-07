@@ -219,7 +219,7 @@ def _is_insufficient_stock_issue(issue: str | None) -> bool:
 
 
 def _failed_job_has_exportable_partial_stock_rows(job: Job) -> bool:
-    if job.status != JobStatus.FAILED:
+    if job.status not in {JobStatus.FAILED, JobStatus.PARTIAL}:
         return False
     if _INSUFFICIENT_RECOMMENDATIONS_MARKER not in (job.error_message or "").lower():
         return False
@@ -834,6 +834,9 @@ def _refresh_run_status(db, job_id: int) -> None:
             elif any(j.status == JobStatus.COMPLETED for j in stage_jobs):
                 # All terminal, at least one succeeded
                 new_status = JobStatus.COMPLETED
+            elif any(j.status == JobStatus.PARTIAL for j in stage_jobs):
+                # All terminal and at least one usable-but-incomplete model output exists.
+                new_status = JobStatus.PARTIAL
             else:
                 # All terminal, all failed
                 new_status = JobStatus.FAILED
@@ -856,11 +859,11 @@ def _refresh_run_status(db, job_id: int) -> None:
             # a failed model still produced complete stock rows that can be exported.
             if (
                 updated_job is not None
-                and updated_job.status in {JobStatus.COMPLETED, JobStatus.FAILED}
+                and updated_job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}
                 and auto_export_enabled
                 and export_spreadsheet_url
                 and (
-                    updated_job.status == JobStatus.COMPLETED
+                    updated_job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL}
                     or _failed_job_has_exportable_partial_stock_rows(updated_job)
                 )
                 and (updated_job.export_status or "").lower() not in {"queued", "processing", "completed", "failed"}
@@ -922,7 +925,7 @@ def _refresh_run_status(db, job_id: int) -> None:
                 if run_after:
                     stage_pairs = run_repo.get_stage_run_jobs(rj.run_id, rj.stage)
                     stage_jobs_after = [job for _, job in stage_pairs]
-                    terminal = {JobStatus.COMPLETED, JobStatus.FAILED}
+                    terminal = {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}
                     eligible_jobs = [j for j in stage_jobs_after if j.status in terminal]
                     exports = [str((j.export_status or "pending")).lower() for j in eligible_jobs]
                     completed_count = sum(1 for s in exports if s == "completed")
@@ -1126,6 +1129,22 @@ def execute_ai_job(self, job_id: int) -> None:
                             content = repaired_content
                     content, stock_table_issue, parsed_stocks = _validate_stock_table_content(content)
                 if stock_table_issue:
+                    if _is_insufficient_stock_issue(stock_table_issue) and parsed_stocks:
+                        repo.update_status(
+                            job,
+                            JobStatus.PARTIAL,
+                            response=content,
+                            error_message=f"{job.provider}/{job.model} returned {stock_table_issue}",
+                            tokens_in=tokens_in,
+                            tokens_out=tokens_out,
+                            estimated_cost=estimated_cost,
+                        )
+                        _publish_job_update(job)
+                        _refresh_run_status(db, job_id)
+                        WorkerLogHelper.log_task_complete(
+                            "execute_ai_job", "n/a", (monotonic() - started_at) * 1000, job_id
+                        )
+                        return
                     raise RuntimeError(
                         f"{job.provider}/{job.model} returned {stock_table_issue}"
                     )

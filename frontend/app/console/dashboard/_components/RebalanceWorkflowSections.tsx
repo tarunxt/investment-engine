@@ -9,6 +9,7 @@ import {
   Info,
   Loader2,
   Play,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 
@@ -55,6 +56,20 @@ type WorkflowStageKey =
   | "technical"
   | "actionables";
 type StageState = "idle" | "queued" | "running" | "completed" | "failed";
+type InputSelectionStage = "swing" | "rebalance" | "technical";
+type InputSelectionCandidate = {
+  id: string;
+  source: "next" | "threat" | "run-job";
+  label: string;
+  jobNo: string;
+  timestamp: string | null;
+  status: string;
+  costUsd: number | null;
+  error: string | null;
+  run?: RunResponse;
+  jobId?: number;
+  content?: string | null;
+};
 type StageInfo = {
   state: StageState;
   startedAt?: string | null;
@@ -190,6 +205,7 @@ type PersistedWorkflow = {
   runningPortfolio: WorkflowPortfolio | null;
   specificMode: Record<WorkflowPortfolio, boolean>;
   selectedStages: Record<WorkflowPortfolio, WorkflowStageKey[]>;
+  selectedInputs?: Record<WorkflowPortfolio, Partial<Record<InputSelectionStage, string[]>>>;
   savedAt: string;
 };
 
@@ -304,7 +320,6 @@ function summarizeRun(run: RunResponse) {
     runStatus: run.status,
     exportStatus: run.export_status ?? firstJob?.export_status,
     costUsd: costUsd || null,
-    costInr: null,
     error: run.export_error ?? failedJob?.error_message ?? null,
   };
 }
@@ -319,7 +334,6 @@ function summarizeThreat(
     runStatus: analysis.status,
     exportStatus: null,
     costUsd: analysis.estimated_cost ?? null,
-    costInr: null,
     error: analysis.error_message ?? null,
   };
 }
@@ -505,6 +519,80 @@ function getCompletedLlmProgress(run: RunResponse) {
   };
 }
 
+function isUsableStageJob(job?: { status?: string; response?: string | null }) {
+  const status = (job?.status || "").toLowerCase();
+  return status === "completed" || status === "partial" || Boolean(job?.response?.trim());
+}
+
+function getRunJobTimestamp(run: RunResponse, job?: { updated_at?: string | null; created_at?: string | null }) {
+  return job?.updated_at ?? job?.created_at ?? getLatestRunTimestamp(run);
+}
+
+function buildRunJobCandidate(run: RunResponse, jobId: number | undefined, stageLabel: string): InputSelectionCandidate | null {
+  const link = run.run_jobs?.find((item) => item.job?.id === jobId);
+  const job = link?.job;
+  if (!job || !isUsableStageJob(job)) return null;
+  const costUsd = typeof job.estimated_cost === "number" ? job.estimated_cost : null;
+  return {
+    id: `run:${run.id}:job:${job.id}`,
+    source: "run-job",
+    label: `${stageLabel} · ${job.provider}/${job.model}`,
+    jobNo: `#${run.id} / #${job.id}`,
+    timestamp: getRunJobTimestamp(run, job),
+    status: job.status || run.status,
+    costUsd,
+    error: job.error_message ?? null,
+    run,
+    jobId: job.id,
+    content: job.response,
+  };
+}
+
+function buildRunJobCandidates(runs: RunResponse[], stageLabel: string) {
+  return runs.flatMap((run) =>
+    (run.run_jobs ?? [])
+      .map((link) => buildRunJobCandidate(run, link.job?.id, stageLabel))
+      .filter(Boolean) as InputSelectionCandidate[],
+  );
+}
+
+function buildNextCandidate(stage: InputSelectionStage): InputSelectionCandidate {
+  const labelByStage: Record<InputSelectionStage, string> = {
+    swing: "Next Threat Scan output",
+    rebalance: "Next Swing Scan output",
+    technical: "Next Rebalance Scan output",
+  };
+  return {
+    id: `${stage}:next`,
+    source: "next",
+    label: labelByStage[stage],
+    jobNo: "Next run",
+    timestamp: null,
+    status: "reserved",
+    costUsd: null,
+    error: null,
+  };
+}
+
+function filterRunToSelectedJobs(run: RunResponse, selectedIds: Set<string>): RunResponse | null {
+  const runJobs = (run.run_jobs ?? []).filter((link) =>
+    selectedIds.has(`run:${run.id}:job:${link.job?.id}`),
+  );
+  if (runJobs.length === 0) return null;
+  return { ...run, run_jobs: runJobs };
+}
+
+function uniqueRunsBySelectedCandidates(candidates: InputSelectionCandidate[], selectedIds: Set<string>) {
+  const byRun = new Map<number, RunResponse>();
+  candidates.forEach((candidate) => {
+    if (!candidate.run) return;
+    byRun.set(candidate.run.id, candidate.run);
+  });
+  return Array.from(byRun.values())
+    .map((run) => filterRunToSelectedJobs(run, selectedIds))
+    .filter(Boolean) as RunResponse[];
+}
+
 function withInrCost(info: Partial<StageInfo>, usdInrRate: number) {
   if (typeof info.costUsd !== "number" || info.costUsd <= 0) return info;
   return {
@@ -662,6 +750,7 @@ function WorkflowStageTile({
   selected,
   onClick,
   onInfoClick,
+  onInputClick,
 }: {
   stage: WorkflowStageKey;
   info: StageInfo;
@@ -670,6 +759,7 @@ function WorkflowStageTile({
   selected?: boolean;
   onClick?: () => void;
   onInfoClick?: () => void;
+  onInputClick?: () => void;
 }) {
   const isRunning = info.state === "running";
   const isQueued = info.state === "queued";
@@ -731,6 +821,19 @@ function WorkflowStageTile({
           </span>
         ) : null}
       </div>
+      {onInputClick ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onInputClick();
+          }}
+          className="mt-3 inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
+        >
+          <SlidersHorizontal className="mr-1.5 size-3.5" />
+          Select Inputs
+        </button>
+      ) : null}
       <p className="mt-2 text-xs leading-5 text-slate-500">
         {stageMeta.tileDescription}
       </p>
@@ -912,7 +1015,146 @@ function IndMoneySnapshotDialog({
   );
 }
 
+function InputSelectionDialog({
+  open,
+  stage,
+  candidates,
+  selectedIds,
+  usdInrRate,
+  loading,
+  onToggle,
+  onToggleAll,
+  onClose,
+}: {
+  open: boolean;
+  stage: InputSelectionStage | null;
+  candidates: InputSelectionCandidate[];
+  selectedIds: Set<string>;
+  usdInrRate: number;
+  loading: boolean;
+  onToggle: (id: string) => void;
+  onToggleAll: () => void;
+  onClose: () => void;
+}) {
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const allSelected = candidates.length > 0 && candidates.every((candidate) => selectedIds.has(candidate.id));
+  const someSelected = candidates.some((candidate) => selectedIds.has(candidate.id));
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [allSelected, someSelected]);
+
+  if (!open || !stage) return null;
+
+  const titleByStage: Record<InputSelectionStage, string> = {
+    swing: "Select Threat Scan inputs",
+    rebalance: "Select Swing Scan inputs",
+    technical: "Select Rebalance Scan inputs",
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-950">{titleByStage[stage]}</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Pick the previous-stage outputs this stage should consider. The reserved next-row is replaced by the live output when that earlier stage finishes.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close input selection"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="max-h-[65vh] overflow-auto p-5">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 p-8 text-sm text-slate-500">
+              <Loader2 className="size-4 animate-spin" /> Loading eligible outputs…
+            </div>
+          ) : candidates.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 p-8 text-sm text-slate-500">
+              No eligible outputs are available yet.
+            </div>
+          ) : (
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="w-12 px-3 py-3">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={onToggleAll}
+                      aria-label="Select or deselect all inputs"
+                    />
+                  </th>
+                  <th className="px-3 py-3">Job / Run No</th>
+                  <th className="px-3 py-3">Timestamp</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">LLM / Source</th>
+                  <th className="px-3 py-3">Cost (INR)</th>
+                  <th className="px-3 py-3">Error</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {candidates.map((candidate) => (
+                  <tr key={candidate.id} className={candidate.source === "next" ? "bg-blue-50/60" : "bg-white"}>
+                    <td className="px-3 py-3 align-top">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(candidate.id)}
+                        onChange={() => onToggle(candidate.id)}
+                        aria-label={`Select ${candidate.label}`}
+                      />
+                    </td>
+                    <td className="px-3 py-3 align-top font-semibold text-slate-900">{candidate.jobNo}</td>
+                    <td className="px-3 py-3 align-top text-slate-600">{candidate.timestamp ? formatTimestamp(candidate.timestamp) : "Reserved for next output"}</td>
+                    <td className="px-3 py-3 align-top">
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{candidate.status}</span>
+                    </td>
+                    <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
+                    <td className="px-3 py-3 align-top text-slate-600">
+                      {typeof candidate.costUsd === "number" ? `₹${(candidate.costUsd * usdInrRate).toFixed(2)}` : "n/a"}
+                    </td>
+                    <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">{candidate.error || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="flex justify-end border-t border-slate-200 p-4">
+          <Button type="button" onClick={onClose} className="bg-blue-600 text-white hover:bg-blue-500">
+            Done
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RebalanceFlowIcon({ className = "size-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="5">
+      <circle cx="32" cy="13" r="9" />
+      <circle cx="15" cy="47" r="9" />
+      <circle cx="52" cy="38" r="9" />
+      <path d="M32 22v12" />
+      <path d="M23 34h29" />
+      <path d="M15 38v-4h17" />
+    </svg>
+  );
+}
+
 function ZerodhaRebalanceFlowCard() {
+  const [visible, setVisible] = useState(false);
   const legendItems = [
     {
       label: "Primary workflow",
@@ -1044,16 +1286,29 @@ function ZerodhaRebalanceFlowCard() {
 
   return (
     <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-      <div>
-        <h2 className="text-lg font-semibold text-slate-950">
-          Zerodha Rebalance Flow
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Follow how the latest sync splits into risk and opportunity lanes,
-          converges in rebalance, and exits as validated actionables.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-950">
+            Zerodha Rebalance Flow
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Follow how the latest sync splits into risk and opportunity lanes,
+            converges in rebalance, and exits as validated actionables.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setVisible((current) => !current)}
+          aria-expanded={visible}
+          className="rounded-full"
+        >
+          <RebalanceFlowIcon className="mr-2 size-5" />
+          {visible ? "Hide" : "Show"} Zerodha Rebalance Flow
+        </Button>
       </div>
 
+      {visible ? (
       <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
         <div className="grid gap-3 rounded-[20px] border border-slate-200 bg-white/90 p-4 sm:grid-cols-2 xl:grid-cols-4">
           {legendItems.map((item) => (
@@ -1416,6 +1671,7 @@ function ZerodhaRebalanceFlowCard() {
         </svg>
         </div>
       </div>
+      ) : null}
     </div>
   );
 }
@@ -1448,6 +1704,26 @@ export function RebalanceWorkflowSections({
     zerodha: new Set(initialPersisted?.selectedStages?.zerodha ?? []),
     indmoneyUs: new Set(initialPersisted?.selectedStages?.indmoneyUs ?? []),
   }));
+  const [selectedInputs, setSelectedInputs] = useState<
+    Record<WorkflowPortfolio, Record<InputSelectionStage, Set<string>>>
+  >(() => ({
+    zerodha: {
+      swing: new Set(initialPersisted?.selectedInputs?.zerodha?.swing ?? ["swing:next"]),
+      rebalance: new Set(initialPersisted?.selectedInputs?.zerodha?.rebalance ?? ["rebalance:next"]),
+      technical: new Set(initialPersisted?.selectedInputs?.zerodha?.technical ?? ["technical:next"]),
+    },
+    indmoneyUs: {
+      swing: new Set(initialPersisted?.selectedInputs?.indmoneyUs?.swing ?? ["swing:next"]),
+      rebalance: new Set(initialPersisted?.selectedInputs?.indmoneyUs?.rebalance ?? ["rebalance:next"]),
+      technical: new Set(initialPersisted?.selectedInputs?.indmoneyUs?.technical ?? ["technical:next"]),
+    },
+  }));
+  const [inputDialog, setInputDialog] = useState<{
+    portfolio: WorkflowPortfolio;
+    stage: InputSelectionStage;
+  } | null>(null);
+  const [inputCandidates, setInputCandidates] = useState<InputSelectionCandidate[]>([]);
+  const [inputCandidatesLoading, setInputCandidatesLoading] = useState(false);
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
 
@@ -1460,9 +1736,21 @@ export function RebalanceWorkflowSections({
         zerodha: Array.from(selectedStages.zerodha),
         indmoneyUs: Array.from(selectedStages.indmoneyUs),
       },
+      selectedInputs: {
+        zerodha: {
+          swing: Array.from(selectedInputs.zerodha.swing),
+          rebalance: Array.from(selectedInputs.zerodha.rebalance),
+          technical: Array.from(selectedInputs.zerodha.technical),
+        },
+        indmoneyUs: {
+          swing: Array.from(selectedInputs.indmoneyUs.swing),
+          rebalance: Array.from(selectedInputs.indmoneyUs.rebalance),
+          technical: Array.from(selectedInputs.indmoneyUs.technical),
+        },
+      },
       savedAt: new Date().toISOString(),
     });
-  }, [runningPortfolio, selectedStages, specificMode, states]);
+  }, [runningPortfolio, selectedInputs, selectedStages, specificMode, states]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -1803,6 +2091,123 @@ export function RebalanceWorkflowSections({
     [],
   );
 
+  const loadInputCandidates = useCallback(
+    async (portfolio: WorkflowPortfolio, stage: InputSelectionStage) => {
+      setInputCandidatesLoading(true);
+      try {
+        const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
+        const nextCandidate = buildNextCandidate(stage);
+        let candidates: InputSelectionCandidate[] = [nextCandidate];
+
+        if (stage === "swing") {
+          const latest =
+            portfolio === "zerodha"
+              ? (await apiService.zerodhaThreatsLatest()).analysis
+              : (await apiService.indmoneyUsThreatsLatest()).analysis;
+          if (latest && isUsableStageJob({ status: latest.status, response: latest.report?.raw_markdown })) {
+            candidates.push({
+              id: `threat:${latest.job_id}`,
+              source: "threat",
+              label: `${latest.provider}/${latest.model}`,
+              jobNo: `#${latest.job_id}`,
+              timestamp: latest.created_at,
+              status: latest.status,
+              costUsd: latest.estimated_cost ?? null,
+              error: latest.error_message ?? null,
+              content: latest.report?.raw_markdown ?? null,
+            });
+          }
+        } else {
+          const runs = await fetchAllFullRuns();
+          if (stage === "rebalance") {
+            const previousClose = getPreviousMarketClose(market);
+            candidates = candidates.concat(
+              buildRunJobCandidates(
+                sortRunsByLatestTimestamp(
+                  runs
+                    .filter((run) => parseTimestampMs(run.created_at) > previousClose.getTime())
+                    .filter((run) => isRunInSwingTradeMarket(run.prompt, market)),
+                ),
+                "Swing Scan",
+              ),
+            );
+          } else {
+            candidates = candidates.concat(
+              buildRunJobCandidates(
+                sortRunsByLatestTimestamp(runs.filter((run) => isCompletedRebalanceRun(run, market))),
+                "Rebalance Scan",
+              ),
+            );
+          }
+        }
+
+        setInputCandidates(candidates);
+        setSelectedInputs((current) => {
+          const currentSet = current[portfolio][stage];
+          const onlyReservedNext = currentSet.size === 1 && currentSet.has(nextCandidate.id);
+          if (currentSet.size > 0 && !onlyReservedNext) return current;
+          const defaultIds = stage === "rebalance"
+            ? candidates.map((candidate) => candidate.id)
+            : [nextCandidate.id, candidates.find((candidate) => candidate.source !== "next")?.id]
+                .filter(Boolean) as string[];
+          return {
+            ...current,
+            [portfolio]: {
+              ...current[portfolio],
+              [stage]: new Set(defaultIds),
+            },
+          };
+        });
+      } finally {
+        setInputCandidatesLoading(false);
+      }
+    },
+    [],
+  );
+
+  const openInputSelection = useCallback(
+    (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
+      if (stage !== "swing" && stage !== "rebalance" && stage !== "technical") return;
+      const inputStage = stage as InputSelectionStage;
+      setInputDialog({ portfolio, stage: inputStage });
+      void loadInputCandidates(portfolio, inputStage).catch((error) => {
+        setInputCandidates([]);
+        window.alert(`Could not load selectable inputs: ${normalizeError(error)}`);
+      });
+    },
+    [loadInputCandidates],
+  );
+
+  const toggleInputCandidate = useCallback((id: string) => {
+    if (!inputDialog) return;
+    setSelectedInputs((current) => {
+      const nextSet = new Set(current[inputDialog.portfolio][inputDialog.stage]);
+      if (nextSet.has(id)) nextSet.delete(id);
+      else nextSet.add(id);
+      return {
+        ...current,
+        [inputDialog.portfolio]: {
+          ...current[inputDialog.portfolio],
+          [inputDialog.stage]: nextSet,
+        },
+      };
+    });
+  }, [inputDialog]);
+
+  const toggleAllInputCandidates = useCallback(() => {
+    if (!inputDialog) return;
+    setSelectedInputs((current) => {
+      const allSelected = inputCandidates.every((candidate) => current[inputDialog.portfolio][inputDialog.stage].has(candidate.id));
+      return {
+        ...current,
+        [inputDialog.portfolio]: {
+          ...current[inputDialog.portfolio],
+          [inputDialog.stage]: allSelected ? new Set() : new Set(inputCandidates.map((candidate) => candidate.id)),
+        },
+      };
+    });
+  }, [inputDialog, inputCandidates]);
+
   const cancelActiveWorkflow = useCallback(async () => {
     cancelRequestedRef.current = true;
     const runIds = Array.from(new Set(activeRunIdsRef.current));
@@ -1970,6 +2375,9 @@ export function RebalanceWorkflowSections({
       cancelRequestedRef.current = false;
 
       let currentStage: WorkflowStageKey = "sync";
+      let generatedThreatMarkdown = "";
+      let generatedSwingRun: RunResponse | null = null;
+      let generatedRebalanceRun: RunResponse | null = null;
 
       try {
         currentStage = "sync";
@@ -2061,6 +2469,7 @@ export function RebalanceWorkflowSections({
             throw new Error(
               `Threats scan failed: ${completedThreat.error_message ?? "Job failed."}`,
             );
+          generatedThreatMarkdown = completedThreat.report?.raw_markdown ?? "";
           markCompleted(portfolio, "threats", {
             ...summarizeThreat(completedThreat),
             completedLlms: 1,
@@ -2080,12 +2489,29 @@ export function RebalanceWorkflowSections({
             totalLlms: modelMixTargets.length,
             completedLlms: 0,
           });
+          const swingInputSelection = selectedInputs[portfolio].swing;
+          const selectedThreatParts: string[] = [];
+          if (swingInputSelection.has("swing:next") && generatedThreatMarkdown.trim()) {
+            selectedThreatParts.push(`## Next Threat Scan output\n\n${generatedThreatMarkdown.trim()}`);
+          }
+          if ([...swingInputSelection].some((id) => id.startsWith("threat:"))) {
+            const latestThreat =
+              portfolio === "zerodha"
+                ? (await apiService.zerodhaThreatsLatest()).analysis
+                : (await apiService.indmoneyUsThreatsLatest()).analysis;
+            if (latestThreat?.report?.raw_markdown && swingInputSelection.has(`threat:${latestThreat.job_id}`)) {
+              selectedThreatParts.push(`## Selected Threat Scan #${latestThreat.job_id}\n\n${latestThreat.report.raw_markdown.trim()}`);
+            }
+          }
+          const threatAppendix = selectedThreatParts.length
+            ? `\n\n---\n\n# User-selected Threat Scan Inputs\n\n${selectedThreatParts.join("\n\n---\n\n")}`
+            : "";
           const swingRun = await apiService.createRun(
             buildRunPayload({
-              prompt: buildSwingTradePrompt(
+              prompt: `${buildSwingTradePrompt(
                 market,
                 getSwingTradeDefaultInvestmentAmount(market),
-              ),
+              )}${threatAppendix}`,
               targets: modelMixTargets,
               sheetName: getSwingTradeDefaultExportSheetName(market),
             }),
@@ -2095,6 +2521,7 @@ export function RebalanceWorkflowSections({
             "swing",
             swingRun.id,
           );
+          generatedSwingRun = completedSwingRun;
           markCompleted(portfolio, "swing", {
             ...summarizeRun(completedSwingRun),
             ...getRunProgress(completedSwingRun),
@@ -2135,9 +2562,20 @@ export function RebalanceWorkflowSections({
           const fullRunCandidates = await Promise.all(
             recentCompletedRuns.map((run) => apiService.getRun(run.id)),
           );
-          const swingRuns = fullRunCandidates
-            .filter((run) => isRunInSwingTradeMarket(run.prompt, market))
-            .slice(0, 12);
+          const swingCandidates = buildRunJobCandidates(
+            fullRunCandidates.filter((run) => isRunInSwingTradeMarket(run.prompt, market)),
+            "Swing Scan",
+          );
+          const selectedRebalanceInputs = selectedInputs[portfolio].rebalance;
+          const selectedSwingRuns = selectedRebalanceInputs.size
+            ? uniqueRunsBySelectedCandidates(swingCandidates, selectedRebalanceInputs)
+            : [];
+          const swingRuns = [
+            ...(selectedRebalanceInputs.has("rebalance:next") && generatedSwingRun ? [generatedSwingRun] : []),
+            ...(selectedSwingRuns.length ? selectedSwingRuns : fullRunCandidates
+              .filter((run) => isRunInSwingTradeMarket(run.prompt, market))
+              .slice(0, 12)),
+          ];
           const inputBundle = buildRebalanceInputBundle({
             market,
             previousClose,
@@ -2159,6 +2597,7 @@ export function RebalanceWorkflowSections({
             "rebalance",
             rebalanceRun.id,
           );
+          generatedRebalanceRun = completedRebalanceRun;
           markCompleted(portfolio, "rebalance", {
             ...summarizeRun(completedRebalanceRun),
             ...getRunProgress(completedRebalanceRun),
@@ -2184,8 +2623,19 @@ export function RebalanceWorkflowSections({
             completedLlms: 0,
           });
           const allRuns = await fetchAllFullRuns();
+          const selectedTechnicalInputs = selectedInputs[portfolio].technical;
+          const selectedRebalanceRuns = selectedTechnicalInputs.size
+            ? uniqueRunsBySelectedCandidates(
+                buildRunJobCandidates(allRuns.filter((run) => isCompletedRebalanceRun(run, market)), "Rebalance Scan"),
+                selectedTechnicalInputs,
+              )
+            : [];
+          const rebalanceInputs = [
+            ...(selectedTechnicalInputs.has("technical:next") && generatedRebalanceRun ? [generatedRebalanceRun] : []),
+            ...(selectedRebalanceRuns.length ? selectedRebalanceRuns : getLatestMatchingRebalanceRuns(allRuns, market)),
+          ];
           const consensus = buildConsensusRows(
-            getLatestMatchingRebalanceRuns(allRuns, market),
+            rebalanceInputs,
             market,
           );
           if (consensus.length === 0)
@@ -2260,6 +2710,7 @@ export function RebalanceWorkflowSections({
       onDashboardRefresh,
       promptToContinueAfterProblem,
       resetPortfolio,
+      selectedInputs,
       selectedStages,
       specificMode,
       updateStage,
@@ -2424,6 +2875,11 @@ export function RebalanceWorkflowSections({
                   ? () => void showStageLlmInfo(stage)
                   : undefined
               }
+              onInputClick={
+                stage === "swing" || stage === "rebalance" || stage === "technical"
+                  ? () => openInputSelection(section.portfolio, stage)
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -2444,6 +2900,18 @@ export function RebalanceWorkflowSections({
       <section className="mt-6">
         <ZerodhaRebalanceFlowCard />
       </section>
+
+      <InputSelectionDialog
+        open={Boolean(inputDialog)}
+        stage={inputDialog?.stage ?? null}
+        candidates={inputCandidates}
+        selectedIds={inputDialog ? selectedInputs[inputDialog.portfolio][inputDialog.stage] : new Set()}
+        usdInrRate={usdInrRate}
+        loading={inputCandidatesLoading}
+        onToggle={toggleInputCandidate}
+        onToggleAll={toggleAllInputCandidates}
+        onClose={() => setInputDialog(null)}
+      />
 
       <IndMoneySnapshotDialog
         open={dialogOpen}
