@@ -712,5 +712,84 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         self.assertTrue(fake_db.closed)
 
 
+    @patch("app.domains.jobs.tasks._refresh_run_status")
+    @patch("app.domains.jobs.tasks._publish_job_update")
+    @patch("app.domains.ai_providers.factory.ProviderFactory.create")
+    @patch("app.domains.jobs.tasks.SyncJobRepository")
+    @patch("app.domains.jobs.tasks.SyncSessionLocal")
+    def test_execute_ai_job_marks_malformed_rebalance_rows_as_partial(
+        self,
+        sync_session_local_mock,
+        sync_repo_cls_mock,
+        provider_factory_create_mock,
+        _publish_job_update_mock,
+        _refresh_run_status_mock,
+    ):
+        job = SimpleNamespace(
+            id=904,
+            prompt=(
+                "[REBALANCE_FLOW:india]\n"
+                "Return ONLY one markdown table.\n"
+                "Create one table only with exactly these columns:\n"
+                "| Exchange Symbol | Stock Symbol | Current Units | Action (Buy/Add/Sell All/Trim/Hold/Buy New) | Units Change | Final Units | Technical Setup | Entry Range | Stop Loss | Target | Analyst/Source | Units to Buy | Price Per Unit | Total Buy Amount | Upside Horizon (% return) | Weeks | Confidence Score (0-100) | Rationale Remarks | Rationale - Technical setup (short term (1-3 months) | Rationale - Technical setup (medium term) | Rationale - Technical setup (long term term) | Rationale - Fundamentals Short term | Rationale - Fundamentals Medium/Long Term |"
+            ),
+            provider="deepseek",
+            model="deepseek-chat",
+            status=JobStatus.PENDING,
+            response=None,
+            error_message=None,
+            tokens_in=None,
+            tokens_out=None,
+            estimated_cost=None,
+        )
+        fake_db = FakeDB()
+        fake_repo = FakeRepo(job)
+
+        sync_session_local_mock.return_value = fake_db
+        sync_repo_cls_mock.return_value = fake_repo
+
+        malformed_response = (
+            "| Exchange Symbol | Stock Symbol | Current Units | Action (Buy/Add/Sell All/Trim/Hold/Buy New) | Units Change | Final Units | Technical Setup |\n"
+            "| --- | --- | --- | --- | --- | --- | --- |\n"
+            "| | ASHOKLEY | 45 | Sell All | -45 | 0 | Breakdown below support |\n"
+        )
+        provider = MagicMock()
+        provider.generate.side_effect = [
+            AIProviderResponse(
+                content=malformed_response,
+                tokens_in=100,
+                tokens_out=50,
+                cost=0.001,
+                provider="deepseek",
+                model="deepseek-chat",
+            ),
+            AIProviderResponse(
+                content=malformed_response,
+                tokens_in=120,
+                tokens_out=60,
+                cost=0.0012,
+                provider="deepseek",
+                model="deepseek-chat",
+            ),
+            AIProviderResponse(
+                content=malformed_response,
+                tokens_in=130,
+                tokens_out=65,
+                cost=0.0013,
+                provider="deepseek",
+                model="deepseek-chat",
+            ),
+        ]
+        provider_factory_create_mock.return_value = provider
+
+        tasks.execute_ai_job.run(904)
+
+        self.assertEqual(job.status, JobStatus.PARTIAL)
+        self.assertIn("malformed table output", job.error_message)
+        self.assertIn("ASHOKLEY", job.response)
+        self.assertEqual(provider.generate.call_count, 3)
+        self.assertTrue(fake_db.closed)
+
+
 if __name__ == "__main__":
     unittest.main()

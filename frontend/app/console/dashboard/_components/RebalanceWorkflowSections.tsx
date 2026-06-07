@@ -872,21 +872,35 @@ function getRunDuration(run: RunResponse) {
   );
 }
 
+function classifyRunOutputJob(
+  job: NonNullable<RunResponse["run_jobs"]>[number]["job"],
+) {
+  const status = (job?.status || "").toLowerCase();
+  const issueText = `${job?.error_message || ""}
+${job?.response || ""}`.toLowerCase();
+  const hasSavedRows = Boolean(job?.response?.trim());
+  const isMalformedTable = issueText.includes("malformed table output");
+  const isPartialTable = issueText.includes("partial rebalance table");
+
+  if (
+    status === "partial" ||
+    isPartialTable ||
+    (isMalformedTable && hasSavedRows) ||
+    (hasSavedRows && status !== "completed" && status !== "failed")
+  ) {
+    return "partial";
+  }
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  return "other";
+}
+
 function getRunOutputSummary(run: RunResponse) {
   const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
-  const completed = jobs.filter(
-    (job) => (job.status || "").toLowerCase() === "completed",
-  ).length;
-  const failed = jobs.filter(
-    (job) => (job.status || "").toLowerCase() === "failed",
-  ).length;
-  const partial = jobs.filter((job) => {
-    const status = (job.status || "").toLowerCase();
-    return (
-      status === "partial" ||
-      (Boolean(job.response?.trim()) && status !== "completed")
-    );
-  }).length;
+  const classifications = jobs.map(classifyRunOutputJob);
+  const completed = classifications.filter((state) => state === "completed").length;
+  const partial = classifications.filter((state) => state === "partial").length;
+  const failed = classifications.filter((state) => state === "failed").length;
   const costUsd = jobs.reduce(
     (total, job) => total + (job.estimated_cost ?? 0),
     0,
@@ -3321,7 +3335,7 @@ export function RebalanceWorkflowSections({
 
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
-      const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle}`;
+      const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle} Output`;
       const routeUrl = getStageOutputRoute(portfolio, stage);
       setOutputDialog({
         portfolio,
@@ -4018,14 +4032,98 @@ export function RebalanceWorkflowSections({
     ],
   );
 
+  const buildZerodhaPopupFeatures = useCallback(() => {
+    const width = 560;
+    const height = 760;
+    const left = Math.max(window.screenX + (window.outerWidth - width) / 2, 0);
+    const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0);
+    return `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`;
+  }, []);
+
+  const ensureZerodhaConnectedForSync = useCallback(async (preOpenedPopup?: Window | null) => {
+    const status = await apiService.zerodhaStatus();
+    if (status.connected) {
+      preOpenedPopup?.close();
+      return;
+    }
+
+    const login = await apiService.zerodhaLoginUrl();
+    if (!login.configured || !login.login_url) {
+      preOpenedPopup?.close();
+      throw new Error("Zerodha is not configured on this server.");
+    }
+
+    const canReusePreOpenedPopup = Boolean(preOpenedPopup && !preOpenedPopup.closed);
+    const popup = canReusePreOpenedPopup
+      ? preOpenedPopup
+      : window.open(
+          login.login_url,
+          "zerodha-connect",
+          buildZerodhaPopupFeatures(),
+        );
+
+    if (!popup) {
+      throw new Error(
+        "Zerodha login popup was blocked. Allow popups and click Sync Now or Refresh Board again.",
+      );
+    }
+
+    if (canReusePreOpenedPopup) {
+      popup.location.href = login.login_url;
+    }
+    popup.focus();
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timeoutMs = 5 * 60 * 1000;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener("message", handleMessage);
+        window.clearInterval(popupPoll);
+        window.clearTimeout(timeout);
+        if (error) reject(error);
+        else resolve();
+      };
+      const handleMessage = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return;
+        const data = event.data as
+          | { type?: string; message?: string }
+          | null
+          | undefined;
+        if (data?.type === "zerodha_connected") {
+          finish();
+        } else if (data?.type === "zerodha_error") {
+          finish(new Error(data.message || "Zerodha connection failed."));
+        }
+      };
+      const popupPoll = window.setInterval(() => {
+        if (popup.closed) {
+          finish(new Error("Zerodha login popup was closed before connection completed."));
+        }
+      }, 500);
+      const timeout = window.setTimeout(() => {
+        finish(new Error("Zerodha login timed out before connection completed."));
+      }, timeoutMs);
+      window.addEventListener("message", handleMessage);
+    });
+
+    await sleep(1200);
+  }, [buildZerodhaPopupFeatures]);
+
   const syncPortfolioNow = useCallback(
     async (
       portfolio: WorkflowPortfolio,
       payload?: IndMoneyUsPortfolioSnapshotCreateRequest,
     ) => {
+      const zerodhaPopup =
+        portfolio === "zerodha"
+          ? window.open("about:blank", "zerodha-connect", buildZerodhaPopupFeatures())
+          : null;
       try {
         markRunning(portfolio, "sync");
         if (portfolio === "zerodha") {
+          await ensureZerodhaConnectedForSync(zerodhaPopup);
           const synced = await apiService.zerodhaSyncPortfolio();
           const overview = await apiService.zerodhaPortfolioOverview();
           markCompleted(portfolio, "sync", {
@@ -4056,7 +4154,14 @@ export function RebalanceWorkflowSections({
         });
       }
     },
-    [markCompleted, markRunning, onDashboardRefresh, updateStage],
+    [
+      buildZerodhaPopupFeatures,
+      ensureZerodhaConnectedForSync,
+      markCompleted,
+      markRunning,
+      onDashboardRefresh,
+      updateStage,
+    ],
   );
 
   useEffect(() => {
