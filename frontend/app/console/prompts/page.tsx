@@ -17,7 +17,6 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { apiService, APIError } from '@/services/api';
@@ -47,6 +46,54 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = { name: '', description: '', body: '' };
+
+const PROMPT_DETAIL_SECTION_NAMES = [
+  'TASK',
+  'ROLE',
+  'OBJECTIVE',
+  'MARKET + TIME HORIZON',
+  'INPUTS',
+  'DATA + SOURCE RULES',
+  'COVERAGE RULES',
+  'ANALYSIS RULES',
+  'DECISION RULES',
+  'CAPITAL / UNIT RULES',
+  'OUTPUT FORMAT',
+  'FALLBACK RULES',
+  'VALIDATION CHECKLIST',
+  'FINAL OUTPUT RESTRICTION',
+] as const;
+
+type PromptDetailSectionName = (typeof PROMPT_DETAIL_SECTION_NAMES)[number];
+type PromptDetailSections = Record<PromptDetailSectionName, string>;
+
+function createEmptyPromptSections(): PromptDetailSections {
+  return PROMPT_DETAIL_SECTION_NAMES.reduce((acc, section) => {
+    acc[section] = '';
+    return acc;
+  }, {} as PromptDetailSections);
+}
+
+function parsePromptSections(body: string): PromptDetailSections {
+  const sections = createEmptyPromptSections();
+  const sectionPattern = /^\[([^\]]+)\]\s*$/gm;
+  const matches = Array.from(body.matchAll(sectionPattern));
+  matches.forEach((match, index) => {
+    const sectionName = match[1].trim().toUpperCase() as PromptDetailSectionName;
+    if (!PROMPT_DETAIL_SECTION_NAMES.includes(sectionName)) return;
+    const start = (match.index ?? 0) + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index ?? body.length : body.length;
+    sections[sectionName] = body.slice(start, end).trim();
+  });
+  return sections;
+}
+
+function buildPromptBodyFromSections(sections: PromptDetailSections) {
+  return PROMPT_DETAIL_SECTION_NAMES
+    .map((section) => `[${section}]\n${sections[section].trim()}`)
+    .join('\n\n')
+    .trim();
+}
 
 type PromptMarket = 'India' | 'US' | 'TBD';
 type PromptStageId =
@@ -125,6 +172,7 @@ export default function PromptsPage() {
   const [editTarget, setEditTarget] = useState<PromptResponse | null>(null);
   const [isFork, setIsFork] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [promptSections, setPromptSections] = useState<PromptDetailSections>(() => createEmptyPromptSections());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -160,6 +208,7 @@ export default function PromptsPage() {
     setEditTarget(null);
     setIsFork(false);
     setForm(EMPTY_FORM);
+    setPromptSections(createEmptyPromptSections());
     setFormError(null);
     setShowModal(true);
   }
@@ -168,6 +217,7 @@ export default function PromptsPage() {
     setEditTarget(prompt);
     setIsFork(false);
     setForm({ name: prompt.name, description: prompt.description ?? '', body: prompt.body });
+    setPromptSections(parsePromptSections(prompt.body));
     setFormError(null);
     setShowModal(true);
   }
@@ -176,6 +226,7 @@ export default function PromptsPage() {
     setEditTarget(null);
     setIsFork(true);
     setForm({ name: prompt.name, description: prompt.description ?? '', body: prompt.body });
+    setPromptSections(parsePromptSections(prompt.body));
     setFormError(null);
     setShowModal(true);
   }
@@ -185,12 +236,22 @@ export default function PromptsPage() {
     setEditTarget(null);
     setIsFork(false);
     setForm(EMPTY_FORM);
+    setPromptSections(createEmptyPromptSections());
     setFormError(null);
   }
 
+  function updatePromptSection(section: PromptDetailSectionName, value: string) {
+    setPromptSections((current) => {
+      const next = { ...current, [section]: value };
+      setForm((existing) => ({ ...existing, body: buildPromptBodyFromSections(next) }));
+      return next;
+    });
+  }
+
   async function handleSave() {
-    if (!form.name.trim() || !form.body.trim()) {
-      setFormError('Name and body are required.');
+    const promptName = form.name.trim() || 'Untitled Prompt';
+    if (!form.body.trim()) {
+      setFormError('Prompt detail sections are required.');
       return;
     }
 
@@ -200,7 +261,7 @@ export default function PromptsPage() {
     try {
       if (editTarget) {
         const update: PromptUpdate = {
-          name: form.name.trim(),
+          name: promptName,
           description: form.description.trim() || undefined,
           body: form.body,
         };
@@ -208,7 +269,7 @@ export default function PromptsPage() {
         setPrompts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
       } else {
         const create: PromptCreate = {
-          name: form.name.trim(),
+          name: promptName,
           description: form.description.trim() || undefined,
           body: form.body,
         };
@@ -326,7 +387,7 @@ export default function PromptsPage() {
           <div className="w-full max-w-2xl bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-950">
-                {editTarget ? 'Edit Prompt' : isFork ? 'Save as My Prompt' : 'New Prompt'}
+                {editTarget ? 'Prompt Details' : isFork ? 'Save as My Prompt' : 'New Prompt'}
               </h2>
               <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">
                 <X className="size-5" />
@@ -340,40 +401,33 @@ export default function PromptsPage() {
                 </div>
               )}
 
-              <div className="space-y-1.5">
-                <Label htmlFor="p-name">Name</Label>
-                <Input
-                  id="p-name"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="India Swing-Trade Research"
-                  className="border-gray-300"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="p-desc">
-                  Description <span className="text-gray-400">(optional)</span>
-                </Label>
-                <Input
-                  id="p-desc"
-                  value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                  placeholder="Short description of what this prompt does"
-                  className="border-gray-300"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="p-body">Prompt Body</Label>
+              <details className="border border-gray-200 bg-gray-50">
+                <summary className="cursor-pointer px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-700">
+                  [Full Prompt]
+                </summary>
                 <textarea
-                  id="p-body"
                   value={form.body}
-                  onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
-                  rows={14}
-                  className="w-full resize-y border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-950 shadow-sm outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
-                  placeholder="Enter your prompt text here..."
+                  readOnly
+                  rows={10}
+                  className="w-full resize-y border-t border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-800 outline-none"
+                  aria-label="Full Prompt"
                 />
+              </details>
+
+              <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+                {PROMPT_DETAIL_SECTION_NAMES.map((section) => (
+                  <div key={section} className="space-y-1.5">
+                    <Label htmlFor={`prompt-section-${section}`}>[{section}]</Label>
+                    <textarea
+                      id={`prompt-section-${section}`}
+                      value={promptSections[section]}
+                      onChange={(e) => updatePromptSection(section, e.target.value)}
+                      rows={section === 'OUTPUT FORMAT' ? 8 : 4}
+                      className="w-full resize-y border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-950 shadow-sm outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
+                      placeholder={`Define ${section.toLowerCase()}`}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 

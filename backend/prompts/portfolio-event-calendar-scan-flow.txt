@@ -1,104 +1,48 @@
-{{EVENT_JOB_MARKER}}
-[ENABLE_WEB_SEARCH]
-[EVENT_METADATA_DO_NOT_REPEAT]
-{{SNAPSHOT_METADATA_MARKERS}}
+[TASK]
+Create one markdown table listing all upcoming scheduled or announced price-sensitive events for current portfolio holdings.
 
-Use live web data before answering.
-Treat {{SNAPSHOT_DATE}} as the reference 'today' date when deciding whether an event is upcoming.
-Do not repeat the metadata marker lines in the final answer.
-Return ONLY one markdown table.
-Do not return any introduction, explanation, notes, code fences, bullets, summary, or conclusion.
-Use exactly these columns in this order: | Date | Exchange | Stock Symbol | Stock Name | Event | Why it may matter | Expected Outcome | Status / Source |
-The `Expected Outcome` column must contain only Bullish, Bearish, or Neutral.
-Date format must be DD Mon YYYY.
-Every output row must include Exchange, Stock Symbol, and Stock Name in addition to the event details.
-Use the pasted exchange + tradingsymbol pair as authoritative when searching for events.
-If the pasted stock name looks like only a ticker placeholder, replace it with the official listed company name when verified.
-If no upcoming scheduled event is found for the entire portfolio, still return exactly one data row with Date `Not found`, Exchange `Not found`, Stock Symbol `All holdings`, Stock Name `All holdings`, Event `No upcoming scheduled price-sensitive event found`, Why it may matter `No scheduled catalyst found in checked sources`, Expected Outcome `Neutral`, and Status / Source `Checked latest available sources`.
+[ROLE]
+Act as an equity market calendar analyst for Indian equities and US equities.
 
-Current portfolio snapshot:
-{{PORTFOLIO_SNAPSHOT_AND_HOLDINGS_TABLES}}
+[OBJECTIVE]
+Identify upcoming earnings, results, board meetings, AGMs, dividends, buybacks, splits, bonus issues, rights issues, investor days, product events, regulatory events, and other scheduled company-specific catalysts.
 
-Use the analysis brief below verbatim as the core instruction:
+[MARKET + TIME HORIZON]
+Cover NSE/BSE and NASDAQ/NYSE/AMEX holdings. Prioritize nearest 60 calendar days from `{{SNAPSHOT_DATE}}`; include later events only if clearly scheduled and material.
 
-Act as an equity market calendar analyst for both **Indian equities** and **US equities**.
+[INPUTS]
+`{{SNAPSHOT_DATE}}`
+`{{PORTFOLIO_SNAPSHOT_AND_HOLDINGS_TABLES}}`
+Exchange + stock symbol pairs are authoritative.
 
-Using my current portfolio holdings pasted below, create **Table 1 only** listing all upcoming scheduled / announced price-sensitive events for these holdings.
-You must cover **every holding in the pasted portfolio**, not just a selected subset.
+[DATA + SOURCE RULES]
+Use latest web data. Prefer NSE/BSE announcements, company IR, SEBI/NCLT filings, SEC filings, Nasdaq/NYSE calendars, press releases, and reputable market calendars.
 
-Prioritize the **nearest 60 calendar days first**. If a holding has no event inside 60 days but has a clearly scheduled event shortly after that, you may still include it.
+[COVERAGE RULES]
+Cover every holding. Return at least one row for every holding. Include multiple rows if multiple material events exist.
 
-The portfolio may contain:
+[ANALYSIS RULES]
+Assess expected event bias using recent results trend, expectations, guidance, management commentary, newsflow, sector trend, valuation, recent price action, and event type.
 
-* Indian stocks from NSE/BSE / Zerodha holdings
-* US stocks from INDmoney US portfolio
-* Or both together
+[DECISION RULES]
+Expected Outcome must be exactly Bullish, Bearish, or Neutral.
 
-Events to include:
+[CAPITAL / UNIT RULES]
+Not applicable. Do not calculate allocation, units, weights, or buy/sell actions.
 
-* Earnings / quarterly results / board meeting for results
-* Investor Day / Analyst Day
-* Annual General Meeting / shareholder meeting
-* Dividend declaration, ex-dividend date, record date, payment date
-* Bonus, split, buyback, rights issue, preferential issue, QIP, merger/demerger, scheme of arrangement
-* Major management presentation / investor conference
-* Product launch / developer conference / AI event / industry event directly relevant to the company
-* Regulatory approval / scheduled court/NCLT/SEC-related event, if clearly scheduled
-* Any other clearly scheduled company-specific event that may affect price
-
-For each event, also assess the **expected market outcome at the event** as exactly one of:
-
-* Bullish
-* Bearish
-* Neutral
-
-Expected Outcome rules:
-
-1. Base the expected outcome on available evidence such as recent results trend, analyst expectations, guidance, management commentary, recent newsflow, sector trend, valuation, recent price action, and event type.
-2. Use **Bullish** only where the event has a reasonable chance of positive surprise, favourable guidance, positive corporate action, or strong sector/news support.
-3. Use **Bearish** only where the event has a reasonable chance of disappointment, weak guidance, adverse regulatory/corporate action, or negative sector/news support.
-4. Use **Neutral** where the event is routine, already priced in, low-impact, mixed, or insufficient evidence is available.
-5. Do not overstate certainty. This is an expected event bias, not a guaranteed outcome.
-6. The Expected Outcome column must contain only: Bullish, Bearish, or Neutral.
-
-Source rules:
-
-1. Use the latest available online information.
-2. Do not rely on stale memory.
-3. Treat the pasted exchange + stock symbol pair as authoritative when available and use it in searches.
-4. For Indian stocks, prefer NSE corporate announcements, BSE corporate announcements, company investor relations pages, exchange filings, SEBI/NCLT disclosures, and reputable market calendar sources.
-5. For US stocks, prefer company IR pages, SEC filings, Nasdaq/NYSE calendars, press releases, and reputable market calendar sources.
-6. For Indian stocks, return the exchange as exactly `NSE` or `BSE` using the pasted portfolio data.
-7. For US stocks, return the primary listed exchange in a TradingView-compatible form such as `NASDAQ`, `NYSE`, or `AMEX` when it can be verified from current public sources.
-8. Always return both the stock symbol and the stock name. If the pasted stock name is only a ticker-like placeholder, replace it with the proper listed company name when verified.
-9. If a date is company-confirmed or exchange-confirmed, write “Confirmed” in Status / Source.
-10. If a date is only estimated by third-party calendars, write “Estimated / not company-confirmed”.
-11. If sources conflict, mention the conflict briefly in Status / Source.
-12. Include source name and link/citation in Status / Source.
-13. Before concluding there are no events, check at least these categories for every holding, with extra care on the most material holdings: earnings/results date, dividend/ex-date, AGM/shareholder meeting, investor conference / analyst day / product event.
-14. Do not treat failure to find one event type as proof that no scheduled event exists.
-
-Strict output rules:
-
-1. Return **only Table 1**.
-2. Do not include any introduction, explanation, notes, assumptions, observations, bullets, summary, or conclusion.
-3. Use only upcoming events as of today.
-4. Do not include past events.
-5. Do not invent any event, date, source, explanation, or expected outcome.
-6. Return at least one row for every holding in the portfolio.
-7. If a holding has multiple distinct material upcoming events, include multiple rows for that holding.
-8. If no scheduled event is found for a holding after checking the required categories, include exactly one fallback row for that holding with Date `Not found`, the best available Exchange / Stock Symbol / Stock Name for that holding, Event `No upcoming scheduled price-sensitive event found`, Why it may matter `No scheduled catalyst found in checked sources`, Expected Outcome `Neutral`, and Status / Source `Checked latest available sources`.
-9. Every row must include Exchange, Stock Symbol, and Stock Name. For fallback rows, use the pasted exchange and stock symbol where available so every portfolio holding remains visible in the final table.
-10. Sort rows by date from nearest to farthest, placing any `Not found` fallback rows after dated rows.
-11. Date format must be: DD Mon YYYY.
-12. Keep wording concise but meaningful inside cells.
-13. Use the exact column structure below.
-14. Standardize holding names/tickers where required.
-15. If a holding is ambiguous, use the pasted exchange + stock symbol pair as the tie-breaker.
-16. If both Indian and US holdings are provided, combine them into the same table and do not create separate tables.
-17. Use exact absolute dates whenever available; avoid vague text like “next week”, “soon”, or “upcoming”.
-
-Return only this table:
+[OUTPUT FORMAT]
+Return exactly this table:
 
 | Date | Exchange | Stock Symbol | Stock Name | Event | Why it may matter | Expected Outcome | Status / Source |
 | ---- | -------- | ------------ | ---------- | ----- | ----------------- | ---------------- | --------------- |
+
+Date format: DD Mon YYYY.
+
+[FALLBACK RULES]
+If no event is found for a holding, include one fallback row with Date `Not found`, Event `No upcoming scheduled price-sensitive event found`, Expected Outcome `Neutral`, Status / Source `Checked latest available sources`.
+
+[VALIDATION CHECKLIST]
+Verify every holding appears at least once; dates are upcoming as of `{{SNAPSHOT_DATE}}`; every row includes Exchange, Stock Symbol, Stock Name; Expected Outcome is valid.
+
+[FINAL OUTPUT RESTRICTION]
+Return only one markdown table. No introduction, explanation, notes, bullets, summary, conclusion, or code fences.

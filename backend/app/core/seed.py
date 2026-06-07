@@ -112,12 +112,12 @@ async def seed_system_prompts(db: AsyncSession) -> None:
 
         if existing:
             existing.description = seed.description
-            if not (existing.body or "").strip():
+            if (existing.body or "").strip() != body:
                 existing.body = body
                 existing.version += 1
-                logger.info("Initialized empty system prompt body: %s", seed.name)
+                logger.info("Updated system prompt body from seed: %s", seed.name)
             else:
-                logger.info("Preserved customized system prompt body: %s", seed.name)
+                logger.info("System prompt body already current: %s", seed.name)
             existing.is_active = True
         else:
             db.add(

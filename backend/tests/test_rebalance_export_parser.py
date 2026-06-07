@@ -37,12 +37,18 @@ def test_rebalance_markdown_table_parses_and_formats_for_sheets():
         "Upside Horizon (% return)",
         "Weeks",
         "Confidence Score (0-100)",
-        "Rationale Remarks",
-        "Rationale - Technical setup (short term (1-3 months)",
-        "Rationale - Technical setup (medium term)",
-        "Rationale - Technical setup (long term term)",
-        "Rationale - Fundamentals Short term",
+        "Rationale Cruxx",
+        "Score Rationale Cruxx",
+        "Rationale Technical Setup Short Term 1–3 Months",
+        "Score Rationale Technical Setup Short Term 1–3 Months",
+        "Rationale - Technical Setup (Medium Term)",
+        "Score Rationale - Technical Setup (Medium Term)",
+        "Rationale - Technical Setup (Long Term)",
+        "Score Rationale - Technical Setup (Long Term)",
+        "Rationale - Fundamentals Short Term",
+        "Score Rationale - Fundamentals Short Term",
         "Rationale - Fundamentals Medium/Long Term",
+        "Score Rationale - Fundamentals Medium/Long Term",
     ]
     assert sheet_rows[0][:6] == ["NSE", "ABC", 10, "Hold", 0, 10]
     assert sheet_rows[0][15] == 8
