@@ -39,6 +39,7 @@ import { APIError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
 import type {
   IndMoneyUsPortfolioSnapshotCreateRequest,
+  JobResponse,
   IndMoneyUsThreatAnalysis,
   ProviderInfo,
   ProviderModelTarget,
@@ -355,7 +356,7 @@ function getStageTileLabel(stage: WorkflowStageKey) {
 }
 
 function summarizeRun(run: RunResponse) {
-  const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+  const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
   const firstJob = jobs[0];
   const costUsd = jobs.reduce(
     (total, job) => total + (job.estimated_cost ?? 0),
@@ -896,7 +897,7 @@ ${job?.response || ""}`.toLowerCase();
 }
 
 function getRunOutputSummary(run: RunResponse) {
-  const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+  const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
   const classifications = jobs.map(classifyRunOutputJob);
   const completed = classifications.filter((state) => state === "completed").length;
   const partial = classifications.filter((state) => state === "partial").length;
@@ -924,6 +925,159 @@ function formatLlmCompletion(info: StageInfo) {
 function formatLlmRun(info: StageInfo) {
   return (
     [info.provider, info.model].filter(Boolean).join(" / ") || "Not available"
+  );
+}
+
+
+function formatUsdCost(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "$0.0000";
+  }
+  return `$${value.toFixed(4)}`;
+}
+
+function getJobDuration(job?: JobResponse | null) {
+  return formatDuration(job?.created_at, job?.updated_at);
+}
+
+function getRunCostUsd(run: RunResponse) {
+  return (run.run_jobs ?? []).reduce(
+    (total, link) => total + (link.job?.estimated_cost ?? 0),
+    0,
+  );
+}
+
+function getRunOutputStatusClass(status: ReturnType<typeof classifyRunOutputJob>) {
+  if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "partial") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "failed") return "border-red-200 bg-red-50 text-red-700";
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
+function getRunOutputStatusLabel(status: ReturnType<typeof classifyRunOutputJob>) {
+  if (status === "completed") return "Completed";
+  if (status === "partial") return "Partial";
+  if (status === "failed") return "Failed";
+  return "Other";
+}
+
+function RunOutputDetails({ run }: { run: RunResponse }) {
+  const [highlightedJobId, setHighlightedJobId] = useState<number | null>(null);
+  const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
+  const classifications = jobs.map(classifyRunOutputJob);
+  const completed = classifications.filter((state) => state === "completed").length;
+  const partial = classifications.filter((state) => state === "partial").length;
+  const failed = classifications.filter((state) => state === "failed").length;
+  const duration = getRunDuration(run);
+  const costUsd = getRunCostUsd(run);
+
+  const scrollToJob = (jobId: number) => {
+    setHighlightedJobId(jobId);
+    window.setTimeout(() => setHighlightedJobId((current) => (current === jobId ? null : current)), 1000);
+    document.getElementById(`run-output-job-${jobId}`)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
+  return (
+    <div className="space-y-4 bg-white p-5 text-slate-900">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+              Last Run Summary
+            </p>
+            <h4 className="mt-2 text-lg font-extrabold text-slate-950">
+              Run #{run.id} · {formatTimestamp(run.created_at)}
+              <span className="block text-sm font-semibold text-slate-600 sm:ml-2 sm:inline">
+                LLMs used: {jobs.length}{duration ? ` · Time taken: ${duration}` : ""}
+              </span>
+            </h4>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold uppercase tracking-[0.14em]">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-emerald-700">
+              <span className="block text-xl">{completed}</span>Completed
+            </div>
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 px-5 py-3 text-sky-700">
+              <span className="block text-xl">{partial}</span>Partial
+            </div>
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-red-700">
+              <span className="block text-xl">{failed}</span>Failed
+            </div>
+          </div>
+        </div>
+        {costUsd > 0 ? (
+          <p className="mt-2 text-sm font-semibold text-slate-600">Cumulative cost: {formatUsdCost(costUsd)}</p>
+        ) : null}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {jobs.map((job) => {
+            const state = classifyRunOutputJob(job);
+            const jobDuration = getJobDuration(job);
+            return (
+              <button
+                key={`summary-job-${job.id}`}
+                type="button"
+                onClick={() => scrollToJob(job.id)}
+                className={`rounded-full border px-3 py-1.5 text-left text-xs font-semibold transition hover:shadow-sm ${getRunOutputStatusClass(state)}`}
+                title={`Jump to ${job.provider}/${job.model}`}
+              >
+                <span className="capitalize">{job.provider}</span>{" "}
+                <span className="font-medium">{job.model}</span>
+                <span className="font-bold"> · {getRunOutputStatusLabel(state)}</span>
+                <span className="ml-1 text-[11px] opacity-80">
+                  {jobDuration ? ` · ${jobDuration}` : ""} · {formatUsdCost(job.estimated_cost)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-4 text-xs text-slate-500">
+          Malformed table outputs with any stored LLM table response are counted as Partial.
+        </p>
+      </section>
+
+      {jobs.map((job) => {
+        const state = classifyRunOutputJob(job);
+        const isHighlighted = highlightedJobId === job.id;
+        return (
+          <section
+            key={`details-job-${job.id}`}
+            id={`run-output-job-${job.id}`}
+            className={`scroll-mt-6 overflow-hidden rounded-2xl border bg-white transition duration-300 ${
+              isHighlighted
+                ? "border-blue-400 ring-4 ring-blue-200"
+                : "border-slate-200"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h4 className="font-bold text-slate-950">
+                  <span className="capitalize">{job.provider}</span>
+                  <span className="ml-3 text-sm font-medium text-slate-500">{job.model}</span>
+                  <span className="ml-3 text-sm font-medium text-slate-500">Job #{job.id}</span>
+                </h4>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                <span>Run timer: {getJobDuration(job) ?? "n/a"}</span>
+                <span>Cost: {formatUsdCost(job.estimated_cost)}</span>
+                <span className={`rounded-full border px-2 py-1 ${getRunOutputStatusClass(state)}`}>
+                  {getRunOutputStatusLabel(state)}
+                </span>
+              </div>
+            </div>
+            {job.error_message ? (
+              <div className="m-5 rounded-none border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">
+                {job.error_message}
+              </div>
+            ) : null}
+            <pre className="m-5 whitespace-pre-wrap break-words rounded-2xl bg-slate-50 p-5 text-xs leading-6 text-slate-700">
+              {job.response?.trim() || "No response text saved."}
+            </pre>
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
@@ -2641,6 +2795,7 @@ export function RebalanceWorkflowSections({
     loading: boolean;
     error: string | null;
     routeUrl?: string | null;
+    run?: RunResponse | null;
   } | null>(null);
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
@@ -3336,7 +3491,9 @@ export function RebalanceWorkflowSections({
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
       const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle} Output`;
-      const routeUrl = getStageOutputRoute(portfolio, stage);
+      const routeUrl = ["swing", "rebalance", "technical"].includes(stage)
+        ? null
+        : getStageOutputRoute(portfolio, stage);
       setOutputDialog({
         portfolio,
         stage,
@@ -3345,12 +3502,14 @@ export function RebalanceWorkflowSections({
         loading: false,
         error: null,
         routeUrl,
+        run: null,
       });
       try {
         if (routeUrl) return;
         const market: SwingTradeMarket =
           portfolio === "zerodha" ? "india" : "us";
         let body = "No saved output is available yet.";
+        let selectedRun: RunResponse | null = null;
         if (stage === "sync") {
           const overview =
             portfolio === "zerodha"
@@ -3371,7 +3530,7 @@ export function RebalanceWorkflowSections({
             "Final Actionables are rendered in the dashboard output tables below. Use the section anchor to inspect the latest India and US actionable rows.";
         } else {
           const runs = await fetchAllFullRuns();
-          const latestRun = sortRunsByLatestTimestamp(
+          selectedRun = sortRunsByLatestTimestamp(
             runs.filter((run) => {
               if (stage === "swing")
                 return isRunInSwingTradeMarket(run.prompt, market);
@@ -3383,14 +3542,14 @@ export function RebalanceWorkflowSections({
             }),
           )[0];
           const jobs =
-            latestRun?.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+            selectedRun?.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
           body = jobs.length
             ? [
-                `## Last run summary\n${latestRun ? getRunOutputSummary(latestRun) : "Not available"}`,
+                `## Last run summary\n${selectedRun ? getRunOutputSummary(selectedRun) : "Not available"}`,
                 jobs
                   .map(
                     (job) =>
-                      `# Run ${latestRun?.id} / Job ${job?.id} · ${job?.provider ?? "LLM"}/${job?.model ?? "model"}\n\n${job?.response?.trim() || job?.error_message || "No response text saved."}`,
+                      `# Run ${selectedRun?.id} / Job ${job?.id} · ${job?.provider ?? "LLM"}/${job?.model ?? "model"}\n\n${job?.response?.trim() || job?.error_message || "No response text saved."}`,
                   )
                   .join("\n\n---\n\n"),
               ].join("\n\n---\n\n")
@@ -3404,6 +3563,7 @@ export function RebalanceWorkflowSections({
           loading: false,
           error: null,
           routeUrl: null,
+          run: selectedRun,
         });
       } catch (error) {
         setOutputDialog({
@@ -3414,6 +3574,7 @@ export function RebalanceWorkflowSections({
           loading: false,
           error: normalizeError(error),
           routeUrl: null,
+          run: null,
         });
       }
     },
@@ -4490,6 +4651,8 @@ export function RebalanceWorkflowSections({
                   title={outputDialog.title}
                   className="h-[72vh] w-full border-0 bg-white"
                 />
+              ) : outputDialog.run ? (
+                <RunOutputDetails run={outputDialog.run} />
               ) : (
                 <pre className="m-5 whitespace-pre-wrap break-words rounded-2xl bg-slate-950 p-5 text-xs leading-6 text-slate-100">
                   {outputDialog.body}
