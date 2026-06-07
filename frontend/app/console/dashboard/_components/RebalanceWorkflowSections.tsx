@@ -5,7 +5,6 @@ import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import {
   AlertCircle,
   CheckCircle2,
-  Eye,
   Loader2,
   Play,
   X,
@@ -319,8 +318,6 @@ function getStageLabel(stage: WorkflowStageKey, state: StageState) {
 }
 
 function getStageClasses(state: StageState) {
-  if (state === "completed")
-    return "border-emerald-300 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-1 ring-emerald-100";
   if (state === "running")
     return "border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100 ring-1 ring-amber-100";
   if (state === "queued")
@@ -328,6 +325,18 @@ function getStageClasses(state: StageState) {
   if (state === "failed")
     return "border-red-300 bg-red-50 text-red-950 shadow-red-100 ring-1 ring-red-100";
   return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
+}
+
+function getStageTileLabel(stage: WorkflowStageKey) {
+  const labels: Record<WorkflowStageKey, string> = {
+    sync: "Sync Portfolio",
+    threats: "Threats Scan",
+    swing: "Swing Scan",
+    rebalance: "Rebalance",
+    technical: "Technical Scan",
+    actionables: "Actionables",
+  };
+  return labels[stage];
 }
 
 function summarizeRun(run: RunResponse) {
@@ -931,35 +940,56 @@ function LlmDetailsIcon(props: SVGProps<SVGSVGElement>) {
       {...props}
     >
       <path
-        d="M22 8c-5 0-9 4-9 9v1c-4 1-7 5-7 10 0 3 1 6 4 8-2 2-3 5-3 8 0 6 5 11 11 11h4V8Z"
+        d="M23 7c-5.4 0-9.8 4.4-9.8 9.8v.7C8.9 18.8 5.8 22.8 5.8 27.6c0 2.8 1 5.4 2.9 7.4-2.4 2.3-3.9 5.6-3.9 9.2 0 7 5.6 12.6 12.6 12.6H23V7Z"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="3"
+        strokeWidth="3.4"
       />
       <path
-        d="M42 8c5 0 9 4 9 9v1c4 1 7 5 7 10 0 3-1 6-4 8 2 2 3 5 3 8 0 6-5 11-11 11h-4V8Z"
+        d="M41 7c5.4 0 9.8 4.4 9.8 9.8v.7c4.3 1.3 7.4 5.3 7.4 10.1 0 2.8-1 5.4-2.9 7.4 2.4 2.3 3.9 5.6 3.9 9.2 0 7-5.6 12.6-12.6 12.6H41V7Z"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="3"
+        strokeWidth="3.4"
       />
       <path
-        d="M22 18h-5m5 9h-7m7 9h-6m6 9h-5"
+        d="M23 42V30l-8-8m8 8 8 8V13m10 29V31l8-8m-8 8-8 8V13"
         stroke="currentColor"
         strokeLinecap="round"
-        strokeWidth="3"
+        strokeLinejoin="round"
+        strokeWidth="3.4"
       />
-      <path
-        d="M42 18h5m-5 9h7m-7 9h6m-6 9h5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="3"
-      />
-      {["17,18", "15,27", "16,36", "17,45", "47,18", "49,27", "48,36", "47,45"].map((point) => {
+      {["15,22", "31,13", "49,23", "23,46", "41,46"].map((point) => {
         const [cx, cy] = point.split(",");
-        return <circle key={point} cx={cx} cy={cy} r="2.5" fill="currentColor" />;
+        return <circle key={point} cx={cx} cy={cy} r="3.8" stroke="currentColor" strokeWidth="3.2" />;
       })}
+    </svg>
+  );
+}
+
+function PromptIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M15 20l16 12-16 12"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="6"
+      />
+      <path
+        d="M35 46h15"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="6"
+      />
     </svg>
   );
 }
@@ -991,6 +1021,10 @@ function WorkflowStageTile({
   const isQueued = info.state === "queued";
   const isCompleted = info.state === "completed";
   const stageMeta = STAGE_METADATA[stage];
+  const showPromptShortcut = stage !== "sync" && Boolean(onClick);
+  const iconButtonClasses =
+    "inline-flex size-10 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-slate-800 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 hover:text-blue-700";
+
   return (
     <button
       type="button"
@@ -998,40 +1032,55 @@ function WorkflowStageTile({
         onClick?.();
       }}
       disabled={!onClick}
-      className={`relative flex min-h-44 flex-col items-start justify-start rounded-2xl border p-4 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-blue-400 bg-white text-slate-950 shadow-slate-100 ring-2 ring-blue-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
+      className={`relative flex min-h-[17rem] flex-col items-start justify-start rounded-2xl border p-5 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-blue-400 bg-white text-slate-950 shadow-slate-100 ring-2 ring-blue-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
     >
-      {isCompleted ? (
-        <CheckCircle2 className="absolute right-3 top-3 size-5 text-emerald-600" />
+      {onInputClick ? (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.stopPropagation();
+            onInputClick();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              onInputClick();
+            }
+          }}
+          className={`absolute left-5 top-5 ${iconButtonClasses}`}
+          aria-label={`Select inputs for ${stageMeta.idle}`}
+          title="Select Inputs"
+        >
+          <SelectInputsIcon className="size-6" />
+        </span>
       ) : null}
-      <span className="mb-2 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">
-        Step {stageMeta.step}
-      </span>
-      <div className="grid w-full grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2 text-sm font-semibold">
-        <div className="flex justify-start">
-          {onInputClick ? (
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(event) => {
-                event.stopPropagation();
-                onInputClick();
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onInputClick();
-                }
-              }}
-              className="inline-flex size-8 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 transition hover:border-blue-400 hover:bg-blue-100"
-              aria-label={`Select inputs for ${stageMeta.idle}`}
-              title="Select Inputs"
-            >
-              <SelectInputsIcon className="size-5" />
-            </span>
-          ) : null}
-        </div>
-        <div className="flex min-w-0 items-center justify-center gap-2 text-center">
+      {onInfoClick ? (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.stopPropagation();
+            onInfoClick();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              onInfoClick();
+            }
+          }}
+          className={`absolute right-5 top-5 ${iconButtonClasses} text-blue-700`}
+          aria-label={`Show ${stageMeta.idle} LLM details`}
+          title="LLM models and expected cost"
+        >
+          <LlmDetailsIcon className="size-6" />
+        </span>
+      ) : null}
+
+      <div className="w-full px-10 text-center text-base font-extrabold text-slate-950">
+        <div className="flex min-w-0 items-center justify-center gap-2">
           {isRunning ? (
             <Loader2 className="size-4 shrink-0 animate-spin text-amber-600" />
           ) : isQueued ? (
@@ -1041,62 +1090,36 @@ function WorkflowStageTile({
           ) : isCompleted ? (
             <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
           ) : null}
-          <span className="truncate">{getStageLabel(stage, info.state)}</span>
-        </div>
-        <div className="flex justify-end">
-          {onInfoClick ? (
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(event) => {
-                event.stopPropagation();
-                onInfoClick();
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onInfoClick();
-                }
-              }}
-              className="inline-flex size-8 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 transition hover:border-blue-400 hover:bg-blue-100"
-              aria-label={`Show ${stageMeta.idle} LLM details`}
-              title="LLM models and expected cost"
-            >
-              <LlmDetailsIcon className="size-5" />
-            </span>
-          ) : null}
+          <span className="truncate">{getStageTileLabel(stage)}</span>
         </div>
       </div>
-      <p className="mt-2 text-xs leading-5 text-slate-500">
-        {stageMeta.tileDescription}
-      </p>
-      <div className="mt-3 w-full space-y-1 text-xs leading-5 text-slate-600">
+
+      <div className="mt-6 w-full space-y-2 text-sm leading-5 text-slate-600">
         {info.state === "idle" || info.state === "queued" ? (
           getIdleStageRows(stage, info).map((row) => (
             <p key={row.label}>
-              <span className="font-semibold text-slate-500">{row.label}:</span>{" "}
+              <span className="font-extrabold text-slate-500">{row.label}:</span>{" "}
               {row.value}
             </p>
           ))
         ) : (
           <>
-            {info.lastRunId ? <p>Job Number: #{info.lastRunId}</p> : null}
+            {info.lastRunId ? <p><span className="font-extrabold text-slate-500">Job Number:</span> #{info.lastRunId}</p> : null}
             {info.completedAt ? (
-              <p>Timestamp: {formatTimestamp(info.completedAt)}</p>
+              <p><span className="font-extrabold text-slate-500">Timestamp:</span> {formatTimestamp(info.completedAt)}</p>
             ) : null}
             {formatDuration(info.startedAt, info.endedAt, now) ? (
               <p>
-                Duration: {formatDuration(info.startedAt, info.endedAt, now)}
+                <span className="font-extrabold text-slate-500">Duration:</span> {formatDuration(info.startedAt, info.endedAt, now)}
               </p>
             ) : null}
             {info.totalLlms ? (
               <p>
-                {info.completedLlms ?? 0}/{info.totalLlms} LLMs completed
+                <span className="font-extrabold text-slate-500">LLMs completed:</span> {info.completedLlms ?? 0}/{info.totalLlms}
               </p>
             ) : null}
             {info.recommendedStocks ? (
-              <p>Stocks recommended: {info.recommendedStocks}</p>
+              <p><span className="font-extrabold text-slate-500">Stocks recommended:</span> {info.recommendedStocks}</p>
             ) : null}
             {stage !== "sync" &&
             (info.provider ||
@@ -1107,26 +1130,27 @@ function WorkflowStageTile({
               info.error) ? (
               <>
                 <p>
-                  LLM:{" "}
+                  <span className="font-extrabold text-slate-500">LLM run:</span>{" "}
                   {[info.provider, info.model].filter(Boolean).join(" / ") ||
                     "LLM details not available yet"}
                 </p>
                 <p>
-                  LLM Run Status: {info.runStatus ?? "Waiting for job status"}
+                  <span className="font-extrabold text-slate-500">Run status:</span> {info.runStatus ?? "Waiting for job status"}
                 </p>
                 <p>
-                  Sheets Export Status:{" "}
+                  <span className="font-extrabold text-slate-500">Sheets export:</span>{" "}
                   {info.exportStatus ?? "No sheet export status yet"}
                 </p>
-                <p>Cost incurred: {formatInrCost(info.costInr)}</p>
+                <p><span className="font-extrabold text-slate-500">Cost incurred:</span> {formatInrCost(info.costInr)}</p>
                 {info.error ? (
-                  <p className="text-red-700">Error: {info.error}</p>
+                  <p className="text-red-700"><span className="font-extrabold">Error:</span> {info.error}</p>
                 ) : null}
               </>
             ) : null}
           </>
         )}
       </div>
+
       {onSyncNowClick && stage === "sync" ? (
         <span
           role="button"
@@ -1142,13 +1166,38 @@ function WorkflowStageTile({
               onSyncNowClick();
             }
           }}
-          className="mt-auto inline-flex h-8 items-center justify-center rounded-full border border-blue-200 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+          className="mt-6 inline-flex h-10 items-center justify-center rounded-full bg-blue-600 px-6 text-sm font-extrabold text-white shadow-md shadow-blue-600/25 transition hover:bg-blue-700"
         >
           Sync Now
         </span>
       ) : null}
-      {onOutputClick ? (
-        <div className={`${onSyncNowClick && stage === "sync" ? "mt-2" : "mt-auto"} flex w-full justify-end pt-3`}>
+
+      <div className="mt-auto flex w-full items-end justify-between gap-3 pt-5">
+        {showPromptShortcut ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick?.();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                onClick?.();
+              }
+            }}
+            className="inline-flex size-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-950 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+            aria-label={`Open prompt for ${stageMeta.idle}`}
+            title="Prompt"
+          >
+            <PromptIcon className="size-6" />
+          </span>
+        ) : (
+          <span aria-hidden="true" />
+        )}
+        {onOutputClick ? (
           <span
             role="button"
             tabIndex={0}
@@ -1163,14 +1212,14 @@ function WorkflowStageTile({
                 onOutputClick();
               }
             }}
-            className="inline-flex size-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 transition hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
+            className={iconButtonClasses}
             aria-label={`View output for ${stageMeta.idle}`}
             title="View Output"
           >
-            <Eye className="size-4" />
+            <SelectInputsIcon className="size-6" />
           </span>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </button>
   );
 }
@@ -3437,18 +3486,18 @@ export function RebalanceWorkflowSections({
     return (
       <div
         key={section.portfolio}
-        className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm"
+        className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-md shadow-slate-200/70"
       >
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-slate-950">
+            <h2 className="text-xl font-extrabold text-slate-950">
               {section.title}
             </h2>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-2 text-base leading-6 text-slate-500">
               {section.subtitle}
             </p>
           </div>
-          <div className="flex w-full flex-col items-start gap-2 xl:w-auto xl:items-end">
+          <div className="flex w-full flex-col items-start gap-3 xl:w-64 xl:items-end">
             <div className="flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
               {isSectionRunning ? (
                 <>
@@ -3489,10 +3538,10 @@ export function RebalanceWorkflowSections({
                     }
                     void runWorkflow("zerodha");
                   }}
-                  className="h-auto w-full justify-center whitespace-normal rounded-full bg-slate-950 py-2 text-center leading-5 text-white hover:bg-slate-800 disabled:opacity-50 xl:w-auto"
+                  className="h-11 w-full justify-center gap-3 rounded-full bg-slate-950 px-7 text-xs font-extrabold uppercase tracking-[0.18em] text-white shadow-lg shadow-slate-950/15 hover:bg-slate-900 disabled:opacity-50 xl:w-auto"
                 >
-                  <Play className="mr-2 size-4" />
-                  {section.buttonLabel}
+                  <Play className="size-4" />
+                  {section.buttonLabel.toUpperCase()}
                 </Button>
               )}
             </div>
@@ -3522,7 +3571,7 @@ export function RebalanceWorkflowSections({
           </p>
         ) : null}
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}
@@ -3575,12 +3624,12 @@ export function RebalanceWorkflowSections({
             />
           ))}
         </div>
-        <p className="mt-4 text-right text-xs font-semibold text-slate-700">
+        <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-extrabold text-emerald-950">
           {getWorkflowRunDuration(states[section.portfolio], now) ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · ` : ""}
-          Total cost incurred in last Auto-rebalance in INR: {formatInrCost(
+          Total cost incurred in last Auto-rebalance: {formatInrCost(
             getWorkflowRunCost(states[section.portfolio], usdInrRate) || lastAutoRebalanceCosts[section.portfolio],
           )}
-        </p>
+        </div>
       </div>
     );
   };
