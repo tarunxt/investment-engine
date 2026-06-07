@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { DragEvent, useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
   Check,
   Copy,
   FilePlus,
   Loader2,
+  Menu,
   Pencil,
   Plus,
   Shield,
@@ -23,6 +24,14 @@ import { apiService, APIError } from '@/services/api';
 import { PromptResponse, PromptCreate, PromptUpdate } from '@/types/api';
 import { getPromptLogicalId } from '@/lib/promptIds';
 import { cn } from '@/lib/utils';
+import {
+  buildMasterValidationChecklist,
+  createStockParameter,
+  loadStockParametersFromStorage,
+  normalizeParameterName,
+  saveStockParametersToStorage,
+} from '@/lib/stockParameters';
+import type { StockParameter } from '@/lib/stockParameters';
 import { useClipboard } from '@/hooks/useClipboard';
 
 function formatDate(iso: string) {
@@ -93,6 +102,43 @@ function buildPromptBodyFromSections(sections: PromptDetailSections) {
     .map((section) => `[${section}]\n${sections[section].trim()}`)
     .join('\n\n')
     .trim();
+}
+
+function extractOutputHeaders(outputFormat: string) {
+  const tableHeaderLine = outputFormat
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('|') && line.endsWith('|') && !/^\|\s*-+/.test(line));
+
+  if (tableHeaderLine) {
+    return tableHeaderLine
+      .split('|')
+      .map((header) => header.trim())
+      .filter(Boolean);
+  }
+
+  return outputFormat
+    .split(/[,\n]/)
+    .map((header) => header.trim())
+    .filter(Boolean);
+}
+
+function buildOutputFormatFromHeaders(headers: string[]) {
+  if (headers.length === 0) return '';
+  const headerRow = `| ${headers.join(' | ')} |`;
+  const dividerRow = `| ${headers.map(() => '---').join(' | ')} |`;
+  return ['Return exactly this table:', headerRow, dividerRow].join('\n');
+}
+
+function applyMasterValidationChecklist(sections: PromptDetailSections, parameters: StockParameter[]) {
+  const checklist = buildMasterValidationChecklist(parameters);
+  const stageSpecific = sections['VALIDATION CHECKLIST']
+    .replace(/\n*Master Validation Rules:[\s\S]*$/i, '')
+    .trim();
+  return {
+    ...sections,
+    'VALIDATION CHECKLIST': [stageSpecific, checklist].filter(Boolean).join('\n\n'),
+  };
 }
 
 type PromptMarket = 'India' | 'US' | 'TBD';
@@ -175,6 +221,18 @@ export default function PromptsPage() {
   const [promptSections, setPromptSections] = useState<PromptDetailSections>(() => createEmptyPromptSections());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [stockParameters, setStockParameters] = useState<StockParameter[]>(() => loadStockParametersFromStorage());
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [showStockParametersModal, setShowStockParametersModal] = useState(false);
+  const [parameterDraft, setParameterDraft] = useState({ parameter: '', description: '', validationRule: 'text' });
+  const [editingParameterId, setEditingParameterId] = useState<string | null>(null);
+  const [draggedHeaderIndex, setDraggedHeaderIndex] = useState<number | null>(null);
+
+  const outputHeaders = useMemo(() => extractOutputHeaders(promptSections['OUTPUT FORMAT']), [promptSections]);
+  const stockParameterNames = useMemo(() => stockParameters.map((param) => param.parameter), [stockParameters]);
+  const outputHeaderErrors = outputHeaders.filter(
+    (header) => !stockParameters.some((param) => normalizeParameterName(param.parameter) === normalizeParameterName(header)),
+  );
 
   // copy feedback
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -248,12 +306,97 @@ export default function PromptsPage() {
     });
   }
 
+  function replacePromptSections(next: PromptDetailSections) {
+    setPromptSections(next);
+    setForm((existing) => ({ ...existing, body: buildPromptBodyFromSections(next) }));
+  }
+
+  function persistStockParameters(next: StockParameter[]) {
+    setStockParameters(next);
+    saveStockParametersToStorage(next);
+  }
+
+  function upsertStockParameter() {
+    const parameter = parameterDraft.parameter.trim();
+    if (!parameter) return;
+
+    const nextParameter = editingParameterId
+      ? { id: editingParameterId, parameter, description: parameterDraft.description.trim(), validationRule: parameterDraft.validationRule.trim() || 'text' }
+      : createStockParameter(parameter, parameterDraft.validationRule, parameterDraft.description);
+
+    persistStockParameters(
+      editingParameterId
+        ? stockParameters.map((item) => (item.id === editingParameterId ? nextParameter : item))
+        : [...stockParameters, nextParameter],
+    );
+    setParameterDraft({ parameter: '', description: '', validationRule: 'text' });
+    setEditingParameterId(null);
+  }
+
+  function editStockParameter(parameter: StockParameter) {
+    setEditingParameterId(parameter.id);
+    setParameterDraft({
+      parameter: parameter.parameter,
+      description: parameter.description,
+      validationRule: parameter.validationRule,
+    });
+  }
+
+  function deleteStockParameter(parameterId: string) {
+    persistStockParameters(stockParameters.filter((parameter) => parameter.id !== parameterId));
+  }
+
+  function addOutputHeader(header: string) {
+    const cleanHeader = header.trim();
+    if (!cleanHeader) return;
+    const headers = outputHeaders.some((item) => normalizeParameterName(item) === normalizeParameterName(cleanHeader))
+      ? outputHeaders
+      : [...outputHeaders, cleanHeader];
+    updatePromptSection('OUTPUT FORMAT', buildOutputFormatFromHeaders(headers));
+  }
+
+  function addNewOutputHeader(header: string) {
+    const cleanHeader = header.trim();
+    if (!cleanHeader) return;
+    if (!stockParameters.some((param) => normalizeParameterName(param.parameter) === normalizeParameterName(cleanHeader))) {
+      persistStockParameters([...stockParameters, createStockParameter(cleanHeader)]);
+    }
+    addOutputHeader(cleanHeader);
+  }
+
+  function removeOutputHeader(index: number) {
+    updatePromptSection('OUTPUT FORMAT', buildOutputFormatFromHeaders(outputHeaders.filter((_, itemIndex) => itemIndex !== index)));
+  }
+
+  function moveOutputHeader(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || from >= outputHeaders.length || to >= outputHeaders.length) return;
+    const headers = [...outputHeaders];
+    const [moved] = headers.splice(from, 1);
+    headers.splice(to, 0, moved);
+    updatePromptSection('OUTPUT FORMAT', buildOutputFormatFromHeaders(headers));
+  }
+
+  function handleHeaderDrop(event: DragEvent<HTMLDivElement>, targetIndex: number) {
+    event.preventDefault();
+    if (draggedHeaderIndex === null) return;
+    moveOutputHeader(draggedHeaderIndex, targetIndex);
+    setDraggedHeaderIndex(null);
+  }
+
   async function handleSave() {
     const promptName = form.name.trim() || 'Untitled Prompt';
     if (!form.body.trim()) {
       setFormError('Prompt detail sections are required.');
       return;
     }
+    if (outputHeaderErrors.length > 0) {
+      setFormError(`Output Format contains unknown Stock Parameters: ${outputHeaderErrors.join(', ')}.`);
+      return;
+    }
+
+    const sectionsWithMasterValidation = applyMasterValidationChecklist(promptSections, stockParameters);
+    replacePromptSections(sectionsWithMasterValidation);
+    const promptBody = buildPromptBodyFromSections(sectionsWithMasterValidation);
 
     setSaving(true);
     setFormError(null);
@@ -263,7 +406,7 @@ export default function PromptsPage() {
         const update: PromptUpdate = {
           name: promptName,
           description: form.description.trim() || undefined,
-          body: form.body,
+          body: promptBody,
         };
         const updated = await apiService.updatePrompt(editTarget.id, update);
         setPrompts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
@@ -271,7 +414,7 @@ export default function PromptsPage() {
         const create: PromptCreate = {
           name: promptName,
           description: form.description.trim() || undefined,
-          body: form.body,
+          body: promptBody,
         };
         const created = await apiService.createPrompt(create);
         setPrompts((prev) => [...prev, created]);
@@ -333,26 +476,57 @@ export default function PromptsPage() {
       )}
 
       <Tabs defaultValue="system">
-        <TabsList className="border border-gray-200 bg-gray-50">
-          <TabsTrigger value="system" className="gap-2">
-            <Shield className="size-3.5" />
-            System Prompts
-            {systemPrompts.length > 0 && (
-              <span className="ml-1 rounded-full bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-700">
-                {systemPrompts.length}
-              </span>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList className="border border-gray-200 bg-gray-50">
+            <TabsTrigger value="system" className="gap-2">
+              <Shield className="size-3.5" />
+              System Prompts
+              {systemPrompts.length > 0 && (
+                <span className="ml-1 rounded-full bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-700">
+                  {systemPrompts.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="mine" className="gap-2">
+              <User className="size-3.5" />
+              My Prompts
+              {myPrompts.length > 0 && (
+                <span className="ml-1 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-700">
+                  {myPrompts.length}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="relative">
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              onClick={() => setRulesOpen((open) => !open)}
+              aria-expanded={rulesOpen}
+              aria-haspopup="menu"
+            >
+              Rules
+              <Menu className="size-4" />
+            </Button>
+            {rulesOpen && (
+              <div className="absolute right-0 z-20 mt-2 w-56 border border-gray-200 bg-white p-1 shadow-lg" role="menu">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    setRulesOpen(false);
+                    setShowStockParametersModal(true);
+                  }}
+                >
+                  Stock Parameters
+                  <span className="text-xs text-gray-400">{stockParameters.length}</span>
+                </button>
+              </div>
             )}
-          </TabsTrigger>
-          <TabsTrigger value="mine" className="gap-2">
-            <User className="size-3.5" />
-            My Prompts
-            {myPrompts.length > 0 && (
-              <span className="ml-1 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-700">
-                {myPrompts.length}
-              </span>
-            )}
-          </TabsTrigger>
-        </TabsList>
+          </div>
+        </div>
 
         <TabsContent value="system" className="mt-4">
           <PromptGrid
@@ -418,14 +592,90 @@ export default function PromptsPage() {
                 {PROMPT_DETAIL_SECTION_NAMES.map((section) => (
                   <div key={section} className="space-y-1.5">
                     <Label htmlFor={`prompt-section-${section}`}>[{section}]</Label>
-                    <textarea
-                      id={`prompt-section-${section}`}
-                      value={promptSections[section]}
-                      onChange={(e) => updatePromptSection(section, e.target.value)}
-                      rows={section === 'OUTPUT FORMAT' ? 8 : 4}
-                      className="w-full resize-y border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-950 shadow-sm outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
-                      placeholder={`Define ${section.toLowerCase()}`}
-                    />
+                    {section === 'OUTPUT FORMAT' ? (
+                      <div className="space-y-3 border border-gray-300 bg-white p-3 shadow-sm">
+                        <div className="flex flex-wrap gap-2">
+                          {outputHeaders.length === 0 ? (
+                            <span className="text-xs text-gray-500">Select Stock Parameters below to build the output table from left to right.</span>
+                          ) : (
+                            outputHeaders.map((header, index) => {
+                              const isUnknown = outputHeaderErrors.some((item) => normalizeParameterName(item) === normalizeParameterName(header));
+                              return (
+                                <div
+                                  key={`${header}-${index}`}
+                                  draggable
+                                  onDragStart={() => setDraggedHeaderIndex(index)}
+                                  onDragOver={(event) => event.preventDefault()}
+                                  onDrop={(event) => handleHeaderDrop(event, index)}
+                                  className={cn(
+                                    'group flex cursor-move items-center gap-2 border px-2 py-1 text-xs font-medium',
+                                    isUnknown ? 'border-red-300 bg-red-50 text-red-700' : 'border-gray-200 bg-gray-50 text-gray-700',
+                                  )}
+                                  title="Drag left/right to reorganize output headers"
+                                >
+                                  <span className="relative">
+                                    {header}
+                                    {isUnknown && <span className="absolute -right-2 -top-2 text-red-600">*</span>}
+                                  </span>
+                                  <button type="button" onClick={() => removeOutputHeader(index)} className="text-gray-400 hover:text-red-600">
+                                    <X className="size-3" />
+                                  </button>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                          <select
+                            id={`prompt-section-${section}`}
+                            className="border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 outline-none focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
+                            defaultValue=""
+                            onChange={(event) => {
+                              addOutputHeader(event.target.value);
+                              event.target.value = '';
+                            }}
+                          >
+                            <option value="" disabled>Add existing Stock Parameter…</option>
+                            {stockParameterNames.map((name) => (
+                              <option key={name} value={name}>{name}</option>
+                            ))}
+                          </select>
+                          <form
+                            className="flex gap-2"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              const input = event.currentTarget.elements.namedItem('newHeader') as HTMLInputElement;
+                              addNewOutputHeader(input.value);
+                              input.value = '';
+                            }}
+                          >
+                            <input name="newHeader" className="min-w-0 border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-950" placeholder="Add new header" />
+                            <Button type="submit" variant="outline" className="shrink-0">Add</Button>
+                          </form>
+                        </div>
+
+                        {outputHeaderErrors.length > 0 && (
+                          <p className="text-xs text-red-700">Unknown headers must be added to Rules &gt; Stock Parameters before saving: {outputHeaderErrors.join(', ')}</p>
+                        )}
+                        <textarea
+                          value={promptSections[section]}
+                          readOnly
+                          rows={5}
+                          className="w-full resize-y border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 outline-none"
+                          aria-label="Generated Output Format"
+                        />
+                      </div>
+                    ) : (
+                      <textarea
+                        id={`prompt-section-${section}`}
+                        value={promptSections[section]}
+                        onChange={(e) => updatePromptSection(section, e.target.value)}
+                        rows={4}
+                        className="w-full resize-y border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-950 shadow-sm outline-none transition focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
+                        placeholder={`Define ${section.toLowerCase()}`}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
@@ -439,6 +689,85 @@ export default function PromptsPage() {
                 {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
                 {editTarget ? 'Save Changes' : isFork ? 'Save as Mine' : 'Create Prompt'}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stock Parameters Modal */}
+      {showStockParametersModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-5xl flex-col bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-950">Stock Parameters</h2>
+                <p className="mt-1 text-xs text-gray-500">Central repository of allowed prompt output column headers and master validation rules.</p>
+              </div>
+              <button onClick={() => setShowStockParametersModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto px-6 py-5">
+              <div className="grid gap-3 border border-gray-200 bg-gray-50 p-3 md:grid-cols-[1fr_1.3fr_1fr_auto]">
+                <input
+                  value={parameterDraft.parameter}
+                  onChange={(event) => setParameterDraft((draft) => ({ ...draft, parameter: event.target.value }))}
+                  className="border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-gray-950"
+                  placeholder="Parameter"
+                />
+                <input
+                  value={parameterDraft.description}
+                  onChange={(event) => setParameterDraft((draft) => ({ ...draft, description: event.target.value }))}
+                  className="border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-gray-950"
+                  placeholder="Brief description"
+                />
+                <input
+                  value={parameterDraft.validationRule}
+                  onChange={(event) => setParameterDraft((draft) => ({ ...draft, validationRule: event.target.value }))}
+                  className="border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-gray-950"
+                  placeholder="Validation rule"
+                />
+                <Button type="button" onClick={upsertStockParameter} className="whitespace-nowrap">
+                  {editingParameterId ? 'Save Parameter' : 'Add Parameter'}
+                </Button>
+              </div>
+
+              <div className="overflow-x-auto border border-gray-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase tracking-wider text-gray-500">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">Parameter</th>
+                      <th className="px-4 py-3 font-semibold">Brief description</th>
+                      <th className="px-4 py-3 font-semibold">Validation rule</th>
+                      <th className="px-4 py-3 text-right font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {stockParameters.map((parameter) => (
+                      <tr key={parameter.id} className="align-top hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-950">{parameter.parameter}</td>
+                        <td className="px-4 py-3 text-gray-600">{parameter.description}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-gray-700">{parameter.validationRule}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" className="h-8 px-2" onClick={() => editStockParameter(parameter)}>
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <Button type="button" variant="outline" className="h-8 px-2 text-red-700 hover:bg-red-50" onClick={() => deleteStockParameter(parameter.id)}>
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="flex justify-end border-t border-gray-200 px-6 py-4">
+              <Button type="button" onClick={() => setShowStockParametersModal(false)}>Done</Button>
             </div>
           </div>
         </div>
