@@ -109,6 +109,14 @@ type DetailedRationaleScoreRow = {
   denominatorWeight?: number;
 };
 
+type ActionablesCalculationRowGroup = {
+  stockKey: string;
+  stock: StockConsensus;
+  stockInfo: ReactNode;
+  sortValues: Record<string, string | number>;
+  rows: ActionablesCalculationRow[];
+};
+
 type ScoreMatrixContext = {
   currentUnits: number | null;
   meanScore: number | null;
@@ -594,6 +602,10 @@ function formatDateTime(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(ms));
+}
+
+function formatJobRunTimestamp(meta: LlmMeta) {
+  return `#${meta.jobId} / #${meta.runId} (${formatDateTime(meta.createdAt)})`;
 }
 
 function normalizeAction(value: string): ActionCategory | null {
@@ -1212,6 +1224,101 @@ function buildScoreMatrixDetail(
         isCalculated: true,
       },
     ],
+  };
+}
+
+function getEditableRuleSummary(
+  rule: ScoreMatrixRuleEvaluation,
+  action: ActionCategory,
+  unitsChange: number | null | undefined,
+) {
+  const unitsText = unitsChange === undefined
+    ? rule.unitsStrategy
+    : `Use manual Units Change ${formatSignedQuantity(unitsChange)}.`;
+  return `${rule.label} manually resolves to ${ACTION_CATEGORY_LABEL[action]}. ${unitsText}`;
+}
+
+function applyScoreMatrixEdits(
+  detail: ScoreMatrixDetail,
+  multiplierDrafts: Record<string, string>,
+  ruleDrafts: Record<string, { action?: ActionCategory; unitsChange?: string }>,
+): ScoreMatrixDetail {
+  const detailedRationaleRows = detail.detailedRationaleRows.map((row) => {
+    const draft = multiplierDrafts[row.id];
+    if (draft === undefined || draft.trim() === "") return row;
+    const multiplier = Number(draft);
+    return Number.isFinite(multiplier) ? { ...row, multiplier } : row;
+  });
+  const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
+    calculateWeightedRationaleScore(detailedRationaleRows);
+  const calculatedScore = detailedRationaleFinalScore ?? detail.meanScore;
+  const rules = detail.rules.map((rule) => {
+    const draft = ruleDrafts[rule.id];
+    const action = draft?.action ?? rule.action;
+    const manualUnits = draft?.unitsChange?.trim() ? Number(draft.unitsChange) : undefined;
+    return {
+      ...rule,
+      action,
+      unitsStrategy: manualUnits === undefined || !Number.isFinite(manualUnits)
+        ? rule.unitsStrategy
+        : `Manual Units Change ${formatSignedQuantity(manualUnits)}.`,
+      summary: getEditableRuleSummary(
+        rule,
+        action,
+        manualUnits !== undefined && Number.isFinite(manualUnits) ? manualUnits : undefined,
+      ),
+    };
+  });
+  const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
+  const context: ScoreMatrixContext = {
+    currentUnits: detail.currentUnits,
+    meanScore: detail.meanScore,
+    meanUnitsChange: detail.meanUnitsChange,
+    calculatedScore,
+    modeAction: detail.modeAction,
+    bullishVotes: 0,
+    bearishVotes: 0,
+    holdVotes: 0,
+    totalVotes: 0,
+    bullishMeanUnits: average(
+      detail.rows
+        .filter((row) => !row.isSummary)
+        .map((row) => row.unitsChange)
+        .filter((value): value is number => value !== null && value > 0),
+    ),
+    bearishMeanUnits: average(
+      detail.rows
+        .filter((row) => !row.isSummary)
+        .map((row) => row.unitsChange)
+        .filter((value): value is number => value !== null && value < 0)
+        .map((value) => Math.abs(value)),
+    ),
+  };
+  const matchedDraft = ruleDrafts[matchedRule.id];
+  const manualUnits = matchedDraft?.unitsChange?.trim() ? Number(matchedDraft.unitsChange) : null;
+  const calculatedUnitsChange = manualUnits !== null && Number.isFinite(manualUnits)
+    ? manualUnits
+    : resolveMatrixUnitsForAction(matchedRule.action, context);
+  const rows = detail.rows.map((row) => row.isCalculated
+    ? {
+      ...row,
+      action: matchedRule.action,
+      actionScore: calculatedScore,
+      unitsChange: calculatedUnitsChange,
+      note: matchedRule.summary,
+    }
+    : row);
+
+  return {
+    ...detail,
+    calculatedScore,
+    calculatedAction: matchedRule.action,
+    calculatedUnitsChange,
+    rules,
+    rows,
+    detailedRationaleRows,
+    detailedRationaleFinalScore,
+    detailedRationaleDenominator,
   };
 }
 
@@ -2737,13 +2844,22 @@ function ScoreMatrixSection({
   );
 }
 
-function DetailedRationaleScoreSection({ detail }: { detail: ScoreMatrixDetail }) {
+function DetailedRationaleScoreSection({
+  detail,
+  multiplierDrafts,
+  onMultiplierChange,
+}: {
+  detail: ScoreMatrixDetail;
+  multiplierDrafts?: Record<string, string>;
+  onMultiplierChange?: (rowId: string, value: string) => void;
+}) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
         <h3 className="font-semibold text-slate-950">Detailed Calculated Rationale Score</h3>
         <p className="mt-1 text-xs text-slate-500">
           Weighted score-rationale averages, technical scan confidence, and the Mean and Mode final action score.
+          {onMultiplierChange ? " Multiplier cells are editable for what-if formula recalculation." : ""}
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -2763,7 +2879,16 @@ function DetailedRationaleScoreSection({ detail }: { detail: ScoreMatrixDetail }
                   {formatScoreValue(row.score)}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
-                  {row.multiplier}
+                  {onMultiplierChange ? (
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={multiplierDrafts?.[row.id] ?? String(row.multiplier)}
+                      onChange={(event) => onMultiplierChange(row.id, event.target.value)}
+                      className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      aria-label={`Multiplier for ${row.parameter}`}
+                    />
+                  ) : row.multiplier}
                 </td>
               </tr>
             ))}
@@ -2848,10 +2973,29 @@ function ScoreMatrixModal({
   detail: ScoreMatrixDetail | null;
   onClose: () => void;
 }) {
-  if (!detail) return null;
+  const [editState, setEditState] = useState<{
+    stockKey: string;
+    multiplierDrafts: Record<string, string>;
+    ruleDrafts: Record<string, { action?: ActionCategory; unitsChange?: string }>;
+  }>({ stockKey: "", multiplierDrafts: {}, ruleDrafts: {} });
+  const multiplierDrafts = useMemo(
+    () => (detail && editState.stockKey === detail.stockKey ? editState.multiplierDrafts : {}),
+    [detail, editState],
+  );
+  const ruleDrafts = useMemo(
+    () => (detail && editState.stockKey === detail.stockKey ? editState.ruleDrafts : {}),
+    [detail, editState],
+  );
 
-  const matchedRule = detail.rules.find((rule) => rule.matched) ?? null;
-  const sourceRows = detail.rows.filter((row) => !row.isSummary);
+  const editedDetail = useMemo(
+    () => (detail ? applyScoreMatrixEdits(detail, multiplierDrafts, ruleDrafts) : null),
+    [detail, multiplierDrafts, ruleDrafts],
+  );
+
+  if (!editedDetail) return null;
+
+  const matchedRule = editedDetail.rules.find((rule) => rule.matched) ?? null;
+  const sourceRows = editedDetail.rows.filter((row) => !row.isSummary);
 
   return (
     <div
@@ -2874,9 +3018,9 @@ function ScoreMatrixModal({
               Final Action Rule
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              {detail.stockExchange || "Unknown exchange"} · {detail.stockSymbol} · calculated score {formatActionScore(detail.detailedRationaleFinalScore)} maps to{" "}
-              <FinalActionTag action={detail.calculatedAction} />
-              {" "}with units change {formatSignedQuantity(detail.calculatedUnitsChange)}.
+              {editedDetail.stockExchange || "Unknown exchange"} · {editedDetail.stockSymbol} · calculated score {formatActionScore(editedDetail.detailedRationaleFinalScore)} maps to{" "}
+              <FinalActionTag action={editedDetail.calculatedAction} />
+              {" "}with units change {formatSignedQuantity(editedDetail.calculatedUnitsChange)}.
             </p>
           </div>
           <button
@@ -2890,7 +3034,7 @@ function ScoreMatrixModal({
         </div>
 
         <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
-          <DetailedRationaleScoreSection detail={detail} />
+          <DetailedRationaleScoreSection detail={editedDetail} multiplierDrafts={multiplierDrafts} onMultiplierChange={(rowId, value) => setEditState((current) => ({ stockKey: editedDetail.stockKey, multiplierDrafts: { ...(current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {}), [rowId]: value }, ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {} }))} />
 
           <ScoreReferenceTables />
 
@@ -2910,15 +3054,15 @@ function ScoreMatrixModal({
                 values={[
                   [
                     "Mode action",
-                    detail.modeAction ? <FinalActionTag key="mode-action" action={detail.modeAction} /> : "—",
+                    editedDetail.modeAction ? <FinalActionTag key="mode-action" action={editedDetail.modeAction} /> : "—",
                   ],
-                  ["Mean score", formatActionScore(detail.meanScore)],
-                  ["Mean units change", formatSignedQuantity(detail.meanUnitsChange)],
-                  ["Current units", formatQuantity(detail.currentUnits)],
-                  ["Calculated action", <FinalActionTag key="calculated-action" action={detail.calculatedAction} />],
+                  ["Mean score", formatActionScore(editedDetail.meanScore)],
+                  ["Mean units change", formatSignedQuantity(editedDetail.meanUnitsChange)],
+                  ["Current units", formatQuantity(editedDetail.currentUnits)],
+                  ["Calculated action", <FinalActionTag key="calculated-action" action={editedDetail.calculatedAction} />],
                   [
                     "Calculated units change",
-                    formatSignedQuantity(detail.calculatedUnitsChange),
+                    formatSignedQuantity(editedDetail.calculatedUnitsChange),
                   ],
                 ]}
               />
@@ -2937,7 +3081,7 @@ function ScoreMatrixModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {detail.rules.map((rule) => (
+                  {editedDetail.rules.map((rule) => (
                     <tr
                       key={rule.id}
                       className={cn(
@@ -2950,16 +3094,66 @@ function ScoreMatrixModal({
                         {rule.label}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2">
-                        <FinalActionTag action={rule.action} />
+                        <div className="flex items-center gap-2">
+                          <FinalActionTag action={rule.action} />
+                          <select
+                            value={ruleDrafts[rule.id]?.action ?? rule.action}
+                            onChange={(event) =>
+                              setEditState((current) => {
+                                const currentRules = current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {};
+                                return {
+                                  stockKey: editedDetail.stockKey,
+                                  multiplierDrafts: current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {},
+                                  ruleDrafts: {
+                                    ...currentRules,
+                                    [rule.id]: {
+                                      ...currentRules[rule.id],
+                                      action: event.target.value as ActionCategory,
+                                    },
+                                  },
+                                };
+                              })
+                            }
+                            className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            aria-label={`Formula action for ${rule.label}`}
+                          >
+                            {ACTION_CATEGORIES.map((action) => (
+                              <option key={action} value={action}>{ACTION_CATEGORY_LABEL[action]}</option>
+                            ))}
+                          </select>
+                        </div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-right font-medium text-slate-800">
-                        {rule.action === "Hold"
-                          ? "0"
-                          : rule.action === "Trim"
-                            ? "50%"
-                            : rule.action === "Sell All"
-                              ? "100%"
-                              : ""}
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder={rule.action === "Hold"
+                            ? "0"
+                            : rule.action === "Trim"
+                              ? "50%"
+                              : rule.action === "Sell All"
+                                ? "100%"
+                                : "auto"}
+                          value={ruleDrafts[rule.id]?.unitsChange ?? ""}
+                          onChange={(event) =>
+                            setEditState((current) => {
+                              const currentRules = current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {};
+                              return {
+                                stockKey: editedDetail.stockKey,
+                                multiplierDrafts: current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {},
+                                ruleDrafts: {
+                                  ...currentRules,
+                                  [rule.id]: {
+                                    ...currentRules[rule.id],
+                                    unitsChange: event.target.value,
+                                  },
+                                },
+                              };
+                            })
+                          }
+                          className="w-24 rounded-md border border-blue-200 bg-white px-2 py-1 text-right text-xs font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          aria-label={`Manual units change for ${rule.label}`}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -2968,8 +3162,7 @@ function ScoreMatrixModal({
             </div>
             <p className="mt-3 text-xs leading-5 text-slate-600">
               The highlighted score range drives the Consolidated (Formula) action and units change.
-              Positive ranges buy or add from the LLM sizing; Hold keeps units at 0; Trim sells 50%;
-              Sell All exits 100%.
+              Actions and manual Units Change values are editable here for what-if formula changes; blank units use the default auto sizing.
             </p>
           </section>
 
@@ -3203,6 +3396,7 @@ type ActionablesCalculationRow = {
 
 const ACTIONABLES_CALCULATION_HEADERS = [
   "Stock Info",
+  "Job / Run No (Timestamp)",
   "LLMs",
   ...REBALANCE_HEADER_ORDER.filter(
     (header) => !["Exchange Symbol", "Stock Symbol", "Stock Name"].includes(header),
@@ -3240,6 +3434,38 @@ function getCalculationCellSortValue(value: ReactNode) {
   return "";
 }
 
+
+function getStockSummaryJobRunLabel(stock: StockConsensus) {
+  const newestMeta = [...stock.rows]
+    .map((row) => row.meta)
+    .sort((left, right) => parseTimestampMs(right.createdAt) - parseTimestampMs(left.createdAt))[0];
+
+  return newestMeta ? formatJobRunTimestamp(newestMeta) : "—";
+}
+
+function renderStockInfoBlock(stock: StockConsensus, detailsData?: StockDetailsData, market?: SwingTradeMarket, technicalScan?: TechnicalScanResult | null) {
+  const stockName = stock.representative["Stock Name"] || stock.symbol;
+  return (
+    <div className="flex min-w-[16rem] items-start gap-2 py-1">
+      {detailsData && market ? (
+        <StockDetailsButton
+          stock={stock}
+          market={market}
+          technicalScan={technicalScan ?? null}
+          detailsData={detailsData}
+        />
+      ) : null}
+      <div className="space-y-2 whitespace-normal text-slate-950">
+        <div>
+          <div className="text-xl font-extrabold leading-6 tracking-tight">{stock.symbol}</div>
+          <div className="text-sm font-medium leading-5 text-slate-900">{stockName}</div>
+        </div>
+        <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">{stock.exchange || "—"}</div>
+      </div>
+    </div>
+  );
+}
+
 function buildActionablesCalculationRows(
   stocks: StockConsensus[],
   market: SwingTradeMarket,
@@ -3257,6 +3483,7 @@ function buildActionablesCalculationRows(
 
     const sourceRows: Array<{
       id: string;
+      jobRun: string;
       llmName: string;
       cells: CanonicalRow;
       rowClassName: string;
@@ -3266,18 +3493,21 @@ function buildActionablesCalculationRows(
     }> = [
       ...stock.rows.map((row) => ({
         id: `${stock.key}-${row.meta.runId}-${row.meta.jobId}`,
+        jobRun: formatJobRunTimestamp(row.meta),
         llmName: `${row.meta.provider} ${row.meta.model}`.trim(),
         cells: row.cells,
         rowClassName: "bg-white",
       })),
       {
         id: `${stock.key}-mean-mode`,
+        jobRun: getStockSummaryJobRunLabel(stock),
         llmName: "Consolidated (Mean and Mode)",
         cells: meanModeCells,
         rowClassName: "bg-amber-100/70 font-semibold",
       },
       {
         id: `${stock.key}-formula`,
+        jobRun: getStockSummaryJobRunLabel(stock),
         llmName: "Consolidated (Formula)",
         cells: formulaCells,
         rowClassName: "bg-rose-100/75 font-semibold",
@@ -3286,6 +3516,7 @@ function buildActionablesCalculationRows(
       },
       {
         id: `${stock.key}-calculated-score`,
+        jobRun: getStockSummaryJobRunLabel(stock),
         llmName: `Calculated Score = ${formatActionScore(detail.calculatedScore)}`,
         cells: { ...formulaCells, [ACTION_HEADER]: "depends on Calculated Score Matrix" },
         rowClassName: "bg-rose-50/70 text-blue-700 font-semibold",
@@ -3297,15 +3528,17 @@ function buildActionablesCalculationRows(
     return sourceRows.map((source) => {
       const values: Record<string, ReactNode> = {
         "Stock Info": stockLabel,
+        "Job / Run No (Timestamp)": source.jobRun,
         LLMs: source.llmName,
       };
       const sortValues: Record<string, string | number> = {
         "Stock Info": stockLabel,
+        "Job / Run No (Timestamp)": source.jobRun,
         LLMs: source.llmName,
       };
 
       ACTIONABLES_CALCULATION_HEADERS.forEach((header) => {
-        if (header === "Stock Info" || header === "LLMs") return;
+        if (header === "Stock Info" || header === "Job / Run No (Timestamp)" || header === "LLMs") return;
         if (header === ACTION_HEADER && source.isFormula && source.detail) {
           values[header] = (
             <button
@@ -3402,6 +3635,43 @@ function compareActionablesCalculationRows(
   }
   if (comparison === 0) comparison = left.id.localeCompare(right.id);
   return sortState.direction === "asc" ? comparison : -comparison;
+}
+
+function buildActionablesCalculationRowGroups(
+  rows: ActionablesCalculationRow[],
+  sortState: ActionablesCalculationSortState,
+  market: SwingTradeMarket,
+  technicalScans: TechnicalScanMap,
+  detailsData?: StockDetailsData,
+): ActionablesCalculationRowGroup[] {
+  const groupMap = new Map<string, ActionablesCalculationRowGroup>();
+
+  rows.forEach((row) => {
+    const existing = groupMap.get(row.stock.key);
+    if (existing) {
+      existing.rows.push(row);
+      return;
+    }
+
+    groupMap.set(row.stock.key, {
+      stockKey: row.stock.key,
+      stock: row.stock,
+      stockInfo: renderStockInfoBlock(
+        row.stock,
+        detailsData,
+        market,
+        getTechnicalScanForStock(technicalScans, row.stock),
+      ),
+      sortValues: row.sortValues,
+      rows: [row],
+    });
+  });
+
+  return [...groupMap.values()].sort((left, right) => {
+    const representativeLeft = { ...left.rows[0], sortValues: left.sortValues };
+    const representativeRight = { ...right.rows[0], sortValues: right.sortValues };
+    return compareActionablesCalculationRows(representativeLeft, representativeRight, sortState);
+  });
 }
 
 function SortableCalculationHeader({
@@ -3524,9 +3794,9 @@ function ActionablesCalculationsModal({
     () => buildActionablesCalculationRows(stocks, market, technicalScans, setupGroups, onSetupClick, setSelectedMatrixDetail),
     [market, onSetupClick, setupGroups, stocks, technicalScans],
   );
-  const sortedRows = useMemo(
-    () => [...rows].sort((left, right) => compareActionablesCalculationRows(left, right, sortState)),
-    [rows, sortState],
+  const rowGroups = useMemo(
+    () => buildActionablesCalculationRowGroups(rows, sortState, market, technicalScans, detailsData),
+    [detailsData, market, rows, sortState, technicalScans],
   );
 
   if (!open) return null;
@@ -3534,7 +3804,7 @@ function ActionablesCalculationsModal({
   const toggleSort = (header: string) => {
     setSortState((current) => current.key === header
       ? { key: header, direction: current.direction === "asc" ? "desc" : "asc" }
-      : { key: header, direction: header === "Stock Info" || header === "LLMs" || header === "Technical Setup" ? "asc" : "desc" });
+      : { key: header, direction: header === "Stock Info" || header === "Job / Run No (Timestamp)" || header === "LLMs" || header === "Technical Setup" ? "asc" : "desc" });
   };
 
   return (
@@ -3567,7 +3837,7 @@ function ActionablesCalculationsModal({
             LLMs consolidated in this view: {Math.max(...stocks.map((stock) => stock.rows.length), 0)}. Stocks: {stocks.length}.
           </div>
           <div className="max-h-[76vh] overflow-auto p-5">
-            {sortedRows.length ? (
+            {rowGroups.length ? (
               <table className="min-w-max border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-100 text-left">
                   <tr>
@@ -3579,25 +3849,25 @@ function ActionablesCalculationsModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedRows.map((row) => (
-                    <tr key={row.id} className={row.rowClassName}>
-                      {ACTIONABLES_CALCULATION_HEADERS.map((header) => (
-                        <td key={`${row.id}-${header}`} className="max-w-[26rem] whitespace-nowrap border border-slate-300 px-3 py-2 align-top text-slate-900">
-                          {header === "Stock Info" && detailsData ? (
-                            <span className="inline-flex items-center gap-2">
-                              <StockDetailsButton
-                                stock={row.stock}
-                                market={market}
-                                technicalScan={getTechnicalScanForStock(technicalScans, row.stock)}
-                                detailsData={detailsData}
-                              />
-                              <span>{row.values[header]}</span>
-                            </span>
-                          ) : row.values[header]}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
+                  {rowGroups.map((group) =>
+                    group.rows.map((row, rowIndex) => (
+                      <tr key={row.id} className={cn(row.rowClassName, rowIndex === 0 ? "border-t-2 border-slate-900" : "border-t border-slate-900")}>
+                        {rowIndex === 0 ? (
+                          <td
+                            rowSpan={group.rows.length}
+                            className="sticky left-0 z-[1] min-w-[17rem] border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
+                          >
+                            {group.stockInfo}
+                          </td>
+                        ) : null}
+                        {ACTIONABLES_CALCULATION_HEADERS.filter((header) => header !== "Stock Info").map((header) => (
+                          <td key={`${row.id}-${header}`} className="max-w-[26rem] whitespace-nowrap border border-slate-900 px-3 py-1.5 align-top text-slate-900">
+                            {row.values[header]}
+                          </td>
+                        ))}
+                      </tr>
+                    )),
+                  )}
                 </tbody>
               </table>
             ) : (
