@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, Info, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, X } from "lucide-react";
 
 import {
   parseInvestmentRecommendationContent,
@@ -112,6 +112,7 @@ type ScoreMatrixContext = {
   currentUnits: number | null;
   meanScore: number | null;
   meanUnitsChange: number | null;
+  calculatedScore: number | null;
   modeAction: ActionCategory | null;
   bullishVotes: number;
   bearishVotes: number;
@@ -129,6 +130,7 @@ type ScoreMatrixDetail = {
   modeAction: ActionCategory | null;
   meanScore: number | null;
   meanUnitsChange: number | null;
+  calculatedScore: number | null;
   meanModeAction: ActionCategory | null;
   meanModeUnitsChange: number | null;
   calculatedAction: ActionCategory;
@@ -423,8 +425,6 @@ const REBALANCE_DISPLAY_HEADERS = [
 ] as const;
 
 const CONSOLIDATED_DISPLAY_HEADERS = [
-  "Exchange Symbol",
-  "Stock Symbol",
   "Current Units",
   CURRENT_INVESTMENT_AMOUNT_HEADER,
   "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
@@ -437,6 +437,7 @@ const CONSOLIDATED_DISPLAY_HEADERS = [
       ![
         "Exchange Symbol",
         "Stock Symbol",
+        "Stock Name",
         "Current Units",
         "Action (Buy/Add/Sell All/Trim/Hold/Buy New)",
       ].includes(header),
@@ -489,14 +490,6 @@ const ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
   "Buy New": 2,
 };
 
-const FINAL_ACTION_RATIONALE_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
-  "Sell All": -2.5,
-  Trim: -1.5,
-  Hold: 0,
-  "Buy New": 1.5,
-  "Add more": 2.5,
-};
-
 const ACTION_SCORE_TABLE_ROWS: Array<{ label: string; score: number }> = [
   { label: "Sell All", score: -2.5 },
   { label: "Trim", score: -1.5 },
@@ -509,6 +502,11 @@ const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; multiplier: number 
   { label: "Bullish", multiplier: 1 },
   { label: "Bearish", multiplier: -1 },
 ];
+
+
+function ActionablesCalculationsIcon({ className }: { className?: string }) {
+  return <FileSpreadsheet className={cn("size-5", className)} />;
+}
 
 function FinalActionTag({
   action,
@@ -807,13 +805,6 @@ function getAverageNumericCell(rows: LlmBreakupRow[], header: RebalanceHeader) {
   );
 }
 
-function getTechnicalScanMultiplier(scan: TechnicalScanResult | null) {
-  if (!scan) return 0;
-  if (scan.bias === "bullish") return 1;
-  if (scan.bias === "bearish") return -1;
-  return 0;
-}
-
 function calculateWeightedRationaleScore(rows: DetailedRationaleScoreRow[]) {
   const weightedRows = rows.filter((row) => row.multiplier !== 0);
   const denominator = weightedRows.reduce((sum, row) => sum + Math.abs(row.multiplier), 0);
@@ -827,13 +818,7 @@ function calculateWeightedRationaleScore(rows: DetailedRationaleScoreRow[]) {
 
 function buildDetailedRationaleScoreRows(
   stock: StockConsensus,
-  technicalScan: TechnicalScanResult | null,
-  meanModeAction: ActionCategory | null,
 ): DetailedRationaleScoreRow[] {
-  const technicalConfidence = parseNumericCell(
-    formatTechnicalConfidence(technicalScan, stock.representative),
-  );
-
   return [
     {
       id: "cruxx",
@@ -870,20 +855,6 @@ function buildDetailedRationaleScoreRows(
       parameter: "Average of Score Rationale - Fundamentals Medium/Long Term",
       score: getAverageNumericCell(stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
       multiplier: 1,
-    },
-    {
-      id: "technical-scan-confidence",
-      parameter: "Technical Scan Confidence Score",
-      score: technicalConfidence,
-      multiplier: getTechnicalScanMultiplier(technicalScan),
-    },
-    {
-      id: "mean-mode-action",
-      parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in final Consolidated (Mean and Mode) row",
-      score: meanModeAction
-        ? FINAL_ACTION_RATIONALE_SCORE_BY_CATEGORY[meanModeAction]
-        : null,
-      multiplier: 4,
     },
   ];
 }
@@ -988,7 +959,7 @@ function resolveMatrixUnitsForAction(
 }
 
 function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
-  const meanScore = Math.max(-3, Math.min(3, context.meanScore ?? 0));
+  const meanScore = Math.max(-3, Math.min(3, context.calculatedScore ?? context.meanScore ?? 0));
   const hasPosition = (context.currentUnits ?? 0) > 0;
   const positiveAction: ActionCategory = hasPosition ? "Add more" : "Buy New";
   const positiveUnitsStrategy = hasPosition
@@ -1069,6 +1040,7 @@ function buildScoreMatrixDetail(
   stock: StockConsensus,
   technicalScan: TechnicalScanResult | null = null,
 ): ScoreMatrixDetail {
+  void technicalScan;
   const entries: ScoreMatrixEntry[] = stock.rows.map((row) => {
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
     return {
@@ -1124,10 +1096,16 @@ function buildScoreMatrixDetail(
       .map((value) => Math.abs(value)),
   );
 
+  const detailedRationaleRows = buildDetailedRationaleScoreRows(stock);
+  const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
+    calculateWeightedRationaleScore(detailedRationaleRows);
+  const calculatedScore = detailedRationaleFinalScore ?? meanScore;
+
   const context: ScoreMatrixContext = {
     currentUnits,
     meanScore,
     meanUnitsChange,
+    calculatedScore,
     modeAction,
     bullishVotes,
     bearishVotes,
@@ -1140,13 +1118,6 @@ function buildScoreMatrixDetail(
   const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
   const calculatedAction = matchedRule.action;
   const calculatedUnitsChange = resolveMatrixUnitsForAction(calculatedAction, context);
-  const detailedRationaleRows = buildDetailedRationaleScoreRows(
-    stock,
-    technicalScan,
-    modeAction,
-  );
-  const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
-    calculateWeightedRationaleScore(detailedRationaleRows);
 
   return {
     stockKey: stock.key,
@@ -1156,6 +1127,7 @@ function buildScoreMatrixDetail(
     modeAction,
     meanScore,
     meanUnitsChange,
+    calculatedScore,
     meanModeAction: modeAction,
     meanModeUnitsChange: meanUnitsChange,
     calculatedAction,
@@ -1180,7 +1152,7 @@ function buildScoreMatrixDetail(
         id: `${stock.key}-matrix-calculated`,
         source: "Consolidated (Formula)",
         action: calculatedAction,
-        actionScore: meanScore,
+        actionScore: calculatedScore,
         unitsChange: calculatedUnitsChange,
         note: matchedRule.summary,
         isSummary: true,
@@ -3158,6 +3130,436 @@ function RunGroupDetails({
   );
 }
 
+type ActionablesCalculationSortState = {
+  key: string;
+  direction: "asc" | "desc";
+};
+
+type ActionablesCalculationRow = {
+  id: string;
+  stock: StockConsensus;
+  stockLabel: string;
+  llmName: string;
+  values: Record<string, ReactNode>;
+  sortValues: Record<string, string | number>;
+  rowClassName: string;
+  detail?: ScoreMatrixDetail;
+  isFormula?: boolean;
+  isScore?: boolean;
+};
+
+const ACTIONABLES_CALCULATION_HEADERS = [
+  "Stock Info",
+  "LLMs",
+  ...REBALANCE_HEADER_ORDER.filter(
+    (header) => !["Exchange Symbol", "Stock Symbol", "Stock Name"].includes(header),
+  ),
+  "Technical Setup",
+  "Confidence Score",
+] as const;
+
+function getActionablesCalculationColumnLabel(header: string) {
+  if (header === ACTION_HEADER) return "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
+  return header;
+}
+
+function buildSummaryRowCells(
+  stock: StockConsensus,
+  detail: ScoreMatrixDetail,
+  action: ActionCategory | null,
+  unitsChange: number | null,
+): CanonicalRow {
+  return {
+    ...stock.representative,
+    [ACTION_HEADER]: action ? ACTION_CATEGORY_LABEL[action] : "",
+    "Units Change": unitsChange === null ? "" : String(unitsChange),
+    "Final Units": unitsChange === null || detail.currentUnits === null ? "" : String(detail.currentUnits + unitsChange),
+    "Units to Buy": unitsChange !== null && unitsChange > 0 ? String(unitsChange) : stock.representative["Units to Buy"] || "",
+  };
+}
+
+function getCalculationCellSortValue(value: ReactNode) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const numeric = parseNumericCell(value);
+    return numeric ?? value;
+  }
+  return "";
+}
+
+function buildActionablesCalculationRows(
+  stocks: StockConsensus[],
+  market: SwingTradeMarket,
+  technicalScans: TechnicalScanMap,
+  setupGroups?: Record<string, SetupStockGroup>,
+  onSetupClick?: (group: SetupStockGroup) => void,
+  onMatrixOpen?: (detail: ScoreMatrixDetail) => void,
+): ActionablesCalculationRow[] {
+  return stocks.flatMap((stock) => {
+    const technicalScan = getTechnicalScanForStock(technicalScans, stock);
+    const detail = buildScoreMatrixDetail(stock, technicalScan);
+    const meanModeCells = buildSummaryRowCells(stock, detail, detail.meanModeAction, detail.meanModeUnitsChange);
+    const formulaCells = buildSummaryRowCells(stock, detail, detail.calculatedAction, detail.calculatedUnitsChange);
+    const stockLabel = `${stock.exchange || "—"} · ${stock.symbol} · ${stock.representative["Stock Name"] || stock.symbol}`;
+
+    const sourceRows: Array<{
+      id: string;
+      llmName: string;
+      cells: CanonicalRow;
+      rowClassName: string;
+      detail?: ScoreMatrixDetail;
+      isFormula?: boolean;
+      isScore?: boolean;
+    }> = [
+      ...stock.rows.map((row) => ({
+        id: `${stock.key}-${row.meta.runId}-${row.meta.jobId}`,
+        llmName: `${row.meta.provider} ${row.meta.model}`.trim(),
+        cells: row.cells,
+        rowClassName: "bg-white",
+      })),
+      {
+        id: `${stock.key}-mean-mode`,
+        llmName: "Consolidated (Mean and Mode)",
+        cells: meanModeCells,
+        rowClassName: "bg-amber-100/70 font-semibold",
+      },
+      {
+        id: `${stock.key}-formula`,
+        llmName: "Consolidated (Formula)",
+        cells: formulaCells,
+        rowClassName: "bg-rose-100/75 font-semibold",
+        detail,
+        isFormula: true,
+      },
+      {
+        id: `${stock.key}-calculated-score`,
+        llmName: `Calculated Score = ${formatActionScore(detail.calculatedScore)}`,
+        cells: { ...formulaCells, [ACTION_HEADER]: "depends on Calculated Score Matrix" },
+        rowClassName: "bg-rose-50/70 text-blue-700 font-semibold",
+        detail,
+        isScore: true,
+      },
+    ];
+
+    return sourceRows.map((source) => {
+      const values: Record<string, ReactNode> = {
+        "Stock Info": stockLabel,
+        LLMs: source.llmName,
+      };
+      const sortValues: Record<string, string | number> = {
+        "Stock Info": stockLabel,
+        LLMs: source.llmName,
+      };
+
+      ACTIONABLES_CALCULATION_HEADERS.forEach((header) => {
+        if (header === "Stock Info" || header === "LLMs") return;
+        if (header === ACTION_HEADER && source.isFormula && source.detail) {
+          values[header] = (
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onClick={() => onMatrixOpen?.(source.detail!)}
+            >
+              <FinalActionTag action={source.detail.calculatedAction} />
+              <span className="text-[11px] font-semibold text-blue-700">Matrix</span>
+            </button>
+          );
+          sortValues[header] = ACTION_CATEGORY_LABEL[source.detail.calculatedAction];
+          return;
+        }
+        if (header === ACTION_HEADER && !source.isScore) {
+          const action = normalizeAction(source.cells[ACTION_HEADER] || "");
+          values[header] = action ? <FinalActionTag action={action} /> : source.cells[ACTION_HEADER] || "";
+          sortValues[header] = action ? ACTION_CATEGORY_LABEL[action] : source.cells[ACTION_HEADER] || "";
+          return;
+        }
+        if (header === "Technical Setup") {
+          const setup = formatTechnicalSetup(technicalScan, stock.representative);
+          values[header] = (
+            <span className={cn("font-medium", getTechnicalScanClass(technicalScan, stock.representative))}>
+              <TechnicalSetupLink
+                setup={setup}
+                setupGroup={getSetupStockGroup(setupGroups, setup)}
+                onSetupClick={onSetupClick}
+              />
+            </span>
+          );
+          sortValues[header] = setup;
+          return;
+        }
+        if (header === "Confidence Score") {
+          const confidence = formatTechnicalConfidence(technicalScan, stock.representative);
+          values[header] = (
+            <span className={cn("font-semibold", getTechnicalScanClass(technicalScan, stock.representative))}>
+              {confidence}
+            </span>
+          );
+          sortValues[header] = parseNumericCell(confidence) ?? confidence;
+          return;
+        }
+        if (source.isScore && header === "Score Rationale Cruxx") {
+          values[header] = (
+            <button
+              type="button"
+              className="font-semibold text-blue-700 underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onClick={() => onMatrixOpen?.(source.detail!)}
+            >
+              Calculated Score = {formatActionScore(source.detail?.calculatedScore ?? null)}
+            </button>
+          );
+          sortValues[header] = source.detail?.calculatedScore ?? Number.NEGATIVE_INFINITY;
+          return;
+        }
+        const cellValue = source.cells[header as RebalanceHeader] || "";
+        values[header] = cellValue;
+        sortValues[header] = getCalculationCellSortValue(cellValue);
+      });
+
+      return {
+        id: source.id,
+        stock,
+        stockLabel,
+        llmName: source.llmName,
+        values,
+        sortValues,
+        rowClassName: source.rowClassName,
+        detail: source.detail,
+        isFormula: source.isFormula,
+        isScore: source.isScore,
+      };
+    });
+  });
+}
+
+function compareActionablesCalculationRows(
+  left: ActionablesCalculationRow,
+  right: ActionablesCalculationRow,
+  sortState: ActionablesCalculationSortState,
+) {
+  const leftValue = left.sortValues[sortState.key] ?? "";
+  const rightValue = right.sortValues[sortState.key] ?? "";
+  let comparison = 0;
+  if (typeof leftValue === "number" && typeof rightValue === "number") {
+    comparison = leftValue - rightValue;
+  } else {
+    comparison = String(leftValue).localeCompare(String(rightValue), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    });
+  }
+  if (comparison === 0) comparison = left.id.localeCompare(right.id);
+  return sortState.direction === "asc" ? comparison : -comparison;
+}
+
+function SortableCalculationHeader({
+  header,
+  sortState,
+  onSort,
+}: {
+  header: string;
+  sortState: ActionablesCalculationSortState;
+  onSort: (header: string) => void;
+}) {
+  const isActive = sortState.key === header;
+  return (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 text-left font-bold text-slate-800 transition hover:text-blue-700"
+      onClick={() => onSort(header)}
+      title={`Sort ${getActionablesCalculationColumnLabel(header)}`}
+    >
+      {getActionablesCalculationColumnLabel(header)}
+      {isActive ? (
+        sortState.direction === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
+      ) : (
+        <span className="text-slate-300">↕</span>
+      )}
+    </button>
+  );
+}
+
+function ActionablesFormulaModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="actionables-formula-modal-title"
+      onClick={onClose}
+    >
+      <div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Actionables calculations</p>
+            <h2 id="actionables-formula-modal-title" className="mt-1 text-xl font-bold text-slate-950">Logics and formulas</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close formulas popup">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="max-h-[75vh] space-y-4 overflow-y-auto p-5 text-sm text-slate-700">
+          <DetailedRationaleScoreSection detail={{
+            stockKey: "formula-reference",
+            stockSymbol: "Reference",
+            stockExchange: "",
+            currentUnits: null,
+            modeAction: null,
+            meanScore: null,
+            meanUnitsChange: null,
+            calculatedScore: null,
+            meanModeAction: null,
+            meanModeUnitsChange: null,
+            calculatedAction: "Hold",
+            calculatedUnitsChange: 0,
+            matchedRuleId: "",
+            rows: [],
+            rules: [],
+            detailedRationaleRows: [
+              { id: "cruxx", parameter: "Average of Score Rationale Cruxx", score: null, multiplier: 3 },
+              { id: "technical-short", parameter: "Average of Score Rationale - Technical Setup (Short Term 1–3 Months)", score: null, multiplier: 3 },
+              { id: "technical-medium", parameter: "Average of Score Rationale - Technical Setup (Medium Term)", score: null, multiplier: 2 },
+              { id: "technical-long", parameter: "Average of Score Rationale - Technical Setup (Long Term)", score: null, multiplier: 1 },
+              { id: "fundamentals-short", parameter: "Average of Score Rationale - Fundamentals Short Term", score: null, multiplier: 3 },
+              { id: "fundamentals-medium-long", parameter: "Average of Score Rationale - Fundamentals Medium/Long Term", score: null, multiplier: 1 },
+            ],
+            detailedRationaleFinalScore: null,
+            detailedRationaleDenominator: 13,
+          }} />
+          <ScoreReferenceTables />
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h3 className="font-semibold text-slate-950">Consolidation rules</h3>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>Consolidated (Mean and Mode) uses the mode action across LLM rows and averages numeric sizing/rationale columns.</li>
+              <li>Consolidated (Formula) uses the weighted Calculated Score and the Calculated Score matrix to set Action and Units Change.</li>
+              <li>Technical Setup and Confidence Score are appended from the latest Technical Scan for the stock.</li>
+              <li>Rows with no stocks for Sell All, Add More, Buy New, Trim, or Hold are hidden.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActionablesCalculationsModal({
+  open,
+  onClose,
+  title,
+  market,
+  stocks,
+  technicalScans,
+  setupGroups,
+  detailsData,
+  onSetupClick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  market: SwingTradeMarket;
+  stocks: StockConsensus[];
+  technicalScans: TechnicalScanMap;
+  setupGroups?: Record<string, SetupStockGroup>;
+  detailsData?: StockDetailsData;
+  onSetupClick?: (group: SetupStockGroup) => void;
+}) {
+  const [sortState, setSortState] = useState<ActionablesCalculationSortState>({ key: "Stock Info", direction: "asc" });
+  const [formulaOpen, setFormulaOpen] = useState(false);
+  const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
+  const rows = useMemo(
+    () => buildActionablesCalculationRows(stocks, market, technicalScans, setupGroups, onSetupClick, setSelectedMatrixDetail),
+    [market, onSetupClick, setupGroups, stocks, technicalScans],
+  );
+  const sortedRows = useMemo(
+    () => [...rows].sort((left, right) => compareActionablesCalculationRows(left, right, sortState)),
+    [rows, sortState],
+  );
+
+  if (!open) return null;
+
+  const toggleSort = (header: string) => {
+    setSortState((current) => current.key === header
+      ? { key: header, direction: current.direction === "asc" ? "desc" : "asc" }
+      : { key: header, direction: header === "Stock Info" || header === "LLMs" || header === "Technical Setup" ? "asc" : "desc" });
+  };
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="actionables-calculations-modal-title"
+        onClick={onClose}
+      >
+        <div className="w-full max-w-[96vw] rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Actionables Calculations</p>
+              <h2 id="actionables-calculations-modal-title" className="mt-1 text-2xl font-bold text-slate-950">{title} Excel layout</h2>
+              <p className="mt-1 text-sm text-slate-500">Grouped in the same rebalance export column order with sortable Excel-style headers.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setFormulaOpen(true)} className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500" title="Show logics and formulas">
+                <FunctionSquare className="size-4" />
+                Logics & formulas
+              </button>
+              <button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close Actionables Calculations popup">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+          <div className="border-b border-blue-100 bg-blue-50/50 px-5 py-3 text-sm text-blue-900">
+            LLMs consolidated in this view: {Math.max(...stocks.map((stock) => stock.rows.length), 0)}. Stocks: {stocks.length}.
+          </div>
+          <div className="max-h-[76vh] overflow-auto p-5">
+            {sortedRows.length ? (
+              <table className="min-w-max border-collapse text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-100 text-left">
+                  <tr>
+                    {ACTIONABLES_CALCULATION_HEADERS.map((header) => (
+                      <th key={header} className="min-w-36 border border-slate-300 px-3 py-3 align-bottom">
+                        <SortableCalculationHeader header={header} sortState={sortState} onSort={toggleSort} />
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedRows.map((row) => (
+                    <tr key={row.id} className={row.rowClassName}>
+                      {ACTIONABLES_CALCULATION_HEADERS.map((header) => (
+                        <td key={`${row.id}-${header}`} className="max-w-[26rem] whitespace-nowrap border border-slate-300 px-3 py-2 align-top text-slate-900">
+                          {header === "Stock Info" && detailsData ? (
+                            <span className="inline-flex items-center gap-2">
+                              <StockDetailsButton
+                                stock={row.stock}
+                                market={market}
+                                technicalScan={getTechnicalScanForStock(technicalScans, row.stock)}
+                                detailsData={detailsData}
+                              />
+                              <span>{row.values[header]}</span>
+                            </span>
+                          ) : row.values[header]}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">No actionable calculation rows available.</div>
+            )}
+          </div>
+        </div>
+      </div>
+      <ActionablesFormulaModal open={formulaOpen} onClose={() => setFormulaOpen(false)} />
+      <ScoreMatrixModal detail={selectedMatrixDetail} onClose={() => setSelectedMatrixDetail(null)} />
+    </>
+  );
+}
+
+
 
 
 type DashboardActionRow = {
@@ -3293,6 +3695,7 @@ export function DashboardFinalActionablesTables() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
+  const [calculationsMarket, setCalculationsMarket] = useState<SwingTradeMarket | null>(null);
   const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
     india: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
     us: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
@@ -3330,6 +3733,15 @@ export function DashboardFinalActionablesTables() {
 
     return () => window.clearTimeout(timeoutId);
   }, [loadRuns]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ market?: SwingTradeMarket }>).detail;
+      setCalculationsMarket(detail?.market === "us" ? "us" : "india");
+    };
+    window.addEventListener("open-actionables-calculations", handler);
+    return () => window.removeEventListener("open-actionables-calculations", handler);
+  }, []);
 
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
 
@@ -3409,12 +3821,23 @@ export function DashboardFinalActionablesTables() {
 
     return (
       <div id={market === "us" ? "final-actionable-us" : "final-actionable-zerodha"} className="scroll-mt-24 rounded-[28px] border border-slate-200 bg-white/80 p-4 shadow-sm">
-        <div className="mb-4">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            {market === "us" ? "US" : "Zerodha India"}
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              {market === "us" ? "US" : "Zerodha India"}
+            </div>
+            <h3 className="mt-1 font-serif text-xl tracking-tight text-slate-950">{title}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
           </div>
-          <h3 className="mt-1 font-serif text-xl tracking-tight text-slate-950">{title}</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
+          <button
+            type="button"
+            onClick={() => setCalculationsMarket(market)}
+            className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label={`Open ${title} Actionables Calculations`}
+            title="Actionables Calculations"
+          >
+            <ActionablesCalculationsIcon />
+          </button>
         </div>
 
         <div className="space-y-4">
@@ -3429,6 +3852,7 @@ export function DashboardFinalActionablesTables() {
               const rows = actionRows
                 .filter(({ stock }) => stock.consensusAction === action)
                 .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans));
+              if (!rows.length) return null;
               return (
                 <Card
                   key={`${market}-${action}`}
@@ -3575,6 +3999,15 @@ export function DashboardFinalActionablesTables() {
           )}
         </div>
       </div>
+      <ActionablesCalculationsModal
+        open={calculationsMarket !== null}
+        onClose={() => setCalculationsMarket(null)}
+        title={calculationsMarket === "us" ? "Final Actionable US" : "Final Actionable Zerodha"}
+        market={calculationsMarket ?? "india"}
+        stocks={(calculationsMarket ? actionRowsByMarket[calculationsMarket] : actionRowsByMarket.india).map((row) => row.stock)}
+        technicalScans={technicalScans}
+        detailsData={calculationsMarket ? detailsDataByMarket[calculationsMarket] : detailsDataByMarket.india}
+      />
     </section>
   );
 }
@@ -3601,6 +4034,7 @@ export function FinalActionablesConsole({
   const [showRunDetails, setShowRunDetails] = useState(false);
   const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
+  const [calculationsOpen, setCalculationsOpen] = useState(false);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
   const [detailsData, setDetailsData] = useState<StockDetailsData>({
     portfolioSnapshot: null,
@@ -3907,9 +4341,20 @@ export function FinalActionablesConsole({
         {!showRunDetails ? (
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">
-                Stock-wise Consolidated Rebalance Output
-              </CardTitle>
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="text-lg">
+                  Stock-wise Consolidated Rebalance Output
+                </CardTitle>
+                <button
+                  type="button"
+                  onClick={() => setCalculationsOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  title="Actionables Calculations"
+                >
+                  <ActionablesCalculationsIcon className="size-4" />
+                  Actionables Calculations
+                </button>
+              </div>
             </CardHeader>
             <CardContent>
               {loading ? (
@@ -3923,6 +4368,9 @@ export function FinalActionablesConsole({
                       <tr className="border-b border-gray-300 bg-gray-50">
                         <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700">
                           Details
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-gray-700">
+                          Stock Info
                         </th>
                         {CONSOLIDATED_DISPLAY_HEADERS.map((header) => (
                           <th
@@ -3971,6 +4419,17 @@ export function FinalActionablesConsole({
           </Card>
         ) : null}
       </main>
+      <ActionablesCalculationsModal
+        open={calculationsOpen}
+        onClose={() => setCalculationsOpen(false)}
+        title={PAGE_COPY[portfolio].title}
+        market={market}
+        stocks={consensus}
+        technicalScans={technicalScans}
+        setupGroups={setupStockGroups}
+        detailsData={detailsData}
+        onSetupClick={setSelectedSetupGroup}
+      />
       <SetupStocksModal
         group={selectedSetupGroup}
         onClose={() => setSelectedSetupGroup(null)}
@@ -4104,6 +4563,28 @@ function FragmentRows({
             {isExpanded ? "Hide" : "Show"}
           </button>
         </td>
+        <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+          <div className="flex items-start gap-2">
+            <StockDetailsButton
+              stock={stock}
+              market={market}
+              technicalScan={technicalScan}
+              detailsData={detailsData}
+            />
+            <div>
+              <TradingViewSymbolLink
+                symbol={stock.symbol}
+                market={market}
+                exchange={stock.exchange}
+                className="font-semibold underline-offset-4 hover:text-blue-700 hover:underline"
+              >
+                {stock.symbol}
+              </TradingViewSymbolLink>
+              <div className="text-xs text-gray-500">{stock.exchange || "—"}</div>
+              <div className="text-xs text-gray-600">{stock.representative["Stock Name"] || stock.symbol}</div>
+            </div>
+          </div>
+        </td>
         {CONSOLIDATED_DISPLAY_HEADERS.map((header) => (
           <td
             key={`${stock.key}-${header}`}
@@ -4137,7 +4618,7 @@ function FragmentRows({
       </tr>
       {isExpanded ? (
         <tr className="bg-gray-50/70">
-          <td colSpan={CONSOLIDATED_DISPLAY_HEADERS.length + 1} className="px-3 py-4">
+          <td colSpan={CONSOLIDATED_DISPLAY_HEADERS.length + 2} className="px-3 py-4">
             <div className="space-y-4">
               <ScoreMatrixSection
                 stock={stock}
