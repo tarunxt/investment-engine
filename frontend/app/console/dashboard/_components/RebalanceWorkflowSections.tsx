@@ -1,14 +1,15 @@
 "use client";
 
-import { type SVGProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import {
-  AlertCircle,
-  CheckCircle2,
-  Loader2,
-  Play,
-  X,
-} from "lucide-react";
+  type SVGProps,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useUsdInrRate } from "@/hooks/useUsdInrRate";
+import { AlertCircle, CheckCircle2, Loader2, Play, X } from "lucide-react";
 
 import {
   buildConsensusRows,
@@ -18,6 +19,7 @@ import {
   isCompletedRebalanceRun,
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
+import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import {
   buildRebalanceInputBundle,
   buildRebalancePrompt,
@@ -108,7 +110,8 @@ const MAX_JOB_POLLS = 120;
 const WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
 const STAGE_LLM_SELECTION_STORAGE_KEY = "investor:dashboard-stage-llms:v1";
 const WORKFLOW_COMPLETION_RESET_DELAY_MS = 5000;
-export const ZERODHA_DASHBOARD_SYNC_NOW_EVENT = "investor:dashboard:zerodha-sync-now";
+export const ZERODHA_DASHBOARD_SYNC_NOW_EVENT =
+  "investor:dashboard:zerodha-sync-now";
 
 const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",
@@ -207,13 +210,15 @@ function initialWorkflowState(): WorkflowState {
   }, {} as WorkflowState);
 }
 
-
 type PersistedWorkflow = {
   states: Record<WorkflowPortfolio, WorkflowState>;
   runningPortfolio: WorkflowPortfolio | null;
   specificMode: Record<WorkflowPortfolio, boolean>;
   selectedStages: Record<WorkflowPortfolio, WorkflowStageKey[]>;
-  selectedInputs?: Record<WorkflowPortfolio, Partial<Record<InputSelectionStage, string[]>>>;
+  selectedInputs?: Record<
+    WorkflowPortfolio,
+    Partial<Record<InputSelectionStage, string[]>>
+  >;
   lastAutoRebalanceCosts?: Record<WorkflowPortfolio, number | null>;
   savedAt: string;
 };
@@ -260,7 +265,7 @@ function hasRestorableRunningWorkflow(
 
 function getRestorableRunningPortfolio(persisted: PersistedWorkflow | null) {
   return hasRestorableRunningWorkflow(persisted, persisted?.runningPortfolio)
-    ? persisted?.runningPortfolio ?? null
+    ? (persisted?.runningPortfolio ?? null)
     : null;
 }
 
@@ -281,7 +286,9 @@ function getQueuedStages(
       const info = states[portfolio][stage];
       if (info.state !== "idle" && info.state !== "queued") return false;
       if (index <= activeIndex) return false;
-      return specificMode[portfolio] ? selectedStages[portfolio].has(stage) : true;
+      return specificMode[portfolio]
+        ? selectedStages[portfolio].has(stage)
+        : true;
     }),
   );
 }
@@ -410,28 +417,6 @@ function getRunTargetsFromStoredMix(providers: ProviderInfo[]) {
     });
 }
 
-function describeTargets(
-  targets: ProviderModelTarget[],
-  providers: ProviderInfo[],
-) {
-  const providerMap = new Map(
-    providers.map((provider) => [provider.name, provider]),
-  );
-  const totalCostInr = targets.reduce((total, target) => {
-    const provider = providerMap.get(target.provider);
-    const cost = provider?.model_estimated_cost_inr?.[target.model];
-    return total + (typeof cost === "number" ? cost : 0);
-  }, 0);
-  return {
-    totalCostInr,
-    lines: targets.map((target) => {
-      const provider = providerMap.get(target.provider);
-      const cost = provider?.model_estimated_cost_inr?.[target.model];
-      return `${target.provider} / ${target.model}${typeof cost === "number" ? ` — est. ₹${cost.toFixed(2)}` : ""}`;
-    }),
-  };
-}
-
 function getGpt4oMiniTarget(
   providers: ProviderInfo[],
 ): ProviderModelTarget | null {
@@ -499,7 +484,6 @@ function getLatestMatchingRebalanceRuns(
   );
 }
 
-
 function targetKey(target: ProviderModelTarget) {
   return `${target.provider}::${target.model}`;
 }
@@ -512,7 +496,9 @@ function parseTargetKey(key: string): ProviderModelTarget | null {
 function getCompatibleTargets(providers: ProviderInfo[]) {
   return providers.flatMap((provider) =>
     provider.models
-      .filter((model) => provider.model_compatibility?.[model]?.compatible !== false)
+      .filter(
+        (model) => provider.model_compatibility?.[model]?.compatible !== false,
+      )
       .map((model) => ({ provider: provider.name, model })),
   );
 }
@@ -540,7 +526,10 @@ function writeStageLlmSelection(stage: WorkflowStageKey, keys: string[]) {
   }
 }
 
-function getDefaultStageTargets(stage: WorkflowStageKey, providers: ProviderInfo[]) {
+function getDefaultStageTargets(
+  stage: WorkflowStageKey,
+  providers: ProviderInfo[],
+) {
   if (stage === "swing" || stage === "rebalance") {
     return getRunTargetsFromStoredMix(providers);
   }
@@ -549,14 +538,21 @@ function getDefaultStageTargets(stage: WorkflowStageKey, providers: ProviderInfo
   return gpt4oMiniTarget ? [gpt4oMiniTarget] : [];
 }
 
-function getSavedStageTargets(stage: WorkflowStageKey, providers: ProviderInfo[]) {
-  const compatibleKeys = new Set(getCompatibleTargets(providers).map(targetKey));
+function getSavedStageTargets(
+  stage: WorkflowStageKey,
+  providers: ProviderInfo[],
+) {
+  const compatibleKeys = new Set(
+    getCompatibleTargets(providers).map(targetKey),
+  );
   const savedTargets = readStageLlmSelection(stage)
     .filter((key) => compatibleKeys.has(key))
     .map(parseTargetKey)
     .filter((target): target is ProviderModelTarget => Boolean(target));
 
-  return savedTargets.length > 0 ? savedTargets : getDefaultStageTargets(stage, providers);
+  return savedTargets.length > 0
+    ? savedTargets
+    : getDefaultStageTargets(stage, providers);
 }
 
 function buildRunPayload({
@@ -617,18 +613,30 @@ function getCompletedLlmProgress(run: RunResponse) {
 
 function isUsableStageJob(job?: { status?: string; response?: string | null }) {
   const status = (job?.status || "").toLowerCase();
-  return status === "completed" || status === "partial" || Boolean(job?.response?.trim());
+  return (
+    status === "completed" ||
+    status === "partial" ||
+    Boolean(job?.response?.trim())
+  );
 }
 
-function getRunJobTimestamp(run: RunResponse, job?: { updated_at?: string | null; created_at?: string | null }) {
+function getRunJobTimestamp(
+  run: RunResponse,
+  job?: { updated_at?: string | null; created_at?: string | null },
+) {
   return job?.updated_at ?? job?.created_at ?? getLatestRunTimestamp(run);
 }
 
-function buildRunJobCandidate(run: RunResponse, jobId: number | undefined, stageLabel: string): InputSelectionCandidate | null {
+function buildRunJobCandidate(
+  run: RunResponse,
+  jobId: number | undefined,
+  stageLabel: string,
+): InputSelectionCandidate | null {
   const link = run.run_jobs?.find((item) => item.job?.id === jobId);
   const job = link?.job;
   if (!job || !isUsableStageJob(job)) return null;
-  const costUsd = typeof job.estimated_cost === "number" ? job.estimated_cost : null;
+  const costUsd =
+    typeof job.estimated_cost === "number" ? job.estimated_cost : null;
   return {
     id: `run:${run.id}:job:${job.id}`,
     source: "run-job",
@@ -645,14 +653,17 @@ function buildRunJobCandidate(run: RunResponse, jobId: number | undefined, stage
 }
 
 function buildRunJobCandidates(runs: RunResponse[], stageLabel: string) {
-  return runs.flatMap((run) =>
-    (run.run_jobs ?? [])
-      .map((link) => buildRunJobCandidate(run, link.job?.id, stageLabel))
-      .filter(Boolean) as InputSelectionCandidate[],
+  return runs.flatMap(
+    (run) =>
+      (run.run_jobs ?? [])
+        .map((link) => buildRunJobCandidate(run, link.job?.id, stageLabel))
+        .filter(Boolean) as InputSelectionCandidate[],
   );
 }
 
-function buildNextCandidate(stage: InputSelectionStage): InputSelectionCandidate {
+function buildNextCandidate(
+  stage: InputSelectionStage,
+): InputSelectionCandidate {
   const labelByStage: Record<InputSelectionStage, string> = {
     swing: "Next Threat Scan output",
     rebalance: "Next Swing Scan output",
@@ -671,7 +682,10 @@ function buildNextCandidate(stage: InputSelectionStage): InputSelectionCandidate
   };
 }
 
-function filterRunToSelectedJobs(run: RunResponse, selectedIds: Set<string>): RunResponse | null {
+function filterRunToSelectedJobs(
+  run: RunResponse,
+  selectedIds: Set<string>,
+): RunResponse | null {
   const runJobs = (run.run_jobs ?? []).filter((link) =>
     selectedIds.has(`run:${run.id}:job:${link.job?.id}`),
   );
@@ -679,7 +693,10 @@ function filterRunToSelectedJobs(run: RunResponse, selectedIds: Set<string>): Ru
   return { ...run, run_jobs: runJobs };
 }
 
-function uniqueRunsBySelectedCandidates(candidates: InputSelectionCandidate[], selectedIds: Set<string>) {
+function uniqueRunsBySelectedCandidates(
+  candidates: InputSelectionCandidate[],
+  selectedIds: Set<string>,
+) {
   const byRun = new Map<number, RunResponse>();
   candidates.forEach((candidate) => {
     if (!candidate.run) return;
@@ -774,7 +791,8 @@ function formatInrCost(value?: number | null) {
 
 function getStageCostInr(info: StageInfo, usdInrRate: number) {
   if (typeof info.costInr === "number" && info.costInr > 0) return info.costInr;
-  if (typeof info.costUsd === "number" && info.costUsd > 0) return info.costUsd * usdInrRate;
+  if (typeof info.costUsd === "number" && info.costUsd > 0)
+    return info.costUsd * usdInrRate;
   return 0;
 }
 
@@ -786,8 +804,12 @@ function getWorkflowRunCost(state: WorkflowState, usdInrRate: number) {
 }
 
 function getWorkflowRunDuration(state: WorkflowState, now = Date.now()) {
-  const starts = COST_BEARING_STAGES.map((stage) => parseTimestampMs(state[stage].startedAt)).filter(Boolean);
-  const ends = COST_BEARING_STAGES.map((stage) => parseTimestampMs(state[stage].endedAt ?? state[stage].completedAt)).filter(Boolean);
+  const starts = COST_BEARING_STAGES.map((stage) =>
+    parseTimestampMs(state[stage].startedAt),
+  ).filter(Boolean);
+  const ends = COST_BEARING_STAGES.map((stage) =>
+    parseTimestampMs(state[stage].endedAt ?? state[stage].completedAt),
+  ).filter(Boolean);
   if (!starts.length) return null;
   return formatDuration(
     new Date(Math.min(...starts)).toISOString(),
@@ -799,33 +821,52 @@ function getWorkflowRunDuration(state: WorkflowState, now = Date.now()) {
 function getRunDuration(run: RunResponse) {
   const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
   const startMs = Math.min(
-    ...[parseTimestampMs(run.created_at), ...jobs.map((job) => parseTimestampMs(job.created_at))]
-      .filter(Boolean),
+    ...[
+      parseTimestampMs(run.created_at),
+      ...jobs.map((job) => parseTimestampMs(job.created_at)),
+    ].filter(Boolean),
   );
   const endMs = Math.max(
-    ...[parseTimestampMs(run.updated_at), ...jobs.map((job) => parseTimestampMs(job.updated_at))]
-      .filter(Boolean),
+    ...[
+      parseTimestampMs(run.updated_at),
+      ...jobs.map((job) => parseTimestampMs(job.updated_at)),
+    ].filter(Boolean),
   );
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
-  return formatDuration(new Date(startMs).toISOString(), new Date(endMs).toISOString());
+  return formatDuration(
+    new Date(startMs).toISOString(),
+    new Date(endMs).toISOString(),
+  );
 }
 
 function getRunOutputSummary(run: RunResponse) {
   const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
-  const completed = jobs.filter((job) => (job.status || "").toLowerCase() === "completed").length;
-  const failed = jobs.filter((job) => (job.status || "").toLowerCase() === "failed").length;
+  const completed = jobs.filter(
+    (job) => (job.status || "").toLowerCase() === "completed",
+  ).length;
+  const failed = jobs.filter(
+    (job) => (job.status || "").toLowerCase() === "failed",
+  ).length;
   const partial = jobs.filter((job) => {
     const status = (job.status || "").toLowerCase();
-    return status === "partial" || (Boolean(job.response?.trim()) && status !== "completed");
+    return (
+      status === "partial" ||
+      (Boolean(job.response?.trim()) && status !== "completed")
+    );
   }).length;
-  const costUsd = jobs.reduce((total, job) => total + (job.estimated_cost ?? 0), 0);
+  const costUsd = jobs.reduce(
+    (total, job) => total + (job.estimated_cost ?? 0),
+    0,
+  );
   const duration = getRunDuration(run);
   return [
     `Run #${run.id} · ${formatTimestamp(run.created_at)} · LLMs used: ${jobs.length}`,
     `Completed: ${completed} · Partial: ${partial} · Failed: ${failed}`,
     duration ? `Time taken: ${duration}` : null,
     costUsd > 0 ? `Cost incurred: $${costUsd.toFixed(4)}` : null,
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function formatLlmCompletion(info: StageInfo) {
@@ -860,7 +901,10 @@ function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
   }
   if (stage === "threats") {
     return [
-      { label: "Latest guardrail scan", value: formatTimestamp(info.completedAt) },
+      {
+        label: "Latest guardrail scan",
+        value: formatTimestamp(info.completedAt),
+      },
       { label: "LLM run", value: formatLlmRun(info) },
       { label: "Cost incurred", value: formatInrCost(info.costInr) },
     ];
@@ -894,7 +938,6 @@ function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
     },
   ];
 }
-
 
 function SelectInputsIcon({ className }: { className?: string }) {
   return (
@@ -962,7 +1005,16 @@ function LlmDetailsIcon(props: SVGProps<SVGSVGElement>) {
       />
       {["15,22", "31,13", "49,23", "23,46", "41,46"].map((point) => {
         const [cx, cy] = point.split(",");
-        return <circle key={point} cx={cx} cy={cy} r="3.8" stroke="currentColor" strokeWidth="3.2" />;
+        return (
+          <circle
+            key={point}
+            cx={cx}
+            cy={cy}
+            r="3.8"
+            stroke="currentColor"
+            strokeWidth="3.2"
+          />
+        );
       })}
     </svg>
   );
@@ -1098,28 +1150,51 @@ function WorkflowStageTile({
         {info.state === "idle" || info.state === "queued" ? (
           getIdleStageRows(stage, info).map((row) => (
             <p key={row.label}>
-              <span className="font-extrabold text-slate-500">{row.label}:</span>{" "}
+              <span className="font-extrabold text-slate-500">
+                {row.label}:
+              </span>{" "}
               {row.value}
             </p>
           ))
         ) : (
           <>
-            {info.lastRunId ? <p><span className="font-extrabold text-slate-500">Job Number:</span> #{info.lastRunId}</p> : null}
+            {info.lastRunId ? (
+              <p>
+                <span className="font-extrabold text-slate-500">
+                  Job Number:
+                </span>{" "}
+                #{info.lastRunId}
+              </p>
+            ) : null}
             {info.completedAt ? (
-              <p><span className="font-extrabold text-slate-500">Timestamp:</span> {formatTimestamp(info.completedAt)}</p>
+              <p>
+                <span className="font-extrabold text-slate-500">
+                  Timestamp:
+                </span>{" "}
+                {formatTimestamp(info.completedAt)}
+              </p>
             ) : null}
             {formatDuration(info.startedAt, info.endedAt, now) ? (
               <p>
-                <span className="font-extrabold text-slate-500">Duration:</span> {formatDuration(info.startedAt, info.endedAt, now)}
+                <span className="font-extrabold text-slate-500">Duration:</span>{" "}
+                {formatDuration(info.startedAt, info.endedAt, now)}
               </p>
             ) : null}
             {info.totalLlms ? (
               <p>
-                <span className="font-extrabold text-slate-500">LLMs completed:</span> {info.completedLlms ?? 0}/{info.totalLlms}
+                <span className="font-extrabold text-slate-500">
+                  LLMs completed:
+                </span>{" "}
+                {info.completedLlms ?? 0}/{info.totalLlms}
               </p>
             ) : null}
             {info.recommendedStocks ? (
-              <p><span className="font-extrabold text-slate-500">Stocks recommended:</span> {info.recommendedStocks}</p>
+              <p>
+                <span className="font-extrabold text-slate-500">
+                  Stocks recommended:
+                </span>{" "}
+                {info.recommendedStocks}
+              </p>
             ) : null}
             {stage !== "sync" &&
             (info.provider ||
@@ -1130,20 +1205,34 @@ function WorkflowStageTile({
               info.error) ? (
               <>
                 <p>
-                  <span className="font-extrabold text-slate-500">LLM run:</span>{" "}
+                  <span className="font-extrabold text-slate-500">
+                    LLM run:
+                  </span>{" "}
                   {[info.provider, info.model].filter(Boolean).join(" / ") ||
                     "LLM details not available yet"}
                 </p>
                 <p>
-                  <span className="font-extrabold text-slate-500">Run status:</span> {info.runStatus ?? "Waiting for job status"}
+                  <span className="font-extrabold text-slate-500">
+                    Run status:
+                  </span>{" "}
+                  {info.runStatus ?? "Waiting for job status"}
                 </p>
                 <p>
-                  <span className="font-extrabold text-slate-500">Sheets export:</span>{" "}
+                  <span className="font-extrabold text-slate-500">
+                    Sheets export:
+                  </span>{" "}
                   {info.exportStatus ?? "No sheet export status yet"}
                 </p>
-                <p><span className="font-extrabold text-slate-500">Cost incurred:</span> {formatInrCost(info.costInr)}</p>
+                <p>
+                  <span className="font-extrabold text-slate-500">
+                    Cost incurred:
+                  </span>{" "}
+                  {formatInrCost(info.costInr)}
+                </p>
                 {info.error ? (
-                  <p className="text-red-700"><span className="font-extrabold">Error:</span> {info.error}</p>
+                  <p className="text-red-700">
+                    <span className="font-extrabold">Error:</span> {info.error}
+                  </p>
                 ) : null}
               </>
             ) : null}
@@ -1360,8 +1449,12 @@ function InputSelectionDialog({
   onClose: () => void;
 }) {
   const selectAllRef = useRef<HTMLInputElement | null>(null);
-  const allSelected = candidates.length > 0 && candidates.every((candidate) => selectedIds.has(candidate.id));
-  const someSelected = candidates.some((candidate) => selectedIds.has(candidate.id));
+  const allSelected =
+    candidates.length > 0 &&
+    candidates.every((candidate) => selectedIds.has(candidate.id));
+  const someSelected = candidates.some((candidate) =>
+    selectedIds.has(candidate.id),
+  );
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -1383,9 +1476,13 @@ function InputSelectionDialog({
       <div className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
-            <h3 className="text-lg font-semibold text-slate-950">{titleByStage[stage]}</h3>
+            <h3 className="text-lg font-semibold text-slate-950">
+              {titleByStage[stage]}
+            </h3>
             <p className="mt-1 text-sm text-slate-500">
-              Pick the previous-stage outputs this stage should consider. The reserved next-row is replaced by the live output when that earlier stage finishes.
+              Pick the previous-stage outputs this stage should consider. The
+              reserved next-row is replaced by the live output when that earlier
+              stage finishes.
             </p>
           </div>
           <button
@@ -1400,7 +1497,8 @@ function InputSelectionDialog({
         <div className="max-h-[65vh] overflow-auto p-5">
           {loading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 p-8 text-sm text-slate-500">
-              <Loader2 className="size-4 animate-spin" /> Loading eligible outputs…
+              <Loader2 className="size-4 animate-spin" /> Loading eligible
+              outputs…
             </div>
           ) : candidates.length === 0 ? (
             <div className="rounded-2xl border border-slate-200 p-8 text-sm text-slate-500">
@@ -1429,7 +1527,12 @@ function InputSelectionDialog({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {candidates.map((candidate) => (
-                  <tr key={candidate.id} className={candidate.source === "next" ? "bg-blue-50/60" : "bg-white"}>
+                  <tr
+                    key={candidate.id}
+                    className={
+                      candidate.source === "next" ? "bg-blue-50/60" : "bg-white"
+                    }
+                  >
                     <td className="px-3 py-3 align-top">
                       <input
                         type="checkbox"
@@ -1438,16 +1541,30 @@ function InputSelectionDialog({
                         aria-label={`Select ${candidate.label}`}
                       />
                     </td>
-                    <td className="px-3 py-3 align-top font-semibold text-slate-900">{candidate.jobNo}</td>
-                    <td className="px-3 py-3 align-top text-slate-600">{candidate.timestamp ? formatTimestamp(candidate.timestamp) : "Reserved for next output"}</td>
-                    <td className="px-3 py-3 align-top">
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{candidate.status}</span>
+                    <td className="px-3 py-3 align-top font-semibold text-slate-900">
+                      {candidate.jobNo}
                     </td>
-                    <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
                     <td className="px-3 py-3 align-top text-slate-600">
-                      {typeof candidate.costUsd === "number" ? `₹${(candidate.costUsd * usdInrRate).toFixed(2)}` : "n/a"}
+                      {candidate.timestamp
+                        ? formatTimestamp(candidate.timestamp)
+                        : "Reserved for next output"}
                     </td>
-                    <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">{candidate.error || "—"}</td>
+                    <td className="px-3 py-3 align-top">
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                        {candidate.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 align-top text-slate-700">
+                      {candidate.label}
+                    </td>
+                    <td className="px-3 py-3 align-top text-slate-600">
+                      {typeof candidate.costUsd === "number"
+                        ? `₹${(candidate.costUsd * usdInrRate).toFixed(2)}`
+                        : "n/a"}
+                    </td>
+                    <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">
+                      {candidate.error || "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1455,7 +1572,11 @@ function InputSelectionDialog({
           )}
         </div>
         <div className="flex justify-end border-t border-slate-200 p-4">
-          <Button type="button" onClick={onClose} className="bg-blue-600 text-white hover:bg-blue-500">
+          <Button
+            type="button"
+            onClick={onClose}
+            className="bg-blue-600 text-white hover:bg-blue-500"
+          >
             Done
           </Button>
         </div>
@@ -1466,7 +1587,16 @@ function InputSelectionDialog({
 
 function RebalanceFlowIcon({ className = "size-5" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 64 64" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="5">
+    <svg
+      viewBox="0 0 64 64"
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="5"
+    >
       <circle cx="32" cy="13" r="9" />
       <circle cx="15" cy="47" r="9" />
       <circle cx="52" cy="38" r="9" />
@@ -1484,7 +1614,10 @@ function ZerodhaRebalanceFlowCard() {
       label: "Primary workflow",
       description: "Blue solid arrows show the main stage handoff.",
       sample: (
-        <span className="h-0.5 w-12 rounded-full bg-blue-600" aria-hidden="true" />
+        <span
+          className="h-0.5 w-12 rounded-full bg-blue-600"
+          aria-hidden="true"
+        />
       ),
     },
     {
@@ -1633,373 +1766,435 @@ function ZerodhaRebalanceFlowCard() {
       </div>
 
       {visible ? (
-      <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-        <div className="grid gap-3 rounded-[20px] border border-slate-200 bg-white/90 p-4 sm:grid-cols-2 xl:grid-cols-4">
-          {legendItems.map((item) => (
-            <div key={item.label} className="flex items-start gap-3">
-              <span className="mt-1 flex h-8 w-12 items-center justify-center">
-                {item.sample}
-              </span>
-              <div>
-                <p className="text-sm font-semibold text-slate-900">{item.label}</p>
-                <p className="text-xs leading-5 text-slate-500">{item.description}</p>
+        <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+          <div className="grid gap-3 rounded-[20px] border border-slate-200 bg-white/90 p-4 sm:grid-cols-2 xl:grid-cols-4">
+            {legendItems.map((item) => (
+              <div key={item.label} className="flex items-start gap-3">
+                <span className="mt-1 flex h-8 w-12 items-center justify-center">
+                  {item.sample}
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {item.label}
+                  </p>
+                  <p className="text-xs leading-5 text-slate-500">
+                    {item.description}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
 
-        <div className="mt-4 overflow-x-auto">
-        <svg
-          viewBox="0 0 1360 520"
-          role="img"
-          aria-labelledby="zerodha-rebalance-flow-title zerodha-rebalance-flow-desc"
-          className="min-w-[1040px]"
-        >
-          <title id="zerodha-rebalance-flow-title">
-            Zerodha rebalance workflow from sync through threats, swing,
-            rebalance, technical validation, and final actionables.
-          </title>
-          <desc id="zerodha-rebalance-flow-desc">
-            The sync stage feeds a risk and guardrail lane plus an opportunity
-            lane. Those inputs combine in rebalance, move through technical
-            validation, and finally publish buy or add, sell or trim, and hold
-            or watch outputs.
-          </desc>
-          <defs>
-            <marker
-              id="flow-arrow-teal"
-              markerHeight="8"
-              markerWidth="8"
-              orient="auto"
-              refX="7"
-              refY="4"
+          <div className="mt-4 overflow-x-auto">
+            <svg
+              viewBox="0 0 1360 520"
+              role="img"
+              aria-labelledby="zerodha-rebalance-flow-title zerodha-rebalance-flow-desc"
+              className="min-w-[1040px]"
             >
-              <path d="M0,0 L8,4 L0,8 Z" fill="#0f766e" />
-            </marker>
-            <marker
-              id="flow-arrow-blue"
-              markerHeight="8"
-              markerWidth="8"
-              orient="auto"
-              refX="7"
-              refY="4"
-            >
-              <path d="M0,0 L8,4 L0,8 Z" fill="#2563eb" />
-            </marker>
-            <marker
-              id="flow-arrow-red"
-              markerHeight="8"
-              markerWidth="8"
-              orient="auto"
-              refX="7"
-              refY="4"
-            >
-              <path d="M0,0 L8,4 L0,8 Z" fill="#dc2626" />
-            </marker>
-          </defs>
-
-          <rect
-            x="12"
-            y="12"
-            width="1336"
-            height="496"
-            rx="32"
-            fill="#f8fafc"
-            stroke="#e2e8f0"
-            strokeWidth="2"
-          />
-          <rect
-            x="286"
-            y="52"
-            width="300"
-            height="184"
-            rx="28"
-            fill="#fff5f5"
-            stroke="#fecaca"
-            strokeWidth="2"
-          />
-          <rect
-            x="286"
-            y="284"
-            width="300"
-            height="184"
-            rx="28"
-            fill="#ecfeff"
-            stroke="#99f6e4"
-            strokeWidth="2"
-          />
-          <rect
-            x="1124"
-            y="92"
-            width="200"
-            height="336"
-            rx="28"
-            fill="#ffffff"
-            stroke="#cbd5e1"
-            strokeWidth="2"
-          />
-
-          <text x="316" y="88" fill="#881337" fontSize="15" fontWeight="700">
-            Risk / guardrail lane
-          </text>
-          <text x="316" y="112" fill="#9f1239" fontSize="12">
-            Threats decide what should block adds, force trims, or preserve cash.
-          </text>
-          <text x="316" y="320" fill="#115e59" fontSize="15" fontWeight="700">
-            Opportunity lane
-          </text>
-          <text x="316" y="344" fill="#0f766e" fontSize="12">
-            Swing scan surfaces where fresh capital or adds have the best setup.
-          </text>
-          <text x="1152" y="128" fill="#334155" fontSize="12" fontWeight="700">
-            Step 06
-          </text>
-          <text x="1152" y="152" fill="#0f172a" fontSize="18" fontWeight="700">
-            Actionables
-          </text>
-          <text x="1152" y="174" fill="#475569" fontSize="12">
-            <tspan x="1152" dy="0">
-              Publish the validated outputs
-            </tspan>
-            <tspan x="1152" dy="16">
-              traders actually execute.
-            </tspan>
-          </text>
-
-          <path
-            d="M254 242 C290 242 290 144 326 144"
-            fill="none"
-            stroke="#2563eb"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-blue)"
-          />
-          <path
-            d="M436 190 C436 242 436 302 436 354"
-            fill="none"
-            stroke="#2563eb"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-blue)"
-          />
-          <path
-            d="M546 400 C598 400 598 260 634 260"
-            fill="none"
-            stroke="#2563eb"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-blue)"
-          />
-          <path
-            d="M854 260 H886"
-            fill="none"
-            stroke="#2563eb"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-blue)"
-          />
-          <path
-            d="M1106 260 H1124"
-            fill="none"
-            stroke="#2563eb"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-blue)"
-          />
-
-          <path
-            d="M546 144 C612 160 628 212 634 232"
-            fill="none"
-            stroke="#dc2626"
-            strokeDasharray="7 7"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-red)"
-          />
-          <path
-            d="M546 400 C612 382 624 314 634 286"
-            fill="none"
-            stroke="#0f766e"
-            strokeDasharray="2 10"
-            strokeLinecap="round"
-            strokeWidth="4"
-            markerEnd="url(#flow-arrow-teal)"
-          />
-
-          <path
-            d="M794 168 L794 214"
-            fill="none"
-            stroke="#dc2626"
-            strokeDasharray="7 7"
-            strokeLinecap="round"
-            strokeWidth="3"
-          />
-          <path
-            d="M998 306 L998 340"
-            fill="none"
-            stroke="#dc2626"
-            strokeDasharray="7 7"
-            strokeLinecap="round"
-            strokeWidth="3"
-          />
-
-          <path
-            d="M724 152 H864"
-            fill="none"
-            stroke="#cbd5e1"
-            strokeDasharray="4 8"
-            strokeLinecap="round"
-            strokeWidth="2"
-          />
-          <text x="564" y="132" fill="#9f1239" fontSize="12" fontWeight="700">
-            Risk inputs into rebalance
-          </text>
-          <text x="564" y="154" fill="#881337" fontSize="12">
-            Threat score, downside flags, concentration and cash discipline.
-          </text>
-          <text x="564" y="402" fill="#115e59" fontSize="12" fontWeight="700">
-            Opportunity signals into rebalance
-          </text>
-          <text x="564" y="424" fill="#0f766e" fontSize="12">
-            Setup quality, momentum, catalysts, and relative strength.
-          </text>
-
-          <rect
-            x="688"
-            y="96"
-            width="212"
-            height="72"
-            rx="18"
-            fill="#ffffff"
-            stroke="#fca5a5"
-            strokeDasharray="7 6"
-            strokeWidth="2"
-          />
-          <text x="708" y="122" fill="#991b1b" fontSize="12" fontWeight="700">
-            Allocation guardrails
-          </text>
-          <text x="708" y="142" fill="#b91c1c" fontSize="12">
-            Cash buffer, sector caps, and position sizing stay explicit.
-          </text>
-
-          <rect
-            x="906"
-            y="340"
-            width="216"
-            height="72"
-            rx="18"
-            fill="#ffffff"
-            stroke="#fca5a5"
-            strokeDasharray="7 6"
-            strokeWidth="2"
-          />
-          <text x="926" y="366" fill="#991b1b" fontSize="12" fontWeight="700">
-            Execution guardrails
-          </text>
-          <text x="926" y="386" fill="#b91c1c" fontSize="12">
-            Confirm trend, respect staged exits, or leave names on watch.
-          </text>
-
-          {stageCards.map((stageCard) => {
-            const stageMeta = STAGE_METADATA[stageCard.stage];
-            return (
-              <g key={stageCard.stage}>
-                <rect
-                  x={stageCard.x}
-                  y={stageCard.y}
-                  width={stageCard.width}
-                  height={stageCard.height}
-                  rx="24"
-                  fill={stageCard.fill}
-                  stroke={stageCard.stroke}
-                  strokeWidth="2.5"
-                />
-                <rect
-                  x={stageCard.x + 16}
-                  y={stageCard.y + 16}
-                  width="66"
-                  height="24"
-                  rx="12"
-                  fill="#ffffff"
-                  opacity="0.92"
-                />
-                <text
-                  x={stageCard.x + 49}
-                  y={stageCard.y + 32}
-                  textAnchor="middle"
-                  fill={stageCard.accent}
-                  fontSize="12"
-                  fontWeight="700"
+              <title id="zerodha-rebalance-flow-title">
+                Zerodha rebalance workflow from sync through threats, swing,
+                rebalance, technical validation, and final actionables.
+              </title>
+              <desc id="zerodha-rebalance-flow-desc">
+                The sync stage feeds a risk and guardrail lane plus an
+                opportunity lane. Those inputs combine in rebalance, move
+                through technical validation, and finally publish buy or add,
+                sell or trim, and hold or watch outputs.
+              </desc>
+              <defs>
+                <marker
+                  id="flow-arrow-teal"
+                  markerHeight="8"
+                  markerWidth="8"
+                  orient="auto"
+                  refX="7"
+                  refY="4"
                 >
-                  Step {stageMeta.step}
-                </text>
-                <text
-                  x={stageCard.x + 18}
-                  y={stageCard.y + 56}
-                  fill="#0f172a"
-                  fontSize="18"
-                  fontWeight="700"
+                  <path d="M0,0 L8,4 L0,8 Z" fill="#0f766e" />
+                </marker>
+                <marker
+                  id="flow-arrow-blue"
+                  markerHeight="8"
+                  markerWidth="8"
+                  orient="auto"
+                  refX="7"
+                  refY="4"
                 >
-                  {stageMeta.chartTitle}
-                </text>
-                <text
-                  x={stageCard.x + 18}
-                  y={stageCard.y + 74}
-                  fill="#475569"
-                  fontSize="12"
+                  <path d="M0,0 L8,4 L0,8 Z" fill="#2563eb" />
+                </marker>
+                <marker
+                  id="flow-arrow-red"
+                  markerHeight="8"
+                  markerWidth="8"
+                  orient="auto"
+                  refX="7"
+                  refY="4"
                 >
-                  {stageMeta.chartLines.map((line, index) => (
-                    <tspan
-                      key={`${stageCard.stage}-${line}`}
-                      x={stageCard.x + 18}
-                      dy={index === 0 ? 0 : 16}
-                    >
-                      {line}
-                    </tspan>
-                  ))}
-                </text>
-              </g>
-            );
-          })}
+                  <path d="M0,0 L8,4 L0,8 Z" fill="#dc2626" />
+                </marker>
+              </defs>
 
-          {downstreamOutputs.map((output) => (
-            <g key={output.title}>
               <rect
-                x="1148"
-                y={output.y}
-                width="152"
-                height="64"
-                rx="20"
-                fill={output.fill}
-                stroke={output.stroke}
+                x="12"
+                y="12"
+                width="1336"
+                height="496"
+                rx="32"
+                fill="#f8fafc"
+                stroke="#e2e8f0"
+                strokeWidth="2"
+              />
+              <rect
+                x="286"
+                y="52"
+                width="300"
+                height="184"
+                rx="28"
+                fill="#fff5f5"
+                stroke="#fecaca"
+                strokeWidth="2"
+              />
+              <rect
+                x="286"
+                y="284"
+                width="300"
+                height="184"
+                rx="28"
+                fill="#ecfeff"
+                stroke="#99f6e4"
+                strokeWidth="2"
+              />
+              <rect
+                x="1124"
+                y="92"
+                width="200"
+                height="336"
+                rx="28"
+                fill="#ffffff"
+                stroke="#cbd5e1"
+                strokeWidth="2"
+              />
+
+              <text
+                x="316"
+                y="88"
+                fill="#881337"
+                fontSize="15"
+                fontWeight="700"
+              >
+                Risk / guardrail lane
+              </text>
+              <text x="316" y="112" fill="#9f1239" fontSize="12">
+                Threats decide what should block adds, force trims, or preserve
+                cash.
+              </text>
+              <text
+                x="316"
+                y="320"
+                fill="#115e59"
+                fontSize="15"
+                fontWeight="700"
+              >
+                Opportunity lane
+              </text>
+              <text x="316" y="344" fill="#0f766e" fontSize="12">
+                Swing scan surfaces where fresh capital or adds have the best
+                setup.
+              </text>
+              <text
+                x="1152"
+                y="128"
+                fill="#334155"
+                fontSize="12"
+                fontWeight="700"
+              >
+                Step 06
+              </text>
+              <text
+                x="1152"
+                y="152"
+                fill="#0f172a"
+                fontSize="18"
+                fontWeight="700"
+              >
+                Actionables
+              </text>
+              <text x="1152" y="174" fill="#475569" fontSize="12">
+                <tspan x="1152" dy="0">
+                  Publish the validated outputs
+                </tspan>
+                <tspan x="1152" dy="16">
+                  traders actually execute.
+                </tspan>
+              </text>
+
+              <path
+                d="M254 242 C290 242 290 144 326 144"
+                fill="none"
+                stroke="#2563eb"
+                strokeLinecap="round"
+                strokeWidth="4"
+                markerEnd="url(#flow-arrow-blue)"
+              />
+              <path
+                d="M436 190 C436 242 436 302 436 354"
+                fill="none"
+                stroke="#2563eb"
+                strokeLinecap="round"
+                strokeWidth="4"
+                markerEnd="url(#flow-arrow-blue)"
+              />
+              <path
+                d="M546 400 C598 400 598 260 634 260"
+                fill="none"
+                stroke="#2563eb"
+                strokeLinecap="round"
+                strokeWidth="4"
+                markerEnd="url(#flow-arrow-blue)"
+              />
+              <path
+                d="M854 260 H886"
+                fill="none"
+                stroke="#2563eb"
+                strokeLinecap="round"
+                strokeWidth="4"
+                markerEnd="url(#flow-arrow-blue)"
+              />
+              <path
+                d="M1106 260 H1124"
+                fill="none"
+                stroke="#2563eb"
+                strokeLinecap="round"
+                strokeWidth="4"
+                markerEnd="url(#flow-arrow-blue)"
+              />
+
+              <path
+                d="M546 144 C612 160 628 212 634 232"
+                fill="none"
+                stroke="#dc2626"
+                strokeDasharray="7 7"
+                strokeLinecap="round"
+                strokeWidth="4"
+                markerEnd="url(#flow-arrow-red)"
+              />
+              <path
+                d="M546 400 C612 382 624 314 634 286"
+                fill="none"
+                stroke="#0f766e"
+                strokeDasharray="2 10"
+                strokeLinecap="round"
+                strokeWidth="4"
+                markerEnd="url(#flow-arrow-teal)"
+              />
+
+              <path
+                d="M794 168 L794 214"
+                fill="none"
+                stroke="#dc2626"
+                strokeDasharray="7 7"
+                strokeLinecap="round"
+                strokeWidth="3"
+              />
+              <path
+                d="M998 306 L998 340"
+                fill="none"
+                stroke="#dc2626"
+                strokeDasharray="7 7"
+                strokeLinecap="round"
+                strokeWidth="3"
+              />
+
+              <path
+                d="M724 152 H864"
+                fill="none"
+                stroke="#cbd5e1"
+                strokeDasharray="4 8"
+                strokeLinecap="round"
                 strokeWidth="2"
               />
               <text
-                x="1170"
-                y={output.y + 26}
-                fill={output.accent}
-                fontSize="13"
+                x="564"
+                y="132"
+                fill="#9f1239"
+                fontSize="12"
                 fontWeight="700"
               >
-                {output.title}
+                Risk inputs into rebalance
               </text>
-              <text x="1170" y={output.y + 44} fill="#475569" fontSize="11.5">
-                {output.subtitleLines.map((line, index) => (
-                  <tspan key={`${output.title}-${line}`} x="1170" dy={index === 0 ? 0 : 14}>
-                    {line}
-                  </tspan>
-                ))}
+              <text x="564" y="154" fill="#881337" fontSize="12">
+                Threat score, downside flags, concentration and cash discipline.
               </text>
-            </g>
-          ))}
-        </svg>
+              <text
+                x="564"
+                y="402"
+                fill="#115e59"
+                fontSize="12"
+                fontWeight="700"
+              >
+                Opportunity signals into rebalance
+              </text>
+              <text x="564" y="424" fill="#0f766e" fontSize="12">
+                Setup quality, momentum, catalysts, and relative strength.
+              </text>
+
+              <rect
+                x="688"
+                y="96"
+                width="212"
+                height="72"
+                rx="18"
+                fill="#ffffff"
+                stroke="#fca5a5"
+                strokeDasharray="7 6"
+                strokeWidth="2"
+              />
+              <text
+                x="708"
+                y="122"
+                fill="#991b1b"
+                fontSize="12"
+                fontWeight="700"
+              >
+                Allocation guardrails
+              </text>
+              <text x="708" y="142" fill="#b91c1c" fontSize="12">
+                Cash buffer, sector caps, and position sizing stay explicit.
+              </text>
+
+              <rect
+                x="906"
+                y="340"
+                width="216"
+                height="72"
+                rx="18"
+                fill="#ffffff"
+                stroke="#fca5a5"
+                strokeDasharray="7 6"
+                strokeWidth="2"
+              />
+              <text
+                x="926"
+                y="366"
+                fill="#991b1b"
+                fontSize="12"
+                fontWeight="700"
+              >
+                Execution guardrails
+              </text>
+              <text x="926" y="386" fill="#b91c1c" fontSize="12">
+                Confirm trend, respect staged exits, or leave names on watch.
+              </text>
+
+              {stageCards.map((stageCard) => {
+                const stageMeta = STAGE_METADATA[stageCard.stage];
+                return (
+                  <g key={stageCard.stage}>
+                    <rect
+                      x={stageCard.x}
+                      y={stageCard.y}
+                      width={stageCard.width}
+                      height={stageCard.height}
+                      rx="24"
+                      fill={stageCard.fill}
+                      stroke={stageCard.stroke}
+                      strokeWidth="2.5"
+                    />
+                    <rect
+                      x={stageCard.x + 16}
+                      y={stageCard.y + 16}
+                      width="66"
+                      height="24"
+                      rx="12"
+                      fill="#ffffff"
+                      opacity="0.92"
+                    />
+                    <text
+                      x={stageCard.x + 49}
+                      y={stageCard.y + 32}
+                      textAnchor="middle"
+                      fill={stageCard.accent}
+                      fontSize="12"
+                      fontWeight="700"
+                    >
+                      Step {stageMeta.step}
+                    </text>
+                    <text
+                      x={stageCard.x + 18}
+                      y={stageCard.y + 56}
+                      fill="#0f172a"
+                      fontSize="18"
+                      fontWeight="700"
+                    >
+                      {stageMeta.chartTitle}
+                    </text>
+                    <text
+                      x={stageCard.x + 18}
+                      y={stageCard.y + 74}
+                      fill="#475569"
+                      fontSize="12"
+                    >
+                      {stageMeta.chartLines.map((line, index) => (
+                        <tspan
+                          key={`${stageCard.stage}-${line}`}
+                          x={stageCard.x + 18}
+                          dy={index === 0 ? 0 : 16}
+                        >
+                          {line}
+                        </tspan>
+                      ))}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {downstreamOutputs.map((output) => (
+                <g key={output.title}>
+                  <rect
+                    x="1148"
+                    y={output.y}
+                    width="152"
+                    height="64"
+                    rx="20"
+                    fill={output.fill}
+                    stroke={output.stroke}
+                    strokeWidth="2"
+                  />
+                  <text
+                    x="1170"
+                    y={output.y + 26}
+                    fill={output.accent}
+                    fontSize="13"
+                    fontWeight="700"
+                  >
+                    {output.title}
+                  </text>
+                  <text
+                    x="1170"
+                    y={output.y + 44}
+                    fill="#475569"
+                    fontSize="11.5"
+                  >
+                    {output.subtitleLines.map((line, index) => (
+                      <tspan
+                        key={`${output.title}-${line}`}
+                        x="1170"
+                        dy={index === 0 ? 0 : 14}
+                      >
+                        {line}
+                      </tspan>
+                    ))}
+                  </text>
+                </g>
+              ))}
+            </svg>
+          </div>
         </div>
-      </div>
       ) : null}
     </div>
   );
 }
-
 
 function StageLlmSelectorDialog({
   open,
@@ -2024,11 +2219,6 @@ function StageLlmSelectorDialog({
 }) {
   if (!open || !stage) return null;
 
-  const compatibleTargets = getCompatibleTargets(providers);
-  const selectedTargets = [...selectedKeys]
-    .map(parseTargetKey)
-    .filter((target): target is ProviderModelTarget => Boolean(target));
-  const details = describeTargets(selectedTargets, providers);
   const singleSelect = stage === "threats" || stage === "technical";
 
   return (
@@ -2057,100 +2247,44 @@ function StageLlmSelectorDialog({
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-              {selectedKeys.size} selected
-            </span>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              Est. ₹{details.totalCostInr.toFixed(2)}
-            </span>
-            {!singleSelect ? (
-              <button
-                type="button"
-                onClick={onSelectAll}
-                className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Select all
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={onClear}
-              className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              Unselect all
-            </button>
-            <button
-              type="button"
-              onClick={onResetDefaults}
-              className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              Reset defaults
-            </button>
-          </div>
-
-          {providers.length === 0 ? (
-            <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              Loading provider models...
-            </p>
-          ) : compatibleTargets.length === 0 ? (
-            <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              No compatible provider models are available for this prompt.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {providers.map((provider) => {
-                const models = provider.models.filter(
-                  (model) => provider.model_compatibility?.[model]?.compatible !== false,
-                );
-                if (models.length === 0) return null;
-                return (
-                  <div key={provider.name} className="rounded-2xl border border-slate-200 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <h4 className="font-semibold text-slate-950">{provider.name}</h4>
-                      <span className="text-xs text-slate-500">
-                        {provider.configured ? "Configured" : "Not configured"}
-                      </span>
-                    </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      {models.map((model) => {
-                        const key = `${provider.name}::${model}`;
-                        const cost = provider.model_estimated_cost_inr?.[model];
-                        return (
-                          <label
-                            key={key}
-                            className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2 text-sm transition ${
-                              selectedKeys.has(key)
-                                ? "border-blue-300 bg-blue-50 text-blue-950"
-                                : "border-slate-200 hover:bg-slate-50"
-                            }`}
-                          >
-                            <input
-                              type={singleSelect ? "radio" : "checkbox"}
-                              name={`stage-llm-${stage}`}
-                              checked={selectedKeys.has(key)}
-                              onChange={() => onToggle(key)}
-                              className="mt-1"
-                            />
-                            <span className="min-w-0">
-                              <span className="block truncate font-semibold">{model}</span>
-                              <span className="text-xs text-slate-500">
-                                {typeof cost === "number" ? `Est. ₹${cost.toFixed(2)}` : "Cost unavailable"}
-                              </span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <LlmModelSelectionPanel
+            providers={providers}
+            selectedKeys={selectedKeys}
+            selectionMode={singleSelect ? "single" : "multiple"}
+            emptyMessage="Loading provider models..."
+            showBulkActions={!singleSelect}
+            onToggle={onToggle}
+            onSelectAll={singleSelect ? undefined : onSelectAll}
+            onClear={onClear}
+            onToggleProvider={(providerName, models) => {
+              const providerModelKeys = models.map(
+                (model) => `${providerName}::${model}`,
+              );
+              const allSelected =
+                providerModelKeys.length > 0 &&
+                providerModelKeys.every((key) => selectedKeys.has(key));
+              providerModelKeys.forEach((key) => {
+                if (allSelected === selectedKeys.has(key)) {
+                  onToggle(key);
+                }
+              });
+            }}
+          />
         </div>
 
-        <div className="flex justify-end border-t border-slate-200 px-6 py-4">
-          <Button type="button" onClick={onClose} className="rounded-full bg-slate-950 text-white hover:bg-slate-800">
+        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+          <button
+            type="button"
+            onClick={onResetDefaults}
+            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Reset defaults
+          </button>
+          <Button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-slate-950 text-white hover:bg-slate-800"
+          >
             Done
           </Button>
         </div>
@@ -2174,10 +2308,13 @@ export function RebalanceWorkflowSections({
   );
   const [states, setStates] = useState<
     Record<WorkflowPortfolio, WorkflowState>
-  >(() => initialRunningPortfolio && initialPersisted?.states ? initialPersisted.states : buildInitialStates());
-  const [runningPortfolio, setRunningPortfolio] = useState<WorkflowPortfolio | null>(
-    () => initialRunningPortfolio,
+  >(() =>
+    initialRunningPortfolio && initialPersisted?.states
+      ? initialPersisted.states
+      : buildInitialStates(),
   );
+  const [runningPortfolio, setRunningPortfolio] =
+    useState<WorkflowPortfolio | null>(() => initialRunningPortfolio);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [indMoneySyncOnly, setIndMoneySyncOnly] = useState(false);
@@ -2186,43 +2323,117 @@ export function RebalanceWorkflowSections({
   const [specificMode, setSpecificMode] = useState<
     Record<WorkflowPortfolio, boolean>
   >(() => ({
-    zerodha: initialRunningPortfolio === "zerodha" ? Boolean(initialPersisted?.specificMode?.zerodha) : false,
-    indmoneyUs: initialRunningPortfolio === "indmoneyUs" ? Boolean(initialPersisted?.specificMode?.indmoneyUs) : false,
+    zerodha:
+      initialRunningPortfolio === "zerodha"
+        ? Boolean(initialPersisted?.specificMode?.zerodha)
+        : false,
+    indmoneyUs:
+      initialRunningPortfolio === "indmoneyUs"
+        ? Boolean(initialPersisted?.specificMode?.indmoneyUs)
+        : false,
   }));
   const [selectedStages, setSelectedStages] = useState<
     Record<WorkflowPortfolio, Set<WorkflowStageKey>>
   >(() => ({
-    zerodha: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedStages?.zerodha ?? [] : []),
-    indmoneyUs: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedStages?.indmoneyUs ?? [] : []),
+    zerodha: new Set(
+      initialRunningPortfolio === "zerodha"
+        ? (initialPersisted?.selectedStages?.zerodha ?? [])
+        : [],
+    ),
+    indmoneyUs: new Set(
+      initialRunningPortfolio === "indmoneyUs"
+        ? (initialPersisted?.selectedStages?.indmoneyUs ?? [])
+        : [],
+    ),
   }));
   const [selectedInputs, setSelectedInputs] = useState<
     Record<WorkflowPortfolio, Record<InputSelectionStage, Set<string>>>
   >(() => ({
     zerodha: {
-      swing: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.swing ?? ["swing:next"] : ["swing:next"]),
-      rebalance: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.rebalance ?? ["rebalance:next"] : ["rebalance:next"]),
-      technical: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.technical ?? ["technical:next"] : ["technical:next"]),
-      actionables: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.actionables ?? ["actionables:next"] : ["actionables:next"]),
+      swing: new Set(
+        initialRunningPortfolio === "zerodha"
+          ? (initialPersisted?.selectedInputs?.zerodha?.swing ?? ["swing:next"])
+          : ["swing:next"],
+      ),
+      rebalance: new Set(
+        initialRunningPortfolio === "zerodha"
+          ? (initialPersisted?.selectedInputs?.zerodha?.rebalance ?? [
+              "rebalance:next",
+            ])
+          : ["rebalance:next"],
+      ),
+      technical: new Set(
+        initialRunningPortfolio === "zerodha"
+          ? (initialPersisted?.selectedInputs?.zerodha?.technical ?? [
+              "technical:next",
+            ])
+          : ["technical:next"],
+      ),
+      actionables: new Set(
+        initialRunningPortfolio === "zerodha"
+          ? (initialPersisted?.selectedInputs?.zerodha?.actionables ?? [
+              "actionables:next",
+            ])
+          : ["actionables:next"],
+      ),
     },
     indmoneyUs: {
-      swing: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.swing ?? ["swing:next"] : ["swing:next"]),
-      rebalance: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.rebalance ?? ["rebalance:next"] : ["rebalance:next"]),
-      technical: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.technical ?? ["technical:next"] : ["technical:next"]),
-      actionables: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.actionables ?? ["actionables:next"] : ["actionables:next"]),
+      swing: new Set(
+        initialRunningPortfolio === "indmoneyUs"
+          ? (initialPersisted?.selectedInputs?.indmoneyUs?.swing ?? [
+              "swing:next",
+            ])
+          : ["swing:next"],
+      ),
+      rebalance: new Set(
+        initialRunningPortfolio === "indmoneyUs"
+          ? (initialPersisted?.selectedInputs?.indmoneyUs?.rebalance ?? [
+              "rebalance:next",
+            ])
+          : ["rebalance:next"],
+      ),
+      technical: new Set(
+        initialRunningPortfolio === "indmoneyUs"
+          ? (initialPersisted?.selectedInputs?.indmoneyUs?.technical ?? [
+              "technical:next",
+            ])
+          : ["technical:next"],
+      ),
+      actionables: new Set(
+        initialRunningPortfolio === "indmoneyUs"
+          ? (initialPersisted?.selectedInputs?.indmoneyUs?.actionables ?? [
+              "actionables:next",
+            ])
+          : ["actionables:next"],
+      ),
     },
   }));
   const [lastAutoRebalanceCosts, setLastAutoRebalanceCosts] = useState<
     Record<WorkflowPortfolio, number | null>
-  >(() => initialPersisted?.lastAutoRebalanceCosts ?? { zerodha: null, indmoneyUs: null });
+  >(
+    () =>
+      initialPersisted?.lastAutoRebalanceCosts ?? {
+        zerodha: null,
+        indmoneyUs: null,
+      },
+  );
   const [inputDialog, setInputDialog] = useState<{
     portfolio: WorkflowPortfolio;
     stage: InputSelectionStage;
   } | null>(null);
-  const [inputCandidates, setInputCandidates] = useState<InputSelectionCandidate[]>([]);
+  const [inputCandidates, setInputCandidates] = useState<
+    InputSelectionCandidate[]
+  >([]);
   const [inputCandidatesLoading, setInputCandidatesLoading] = useState(false);
-  const [llmDialogStage, setLlmDialogStage] = useState<WorkflowStageKey | null>(null);
-  const [llmDialogProviders, setLlmDialogProviders] = useState<ProviderInfo[]>([]);
-  const [llmDialogSelectedKeys, setLlmDialogSelectedKeys] = useState<Set<string>>(new Set());
+  const [llmDialogStage, setLlmDialogStage] = useState<WorkflowStageKey | null>(
+    null,
+  );
+  const [llmDialogProviders, setLlmDialogProviders] = useState<ProviderInfo[]>(
+    [],
+  );
+  const [llmDialogSelectedKeys, setLlmDialogSelectedKeys] = useState<
+    Set<string>
+  >(new Set());
   const [outputDialog, setOutputDialog] = useState<{
     portfolio: WorkflowPortfolio;
     stage: WorkflowStageKey;
@@ -2259,7 +2470,14 @@ export function RebalanceWorkflowSections({
       lastAutoRebalanceCosts,
       savedAt: new Date().toISOString(),
     });
-  }, [lastAutoRebalanceCosts, runningPortfolio, selectedInputs, selectedStages, specificMode, states]);
+  }, [
+    lastAutoRebalanceCosts,
+    runningPortfolio,
+    selectedInputs,
+    selectedStages,
+    specificMode,
+    states,
+  ]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -2417,7 +2635,11 @@ export function RebalanceWorkflowSections({
         };
         const persisted = readPersistedWorkflow();
         if (persisted) {
-          persistWorkflow({ ...persisted, states: next, savedAt: new Date().toISOString() });
+          persistWorkflow({
+            ...persisted,
+            states: next,
+            savedAt: new Date().toISOString(),
+          });
         }
         return next;
       });
@@ -2443,7 +2665,11 @@ export function RebalanceWorkflowSections({
         state: specificMode[portfolio] ? "idle" : "completed",
         ...(specificMode[portfolio]
           ? {}
-          : { startedAt: timestamp, endedAt: timestamp, completedAt: timestamp }),
+          : {
+              startedAt: timestamp,
+              endedAt: timestamp,
+              completedAt: timestamp,
+            }),
         runStatus: note,
         error: null,
       });
@@ -2604,7 +2830,8 @@ export function RebalanceWorkflowSections({
     async (portfolio: WorkflowPortfolio, stage: InputSelectionStage) => {
       setInputCandidatesLoading(true);
       try {
-        const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
+        const market: SwingTradeMarket =
+          portfolio === "zerodha" ? "india" : "us";
         const nextCandidate = buildNextCandidate(stage);
         let candidates: InputSelectionCandidate[] = [nextCandidate];
 
@@ -2613,7 +2840,13 @@ export function RebalanceWorkflowSections({
             portfolio === "zerodha"
               ? (await apiService.zerodhaThreatsLatest()).analysis
               : (await apiService.indmoneyUsThreatsLatest()).analysis;
-          if (latest && isUsableStageJob({ status: latest.status, response: latest.report?.raw_markdown })) {
+          if (
+            latest &&
+            isUsableStageJob({
+              status: latest.status,
+              response: latest.report?.raw_markdown,
+            })
+          ) {
             candidates.push({
               id: `threat:${latest.job_id}`,
               source: "threat",
@@ -2634,8 +2867,14 @@ export function RebalanceWorkflowSections({
               buildRunJobCandidates(
                 sortRunsByLatestTimestamp(
                   runs
-                    .filter((run) => parseTimestampMs(run.created_at) > previousClose.getTime())
-                    .filter((run) => isRunInSwingTradeMarket(run.prompt, market)),
+                    .filter(
+                      (run) =>
+                        parseTimestampMs(run.created_at) >
+                        previousClose.getTime(),
+                    )
+                    .filter((run) =>
+                      isRunInSwingTradeMarket(run.prompt, market),
+                    ),
                 ),
                 "Swing Scan",
               ),
@@ -2643,14 +2882,20 @@ export function RebalanceWorkflowSections({
           } else if (stage === "technical") {
             candidates = candidates.concat(
               buildRunJobCandidates(
-                sortRunsByLatestTimestamp(runs.filter((run) => isCompletedRebalanceRun(run, market))),
+                sortRunsByLatestTimestamp(
+                  runs.filter((run) => isCompletedRebalanceRun(run, market)),
+                ),
                 "Rebalance Scan",
               ),
             );
           } else {
             candidates = candidates.concat(
               buildRunJobCandidates(
-                sortRunsByLatestTimestamp(runs.filter((run) => isCompletedTechnicalScanRun(run, market))),
+                sortRunsByLatestTimestamp(
+                  runs.filter((run) =>
+                    isCompletedTechnicalScanRun(run, market),
+                  ),
+                ),
                 "Technical Scan",
               ),
             );
@@ -2660,12 +2905,17 @@ export function RebalanceWorkflowSections({
         setInputCandidates(candidates);
         setSelectedInputs((current) => {
           const currentSet = current[portfolio][stage];
-          const onlyReservedNext = currentSet.size === 1 && currentSet.has(nextCandidate.id);
+          const onlyReservedNext =
+            currentSet.size === 1 && currentSet.has(nextCandidate.id);
           if (currentSet.size > 0 && !onlyReservedNext) return current;
-          const defaultIds = stage === "rebalance"
-            ? candidates.map((candidate) => candidate.id)
-            : [nextCandidate.id, candidates.find((candidate) => candidate.source !== "next")?.id]
-                .filter(Boolean) as string[];
+          const defaultIds =
+            stage === "rebalance"
+              ? candidates.map((candidate) => candidate.id)
+              : ([
+                  nextCandidate.id,
+                  candidates.find((candidate) => candidate.source !== "next")
+                    ?.id,
+                ].filter(Boolean) as string[]);
           return {
             ...current,
             [portfolio]: {
@@ -2683,42 +2933,59 @@ export function RebalanceWorkflowSections({
 
   const openInputSelection = useCallback(
     (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
-      if (stage !== "swing" && stage !== "rebalance" && stage !== "technical" && stage !== "actionables") return;
+      if (
+        stage !== "swing" &&
+        stage !== "rebalance" &&
+        stage !== "technical" &&
+        stage !== "actionables"
+      )
+        return;
       const inputStage = stage as InputSelectionStage;
       setInputDialog({ portfolio, stage: inputStage });
       void loadInputCandidates(portfolio, inputStage).catch((error) => {
         setInputCandidates([]);
-        window.alert(`Could not load selectable inputs: ${normalizeError(error)}`);
+        window.alert(
+          `Could not load selectable inputs: ${normalizeError(error)}`,
+        );
       });
     },
     [loadInputCandidates],
   );
 
-  const toggleInputCandidate = useCallback((id: string) => {
-    if (!inputDialog) return;
-    setSelectedInputs((current) => {
-      const nextSet = new Set(current[inputDialog.portfolio][inputDialog.stage]);
-      if (nextSet.has(id)) nextSet.delete(id);
-      else nextSet.add(id);
-      return {
-        ...current,
-        [inputDialog.portfolio]: {
-          ...current[inputDialog.portfolio],
-          [inputDialog.stage]: nextSet,
-        },
-      };
-    });
-  }, [inputDialog]);
+  const toggleInputCandidate = useCallback(
+    (id: string) => {
+      if (!inputDialog) return;
+      setSelectedInputs((current) => {
+        const nextSet = new Set(
+          current[inputDialog.portfolio][inputDialog.stage],
+        );
+        if (nextSet.has(id)) nextSet.delete(id);
+        else nextSet.add(id);
+        return {
+          ...current,
+          [inputDialog.portfolio]: {
+            ...current[inputDialog.portfolio],
+            [inputDialog.stage]: nextSet,
+          },
+        };
+      });
+    },
+    [inputDialog],
+  );
 
   const toggleAllInputCandidates = useCallback(() => {
     if (!inputDialog) return;
     setSelectedInputs((current) => {
-      const allSelected = inputCandidates.every((candidate) => current[inputDialog.portfolio][inputDialog.stage].has(candidate.id));
+      const allSelected = inputCandidates.every((candidate) =>
+        current[inputDialog.portfolio][inputDialog.stage].has(candidate.id),
+      );
       return {
         ...current,
         [inputDialog.portfolio]: {
           ...current[inputDialog.portfolio],
-          [inputDialog.stage]: allSelected ? new Set() : new Set(inputCandidates.map((candidate) => candidate.id)),
+          [inputDialog.stage]: allSelected
+            ? new Set()
+            : new Set(inputCandidates.map((candidate) => candidate.id)),
         },
       };
     });
@@ -2816,53 +3083,87 @@ export function RebalanceWorkflowSections({
     }
   }, []);
 
-
-
-  const showStageOutput = useCallback(async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
-    const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle}`;
-    setOutputDialog({ portfolio, stage, title, body: "", loading: true, error: null });
-    try {
-      const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
-      let body = "No saved output is available yet.";
-      if (stage === "sync") {
-        const overview = portfolio === "zerodha"
-          ? await apiService.zerodhaPortfolioOverview()
-          : await apiService.indmoneyUsPortfolioOverview();
-        body = JSON.stringify(overview.latest ?? overview, null, 2);
-      } else if (stage === "threats") {
-        const latest = portfolio === "zerodha"
-          ? (await apiService.zerodhaThreatsLatest()).analysis
-          : (await apiService.indmoneyUsThreatsLatest()).analysis;
-        body = latest?.report?.raw_markdown?.trim()
-          || latest?.error_message
-          || "No saved threat output is available yet.";
-      } else if (stage === "actionables") {
-        body = "Final Actionables are rendered in the dashboard output tables below. Use the section anchor to inspect the latest India and US actionable rows.";
-      } else {
-        const runs = await fetchAllFullRuns();
-        const latestRun = sortRunsByLatestTimestamp(
-          runs.filter((run) => {
-            if (stage === "swing") return isRunInSwingTradeMarket(run.prompt, market);
-            if (stage === "rebalance") return isCompletedRebalanceRun(run, market);
-            if (stage === "technical") return isCompletedTechnicalScanRun(run, market);
-            return false;
-          }),
-        )[0];
-        const jobs = latestRun?.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
-        body = jobs.length
-          ? [
-              `## Last run summary\n${latestRun ? getRunOutputSummary(latestRun) : "Not available"}`,
-              jobs
-                .map((job) => `# Run ${latestRun?.id} / Job ${job?.id} · ${job?.provider ?? "LLM"}/${job?.model ?? "model"}\n\n${job?.response?.trim() || job?.error_message || "No response text saved."}`)
-                .join("\n\n---\n\n"),
-            ].join("\n\n---\n\n")
-          : "No saved LLM output is available yet.";
+  const showStageOutput = useCallback(
+    async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
+      const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle}`;
+      setOutputDialog({
+        portfolio,
+        stage,
+        title,
+        body: "",
+        loading: true,
+        error: null,
+      });
+      try {
+        const market: SwingTradeMarket =
+          portfolio === "zerodha" ? "india" : "us";
+        let body = "No saved output is available yet.";
+        if (stage === "sync") {
+          const overview =
+            portfolio === "zerodha"
+              ? await apiService.zerodhaPortfolioOverview()
+              : await apiService.indmoneyUsPortfolioOverview();
+          body = JSON.stringify(overview.latest ?? overview, null, 2);
+        } else if (stage === "threats") {
+          const latest =
+            portfolio === "zerodha"
+              ? (await apiService.zerodhaThreatsLatest()).analysis
+              : (await apiService.indmoneyUsThreatsLatest()).analysis;
+          body =
+            latest?.report?.raw_markdown?.trim() ||
+            latest?.error_message ||
+            "No saved threat output is available yet.";
+        } else if (stage === "actionables") {
+          body =
+            "Final Actionables are rendered in the dashboard output tables below. Use the section anchor to inspect the latest India and US actionable rows.";
+        } else {
+          const runs = await fetchAllFullRuns();
+          const latestRun = sortRunsByLatestTimestamp(
+            runs.filter((run) => {
+              if (stage === "swing")
+                return isRunInSwingTradeMarket(run.prompt, market);
+              if (stage === "rebalance")
+                return isCompletedRebalanceRun(run, market);
+              if (stage === "technical")
+                return isCompletedTechnicalScanRun(run, market);
+              return false;
+            }),
+          )[0];
+          const jobs =
+            latestRun?.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+          body = jobs.length
+            ? [
+                `## Last run summary\n${latestRun ? getRunOutputSummary(latestRun) : "Not available"}`,
+                jobs
+                  .map(
+                    (job) =>
+                      `# Run ${latestRun?.id} / Job ${job?.id} · ${job?.provider ?? "LLM"}/${job?.model ?? "model"}\n\n${job?.response?.trim() || job?.error_message || "No response text saved."}`,
+                  )
+                  .join("\n\n---\n\n"),
+              ].join("\n\n---\n\n")
+            : "No saved LLM output is available yet.";
+        }
+        setOutputDialog({
+          portfolio,
+          stage,
+          title,
+          body,
+          loading: false,
+          error: null,
+        });
+      } catch (error) {
+        setOutputDialog({
+          portfolio,
+          stage,
+          title,
+          body: "",
+          loading: false,
+          error: normalizeError(error),
+        });
       }
-      setOutputDialog({ portfolio, stage, title, body, loading: false, error: null });
-    } catch (error) {
-      setOutputDialog({ portfolio, stage, title, body: "", loading: false, error: normalizeError(error) });
-    }
-  }, []);
+    },
+    [],
+  );
 
   const persistLlmDialogSelection = useCallback(
     (nextKeys: Set<string>) => {
@@ -2903,7 +3204,11 @@ export function RebalanceWorkflowSections({
   const resetDefaultLlmTargets = useCallback(() => {
     if (!llmDialogStage) return;
     persistLlmDialogSelection(
-      new Set(getDefaultStageTargets(llmDialogStage, llmDialogProviders).map(targetKey)),
+      new Set(
+        getDefaultStageTargets(llmDialogStage, llmDialogProviders).map(
+          targetKey,
+        ),
+      ),
     );
   }, [llmDialogProviders, llmDialogStage, persistLlmDialogSelection]);
 
@@ -2960,9 +3265,15 @@ export function RebalanceWorkflowSections({
           ...current,
           [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
             const info = current[portfolio][stage];
-            acc[stage] = info.state === "queued"
-              ? { ...info, state: "idle", endedAt: timestamp, runStatus: "Paused before this stage" }
-              : info;
+            acc[stage] =
+              info.state === "queued"
+                ? {
+                    ...info,
+                    state: "idle",
+                    endedAt: timestamp,
+                    runStatus: "Paused before this stage",
+                  }
+                : info;
             return acc;
           }, {} as WorkflowState),
         }));
@@ -3052,7 +3363,10 @@ export function RebalanceWorkflowSections({
             `No compatible targets found for Swing Scan. Open the stage LLM selector and choose the exact LLMs you want this stage to use.`,
           );
         }
-        if (shouldRunCurrentStage("rebalance") && rebalanceTargets.length === 0) {
+        if (
+          shouldRunCurrentStage("rebalance") &&
+          rebalanceTargets.length === 0
+        ) {
           throw new Error(
             `No compatible targets found for Rebalance. Open the stage LLM selector and choose the exact LLMs you want this stage to use.`,
           );
@@ -3079,7 +3393,9 @@ export function RebalanceWorkflowSections({
             portfolio === "zerodha"
               ? await apiService.zerodhaRunThreats(threatTargets[0])
               : await apiService.indmoneyUsRunThreats(threatTargets[0]);
-          updateStage(portfolio, "threats", { activeRunId: queuedThreat.job_id });
+          updateStage(portfolio, "threats", {
+            activeRunId: queuedThreat.job_id,
+          });
           const completedThreat = await waitForThreatCompletion(
             portfolio,
             queuedThreat.job_id,
@@ -3112,16 +3428,26 @@ export function RebalanceWorkflowSections({
           });
           const swingInputSelection = selectedInputs[portfolio].swing;
           const selectedThreatParts: string[] = [];
-          if (swingInputSelection.has("swing:next") && generatedThreatMarkdown.trim()) {
-            selectedThreatParts.push(`## Next Threat Scan output\n\n${generatedThreatMarkdown.trim()}`);
+          if (
+            swingInputSelection.has("swing:next") &&
+            generatedThreatMarkdown.trim()
+          ) {
+            selectedThreatParts.push(
+              `## Next Threat Scan output\n\n${generatedThreatMarkdown.trim()}`,
+            );
           }
           if ([...swingInputSelection].some((id) => id.startsWith("threat:"))) {
             const latestThreat =
               portfolio === "zerodha"
                 ? (await apiService.zerodhaThreatsLatest()).analysis
                 : (await apiService.indmoneyUsThreatsLatest()).analysis;
-            if (latestThreat?.report?.raw_markdown && swingInputSelection.has(`threat:${latestThreat.job_id}`)) {
-              selectedThreatParts.push(`## Selected Threat Scan #${latestThreat.job_id}\n\n${latestThreat.report.raw_markdown.trim()}`);
+            if (
+              latestThreat?.report?.raw_markdown &&
+              swingInputSelection.has(`threat:${latestThreat.job_id}`)
+            ) {
+              selectedThreatParts.push(
+                `## Selected Threat Scan #${latestThreat.job_id}\n\n${latestThreat.report.raw_markdown.trim()}`,
+              );
             }
           }
           const threatAppendix = selectedThreatParts.length
@@ -3186,18 +3512,28 @@ export function RebalanceWorkflowSections({
             recentCompletedRuns.map((run) => apiService.getRun(run.id)),
           );
           const swingCandidates = buildRunJobCandidates(
-            fullRunCandidates.filter((run) => isRunInSwingTradeMarket(run.prompt, market)),
+            fullRunCandidates.filter((run) =>
+              isRunInSwingTradeMarket(run.prompt, market),
+            ),
             "Swing Scan",
           );
           const selectedRebalanceInputs = selectedInputs[portfolio].rebalance;
           const selectedSwingRuns = selectedRebalanceInputs.size
-            ? uniqueRunsBySelectedCandidates(swingCandidates, selectedRebalanceInputs)
+            ? uniqueRunsBySelectedCandidates(
+                swingCandidates,
+                selectedRebalanceInputs,
+              )
             : [];
           const swingRuns = [
-            ...(selectedRebalanceInputs.has("rebalance:next") && generatedSwingRun ? [generatedSwingRun] : []),
-            ...(selectedSwingRuns.length ? selectedSwingRuns : fullRunCandidates
-              .filter((run) => isRunInSwingTradeMarket(run.prompt, market))
-              .slice(0, 12)),
+            ...(selectedRebalanceInputs.has("rebalance:next") &&
+            generatedSwingRun
+              ? [generatedSwingRun]
+              : []),
+            ...(selectedSwingRuns.length
+              ? selectedSwingRuns
+              : fullRunCandidates
+                  .filter((run) => isRunInSwingTradeMarket(run.prompt, market))
+                  .slice(0, 12)),
           ];
           const inputBundle = buildRebalanceInputBundle({
             market,
@@ -3251,18 +3587,23 @@ export function RebalanceWorkflowSections({
           const selectedTechnicalInputs = selectedInputs[portfolio].technical;
           const selectedRebalanceRuns = selectedTechnicalInputs.size
             ? uniqueRunsBySelectedCandidates(
-                buildRunJobCandidates(allRuns.filter((run) => isCompletedRebalanceRun(run, market)), "Rebalance Scan"),
+                buildRunJobCandidates(
+                  allRuns.filter((run) => isCompletedRebalanceRun(run, market)),
+                  "Rebalance Scan",
+                ),
                 selectedTechnicalInputs,
               )
             : [];
           const rebalanceInputs = [
-            ...(selectedTechnicalInputs.has("technical:next") && generatedRebalanceRun ? [generatedRebalanceRun] : []),
-            ...(selectedRebalanceRuns.length ? selectedRebalanceRuns : getLatestMatchingRebalanceRuns(allRuns, market)),
+            ...(selectedTechnicalInputs.has("technical:next") &&
+            generatedRebalanceRun
+              ? [generatedRebalanceRun]
+              : []),
+            ...(selectedRebalanceRuns.length
+              ? selectedRebalanceRuns
+              : getLatestMatchingRebalanceRuns(allRuns, market)),
           ];
-          const consensus = buildConsensusRows(
-            rebalanceInputs,
-            market,
-          );
+          const consensus = buildConsensusRows(rebalanceInputs, market);
           if (consensus.length === 0)
             throw new Error(
               "No fresh rebalance consensus rows were available for technical scan. Consensus rows are the normalized stock/action rows parsed from completed Rebalance LLM outputs. Run or keep the Rebalance stage selected, select completed Rebalance outputs in Select Inputs, or allow this stage to use the latest completed rebalance output.",
@@ -3312,18 +3653,27 @@ export function RebalanceWorkflowSections({
         window.setTimeout(() => {
           setStates((current) => {
             const lastCost = getWorkflowRunCost(current[portfolio], usdInrRate);
-            setLastAutoRebalanceCosts((costs) => ({ ...costs, [portfolio]: lastCost }));
+            setLastAutoRebalanceCosts((costs) => ({
+              ...costs,
+              [portfolio]: lastCost,
+            }));
             return {
               ...current,
               [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
                 const info = current[portfolio][stage];
-                acc[stage] = info.state === "completed" ? { ...info, state: "idle" } : info;
+                acc[stage] =
+                  info.state === "completed"
+                    ? { ...info, state: "idle" }
+                    : info;
                 return acc;
               }, {} as WorkflowState),
             };
           });
           setSpecificMode((current) => ({ ...current, [portfolio]: false }));
-          setSelectedStages((current) => ({ ...current, [portfolio]: new Set() }));
+          setSelectedStages((current) => ({
+            ...current,
+            [portfolio]: new Set(),
+          }));
           setSelectedInputs((current) => ({
             ...current,
             [portfolio]: {
@@ -3372,9 +3722,11 @@ export function RebalanceWorkflowSections({
     ],
   );
 
-
   const syncPortfolioNow = useCallback(
-    async (portfolio: WorkflowPortfolio, payload?: IndMoneyUsPortfolioSnapshotCreateRequest) => {
+    async (
+      portfolio: WorkflowPortfolio,
+      payload?: IndMoneyUsPortfolioSnapshotCreateRequest,
+    ) => {
       try {
         markRunning(portfolio, "sync");
         if (portfolio === "zerodha") {
@@ -3385,7 +3737,8 @@ export function RebalanceWorkflowSections({
             runStatus: synced.status,
           });
         } else if (payload) {
-          const snapshot = await apiService.indmoneyUsCreatePortfolioSnapshot(payload);
+          const snapshot =
+            await apiService.indmoneyUsCreatePortfolioSnapshot(payload);
           markCompleted(portfolio, "sync", {
             completedAt: snapshot.captured_at,
             runStatus: snapshot.parse_status,
@@ -3410,14 +3763,20 @@ export function RebalanceWorkflowSections({
     [markCompleted, markRunning, onDashboardRefresh, updateStage],
   );
 
-
   useEffect(() => {
     const handleDashboardSync = () => {
       if (runningPortfolio) return;
       void syncPortfolioNow("zerodha");
     };
-    window.addEventListener(ZERODHA_DASHBOARD_SYNC_NOW_EVENT, handleDashboardSync);
-    return () => window.removeEventListener(ZERODHA_DASHBOARD_SYNC_NOW_EVENT, handleDashboardSync);
+    window.addEventListener(
+      ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
+      handleDashboardSync,
+    );
+    return () =>
+      window.removeEventListener(
+        ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
+        handleDashboardSync,
+      );
   }, [runningPortfolio, syncPortfolioNow]);
 
   const handleIndMoneyContinue = useCallback(
@@ -3429,7 +3788,10 @@ export function RebalanceWorkflowSections({
       setDialogOpen(false);
       if (indMoneySyncOnly) {
         setIndMoneySyncOnly(false);
-        void syncPortfolioNow("indmoneyUs", mode === "paste" ? payload : undefined);
+        void syncPortfolioNow(
+          "indmoneyUs",
+          mode === "paste" ? payload : undefined,
+        );
         return;
       }
       void runWorkflow("indmoneyUs", mode === "paste" ? payload : undefined);
@@ -3546,7 +3908,8 @@ export function RebalanceWorkflowSections({
               )}
             </div>
             <p className="text-xs text-slate-500">
-              Last run on {formatTimestamp(lastRunByPortfolio[section.portfolio])}
+              Last run on{" "}
+              {formatTimestamp(lastRunByPortfolio[section.portfolio])}
             </p>
             <button
               type="button"
@@ -3607,7 +3970,9 @@ export function RebalanceWorkflowSections({
                   ? () => openInputSelection(section.portfolio, stage)
                   : undefined
               }
-              onOutputClick={() => void showStageOutput(section.portfolio, stage)}
+              onOutputClick={() =>
+                void showStageOutput(section.portfolio, stage)
+              }
               onSyncNowClick={
                 stage === "sync"
                   ? () => {
@@ -3625,9 +3990,13 @@ export function RebalanceWorkflowSections({
           ))}
         </div>
         <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-extrabold text-emerald-950">
-          {getWorkflowRunDuration(states[section.portfolio], now) ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · ` : ""}
-          Total cost incurred in last Auto-rebalance: {formatInrCost(
-            getWorkflowRunCost(states[section.portfolio], usdInrRate) || lastAutoRebalanceCosts[section.portfolio],
+          {getWorkflowRunDuration(states[section.portfolio], now)
+            ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · `
+            : ""}
+          Total cost incurred in last Auto-rebalance:{" "}
+          {formatInrCost(
+            getWorkflowRunCost(states[section.portfolio], usdInrRate) ||
+              lastAutoRebalanceCosts[section.portfolio],
           )}
         </div>
       </div>
@@ -3664,7 +4033,11 @@ export function RebalanceWorkflowSections({
         open={Boolean(inputDialog)}
         stage={inputDialog?.stage ?? null}
         candidates={inputCandidates}
-        selectedIds={inputDialog ? selectedInputs[inputDialog.portfolio][inputDialog.stage] : new Set()}
+        selectedIds={
+          inputDialog
+            ? selectedInputs[inputDialog.portfolio][inputDialog.stage]
+            : new Set()
+        }
         usdInrRate={usdInrRate}
         loading={inputCandidatesLoading}
         onToggle={toggleInputCandidate}
@@ -3677,8 +4050,12 @@ export function RebalanceWorkflowSections({
           <div className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
               <div>
-                <h3 className="text-lg font-semibold text-slate-950">{outputDialog.title}</h3>
-                <p className="mt-1 text-sm text-slate-500">Latest saved stage output for the selected portfolio.</p>
+                <h3 className="text-lg font-semibold text-slate-950">
+                  {outputDialog.title}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Latest saved stage output for the selected portfolio.
+                </p>
               </div>
               <button
                 type="button"
@@ -3699,7 +4076,9 @@ export function RebalanceWorkflowSections({
                   {outputDialog.error}
                 </div>
               ) : (
-                <pre className="whitespace-pre-wrap break-words text-xs leading-6">{outputDialog.body}</pre>
+                <pre className="whitespace-pre-wrap break-words text-xs leading-6">
+                  {outputDialog.body}
+                </pre>
               )}
             </div>
           </div>
