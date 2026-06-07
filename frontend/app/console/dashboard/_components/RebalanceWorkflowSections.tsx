@@ -329,6 +329,8 @@ function getStageClasses(state: StageState) {
     return "border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100 ring-1 ring-amber-100";
   if (state === "queued")
     return "border-sky-200 bg-sky-50 text-sky-950 shadow-sky-100 ring-1 ring-sky-100";
+  if (state === "completed")
+    return "border-emerald-300 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-1 ring-emerald-100";
   if (state === "failed")
     return "border-red-300 bg-red-50 text-red-950 shadow-red-100 ring-1 ring-red-100";
   return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
@@ -1076,6 +1078,13 @@ function WorkflowStageTile({
   const showPromptShortcut = stage !== "sync" && Boolean(onClick);
   const iconButtonClasses =
     "inline-flex size-10 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-slate-800 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 hover:text-blue-700";
+  const selectionClasses = selectable
+    ? selected
+      ? "ring-2 ring-blue-500"
+      : info.state === "idle"
+        ? "bg-white opacity-100"
+        : ""
+    : "";
 
   return (
     <button
@@ -1084,7 +1093,7 @@ function WorkflowStageTile({
         onClick?.();
       }}
       disabled={!onClick}
-      className={`relative flex min-h-[17rem] flex-col items-start justify-start rounded-2xl border p-5 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-blue-400 bg-white text-slate-950 shadow-slate-100 ring-2 ring-blue-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
+      className={`relative flex min-h-[17rem] flex-col items-start justify-start rounded-2xl border p-5 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${getStageClasses(info.state)} ${selectionClasses}`}
     >
       {onInputClick ? (
         <span
@@ -3859,8 +3868,8 @@ export function RebalanceWorkflowSections({
               {section.subtitle}
             </p>
           </div>
-          <div className="flex w-full flex-col items-start gap-3 xl:w-64 xl:items-end">
-            <div className="flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
+          <div className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
+            <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end xl:w-auto">
               {isSectionRunning ? (
                 <>
                   <Button
@@ -3869,7 +3878,7 @@ export function RebalanceWorkflowSections({
                       pauseRequestedRef.current = !pauseRequestedRef.current;
                       setWorkflowPaused(pauseRequestedRef.current);
                     }}
-                    className="h-auto w-full justify-center whitespace-normal rounded-full bg-orange-500 py-2 text-center leading-5 text-white hover:bg-orange-600 xl:w-auto"
+                    className="h-auto w-full shrink-0 justify-center whitespace-normal rounded-full bg-orange-500 px-6 py-2 text-center leading-5 text-white hover:bg-orange-600 sm:w-auto"
                   >
                     {workflowPaused ? "Resume" : "Pause"}
                   </Button>
@@ -3880,10 +3889,10 @@ export function RebalanceWorkflowSections({
                       pauseRequestedRef.current = false;
                       setWorkflowPaused(false);
                     }}
-                    className="h-auto w-full justify-center whitespace-normal rounded-full bg-red-600 py-2 text-center leading-5 text-white hover:bg-red-700 xl:w-auto"
+                    className="h-auto w-full shrink-0 justify-center whitespace-normal rounded-full bg-red-600 px-6 py-2 text-center leading-5 text-white hover:bg-red-700 sm:w-auto"
                   >
                     <X className="mr-2 size-4" />
-                    Kill Rebalance
+                    Kill
                   </Button>
                 </>
               ) : (
