@@ -12,7 +12,6 @@ import { URLs } from '@/lib/urls';
 import { BRAND_ACRONYM, getBrandExpansionLines } from '@/lib/brand';
 import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
 import { FullLoader } from '@/components/shared/Loader';
-import { UserMenu } from '@/components/dashboard/UserMenu';
 import { SidebarNavigation } from './_components/SidebarNavigation';
 
 export default function DashboardLayout({
@@ -94,55 +93,29 @@ export default function DashboardLayout({
                     <nav className="flex-1 py-4">
                         <SidebarNavigation
                             pathname={pathname}
+                            user={user}
                             userId={user?.id}
+                            onLogout={logout}
                             onNavigate={() => setSidebarOpen(false)}
                         />
                     </nav>
 
-                    {/* User info in sidebar (mobile) */}
-                    <div className="p-4 border-t lg:hidden">
-                        <div className="flex items-center">
-                            <div className="shrink-0">
-                                <div className="h-8 w-8 rounded-full bg-linear-to-r from-indigo-600 to-purple-600 flex items-center justify-center text-white font-semibold">
-                                    {user?.full_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'}
-                                </div>
-                            </div>
-                            <div className="ml-3">
-                                <p className="text-sm font-medium text-gray-900">
-                                    {user?.full_name || user?.username}
-                                </p>
-                                <p className="text-xs text-gray-500">{user?.email}</p>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
 
             {/* Main content area */}
             <div className="lg:pl-64">
-                {/* Top header */}
-                <header className="bg-white shadow-sm sticky top-0 z-10">
-                    <div className="flex h-16 items-center justify-between gap-4 px-4 sm:px-6">
-                        <div className="flex min-w-0 flex-1 items-center">
-                            <button
-                                type="button"
-                                onClick={() => setSidebarOpen(true)}
-                                className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 lg:hidden"
-                            >
-                                <HiOutlineMenu />
-                            </button>
-                        </div>
-
-                        <UserMenu
-                            user={user}
-                            onLogout={logout}
-                            className="shrink-0"
-                        />
-                    </div>
-                </header>
+                <button
+                    type="button"
+                    onClick={() => setSidebarOpen(true)}
+                    className="fixed left-4 top-4 z-10 rounded-full border border-gray-200 bg-white p-2 text-gray-500 shadow-sm hover:text-gray-700 hover:bg-gray-50 lg:hidden"
+                    aria-label="Open navigation"
+                >
+                    <HiOutlineMenu />
+                </button>
 
                 {/* Page content */}
-                <main className="py-6 px-4 sm:px-6">
+                <main className="px-4 py-6 sm:px-6 lg:py-6">
                     {children}
                 </main>
             </div>

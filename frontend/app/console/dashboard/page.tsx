@@ -224,6 +224,7 @@ function PortfolioCommandSummary({
   zerodhaValue,
   zerodhaPortfolioValue,
   zerodhaMargin,
+  indmoneyValue,
   indmoneyPortfolioValue,
   indmoneyFundsValue,
 }: {
@@ -231,6 +232,7 @@ function PortfolioCommandSummary({
   zerodhaValue: number;
   zerodhaPortfolioValue: number | null | undefined;
   zerodhaMargin: number;
+  indmoneyValue: number;
   indmoneyPortfolioValue: number | null | undefined;
   indmoneyFundsValue: number | null | undefined;
 }) {
@@ -262,7 +264,7 @@ function PortfolioCommandSummary({
           <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
             <div className="text-xs font-semibold text-white">INDmoney</div>
             <div className="mt-1 text-sm font-bold text-white">
-              {formatInr(indmoneyPortfolioValue)}
+              {formatInr(indmoneyValue)}
             </div>
             <div className="mt-3 text-xs leading-5 text-slate-200">
               {formatInr(indmoneyPortfolioValue)} total portfolio +{" "}
@@ -419,7 +421,8 @@ export default function DashboardPage() {
     usSnapshot?.wallet_balance == null
       ? undefined
       : usSnapshot.wallet_balance * usdInrRate;
-  const indmoneyCommandValue = indmoneyPortfolioValueInr ?? 0;
+  const indmoneyCommandValue =
+    (indmoneyPortfolioValueInr ?? 0) + (indmoneyAvailableFundsValueInr ?? 0);
   const totalCommandValue = zerodhaCommandValue + indmoneyCommandValue;
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
   if (
@@ -478,6 +481,7 @@ export default function DashboardPage() {
             zerodhaValue={zerodhaCommandValue}
             zerodhaPortfolioValue={indiaSnapshot?.holdings_market_value}
             zerodhaMargin={zerodhaAvailableMargin}
+            indmoneyValue={indmoneyCommandValue}
             indmoneyPortfolioValue={indmoneyPortfolioValueInr}
             indmoneyFundsValue={indmoneyAvailableFundsValueInr}
           />
