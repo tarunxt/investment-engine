@@ -22,6 +22,7 @@ import {
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
 import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
+import MarkdownRenderer from "@/components/shared/MarkdownRenderer";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import {
   buildRebalanceInputBundle,
@@ -1097,11 +1098,11 @@ function formatLlmRun(info: StageInfo) {
 }
 
 
-function formatUsdCost(value?: number | null) {
+function formatInrCostFromUsd(value: number | null | undefined, usdInrRate: number) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return "$0.0000";
+    return "₹0.00";
   }
-  return `$${value.toFixed(4)}`;
+  return `₹${(value * usdInrRate).toFixed(2)}`;
 }
 
 function getJobDuration(job?: JobResponse | null) {
@@ -1130,6 +1131,7 @@ function getRunOutputStatusLabel(status: ReturnType<typeof classifyRunOutputJob>
 }
 
 function RunOutputDetails({ run }: { run: RunResponse }) {
+  const usdInrRate = useUsdInrRate();
   const [highlightedJobId, setHighlightedJobId] = useState<number | null>(null);
   const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
   const classifications = jobs.map(classifyRunOutputJob);
@@ -1176,7 +1178,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
           </div>
         </div>
         {costUsd > 0 ? (
-          <p className="mt-2 text-sm font-semibold text-slate-600">Cumulative cost: {formatUsdCost(costUsd)}</p>
+          <p className="mt-2 text-sm font-semibold text-slate-600">Cumulative cost: {formatInrCostFromUsd(costUsd, usdInrRate)}</p>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
           {jobs.map((job) => {
@@ -1194,7 +1196,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
                 <span className="font-medium">{job.model}</span>
                 <span className="font-bold"> · {getRunOutputStatusLabel(state)}</span>
                 <span className="ml-1 text-[11px] opacity-80">
-                  {jobDuration ? ` · ${jobDuration}` : ""} · {formatUsdCost(job.estimated_cost)}
+                  {jobDuration ? ` · ${jobDuration}` : ""} · {formatInrCostFromUsd(job.estimated_cost, usdInrRate)}
                 </span>
               </button>
             );
@@ -1228,7 +1230,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
                 <span>Run timer: {getJobDuration(job) ?? "n/a"}</span>
-                <span>Cost: {formatUsdCost(job.estimated_cost)}</span>
+                <span>Cost: {formatInrCostFromUsd(job.estimated_cost, usdInrRate)}</span>
                 <span className={`rounded-full border px-2 py-1 ${getRunOutputStatusClass(state)}`}>
                   {getRunOutputStatusLabel(state)}
                 </span>
@@ -1239,9 +1241,19 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
                 {job.error_message}
               </div>
             ) : null}
-            <pre className="m-5 whitespace-pre-wrap break-words rounded-2xl bg-slate-50 p-5 text-xs leading-6 text-slate-700">
-              {job.response?.trim() || "No response text saved."}
-            </pre>
+            {job.response?.trim() ? (
+              <div className="m-5 rounded-2xl bg-slate-50 p-5">
+                <MarkdownRenderer
+                  content={job.response.trim()}
+                  enableValidation={false}
+                  className="text-xs leading-6 text-slate-700 [&_.prose]:max-w-none [&_table]:min-w-max [&_td]:align-top [&_td]:text-xs [&_th]:whitespace-nowrap [&_th]:text-[11px]"
+                />
+              </div>
+            ) : (
+              <div className="m-5 rounded-2xl bg-slate-50 p-5 text-xs leading-6 text-slate-700">
+                No response text saved.
+              </div>
+            )}
           </section>
         );
       })}

@@ -80,6 +80,7 @@ interface MarkdownRendererProps {
     className?: string;
     enableCodeHighlighting?: boolean;
     enableTableStyling?: boolean;
+    enableValidation?: boolean;
 }
 
 type CodeProps = React.ComponentProps<'code'> &
@@ -92,6 +93,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     content,
     className = '',
     enableTableStyling = true,
+    enableValidation = true,
 }) => {
     const [stockParameters, setStockParameters] = useState<StockParameter[]>(() => loadStockParametersFromStorage());
 
@@ -108,7 +110,10 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         };
     }, []);
 
-    const validationIssues = useMemo(() => validateMarkdownTables(content, stockParameters), [content, stockParameters]);
+    const validationIssues = useMemo(
+        () => (enableValidation ? validateMarkdownTables(content, stockParameters) : []),
+        [content, enableValidation, stockParameters],
+    );
 
     if (!content) {
         return null;
