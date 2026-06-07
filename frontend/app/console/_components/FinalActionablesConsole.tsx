@@ -3889,11 +3889,15 @@ type DashboardActionRow = {
   id: string;
   market: SwingTradeMarket;
   stock: StockConsensus;
+  formulaAction: ActionCategory;
+  formulaScore: number | null;
+  formulaEstimate: ActionEstimate;
 };
 
 type DashboardActionSortKey =
   | "selected"
   | "stock"
+  | "score"
   | "consensus"
   | "currentUnits"
   | "currentValue"
@@ -3913,6 +3917,63 @@ function getDashboardActionRowId(market: SwingTradeMarket, stock: StockConsensus
   return `${market}:${stock.key}`;
 }
 
+function buildFormulaActionEstimate(
+  stock: StockConsensus,
+  action: ActionCategory,
+  unitsChange: number | null,
+): ActionEstimate {
+  const currentUnits = parseNumericCell(stock.representative["Current Units"]);
+  const currentInvestmentAmount = getCurrentValueAmount(stock.representative);
+  const units = ACTION_ESTIMATE_CATEGORIES.has(action) && unitsChange !== null
+    ? Math.abs(unitsChange)
+    : null;
+  const price = parseNumericCell(stock.representative["Price Per Unit"]);
+  let amount: number | null = null;
+
+  if (units !== null) {
+    if (action === "Sell All" && currentInvestmentAmount !== null) {
+      amount = currentInvestmentAmount;
+    } else if (
+      action === "Trim" &&
+      currentUnits !== null &&
+      currentUnits > 0 &&
+      currentInvestmentAmount !== null
+    ) {
+      amount = Math.abs(units / currentUnits) * currentInvestmentAmount;
+    } else if (price !== null) {
+      amount = Math.abs(units * price);
+    } else {
+      amount = getActionAmount(stock.representative, units, action);
+    }
+  }
+
+  return {
+    currentUnits,
+    currentInvestmentAmount,
+    units,
+    amount,
+  };
+}
+
+function buildDashboardActionRows(
+  stocks: StockConsensus[],
+  market: SwingTradeMarket,
+  technicalScans: TechnicalScanMap,
+): DashboardActionRow[] {
+  return stocks.map((stock) => {
+    const detail = buildScoreMatrixDetail(stock, getTechnicalScanForStock(technicalScans, stock));
+    const formulaAction = detail.calculatedAction;
+    return {
+      id: getDashboardActionRowId(market, stock),
+      market,
+      stock,
+      formulaAction,
+      formulaScore: detail.calculatedScore,
+      formulaEstimate: buildFormulaActionEstimate(stock, formulaAction, detail.calculatedUnitsChange),
+    };
+  });
+}
+
 function getDashboardActionSortValue(
   row: DashboardActionRow,
   action: ActionCategory,
@@ -3920,23 +3981,24 @@ function getDashboardActionSortValue(
   technicalScans: TechnicalScanMap,
   selectedIds: Set<string>,
 ) {
-  const estimate = row.stock.actionAverages[action];
   const scan = getTechnicalScanForStock(technicalScans, row.stock);
   switch (key) {
     case "selected":
       return selectedIds.has(row.id) ? 1 : 0;
     case "stock":
       return row.stock.symbol;
+    case "score":
+      return row.formulaScore ?? Number.POSITIVE_INFINITY;
     case "consensus":
       return row.stock.actionCounts[action] / Math.max(row.stock.totalSuggestions, 1);
     case "currentUnits":
-      return estimate.currentUnits ?? Number.NEGATIVE_INFINITY;
+      return row.formulaEstimate.currentUnits ?? Number.NEGATIVE_INFINITY;
     case "currentValue":
-      return estimate.currentInvestmentAmount ?? getCurrentValueAmount(row.stock.representative) ?? Number.NEGATIVE_INFINITY;
+      return row.formulaEstimate.currentInvestmentAmount ?? getCurrentValueAmount(row.stock.representative) ?? Number.NEGATIVE_INFINITY;
     case "units":
-      return estimate.units ?? Number.NEGATIVE_INFINITY;
+      return row.formulaEstimate.units ?? Number.NEGATIVE_INFINITY;
     case "amount":
-      return estimate.amount ?? Number.NEGATIVE_INFINITY;
+      return row.formulaEstimate.amount ?? Number.NEGATIVE_INFINITY;
     case "technicalSetup":
       return formatTechnicalSetup(scan, row.stock.representative);
     case "confidence":
@@ -4114,17 +4176,17 @@ export function DashboardFinalActionablesTables() {
     };
   }, []);
   const actionRowsByMarket = useMemo(() => ({
-    india: buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india).map((stock) => ({
-      id: getDashboardActionRowId("india", stock),
-      market: "india" as SwingTradeMarket,
-      stock,
-    })),
-    us: buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us", portfolioSnapshots.us).map((stock) => ({
-      id: getDashboardActionRowId("us", stock),
-      market: "us" as SwingTradeMarket,
-      stock,
-    })),
-  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs]);
+    india: buildDashboardActionRows(
+      buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india),
+      "india",
+      technicalScans,
+    ),
+    us: buildDashboardActionRows(
+      buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us", portfolioSnapshots.us),
+      "us",
+      technicalScans,
+    ),
+  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, technicalScans]);
 
   const toggleActionSort = useCallback((tableKey: string, key: DashboardActionSortKey) => {
     setSortStates((current) => {
@@ -4133,7 +4195,7 @@ export function DashboardFinalActionablesTables() {
         ...current,
         [tableKey]: existing.key === key
           ? { key, direction: existing.direction === "asc" ? "desc" : "asc" }
-          : { key, direction: key === "stock" || key === "technicalSetup" ? "asc" : "desc" },
+          : { key, direction: key === "stock" || key === "score" || key === "technicalSetup" ? "asc" : "desc" },
       };
     });
   }, []);
@@ -4171,9 +4233,9 @@ export function DashboardFinalActionablesTables() {
           ) : (
             ACTION_CATEGORIES.map((action) => {
               const tableKey = `${market}:${action}`;
-              const sortState = sortStates[tableKey] ?? { key: "confidence", direction: "desc" as const };
+              const sortState = sortStates[tableKey] ?? { key: "score", direction: "asc" as const };
               const rows = actionRows
-                .filter(({ stock }) => stock.consensusAction === action)
+                .filter((row) => row.formulaAction === action)
                 .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans));
               if (!rows.length) return null;
               return (
@@ -4197,6 +4259,7 @@ export function DashboardFinalActionablesTables() {
                           <thead>
                             <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Stock" sortKey="stock" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Score" sortKey="score" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Consensus" sortKey="consensus" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Units" sortKey="currentUnits" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
                               <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Value" sortKey="currentValue" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
@@ -4207,8 +4270,9 @@ export function DashboardFinalActionablesTables() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
-                            {rows.map(({ stock }) => {
-                              const estimate = stock.actionAverages[action];
+                            {rows.map((row) => {
+                              const { stock } = row;
+                              const estimate = row.formulaEstimate;
                               const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
                               const scan = getTechnicalScanForStock(technicalScans, stock);
                               const setup = formatTechnicalSetup(scan, stock.representative);
@@ -4231,6 +4295,9 @@ export function DashboardFinalActionablesTables() {
                                         {stock.symbol}
                                       </TradingViewSymbolLink>
                                     </span>
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-gray-800">
+                                    {formatActionScore(row.formulaScore)}
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                                     <ConsensusBreakupButton stock={stock} action={action} />
