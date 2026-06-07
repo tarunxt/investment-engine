@@ -32,7 +32,12 @@ import {
 import type { SwingTradeMarket } from '@/lib/swingTrade';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { URLs } from '@/lib/urls';
-import type { RunResponse } from '@/types/api';
+import { apiService } from '@/services/api';
+import type {
+  IndMoneyUsPortfolioSnapshotDetail,
+  RunResponse,
+  ZerodhaPortfolioSnapshotDetail,
+} from '@/types/api';
 
 const COLUMNS: Array<{ key: SortKey; label: string; align?: 'left' | 'right' }> = [
   { key: 'setup', label: 'Setup (SellAll, Add More, Buy New, Trim, Hold)' },
@@ -304,11 +309,21 @@ function mergeSetupGroups(groups: Array<Record<string, SetupStockGroup>>) {
   );
 }
 
-function buildFinalActionablesSetupGroups(runs: RunResponse[]) {
+function buildFinalActionablesSetupGroups(
+  runs: RunResponse[],
+  portfolioSnapshots: {
+    india: ZerodhaPortfolioSnapshotDetail | null;
+    us: IndMoneyUsPortfolioSnapshotDetail | null;
+  },
+) {
   const technicalScans = buildTechnicalScanMap(runs);
   const groupsByMarket = (['india', 'us'] as SwingTradeMarket[]).map((market) => {
     const latestRuns = getLatestFinalActionableRuns(runs, market);
-    const consensus = buildConsensusRows(latestRuns, market);
+    const consensus = buildConsensusRows(
+      latestRuns,
+      market,
+      market === 'india' ? portfolioSnapshots.india : portfolioSnapshots.us,
+    );
     return getSetupStockGroups(consensus, technicalScans, market);
   });
 
@@ -445,7 +460,7 @@ function SetupStocksModal({ group, onClose }: { group: SetupStockGroup | null; o
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="px-3 py-2 font-semibold">Name</th>
                 <th className="px-3 py-2 font-semibold">Current Units</th>
-                <th className="px-3 py-2 font-semibold">Current Investment</th>
+                <th className="px-3 py-2 font-semibold">Current Value</th>
                 <th className="px-3 py-2 font-semibold">Action Suggested in Rebalance</th>
               </tr>
             </thead>
@@ -469,7 +484,7 @@ function SetupStocksModal({ group, onClose }: { group: SetupStockGroup | null; o
                       {stock.currentUnits}
                     </td>
                     <td className={`whitespace-nowrap px-3 py-2 ${actionClasses.cell}`}>
-                      {stock.currentInvestment}
+                      {stock.currentValue}
                     </td>
                     <td className={`whitespace-nowrap px-3 py-2 font-medium ${actionClasses.cell}`}>
                       <Link
@@ -504,9 +519,18 @@ export default function TechnicalSetupsPage() {
   useEffect(() => {
     let ignore = false;
 
-    fetchAllFullRuns()
-      .then((runs) => {
-        if (!ignore) setSetupGroups(buildFinalActionablesSetupGroups(runs));
+    Promise.all([
+      fetchAllFullRuns(),
+      apiService.zerodhaPortfolioOverview(),
+      apiService.indmoneyUsPortfolioOverview(),
+    ])
+      .then(([runs, zerodhaOverview, indmoneyOverview]) => {
+        if (!ignore) {
+          setSetupGroups(buildFinalActionablesSetupGroups(runs, {
+            india: zerodhaOverview.latest,
+            us: indmoneyOverview.latest,
+          }));
+        }
       })
       .catch((error: unknown) => {
         console.warn('Failed to load final actionables setup counts:', error);
