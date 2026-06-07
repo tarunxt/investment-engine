@@ -3,6 +3,8 @@
 import { useMemo } from 'react';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
+import { getStandardActionTextClass, type StandardActionCategory } from '@/lib/actionColorScheme';
+import { cn } from '@/lib/utils';
 
 interface JsonRecommendationRow {
   [key: string]: unknown;
@@ -11,6 +13,18 @@ interface JsonRecommendationRow {
 interface JsonRecommendationPayload {
   title?: string;
   stocks: JsonRecommendationRow[];
+}
+
+
+function normalizeActionCell(value: string): StandardActionCategory | null {
+  const normalized = value.toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+  if (!normalized) return null;
+  if (normalized.includes('sell all') || normalized === 'sell') return 'Sell All';
+  if (normalized.includes('trim')) return 'Trim';
+  if (normalized.includes('hold')) return 'Hold';
+  if (normalized.includes('buy new')) return 'Buy New';
+  if (normalized.includes('add more') || normalized === 'add') return 'Add more';
+  return null;
 }
 
 interface Props {
@@ -641,7 +655,15 @@ export default function InvestmentRecommendationTable({
 	                    );
 
 	                  return (
-	                    <td key={`${rowIdx}-${header}`} className="px-3 py-2 align-top text-gray-700">
+	                    <td
+                        key={`${rowIdx}-${header}`}
+                        className={cn(
+                          "px-3 py-2 align-top text-gray-700",
+                          header === "Action (Buy/Add/Sell All/Trim/Hold/Buy New)" && normalizeActionCell(cellValue)
+                            ? getStandardActionTextClass(normalizeActionCell(cellValue)!)
+                            : null,
+                        )}
+                      >
 	                      {content}
 	                    </td>
 	                  );

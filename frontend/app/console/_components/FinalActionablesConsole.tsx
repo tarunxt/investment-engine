@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowLeft, ChevronDown, ChevronUp, Info, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, ExternalLink, Info, RefreshCw, X } from "lucide-react";
 
 import {
   parseInvestmentRecommendationContent,
@@ -27,6 +27,7 @@ import {
   technicalSetupDomId,
   type SetupRow,
 } from "@/lib/technicalSetups";
+import { STANDARD_ACTION_ORDER, getStandardActionBadgeClass } from "@/lib/actionColorScheme";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -156,40 +157,37 @@ export type SetupStockGroup = {
   stocks: SetupStockDetail[];
 };
 
-const SETUP_STOCK_ACTION_PRIORITY: Record<ActionCategory, number> = {
-  "Sell All": 0,
-  "Add more": 1,
-  "Buy New": 2,
-  Trim: 3,
-  Hold: 4,
-};
+const SETUP_STOCK_ACTION_PRIORITY: Record<ActionCategory, number> = STANDARD_ACTION_ORDER.reduce((acc, action, index) => {
+  acc[action] = index;
+  return acc;
+}, {} as Record<ActionCategory, number>);
 
 const SETUP_STOCK_ACTION_CLASSES: Record<
   ActionCategory,
   { row: string; nameCell: string; cell: string }
 > = {
   "Sell All": {
-    row: "bg-red-100",
+    row: "bg-red-50/90",
     nameCell: "text-red-950",
     cell: "text-red-900",
   },
+  Trim: {
+    row: "bg-red-50/70",
+    nameCell: "text-red-900",
+    cell: "text-red-700",
+  },
   "Add more": {
-    row: "bg-emerald-100",
+    row: "bg-emerald-100/70",
     nameCell: "text-emerald-950",
     cell: "text-emerald-900",
   },
-  Trim: {
-    row: "bg-red-50",
-    nameCell: "text-red-950",
-    cell: "text-red-800",
-  },
   "Buy New": {
-    row: "bg-emerald-50",
-    nameCell: "text-emerald-950",
+    row: "bg-emerald-50/70",
+    nameCell: "text-emerald-900",
     cell: "text-emerald-800",
   },
   Hold: {
-    row: "bg-yellow-50",
+    row: "bg-yellow-50/80",
     nameCell: "text-yellow-950",
     cell: "text-yellow-800",
   },
@@ -400,13 +398,7 @@ function TechnicalSetupLink({
   );
 }
 
-const ACTION_CATEGORIES: ActionCategory[] = [
-  "Sell All",
-  "Add more",
-  "Buy New",
-  "Trim",
-  "Hold",
-];
+const ACTION_CATEGORIES: ActionCategory[] = STANDARD_ACTION_ORDER;
 const ACTION_HEADER: RebalanceHeader =
   "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
 const CURRENT_INVESTMENT_AMOUNT_HEADER = "Current Value";
@@ -458,11 +450,11 @@ type ConsolidatedDisplayHeader =
   | RebalanceHeader;
 
 const CATEGORY_BADGE_CLASS: Record<ActionCategory, string> = {
-  "Sell All": "border-red-200 bg-red-50 text-red-700",
-  "Add more": "border-blue-200 bg-blue-50 text-blue-700",
-  "Buy New": "border-emerald-200 bg-emerald-50 text-emerald-700",
-  Trim: "border-orange-200 bg-orange-50 text-orange-700",
-  Hold: "border-slate-200 bg-slate-50 text-slate-700",
+  "Sell All": getStandardActionBadgeClass("Sell All"),
+  Trim: getStandardActionBadgeClass("Trim"),
+  Hold: getStandardActionBadgeClass("Hold"),
+  "Buy New": getStandardActionBadgeClass("Buy New"),
+  "Add more": getStandardActionBadgeClass("Add more"),
 };
 
 const ACTION_CATEGORY_LABEL: Record<ActionCategory, string> = {
@@ -2025,23 +2017,80 @@ function formatRecommendationLabel(value: string) {
   return action ? ACTION_CATEGORY_LABEL[action] : value || "No recommendation";
 }
 
-function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
-  const rationales = LLM_BREAKUP_RATIONALE_HEADERS.map((header) => ({
-    header,
-    value: row[header] || "",
-  })).filter((item) => item.value.trim());
+const RATIONALE_SECTION_GROUPS: Array<{
+  title: string;
+  subtitle?: string;
+  className: string;
+  titleClassName: string;
+  items: Array<{ header: (typeof LLM_BREAKUP_RATIONALE_HEADERS)[number]; label: string | null }>;
+}> = [
+  {
+    title: "Cruxx",
+    className: "border-rose-200 bg-rose-50/80 text-rose-700",
+    titleClassName: "text-rose-800",
+    items: [{ header: "Rationale Remarks", label: null }],
+  },
+  {
+    title: "Technical setup",
+    subtitle: "Short, medium, and long-term setup",
+    className: "border-blue-200 bg-blue-50/80 text-blue-700",
+    titleClassName: "text-blue-800",
+    items: [
+      { header: "Rationale - Technical setup (short term (1–3 months))", label: "Short" },
+      { header: "Rationale - Technical setup (short term (1-3 months))", label: "Short" },
+      { header: "Rationale - Technical setup (medium term)", label: "Medium" },
+      { header: "Rationale - Technical setup (long term term)", label: "Long" },
+      { header: "Rationale - Technical setup (long term)", label: "Long" },
+    ],
+  },
+  {
+    title: "Fundamental Setup",
+    subtitle: "Short and medium/long-term fundamentals",
+    className: "border-emerald-200 bg-emerald-50/80 text-emerald-700",
+    titleClassName: "text-emerald-800",
+    items: [
+      { header: "Rationale - Fundamentals Short term", label: "Short" },
+      { header: "Rationale - Fundamentals Medium/Long Term", label: "Medium" },
+    ],
+  },
+];
 
-  if (!rationales.length) {
+function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
+  const groups = RATIONALE_SECTION_GROUPS.map((group) => {
+    const seenLabels = new Set<string>();
+    const items = group.items
+      .map((item) => ({ ...item, value: row[item.header] || "" }))
+      .filter((item) => item.value.trim())
+      .filter((item) => {
+        const key = `${item.label ?? ""}:${normalizeWhitespace(item.value)}`;
+        if (seenLabels.has(key)) return false;
+        seenLabels.add(key);
+        return true;
+      });
+    return { ...group, items };
+  }).filter((group) => group.items.length > 0);
+
+  if (!groups.length) {
     return <span>{row["Technical Setup"] || "—"}</span>;
   }
 
   return (
     <div className="space-y-2">
-      {rationales.map(({ header, value }) => (
-        <div key={header}>
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">{header}</div>
-          <div className="mt-0.5 whitespace-pre-wrap break-words text-red-600">{value}</div>
-        </div>
+      {groups.map((group) => (
+        <section key={group.title} className={cn("rounded-lg border px-3 py-2", group.className)}>
+          <div className={cn("text-[11px] font-bold uppercase tracking-wide", group.titleClassName)}>
+            {group.title}
+          </div>
+          {group.subtitle ? <div className="mt-0.5 text-[10px] font-medium opacity-80">{group.subtitle}</div> : null}
+          <div className="mt-1.5 space-y-1 text-xs leading-5">
+            {group.items.map(({ header, label, value }) => (
+              <p key={`${header}-${label ?? "plain"}`} className="whitespace-pre-wrap break-words">
+                {label ? <span className="font-semibold">{label}: </span> : null}
+                {value}
+              </p>
+            ))}
+          </div>
+        </section>
       ))}
     </div>
   );
@@ -3091,6 +3140,117 @@ function RunGroupDetails({
 }
 
 
+
+type DashboardActionRow = {
+  id: string;
+  market: SwingTradeMarket;
+  stock: StockConsensus;
+};
+
+type DashboardActionSortKey =
+  | "selected"
+  | "stock"
+  | "consensus"
+  | "currentUnits"
+  | "currentValue"
+  | "units"
+  | "amount"
+  | "technicalSetup"
+  | "confidence";
+
+type DashboardActionSortState = {
+  key: DashboardActionSortKey;
+  direction: "asc" | "desc";
+};
+
+function getDashboardActionRowId(market: SwingTradeMarket, stock: StockConsensus) {
+  return `${market}:${stock.key}`;
+}
+
+function getDashboardActionSortValue(
+  row: DashboardActionRow,
+  action: ActionCategory,
+  key: DashboardActionSortKey,
+  technicalScans: TechnicalScanMap,
+  selectedIds: Set<string>,
+) {
+  const estimate = row.stock.actionAverages[action];
+  const scan = getTechnicalScanForStock(technicalScans, row.stock);
+  switch (key) {
+    case "selected":
+      return selectedIds.has(row.id) ? 1 : 0;
+    case "stock":
+      return row.stock.symbol;
+    case "consensus":
+      return row.stock.actionCounts[action] / Math.max(row.stock.totalSuggestions, 1);
+    case "currentUnits":
+      return estimate.currentUnits ?? Number.NEGATIVE_INFINITY;
+    case "currentValue":
+      return estimate.currentInvestmentAmount ?? getCurrentValueAmount(row.stock.representative) ?? Number.NEGATIVE_INFINITY;
+    case "units":
+      return estimate.units ?? Number.NEGATIVE_INFINITY;
+    case "amount":
+      return estimate.amount ?? Number.NEGATIVE_INFINITY;
+    case "technicalSetup":
+      return formatTechnicalSetup(scan, row.stock.representative);
+    case "confidence":
+      return parseNumericCell(formatTechnicalConfidence(scan, row.stock.representative)) ?? Number.NEGATIVE_INFINITY;
+    default:
+      return "";
+  }
+}
+
+function compareDashboardActionRows(
+  left: DashboardActionRow,
+  right: DashboardActionRow,
+  action: ActionCategory,
+  sortState: DashboardActionSortState,
+  technicalScans: TechnicalScanMap,
+  selectedIds: Set<string>,
+) {
+  const leftValue = getDashboardActionSortValue(left, action, sortState.key, technicalScans, selectedIds);
+  const rightValue = getDashboardActionSortValue(right, action, sortState.key, technicalScans, selectedIds);
+  let comparison = 0;
+  if (typeof leftValue === "number" && typeof rightValue === "number") {
+    comparison = leftValue - rightValue;
+  } else {
+    comparison = String(leftValue).localeCompare(String(rightValue), undefined, { sensitivity: "base", numeric: true });
+  }
+  if (comparison === 0) {
+    comparison = left.stock.symbol.localeCompare(right.stock.symbol, undefined, { sensitivity: "base" });
+  }
+  return sortState.direction === "asc" ? comparison : -comparison;
+}
+
+function SortableActionHeader({
+  label,
+  sortKey,
+  currentSort,
+  onSort,
+}: {
+  label: string;
+  sortKey: DashboardActionSortKey;
+  currentSort: DashboardActionSortState;
+  onSort: (key: DashboardActionSortKey) => void;
+}) {
+  const isActive = currentSort.key === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className="inline-flex items-center gap-1 whitespace-nowrap font-semibold text-gray-500 transition hover:text-gray-900"
+      title={`Sort by ${label}`}
+    >
+      {label}
+      {isActive ? (
+        currentSort.direction === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
+      ) : (
+        <span className="text-gray-300">↕</span>
+      )}
+    </button>
+  );
+}
+
 function getLatestMatchingRuns(runs: RunResponse[], market: SwingTradeMarket) {
   const marketRuns = runs
     .filter((run) => isCompletedRebalanceRun(run, market))
@@ -3111,6 +3271,8 @@ export function DashboardFinalActionablesTables() {
   }>({ india: null, us: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -3144,14 +3306,66 @@ export function DashboardFinalActionablesTables() {
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
   const actionRowsByMarket = useMemo(() => ({
     india: buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india).map((stock) => ({
+      id: getDashboardActionRowId("india", stock),
       market: "india" as SwingTradeMarket,
       stock,
     })),
     us: buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us", portfolioSnapshots.us).map((stock) => ({
+      id: getDashboardActionRowId("us", stock),
       market: "us" as SwingTradeMarket,
       stock,
     })),
   }), [portfolioSnapshots.india, portfolioSnapshots.us, runs]);
+
+  const toggleOrderSelection = useCallback((id: string) => {
+    setSelectedOrderIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAllOrderRows = useCallback((ids: string[], checked: boolean) => {
+    setSelectedOrderIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => {
+        if (checked) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  }, []);
+
+  const toggleActionSort = useCallback((tableKey: string, key: DashboardActionSortKey) => {
+    setSortStates((current) => {
+      const existing = current[tableKey] ?? { key: "confidence" as DashboardActionSortKey, direction: "desc" as const };
+      return {
+        ...current,
+        [tableKey]: existing.key === key
+          ? { key, direction: existing.direction === "asc" ? "desc" : "asc" }
+          : { key, direction: key === "stock" || key === "technicalSetup" ? "asc" : "desc" },
+      };
+    });
+  }, []);
+
+  const selectedOrders = useMemo(() => [
+    ...actionRowsByMarket.india,
+    ...actionRowsByMarket.us,
+  ].filter((row) => selectedOrderIds.has(row.id)), [actionRowsByMarket.india, actionRowsByMarket.us, selectedOrderIds]);
+
+  const openOrderBasket = useCallback((market: SwingTradeMarket) => {
+    const rows = selectedOrders.filter((row) => row.market === market);
+    if (!rows.length) {
+      window.alert("Select at least one actionable row before placing an order.");
+      return;
+    }
+    if (market !== "india") {
+      window.alert("US basket placement is not wired to a broker yet. Use the selected rows as your execution checklist.");
+      return;
+    }
+    window.open(URLs.routes.console.zerodha(), "_blank", "noopener,noreferrer");
+  }, [selectedOrders]);
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
@@ -3173,12 +3387,15 @@ export function DashboardFinalActionablesTables() {
             </div>
           ) : (
             ACTION_CATEGORIES.map((action) => {
+              const tableKey = `${market}:${action}`;
+              const sortState = sortStates[tableKey] ?? { key: "confidence", direction: "desc" as const };
               const rows = actionRows
                 .filter(({ stock }) => stock.consensusAction === action)
-                .sort((a, b) => {
-                  const sorted = sortStocksByConfidence([a.stock, b.stock], technicalScans);
-                  return sorted[0]?.key === a.stock.key ? -1 : 1;
-                });
+                .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans, selectedOrderIds));
+              const selectableRowIds = rows
+                .filter(({ stock }) => ACTION_ESTIMATE_CATEGORIES.has(stock.consensusAction))
+                .map((row) => row.id);
+              const allVisibleSelected = selectableRowIds.length > 0 && selectableRowIds.every((id) => selectedOrderIds.has(id));
 
               return (
                 <Card
@@ -3200,24 +3417,44 @@ export function DashboardFinalActionablesTables() {
                         <table className="min-w-[64rem] text-xs">
                           <thead>
                             <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
-                              <th className="px-3 py-2 font-semibold">Stock</th>
-                              <th className="px-3 py-2 font-semibold">Consensus</th>
-                              <th className="px-3 py-2 font-semibold">Current Units</th>
-                              <th className="px-3 py-2 font-semibold">Current Value</th>
-                              <th className="px-3 py-2 font-semibold">Units to {getActionVerb(action)}</th>
-                              <th className="px-3 py-2 font-semibold">Amount</th>
-                              <th className="px-3 py-2 font-semibold">Technical Setup</th>
-                              <th className="px-3 py-2 font-semibold">Confidence Score</th>
+                              <th className="px-3 py-2 font-semibold">
+                                <label className="inline-flex items-center gap-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={allVisibleSelected}
+                                    disabled={selectableRowIds.length === 0}
+                                    onChange={(event) => toggleAllOrderRows(selectableRowIds, event.target.checked)}
+                                  />
+                                  Place?
+                                </label>
+                              </th>
+                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Stock" sortKey="stock" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Consensus" sortKey="consensus" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Units" sortKey="currentUnits" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Value" sortKey="currentValue" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label={`Units to ${getActionVerb(action)}`} sortKey="units" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Amount" sortKey="amount" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Technical Setup" sortKey="technicalSetup" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Confidence Score" sortKey="confidence" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
-                            {rows.map(({ stock }) => {
+                            {rows.map(({ id, stock }) => {
                               const estimate = stock.actionAverages[action];
                               const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
                               const scan = getTechnicalScanForStock(technicalScans, stock);
                               const setup = formatTechnicalSetup(scan, stock.representative);
                               return (
                                 <tr key={`${market}-${stock.key}`} className="bg-white/40">
+                                  <td className="whitespace-nowrap px-3 py-2 align-top text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedOrderIds.has(id)}
+                                      disabled={!showActionColumns}
+                                      onChange={() => toggleOrderSelection(id)}
+                                      aria-label={`Select ${stock.symbol} for order placement`}
+                                    />
+                                  </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top">
                                     <TradingViewSymbolLink
                                       symbol={stock.symbol}
@@ -3263,6 +3500,17 @@ export function DashboardFinalActionablesTables() {
               );
             })
           )}
+        </div>
+        <div className="mt-4 flex justify-end">
+          <Button
+            type="button"
+            onClick={() => openOrderBasket(market)}
+            disabled={!selectedOrders.some((row) => row.market === market)}
+            className="rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-300"
+          >
+            <ExternalLink className="mr-2 size-4" />
+            Place Order
+          </Button>
         </div>
       </div>
     );

@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { apiService, APIError } from '@/services/api';
 import { PromptResponse, PromptCreate, PromptUpdate } from '@/types/api';
+import { getPromptLogicalId } from '@/lib/promptIds';
 import { cn } from '@/lib/utils';
 import { useClipboard } from '@/hooks/useClipboard';
 
@@ -64,12 +65,12 @@ type PromptStage = {
 };
 
 const PROMPT_STAGES: PromptStage[] = [
-  { id: 'portfolio-scan', label: 'Portfolio Scan', description: 'Portfolio sync and holdings snapshot prompts.' },
-  { id: 'event-scan', label: 'Events Scan', description: 'Calendar, catalyst, and event-analysis prompts.' },
-  { id: 'threat-scan', label: 'Threats Scan', description: 'Risk, guardrail, and downside-analysis prompts.' },
-  { id: 'swing-opportunities', label: 'Swing Opportunities Scan', description: 'Opportunity discovery, momentum, and swing-trade prompts.' },
-  { id: 'rebalance', label: 'Rebalance Suggestions', description: 'Allocation, target-weight, add/trim, and rebalance prompts.' },
-  { id: 'technical-scan', label: 'Technical Scan', description: 'Chart validation, entry/exit, and execution timing prompts.' },
+  { id: 'portfolio-scan', label: 'Stage 1B · Portfolio Event Calendar Scan Flow', description: 'Portfolio event calendar and snapshot prompts.' },
+  { id: 'event-scan', label: 'Stage 1B · Portfolio Event Calendar Scan Flow', description: 'Calendar, catalyst, and event-analysis prompts.' },
+  { id: 'threat-scan', label: 'Stage 2 · Threat Scan Flow', description: 'INDmoney US and Zerodha threat prompts.' },
+  { id: 'swing-opportunities', label: 'Stage 3 · Swing Scan Flow', description: 'India and US swing-trade research prompts.' },
+  { id: 'rebalance', label: 'Stage 4 · Rebalance Scan Flow', description: 'India and US portfolio rebalance prompts.' },
+  { id: 'technical-scan', label: 'Stage 5 · Technical Scan Flow', description: 'Technical setup scan prompts.' },
   { id: 'uncategorized', label: 'Uncategorized', description: 'Prompts that need manual stage tagging.' },
 ];
 
@@ -290,7 +291,7 @@ export default function PromptsPage() {
             copiedId={copiedId}
             onCopy={copyBody}
             onFork={openFork}
-            onEdit={null}
+            onEdit={openEdit}
             onDelete={null}
           />
         </TabsContent>
@@ -496,7 +497,7 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
   const isCopied = copiedId === prompt.id;
 
   return (
-    <Card className="flex flex-col border border-gray-200 shadow-sm">
+    <Card className="flex flex-col border border-gray-200 shadow-sm transition hover:border-gray-300 hover:shadow-md">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-sm font-semibold leading-snug text-gray-950">
@@ -537,11 +538,18 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
 
       <CardContent className="flex flex-1 flex-col gap-3">
         {/* Body preview */}
-        <p className="line-clamp-4 flex-1 text-xs leading-5 text-gray-600">{prompt.body}</p>
+        <button
+          type="button"
+          onClick={() => onEdit?.(prompt)}
+          className="line-clamp-4 flex-1 text-left text-xs leading-5 text-gray-600 transition hover:text-gray-950 focus:outline-none focus:ring-2 focus:ring-gray-950/10"
+          title="Open expanded prompt"
+        >
+          {prompt.body}
+        </button>
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-2 pt-1">
-          <span className="text-xs text-gray-400">Updated {formatDate(prompt.updated_at)}</span>
+          <span className="text-xs text-gray-400">Updated {formatDate(prompt.updated_at)} · Prompt ID <span className="font-mono text-gray-500">{getPromptLogicalId(prompt.name, prompt.id)}</span></span>
 
           <div className="flex items-center gap-1">
             <Button
