@@ -5015,15 +5015,11 @@ export function RebalanceWorkflowSections({
         portfolio: "zerodha" as const,
         title: "Run Zerodha Auto-Rebalance",
         buttonLabel: "Run",
-        subtitle:
-          "Queue the India sync, scans, rebalance, technical scan, and final actionable refresh.",
       },
       {
         portfolio: "indmoneyUs" as const,
         title: "Run Indmoney Auto-Rebalance",
         buttonLabel: "Run",
-        subtitle:
-          "Use the latest INDmoney snapshot or paste a fresh screen before the US rebalance workflow.",
       },
     ],
     [],
@@ -5050,7 +5046,8 @@ export function RebalanceWorkflowSections({
               {section.title}
             </h2>
             <p className="mt-2 text-base leading-6 text-slate-500">
-              {section.subtitle}
+              Last run on{" "}
+              {formatTimestamp(lastRunByPortfolio[section.portfolio])}
             </p>
           </div>
           <div className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
@@ -5112,10 +5109,6 @@ export function RebalanceWorkflowSections({
                 </Button>
               )}
             </div>
-            <p className="text-xs text-slate-500">
-              Last run on{" "}
-              {formatTimestamp(lastRunByPortfolio[section.portfolio])}
-            </p>
             <button
               type="button"
               disabled={isBusy}
