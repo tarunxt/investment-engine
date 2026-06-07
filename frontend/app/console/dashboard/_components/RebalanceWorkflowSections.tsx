@@ -102,7 +102,6 @@ type StageInfo = {
 type ZerodhaBasketOrderKind = "Market" | "Limit" | "After market";
 type ZerodhaBasketSubmission = {
   redirected: number;
-  kiteUrl: string;
   clipboardCopied: boolean;
   orders: ZerodhaBasketPreviewOrder[];
 };
@@ -552,7 +551,7 @@ const ZERODHA_ORDER_KINDS: ZerodhaBasketOrderKind[] = [
   "After market",
 ];
 
-const KITE_ORDERS_URL = "https://kite.zerodha.com/orders";
+const KITE_BASKET_URL = "https://kite.zerodha.com/connect/basket";
 const INDIA_MARKET_TIME_ZONE = "Asia/Kolkata";
 const INDIA_MARKET_OPEN_MINUTES = 9 * 60 + 15;
 const INDIA_MARKET_CLOSE_MINUTES = 15 * 60 + 30;
@@ -584,8 +583,62 @@ function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, market
   const orderType = order.orderKind === "Market" && marketOpen ? "MARKET" : "LIMIT";
   return {
     orderType,
-    variety: order.orderKind === "After market" || !marketOpen ? "AMO" : "Regular",
+    variety: order.orderKind === "After market" || !marketOpen ? "amo" : "regular",
   };
+}
+
+function getZerodhaPublisherApiKey(loginUrl: string) {
+  try {
+    return new URL(loginUrl).searchParams.get("api_key")?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], marketOpen: boolean) {
+  return orders.map((order) => {
+    const execution = getZerodhaBasketOrderExecution(order, marketOpen);
+    const payload: Record<string, string | number | boolean> = {
+      variety: execution.variety,
+      tradingsymbol: order.symbol.toUpperCase(),
+      exchange: order.exchange.toUpperCase(),
+      transaction_type: order.side,
+      order_type: execution.orderType,
+      quantity: Math.max(1, Math.floor(order.units ?? 0)),
+      product: "CNC",
+      validity: "DAY",
+      readonly: false,
+      tag: "credx",
+    };
+    if (execution.orderType === "LIMIT" && order.price) {
+      payload.price = Number(order.price.toFixed(2));
+    }
+    return payload;
+  });
+}
+
+function postZerodhaKiteBasket(apiKey: string, orders: ZerodhaBasketPreviewOrder[], marketOpen: boolean, targetName: string) {
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = KITE_BASKET_URL;
+  form.target = targetName;
+  form.style.display = "none";
+
+  const apiKeyInput = document.createElement("input");
+  apiKeyInput.type = "hidden";
+  apiKeyInput.name = "api_key";
+  apiKeyInput.value = apiKey;
+  form.appendChild(apiKeyInput);
+
+  const dataInput = document.createElement("input");
+  dataInput.type = "hidden";
+  dataInput.name = "data";
+  dataInput.value = JSON.stringify(buildZerodhaKiteBasketPayload(orders, marketOpen));
+  form.appendChild(dataInput);
+
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
 }
 
 function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], marketOpen: boolean) {
@@ -605,7 +658,7 @@ function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], mark
       order.side,
       Math.max(1, Math.floor(order.units ?? 0)),
       execution.orderType,
-      execution.variety,
+      execution.variety.toUpperCase(),
       "CNC",
       "DAY",
       price,
@@ -1870,7 +1923,7 @@ function ZerodhaBasketPreviewDialog({
               Zerodha India Place Order Basket
             </h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All, Trim, Add more, and Buy New actionables are pre-selected. Review the basket here, then open Kite to place the selected orders from the Zerodha portal.
+              Sell All, Trim, Add more, and Buy New actionables are pre-selected. Review the basket here, then open a Kite order tray to confirm and place the selected orders from Zerodha.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -1903,16 +1956,8 @@ function ZerodhaBasketPreviewDialog({
 
               {submission ? (
                 <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                  Opened Kite for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
-                  {submission.clipboardCopied ? " A Kite order checklist was copied to your clipboard." : " Use the table below as your manual entry checklist in Kite."}
-                  <a
-                    href={submission.kiteUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ml-2 font-bold underline decoration-blue-300 underline-offset-2"
-                  >
-                    Open Kite again
-                  </a>
+                  Created a Kite order tray for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
+                  {submission.clipboardCopied ? " A backup order checklist was copied to your clipboard." : " Use the table below as your backup manual-entry checklist if Kite rejects the basket payload."}
                 </div>
               ) : null}
 
@@ -1995,7 +2040,7 @@ function ZerodhaBasketPreviewDialog({
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
                           {submission?.orders.some((submittedOrder) => submittedOrder.id === order.id) ? (
-                            <span className="text-blue-700">Opened in Kite</span>
+                            <span className="text-blue-700">Sent to Kite tray</span>
                           ) : (
                             <span>Pending</span>
                           )}
@@ -2015,7 +2060,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex flex-col gap-3 border-t border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows now redirect to the Kite portal instead of using direct Kite Connect placement. Market rows are only suggested while NSE/BSE regular market appears open; closed-market rows should be entered as AMO limit orders using the displayed price.
+            Selected rows are posted to Zerodha Kite Publisher to create a reviewable Kite order tray. Market rows are only sent while NSE/BSE regular market appears open; closed-market rows are sent as AMO limit orders using the displayed price.
           </div>
           {renderPlaceOrderButton()}
         </div>
@@ -3443,15 +3488,24 @@ export function RebalanceWorkflowSections({
     setZerodhaBasketPlacing(true);
     setZerodhaBasketSubmission(null);
     setZerodhaBasketError(null);
-    const kiteWindow = window.open(KITE_ORDERS_URL, "_blank");
+    const kiteTargetName = `zerodha-basket-${Date.now()}`;
+    const kiteWindow = window.open("about:blank", kiteTargetName);
     if (!kiteWindow) {
       setZerodhaBasketPlacing(false);
-      setZerodhaBasketError("Your browser blocked the Kite popup. Allow popups for this site, or open https://kite.zerodha.com/orders manually.");
+      setZerodhaBasketError("Your browser blocked the Kite basket popup. Allow popups for this site, then try Open Kite again.");
       return;
     }
     kiteWindow.opener = null;
 
     try {
+      const login = await apiService.zerodhaLoginUrl();
+      const apiKey = login.configured ? getZerodhaPublisherApiKey(login.login_url) : null;
+      if (!apiKey) {
+        kiteWindow.close();
+        setZerodhaBasketError("Zerodha Kite Publisher is not configured. Add ZERODHA_API_KEY on the backend and try again.");
+        return;
+      }
+
       let clipboardCopied = false;
       try {
         clipboardCopied = await copyZerodhaKiteBasketToClipboard(selectedOrders, marketStatus.open);
@@ -3459,12 +3513,16 @@ export function RebalanceWorkflowSections({
         clipboardCopied = false;
       }
 
+      postZerodhaKiteBasket(apiKey, selectedOrders, marketStatus.open, kiteTargetName);
+
       setZerodhaBasketSubmission({
         redirected: selectedOrders.length,
-        kiteUrl: KITE_ORDERS_URL,
         clipboardCopied,
         orders: selectedOrders,
       });
+    } catch (error) {
+      kiteWindow.close();
+      setZerodhaBasketError(`Could not open the Kite order basket: ${normalizeError(error)}`);
     } finally {
       setZerodhaBasketPlacing(false);
     }
