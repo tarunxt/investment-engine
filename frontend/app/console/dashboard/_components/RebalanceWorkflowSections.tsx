@@ -2482,7 +2482,7 @@ function StageLlmSelectorDialog({
         .map((model) => `${provider.name}::${model}`),
     ),
   );
-  const modelMixControls = singleSelect ? undefined : (
+  const modelMixControls = (
     <LlmModelMixControls
       mixes={savedMixes}
       selectedMixId={selectedMixId}
@@ -2501,7 +2501,11 @@ function StageLlmSelectorDialog({
             "Some models in this mix are incompatible with current API access and were skipped.",
           );
         }
-        onReplaceSelection(new Set(filteredTargets));
+        if (singleSelect) {
+          onReplaceSelection(new Set(filteredTargets.slice(0, 1)));
+        } else {
+          onReplaceSelection(new Set(filteredTargets));
+        }
         setSelectedMixId(id);
       }}
       onSave={() => {
