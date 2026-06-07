@@ -1,10 +1,79 @@
-import React from 'react';
+'use client';
+
+import React, { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown, { ExtraProps } from 'react-markdown';
 import type { Element } from 'hast';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import Image from 'next/image';
+import { loadStockParametersFromStorage, normalizeParameterName, validateStockParameterValue } from '@/lib/stockParameters';
+import type { StockParameter } from '@/lib/stockParameters';
+
+
+type TableValidationIssue = {
+    tableIndex: number;
+    rowIndex: number;
+    column: string;
+    value: string;
+    rule: string;
+};
+
+function parseMarkdownTables(content: string) {
+    const lines = content.split('\n');
+    const tables: string[][][] = [];
+
+    for (let index = 0; index < lines.length - 1; index += 1) {
+        const header = lines[index].trim();
+        const divider = lines[index + 1].trim();
+        if (!header.startsWith('|') || !divider.startsWith('|') || !/^\|?[\s:-|]+\|?$/.test(divider)) continue;
+
+        const rows: string[][] = [];
+        let rowIndex = index;
+        while (rowIndex < lines.length && lines[rowIndex].trim().startsWith('|')) {
+            const row = lines[rowIndex]
+                .trim()
+                .replace(/^\|/, '')
+                .replace(/\|$/, '')
+                .split('|')
+                .map((cell) => cell.trim());
+            rows.push(row);
+            rowIndex += 1;
+        }
+        if (rows.length > 2) tables.push(rows.filter((_, localIndex) => localIndex !== 1));
+        index = rowIndex;
+    }
+
+    return tables;
+}
+
+function validateMarkdownTables(content: string, parameters: StockParameter[]) {
+    const issues: TableValidationIssue[] = [];
+    const tables = parseMarkdownTables(content);
+
+    tables.forEach((table, tableIndex) => {
+        const headers = table[0] ?? [];
+        const parameterByColumn = headers.map((header) => parameters.find((param) => normalizeParameterName(param.parameter) === normalizeParameterName(header)) ?? null);
+
+        headers.forEach((header, columnIndex) => {
+            if (!parameterByColumn[columnIndex]) {
+                issues.push({ tableIndex: tableIndex + 1, rowIndex: 0, column: header, value: header, rule: 'Column header must exist in Rules > Stock Parameters.' });
+            }
+        });
+
+        table.slice(1).forEach((row, rowOffset) => {
+            row.forEach((cell, columnIndex) => {
+                const parameter = parameterByColumn[columnIndex];
+                if (!parameter) return;
+                if (!validateStockParameterValue(parameter, cell)) {
+                    issues.push({ tableIndex: tableIndex + 1, rowIndex: rowOffset + 1, column: parameter.parameter, value: cell, rule: parameter.validationRule });
+                }
+            });
+        });
+    });
+
+    return issues;
+}
 
 interface MarkdownRendererProps {
     content: string;
@@ -24,12 +93,41 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     className = '',
     enableTableStyling = true,
 }) => {
+    const [stockParameters, setStockParameters] = useState<StockParameter[]>(() => loadStockParametersFromStorage());
+
+    useEffect(() => {
+        function handleStorageUpdate() {
+            setStockParameters(loadStockParametersFromStorage());
+        }
+
+        window.addEventListener('storage', handleStorageUpdate);
+        window.addEventListener('stock-parameters-updated', handleStorageUpdate);
+        return () => {
+            window.removeEventListener('storage', handleStorageUpdate);
+            window.removeEventListener('stock-parameters-updated', handleStorageUpdate);
+        };
+    }, []);
+
+    const validationIssues = useMemo(() => validateMarkdownTables(content, stockParameters), [content, stockParameters]);
+
     if (!content) {
         return null;
     }
 
     return (
         <article className={`prose prose-sm max-w-none dark:prose-invert ${className}`}>
+            {validationIssues.length > 0 && (
+                <div className="not-prose mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    <div className="font-semibold">Master validation flagged {validationIssues.length} table issue{validationIssues.length === 1 ? '' : 's'}.</div>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                        {validationIssues.slice(0, 8).map((issue, index) => (
+                            <li key={`${issue.tableIndex}-${issue.rowIndex}-${issue.column}-${index}`}>
+                                Table {issue.tableIndex}, {issue.rowIndex === 0 ? 'header' : `row ${issue.rowIndex}`}, {issue.column}: “{issue.value}” violates {issue.rule}. <span className="relative text-red-700">*</span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
             <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
@@ -169,14 +267,19 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                             {children}
                         </tr>
                     ),
-                    th: ({ children, ...props }) => (
-                        <th
-                            className="border border-gray-200 dark:border-gray-700 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800"
-                            {...props}
-                        >
-                            {children}
-                        </th>
-                    ),
+                    th: ({ children, ...props }) => {
+                        const headerText = String(children).trim();
+                        const isKnownHeader = stockParameters.some((parameter) => normalizeParameterName(parameter.parameter) === normalizeParameterName(headerText));
+                        return (
+                            <th
+                                className="relative border border-gray-200 dark:border-gray-700 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-800"
+                                {...props}
+                            >
+                                {children}
+                                {!isKnownHeader && <span className="absolute right-1 top-1 text-red-600" title="Unknown Stock Parameter header">*</span>}
+                            </th>
+                        );
+                    },
                     td: ({ children, ...props }) => (
                         <td
                             className="border border-gray-200 dark:border-gray-700 px-4 py-3 text-sm text-gray-800 dark:text-gray-200"
