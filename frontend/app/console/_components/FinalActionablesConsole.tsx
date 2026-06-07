@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, Triangle, X } from "lucide-react";
 
@@ -2507,11 +2507,11 @@ function StockDetailsButton({
           event.stopPropagation();
           setOpen(true);
         }}
-        className="mr-2 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="mr-2 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         aria-label={`Open ${stock.symbol} captured details`}
         title={`Open ${stock.symbol} captured details`}
       >
-        <Info className="h-3 w-3" />
+        <Info className="h-[18px] w-[18px]" />
       </button>
 
       {open ? (
@@ -3630,6 +3630,91 @@ const ACTIONABLES_CALCULATION_HEADERS = [
   "Confidence Score",
 ] as const;
 
+type ActionablesCalculationHeader = (typeof ACTIONABLES_CALCULATION_HEADERS)[number];
+type ActionablesCalculationColumnLayout = {
+  order: ActionablesCalculationHeader[];
+  widths: Partial<Record<ActionablesCalculationHeader, number>>;
+};
+
+const ACTIONABLES_CALCULATION_LAYOUT_VERSION = 1;
+const ACTIONABLES_CALCULATION_MIN_COLUMN_WIDTH = 140;
+const ACTIONABLES_CALCULATION_MAX_COLUMN_WIDTH = 760;
+const ACTIONABLES_CALCULATION_DEFAULT_WIDTHS: Record<ActionablesCalculationHeader, number> =
+  ACTIONABLES_CALCULATION_HEADERS.reduce((acc, header) => {
+    acc[header] = header === "Stock Info" ? 272 : 416;
+    return acc;
+  }, {} as Record<ActionablesCalculationHeader, number>);
+
+function getActionablesCalculationLayoutStorageKey(market: SwingTradeMarket) {
+  return `investor:final-actionables:calculation-layout:${market}:v${ACTIONABLES_CALCULATION_LAYOUT_VERSION}`;
+}
+
+function isActionablesCalculationHeader(value: string): value is ActionablesCalculationHeader {
+  return (ACTIONABLES_CALCULATION_HEADERS as readonly string[]).includes(value);
+}
+
+function clampActionablesCalculationColumnWidth(width: number) {
+  if (!Number.isFinite(width)) return ACTIONABLES_CALCULATION_DEFAULT_WIDTHS["Stock Info"];
+  return Math.min(
+    ACTIONABLES_CALCULATION_MAX_COLUMN_WIDTH,
+    Math.max(ACTIONABLES_CALCULATION_MIN_COLUMN_WIDTH, Math.round(width)),
+  );
+}
+
+function createDefaultActionablesCalculationLayout(): ActionablesCalculationColumnLayout {
+  return {
+    order: [...ACTIONABLES_CALCULATION_HEADERS],
+    widths: { ...ACTIONABLES_CALCULATION_DEFAULT_WIDTHS },
+  };
+}
+
+function normalizeActionablesCalculationLayout(
+  layout?: Partial<ActionablesCalculationColumnLayout> | null,
+): ActionablesCalculationColumnLayout {
+  const seen = new Set<ActionablesCalculationHeader>();
+  const order = [
+    ...(layout?.order ?? []).filter((header): header is ActionablesCalculationHeader => {
+      if (!isActionablesCalculationHeader(header) || seen.has(header)) return false;
+      seen.add(header);
+      return true;
+    }),
+    ...ACTIONABLES_CALCULATION_HEADERS.filter((header) => !seen.has(header)),
+  ];
+
+  const widths = ACTIONABLES_CALCULATION_HEADERS.reduce((acc, header) => {
+    acc[header] = clampActionablesCalculationColumnWidth(
+      layout?.widths?.[header] ?? ACTIONABLES_CALCULATION_DEFAULT_WIDTHS[header],
+    );
+    return acc;
+  }, {} as Record<ActionablesCalculationHeader, number>);
+
+  return { order, widths };
+}
+
+function loadActionablesCalculationLayout(market: SwingTradeMarket) {
+  if (typeof window === "undefined") return createDefaultActionablesCalculationLayout();
+  try {
+    const raw = window.localStorage.getItem(getActionablesCalculationLayoutStorageKey(market));
+    if (!raw) return createDefaultActionablesCalculationLayout();
+    return normalizeActionablesCalculationLayout(JSON.parse(raw));
+  } catch {
+    return createDefaultActionablesCalculationLayout();
+  }
+}
+
+function reorderActionablesCalculationHeaders(
+  order: ActionablesCalculationHeader[],
+  from: ActionablesCalculationHeader,
+  to: ActionablesCalculationHeader,
+) {
+  if (from === to) return order;
+  const next = order.filter((header) => header !== from);
+  const targetIndex = next.indexOf(to);
+  if (targetIndex === -1) return order;
+  next.splice(targetIndex, 0, from);
+  return next;
+}
+
 function getActionablesCalculationColumnLabel(header: string) {
   if (header === ACTION_HEADER) return "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
   return header;
@@ -3646,6 +3731,7 @@ function buildSummaryRowCells(
     [ACTION_HEADER]: action ? ACTION_CATEGORY_LABEL[action] : "",
     "Units Change": unitsChange === null ? "" : String(unitsChange),
     "Final Units": unitsChange === null || detail.currentUnits === null ? "" : String(detail.currentUnits + unitsChange),
+    "Rationale Cruxx": "",
     "Units to Buy": unitsChange !== null && unitsChange > 0 ? String(unitsChange) : stock.representative["Units to Buy"] || "",
   };
 }
@@ -4013,6 +4099,9 @@ function ActionablesCalculationsModal({
   onSetupClick?: (group: SetupStockGroup) => void;
 }) {
   const [sortState, setSortState] = useState<ActionablesCalculationSortState>({ key: "Stock Info", direction: "asc" });
+  const [columnLayout, setColumnLayout] = useState<ActionablesCalculationColumnLayout>(() => loadActionablesCalculationLayout(market));
+  const [draggedHeader, setDraggedHeader] = useState<ActionablesCalculationHeader | null>(null);
+  const resizeStateRef = useRef<{ header: ActionablesCalculationHeader; startX: number; startWidth: number } | null>(null);
   const [formulaOpen, setFormulaOpen] = useState(false);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const rows = useMemo(
@@ -4024,7 +4113,68 @@ function ActionablesCalculationsModal({
     [detailsData, market, rows, sortState, technicalScans],
   );
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      getActionablesCalculationLayoutStorageKey(market),
+      JSON.stringify(normalizeActionablesCalculationLayout(columnLayout)),
+    );
+  }, [columnLayout, market]);
+
+  useEffect(() => {
+    return () => {
+      resizeStateRef.current = null;
+    };
+  }, []);
+
   if (!open) return null;
+
+  const orderedHeaders = columnLayout.order;
+
+  const updateColumnWidth = (header: ActionablesCalculationHeader, width: number) => {
+    setColumnLayout((current) => ({
+      ...current,
+      widths: {
+        ...current.widths,
+        [header]: clampActionablesCalculationColumnWidth(width),
+      },
+    }));
+  };
+
+  const handleResizeStart = (header: ActionablesCalculationHeader, event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    resizeStateRef.current = {
+      header,
+      startX: event.clientX,
+      startWidth: columnLayout.widths[header] ?? ACTIONABLES_CALCULATION_DEFAULT_WIDTHS[header],
+    };
+
+    const handleMouseMove = (moveEvent: globalThis.MouseEvent) => {
+      const state = resizeStateRef.current;
+      if (!state) return;
+      updateColumnWidth(state.header, state.startWidth + moveEvent.clientX - state.startX);
+    };
+    const handleMouseUp = () => {
+      resizeStateRef.current = null;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleHeaderDrop = (targetHeader: ActionablesCalculationHeader, event: ReactDragEvent<HTMLTableCellElement>) => {
+    event.preventDefault();
+    const sourceHeader = draggedHeader;
+    setDraggedHeader(null);
+    if (!sourceHeader || sourceHeader === targetHeader) return;
+    setColumnLayout((current) => ({
+      ...current,
+      order: reorderActionablesCalculationHeaders(current.order, sourceHeader, targetHeader),
+    }));
+  };
 
   const toggleSort = (header: string) => {
     setSortState((current) => current.key === header
@@ -4066,19 +4216,42 @@ function ActionablesCalculationsModal({
               <table className="w-max table-fixed border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-100 text-left">
                   <tr>
-                    {ACTIONABLES_CALCULATION_HEADERS.map((header) => (
-                      <th
-                        key={header}
-                        className={cn(
-                          "border border-slate-300 px-3 py-3 align-bottom",
-                          header === "Stock Info" ? "w-[17rem] min-w-[17rem]" : "w-[26rem] min-w-[26rem]",
-                        )}
-                      >
-                        <ScrollableCalculationCell className="max-h-16">
-                          <SortableCalculationHeader header={header} sortState={sortState} onSort={toggleSort} />
-                        </ScrollableCalculationCell>
-                      </th>
-                    ))}
+                    {orderedHeaders.map((header) => {
+                      const width = columnLayout.widths[header] ?? ACTIONABLES_CALCULATION_DEFAULT_WIDTHS[header];
+                      return (
+                        <th
+                          key={header}
+                          draggable
+                          onDragStart={(event) => {
+                            setDraggedHeader(header);
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", header);
+                          }}
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(event) => handleHeaderDrop(header, event)}
+                          onDragEnd={() => setDraggedHeader(null)}
+                          className={cn(
+                            "group relative border border-slate-300 px-3 py-3 align-bottom transition",
+                            draggedHeader === header ? "bg-blue-100" : "",
+                          )}
+                          style={{ width, minWidth: width, maxWidth: width }}
+                          title="Drag left/right to reorder. Use the right edge to resize."
+                        >
+                          <ScrollableCalculationCell className="max-h-16 pr-3">
+                            <SortableCalculationHeader header={header} sortState={sortState} onSort={toggleSort} />
+                          </ScrollableCalculationCell>
+                          <button
+                            type="button"
+                            className="absolute right-0 top-0 h-full w-2 cursor-col-resize border-r-2 border-transparent transition hover:border-blue-500 focus:border-blue-500 focus:outline-none"
+                            aria-label={`Resize ${getActionablesCalculationColumnLabel(header)} column`}
+                            onMouseDown={(event) => handleResizeStart(header, event)}
+                          />
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
@@ -4086,23 +4259,35 @@ function ActionablesCalculationsModal({
                     <Fragment key={group.stockKey}>
                       {group.rows.map((row, rowIndex) => (
                         <tr key={row.id} className={cn(row.rowClassName, rowIndex === 0 ? "border-t-2 border-slate-900" : "border-t border-slate-900")}>
-                          {rowIndex === 0 ? (
-                            <td
-                              rowSpan={group.rows.length}
-                              className="sticky left-0 z-[1] w-[17rem] min-w-[17rem] overflow-hidden border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
-                            >
-                              <ScrollableCalculationCell className="max-h-36">
-                                {group.stockInfo}
-                              </ScrollableCalculationCell>
-                            </td>
-                          ) : null}
-                          {ACTIONABLES_CALCULATION_HEADERS.filter((header) => header !== "Stock Info").map((header) => (
-                            <td key={`${row.id}-${header}`} className="w-[26rem] max-w-[26rem] overflow-hidden border border-slate-900 px-3 py-1.5 align-top text-slate-900">
-                              <ScrollableCalculationCell>
-                                {row.values[header]}
-                              </ScrollableCalculationCell>
-                            </td>
-                          ))}
+                          {orderedHeaders.map((header) => {
+                            const width = columnLayout.widths[header] ?? ACTIONABLES_CALCULATION_DEFAULT_WIDTHS[header];
+                            if (header === "Stock Info") {
+                              return rowIndex === 0 ? (
+                                <td
+                                  key={`${group.stockKey}-stock-info`}
+                                  rowSpan={group.rows.length}
+                                  className="sticky left-0 z-[1] overflow-hidden border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
+                                  style={{ width, minWidth: width, maxWidth: width }}
+                                >
+                                  <ScrollableCalculationCell className="max-h-36">
+                                    {group.stockInfo}
+                                  </ScrollableCalculationCell>
+                                </td>
+                              ) : null;
+                            }
+
+                            return (
+                              <td
+                                key={`${row.id}-${header}`}
+                                className="overflow-hidden border border-slate-900 px-3 py-1.5 align-top text-slate-900"
+                                style={{ width, minWidth: width, maxWidth: width }}
+                              >
+                                <ScrollableCalculationCell>
+                                  {row.values[header]}
+                                </ScrollableCalculationCell>
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
                       {groupIndex < rowGroups.length - 1 ? (
@@ -4658,6 +4843,7 @@ export function DashboardFinalActionablesTables() {
         </div>
       </div>
       <ActionablesCalculationsModal
+        key={calculationsMarket ?? "india"}
         open={calculationsMarket !== null}
         onClose={() => setCalculationsMarket(null)}
         title={calculationsMarket === "us" ? "Final Actionable US" : "Final Actionable Zerodha"}
@@ -5079,6 +5265,7 @@ export function FinalActionablesConsole({
         ) : null}
       </main>
       <ActionablesCalculationsModal
+        key={market}
         open={calculationsOpen}
         onClose={() => setCalculationsOpen(false)}
         title={PAGE_COPY[portfolio].title}
