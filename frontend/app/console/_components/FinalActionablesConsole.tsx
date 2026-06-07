@@ -392,7 +392,7 @@ const ACTION_CATEGORIES: ActionCategory[] = [
 ];
 const ACTION_HEADER: RebalanceHeader =
   "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
-const CURRENT_INVESTMENT_AMOUNT_HEADER = "Current Investment Amount";
+const CURRENT_INVESTMENT_AMOUNT_HEADER = "Current Value";
 const ACTION_ESTIMATE_CATEGORIES = new Set<ActionCategory>([
   "Sell All",
   "Trim",
@@ -600,9 +600,18 @@ function getActionUnits(row: CanonicalRow, action: ActionCategory) {
 }
 
 function getCurrentInvestmentAmount(row: CanonicalRow) {
+  const explicitCurrentValue = parseNumericCell(row["Current Value"]);
+  if (explicitCurrentValue !== null) return Math.abs(explicitCurrentValue);
   const currentUnits = parseNumericCell(row["Current Units"]);
   const price = parseNumericCell(row["Price Per Unit"]);
-  if (currentUnits === null || price === null) return null;
+  const investedAmount = parseNumericCell(row["Current Investment Amount"]);
+  const pnl =
+    parseNumericCell(row["PnL"]) ??
+    parseNumericCell(row["P&L"]) ??
+    parseNumericCell(row["Profit/Loss"]) ??
+    parseNumericCell(row["Profit and Loss"]);
+  if (investedAmount !== null && pnl !== null) return Math.abs(investedAmount + pnl);
+  if (currentUnits === null || price === null) return investedAmount !== null ? Math.abs(investedAmount) : null;
   return Math.abs(currentUnits * price);
 }
 
@@ -2186,7 +2195,7 @@ function ActionSummaryStockTile({
         </div>
         <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
           <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Current Investment Amount
+            Current Value
           </dt>
           <dd className="mt-1 text-sm font-medium text-slate-900">
             {formatDisplayAmount(
@@ -2940,7 +2949,7 @@ export function DashboardFinalActionablesTables() {
                               <th className="px-3 py-2 font-semibold">Stock</th>
                               <th className="px-3 py-2 font-semibold">Consensus</th>
                               <th className="px-3 py-2 font-semibold">Current Units</th>
-                              <th className="px-3 py-2 font-semibold">Current Investment Amount</th>
+                              <th className="px-3 py-2 font-semibold">Current Value</th>
                               <th className="px-3 py-2 font-semibold">Units to {getActionVerb(action)}</th>
                               <th className="px-3 py-2 font-semibold">Amount</th>
                               <th className="px-3 py-2 font-semibold">Technical Setup</th>

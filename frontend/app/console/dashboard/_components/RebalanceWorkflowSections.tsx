@@ -6,7 +6,9 @@ import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import {
   AlertCircle,
   CheckCircle2,
+  Eye,
   Loader2,
+  Pause,
   Play,
   X,
 } from "lucide-react";
@@ -32,7 +34,7 @@ import {
   type SwingTradeMarket,
 } from "@/lib/swingTrade";
 import { isRunInSwingTradeMarket } from "@/lib/runPresentation";
-import { apiService } from "@/services/api";
+import { APIError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
 import type {
   IndMoneyUsPortfolioSnapshotCreateRequest,
@@ -107,6 +109,7 @@ const MAX_RUN_POLLS = 160;
 const MAX_JOB_POLLS = 120;
 const WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
 const STAGE_LLM_SELECTION_STORAGE_KEY = "investor:dashboard-stage-llms:v1";
+const WORKFLOW_COMPLETION_RESET_DELAY_MS = 5000;
 
 const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",
@@ -285,7 +288,7 @@ function formatTimestamp(value?: string | null) {
 
 function getStageLabel(stage: WorkflowStageKey, state: StageState) {
   if (state === "running") return STAGE_METADATA[stage].running;
-  if (state === "queued") return `Queued ${STAGE_METADATA[stage].idle}`;
+  if (state === "queued") return STAGE_METADATA[stage].idle;
   if (state === "completed") return STAGE_METADATA[stage].completed;
   return STAGE_METADATA[stage].idle;
 }
@@ -296,7 +299,7 @@ function getStageClasses(state: StageState) {
   if (state === "running")
     return "border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100";
   if (state === "queued")
-    return "border-sky-300 bg-sky-50 text-sky-950 shadow-sky-100 ring-1 ring-sky-200";
+    return "border-sky-200 bg-white text-slate-950 shadow-slate-100 ring-1 ring-sky-100";
   if (state === "failed")
     return "border-red-300 bg-red-50 text-red-950 shadow-red-100";
   return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
@@ -734,6 +737,12 @@ function formatInrCost(value?: number | null) {
     : "n/a";
 }
 
+function getStageCostInr(info: StageInfo, usdInrRate: number) {
+  if (typeof info.costInr === "number" && info.costInr > 0) return info.costInr;
+  if (typeof info.costUsd === "number" && info.costUsd > 0) return info.costUsd * usdInrRate;
+  return 0;
+}
+
 function formatLlmCompletion(info: StageInfo) {
   if (!info.totalLlms) return "Not available";
   return `${info.completedLlms ?? 0}/${info.totalLlms}`;
@@ -888,6 +897,8 @@ function WorkflowStageTile({
   onClick,
   onInfoClick,
   onInputClick,
+  onOutputClick,
+  onSyncNowClick,
 }: {
   stage: WorkflowStageKey;
   info: StageInfo;
@@ -897,28 +908,23 @@ function WorkflowStageTile({
   onClick?: () => void;
   onInfoClick?: () => void;
   onInputClick?: () => void;
+  onOutputClick?: () => void;
+  onSyncNowClick?: () => void;
 }) {
   const isRunning = info.state === "running";
   const isQueued = info.state === "queued";
   const isCompleted = info.state === "completed";
-  const showRunTag = selectable && selected && !isQueued;
   const stageMeta = STAGE_METADATA[stage];
   return (
     <button
       type="button"
-      onClick={onClick}
-      disabled={!onClick || isRunning}
+      onClick={() => {
+        if (!isRunning) onClick?.();
+      }}
+      disabled={!onClick}
       className={`relative flex min-h-44 flex-col items-start justify-start rounded-2xl border p-4 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-emerald-400 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-2 ring-emerald-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
     >
-      {showRunTag ? (
-        <span className="absolute right-3 top-3 rounded-full border border-green-500 bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-          Run
-        </span>
-      ) : isQueued ? (
-        <span className="absolute right-3 top-3 rounded-full border border-sky-500 bg-sky-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-          Queued
-        </span>
-      ) : isCompleted ? (
+      {isCompleted ? (
         <CheckCircle2 className="absolute right-3 top-3 size-5 text-emerald-600" />
       ) : null}
       <span className="mb-2 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">
@@ -1036,11 +1042,7 @@ function WorkflowStageTile({
                   Sheets Export Status:{" "}
                   {info.exportStatus ?? "No sheet export status yet"}
                 </p>
-                <p>
-                  Cost (USD / INR):{" "}
-                  {info.costUsd ? `$${info.costUsd.toFixed(4)}` : "n/a"} /{" "}
-                  {info.costInr ? `₹${info.costInr.toFixed(2)}` : "n/a"}
-                </p>
+                <p>Cost incurred: {formatInrCost(info.costInr)}</p>
                 {info.error ? (
                   <p className="text-red-700">Error: {info.error}</p>
                 ) : null}
@@ -1049,6 +1051,50 @@ function WorkflowStageTile({
           </>
         )}
       </div>
+      {onSyncNowClick && stage === "sync" ? (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSyncNowClick();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              onSyncNowClick();
+            }
+          }}
+          className="mt-auto inline-flex h-8 items-center justify-center rounded-full border border-blue-200 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+        >
+          Sync Now
+        </span>
+      ) : null}
+      {onOutputClick ? (
+        <div className={`${onSyncNowClick && stage === "sync" ? "mt-2" : "mt-auto"} flex w-full justify-end pt-3`}>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOutputClick();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                onOutputClick();
+              }
+            }}
+            className="inline-flex size-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 transition hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
+            aria-label={`View output for ${stageMeta.idle}`}
+            title="View Output"
+          >
+            <Eye className="size-4" />
+          </span>
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -2005,6 +2051,7 @@ export function RebalanceWorkflowSections({
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [indMoneySyncOnly, setIndMoneySyncOnly] = useState(false);
   const [now, setNow] = useState(0);
   const [specificMode, setSpecificMode] = useState<
     Record<WorkflowPortfolio, boolean>
@@ -2038,8 +2085,17 @@ export function RebalanceWorkflowSections({
   const [llmDialogStage, setLlmDialogStage] = useState<WorkflowStageKey | null>(null);
   const [llmDialogProviders, setLlmDialogProviders] = useState<ProviderInfo[]>([]);
   const [llmDialogSelectedKeys, setLlmDialogSelectedKeys] = useState<Set<string>>(new Set());
+  const [outputDialog, setOutputDialog] = useState<{
+    portfolio: WorkflowPortfolio;
+    stage: WorkflowStageKey;
+    title: string;
+    body: string;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
+  const pauseRequestedRef = useRef(false);
 
   useEffect(() => {
     persistWorkflow({
@@ -2522,8 +2578,13 @@ export function RebalanceWorkflowSections({
     });
   }, [inputDialog, inputCandidates]);
 
+  const requestPauseWorkflow = useCallback(() => {
+    pauseRequestedRef.current = true;
+  }, []);
+
   const cancelActiveWorkflow = useCallback(async () => {
     cancelRequestedRef.current = true;
+    pauseRequestedRef.current = false;
     const runIds = Array.from(new Set(activeRunIdsRef.current));
     await Promise.allSettled(
       runIds.map((runId) => apiService.cancelRun(runId)),
@@ -2566,12 +2627,29 @@ export function RebalanceWorkflowSections({
       updateStage(portfolio, stage, { activeRunId: runId });
 
       while (true) {
-        const run = await waitForRunCompletion(
-          runId,
-          (progressRun) =>
-            updateStage(portfolio, stage, getRunProgress(progressRun)),
-          () => cancelRequestedRef.current,
-        );
+        let run: RunResponse;
+        try {
+          run = await waitForRunCompletion(
+            runId,
+            (progressRun) =>
+              updateStage(portfolio, stage, getRunProgress(progressRun)),
+            () => cancelRequestedRef.current,
+          );
+        } catch (error) {
+          if (error instanceof APIError && error.status === 401) {
+            updateStage(portfolio, stage, {
+              state: "failed",
+              endedAt: new Date().toISOString(),
+              runStatus: "auth expired",
+              error:
+                "Dashboard authentication expired while polling. The worker job may still have completed and saved output in the background; refresh/sign in again before verifying the result.",
+            });
+            throw new Error(
+              "Dashboard authentication expired while polling. The worker job may still complete in the background; refresh/sign in again and open View Output or the stage screen to verify saved results.",
+            );
+          }
+          throw error;
+        }
         const status = (run.status || "").toLowerCase();
         if (status === "completed") return run;
 
@@ -2617,6 +2695,51 @@ export function RebalanceWorkflowSections({
     } catch (error) {
       setLlmDialogStage(null);
       window.alert(`Could not load LLM details: ${normalizeError(error)}`);
+    }
+  }, []);
+
+
+
+  const showStageOutput = useCallback(async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
+    const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle}`;
+    setOutputDialog({ portfolio, stage, title, body: "", loading: true, error: null });
+    try {
+      const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
+      let body = "No saved output is available yet.";
+      if (stage === "sync") {
+        const overview = portfolio === "zerodha"
+          ? await apiService.zerodhaPortfolioOverview()
+          : await apiService.indmoneyUsPortfolioOverview();
+        body = JSON.stringify(overview.latest ?? overview, null, 2);
+      } else if (stage === "threats") {
+        const latest = portfolio === "zerodha"
+          ? (await apiService.zerodhaThreatsLatest()).analysis
+          : (await apiService.indmoneyUsThreatsLatest()).analysis;
+        body = latest?.report?.raw_markdown?.trim()
+          || latest?.error_message
+          || "No saved threat output is available yet.";
+      } else if (stage === "actionables") {
+        body = "Final Actionables are rendered in the dashboard output tables below. Use the section anchor to inspect the latest India and US actionable rows.";
+      } else {
+        const runs = await fetchAllFullRuns();
+        const latestRun = sortRunsByLatestTimestamp(
+          runs.filter((run) => {
+            if (stage === "swing") return isRunInSwingTradeMarket(run.prompt, market);
+            if (stage === "rebalance") return isCompletedRebalanceRun(run, market);
+            if (stage === "technical") return isCompletedTechnicalScanRun(run, market);
+            return false;
+          }),
+        )[0];
+        const jobs = latestRun?.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+        body = jobs.length
+          ? jobs
+              .map((job) => `# Run ${latestRun?.id} / Job ${job?.id} · ${job?.provider ?? "LLM"}/${job?.model ?? "model"}\n\n${job?.response?.trim() || job?.error_message || "No response text saved."}`)
+              .join("\n\n---\n\n")
+          : "No saved LLM output is available yet.";
+      }
+      setOutputDialog({ portfolio, stage, title, body, loading: false, error: null });
+    } catch (error) {
+      setOutputDialog({ portfolio, stage, title, body: "", loading: false, error: normalizeError(error) });
     }
   }, []);
 
@@ -2711,10 +2834,27 @@ export function RebalanceWorkflowSections({
       }
       const shouldRunCurrentStage = (stage: WorkflowStageKey) =>
         !runSpecificMode || stagesToRun.has(stage);
+      const stopIfPaused = () => {
+        if (!pauseRequestedRef.current) return false;
+        const timestamp = new Date().toISOString();
+        setStates((current) => ({
+          ...current,
+          [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
+            const info = current[portfolio][stage];
+            acc[stage] = info.state === "queued"
+              ? { ...info, state: "idle", endedAt: timestamp, runStatus: "Paused before this stage" }
+              : info;
+            return acc;
+          }, {} as WorkflowState),
+        }));
+        pauseRequestedRef.current = false;
+        return true;
+      };
       setRunningPortfolio(portfolio);
       resetPortfolio(portfolio);
       activeRunIdsRef.current = [];
       cancelRequestedRef.current = false;
+      pauseRequestedRef.current = false;
 
       let currentStage: WorkflowStageKey = "sync";
       let generatedThreatMarkdown = "";
@@ -2756,6 +2896,8 @@ export function RebalanceWorkflowSections({
             "Using last synced portfolio",
           );
         }
+
+        if (stopIfPaused()) return;
 
         const needsModelMix =
           shouldRunCurrentStage("swing") || shouldRunCurrentStage("rebalance");
@@ -2840,6 +2982,8 @@ export function RebalanceWorkflowSections({
           );
         }
 
+        if (stopIfPaused()) return;
+
         currentStage = "swing";
         if (shouldRunCurrentStage("swing")) {
           markRunning(portfolio, "swing", {
@@ -2892,6 +3036,8 @@ export function RebalanceWorkflowSections({
             "Using latest completed swing scan",
           );
         }
+
+        if (stopIfPaused()) return;
 
         currentStage = "rebalance";
         if (shouldRunCurrentStage("rebalance")) {
@@ -2973,6 +3119,8 @@ export function RebalanceWorkflowSections({
           );
         }
 
+        if (stopIfPaused()) return;
+
         currentStage = "technical";
         if (shouldRunCurrentStage("technical")) {
           markRunning(portfolio, "technical", {
@@ -2997,7 +3145,7 @@ export function RebalanceWorkflowSections({
           );
           if (consensus.length === 0)
             throw new Error(
-              "No fresh rebalance consensus rows were available for technical scan. Run or keep the Rebalance stage selected, or allow this stage to use the latest completed rebalance output.",
+              "No fresh rebalance consensus rows were available for technical scan. Consensus rows are the normalized stock/action rows parsed from completed Rebalance LLM outputs. Run or keep the Rebalance stage selected, select completed Rebalance outputs in Select Inputs, or allow this stage to use the latest completed rebalance output.",
             );
           const technicalRun = await apiService.createRun(
             buildRunPayload({
@@ -3023,6 +3171,8 @@ export function RebalanceWorkflowSections({
           );
         }
 
+        if (stopIfPaused()) return;
+
         currentStage = "actionables";
         if (shouldRunCurrentStage("actionables")) {
           markRunning(portfolio, "actionables");
@@ -3037,6 +3187,27 @@ export function RebalanceWorkflowSections({
             "Leaving current actionables unchanged",
           );
         }
+        if (pauseRequestedRef.current) pauseRequestedRef.current = false;
+        window.setTimeout(() => {
+          setStates((current) => ({
+            ...current,
+            [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
+              const info = current[portfolio][stage];
+              acc[stage] = info.state === "completed" ? { ...info, state: "idle" } : info;
+              return acc;
+            }, {} as WorkflowState),
+          }));
+          setSpecificMode((current) => ({ ...current, [portfolio]: false }));
+          setSelectedStages((current) => ({ ...current, [portfolio]: new Set() }));
+          setSelectedInputs((current) => ({
+            ...current,
+            [portfolio]: {
+              swing: new Set(["swing:next"]),
+              rebalance: new Set(["rebalance:next"]),
+              technical: new Set(["technical:next"]),
+            },
+          }));
+        }, WORKFLOW_COMPLETION_RESET_DELAY_MS);
       } catch (error) {
         const message = normalizeError(error);
         updateStage(portfolio, currentStage, {
@@ -3076,6 +3247,44 @@ export function RebalanceWorkflowSections({
   );
 
 
+  const syncPortfolioNow = useCallback(
+    async (portfolio: WorkflowPortfolio, payload?: IndMoneyUsPortfolioSnapshotCreateRequest) => {
+      try {
+        markRunning(portfolio, "sync");
+        if (portfolio === "zerodha") {
+          const synced = await apiService.zerodhaSyncPortfolio();
+          const overview = await apiService.zerodhaPortfolioOverview();
+          markCompleted(portfolio, "sync", {
+            completedAt: overview.latest?.captured_at,
+            runStatus: synced.status,
+          });
+        } else if (payload) {
+          const snapshot = await apiService.indmoneyUsCreatePortfolioSnapshot(payload);
+          markCompleted(portfolio, "sync", {
+            completedAt: snapshot.captured_at,
+            runStatus: snapshot.parse_status,
+          });
+        } else {
+          const overview = await apiService.indmoneyUsPortfolioOverview();
+          markCompleted(portfolio, "sync", {
+            completedAt: overview.latest?.captured_at,
+            runStatus: overview.latest?.parse_status ?? "last snapshot",
+          });
+        }
+        await onDashboardRefresh();
+      } catch (error) {
+        updateStage(portfolio, "sync", {
+          state: "failed",
+          endedAt: new Date().toISOString(),
+          error: normalizeError(error),
+          runStatus: "failed",
+        });
+      }
+    },
+    [markCompleted, markRunning, onDashboardRefresh, updateStage],
+  );
+
+
   const handleIndMoneyContinue = useCallback(
     (
       mode: IndMoneySyncMode,
@@ -3083,9 +3292,14 @@ export function RebalanceWorkflowSections({
     ) => {
       setDialogError(null);
       setDialogOpen(false);
+      if (indMoneySyncOnly) {
+        setIndMoneySyncOnly(false);
+        void syncPortfolioNow("indmoneyUs", mode === "paste" ? payload : undefined);
+        return;
+      }
       void runWorkflow("indmoneyUs", mode === "paste" ? payload : undefined);
     },
-    [runWorkflow],
+    [indMoneySyncOnly, runWorkflow, syncPortfolioNow],
   );
 
   const lastRunByPortfolio = useMemo(() => {
@@ -3148,6 +3362,18 @@ export function RebalanceWorkflowSections({
             </p>
           </div>
           <div className="flex w-full flex-col items-start gap-2 xl:w-auto xl:items-end">
+            <div className="flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
+              {runningPortfolio === section.portfolio ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={requestPauseWorkflow}
+                  className="h-auto w-full justify-center rounded-full border-amber-200 py-2 text-amber-700 hover:bg-amber-50 xl:w-auto"
+                >
+                  <Pause className="mr-2 size-4" />
+                  Pause
+                </Button>
+              ) : null}
             <Button
               type="button"
               disabled={isBusy && runningPortfolio !== section.portfolio}
@@ -3158,6 +3384,7 @@ export function RebalanceWorkflowSections({
                 }
                 if (section.portfolio === "indmoneyUs") {
                   setDialogError(null);
+                  setIndMoneySyncOnly(false);
                   setDialogOpen(true);
                   return;
                 }
@@ -3178,8 +3405,17 @@ export function RebalanceWorkflowSections({
                 ? `Kill ${section.portfolio === "zerodha" ? "Zerodha" : "IndMoney"} Rebalance`
                 : section.buttonLabel}
             </Button>
+            </div>
             <p className="text-xs text-slate-500">
               Last run on {formatTimestamp(lastRunByPortfolio[section.portfolio])}
+            </p>
+            <p className="text-xs font-semibold text-slate-700">
+              Total cost incurred: {formatInrCost(
+                STAGE_ORDER.reduce(
+                  (total, stage) => total + getStageCostInr(states[section.portfolio][stage], usdInrRate),
+                  0,
+                ),
+              )}
             </p>
             <button
               type="button"
@@ -3237,6 +3473,20 @@ export function RebalanceWorkflowSections({
                   ? () => openInputSelection(section.portfolio, stage)
                   : undefined
               }
+              onOutputClick={() => void showStageOutput(section.portfolio, stage)}
+              onSyncNowClick={
+                stage === "sync"
+                  ? () => {
+                      if (section.portfolio === "indmoneyUs") {
+                        setDialogError(null);
+                        setIndMoneySyncOnly(true);
+                        setDialogOpen(true);
+                        return;
+                      }
+                      void syncPortfolioNow("zerodha");
+                    }
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -3282,6 +3532,40 @@ export function RebalanceWorkflowSections({
         onClose={() => setInputDialog(null)}
       />
 
+      {outputDialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950">{outputDialog.title}</h3>
+                <p className="mt-1 text-sm text-slate-500">Latest saved stage output for the selected portfolio.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOutputDialog(null)}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close output view"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="max-h-[65vh] overflow-auto bg-slate-950 p-5 text-slate-100">
+              {outputDialog.loading ? (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-300">
+                  <Loader2 className="size-4 animate-spin" /> Loading output…
+                </div>
+              ) : outputDialog.error ? (
+                <div className="rounded-2xl border border-red-300 bg-red-950/40 p-4 text-sm text-red-100">
+                  {outputDialog.error}
+                </div>
+              ) : (
+                <pre className="whitespace-pre-wrap break-words text-xs leading-6">{outputDialog.body}</pre>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <IndMoneySnapshotDialog
         open={dialogOpen}
         saving={runningPortfolio === "indmoneyUs"}
@@ -3289,6 +3573,7 @@ export function RebalanceWorkflowSections({
         onClose={() => {
           if (runningPortfolio === "indmoneyUs") return;
           setDialogOpen(false);
+          setIndMoneySyncOnly(false);
         }}
         onContinue={handleIndMoneyContinue}
       />

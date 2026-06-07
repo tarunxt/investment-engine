@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react';
 import {
   BookOpen,
   Check,
-  ChevronLeft,
-  ChevronRight,
   Copy,
   FilePlus,
   Loader2,
@@ -49,7 +47,61 @@ type FormState = {
 
 const EMPTY_FORM: FormState = { name: '', description: '', body: '' };
 
-const PROMPTS_PER_PAGE = 9;
+type PromptMarket = 'India' | 'US' | 'TBD';
+type PromptStageId =
+  | 'portfolio-scan'
+  | 'event-scan'
+  | 'threat-scan'
+  | 'swing-opportunities'
+  | 'rebalance'
+  | 'technical-scan'
+  | 'uncategorized';
+
+type PromptStage = {
+  id: PromptStageId;
+  label: string;
+  description: string;
+};
+
+const PROMPT_STAGES: PromptStage[] = [
+  { id: 'portfolio-scan', label: 'Portfolio Scan', description: 'Portfolio sync and holdings snapshot prompts.' },
+  { id: 'event-scan', label: 'Events Scan', description: 'Calendar, catalyst, and event-analysis prompts.' },
+  { id: 'threat-scan', label: 'Threats Scan', description: 'Risk, guardrail, and downside-analysis prompts.' },
+  { id: 'swing-opportunities', label: 'Swing Opportunities Scan', description: 'Opportunity discovery, momentum, and swing-trade prompts.' },
+  { id: 'rebalance', label: 'Rebalance Suggestions', description: 'Allocation, target-weight, add/trim, and rebalance prompts.' },
+  { id: 'technical-scan', label: 'Technical Scan', description: 'Chart validation, entry/exit, and execution timing prompts.' },
+  { id: 'uncategorized', label: 'Uncategorized', description: 'Prompts that need manual stage tagging.' },
+];
+
+type PromptMetadata = {
+  stage: PromptStage;
+  markets: PromptMarket[];
+};
+
+function inferPromptMetadata(prompt: PromptResponse): PromptMetadata {
+  const haystack = `${prompt.name} ${prompt.description ?? ''} ${prompt.body}`.toLowerCase();
+  const stageId: PromptStageId = /technical|chart|entry|exit|validation/.test(haystack)
+    ? 'technical-scan'
+    : /rebalance|allocation|weight|trim|hold|target/.test(haystack)
+      ? 'rebalance'
+      : /swing|opportunit|momentum|setup/.test(haystack)
+        ? 'swing-opportunities'
+        : /threat|risk|guardrail|downside/.test(haystack)
+          ? 'threat-scan'
+          : /event|calendar|catalyst|earnings/.test(haystack)
+            ? 'event-scan'
+            : /portfolio|holding|snapshot|sync|zerodha|indmoney/.test(haystack)
+              ? 'portfolio-scan'
+              : 'uncategorized';
+  const markets = new Set<PromptMarket>();
+  if (/india|indian|zerodha|nse|bse|inr/.test(haystack)) markets.add('India');
+  if (/\bus\b|u\.s\.|united states|indmoney|nasdaq|nyse|usd/.test(haystack)) markets.add('US');
+  if (markets.size === 0) markets.add('TBD');
+  return {
+    stage: PROMPT_STAGES.find((stage) => stage.id === stageId) ?? PROMPT_STAGES[PROMPT_STAGES.length - 1],
+    markets: Array.from(markets),
+  };
+}
 
 export default function PromptsPage() {
   const { copy } = useClipboard();
@@ -192,7 +244,7 @@ export default function PromptsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-gray-950">Prompt Library</h1>
           <p className="mt-1 text-sm text-gray-600">
-            System prompts are shared across all users. My Prompts are private to your account.
+            Prompts are grouped by workflow stage and tagged separately for India and US coverage. System prompts are shared across all users; My Prompts are private to your account.
           </p>
         </div>
         <Button onClick={openCreate} className="w-full sm:w-auto">
@@ -372,15 +424,6 @@ type PromptGridProps = {
 };
 
 function PromptGrid({ prompts, loading, emptyMessage, copiedId, onCopy, onFork, onEdit, onDelete }: PromptGridProps) {
-  const [page, setPage] = useState(1);
-  const [prevLength, setPrevLength] = useState(prompts.length);
-
-  // Reset to page 1 whenever the prompts list changes (e.g. after create/delete)
-  if (prevLength !== prompts.length) {
-    setPrevLength(prompts.length);
-    setPage(1);
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-sm text-gray-500">
@@ -399,58 +442,49 @@ function PromptGrid({ prompts, loading, emptyMessage, copiedId, onCopy, onFork, 
     );
   }
 
-  const totalPages = Math.max(1, Math.ceil(prompts.length / PROMPTS_PER_PAGE));
-  const currentPage = Math.min(page, totalPages);
-  const slice = prompts.slice((currentPage - 1) * PROMPTS_PER_PAGE, currentPage * PROMPTS_PER_PAGE);
+  const promptsByStage = PROMPT_STAGES.map((stage) => ({
+    stage,
+    prompts: prompts
+      .map((prompt) => ({ prompt, metadata: inferPromptMetadata(prompt) }))
+      .filter((item) => item.metadata.stage.id === stage.id),
+  })).filter((section) => section.prompts.length > 0);
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {slice.map((prompt) => (
-          <PromptCard
-            key={prompt.id}
-            prompt={prompt}
-            copiedId={copiedId}
-            onCopy={onCopy}
-            onFork={onFork}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        ))}
-      </div>
-
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-gray-200 pt-3">
-          <span className="text-xs text-gray-500">
-            {(currentPage - 1) * PROMPTS_PER_PAGE + 1}–{Math.min(currentPage * PROMPTS_PER_PAGE, prompts.length)} of {prompts.length}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage <= 1}
-              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <span className="min-w-16 text-center text-xs text-gray-600">
-              {currentPage} / {totalPages}
+    <div className="flex flex-col gap-6">
+      {promptsByStage.map(({ stage, prompts: stagePrompts }) => (
+        <section key={stage.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-gray-950">{stage.label}</h2>
+              <p className="mt-1 text-xs text-gray-500">{stage.description}</p>
+            </div>
+            <span className="w-fit rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">
+              {stagePrompts.length} prompt{stagePrompts.length === 1 ? '' : 's'}
             </span>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage >= totalPages}
-              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
-            >
-              <ChevronRight className="size-4" />
-            </button>
           </div>
-        </div>
-      )}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {stagePrompts.map(({ prompt, metadata }) => (
+              <PromptCard
+                key={prompt.id}
+                prompt={prompt}
+                metadata={metadata}
+                copiedId={copiedId}
+                onCopy={onCopy}
+                onFork={onFork}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
 
 type PromptCardProps = {
   prompt: PromptResponse;
+  metadata: PromptMetadata;
   copiedId: number | null;
   onCopy: (p: PromptResponse) => void;
   onFork: ((p: PromptResponse) => void) | null;
@@ -458,7 +492,7 @@ type PromptCardProps = {
   onDelete: ((p: PromptResponse) => void) | null;
 };
 
-function PromptCard({ prompt, copiedId, onCopy, onFork, onEdit, onDelete }: PromptCardProps) {
+function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDelete }: PromptCardProps) {
   const isCopied = copiedId === prompt.id;
 
   return (
@@ -478,6 +512,23 @@ function PromptCard({ prompt, copiedId, onCopy, onFork, onEdit, onDelete }: Prom
           >
             v{prompt.version}
           </span>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {metadata.markets.map((market) => (
+            <span
+              key={market}
+              className={cn(
+                'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                market === 'India'
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : market === 'US'
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'bg-amber-50 text-amber-700',
+              )}
+            >
+              {market === 'TBD' ? 'Market TBD' : market}
+            </span>
+          ))}
         </div>
         {prompt.description && (
           <p className="mt-1 text-xs text-gray-500 leading-relaxed">{prompt.description}</p>

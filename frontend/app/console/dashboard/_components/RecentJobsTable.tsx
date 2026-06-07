@@ -45,11 +45,11 @@ const formatModelName = (provider?: string | null, model?: string | null) =>
 const hasKnownCost = (value?: number | null): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
-const formatCostWithInr = (usd: number, usdInrRate: number) =>
-  `$${usd.toFixed(4)} / ₹${(usd * usdInrRate).toFixed(2)}`;
+const formatCostInr = (usd: number, usdInrRate: number) =>
+  `₹${(usd * usdInrRate).toFixed(2)}`;
 
-const formatNullableCostWithInr = (value: number | null | undefined, usdInrRate: number) =>
-  hasKnownCost(value) ? formatCostWithInr(value, usdInrRate) : 'Not captured';
+const formatNullableCostInr = (value: number | null | undefined, usdInrRate: number) =>
+  hasKnownCost(value) ? formatCostInr(value, usdInrRate) : 'Not captured';
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed']);
 const PROCESSING_STATUS = 'processing';
@@ -302,7 +302,7 @@ export function RecentJobsTable() {
                                   <th className="px-2 py-2 font-semibold">Status</th>
                                   <th className="px-2 py-2 font-semibold">Run At</th>
                                   <th className="px-2 py-2 font-semibold">Sheets</th>
-                                  <th className="px-2 py-2 font-semibold">Cost (USD / INR)</th>
+                                  <th className="px-2 py-2 font-semibold">Cost (INR)</th>
                                   <th className="px-2 py-2 font-semibold">Error</th>
                                 </tr>
                               </thead>
@@ -319,7 +319,7 @@ export function RecentJobsTable() {
                                     exportError: job.export_error,
                                   });
                                   const costLabel = hasKnownCost(job.estimated_cost)
-                                    ? formatNullableCostWithInr(job.estimated_cost, usdInrRate)
+                                    ? formatNullableCostInr(job.estimated_cost, usdInrRate)
                                     : TERMINAL_STATUSES.has(normalizedJobStatus)
                                       ? 'Not captured'
                                       : '-';
@@ -437,7 +437,7 @@ export function RecentJobsTable() {
                           </span>
                           <span className="text-gray-500">
                             {missingCostCount > 0 ? 'Known cost:' : 'Total cost:'}{' '}
-                            {hasAnyKnownCost ? formatCostWithInr(totalKnownCost, usdInrRate) : 'Not captured'}
+                            {hasAnyKnownCost ? formatCostInr(totalKnownCost, usdInrRate) : 'Not captured'}
                             {missingCostCount > 0 && hasAnyKnownCost
                               ? ` + ${missingCostCount} not captured`
                               : ''}
