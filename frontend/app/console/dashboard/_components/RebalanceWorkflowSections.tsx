@@ -19,6 +19,7 @@ import {
   isCompletedRebalanceRun,
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
+import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import {
   buildRebalanceInputBundle,
@@ -383,6 +384,26 @@ function summarizeThreat(
   };
 }
 
+
+function readSavedModelMixes(): SavedModelMix[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(MODEL_MIX_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (mix) =>
+            mix &&
+            typeof mix.id === "string" &&
+            typeof mix.name === "string" &&
+            Array.isArray(mix.targets),
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function getRunTargetsFromStoredMix(providers: ProviderInfo[]) {
   let parsed: SavedModelMix[] = [];
   try {
@@ -443,7 +464,7 @@ async function waitForRunCompletion(
     const run = await apiService.getRun(runId);
     onProgress?.(run);
     const status = (run.status || "").toLowerCase();
-    if (status === "completed" || status === "failed") return run;
+    if (status === "completed" || status === "partial" || status === "failed") return run;
     await sleep(POLL_INTERVAL_MS);
   }
   const lastRun = await apiService.getRun(runId);
@@ -2214,6 +2235,7 @@ function StageLlmSelectorDialog({
   onSelectAll,
   onClear,
   onResetDefaults,
+  onReplaceSelection,
   onClose,
 }: {
   open: boolean;
@@ -2224,11 +2246,115 @@ function StageLlmSelectorDialog({
   onSelectAll: () => void;
   onClear: () => void;
   onResetDefaults: () => void;
+  onReplaceSelection: (keys: Set<string>) => void;
   onClose: () => void;
 }) {
+  const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
+    readSavedModelMixes(),
+  );
+  const [selectedMixId, setSelectedMixId] = useState("");
+
+  const persistSavedMixes = useCallback((mixes: SavedModelMix[]) => {
+    setSavedMixes(mixes);
+    try {
+      window.localStorage.setItem(MODEL_MIX_STORAGE_KEY, JSON.stringify(mixes));
+    } catch {
+      // Keep selector usable even when localStorage is unavailable.
+    }
+  }, []);
+
   if (!open || !stage) return null;
 
   const singleSelect = stage === "threats" || stage === "technical";
+  const compatibleTargets = new Set(
+    providers.flatMap((provider) =>
+      provider.models
+        .filter(
+          (model) =>
+            provider.configured &&
+            provider.model_compatibility?.[model]?.compatible !== false,
+        )
+        .map((model) => `${provider.name}::${model}`),
+    ),
+  );
+  const modelMixControls = singleSelect ? undefined : (
+    <LlmModelMixControls
+      mixes={savedMixes}
+      selectedMixId={selectedMixId}
+      onApply={(id) => {
+        if (!id || id === "none") {
+          setSelectedMixId("");
+          return;
+        }
+        const mix = savedMixes.find((item) => item.id === id);
+        if (!mix) return;
+        const filteredTargets = mix.targets.filter((target) =>
+          compatibleTargets.has(target),
+        );
+        if (filteredTargets.length < mix.targets.length) {
+          window.alert(
+            "Some models in this mix are incompatible with current API access and were skipped.",
+          );
+        }
+        onReplaceSelection(new Set(filteredTargets));
+        setSelectedMixId(id);
+      }}
+      onSave={() => {
+        const name = window.prompt("Name this model mix:");
+        if (!name) return;
+        const cleaned = name.trim();
+        if (!cleaned) return;
+        const targets = Array.from(selectedKeys);
+        if (targets.length === 0) {
+          window.alert("Select at least one model before saving a mix.");
+          return;
+        }
+        const now = new Date().toISOString();
+        const existing = savedMixes.find(
+          (mix) => mix.name.toLowerCase() === cleaned.toLowerCase(),
+        );
+        if (existing) {
+          const updated = { ...existing, name: cleaned, targets, updated_at: now };
+          persistSavedMixes(
+            savedMixes.map((mix) => (mix.id === existing.id ? updated : mix)),
+          );
+          setSelectedMixId(existing.id);
+          return;
+        }
+        const created = {
+          id: `mix_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+          name: cleaned,
+          targets,
+          updated_at: now,
+        };
+        persistSavedMixes([created, ...savedMixes]);
+        setSelectedMixId(created.id);
+      }}
+      onEdit={() => {
+        if (!selectedMixId) return;
+        const current = savedMixes.find((mix) => mix.id === selectedMixId);
+        if (!current) return;
+        const name = window.prompt("Edit model mix name:", current.name);
+        if (!name?.trim()) return;
+        persistSavedMixes(
+          savedMixes.map((mix) =>
+            mix.id === selectedMixId
+              ? { ...mix, name: name.trim(), updated_at: new Date().toISOString() }
+              : mix,
+          ),
+        );
+      }}
+      onDelete={() => {
+        if (!selectedMixId) return;
+        const current = savedMixes.find((mix) => mix.id === selectedMixId);
+        if (!window.confirm(`Delete model mix "${current?.name || selectedMixId}"?`)) {
+          return;
+        }
+        persistSavedMixes(savedMixes.filter((mix) => mix.id !== selectedMixId));
+        setSelectedMixId("");
+      }}
+    />
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6 backdrop-blur-sm">
@@ -2262,6 +2388,7 @@ function StageLlmSelectorDialog({
             selectionMode={singleSelect ? "single" : "multiple"}
             emptyMessage="Loading provider models..."
             showBulkActions={!singleSelect}
+            modelMixControls={modelMixControls}
             onToggle={onToggle}
             onSelectAll={singleSelect ? undefined : onSelectAll}
             onClear={onClear}
@@ -2747,7 +2874,7 @@ export function RebalanceWorkflowSections({
             const status = (analysis.status || "").toLowerCase();
             updateStage(runningPortfolio, stage, {
               ...withInrCost(summarizeThreat(analysis), usdInrRate),
-              completedLlms: status === "completed" ? 1 : 0,
+              completedLlms: status === "completed" || status === "partial" ? 1 : 0,
               totalLlms: 1,
             });
             if (status === "completed") {
@@ -2775,7 +2902,7 @@ export function RebalanceWorkflowSections({
             usdInrRate,
           );
           updateStage(runningPortfolio, stage, runSummary);
-          if (status === "completed") {
+          if (status === "completed" || status === "partial") {
             const market: SwingTradeMarket =
               runningPortfolio === "zerodha" ? "india" : "us";
             markCompleted(runningPortfolio, stage, {
@@ -3045,7 +3172,7 @@ export function RebalanceWorkflowSections({
           throw error;
         }
         const status = (run.status || "").toLowerCase();
-        if (status === "completed") return run;
+        if (status === "completed" || status === "partial") return run;
 
         const progress = getRunProgress(run);
         const error = summarizeRun(run).error;
@@ -4035,6 +4162,7 @@ export function RebalanceWorkflowSections({
         onSelectAll={selectAllLlmTargets}
         onClear={clearLlmTargets}
         onResetDefaults={resetDefaultLlmTargets}
+        onReplaceSelection={persistLlmDialogSelection}
         onClose={() => setLlmDialogStage(null)}
       />
 
