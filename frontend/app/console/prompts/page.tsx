@@ -21,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { apiService, APIError } from '@/services/api';
-import { PromptResponse, PromptCreate, PromptUpdate } from '@/types/api';
+import { PromptResponse, PromptCreate } from '@/types/api';
 import { getPromptLogicalId } from '@/lib/promptIds';
 import { cn } from '@/lib/utils';
 import {
@@ -217,6 +217,7 @@ export default function PromptsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<PromptResponse | null>(null);
   const [isFork, setIsFork] = useState(false);
+  const [sourcePromptId, setSourcePromptId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [promptSections, setPromptSections] = useState<PromptDetailSections>(() => createEmptyPromptSections());
   const [saving, setSaving] = useState(false);
@@ -265,6 +266,7 @@ export default function PromptsPage() {
   function openCreate() {
     setEditTarget(null);
     setIsFork(false);
+    setSourcePromptId(null);
     setForm(EMPTY_FORM);
     setPromptSections(createEmptyPromptSections());
     setFormError(null);
@@ -272,8 +274,10 @@ export default function PromptsPage() {
   }
 
   function openEdit(prompt: PromptResponse) {
-    setEditTarget(prompt);
-    setIsFork(false);
+    const sourceId = prompt.is_system ? prompt.id : prompt.source_prompt_id;
+    setEditTarget(prompt.is_system ? null : prompt);
+    setIsFork(prompt.is_system);
+    setSourcePromptId(sourceId ?? null);
     setForm({ name: prompt.name, description: prompt.description ?? '', body: prompt.body });
     setPromptSections(parsePromptSections(prompt.body));
     setFormError(null);
@@ -283,6 +287,7 @@ export default function PromptsPage() {
   function openFork(prompt: PromptResponse) {
     setEditTarget(null);
     setIsFork(true);
+    setSourcePromptId(prompt.id);
     setForm({ name: prompt.name, description: prompt.description ?? '', body: prompt.body });
     setPromptSections(parsePromptSections(prompt.body));
     setFormError(null);
@@ -293,6 +298,7 @@ export default function PromptsPage() {
     setShowModal(false);
     setEditTarget(null);
     setIsFork(false);
+    setSourcePromptId(null);
     setForm(EMPTY_FORM);
     setPromptSections(createEmptyPromptSections());
     setFormError(null);
@@ -402,20 +408,32 @@ export default function PromptsPage() {
     setFormError(null);
 
     try {
+      const payload = {
+        name: promptName,
+        description: form.description.trim() || undefined,
+        body: promptBody,
+      };
+
       if (editTarget) {
-        const update: PromptUpdate = {
-          name: promptName,
-          description: form.description.trim() || undefined,
-          body: promptBody,
-        };
-        const updated = await apiService.updatePrompt(editTarget.id, update);
+        const updated = await apiService.updatePrompt(editTarget.id, payload);
         setPrompts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+      } else if (sourcePromptId) {
+        const existingPersonalVersion = prompts.find(
+          (prompt) => !prompt.is_system && prompt.source_prompt_id === sourcePromptId,
+        );
+        if (existingPersonalVersion) {
+          const updated = await apiService.updatePrompt(existingPersonalVersion.id, payload);
+          setPrompts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+        } else {
+          const create: PromptCreate = {
+            ...payload,
+            source_prompt_id: sourcePromptId,
+          };
+          const created = await apiService.createPrompt(create);
+          setPrompts((prev) => [...prev, created]);
+        }
       } else {
-        const create: PromptCreate = {
-          name: promptName,
-          description: form.description.trim() || undefined,
-          body: promptBody,
-        };
+        const create: PromptCreate = payload;
         const created = await apiService.createPrompt(create);
         setPrompts((prev) => [...prev, created]);
       }
@@ -459,7 +477,7 @@ export default function PromptsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-gray-950">Prompt Library</h1>
           <p className="mt-1 text-sm text-gray-600">
-            Prompts are grouped by workflow stage and tagged separately for India and US coverage. System prompts are shared across all users; My Prompts are private to your account.
+            Prompts are grouped by workflow stage and tagged separately for India and US coverage. You can edit shared system prompts safely; saving creates or updates your private version while the original stays unchanged.
           </p>
         </div>
         <Button onClick={openCreate} className="w-full sm:w-auto">
@@ -561,7 +579,7 @@ export default function PromptsPage() {
           <div className="w-full max-w-2xl bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-950">
-                {editTarget ? 'Prompt Details' : isFork ? 'Save as My Prompt' : 'New Prompt'}
+                {editTarget ? 'Prompt Details' : isFork ? 'Edit My Version' : 'New Prompt'}
               </h2>
               <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">
                 <X className="size-5" />
@@ -569,6 +587,12 @@ export default function PromptsPage() {
             </div>
 
             <div className="space-y-4 px-6 py-5">
+              {isFork && (
+                <div className="border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
+                  Saving changes creates or updates your personal version. The original system prompt remains unchanged and visible in System Prompts.
+                </div>
+              )}
+
               {formError && (
                 <div className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                   {formError}
@@ -626,7 +650,7 @@ export default function PromptsPage() {
                           )}
                         </div>
 
-                        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,auto)]">
                           <select
                             id={`prompt-section-${section}`}
                             className="border border-gray-300 bg-white px-3 py-2 text-sm text-gray-950 outline-none focus:border-gray-950 focus:ring-2 focus:ring-gray-950/10"
@@ -642,7 +666,7 @@ export default function PromptsPage() {
                             ))}
                           </select>
                           <form
-                            className="flex gap-2"
+                            className="flex min-w-0 gap-2"
                             onSubmit={(event) => {
                               event.preventDefault();
                               const input = event.currentTarget.elements.namedItem('newHeader') as HTMLInputElement;
@@ -650,7 +674,7 @@ export default function PromptsPage() {
                               input.value = '';
                             }}
                           >
-                            <input name="newHeader" className="min-w-0 border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-950" placeholder="Add new header" />
+                            <input name="newHeader" className="min-w-0 flex-1 border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-950" placeholder="Add new header" />
                             <Button type="submit" variant="outline" className="shrink-0">Add</Button>
                           </form>
                         </div>
@@ -687,7 +711,7 @@ export default function PromptsPage() {
               </Button>
               <Button onClick={handleSave} disabled={saving}>
                 {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-                {editTarget ? 'Save Changes' : isFork ? 'Save as Mine' : 'Create Prompt'}
+                {editTarget ? 'Save Changes' : isFork ? 'Save My Version' : 'Create Prompt'}
               </Button>
             </div>
           </div>
@@ -904,7 +928,7 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
                 : 'bg-gray-100 text-gray-600',
             )}
           >
-            v{prompt.version}
+            {prompt.is_system ? 'System' : 'My'} v{prompt.version}
           </span>
         </div>
         {metadata.markets.length > 0 && (
@@ -944,7 +968,12 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-2 pt-1">
-          <span className="text-xs text-gray-400">Updated {formatDate(prompt.updated_at)} · Prompt ID <span className="font-mono text-gray-500">{getPromptLogicalId(prompt.name, prompt.id)}</span></span>
+          <span className="text-xs text-gray-400">
+            Updated {formatDate(prompt.updated_at)} · Prompt ID <span className="font-mono text-gray-500">{getPromptLogicalId(prompt.name, prompt.id)}</span>
+            {prompt.source_prompt_id && (
+              <> · Personal version of <span className="font-mono text-gray-500">#{prompt.source_prompt_id}</span></>
+            )}
+          </span>
 
           <div className="flex items-center gap-1">
             <Button

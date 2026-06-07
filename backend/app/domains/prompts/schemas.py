@@ -8,6 +8,7 @@ class PromptCreate(BaseModel):
     description: Optional[str] = None
     body: str
     is_system: bool = False
+    source_prompt_id: Optional[int] = None
 
 
 class PromptUpdate(BaseModel):
@@ -20,6 +21,7 @@ class PromptUpdate(BaseModel):
 class PromptResponse(BaseModel):
     id: int
     user_id: Optional[int]
+    source_prompt_id: Optional[int]
     name: str
     description: Optional[str]
     body: str
