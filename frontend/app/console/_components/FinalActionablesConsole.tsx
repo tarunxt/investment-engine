@@ -1788,10 +1788,22 @@ export function buildTechnicalScanPrompt(stocks: StockConsensus[], market: Swing
   return `${TECHNICAL_SCAN_MARKER}\nMarket: ${market === "us" ? "US equities" : "India equities"}\n\nStock list:\n| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |\n|---|---|---|---:|\n${stockRows}\n\nApproved Technical Setups list from sidebar:\n${setupListMarkdown()}\n\nAct as a top-tier technical analyst and swing-trading strategist.\n\nObjective:\nFor the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.\n\nImportant rules:\n- Use current fresh internet data only. Do not rely on stale memory.\n- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.\n- Check at least daily chart data. If possible, also consider weekly chart for broader trend.\n- Tag only from the approved setup names above. Do not invent, paraphrase, or abbreviate setup names.\n- Every stock must receive a Primary Setup that exactly matches one Setup value from the approved Technical Setups list above.\n- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups; every setup name must exactly match an approved Setup value.\n- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.\n- For Confidence Score, copy the numeric Confidence value from the approved Technical Setups list for the same Primary Setup. Return only the number, without /10, %, avg text, or LLM counts.\n- Always mention the exact trigger level and invalidation level wherever possible.\n- Do not give generic advice. Make the tagging specific to the latest chart structure.\n\nReturn ONLY this markdown table and no extra prose:\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.join(" | ")} |\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.map(() => "---").join(" | ")} |\n| EXCHANGE | SYMBOL | Exact approved primary setup name | Optional exact approved setup names | Bullish/Bearish/Neutral | approved confidence number only | exact price/level | exact price/level |`;
 }
 
+function isUsableModelOutputStatus(status?: string | null) {
+  return ["completed", "partial"].includes((status || "").toLowerCase());
+}
+
+export function hasUsableRebalanceLlmOutput(run: RunResponse) {
+  return (run.run_jobs ?? []).some(
+    (link) =>
+      isUsableModelOutputStatus(link.job?.status) &&
+      Boolean(link.job?.response?.trim()),
+  );
+}
+
 export function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
   return (
-    run.status === "completed" &&
-    inferRebalanceMarketFromPrompt(run.prompt) === market
+    inferRebalanceMarketFromPrompt(run.prompt) === market &&
+    (isUsableModelOutputStatus(run.status) || hasUsableRebalanceLlmOutput(run))
   );
 }
 
@@ -3517,7 +3529,11 @@ export function DashboardFinalActionablesTables() {
   };
 
   return (
-    <section id="final-actionables" className="rounded-[32px] border border-slate-200 bg-white shadow-sm">
+    <section
+      id="final-actionables"
+      tabIndex={-1}
+      className="rounded-[32px] border border-slate-200 bg-white shadow-sm focus:outline-none"
+    >
       <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">

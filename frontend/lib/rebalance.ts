@@ -258,12 +258,30 @@ export function getRebalanceDefaultExportSheetName(
   return `${dateLabel} Rebalance (${MARKET_COPY[market].sheetSuffix})`;
 }
 
+export function getRebalanceFlowMarker(market: SwingTradeMarket) {
+  return `[REBALANCE_FLOW:${market}]`;
+}
+
+export function ensureRebalanceFlowMarker(
+  prompt: string,
+  market: SwingTradeMarket,
+) {
+  const marker = getRebalanceFlowMarker(market);
+  const trimmed = prompt.trimStart();
+  if (/^\[REBALANCE_FLOW:(?:india|us)\]/i.test(trimmed)) {
+    return prompt.replace(/^\s*\[REBALANCE_FLOW:(?:india|us)\]/i, marker);
+  }
+  return `${marker}\n${prompt}`;
+}
+
 export function inferRebalanceMarketFromPrompt(
   prompt?: string | null,
 ): SwingTradeMarket | null {
   const text = (prompt || "").toLowerCase();
   if (text.includes("[rebalance_flow:india]")) return "india";
   if (text.includes("[rebalance_flow:us]")) return "us";
+  if (/zerodha|indian|india|nse|bse|inr/.test(text) && /rebalance/.test(text)) return "india";
+  if (/indmoney|us equity|u\.s\.|nasdaq|nyse|usd/.test(text) && /rebalance/.test(text)) return "us";
   return null;
 }
 
@@ -275,7 +293,7 @@ export function buildRebalancePrompt(market: SwingTradeMarket) {
     : "S&P 500 / Nasdaq / sector ETF";
   const exchangeExamples = isIndia ? "NSE/BSE" : "NASDAQ/NYSE/AMEX";
 
-  return `[REBALANCE_FLOW:${market}]
+  return `${getRebalanceFlowMarker(market)}
 Act as a top-tier ${copy.label} equity aggressive swing-trading portfolio strategist combining the skills of a hedge fund trader, technical analyst, momentum screener, sell-side strategist, and portfolio risk manager.
 
 Objective:
