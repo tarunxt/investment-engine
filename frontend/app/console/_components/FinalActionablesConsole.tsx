@@ -826,13 +826,19 @@ function getAverageNumericCell(rows: LlmBreakupRow[], header: RebalanceHeader) {
   );
 }
 
-function calculateWeightedRationaleScore(rows: DetailedRationaleScoreRow[]) {
+function calculateWeightedRationaleScore(
+  rows: DetailedRationaleScoreRow[],
+  denominatorOverride?: number | null,
+) {
   const weightedRows = rows.filter((row) => row.multiplier !== 0);
-  const denominator = weightedRows.reduce(
+  const defaultDenominator = weightedRows.reduce(
     (sum, row) => sum + (row.denominatorWeight ?? Math.abs(row.multiplier)),
     0,
   );
-  if (!denominator) return { finalScore: null, denominator: 0 };
+  const denominator = denominatorOverride !== undefined && denominatorOverride !== null
+    ? denominatorOverride
+    : defaultDenominator;
+  if (!denominator) return { finalScore: null, denominator };
   const numerator = weightedRows.reduce(
     (sum, row) => sum + (row.score ?? 0) * row.multiplier,
     0,
@@ -1241,6 +1247,7 @@ function getEditableRuleSummary(
 function applyScoreMatrixEdits(
   detail: ScoreMatrixDetail,
   multiplierDrafts: Record<string, string>,
+  denominatorDraft: string,
   ruleDrafts: Record<string, { action?: ActionCategory; unitsChange?: string }>,
 ): ScoreMatrixDetail {
   const detailedRationaleRows = detail.detailedRationaleRows.map((row) => {
@@ -1249,8 +1256,12 @@ function applyScoreMatrixEdits(
     const multiplier = Number(draft);
     return Number.isFinite(multiplier) ? { ...row, multiplier } : row;
   });
+  const denominatorOverride = denominatorDraft.trim() === "" ? null : Number(denominatorDraft);
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
-    calculateWeightedRationaleScore(detailedRationaleRows);
+    calculateWeightedRationaleScore(
+      detailedRationaleRows,
+      typeof denominatorOverride === "number" && Number.isFinite(denominatorOverride) ? denominatorOverride : null,
+    );
   const calculatedScore = detailedRationaleFinalScore ?? detail.meanScore;
   const rules = detail.rules.map((rule) => {
     const draft = ruleDrafts[rule.id];
@@ -2847,11 +2858,15 @@ function ScoreMatrixSection({
 function DetailedRationaleScoreSection({
   detail,
   multiplierDrafts,
+  denominatorDraft,
   onMultiplierChange,
+  onDenominatorChange,
 }: {
   detail: ScoreMatrixDetail;
   multiplierDrafts?: Record<string, string>;
+  denominatorDraft?: string;
   onMultiplierChange?: (rowId: string, value: string) => void;
+  onDenominatorChange?: (value: string) => void;
 }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white">
@@ -2859,7 +2874,7 @@ function DetailedRationaleScoreSection({
         <h3 className="font-semibold text-slate-950">Detailed Calculated Rationale Score</h3>
         <p className="mt-1 text-xs text-slate-500">
           Weighted score-rationale averages, technical scan confidence, and the Mean and Mode final action score.
-          {onMultiplierChange ? " Multiplier cells are editable for what-if formula recalculation." : ""}
+          {onMultiplierChange ? " Multiplier and denominator cells are editable for what-if formula recalculation." : ""}
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -2898,7 +2913,21 @@ function DetailedRationaleScoreSection({
                 {formatActionScore(detail.detailedRationaleFinalScore)}
               </td>
               <td className="whitespace-nowrap px-4 py-3 text-right">
-                / {detail.detailedRationaleDenominator || "—"}
+                {onDenominatorChange ? (
+                  <div className="inline-flex items-center justify-end gap-1">
+                    <span>/</span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={denominatorDraft ?? String(detail.detailedRationaleDenominator)}
+                      onChange={(event) => onDenominatorChange(event.target.value)}
+                      className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      aria-label="Detailed rationale score denominator"
+                    />
+                  </div>
+                ) : (
+                  `/ ${detail.detailedRationaleDenominator || "—"}`
+                )}
               </td>
             </tr>
           </tbody>
@@ -2976,10 +3005,15 @@ function ScoreMatrixModal({
   const [editState, setEditState] = useState<{
     stockKey: string;
     multiplierDrafts: Record<string, string>;
+    denominatorDraft: string;
     ruleDrafts: Record<string, { action?: ActionCategory; unitsChange?: string }>;
-  }>({ stockKey: "", multiplierDrafts: {}, ruleDrafts: {} });
+  }>({ stockKey: "", multiplierDrafts: {}, denominatorDraft: "", ruleDrafts: {} });
   const multiplierDrafts = useMemo(
     () => (detail && editState.stockKey === detail.stockKey ? editState.multiplierDrafts : {}),
+    [detail, editState],
+  );
+  const denominatorDraft = useMemo(
+    () => (detail && editState.stockKey === detail.stockKey ? editState.denominatorDraft : ""),
     [detail, editState],
   );
   const ruleDrafts = useMemo(
@@ -2988,8 +3022,8 @@ function ScoreMatrixModal({
   );
 
   const editedDetail = useMemo(
-    () => (detail ? applyScoreMatrixEdits(detail, multiplierDrafts, ruleDrafts) : null),
-    [detail, multiplierDrafts, ruleDrafts],
+    () => (detail ? applyScoreMatrixEdits(detail, multiplierDrafts, denominatorDraft, ruleDrafts) : null),
+    [detail, multiplierDrafts, denominatorDraft, ruleDrafts],
   );
 
   if (!editedDetail) return null;
@@ -3034,7 +3068,26 @@ function ScoreMatrixModal({
         </div>
 
         <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
-          <DetailedRationaleScoreSection detail={editedDetail} multiplierDrafts={multiplierDrafts} onMultiplierChange={(rowId, value) => setEditState((current) => ({ stockKey: editedDetail.stockKey, multiplierDrafts: { ...(current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {}), [rowId]: value }, ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {} }))} />
+          <DetailedRationaleScoreSection
+            detail={editedDetail}
+            multiplierDrafts={multiplierDrafts}
+            denominatorDraft={denominatorDraft || String(editedDetail.detailedRationaleDenominator)}
+            onMultiplierChange={(rowId, value) => setEditState((current) => ({
+              stockKey: editedDetail.stockKey,
+              multiplierDrafts: {
+                ...(current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {}),
+                [rowId]: value,
+              },
+              denominatorDraft: current.stockKey === editedDetail.stockKey ? current.denominatorDraft : "",
+              ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
+            }))}
+            onDenominatorChange={(value) => setEditState((current) => ({
+              stockKey: editedDetail.stockKey,
+              multiplierDrafts: current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {},
+              denominatorDraft: value,
+              ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
+            }))}
+          />
 
           <ScoreReferenceTables />
 
@@ -3104,6 +3157,7 @@ function ScoreMatrixModal({
                                 return {
                                   stockKey: editedDetail.stockKey,
                                   multiplierDrafts: current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {},
+                                  denominatorDraft: current.stockKey === editedDetail.stockKey ? current.denominatorDraft : "",
                                   ruleDrafts: {
                                     ...currentRules,
                                     [rule.id]: {
@@ -3141,6 +3195,7 @@ function ScoreMatrixModal({
                               return {
                                 stockKey: editedDetail.stockKey,
                                 multiplierDrafts: current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {},
+                                denominatorDraft: current.stockKey === editedDetail.stockKey ? current.denominatorDraft : "",
                                 ruleDrafts: {
                                   ...currentRules,
                                   [rule.id]: {
