@@ -2166,9 +2166,17 @@ function ConsensusBreakupButton({
                     >
                       <div className="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                         <div className="min-w-0">
-                          <div className="truncate text-base font-bold text-slate-900">
+                          <Link
+                            href={`/console/runs/${entry.meta.runId}#llm-output-job-${entry.meta.jobId}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpen(false);
+                            }}
+                            className="block truncate text-base font-bold text-slate-900 underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            title={`Open ${entry.meta.provider || "Unknown provider"} ${entry.meta.model || "Unknown model"} output`}
+                          >
                             {index + 1}. {entry.meta.provider || "Unknown provider"} {entry.meta.model || "Unknown model"}
-                          </div>
+                          </Link>
                           <div className="mt-0.5 text-sm text-slate-500">
                             Run #{entry.meta.runId} · Job #{entry.meta.jobId}
                           </div>

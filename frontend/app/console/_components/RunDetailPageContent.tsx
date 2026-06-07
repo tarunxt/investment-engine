@@ -63,6 +63,26 @@ function normalizeError(error: unknown) {
   return 'Something went wrong';
 }
 
+function getCurrentHashTargetId() {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash.replace(/^#/, '');
+  if (!hash) return null;
+  try {
+    return decodeURIComponent(hash);
+  } catch {
+    return hash;
+  }
+}
+
+function scrollToHashTarget() {
+  const targetId = getCurrentHashTargetId();
+  if (!targetId) return;
+  document.getElementById(targetId)?.scrollIntoView({
+    behavior: 'smooth',
+    block: 'start',
+  });
+}
+
 function formatTokens(value?: number | null) {
   return value?.toLocaleString() ?? '0';
 }
@@ -113,6 +133,7 @@ export default function RunDetailPage() {
 
   const generationRef = useRef(0);
   const wsClientRef = useRef<WSClient | null>(null);
+  const lastHashScrollRef = useRef<string | null>(null);
 
   const loadRun = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -132,7 +153,8 @@ export default function RunDetailPage() {
 
         const canonicalPath = getRunDetailPathFromPrompt(data.id, data.prompt);
         if (isRunDetailPath(pathname) && canonicalPath !== pathname) {
-          router.replace(canonicalPath);
+          const hash = typeof window !== 'undefined' ? window.location.hash : '';
+          router.replace(`${canonicalPath}${hash}`);
         }
       } catch (err) {
         if (gen !== generationRef.current) return;
@@ -205,6 +227,16 @@ export default function RunDetailPage() {
       wsClientRef.current = null;
     };
   }, [hasValidRunId, loadRun, runId]);
+
+  useEffect(() => {
+    if (loading || !run || typeof window === 'undefined') return;
+    const hash = window.location.hash;
+    if (!hash || lastHashScrollRef.current === hash) return;
+    lastHashScrollRef.current = hash;
+    scrollToHashTarget();
+    const retryId = window.setTimeout(scrollToHashTarget, 150);
+    return () => window.clearTimeout(retryId);
+  }, [loading, run]);
 
   if (!hasValidRunId) {
     return (
@@ -395,7 +427,11 @@ export default function RunDetailPage() {
               exportError: job.export_error,
             });
             return (
-              <div key={rj.id} className="border border-gray-200 bg-white shadow-sm max-w-full overflow-auto">
+              <div
+                key={rj.id}
+                id={`llm-output-job-${job.id}`}
+                className="scroll-mt-24 border border-gray-200 bg-white shadow-sm max-w-full overflow-auto"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-3">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium capitalize text-gray-950">

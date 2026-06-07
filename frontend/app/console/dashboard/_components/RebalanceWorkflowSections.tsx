@@ -1373,7 +1373,7 @@ function WorkflowStageTile({
         </span>
       ) : null}
 
-      <div className="w-full px-10 text-center text-base font-extrabold text-slate-950">
+      <div className="w-full px-10 text-center text-base font-semibold text-slate-950">
         <div className="flex min-w-0 items-center justify-center gap-2">
           {isRunning ? (
             <Loader2 className="size-4 shrink-0 animate-spin text-amber-600" />
@@ -1392,7 +1392,7 @@ function WorkflowStageTile({
         {info.state === "idle" || info.state === "queued" ? (
           getIdleStageRows(stage, info).map((row) => (
             <p key={row.label}>
-              <span className="font-extrabold text-slate-500">
+              <span className="font-semibold text-slate-600">
                 {row.label}:
               </span>{" "}
               {row.value}
@@ -1402,7 +1402,7 @@ function WorkflowStageTile({
           <>
             {info.lastRunId ? (
               <p>
-                <span className="font-extrabold text-slate-500">
+                <span className="font-semibold text-slate-600">
                   Job Number:
                 </span>{" "}
                 #{info.lastRunId}
@@ -1410,7 +1410,7 @@ function WorkflowStageTile({
             ) : null}
             {info.completedAt ? (
               <p>
-                <span className="font-extrabold text-slate-500">
+                <span className="font-semibold text-slate-600">
                   Timestamp:
                 </span>{" "}
                 {formatTimestamp(info.completedAt)}
@@ -1418,13 +1418,13 @@ function WorkflowStageTile({
             ) : null}
             {formatDuration(info.startedAt, info.endedAt, now) ? (
               <p>
-                <span className="font-extrabold text-slate-500">Duration:</span>{" "}
+                <span className="font-semibold text-slate-600">Duration:</span>{" "}
                 {formatDuration(info.startedAt, info.endedAt, now)}
               </p>
             ) : null}
             {info.totalLlms ? (
               <p>
-                <span className="font-extrabold text-slate-500">
+                <span className="font-semibold text-slate-600">
                   LLMs completed:
                 </span>{" "}
                 {info.completedLlms ?? 0}/{info.totalLlms}
@@ -1432,7 +1432,7 @@ function WorkflowStageTile({
             ) : null}
             {info.recommendedStocks ? (
               <p>
-                <span className="font-extrabold text-slate-500">
+                <span className="font-semibold text-slate-600">
                   Stocks recommended:
                 </span>{" "}
                 {info.recommendedStocks}
@@ -1447,26 +1447,26 @@ function WorkflowStageTile({
               info.error) ? (
               <>
                 <p>
-                  <span className="font-extrabold text-slate-500">
+                  <span className="font-semibold text-slate-600">
                     LLM run:
                   </span>{" "}
                   {[info.provider, info.model].filter(Boolean).join(" / ") ||
                     "LLM details not available yet"}
                 </p>
                 <p>
-                  <span className="font-extrabold text-slate-500">
+                  <span className="font-semibold text-slate-600">
                     Run status:
                   </span>{" "}
                   {info.runStatus ?? "Waiting for job status"}
                 </p>
                 <p>
-                  <span className="font-extrabold text-slate-500">
+                  <span className="font-semibold text-slate-600">
                     Sheets export:
                   </span>{" "}
                   {info.exportStatus ?? "No sheet export status yet"}
                 </p>
                 <p>
-                  <span className="font-extrabold text-slate-500">
+                  <span className="font-semibold text-slate-600">
                     Cost incurred:
                   </span>{" "}
                   {formatInrCost(info.costInr)}
@@ -1497,7 +1497,7 @@ function WorkflowStageTile({
               onSyncNowClick();
             }
           }}
-          className="mt-6 inline-flex h-10 items-center justify-center rounded-full bg-blue-600 px-6 text-sm font-extrabold text-white shadow-md shadow-blue-600/25 transition hover:bg-blue-700"
+          className="mt-6 inline-flex h-10 items-center justify-center rounded-full bg-blue-600 px-6 text-sm font-semibold text-white shadow-md shadow-blue-600/25 transition hover:bg-blue-700"
         >
           Sync Now
         </span>
@@ -4486,7 +4486,13 @@ export function RebalanceWorkflowSections({
             </p>
           </div>
           <div className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
-            <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end xl:w-auto">
+            <div
+              className={
+                isSectionRunning
+                  ? "grid w-full min-w-0 grid-cols-2 gap-2 xl:w-60"
+                  : "flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end xl:w-auto"
+              }
+            >
               {isSectionRunning ? (
                 <>
                   <Button
@@ -4495,7 +4501,7 @@ export function RebalanceWorkflowSections({
                       pauseRequestedRef.current = !pauseRequestedRef.current;
                       setWorkflowPaused(pauseRequestedRef.current);
                     }}
-                    className="h-auto w-full shrink-0 justify-center whitespace-normal rounded-full bg-orange-500 px-6 py-2 text-center leading-5 text-white hover:bg-orange-600 sm:w-auto"
+                    className="h-auto w-full shrink-0 justify-center whitespace-normal rounded-full bg-orange-500 px-6 py-2 text-center leading-5 text-white hover:bg-orange-600"
                   >
                     {workflowPaused ? "Resume" : "Pause"}
                   </Button>
@@ -4511,7 +4517,7 @@ export function RebalanceWorkflowSections({
                         ),
                       );
                     }}
-                    className="h-auto w-full shrink-0 justify-center whitespace-normal rounded-full bg-red-600 px-6 py-2 text-center leading-5 text-white hover:bg-red-700 sm:w-auto"
+                    className="h-auto w-full shrink-0 justify-center whitespace-normal rounded-full bg-red-600 px-6 py-2 text-center leading-5 text-white hover:bg-red-700"
                   >
                     <X className="mr-2 size-4" />
                     Kill
@@ -4556,14 +4562,6 @@ export function RebalanceWorkflowSections({
             </button>
           </div>
         </div>
-
-        {specificMode[section.portfolio] ? (
-          <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            Select only the stages to run. No stages are selected by default;
-            unselected stages are skipped and use the latest saved output only
-            when a later selected stage needs context.
-          </p>
-        ) : null}
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {STAGE_ORDER.map((stage) => (
