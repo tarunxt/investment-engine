@@ -1081,7 +1081,15 @@ def execute_ai_job(self, job_id: int) -> None:
                         content = repaired_content
                     content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
                 if rebalance_table_issue:
-                    if rebalance_table_issue.startswith("partial rebalance table") and _parsed_rebalance_rows:
+                    has_any_rebalance_rows = _count_markdown_table_data_rows(content) > 0
+                    should_keep_partial_rebalance = (
+                        (rebalance_table_issue.startswith("partial rebalance table") and _parsed_rebalance_rows)
+                        or (
+                            rebalance_table_issue.startswith("malformed table output")
+                            and has_any_rebalance_rows
+                        )
+                    )
+                    if should_keep_partial_rebalance:
                         repo.update_status(
                             job,
                             JobStatus.PARTIAL,
