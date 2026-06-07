@@ -62,17 +62,40 @@ type PromptStage = {
   id: PromptStageId;
   label: string;
   description: string;
+  showMarketTags: boolean;
 };
 
 const PROMPT_STAGES: PromptStage[] = [
-  { id: 'portfolio-scan', label: 'Stage 1B · Portfolio Event Calendar Scan Flow', description: 'Portfolio event calendar and snapshot prompts.' },
-  { id: 'event-scan', label: 'Stage 1B · Portfolio Event Calendar Scan Flow', description: 'Calendar, catalyst, and event-analysis prompts.' },
-  { id: 'threat-scan', label: 'Stage 2 · Threat Scan Flow', description: 'INDmoney US and Zerodha threat prompts.' },
-  { id: 'swing-opportunities', label: 'Stage 3 · Swing Scan Flow', description: 'India and US swing-trade research prompts.' },
-  { id: 'rebalance', label: 'Stage 4 · Rebalance Scan Flow', description: 'India and US portfolio rebalance prompts.' },
-  { id: 'technical-scan', label: 'Stage 5 · Technical Scan Flow', description: 'Technical setup scan prompts.' },
-  { id: 'uncategorized', label: 'Uncategorized', description: 'Prompts that need manual stage tagging.' },
+  { id: 'portfolio-scan', label: 'Stage 1 · Portfolio Scan', description: 'Portfolio snapshot, sync, and holdings-context prompts.', showMarketTags: false },
+  { id: 'event-scan', label: 'Stage 1B · Events Scan', description: 'Portfolio Event Calendar Scan Flow only.', showMarketTags: true },
+  { id: 'threat-scan', label: 'Stage 2 · Threats Scan', description: 'INDmoney US Threat Scan Flow and Zerodha Threat Scan Flow.', showMarketTags: true },
+  { id: 'swing-opportunities', label: 'Stage 3 · Swing Opportunities Scan', description: 'India Swing-Trade Research and US Swing-Trade Research.', showMarketTags: false },
+  { id: 'rebalance', label: 'Stage 4 · Rebalance Suggestions', description: 'India Portfolio Rebalance Flow and US Portfolio Rebalance Flow.', showMarketTags: false },
+  { id: 'technical-scan', label: 'Stage 5 · Technical Scan', description: 'Technical Setup Scan Flow.', showMarketTags: true },
+  { id: 'uncategorized', label: 'Uncategorized', description: 'Prompts that need manual stage tagging.', showMarketTags: false },
 ];
+
+const PROMPT_NAME_STAGE_MAP: Array<[RegExp, PromptStageId]> = [
+  [/^portfolio event calendar scan flow$/i, 'event-scan'],
+  [/^(?:indmoney us|zerodha) threat scan flow$/i, 'threat-scan'],
+  [/^(?:india|us) swing-trade research$/i, 'swing-opportunities'],
+  [/^(?:india|us) portfolio rebalance flow$/i, 'rebalance'],
+  [/^technical setup scan flow$/i, 'technical-scan'],
+];
+
+function inferPromptStageId(prompt: PromptResponse): PromptStageId {
+  const mapped = PROMPT_NAME_STAGE_MAP.find(([pattern]) => pattern.test(prompt.name.trim()));
+  if (mapped) return mapped[1];
+
+  const haystack = `${prompt.name} ${prompt.description ?? ''} ${prompt.body}`.toLowerCase();
+  if (/portfolio event calendar|event|calendar|catalyst|earnings/.test(haystack)) return 'event-scan';
+  if (/threat|risk|guardrail|downside/.test(haystack)) return 'threat-scan';
+  if (/swing|opportunit|momentum|setup/.test(haystack)) return 'swing-opportunities';
+  if (/rebalance|allocation|weight|trim|hold|target/.test(haystack)) return 'rebalance';
+  if (/technical|chart|entry|exit|validation/.test(haystack)) return 'technical-scan';
+  if (/portfolio|holding|snapshot|sync|zerodha|indmoney/.test(haystack)) return 'portfolio-scan';
+  return 'uncategorized';
+}
 
 type PromptMetadata = {
   stage: PromptStage;
@@ -80,28 +103,15 @@ type PromptMetadata = {
 };
 
 function inferPromptMetadata(prompt: PromptResponse): PromptMetadata {
-  const haystack = `${prompt.name} ${prompt.description ?? ''} ${prompt.body}`.toLowerCase();
-  const stageId: PromptStageId = /technical|chart|entry|exit|validation/.test(haystack)
-    ? 'technical-scan'
-    : /rebalance|allocation|weight|trim|hold|target/.test(haystack)
-      ? 'rebalance'
-      : /swing|opportunit|momentum|setup/.test(haystack)
-        ? 'swing-opportunities'
-        : /threat|risk|guardrail|downside/.test(haystack)
-          ? 'threat-scan'
-          : /event|calendar|catalyst|earnings/.test(haystack)
-            ? 'event-scan'
-            : /portfolio|holding|snapshot|sync|zerodha|indmoney/.test(haystack)
-              ? 'portfolio-scan'
-              : 'uncategorized';
-  const markets = new Set<PromptMarket>();
-  if (/india|indian|zerodha|nse|bse|inr/.test(haystack)) markets.add('India');
-  if (/\bus\b|u\.s\.|united states|indmoney|nasdaq|nyse|usd/.test(haystack)) markets.add('US');
-  if (markets.size === 0) markets.add('TBD');
-  return {
-    stage: PROMPT_STAGES.find((stage) => stage.id === stageId) ?? PROMPT_STAGES[PROMPT_STAGES.length - 1],
-    markets: Array.from(markets),
-  };
+  const stageId = inferPromptStageId(prompt);
+  const stage = PROMPT_STAGES.find((item) => item.id === stageId) ?? PROMPT_STAGES[PROMPT_STAGES.length - 1];
+  if (!stage.showMarketTags) return { stage, markets: [] };
+
+  if (stage.id === 'event-scan' || stage.id === 'threat-scan' || stage.id === 'technical-scan') {
+    return { stage, markets: ['India', 'US'] };
+  }
+
+  return { stage, markets: ['TBD'] };
 }
 
 export default function PromptsPage() {
@@ -514,23 +524,25 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
             v{prompt.version}
           </span>
         </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {metadata.markets.map((market) => (
-            <span
-              key={market}
-              className={cn(
-                'rounded-full px-2 py-0.5 text-[11px] font-semibold',
-                market === 'India'
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : market === 'US'
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'bg-amber-50 text-amber-700',
-              )}
-            >
-              {market === 'TBD' ? 'Market TBD' : market}
-            </span>
-          ))}
-        </div>
+        {metadata.markets.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {metadata.markets.map((market) => (
+              <span
+                key={market}
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                  market === 'India'
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : market === 'US'
+                      ? 'bg-blue-50 text-blue-700'
+                      : 'bg-amber-50 text-amber-700',
+                )}
+              >
+                {market === 'TBD' ? 'Market TBD' : market}
+              </span>
+            ))}
+          </div>
+        )}
         {prompt.description && (
           <p className="mt-1 text-xs text-gray-500 leading-relaxed">{prompt.description}</p>
         )}
