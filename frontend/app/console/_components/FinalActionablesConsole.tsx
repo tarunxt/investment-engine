@@ -808,6 +808,10 @@ function formatSignedQuantity(value: number | null) {
   return `${value > 0 ? "+" : "-"}${formatted}`;
 }
 
+function getBuyActionAmountTotal(rows: DashboardActionRow[]) {
+  return rows.reduce((sum, row) => sum + (row.formulaEstimate.amount ?? 0), 0);
+}
+
 function formatActionScore(value: number | null) {
   return value === null ? "—" : value.toFixed(2);
 }
@@ -3959,16 +3963,25 @@ function getDashboardActionRowId(market: SwingTradeMarket, stock: StockConsensus
   return `${market}:${stock.key}`;
 }
 
+function getMarketActionUnits(
+  unitsChange: number | null,
+  action: ActionCategory,
+  market: SwingTradeMarket,
+) {
+  if (!ACTION_ESTIMATE_CATEGORIES.has(action) || unitsChange === null) return null;
+  const absoluteUnits = Math.abs(unitsChange);
+  return market === "india" ? Math.floor(absoluteUnits) : absoluteUnits;
+}
+
 function buildFormulaActionEstimate(
   stock: StockConsensus,
   action: ActionCategory,
   unitsChange: number | null,
+  market: SwingTradeMarket,
 ): ActionEstimate {
   const currentUnits = parseNumericCell(stock.representative["Current Units"]);
   const currentInvestmentAmount = getCurrentValueAmount(stock.representative);
-  const units = ACTION_ESTIMATE_CATEGORIES.has(action) && unitsChange !== null
-    ? Math.abs(unitsChange)
-    : null;
+  const units = getMarketActionUnits(unitsChange, action, market);
   const price = parseNumericCell(stock.representative["Price Per Unit"]);
   let amount: number | null = null;
 
@@ -3984,6 +3997,13 @@ function buildFormulaActionEstimate(
       amount = Math.abs(units / currentUnits) * currentInvestmentAmount;
     } else if (price !== null) {
       amount = Math.abs(units * price);
+    } else if (
+      action === "Add more" &&
+      currentUnits !== null &&
+      currentUnits > 0 &&
+      currentInvestmentAmount !== null
+    ) {
+      amount = Math.abs(units / currentUnits) * currentInvestmentAmount;
     } else {
       amount = getActionAmount(stock.representative, units, action);
     }
@@ -4011,7 +4031,7 @@ function buildDashboardActionRows(
       stock,
       formulaAction,
       formulaScore: detail.calculatedScore,
-      formulaEstimate: buildFormulaActionEstimate(stock, formulaAction, detail.calculatedUnitsChange),
+      formulaEstimate: buildFormulaActionEstimate(stock, formulaAction, detail.calculatedUnitsChange, market),
     };
   });
 }
@@ -4279,6 +4299,8 @@ export function DashboardFinalActionablesTables() {
               const rows = actionRows
                 .filter((row) => row.formulaAction === action)
                 .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans));
+              const showBuyAmountTotal = action === "Add more" || action === "Buy New";
+              const buyAmountTotal = showBuyAmountTotal ? getBuyActionAmountTotal(rows) : null;
               if (!rows.length) return null;
               return (
                 <Card
@@ -4366,6 +4388,19 @@ export function DashboardFinalActionablesTables() {
                               );
                             })}
                           </tbody>
+                          {showBuyAmountTotal ? (
+                            <tfoot>
+                              <tr className="border-t border-emerald-200 bg-white/80 text-slate-900">
+                                <td colSpan={6} className="px-3 py-3 text-right text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                                  Total new buy amount required
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 font-black text-emerald-950">
+                                  {formatDisplayAmount(buyAmountTotal, market)}
+                                </td>
+                                <td colSpan={2} className="px-3 py-3" />
+                              </tr>
+                            </tfoot>
+                          ) : null}
                         </table>
                       </div>
                     ) : (
