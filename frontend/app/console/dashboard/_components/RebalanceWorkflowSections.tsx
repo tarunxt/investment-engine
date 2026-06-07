@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   type SVGProps,
   useCallback,
@@ -2331,7 +2332,16 @@ function InputSelectionDialog({
                       />
                     </td>
                     <td className="px-3 py-3 align-top font-semibold text-slate-900">
-                      {candidate.jobNo}
+                      {candidate.run ? (
+                        <Link
+                          href={URLs.routes.console.runDetail(candidate.run.id)}
+                          className="underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          {candidate.jobNo}
+                        </Link>
+                      ) : (
+                        candidate.jobNo
+                      )}
                     </td>
                     <td className="px-3 py-3 align-top text-slate-600">
                       {candidate.timestamp
