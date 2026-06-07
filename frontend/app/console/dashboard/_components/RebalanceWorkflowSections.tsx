@@ -56,7 +56,12 @@ type WorkflowStageKey =
   | "technical"
   | "actionables";
 type StageState = "idle" | "queued" | "running" | "completed" | "failed";
-type InputSelectionStage = "swing" | "rebalance" | "technical" | "actionables";
+type InputSelectionStage =
+  | "threats"
+  | "swing"
+  | "rebalance"
+  | "technical"
+  | "actionables";
 type InputSelectionCandidate = {
   id: string;
   source: "next" | "threat" | "run-job";
@@ -109,7 +114,7 @@ const MAX_RUN_POLLS = 160;
 const MAX_JOB_POLLS = 120;
 const WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
 const STAGE_LLM_SELECTION_STORAGE_KEY = "investor:dashboard-stage-llms:v1";
-const WORKFLOW_COMPLETION_RESET_DELAY_MS = 5000;
+const WORKFLOW_COMPLETION_RESET_DELAY_MS = 10000;
 export const ZERODHA_DASHBOARD_SYNC_NOW_EVENT =
   "investor:dashboard:zerodha-sync-now";
 
@@ -454,8 +459,12 @@ async function waitForRunCompletion(
 async function waitForThreatCompletion(
   portfolio: WorkflowPortfolio,
   jobId: number,
+  shouldStop?: () => boolean,
 ): Promise<ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis> {
   for (let attempt = 0; attempt < MAX_JOB_POLLS; attempt += 1) {
+    if (shouldStop?.()) {
+      throw new Error(`Threat job #${jobId} was cancelled by user.`);
+    }
     const analysis =
       portfolio === "zerodha"
         ? await apiService.zerodhaThreatJob(jobId)
@@ -667,6 +676,7 @@ function buildNextCandidate(
   stage: InputSelectionStage,
 ): InputSelectionCandidate {
   const labelByStage: Record<InputSelectionStage, string> = {
+    threats: "Next synced portfolio snapshot",
     swing: "Next Threat Scan output",
     rebalance: "Next Swing Scan output",
     technical: "Next Rebalance Scan output",
@@ -941,6 +951,30 @@ function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
   ];
 }
 
+function getStageOutputRoute(
+  portfolio: WorkflowPortfolio,
+  stage: WorkflowStageKey,
+) {
+  const zerodha = portfolio === "zerodha";
+  const routeByStage: Record<WorkflowStageKey, string> = {
+    sync: zerodha
+      ? URLs.routes.console.zerodha()
+      : URLs.routes.console.indmoneyUs(),
+    threats: zerodha
+      ? URLs.routes.console.zerodhaThreats()
+      : URLs.routes.console.indmoneyUsThreats(),
+    swing: zerodha
+      ? URLs.routes.console.zerodhaSwingTrade()
+      : URLs.routes.console.indmoneyUsSwingTrade(),
+    rebalance: zerodha
+      ? URLs.routes.console.zerodhaRebalance()
+      : URLs.routes.console.indmoneyUsRebalance(),
+    technical: URLs.routes.console.dashboard(),
+    actionables: `${URLs.routes.console.dashboard()}#final-actionables`,
+  };
+  return routeByStage[stage];
+}
+
 function SelectInputsIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -979,45 +1013,25 @@ function LlmDetailsIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       aria-hidden="true"
-      viewBox="0 0 64 64"
+      viewBox="0 0 1200 1200"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       {...props}
     >
       <path
-        d="M23 7c-5.4 0-9.8 4.4-9.8 9.8v.7C8.9 18.8 5.8 22.8 5.8 27.6c0 2.8 1 5.4 2.9 7.4-2.4 2.3-3.9 5.6-3.9 9.2 0 7 5.6 12.6 12.6 12.6H23V7Z"
+        d="M500 60c-118 0-221 79-252 193-111 15-197 110-197 225 0 63 25 121 67 163-26 47-39 100-39 154 0 173 140 313 313 313 44 0 87-9 126-27 59 72 148 114 242 114 160 0 294-121 311-279 116-31 197-136 197-257 0-66-24-129-66-178 17-40 26-83 26-127 0-179-145-324-324-324-34 0-67 5-99 16C745 18 676 0 603 0 565 0 530 7 500 60Z"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="3.4"
+        strokeWidth="72"
       />
       <path
-        d="M41 7c5.4 0 9.8 4.4 9.8 9.8v.7c4.3 1.3 7.4 5.3 7.4 10.1 0 2.8-1 5.4-2.9 7.4 2.4 2.3 3.9 5.6 3.9 9.2 0 7-5.6 12.6-12.6 12.6H41V7Z"
+        d="M468 341 779 154M468 341v166m0 0 300-181 302 181M468 507 247 641m221-134 300 181m0-362v180m0 182v171M247 641l300 180 221-133m0 0 302-181m-302 181 302 181"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="3.4"
+        strokeWidth="72"
       />
-      <path
-        d="M23 42V30l-8-8m8 8 8 8V13m10 29V31l8-8m-8 8-8 8V13"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="3.4"
-      />
-      {["15,22", "31,13", "49,23", "23,46", "41,46"].map((point) => {
-        const [cx, cy] = point.split(",");
-        return (
-          <circle
-            key={point}
-            cx={cx}
-            cy={cy}
-            r="3.8"
-            stroke="currentColor"
-            strokeWidth="3.2"
-          />
-        );
-      })}
     </svg>
   );
 }
@@ -1425,7 +1439,7 @@ function IndMoneySnapshotDialog({
                   : undefined,
               )
             }
-            className="bg-blue-600 text-white hover:bg-blue-500"
+            className="rounded-full bg-slate-950 px-7 font-extrabold uppercase tracking-[0.18em] text-white hover:bg-slate-800"
           >
             {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
             Continue Rebalance
@@ -1445,6 +1459,7 @@ function InputSelectionDialog({
   loading,
   onToggle,
   onToggleAll,
+  onResetDefaults,
   onClose,
 }: {
   open: boolean;
@@ -1455,6 +1470,7 @@ function InputSelectionDialog({
   loading: boolean;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
+  onResetDefaults: () => void;
   onClose: () => void;
 }) {
   const selectAllRef = useRef<HTMLInputElement | null>(null);
@@ -1464,6 +1480,9 @@ function InputSelectionDialog({
   const someSelected = candidates.some((candidate) =>
     selectedIds.has(candidate.id),
   );
+  const selectedCount = candidates.filter((candidate) =>
+    selectedIds.has(candidate.id),
+  ).length;
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -1474,6 +1493,7 @@ function InputSelectionDialog({
   if (!open || !stage) return null;
 
   const titleByStage: Record<InputSelectionStage, string> = {
+    threats: "Select Portfolio inputs",
     swing: "Select Threat Scan inputs",
     rebalance: "Select Swing Scan inputs",
     technical: "Select Rebalance Scan inputs",
@@ -1481,18 +1501,23 @@ function InputSelectionDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-      <div className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-[28px] bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-6">
           <div>
-            <h3 className="text-lg font-semibold text-slate-950">
+            <h3 className="text-2xl font-extrabold tracking-tight text-slate-950">
               {titleByStage[stage]}
             </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Pick the previous-stage outputs this stage should consider. The
-              reserved next-row is replaced by the live output when that earlier
-              stage finishes.
+            <p className="mt-2 text-base text-slate-500">
+              Choose which previous-stage outputs should be included in the next
+              prompt.
             </p>
+            <div className="mt-3 max-w-3xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium leading-6 text-amber-800">
+              <span className="font-extrabold">Default rationale:</span> reserve
+              the upcoming stage output from this workflow and include the latest
+              completed outputs so the next stage reviews the freshest consensus
+              candidates.
+            </div>
           </div>
           <button
             type="button"
@@ -1503,7 +1528,19 @@ function InputSelectionDialog({
             <X className="size-5" />
           </button>
         </div>
-        <div className="max-h-[65vh] overflow-auto p-5">
+        <div className="mx-6 mb-4 flex items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
+          <span>
+            {selectedCount} output{selectedCount === 1 ? "" : "s"} selected.
+          </span>
+          <button
+            type="button"
+            onClick={onResetDefaults}
+            className="rounded-full border border-slate-300 bg-white px-5 py-2 text-xs font-extrabold uppercase tracking-[0.18em] text-slate-900 shadow-sm hover:bg-slate-50"
+          >
+            Reset defaults
+          </button>
+        </div>
+        <div className="mx-6 max-h-[58vh] overflow-auto rounded-2xl border border-slate-200">
           {loading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 p-8 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> Loading eligible
@@ -1514,8 +1551,8 @@ function InputSelectionDialog({
               No eligible outputs are available yet.
             </div>
           ) : (
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <table className="w-full min-w-[860px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs font-extrabold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="w-12 px-3 py-3">
                     <input
@@ -1580,11 +1617,11 @@ function InputSelectionDialog({
             </table>
           )}
         </div>
-        <div className="flex justify-end border-t border-slate-200 p-4">
+        <div className="flex justify-end px-6 py-5">
           <Button
             type="button"
             onClick={onClose}
-            className="bg-blue-600 text-white hover:bg-blue-500"
+            className="rounded-full bg-slate-950 px-7 font-extrabold uppercase tracking-[0.18em] text-white hover:bg-slate-800"
           >
             Done
           </Button>
@@ -2359,6 +2396,11 @@ export function RebalanceWorkflowSections({
     Record<WorkflowPortfolio, Record<InputSelectionStage, Set<string>>>
   >(() => ({
     zerodha: {
+      threats: new Set(
+        initialRunningPortfolio === "zerodha"
+          ? (initialPersisted?.selectedInputs?.zerodha?.threats ?? ["threats:next"])
+          : ["threats:next"],
+      ),
       swing: new Set(
         initialRunningPortfolio === "zerodha"
           ? (initialPersisted?.selectedInputs?.zerodha?.swing ?? ["swing:next"])
@@ -2387,6 +2429,13 @@ export function RebalanceWorkflowSections({
       ),
     },
     indmoneyUs: {
+      threats: new Set(
+        initialRunningPortfolio === "indmoneyUs"
+          ? (initialPersisted?.selectedInputs?.indmoneyUs?.threats ?? [
+              "threats:next",
+            ])
+          : ["threats:next"],
+      ),
       swing: new Set(
         initialRunningPortfolio === "indmoneyUs"
           ? (initialPersisted?.selectedInputs?.indmoneyUs?.swing ?? [
@@ -2450,6 +2499,7 @@ export function RebalanceWorkflowSections({
     body: string;
     loading: boolean;
     error: string | null;
+    routeUrl?: string | null;
   } | null>(null);
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
@@ -2466,14 +2516,18 @@ export function RebalanceWorkflowSections({
       },
       selectedInputs: {
         zerodha: {
+          threats: Array.from(selectedInputs.zerodha.threats),
           swing: Array.from(selectedInputs.zerodha.swing),
           rebalance: Array.from(selectedInputs.zerodha.rebalance),
           technical: Array.from(selectedInputs.zerodha.technical),
+          actionables: Array.from(selectedInputs.zerodha.actionables),
         },
         indmoneyUs: {
+          threats: Array.from(selectedInputs.indmoneyUs.threats),
           swing: Array.from(selectedInputs.indmoneyUs.swing),
           rebalance: Array.from(selectedInputs.indmoneyUs.rebalance),
           technical: Array.from(selectedInputs.indmoneyUs.technical),
+          actionables: Array.from(selectedInputs.indmoneyUs.actionables),
         },
       },
       lastAutoRebalanceCosts,
@@ -2844,7 +2898,33 @@ export function RebalanceWorkflowSections({
         const nextCandidate = buildNextCandidate(stage);
         let candidates: InputSelectionCandidate[] = [nextCandidate];
 
-        if (stage === "swing") {
+        if (stage === "threats") {
+          const overview =
+            portfolio === "zerodha"
+              ? await apiService.zerodhaPortfolioOverview()
+              : await apiService.indmoneyUsPortfolioOverview();
+          if (overview.latest) {
+            candidates.push({
+              id: `portfolio:${portfolio}:latest`,
+              source: "run-job",
+              label:
+                portfolio === "zerodha"
+                  ? "Latest Zerodha portfolio snapshot"
+                  : "Latest INDmoney US snapshot",
+              jobNo: "Latest snapshot",
+              timestamp: overview.latest.captured_at ?? null,
+              status:
+                portfolio === "zerodha"
+                  ? "synced"
+                  : (("parse_status" in overview.latest
+                      ? overview.latest.parse_status
+                      : null) ?? "parsed"),
+              costUsd: null,
+              error: null,
+              content: JSON.stringify(overview.latest, null, 2),
+            });
+          }
+        } else if (stage === "swing") {
           const latest =
             portfolio === "zerodha"
               ? (await apiService.zerodhaThreatsLatest()).analysis
@@ -2943,6 +3023,7 @@ export function RebalanceWorkflowSections({
   const openInputSelection = useCallback(
     (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
       if (
+        stage !== "threats" &&
         stage !== "swing" &&
         stage !== "rebalance" &&
         stage !== "technical" &&
@@ -2999,6 +3080,25 @@ export function RebalanceWorkflowSections({
       };
     });
   }, [inputDialog, inputCandidates]);
+
+  const resetDefaultInputCandidates = useCallback(() => {
+    if (!inputDialog) return;
+    const nextCandidateId = `${inputDialog.stage}:next`;
+    const defaultIds =
+      inputDialog.stage === "rebalance"
+        ? inputCandidates.map((candidate) => candidate.id)
+        : ([
+            nextCandidateId,
+            inputCandidates.find((candidate) => candidate.source !== "next")?.id,
+          ].filter(Boolean) as string[]);
+    setSelectedInputs((current) => ({
+      ...current,
+      [inputDialog.portfolio]: {
+        ...current[inputDialog.portfolio],
+        [inputDialog.stage]: new Set(defaultIds),
+      },
+    }));
+  }, [inputCandidates, inputDialog]);
 
   const promptToContinueAfterProblem = useCallback(
     (stage: WorkflowStageKey, details: string) => {
@@ -3095,15 +3195,18 @@ export function RebalanceWorkflowSections({
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
       const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle}`;
+      const routeUrl = getStageOutputRoute(portfolio, stage);
       setOutputDialog({
         portfolio,
         stage,
         title,
         body: "",
-        loading: true,
+        loading: false,
         error: null,
+        routeUrl,
       });
       try {
+        if (routeUrl) return;
         const market: SwingTradeMarket =
           portfolio === "zerodha" ? "india" : "us";
         let body = "No saved output is available yet.";
@@ -3159,6 +3262,7 @@ export function RebalanceWorkflowSections({
           body,
           loading: false,
           error: null,
+          routeUrl: null,
         });
       } catch (error) {
         setOutputDialog({
@@ -3168,6 +3272,7 @@ export function RebalanceWorkflowSections({
           body: "",
           loading: false,
           error: normalizeError(error),
+          routeUrl: null,
         });
       }
     },
@@ -3408,6 +3513,7 @@ export function RebalanceWorkflowSections({
           const completedThreat = await waitForThreatCompletion(
             portfolio,
             queuedThreat.job_id,
+            () => cancelRequestedRef.current,
           );
           if ((completedThreat.status || "").toLowerCase() !== "completed")
             throw new Error(
@@ -3686,9 +3792,11 @@ export function RebalanceWorkflowSections({
           setSelectedInputs((current) => ({
             ...current,
             [portfolio]: {
+              threats: new Set(["threats:next"]),
               swing: new Set(["swing:next"]),
               rebalance: new Set(["rebalance:next"]),
               technical: new Set(["technical:next"]),
+              actionables: new Set(["actionables:next"]),
             },
           }));
         }, WORKFLOW_COMPLETION_RESET_DELAY_MS);
@@ -3710,9 +3818,61 @@ export function RebalanceWorkflowSections({
             "Skipped after user approval",
           );
         }
+        window.setTimeout(() => {
+          setStates((current) => ({
+            ...current,
+            [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
+              const info = current[portfolio][stage];
+              acc[stage] =
+                info.state === "failed" ? { ...info, state: "idle" } : info;
+              return acc;
+            }, {} as WorkflowState),
+          }));
+          setSpecificMode((current) => ({ ...current, [portfolio]: false }));
+          setSelectedStages((current) => ({
+            ...current,
+            [portfolio]: new Set(),
+          }));
+        }, WORKFLOW_COMPLETION_RESET_DELAY_MS);
       } finally {
+        const wasCancelled = cancelRequestedRef.current;
         activeRunIdsRef.current = [];
-        if (!cancelRequestedRef.current) setRunningPortfolio(null);
+        setRunningPortfolio(null);
+        if (wasCancelled) {
+          const timestamp = new Date().toISOString();
+          setStates((current) => ({
+            ...current,
+            [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
+              const info = current[portfolio][stage];
+              acc[stage] = ["running", "queued"].includes(info.state)
+                ? {
+                    ...info,
+                    state: "failed",
+                    endedAt: timestamp,
+                    runStatus: "killed",
+                    error: "Auto-rebalance flow was killed by user.",
+                  }
+                : info;
+              return acc;
+            }, {} as WorkflowState),
+          }));
+          window.setTimeout(() => {
+            setStates((current) => ({
+              ...current,
+              [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
+                const info = current[portfolio][stage];
+                acc[stage] =
+                  info.state === "failed" ? { ...info, state: "idle" } : info;
+                return acc;
+              }, {} as WorkflowState),
+            }));
+            setSpecificMode((current) => ({ ...current, [portfolio]: false }));
+            setSelectedStages((current) => ({
+              ...current,
+              [portfolio]: new Set(),
+            }));
+          }, WORKFLOW_COMPLETION_RESET_DELAY_MS);
+        }
       }
     },
     [
@@ -3888,6 +4048,11 @@ export function RebalanceWorkflowSections({
                       cancelRequestedRef.current = true;
                       pauseRequestedRef.current = false;
                       setWorkflowPaused(false);
+                      void Promise.allSettled(
+                        activeRunIdsRef.current.map((runId) =>
+                          apiService.cancelRun(runId),
+                        ),
+                      );
                     }}
                     className="h-auto w-full shrink-0 justify-center whitespace-normal rounded-full bg-red-600 px-6 py-2 text-center leading-5 text-white hover:bg-red-700 sm:w-auto"
                   >
@@ -3972,6 +4137,7 @@ export function RebalanceWorkflowSections({
                   : undefined
               }
               onInputClick={
+                stage === "threats" ||
                 stage === "swing" ||
                 stage === "rebalance" ||
                 stage === "technical" ||
@@ -4051,6 +4217,7 @@ export function RebalanceWorkflowSections({
         loading={inputCandidatesLoading}
         onToggle={toggleInputCandidate}
         onToggleAll={toggleAllInputCandidates}
+        onResetDefaults={resetDefaultInputCandidates}
         onClose={() => setInputDialog(null)}
       />
 
@@ -4075,17 +4242,23 @@ export function RebalanceWorkflowSections({
                 <X className="size-5" />
               </button>
             </div>
-            <div className="max-h-[65vh] overflow-auto bg-slate-950 p-5 text-slate-100">
+            <div className="max-h-[72vh] overflow-auto bg-white p-0 text-slate-900">
               {outputDialog.loading ? (
-                <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-300">
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
                   <Loader2 className="size-4 animate-spin" /> Loading output…
                 </div>
               ) : outputDialog.error ? (
-                <div className="rounded-2xl border border-red-300 bg-red-950/40 p-4 text-sm text-red-100">
+                <div className="m-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                   {outputDialog.error}
                 </div>
+              ) : outputDialog.routeUrl ? (
+                <iframe
+                  src={outputDialog.routeUrl}
+                  title={outputDialog.title}
+                  className="h-[72vh] w-full border-0 bg-white"
+                />
               ) : (
-                <pre className="whitespace-pre-wrap break-words text-xs leading-6">
+                <pre className="m-5 whitespace-pre-wrap break-words rounded-2xl bg-slate-950 p-5 text-xs leading-6 text-slate-100">
                   {outputDialog.body}
                 </pre>
               )}

@@ -67,9 +67,10 @@ function formatTokens(value?: number | null) {
   return value?.toLocaleString() ?? '0';
 }
 
-function formatCost(value?: number | null) {
+function formatCostInr(value?: number | null, usdInrRate = 83.5) {
   if (value == null || !Number.isFinite(value)) return 'Not captured';
-  return `$${value.toFixed(4)}`;
+  const inr = value * usdInrRate;
+  return `₹${inr.toFixed(2)}`;
 }
 
 function hasKnownCost(value?: number | null): value is number {
@@ -260,12 +261,7 @@ export default function RunDetailPage() {
   const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
   const missingCostCount = runJobs.length - knownCostJobs.length;
   const hasAnyKnownCost = knownCostJobs.length > 0;
-  const formatCostWithInr = (value?: number | null) => {
-    if (!hasKnownCost(value)) return 'Not captured';
-    const usd = value;
-    const inr = usd * usdInrRate;
-    return `${formatCost(usd)} (₹${inr.toFixed(2)})`;
-  };
+  const formatCostWithInr = (value?: number | null) => formatCostInr(value, usdInrRate);
   const totalTokensIn = runJobs.reduce((sum, rj) => sum + (rj.job.tokens_in ?? 0), 0);
   const totalTokensOut = runJobs.reduce((sum, rj) => sum + (rj.job.tokens_out ?? 0), 0);
 

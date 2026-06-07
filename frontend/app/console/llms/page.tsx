@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { apiService } from '@/services/api';
+import { useUsdInrRate } from '@/hooks/useUsdInrRate';
 import type { LlmPerformanceGroup, LlmPerformanceResponse, LlmScanPerformanceItem } from '@/types/api';
 
 function formatDateTime(value?: string | null) {
@@ -28,15 +29,16 @@ function formatDuration(ms?: number | null) {
   return `${hours}h ${remainingMinutes}m`;
 }
 
-function formatCost(value?: number | null) {
+function formatCostInr(value?: number | null, usdInrRate = 83.5) {
   if (value === null || value === undefined) return '—';
-  if (value === 0) return '$0.00';
-  if (value < 0.0001) return `$${value.toExponential(2)}`;
-  return new Intl.NumberFormat('en-US', {
+  const inrValue = value * usdInrRate;
+  if (inrValue === 0) return '₹0.00';
+  if (inrValue < 0.01) return `₹${inrValue.toExponential(2)}`;
+  return new Intl.NumberFormat('en-IN', {
     style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 6,
-  }).format(value);
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(inrValue);
 }
 
 function passFailLabel(value?: boolean | null) {
@@ -63,6 +65,7 @@ function groupScansByType(scans: LlmScanPerformanceItem[]) {
 }
 
 function LlmGroupCard({ group }: { group: LlmPerformanceGroup }) {
+  const usdInrRate = useUsdInrRate();
   const scansByType = useMemo(() => groupScansByType(group.scans), [group.scans]);
 
   return (
@@ -79,7 +82,7 @@ function LlmGroupCard({ group }: { group: LlmPerformanceGroup }) {
             <Metric label="Processing pass" value={group.processing_passed.toLocaleString('en-IN')} />
             <Metric label="Processing fail" value={group.processing_failed.toLocaleString('en-IN')} />
             <Metric label="Sheet fail" value={group.sheet_export_failed.toLocaleString('en-IN')} />
-            <Metric label="Cost" value={formatCost(group.total_cost)} />
+            <Metric label="Cost" value={formatCostInr(group.total_cost, usdInrRate)} />
           </div>
         </div>
       </div>
@@ -105,7 +108,7 @@ function LlmGroupCard({ group }: { group: LlmPerformanceGroup }) {
                   <td className="px-4 py-3 text-slate-600">{summary.processing_passed} / {summary.processing_failed}</td>
                   <td className="px-4 py-3 text-slate-600">{summary.sheet_export_passed} / {summary.sheet_export_failed}</td>
                   <td className="px-4 py-3 text-slate-600">{formatDuration(summary.avg_time_taken_ms)}</td>
-                  <td className="px-4 py-3 text-slate-600">{formatCost(summary.total_cost)}</td>
+                  <td className="px-4 py-3 text-slate-600">{formatCostInr(summary.total_cost, usdInrRate)}</td>
                 </tr>
               ))}
             </tbody>
@@ -143,7 +146,7 @@ function LlmGroupCard({ group }: { group: LlmPerformanceGroup }) {
                       <td className="px-4 py-3 text-slate-600">{formatDuration(scan.time_taken_ms)}</td>
                       <td className="px-4 py-3"><StatusPill value={scan.processing_passed} /></td>
                       <td className="px-4 py-3"><StatusPill value={scan.sheet_export_passed} /></td>
-                      <td className="px-4 py-3 text-slate-600">{formatCost(scan.estimated_cost)}</td>
+                      <td className="px-4 py-3 text-slate-600">{formatCostInr(scan.estimated_cost, usdInrRate)}</td>
                       <td className="max-w-xs px-4 py-3 text-slate-600">
                         <span className="line-clamp-3">{scan.error_message || scan.export_error || '—'}</span>
                       </td>

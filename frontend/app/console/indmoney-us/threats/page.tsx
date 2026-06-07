@@ -631,9 +631,6 @@ export default function IndMoneyUsThreatsPage() {
                     ? formatInrCost(analysis.estimated_cost, usdInrRate)
                     : 'Not captured'}
                 </div>
-                {hasKnownCost(analysis.estimated_cost) ? (
-                  <div className="text-xs text-slate-500">{formatUsd(analysis.estimated_cost)}</div>
-                ) : null}
               </div>
             </div>
           </div>
