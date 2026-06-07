@@ -623,6 +623,26 @@ function formatJobRunTimestamp(meta: LlmMeta) {
   return `#${meta.jobId} / #${meta.runId} (${formatDateTime(meta.createdAt)})`;
 }
 
+function RunJobLink({
+  runId,
+  children,
+  className,
+}: {
+  runId: number;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Link
+      href={URLs.routes.console.runDetail(runId)}
+      className={cn("underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500", className)}
+      onClick={stopRowToggle}
+    >
+      {children}
+    </Link>
+  );
+}
+
 function normalizeAction(value: string): ActionCategory | null {
   const action = value
     .toLowerCase()
@@ -3982,6 +4002,8 @@ function buildActionablesCalculationRows(
       cells: CanonicalRow;
       rowClassName: string;
       detail?: ScoreMatrixDetail;
+      runId?: number;
+      isConsolidated?: boolean;
       isFormula?: boolean;
     }> = [
       ...stock.rows.map((row) => ({
@@ -3990,6 +4012,7 @@ function buildActionablesCalculationRows(
         llmName: `${row.meta.provider} ${row.meta.model}`.trim(),
         cells: row.cells,
         rowClassName: "bg-white",
+        runId: row.meta.runId,
       })),
       {
         id: `${stock.key}-mean-mode`,
@@ -3997,6 +4020,7 @@ function buildActionablesCalculationRows(
         llmName: "Consolidated (Mean and Mode)",
         cells: meanModeCells,
         rowClassName: "bg-amber-100/70 font-semibold",
+        isConsolidated: true,
       },
       {
         id: `${stock.key}-formula`,
@@ -4005,20 +4029,26 @@ function buildActionablesCalculationRows(
         cells: formulaCells,
         rowClassName: "bg-rose-100/75 font-semibold",
         detail,
+        isConsolidated: true,
         isFormula: true,
       },
     ];
 
     return sourceRows.map((source) => {
+      const jobRunValue = source.isConsolidated
+        ? ""
+        : source.runId
+          ? <RunJobLink runId={source.runId}>{source.jobRun}</RunJobLink>
+          : source.jobRun;
       const values: Record<string, ReactNode> = {
         "Stock Info": stockLabel,
-        "Job / Run No (Timestamp)": source.jobRun,
-        LLMs: source.llmName,
+        "Job / Run No (Timestamp)": jobRunValue,
+        LLMs: source.isConsolidated ? "" : source.llmName,
       };
       const sortValues: Record<string, string | number> = {
         "Stock Info": stockLabel,
-        "Job / Run No (Timestamp)": source.jobRun,
-        LLMs: source.llmName,
+        "Job / Run No (Timestamp)": source.isConsolidated ? "" : source.jobRun,
+        LLMs: source.isConsolidated ? "" : source.llmName,
       };
 
       ACTIONABLES_CALCULATION_HEADERS.forEach((header) => {
@@ -4049,6 +4079,11 @@ function buildActionablesCalculationRows(
           return;
         }
         if (header === "Technical Setup") {
+          if (source.isConsolidated) {
+            values[header] = "";
+            sortValues[header] = "";
+            return;
+          }
           const setup = formatTechnicalSetup(technicalScan, stock.representative);
           values[header] = (
             <span className={cn("font-medium", getTechnicalScanClass(technicalScan, stock.representative))}>
@@ -4072,7 +4107,8 @@ function buildActionablesCalculationRows(
           sortValues[header] = parseNumericCell(confidence) ?? confidence;
           return;
         }
-        const cellValue = source.cells[header as RebalanceHeader] || "";
+        const shouldClearConsolidatedCell = source.isConsolidated && header === "Analyst/Source";
+        const cellValue = shouldClearConsolidatedCell ? "" : source.cells[header as RebalanceHeader] || "";
         values[header] = cellValue;
         sortValues[header] = getCalculationCellSortValue(cellValue);
       });
@@ -4362,7 +4398,9 @@ function ActionablesInputSelectionDialog({
                         aria-label={`Select ${candidate.label}`}
                       />
                     </td>
-                    <td className="px-3 py-3 align-top font-semibold text-slate-900">{candidate.jobNo}</td>
+                    <td className="px-3 py-3 align-top font-semibold text-slate-900">
+                      <RunJobLink runId={candidate.runId}>{candidate.jobNo}</RunJobLink>
+                    </td>
                     <td className="px-3 py-3 align-top text-slate-600">{candidate.timestamp ? formatDateTime(candidate.timestamp) : "—"}</td>
                     <td className="px-3 py-3 align-top">
                       <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{candidate.status}</span>
@@ -4725,9 +4763,91 @@ type DashboardActionSortKey =
   | "currentUnits"
   | "currentValue"
   | "units"
+  | "actionCurrentUnits"
   | "amount"
   | "technicalSetup"
   | "confidence";
+
+type FinalActionableColumnKey = "stock" | "score" | "consensus" | "currentValue" | "actionCurrentUnits" | "amount";
+
+type FinalActionableColumnLayout = {
+  order: FinalActionableColumnKey[];
+  widths: Partial<Record<FinalActionableColumnKey, number>>;
+};
+
+const FINAL_ACTIONABLE_COLUMN_LAYOUT_VERSION = 1;
+const FINAL_ACTIONABLE_COLUMNS: FinalActionableColumnKey[] = ["stock", "score", "consensus", "currentValue", "actionCurrentUnits", "amount"];
+const FINAL_ACTIONABLE_COLUMN_LABELS: Record<FinalActionableColumnKey, string> = {
+  stock: "Stock",
+  score: "Score",
+  consensus: "Consensus",
+  currentValue: "Current Value",
+  actionCurrentUnits: "Action/Current Units",
+  amount: "Amount",
+};
+const FINAL_ACTIONABLE_COLUMN_SORT_KEYS: Record<FinalActionableColumnKey, DashboardActionSortKey> = {
+  stock: "stock",
+  score: "score",
+  consensus: "consensus",
+  currentValue: "currentValue",
+  actionCurrentUnits: "actionCurrentUnits",
+  amount: "amount",
+};
+const FINAL_ACTIONABLE_DEFAULT_WIDTHS: Record<FinalActionableColumnKey, number> = {
+  stock: 168,
+  score: 112,
+  consensus: 132,
+  currentValue: 148,
+  actionCurrentUnits: 168,
+  amount: 148,
+};
+const FINAL_ACTIONABLE_MIN_COLUMN_WIDTH = 96;
+const FINAL_ACTIONABLE_MAX_COLUMN_WIDTH = 420;
+
+function getFinalActionableLayoutStorageKey() {
+  return `investor:final-actionable-table-layout:v${FINAL_ACTIONABLE_COLUMN_LAYOUT_VERSION}`;
+}
+
+function clampFinalActionableColumnWidth(width: number) {
+  if (!Number.isFinite(width)) return FINAL_ACTIONABLE_DEFAULT_WIDTHS.stock;
+  return Math.min(FINAL_ACTIONABLE_MAX_COLUMN_WIDTH, Math.max(FINAL_ACTIONABLE_MIN_COLUMN_WIDTH, Math.round(width)));
+}
+
+function normalizeFinalActionableLayout(layout?: Partial<FinalActionableColumnLayout> | null): FinalActionableColumnLayout {
+  const seen = new Set<FinalActionableColumnKey>();
+  const order = [
+    ...(layout?.order ?? []).filter((column): column is FinalActionableColumnKey => {
+      if (!FINAL_ACTIONABLE_COLUMNS.includes(column as FinalActionableColumnKey) || seen.has(column as FinalActionableColumnKey)) return false;
+      seen.add(column as FinalActionableColumnKey);
+      return true;
+    }),
+    ...FINAL_ACTIONABLE_COLUMNS.filter((column) => !seen.has(column)),
+  ];
+  const widths = FINAL_ACTIONABLE_COLUMNS.reduce((acc, column) => {
+    acc[column] = clampFinalActionableColumnWidth(layout?.widths?.[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column]);
+    return acc;
+  }, {} as Record<FinalActionableColumnKey, number>);
+  return { order, widths };
+}
+
+function loadFinalActionableLayout() {
+  if (typeof window === "undefined") return normalizeFinalActionableLayout();
+  try {
+    const raw = window.localStorage.getItem(getFinalActionableLayoutStorageKey());
+    return raw ? normalizeFinalActionableLayout(JSON.parse(raw)) : normalizeFinalActionableLayout();
+  } catch {
+    return normalizeFinalActionableLayout();
+  }
+}
+
+function reorderFinalActionableColumns(order: FinalActionableColumnKey[], from: FinalActionableColumnKey, to: FinalActionableColumnKey) {
+  if (from === to) return order;
+  const next = order.filter((column) => column !== from);
+  const targetIndex = next.indexOf(to);
+  if (targetIndex === -1) return order;
+  next.splice(targetIndex, 0, from);
+  return next;
+}
 
 type DashboardActionSortState = {
   key: DashboardActionSortKey;
@@ -4837,6 +4957,8 @@ function getDashboardActionSortValue(
       return row.formulaEstimate.currentInvestmentAmount ?? getCurrentValueAmount(row.stock.representative) ?? Number.NEGATIVE_INFINITY;
     case "units":
       return row.formulaEstimate.units ?? Number.NEGATIVE_INFINITY;
+    case "actionCurrentUnits":
+      return row.formulaEstimate.units ?? 0;
     case "amount":
       return row.formulaEstimate.amount ?? Number.NEGATIVE_INFINITY;
     case "technicalSetup":
@@ -4875,18 +4997,20 @@ function SortableActionHeader({
   sortKey,
   currentSort,
   onSort,
+  className,
 }: {
   label: string;
   sortKey: DashboardActionSortKey;
   currentSort: DashboardActionSortState;
   onSort: (key: DashboardActionSortKey) => void;
+  className?: string;
 }) {
   const isActive = currentSort.key === sortKey;
   return (
     <button
       type="button"
       onClick={() => onSort(sortKey)}
-      className="inline-flex items-center gap-1 whitespace-nowrap font-semibold text-gray-500 transition hover:text-gray-900"
+      className={cn("inline-flex items-center gap-1 whitespace-nowrap font-semibold text-gray-500 transition hover:text-gray-900", className)}
       title={`Sort by ${label}`}
     >
       {label}
@@ -4920,6 +5044,9 @@ export function DashboardFinalActionablesTables() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
+  const [finalActionableLayout, setFinalActionableLayout] = useState<FinalActionableColumnLayout>(() => loadFinalActionableLayout());
+  const [draggedFinalActionableColumn, setDraggedFinalActionableColumn] = useState<FinalActionableColumnKey | null>(null);
+  const finalActionableResizeStateRef = useRef<{ column: FinalActionableColumnKey; startX: number; startWidth: number } | null>(null);
   const [calculationsMarket, setCalculationsMarket] = useState<SwingTradeMarket | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
@@ -4959,6 +5086,17 @@ export function DashboardFinalActionablesTables() {
 
     return () => window.clearTimeout(timeoutId);
   }, [loadRuns]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(getFinalActionableLayoutStorageKey(), JSON.stringify(normalizeFinalActionableLayout(finalActionableLayout)));
+  }, [finalActionableLayout]);
+
+  useEffect(() => {
+    return () => {
+      finalActionableResizeStateRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -5028,6 +5166,51 @@ export function DashboardFinalActionablesTables() {
       technicalScans,
     ),
   }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, technicalScans]);
+
+  const updateFinalActionableColumnWidth = useCallback((column: FinalActionableColumnKey, width: number) => {
+    setFinalActionableLayout((current) => ({
+      ...current,
+      widths: {
+        ...current.widths,
+        [column]: clampFinalActionableColumnWidth(width),
+      },
+    }));
+  }, []);
+
+  const handleFinalActionableResizeStart = useCallback((column: FinalActionableColumnKey, event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    finalActionableResizeStateRef.current = {
+      column,
+      startX: event.clientX,
+      startWidth: finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column],
+    };
+
+    const handleMouseMove = (moveEvent: globalThis.MouseEvent) => {
+      const state = finalActionableResizeStateRef.current;
+      if (!state) return;
+      updateFinalActionableColumnWidth(state.column, state.startWidth + moveEvent.clientX - state.startX);
+    };
+    const handleMouseUp = () => {
+      finalActionableResizeStateRef.current = null;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  }, [finalActionableLayout.widths, updateFinalActionableColumnWidth]);
+
+  const handleFinalActionableColumnDrop = useCallback((targetColumn: FinalActionableColumnKey, event: ReactDragEvent<HTMLTableCellElement>) => {
+    event.preventDefault();
+    const sourceColumn = draggedFinalActionableColumn;
+    setDraggedFinalActionableColumn(null);
+    if (!sourceColumn || sourceColumn === targetColumn) return;
+    setFinalActionableLayout((current) => ({
+      ...current,
+      order: reorderFinalActionableColumns(current.order, sourceColumn, targetColumn),
+    }));
+  }, [draggedFinalActionableColumn]);
 
   const toggleActionSort = useCallback((tableKey: string, key: DashboardActionSortKey) => {
     setSortStates((current) => {
@@ -5101,13 +5284,46 @@ export function DashboardFinalActionablesTables() {
                         <table className="min-w-[64rem] text-xs">
                           <thead>
                             <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Stock" sortKey="stock" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Score" sortKey="score" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Consensus" sortKey="consensus" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Units" sortKey="currentUnits" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Value" sortKey="currentValue" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label={`Units to ${getActionVerb(action)}`} sortKey="units" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Amount" sortKey="amount" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              {finalActionableLayout.order.map((column) => {
+                                const width = finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column];
+                                return (
+                                  <th
+                                    key={column}
+                                    draggable
+                                    onDragStart={(event) => {
+                                      setDraggedFinalActionableColumn(column);
+                                      event.dataTransfer.effectAllowed = "move";
+                                      event.dataTransfer.setData("text/plain", column);
+                                    }}
+                                    onDragOver={(event) => {
+                                      event.preventDefault();
+                                      event.dataTransfer.dropEffect = "move";
+                                    }}
+                                    onDrop={(event) => handleFinalActionableColumnDrop(column, event)}
+                                    onDragEnd={() => setDraggedFinalActionableColumn(null)}
+                                    className={cn(
+                                      "group relative px-3 py-2 font-semibold transition",
+                                      draggedFinalActionableColumn === column ? "bg-blue-100" : "",
+                                    )}
+                                    style={{ width, minWidth: width, maxWidth: width }}
+                                    title="Drag left/right to reorder. Use the right edge to resize."
+                                  >
+                                    <SortableActionHeader
+                                      label={FINAL_ACTIONABLE_COLUMN_LABELS[column]}
+                                      sortKey={FINAL_ACTIONABLE_COLUMN_SORT_KEYS[column]}
+                                      currentSort={sortState}
+                                      onSort={(key) => toggleActionSort(tableKey, key)}
+                                      className="pr-3"
+                                    />
+                                    <button
+                                      type="button"
+                                      className="absolute right-0 top-0 h-full w-2 cursor-col-resize border-r-2 border-transparent transition hover:border-blue-500 focus:border-blue-500 focus:outline-none"
+                                      aria-label={`Resize ${FINAL_ACTIONABLE_COLUMN_LABELS[column]} column`}
+                                      onMouseDown={(event) => handleFinalActionableResizeStart(column, event)}
+                                    />
+                                  </th>
+                                );
+                              })}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
@@ -5116,9 +5332,9 @@ export function DashboardFinalActionablesTables() {
                               const estimate = row.formulaEstimate;
                               const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
                               const scan = getTechnicalScanForStock(technicalScans, stock);
-                              return (
-                                <tr key={`${market}-${stock.key}`} className="bg-white/40">
-                                  <td className="whitespace-nowrap px-3 py-2 align-top">
+                              const renderColumn = (column: FinalActionableColumnKey) => {
+                                if (column === "stock") {
+                                  return (
                                     <span className="inline-flex items-center whitespace-nowrap">
                                       <StockDetailsButton
                                         stock={stock}
@@ -5135,25 +5351,34 @@ export function DashboardFinalActionablesTables() {
                                         {stock.symbol}
                                       </TradingViewSymbolLink>
                                     </span>
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-gray-800">
-                                    <ScoreMatrixButton detail={row.detail} onOpenDetail={setSelectedMatrixDetail} />
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    <ConsensusBreakupButton stock={stock} action={action} />
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {formatQuantity(estimate.currentUnits)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentValueAmount(stock.representative), market)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {showActionColumns ? formatQuantity(estimate.units) : "—"}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
-                                  </td>
+                                  );
+                                }
+                                if (column === "score") return <ScoreMatrixButton detail={row.detail} onOpenDetail={setSelectedMatrixDetail} />;
+                                if (column === "consensus") return <ConsensusBreakupButton stock={stock} action={action} />;
+                                if (column === "currentValue") return formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentValueAmount(stock.representative), market);
+                                if (column === "actionCurrentUnits") {
+                                  const actionUnits = showActionColumns ? formatQuantity(estimate.units) : "0";
+                                  return `${actionUnits}/${formatQuantity(estimate.currentUnits)}`;
+                                }
+                                return showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—";
+                              };
+                              return (
+                                <tr key={`${market}-${stock.key}`} className="bg-white/40">
+                                  {finalActionableLayout.order.map((column) => {
+                                    const width = finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column];
+                                    return (
+                                      <td
+                                        key={`${market}-${stock.key}-${column}`}
+                                        className={cn(
+                                          "overflow-hidden px-3 py-2 align-top text-gray-700",
+                                          column === "score" ? "font-semibold text-gray-800" : "",
+                                        )}
+                                        style={{ width, minWidth: width, maxWidth: width }}
+                                      >
+                                        <div className="truncate">{renderColumn(column)}</div>
+                                      </td>
+                                    );
+                                  })}
                                 </tr>
                               );
                             })}
@@ -5161,7 +5386,7 @@ export function DashboardFinalActionablesTables() {
                           {showBuyAmountTotal ? (
                             <tfoot>
                               <tr className="border-t border-emerald-200 bg-white/80 text-slate-900">
-                                <td colSpan={6} className="px-3 py-3 text-right text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                                <td colSpan={Math.max(finalActionableLayout.order.length - 1, 1)} className="px-3 py-3 text-right text-[11px] font-bold uppercase tracking-wide text-slate-600">
                                   Total new buy amount required
                                 </td>
                                 <td className="whitespace-nowrap px-3 py-3 font-black text-emerald-950">
