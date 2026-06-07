@@ -812,6 +812,51 @@ function formatActionScore(value: number | null) {
   return value === null ? "—" : value.toFixed(2);
 }
 
+type ScoreSymbolMeta = {
+  symbol: "▲" | "▼";
+  label: string;
+  className: string;
+};
+
+function getScoreSymbolMeta(score: number | null): ScoreSymbolMeta | null {
+  if (score === null) return null;
+  if (score > 2) {
+    return { symbol: "▲", label: "Up triangle (Green)", className: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+  }
+  if (score >= 1) {
+    return { symbol: "▲", label: "Up triangle (Light Green)", className: "border-emerald-200 bg-emerald-50/70 text-emerald-600" };
+  }
+  if (score >= 0) {
+    return { symbol: "▲", label: "Up triangle (Yellow)", className: "border-yellow-300 bg-yellow-50 text-yellow-700" };
+  }
+  if (score >= -1) {
+    return { symbol: "▼", label: "Down triangle (Yellow)", className: "border-yellow-300 bg-yellow-50 text-yellow-700" };
+  }
+  if (score >= -2) {
+    return { symbol: "▼", label: "Down triangle (Light red)", className: "border-rose-200 bg-rose-50 text-rose-600" };
+  }
+  return { symbol: "▼", label: "Down triangle (Red)", className: "border-red-300 bg-red-50 text-red-700" };
+}
+
+function ScoreSymbolBadge({ score, compact = false }: { score: number | null; compact?: boolean }) {
+  const meta = getScoreSymbolMeta(score);
+  if (!meta) return <span className="text-slate-400">—</span>;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border font-bold tabular-nums",
+        compact ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-1 text-xs",
+        meta.className,
+      )}
+      title={`${meta.label}: ${formatActionScore(score)}`}
+      aria-label={`${meta.label}: ${formatActionScore(score)}`}
+    >
+      <span aria-hidden="true">{meta.symbol}</span>
+      <span>{formatActionScore(score)}</span>
+    </span>
+  );
+}
+
 function formatScoreValue(value: number | null) {
   if (value === null) return "—";
   if (Number.isInteger(value)) return value.toFixed(0);
@@ -2143,12 +2188,37 @@ function formatRecommendationLabel(value: string) {
   return action ? ACTION_CATEGORY_LABEL[action] : value || "No recommendation";
 }
 
+const RATIONALE_SCORE_HEADER_BY_RATIONALE_HEADER: Record<
+  (typeof LLM_BREAKUP_RATIONALE_HEADERS)[number],
+  RebalanceHeader
+> = {
+  "Rationale Cruxx": "Score Rationale Cruxx",
+  "Rationale Technical Setup Short Term 1–3 Months": "Score Rationale Technical Setup Short Term 1–3 Months",
+  "Rationale - Technical Setup (Medium Term)": "Score Rationale - Technical Setup (Medium Term)",
+  "Rationale - Technical Setup (Long Term)": "Score Rationale - Technical Setup (Long Term)",
+  "Rationale - Fundamentals Short Term": "Score Rationale - Fundamentals Short Term",
+  "Rationale - Fundamentals Medium/Long Term": "Score Rationale - Fundamentals Medium/Long Term",
+};
+
+type RationaleSectionItem = {
+  header: (typeof LLM_BREAKUP_RATIONALE_HEADERS)[number];
+  label: string | null;
+};
+
+type CapturedRationaleGroup = {
+  title: string;
+  subtitle?: string;
+  className: string;
+  titleClassName: string;
+  items: Array<RationaleSectionItem & { value: string; score: number | null }>;
+};
+
 const RATIONALE_SECTION_GROUPS: Array<{
   title: string;
   subtitle?: string;
   className: string;
   titleClassName: string;
-  items: Array<{ header: (typeof LLM_BREAKUP_RATIONALE_HEADERS)[number]; label: string | null }>;
+  items: RationaleSectionItem[];
 }> = [
   {
     title: "Cruxx",
@@ -2162,9 +2232,7 @@ const RATIONALE_SECTION_GROUPS: Array<{
     titleClassName: "text-blue-800",
     items: [
       { header: "Rationale Technical Setup Short Term 1–3 Months", label: "Short" },
-      { header: "Rationale Technical Setup Short Term 1–3 Months", label: "Short" },
       { header: "Rationale - Technical Setup (Medium Term)", label: "Medium" },
-      { header: "Rationale - Technical Setup (Long Term)", label: "Long" },
       { header: "Rationale - Technical Setup (Long Term)", label: "Long" },
     ],
   },
@@ -2179,11 +2247,15 @@ const RATIONALE_SECTION_GROUPS: Array<{
   },
 ];
 
-function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
-  const groups = RATIONALE_SECTION_GROUPS.map((group) => {
+function getCapturedRationaleGroups(row: CanonicalRow): CapturedRationaleGroup[] {
+  return RATIONALE_SECTION_GROUPS.map((group) => {
     const seenLabels = new Set<string>();
     const items = group.items
-      .map((item) => ({ ...item, value: row[item.header] || "" }))
+      .map((item) => ({
+        ...item,
+        value: row[item.header] || "",
+        score: parseNumericCell(row[RATIONALE_SCORE_HEADER_BY_RATIONALE_HEADER[item.header]]),
+      }))
       .filter((item) => item.value.trim())
       .filter((item) => {
         const key = `${item.label ?? ""}:${normalizeWhitespace(item.value)}`;
@@ -2193,6 +2265,33 @@ function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
       });
     return { ...group, items };
   }).filter((group) => group.items.length > 0);
+}
+
+function CapturedRationaleScoresCell({ row }: { row: CanonicalRow }) {
+  const groups = getCapturedRationaleGroups(row);
+  if (!groups.length) return <span className="text-slate-400">—</span>;
+
+  return (
+    <div className="space-y-2">
+      {groups.map((group) => (
+        <section key={`${group.title}-scores`} className="rounded-lg border border-slate-200 bg-white/80 px-2 py-1.5">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{group.title}</div>
+          <div className="mt-1 space-y-1">
+            {group.items.map(({ header, label, score }) => (
+              <div key={`${header}-${label ?? "plain"}-score`} className="flex items-center justify-between gap-2">
+                {label ? <span className="text-[10px] font-semibold text-slate-500">{label}</span> : null}
+                <ScoreSymbolBadge score={score} compact />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
+  const groups = getCapturedRationaleGroups(row);
 
   if (!groups.length) {
     return <span>{row["Technical Setup"] || "—"}</span>;
@@ -2448,6 +2547,7 @@ function StockDetailsButton({
                         <th className="px-3 py-2">Action</th>
                         <th className="px-3 py-2">Units</th>
                         <th className="px-3 py-2">Amount</th>
+                        <th className="px-3 py-2">Score</th>
                         <th className="px-3 py-2">Rationale</th>
                       </tr>
                     </thead>
@@ -2463,6 +2563,7 @@ function StockDetailsButton({
                           </td>
                           <td className="px-3 py-2 align-top">{row.cells["Units to Buy"] || row.cells["Units Change"] || "—"}</td>
                           <td className="px-3 py-2 align-top">{row.cells["Total Buy Amount"] || "—"}</td>
+                          <td className="min-w-40 px-3 py-2 align-top"><CapturedRationaleScoresCell row={row.cells} /></td>
                           <td className="min-w-80 px-3 py-2 align-top"><CapturedRationalesCell row={row.cells} /></td>
                         </tr>
                       ))}
@@ -3934,6 +4035,7 @@ type DashboardActionRow = {
   formulaAction: ActionCategory;
   formulaScore: number | null;
   formulaEstimate: ActionEstimate;
+  detail: ScoreMatrixDetail;
 };
 
 type DashboardActionSortKey =
@@ -4012,6 +4114,7 @@ function buildDashboardActionRows(
       formulaAction,
       formulaScore: detail.calculatedScore,
       formulaEstimate: buildFormulaActionEstimate(stock, formulaAction, detail.calculatedUnitsChange),
+      detail,
     };
   });
 }
@@ -4123,6 +4226,7 @@ export function DashboardFinalActionablesTables() {
   const [error, setError] = useState<string | null>(null);
   const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
   const [calculationsMarket, setCalculationsMarket] = useState<SwingTradeMarket | null>(null);
+  const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
     india: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
     us: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
@@ -4339,7 +4443,15 @@ export function DashboardFinalActionablesTables() {
                                     </span>
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-gray-800">
-                                    {formatActionScore(row.formulaScore)}
+                                    <button
+                                      type="button"
+                                      className="rounded-full transition hover:ring-2 hover:ring-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      onClick={() => setSelectedMatrixDetail(row.detail)}
+                                      title={`Open Consolidated score matrix Final Action Rule for ${stock.symbol}`}
+                                      aria-label={`Open Consolidated score matrix Final Action Rule for ${stock.symbol}`}
+                                    >
+                                      <ScoreSymbolBadge score={row.formulaScore} />
+                                    </button>
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                                     <ConsensusBreakupButton stock={stock} action={action} />
@@ -4431,6 +4543,10 @@ export function DashboardFinalActionablesTables() {
           )}
         </div>
       </div>
+      <ScoreMatrixModal
+        detail={selectedMatrixDetail}
+        onClose={() => setSelectedMatrixDetail(null)}
+      />
       <ActionablesCalculationsModal
         open={calculationsMarket !== null}
         onClose={() => setCalculationsMarket(null)}
