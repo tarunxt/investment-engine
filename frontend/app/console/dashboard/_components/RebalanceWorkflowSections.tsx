@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Eye,
   Loader2,
-  Pause,
   Play,
   X,
 } from "lucide-react";
@@ -208,6 +207,7 @@ type PersistedWorkflow = {
   specificMode: Record<WorkflowPortfolio, boolean>;
   selectedStages: Record<WorkflowPortfolio, WorkflowStageKey[]>;
   selectedInputs?: Record<WorkflowPortfolio, Partial<Record<InputSelectionStage, string[]>>>;
+  lastAutoRebalanceCosts?: Record<WorkflowPortfolio, number | null>;
   savedAt: string;
 };
 
@@ -238,6 +238,23 @@ function persistWorkflow(snapshot: PersistedWorkflow) {
   } catch {
     // Progress persistence is best-effort; the visible in-memory state remains authoritative.
   }
+}
+
+function hasRestorableRunningWorkflow(
+  persisted: PersistedWorkflow | null,
+  portfolio: WorkflowPortfolio | null | undefined,
+) {
+  if (!persisted || !portfolio) return false;
+  return STAGE_ORDER.some((stage) => {
+    const state = persisted.states?.[portfolio]?.[stage]?.state;
+    return state === "queued" || state === "running";
+  });
+}
+
+function getRestorableRunningPortfolio(persisted: PersistedWorkflow | null) {
+  return hasRestorableRunningWorkflow(persisted, persisted?.runningPortfolio)
+    ? persisted?.runningPortfolio ?? null
+    : null;
 }
 
 function getQueuedStages(
@@ -295,13 +312,13 @@ function getStageLabel(stage: WorkflowStageKey, state: StageState) {
 
 function getStageClasses(state: StageState) {
   if (state === "completed")
-    return "border-emerald-300 bg-emerald-50 text-emerald-950 shadow-emerald-100";
+    return "border-emerald-300 bg-white text-slate-950 shadow-slate-100";
   if (state === "running")
-    return "border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100";
+    return "border-amber-300 bg-white text-slate-950 shadow-slate-100";
   if (state === "queued")
     return "border-sky-200 bg-white text-slate-950 shadow-slate-100 ring-1 ring-sky-100";
   if (state === "failed")
-    return "border-red-300 bg-red-50 text-red-950 shadow-red-100";
+    return "border-red-300 bg-white text-slate-950 shadow-slate-100";
   return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
 }
 
@@ -922,7 +939,7 @@ function WorkflowStageTile({
         if (!isRunning) onClick?.();
       }}
       disabled={!onClick}
-      className={`relative flex min-h-44 flex-col items-start justify-start rounded-2xl border p-4 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-emerald-400 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-2 ring-emerald-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
+      className={`relative flex min-h-44 flex-col items-start justify-start rounded-2xl border p-4 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${selectable && selected ? "border-blue-400 bg-white text-slate-950 shadow-slate-100 ring-2 ring-blue-500" : getStageClasses(info.state)} ${selectable && !selected ? "bg-white opacity-100" : ""}`}
     >
       {isCompleted ? (
         <CheckCircle2 className="absolute right-3 top-3 size-5 text-emerald-600" />
@@ -2043,11 +2060,15 @@ export function RebalanceWorkflowSections({
   const [initialPersisted] = useState<PersistedWorkflow | null>(() =>
     readPersistedWorkflow(),
   );
+  const initialRunningPortfolio = useMemo(
+    () => getRestorableRunningPortfolio(initialPersisted),
+    [initialPersisted],
+  );
   const [states, setStates] = useState<
     Record<WorkflowPortfolio, WorkflowState>
-  >(() => initialPersisted?.states ?? buildInitialStates());
+  >(() => initialRunningPortfolio && initialPersisted?.states ? initialPersisted.states : buildInitialStates());
   const [runningPortfolio, setRunningPortfolio] = useState<WorkflowPortfolio | null>(
-    () => initialPersisted?.runningPortfolio ?? null,
+    () => initialRunningPortfolio,
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -2055,27 +2076,33 @@ export function RebalanceWorkflowSections({
   const [now, setNow] = useState(0);
   const [specificMode, setSpecificMode] = useState<
     Record<WorkflowPortfolio, boolean>
-  >(() => initialPersisted?.specificMode ?? { zerodha: false, indmoneyUs: false });
+  >(() => ({
+    zerodha: initialRunningPortfolio === "zerodha" ? Boolean(initialPersisted?.specificMode?.zerodha) : false,
+    indmoneyUs: initialRunningPortfolio === "indmoneyUs" ? Boolean(initialPersisted?.specificMode?.indmoneyUs) : false,
+  }));
   const [selectedStages, setSelectedStages] = useState<
     Record<WorkflowPortfolio, Set<WorkflowStageKey>>
   >(() => ({
-    zerodha: new Set(initialPersisted?.selectedStages?.zerodha ?? []),
-    indmoneyUs: new Set(initialPersisted?.selectedStages?.indmoneyUs ?? []),
+    zerodha: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedStages?.zerodha ?? [] : []),
+    indmoneyUs: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedStages?.indmoneyUs ?? [] : []),
   }));
   const [selectedInputs, setSelectedInputs] = useState<
     Record<WorkflowPortfolio, Record<InputSelectionStage, Set<string>>>
   >(() => ({
     zerodha: {
-      swing: new Set(initialPersisted?.selectedInputs?.zerodha?.swing ?? ["swing:next"]),
-      rebalance: new Set(initialPersisted?.selectedInputs?.zerodha?.rebalance ?? ["rebalance:next"]),
-      technical: new Set(initialPersisted?.selectedInputs?.zerodha?.technical ?? ["technical:next"]),
+      swing: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.swing ?? ["swing:next"] : ["swing:next"]),
+      rebalance: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.rebalance ?? ["rebalance:next"] : ["rebalance:next"]),
+      technical: new Set(initialRunningPortfolio === "zerodha" ? initialPersisted?.selectedInputs?.zerodha?.technical ?? ["technical:next"] : ["technical:next"]),
     },
     indmoneyUs: {
-      swing: new Set(initialPersisted?.selectedInputs?.indmoneyUs?.swing ?? ["swing:next"]),
-      rebalance: new Set(initialPersisted?.selectedInputs?.indmoneyUs?.rebalance ?? ["rebalance:next"]),
-      technical: new Set(initialPersisted?.selectedInputs?.indmoneyUs?.technical ?? ["technical:next"]),
+      swing: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.swing ?? ["swing:next"] : ["swing:next"]),
+      rebalance: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.rebalance ?? ["rebalance:next"] : ["rebalance:next"]),
+      technical: new Set(initialRunningPortfolio === "indmoneyUs" ? initialPersisted?.selectedInputs?.indmoneyUs?.technical ?? ["technical:next"] : ["technical:next"]),
     },
   }));
+  const [lastAutoRebalanceCosts, setLastAutoRebalanceCosts] = useState<
+    Record<WorkflowPortfolio, number | null>
+  >(() => initialPersisted?.lastAutoRebalanceCosts ?? { zerodha: null, indmoneyUs: null });
   const [inputDialog, setInputDialog] = useState<{
     portfolio: WorkflowPortfolio;
     stage: InputSelectionStage;
@@ -2118,9 +2145,10 @@ export function RebalanceWorkflowSections({
           technical: Array.from(selectedInputs.indmoneyUs.technical),
         },
       },
+      lastAutoRebalanceCosts,
       savedAt: new Date().toISOString(),
     });
-  }, [runningPortfolio, selectedInputs, selectedStages, specificMode, states]);
+  }, [lastAutoRebalanceCosts, runningPortfolio, selectedInputs, selectedStages, specificMode, states]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -2577,34 +2605,6 @@ export function RebalanceWorkflowSections({
       };
     });
   }, [inputDialog, inputCandidates]);
-
-  const requestPauseWorkflow = useCallback(() => {
-    pauseRequestedRef.current = true;
-  }, []);
-
-  const cancelActiveWorkflow = useCallback(async () => {
-    cancelRequestedRef.current = true;
-    pauseRequestedRef.current = false;
-    const runIds = Array.from(new Set(activeRunIdsRef.current));
-    await Promise.allSettled(
-      runIds.map((runId) => apiService.cancelRun(runId)),
-    );
-    if (runningPortfolio) {
-      STAGE_ORDER.forEach((stage) => {
-        const info = states[runningPortfolio][stage];
-        if (info.state === "running") {
-          updateStage(runningPortfolio, stage, {
-            state: "failed",
-            endedAt: new Date().toISOString(),
-            runStatus: "cancelled",
-            error:
-              "Killed by user. Any queued/pending LLM jobs were marked failed; in-flight provider calls are ignored if they return later.",
-          });
-        }
-      });
-    }
-    setRunningPortfolio(null);
-  }, [runningPortfolio, states, updateStage]);
 
   const promptToContinueAfterProblem = useCallback(
     (stage: WorkflowStageKey, details: string) => {
@@ -3189,14 +3189,21 @@ export function RebalanceWorkflowSections({
         }
         if (pauseRequestedRef.current) pauseRequestedRef.current = false;
         window.setTimeout(() => {
-          setStates((current) => ({
-            ...current,
-            [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
-              const info = current[portfolio][stage];
-              acc[stage] = info.state === "completed" ? { ...info, state: "idle" } : info;
-              return acc;
-            }, {} as WorkflowState),
-          }));
+          setStates((current) => {
+            const lastCost = STAGE_ORDER.reduce(
+              (total, stage) => total + getStageCostInr(current[portfolio][stage], usdInrRate),
+              0,
+            );
+            setLastAutoRebalanceCosts((costs) => ({ ...costs, [portfolio]: lastCost }));
+            return {
+              ...current,
+              [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
+                const info = current[portfolio][stage];
+                acc[stage] = info.state === "completed" ? { ...info, state: "idle" } : info;
+                return acc;
+              }, {} as WorkflowState),
+            };
+          });
           setSpecificMode((current) => ({ ...current, [portfolio]: false }));
           setSelectedStages((current) => ({ ...current, [portfolio]: new Set() }));
           setSelectedInputs((current) => ({
@@ -3242,6 +3249,7 @@ export function RebalanceWorkflowSections({
       selectedStages,
       specificMode,
       updateStage,
+      usdInrRate,
       waitForRunWithStageHandling,
     ],
   );
@@ -3363,25 +3371,11 @@ export function RebalanceWorkflowSections({
           </div>
           <div className="flex w-full flex-col items-start gap-2 xl:w-auto xl:items-end">
             <div className="flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
-              {runningPortfolio === section.portfolio ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={requestPauseWorkflow}
-                  className="h-auto w-full justify-center rounded-full border-amber-200 py-2 text-amber-700 hover:bg-amber-50 xl:w-auto"
-                >
-                  <Pause className="mr-2 size-4" />
-                  Pause
-                </Button>
-              ) : null}
             <Button
               type="button"
-              disabled={isBusy && runningPortfolio !== section.portfolio}
+              disabled={isBusy}
               onClick={() => {
-                if (runningPortfolio === section.portfolio) {
-                  void cancelActiveWorkflow();
-                  return;
-                }
+                if (isBusy) return;
                 if (section.portfolio === "indmoneyUs") {
                   setDialogError(null);
                   setIndMoneySyncOnly(false);
@@ -3390,32 +3384,14 @@ export function RebalanceWorkflowSections({
                 }
                 void runWorkflow("zerodha");
               }}
-              className={
-                runningPortfolio === section.portfolio
-                  ? "h-auto w-full justify-center whitespace-normal rounded-full py-2 text-center leading-5 bg-red-600 text-white hover:bg-red-500 xl:w-auto"
-                  : "h-auto w-full justify-center whitespace-normal rounded-full py-2 text-center leading-5 bg-slate-950 text-white hover:bg-slate-800 xl:w-auto"
-              }
+              className="h-auto w-full justify-center whitespace-normal rounded-full bg-slate-950 py-2 text-center leading-5 text-white hover:bg-slate-800 disabled:opacity-50 xl:w-auto"
             >
-              {runningPortfolio === section.portfolio ? (
-                <X className="mr-2 size-4" />
-              ) : (
-                <Play className="mr-2 size-4" />
-              )}
-              {runningPortfolio === section.portfolio
-                ? `Kill ${section.portfolio === "zerodha" ? "Zerodha" : "IndMoney"} Rebalance`
-                : section.buttonLabel}
+              <Play className="mr-2 size-4" />
+              {section.buttonLabel}
             </Button>
             </div>
             <p className="text-xs text-slate-500">
               Last run on {formatTimestamp(lastRunByPortfolio[section.portfolio])}
-            </p>
-            <p className="text-xs font-semibold text-slate-700">
-              Total cost incurred: {formatInrCost(
-                STAGE_ORDER.reduce(
-                  (total, stage) => total + getStageCostInr(states[section.portfolio][stage], usdInrRate),
-                  0,
-                ),
-              )}
             </p>
             <button
               type="button"
@@ -3490,6 +3466,15 @@ export function RebalanceWorkflowSections({
             />
           ))}
         </div>
+        <p className="mt-4 text-right text-xs font-semibold text-slate-700">
+          Total cost incurred in last Auto-rebalance in INR: {formatInrCost(
+            lastAutoRebalanceCosts[section.portfolio] ??
+              STAGE_ORDER.reduce(
+                (total, stage) => total + getStageCostInr(states[section.portfolio][stage], usdInrRate),
+                0,
+              ),
+          )}
+        </p>
       </div>
     );
   };

@@ -63,6 +63,13 @@ type ActionEstimate = {
   amount: number | null;
 };
 
+type CurrentValueSnapshot = {
+  units: number | null;
+  currentValue: number | null;
+};
+
+type CurrentValueSnapshotMap = Map<string, CurrentValueSnapshot>;
+
 type ScoreMatrixEntry = {
   id: string;
   source: string;
@@ -131,7 +138,7 @@ export type SetupStockDetail = {
   exchange: string;
   market: SwingTradeMarket;
   currentUnits: string;
-  currentInvestment: string;
+  currentValue: string;
   action: ActionCategory;
 };
 
@@ -615,6 +622,69 @@ function getCurrentInvestmentAmount(row: CanonicalRow) {
   return Math.abs(currentUnits * price);
 }
 
+function indexCurrentValueSnapshot(
+  map: CurrentValueSnapshotMap,
+  key: string | null | undefined,
+  snapshot: CurrentValueSnapshot,
+) {
+  const normalizedKey = normalizeStockSymbol(key);
+  if (normalizedKey === "UNKNOWN") return;
+  map.set(normalizedKey, snapshot);
+}
+
+function buildCurrentValueSnapshotMap(
+  snapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null | undefined,
+  market: SwingTradeMarket,
+): CurrentValueSnapshotMap {
+  const map: CurrentValueSnapshotMap = new Map();
+  if (!snapshot) return map;
+
+  if (market === "india") {
+    const indiaSnapshot = snapshot as ZerodhaPortfolioSnapshotDetail;
+    indiaSnapshot.holdings.forEach((holding) => {
+      const value = {
+        units: holding.quantity,
+        currentValue: holding.market_value,
+      };
+      indexCurrentValueSnapshot(map, holding.tradingsymbol, value);
+      indexCurrentValueSnapshot(map, `${holding.exchange}:${holding.tradingsymbol}`, value);
+    });
+    return map;
+  }
+
+  const usSnapshot = snapshot as IndMoneyUsPortfolioSnapshotDetail;
+  usSnapshot.holdings.forEach((holding) => {
+    const value = {
+      units: holding.quantity,
+      currentValue: holding.current_value,
+    };
+    indexCurrentValueSnapshot(map, holding.symbol, value);
+    indexCurrentValueSnapshot(map, holding.company_name, value);
+  });
+  return map;
+}
+
+function getCurrentValueSnapshotForRow(
+  row: CanonicalRow,
+  snapshotMap?: CurrentValueSnapshotMap,
+) {
+  if (!snapshotMap?.size) return null;
+  const symbol = normalizeStockSymbol(row["Stock Symbol"] || row["Stock Name"]);
+  const exchangeSymbol = normalizeStockSymbol(row["Exchange Symbol"]);
+  return snapshotMap.get(symbol) ?? snapshotMap.get(exchangeSymbol) ?? null;
+}
+
+function getCurrentUnits(row: CanonicalRow, snapshotMap?: CurrentValueSnapshotMap) {
+  return getCurrentValueSnapshotForRow(row, snapshotMap)?.units ?? parseNumericCell(row["Current Units"]);
+}
+
+function getCurrentValueAmount(row: CanonicalRow, snapshotMap?: CurrentValueSnapshotMap) {
+  const snapshotValue = getCurrentValueSnapshotForRow(row, snapshotMap)?.currentValue;
+  return snapshotValue !== null && snapshotValue !== undefined
+    ? Math.abs(snapshotValue)
+    : getCurrentInvestmentAmount(row);
+}
+
 function getActionAmount(
   row: CanonicalRow,
   units: number | null,
@@ -635,15 +705,16 @@ function getActionAmount(
 function summarizeActionEstimate(
   rows: LlmBreakupRow[],
   action: ActionCategory,
+  snapshotMap?: CurrentValueSnapshotMap,
 ): ActionEstimate {
   const matchingRows = rows.filter(
     (row) => normalizeAction(row.cells[ACTION_HEADER] || "") === action,
   );
   const currentUnitValues = matchingRows
-    .map((row) => parseNumericCell(row.cells["Current Units"]))
+    .map((row) => getCurrentUnits(row.cells, snapshotMap))
     .filter((value): value is number => value !== null);
   const currentInvestmentValues = matchingRows
-    .map((row) => getCurrentInvestmentAmount(row.cells))
+    .map((row) => getCurrentValueAmount(row.cells, snapshotMap))
     .filter((value): value is number => value !== null);
   const unitValues = matchingRows
     .map((row) => getActionUnits(row.cells, action))
@@ -674,7 +745,8 @@ function formatCurrency(value: number | null, market: SwingTradeMarket) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: market === "us" ? "USD" : "INR",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: market === "us" ? 2 : 0,
+    maximumFractionDigits: market === "us" ? 2 : 0,
   }).format(value);
 }
 
@@ -1137,7 +1209,7 @@ function buildScoreMatrixDetail(
   };
 }
 
-function getFormattedCurrentInvestmentAmount(row: CanonicalRow, market: SwingTradeMarket) {
+function getFormattedCurrentValueAmount(row: CanonicalRow, market: SwingTradeMarket) {
   const explicitValue = normalizeWhitespace(row[CURRENT_INVESTMENT_AMOUNT_HEADER]);
   if (explicitValue) return explicitValue;
   return formatDisplayAmount(getCurrentInvestmentAmount(row), market);
@@ -1647,7 +1719,7 @@ export function getSetupStockGroups(
       exchange: stock.exchange,
       market,
       currentUnits: stock.representative["Current Units"] || "—",
-      currentInvestment: getFormattedCurrentInvestmentAmount(stock.representative, market),
+      currentValue: getFormattedCurrentValueAmount(stock.representative, market),
       action: stock.consensusAction,
     });
     groups.set(normalizedSetup, stockMap);
@@ -1758,8 +1830,10 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
 export function buildConsensusRows(
   runs: RunResponse[],
   market: SwingTradeMarket,
+  portfolioSnapshot?: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
 ): StockConsensus[] {
   const grouped = new Map<string, LlmBreakupRow[]>();
+  const currentValueSnapshots = buildCurrentValueSnapshotMap(portfolioSnapshot, market);
 
   runs.flatMap(parseRunRows).forEach((row) => {
     if (!Object.values(row.cells).some((value) => value.trim())) return;
@@ -1780,7 +1854,7 @@ export function buildConsensusRows(
       );
       const actionAverages = ACTION_CATEGORIES.reduce(
         (acc, action) => {
-          acc[action] = summarizeActionEstimate(rows, action);
+          acc[action] = summarizeActionEstimate(rows, action, currentValueSnapshots);
           return acc;
         },
         {} as Record<ActionCategory, ActionEstimate>,
@@ -1809,10 +1883,10 @@ export function buildConsensusRows(
       representative["Rationale Remarks"] = summarizeRationales(rows);
       const consensusEstimate = actionAverages[consensusAction];
       representative["Current Units"] = formatQuantity(
-        consensusEstimate.currentUnits ?? parseNumericCell(first["Current Units"]),
+        consensusEstimate.currentUnits ?? getCurrentUnits(first, currentValueSnapshots),
       );
       representative[CURRENT_INVESTMENT_AMOUNT_HEADER] = formatDisplayAmount(
-        consensusEstimate.currentInvestmentAmount ?? getCurrentInvestmentAmount(first),
+        consensusEstimate.currentInvestmentAmount ?? getCurrentValueAmount(first, currentValueSnapshots),
         market,
       );
       representative["Units to Sell/Buy"] = ACTION_ESTIMATE_CATEGORIES.has(
@@ -2200,7 +2274,7 @@ function ActionSummaryStockTile({
           <dd className="mt-1 text-sm font-medium text-slate-900">
             {formatDisplayAmount(
               estimate.currentInvestmentAmount ??
-                getCurrentInvestmentAmount(stock.representative),
+                getCurrentValueAmount(stock.representative),
               market,
             )}
           </dd>
@@ -2283,7 +2357,7 @@ function RebalanceCell({
     );
   }
   if (header === CURRENT_INVESTMENT_AMOUNT_HEADER) {
-    return getFormattedCurrentInvestmentAmount(row, market);
+    return getFormattedCurrentValueAmount(row, market);
   }
   if (header === ACTION_HEADER && preferActionTag) {
     const action = normalizeAction(row[header] || "");
@@ -2864,6 +2938,10 @@ function getLatestMatchingRuns(runs: RunResponse[], market: SwingTradeMarket) {
 
 export function DashboardFinalActionablesTables() {
   const [runs, setRuns] = useState<RunResponse[]>([]);
+  const [portfolioSnapshots, setPortfolioSnapshots] = useState<{
+    india: ZerodhaPortfolioSnapshotDetail | null;
+    us: IndMoneyUsPortfolioSnapshotDetail | null;
+  }>({ india: null, us: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -2871,7 +2949,16 @@ export function DashboardFinalActionablesTables() {
     setLoading(true);
     setError(null);
     try {
-      setRuns(await fetchAllFullRuns());
+      const [allRuns, zerodhaOverview, indmoneyOverview] = await Promise.all([
+        fetchAllFullRuns(),
+        apiService.zerodhaPortfolioOverview(),
+        apiService.indmoneyUsPortfolioOverview(),
+      ]);
+      setRuns(allRuns);
+      setPortfolioSnapshots({
+        india: zerodhaOverview.latest,
+        us: indmoneyOverview.latest,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load final actionables.");
     } finally {
@@ -2889,15 +2976,15 @@ export function DashboardFinalActionablesTables() {
 
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
   const actionRowsByMarket = useMemo(() => ({
-    india: buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india").map((stock) => ({
+    india: buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india).map((stock) => ({
       market: "india" as SwingTradeMarket,
       stock,
     })),
-    us: buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us").map((stock) => ({
+    us: buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us", portfolioSnapshots.us).map((stock) => ({
       market: "us" as SwingTradeMarket,
       stock,
     })),
-  }), [runs]);
+  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs]);
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
@@ -2981,7 +3068,7 @@ export function DashboardFinalActionablesTables() {
                                     {formatQuantity(estimate.currentUnits)}
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentInvestmentAmount(stock.representative), market)}
+                                    {formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentValueAmount(stock.representative), market)}
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                                     {showActionColumns ? formatQuantity(estimate.units) : "—"}
@@ -3209,8 +3296,8 @@ export function FinalActionablesConsole({
   }, [market, runs]);
 
   const consensus = useMemo(
-    () => buildConsensusRows(groupedRuns.runs, market),
-    [groupedRuns.runs, market],
+    () => buildConsensusRows(groupedRuns.runs, market, detailsData.portfolioSnapshot),
+    [detailsData.portfolioSnapshot, groupedRuns.runs, market],
   );
   const totalStocksConsolidated = consensus.length;
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
