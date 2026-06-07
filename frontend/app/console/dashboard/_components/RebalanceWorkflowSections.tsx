@@ -1,15 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type SVGProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import {
   AlertCircle,
   CheckCircle2,
-  Info,
   Loader2,
   Play,
-  SlidersHorizontal,
   X,
 } from "lucide-react";
 
@@ -108,6 +106,7 @@ const POLL_INTERVAL_MS = 3000;
 const MAX_RUN_POLLS = 160;
 const MAX_JOB_POLLS = 120;
 const WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
+const STAGE_LLM_SELECTION_STORAGE_KEY = "investor:dashboard-stage-llms:v1";
 
 const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",
@@ -463,6 +462,66 @@ function getLatestMatchingRebalanceRuns(
   );
 }
 
+
+function targetKey(target: ProviderModelTarget) {
+  return `${target.provider}::${target.model}`;
+}
+
+function parseTargetKey(key: string): ProviderModelTarget | null {
+  const [provider, model] = key.split("::");
+  return provider && model ? { provider, model } : null;
+}
+
+function getCompatibleTargets(providers: ProviderInfo[]) {
+  return providers.flatMap((provider) =>
+    provider.models
+      .filter((model) => provider.model_compatibility?.[model]?.compatible !== false)
+      .map((model) => ({ provider: provider.name, model })),
+  );
+}
+
+function readStageLlmSelection(stage: WorkflowStageKey) {
+  try {
+    const raw = window.localStorage.getItem(STAGE_LLM_SELECTION_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return Array.isArray(parsed?.[stage]) ? (parsed[stage] as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStageLlmSelection(stage: WorkflowStageKey, keys: string[]) {
+  try {
+    const raw = window.localStorage.getItem(STAGE_LLM_SELECTION_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    window.localStorage.setItem(
+      STAGE_LLM_SELECTION_STORAGE_KEY,
+      JSON.stringify({ ...parsed, [stage]: keys }),
+    );
+  } catch {
+    // Local storage is a convenience only; workflow defaults still apply.
+  }
+}
+
+function getDefaultStageTargets(stage: WorkflowStageKey, providers: ProviderInfo[]) {
+  if (stage === "swing" || stage === "rebalance") {
+    return getRunTargetsFromStoredMix(providers);
+  }
+
+  const gpt4oMiniTarget = getGpt4oMiniTarget(providers);
+  return gpt4oMiniTarget ? [gpt4oMiniTarget] : [];
+}
+
+function getSavedStageTargets(stage: WorkflowStageKey, providers: ProviderInfo[]) {
+  const compatibleKeys = new Set(getCompatibleTargets(providers).map(targetKey));
+  const savedTargets = readStageLlmSelection(stage)
+    .filter((key) => compatibleKeys.has(key))
+    .map(parseTargetKey)
+    .filter((target): target is ProviderModelTarget => Boolean(target));
+
+  return savedTargets.length > 0 ? savedTargets : getDefaultStageTargets(stage, providers);
+}
+
 function buildRunPayload({
   prompt,
   targets,
@@ -742,6 +801,84 @@ function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
   ];
 }
 
+
+function SelectInputsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 512 512"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M188 188V88h236v336H188V324"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="36"
+      />
+      <path
+        d="M88 256h300"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="36"
+      />
+      <path
+        d="M300 144l112 112-112 112"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="36"
+      />
+    </svg>
+  );
+}
+
+function LlmDetailsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M22 8c-5 0-9 4-9 9v1c-4 1-7 5-7 10 0 3 1 6 4 8-2 2-3 5-3 8 0 6 5 11 11 11h4V8Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="3"
+      />
+      <path
+        d="M42 8c5 0 9 4 9 9v1c4 1 7 5 7 10 0 3-1 6-4 8 2 2 3 5 3 8 0 6-5 11-11 11h-4V8Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="3"
+      />
+      <path
+        d="M22 18h-5m5 9h-7m7 9h-6m6 9h-5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="3"
+      />
+      <path
+        d="M42 18h5m-5 9h7m-7 9h6m-6 9h5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="3"
+      />
+      {["17,18", "15,27", "16,36", "17,45", "47,18", "49,27", "48,36", "47,45"].map((point) => {
+        const [cx, cy] = point.split(",");
+        return <circle key={point} cx={cx} cy={cy} r="2.5" fill="currentColor" />;
+      })}
+    </svg>
+  );
+}
+
 function WorkflowStageTile({
   stage,
   info,
@@ -787,53 +924,68 @@ function WorkflowStageTile({
       <span className="mb-2 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">
         Step {stageMeta.step}
       </span>
-      <div className="flex items-start gap-2 pr-7 text-sm font-semibold">
-        {isRunning ? (
-          <Loader2 className="size-4 animate-spin text-amber-600" />
-        ) : isQueued ? (
-          <Play className="size-4 text-sky-600" />
-        ) : info.state === "failed" ? (
-          <AlertCircle className="size-4 text-red-600" />
-        ) : isCompleted ? (
-          <CheckCircle2 className="size-4 text-emerald-600" />
-        ) : null}
-        {getStageLabel(stage, info.state)}
-        {onInfoClick ? (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(event) => {
-              event.stopPropagation();
-              onInfoClick();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
+      <div className="grid w-full grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2 text-sm font-semibold">
+        <div className="flex justify-start">
+          {onInputClick ? (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(event) => {
+                event.stopPropagation();
+                onInputClick();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onInputClick();
+                }
+              }}
+              className="inline-flex size-8 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 transition hover:border-blue-400 hover:bg-blue-100"
+              aria-label={`Select inputs for ${stageMeta.idle}`}
+              title="Select Inputs"
+            >
+              <SelectInputsIcon className="size-5" />
+            </span>
+          ) : null}
+        </div>
+        <div className="flex min-w-0 items-center justify-center gap-2 text-center">
+          {isRunning ? (
+            <Loader2 className="size-4 shrink-0 animate-spin text-amber-600" />
+          ) : isQueued ? (
+            <Play className="size-4 shrink-0 text-sky-600" />
+          ) : info.state === "failed" ? (
+            <AlertCircle className="size-4 shrink-0 text-red-600" />
+          ) : isCompleted ? (
+            <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+          ) : null}
+          <span className="truncate">{getStageLabel(stage, info.state)}</span>
+        </div>
+        <div className="flex justify-end">
+          {onInfoClick ? (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(event) => {
                 event.stopPropagation();
                 onInfoClick();
-              }
-            }}
-            className="inline-flex size-5 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100"
-            aria-label={`Show ${stageMeta.idle} LLM details`}
-            title="LLM models and expected cost"
-          >
-            <Info className="size-3" />
-          </span>
-        ) : null}
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onInfoClick();
+                }
+              }}
+              className="inline-flex size-8 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 transition hover:border-blue-400 hover:bg-blue-100"
+              aria-label={`Show ${stageMeta.idle} LLM details`}
+              title="LLM models and expected cost"
+            >
+              <LlmDetailsIcon className="size-5" />
+            </span>
+          ) : null}
+        </div>
       </div>
-      {onInputClick ? (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onInputClick();
-          }}
-          className="mt-3 inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
-        >
-          <SlidersHorizontal className="mr-1.5 size-3.5" />
-          Select Inputs
-        </button>
-      ) : null}
       <p className="mt-2 text-xs leading-5 text-slate-500">
         {stageMeta.tileDescription}
       </p>
@@ -1676,6 +1828,165 @@ function ZerodhaRebalanceFlowCard() {
   );
 }
 
+
+function StageLlmSelectorDialog({
+  open,
+  stage,
+  providers,
+  selectedKeys,
+  onToggle,
+  onSelectAll,
+  onClear,
+  onResetDefaults,
+  onClose,
+}: {
+  open: boolean;
+  stage: WorkflowStageKey | null;
+  providers: ProviderInfo[];
+  selectedKeys: Set<string>;
+  onToggle: (key: string) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+  onResetDefaults: () => void;
+  onClose: () => void;
+}) {
+  if (!open || !stage) return null;
+
+  const compatibleTargets = getCompatibleTargets(providers);
+  const selectedTargets = [...selectedKeys]
+    .map(parseTargetKey)
+    .filter((target): target is ProviderModelTarget => Boolean(target));
+  const details = describeTargets(selectedTargets, providers);
+  const singleSelect = stage === "threats" || stage === "technical";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6 backdrop-blur-sm">
+      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+              Select LLMs
+            </p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">
+              {getStageLabel(stage, "idle")}
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Choose the provider/model targets this dashboard stage should use.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close LLM selector"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+              {selectedKeys.size} selected
+            </span>
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+              Est. ₹{details.totalCostInr.toFixed(2)}
+            </span>
+            {!singleSelect ? (
+              <button
+                type="button"
+                onClick={onSelectAll}
+                className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Select all
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClear}
+              className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Unselect all
+            </button>
+            <button
+              type="button"
+              onClick={onResetDefaults}
+              className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Reset defaults
+            </button>
+          </div>
+
+          {providers.length === 0 ? (
+            <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              Loading provider models...
+            </p>
+          ) : compatibleTargets.length === 0 ? (
+            <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              No compatible provider models are available for this prompt.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {providers.map((provider) => {
+                const models = provider.models.filter(
+                  (model) => provider.model_compatibility?.[model]?.compatible !== false,
+                );
+                if (models.length === 0) return null;
+                return (
+                  <div key={provider.name} className="rounded-2xl border border-slate-200 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="font-semibold text-slate-950">{provider.name}</h4>
+                      <span className="text-xs text-slate-500">
+                        {provider.configured ? "Configured" : "Not configured"}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {models.map((model) => {
+                        const key = `${provider.name}::${model}`;
+                        const cost = provider.model_estimated_cost_inr?.[model];
+                        return (
+                          <label
+                            key={key}
+                            className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2 text-sm transition ${
+                              selectedKeys.has(key)
+                                ? "border-blue-300 bg-blue-50 text-blue-950"
+                                : "border-slate-200 hover:bg-slate-50"
+                            }`}
+                          >
+                            <input
+                              type={singleSelect ? "radio" : "checkbox"}
+                              name={`stage-llm-${stage}`}
+                              checked={selectedKeys.has(key)}
+                              onChange={() => onToggle(key)}
+                              className="mt-1"
+                            />
+                            <span className="min-w-0">
+                              <span className="block truncate font-semibold">{model}</span>
+                              <span className="text-xs text-slate-500">
+                                {typeof cost === "number" ? `Est. ₹${cost.toFixed(2)}` : "Cost unavailable"}
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end border-t border-slate-200 px-6 py-4">
+          <Button type="button" onClick={onClose} className="rounded-full bg-slate-950 text-white hover:bg-slate-800">
+            Done
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RebalanceWorkflowSections({
   onDashboardRefresh,
 }: {
@@ -1724,6 +2035,9 @@ export function RebalanceWorkflowSections({
   } | null>(null);
   const [inputCandidates, setInputCandidates] = useState<InputSelectionCandidate[]>([]);
   const [inputCandidatesLoading, setInputCandidatesLoading] = useState(false);
+  const [llmDialogStage, setLlmDialogStage] = useState<WorkflowStageKey | null>(null);
+  const [llmDialogProviders, setLlmDialogProviders] = useState<ProviderInfo[]>([]);
+  const [llmDialogSelectedKeys, setLlmDialogSelectedKeys] = useState<Set<string>>(new Set());
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
 
@@ -2287,6 +2601,9 @@ export function RebalanceWorkflowSections({
 
   const showStageLlmInfo = useCallback(async (stage: WorkflowStageKey) => {
     if (stage === "sync" || stage === "actionables") return;
+    setLlmDialogStage(stage);
+    setLlmDialogProviders([]);
+    setLlmDialogSelectedKeys(new Set());
     try {
       const providers = await apiService.getProviders({
         prompt: buildSwingTradePrompt(
@@ -2294,32 +2611,57 @@ export function RebalanceWorkflowSections({
           getSwingTradeDefaultInvestmentAmount("india"),
         ),
       });
-      const targets =
-        stage === "threats" || stage === "technical"
-          ? getGpt4oMiniTarget(providers)
-            ? [getGpt4oMiniTarget(providers)!]
-            : []
-          : getRunTargetsFromStoredMix(providers);
-      if (targets.length === 0) {
-        window.alert(
-          `No compatible LLM targets found for ${getStageLabel(stage, "idle")}. For Swing Scan and Rebalance, save models in "${AUTO_REBALANCE_MIX_NAME}".`,
-        );
-        return;
-      }
-      const details = describeTargets(targets, providers);
-      window.alert(
-        [
-          `${getStageLabel(stage, "idle")} will use:`,
-          "",
-          ...details.lines,
-          "",
-          `Expected cost: ₹${details.totalCostInr.toFixed(2)}`,
-        ].join("\n"),
-      );
+      const targets = getSavedStageTargets(stage, providers);
+      setLlmDialogProviders(providers);
+      setLlmDialogSelectedKeys(new Set(targets.map(targetKey)));
     } catch (error) {
+      setLlmDialogStage(null);
       window.alert(`Could not load LLM details: ${normalizeError(error)}`);
     }
   }, []);
+
+  const persistLlmDialogSelection = useCallback(
+    (nextKeys: Set<string>) => {
+      if (!llmDialogStage) return;
+      writeStageLlmSelection(llmDialogStage, [...nextKeys]);
+      setLlmDialogSelectedKeys(nextKeys);
+    },
+    [llmDialogStage],
+  );
+
+  const toggleLlmTarget = useCallback(
+    (key: string) => {
+      if (!llmDialogStage) return;
+      const singleSelect =
+        llmDialogStage === "threats" || llmDialogStage === "technical";
+      const next = singleSelect
+        ? new Set([key])
+        : new Set(llmDialogSelectedKeys);
+      if (!singleSelect) {
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+      }
+      persistLlmDialogSelection(next);
+    },
+    [llmDialogSelectedKeys, llmDialogStage, persistLlmDialogSelection],
+  );
+
+  const selectAllLlmTargets = useCallback(() => {
+    persistLlmDialogSelection(
+      new Set(getCompatibleTargets(llmDialogProviders).map(targetKey)),
+    );
+  }, [llmDialogProviders, persistLlmDialogSelection]);
+
+  const clearLlmTargets = useCallback(() => {
+    persistLlmDialogSelection(new Set());
+  }, [persistLlmDialogSelection]);
+
+  const resetDefaultLlmTargets = useCallback(() => {
+    if (!llmDialogStage) return;
+    persistLlmDialogSelection(
+      new Set(getDefaultStageTargets(llmDialogStage, llmDialogProviders).map(targetKey)),
+    );
+  }, [llmDialogProviders, llmDialogStage, persistLlmDialogSelection]);
 
   const navigateForStage = useCallback(
     (
@@ -2437,20 +2779,35 @@ export function RebalanceWorkflowSections({
                 ),
               })
             : [];
-        const modelMixTargets = needsModelMix
-          ? getRunTargetsFromStoredMix(providers)
+        const swingTargets = shouldRunCurrentStage("swing")
+          ? getSavedStageTargets("swing", providers)
           : [];
-        if (needsModelMix && modelMixTargets.length === 0) {
+        const rebalanceTargets = shouldRunCurrentStage("rebalance")
+          ? getSavedStageTargets("rebalance", providers)
+          : [];
+        if (shouldRunCurrentStage("swing") && swingTargets.length === 0) {
           throw new Error(
-            `No compatible targets found in "${AUTO_REBALANCE_MIX_NAME}". Open the model mix picker and add the exact LLMs you want the swing scan and rebalance stages to use; legacy "Auto rebalance Models Mix" is also accepted.`,
+            `No compatible targets found for Swing Scan. Open the stage LLM selector and choose the exact LLMs you want this stage to use.`,
           );
         }
-        const gpt4oMiniTarget = needsSingleModel
-          ? getGpt4oMiniTarget(providers)
-          : null;
-        if (needsSingleModel && !gpt4oMiniTarget)
+        if (shouldRunCurrentStage("rebalance") && rebalanceTargets.length === 0) {
           throw new Error(
-            `${GPT_4O_MINI_MODEL} is not available from a configured provider. This means the provider is not configured, the model is not listed for that provider, or the model compatibility check marked it unavailable.`,
+            `No compatible targets found for Rebalance. Open the stage LLM selector and choose the exact LLMs you want this stage to use.`,
+          );
+        }
+        const threatTargets = shouldRunCurrentStage("threats")
+          ? getSavedStageTargets("threats", providers)
+          : [];
+        const technicalTargets = shouldRunCurrentStage("technical")
+          ? getSavedStageTargets("technical", providers)
+          : [];
+        if (shouldRunCurrentStage("threats") && threatTargets.length === 0)
+          throw new Error(
+            `No compatible target is available for Threats & Guardrails. Open the stage LLM selector and choose one configured model.`,
+          );
+        if (shouldRunCurrentStage("technical") && technicalTargets.length === 0)
+          throw new Error(
+            `No compatible target is available for Technical Validation. Open the stage LLM selector and choose one configured model.`,
           );
 
         currentStage = "threats";
@@ -2458,8 +2815,8 @@ export function RebalanceWorkflowSections({
           markRunning(portfolio, "threats", { totalLlms: 1, completedLlms: 0 });
           const queuedThreat =
             portfolio === "zerodha"
-              ? await apiService.zerodhaRunThreats(gpt4oMiniTarget!)
-              : await apiService.indmoneyUsRunThreats(gpt4oMiniTarget!);
+              ? await apiService.zerodhaRunThreats(threatTargets[0])
+              : await apiService.indmoneyUsRunThreats(threatTargets[0]);
           updateStage(portfolio, "threats", { activeRunId: queuedThreat.job_id });
           const completedThreat = await waitForThreatCompletion(
             portfolio,
@@ -2486,7 +2843,7 @@ export function RebalanceWorkflowSections({
         currentStage = "swing";
         if (shouldRunCurrentStage("swing")) {
           markRunning(portfolio, "swing", {
-            totalLlms: modelMixTargets.length,
+            totalLlms: swingTargets.length,
             completedLlms: 0,
           });
           const swingInputSelection = selectedInputs[portfolio].swing;
@@ -2512,7 +2869,7 @@ export function RebalanceWorkflowSections({
                 market,
                 getSwingTradeDefaultInvestmentAmount(market),
               )}${threatAppendix}`,
-              targets: modelMixTargets,
+              targets: swingTargets,
               sheetName: getSwingTradeDefaultExportSheetName(market),
             }),
           );
@@ -2539,7 +2896,7 @@ export function RebalanceWorkflowSections({
         currentStage = "rebalance";
         if (shouldRunCurrentStage("rebalance")) {
           markRunning(portfolio, "rebalance", {
-            totalLlms: modelMixTargets.length,
+            totalLlms: rebalanceTargets.length,
             completedLlms: 0,
           });
           const [portfolioRes, threatsRes, runsRes] = await Promise.all([
@@ -2588,7 +2945,7 @@ export function RebalanceWorkflowSections({
             buildRunPayload({
               prompt:
                 `${buildRebalancePrompt(market)}\n\n---\n\n${inputBundle}`.trim(),
-              targets: modelMixTargets,
+              targets: rebalanceTargets,
               sheetName: getRebalanceDefaultExportSheetName(market),
             }),
           );
@@ -2645,7 +3002,7 @@ export function RebalanceWorkflowSections({
           const technicalRun = await apiService.createRun(
             buildRunPayload({
               prompt: buildTechnicalScanPrompt(consensus, market),
-              targets: [gpt4oMiniTarget!],
+              targets: [technicalTargets[0]],
             }),
           );
           const completedTechnicalRun = await waitForRunWithStageHandling(
@@ -2751,15 +3108,15 @@ export function RebalanceWorkflowSections({
     () => [
       {
         portfolio: "zerodha" as const,
-        title: "Run Zerodha Rebalance",
-        buttonLabel: "Run Zerodha Auto-Rebalance",
+        title: "Run Zerodha Auto-Rebalance",
+        buttonLabel: "Run",
         subtitle:
           "Queue the India sync, scans, rebalance, technical scan, and final actionable refresh.",
       },
       {
         portfolio: "indmoneyUs" as const,
-        title: "Run IndMoney Rebalance",
-        buttonLabel: "Run Indmoney Auto-Rebalance",
+        title: "Run Indmoney Auto-Rebalance",
+        buttonLabel: "Run",
         subtitle:
           "Use the latest INDmoney snapshot or paste a fresh screen before the US rebalance workflow.",
       },
@@ -2900,6 +3257,18 @@ export function RebalanceWorkflowSections({
       <section className="mt-6">
         <ZerodhaRebalanceFlowCard />
       </section>
+
+      <StageLlmSelectorDialog
+        open={Boolean(llmDialogStage)}
+        stage={llmDialogStage}
+        providers={llmDialogProviders}
+        selectedKeys={llmDialogSelectedKeys}
+        onToggle={toggleLlmTarget}
+        onSelectAll={selectAllLlmTargets}
+        onClear={clearLlmTargets}
+        onResetDefaults={resetDefaultLlmTargets}
+        onClose={() => setLlmDialogStage(null)}
+      />
 
       <InputSelectionDialog
         open={Boolean(inputDialog)}

@@ -29,9 +29,12 @@ import {
     HiOutlineCube,
     HiOutlineTrendingUp,
     HiOutlineUser,
+    HiOutlineCog,
+    HiOutlineLogout,
     HiOutlineChartBar,
     HiOutlineViewGrid,
 } from 'react-icons/hi';
+import type { User } from '@/hooks/useAuth';
 import { URLs } from '@/lib/urls';
 
 type NavigationItem = {
@@ -52,7 +55,9 @@ type NavigationEntry = NavigationItem | NavigationGroup;
 
 type SidebarNavigationProps = {
     pathname: string;
+    user?: User | null;
     userId?: number | null;
+    onLogout?: () => Promise<void>;
     onNavigate: () => void;
 };
 
@@ -143,6 +148,12 @@ const DEFAULT_NAVIGATION: NavigationEntry[] = [
         name: 'Profile',
         href: URLs.routes.profile.root(),
         icon: HiOutlineUser,
+    },
+    {
+        id: 'settings',
+        name: 'Settings',
+        href: URLs.routes.profile.preferences(),
+        icon: HiOutlineCog,
     },
 ];
 
@@ -451,7 +462,9 @@ function SortableNavigationRow({
 
 export function SidebarNavigation({
     pathname,
+    user,
     userId,
+    onLogout,
     onNavigate,
 }: SidebarNavigationProps) {
     const [isReordering, setIsReordering] = useState(false);
@@ -577,6 +590,33 @@ export function SidebarNavigation({
                     </div>
                 </SortableContext>
             </DndContext>
+
+            <div className="mx-3 mt-4 rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-600 to-purple-600 text-sm font-semibold text-white">
+                        {user?.full_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'}
+                    </div>
+                    <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-gray-900">
+                            {user?.full_name || user?.username || 'User'}
+                        </p>
+                        <p className="truncate text-xs text-gray-500">{user?.email}</p>
+                    </div>
+                </div>
+                {onLogout ? (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            onNavigate();
+                            void onLogout();
+                        }}
+                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 hover:text-gray-900"
+                    >
+                        <HiOutlineLogout className="h-4 w-4" />
+                        Sign out
+                    </button>
+                ) : null}
+            </div>
         </div>
     );
 }
