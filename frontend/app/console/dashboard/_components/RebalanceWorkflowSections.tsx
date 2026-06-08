@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
-import { AlertCircle, CheckCircle2, FileSpreadsheet, History, Loader2, Play, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, History, Loader2, Play, X } from "lucide-react";
 
 import {
   buildConsensusRows,
@@ -2327,6 +2327,7 @@ function InputSelectionDialog({
   onClose: () => void;
 }) {
   const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
   const allSelected =
     candidates.length > 0 &&
     candidates.every((candidate) => selectedIds.has(candidate.id));
@@ -2336,6 +2337,46 @@ function InputSelectionDialog({
   const selectedCount = candidates.filter((candidate) =>
     selectedIds.has(candidate.id),
   ).length;
+
+  const runGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        key: string;
+        runId: number | null;
+        title: string;
+        timestamp: string | null;
+        candidates: InputSelectionCandidate[];
+      }
+    >();
+
+    candidates.forEach((candidate) => {
+      const key = candidate.run ? `run:${candidate.run.id}` : candidate.id;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.candidates.push(candidate);
+        if (
+          candidate.timestamp &&
+          (!existing.timestamp || parseTimestampMs(candidate.timestamp) > parseTimestampMs(existing.timestamp))
+        ) {
+          existing.timestamp = candidate.timestamp;
+        }
+        return;
+      }
+
+      groups.set(key, {
+        key,
+        runId: candidate.run?.id ?? null,
+        title: candidate.run ? `Run #${candidate.run.id}` : candidate.jobNo,
+        timestamp: candidate.timestamp,
+        candidates: [candidate],
+      });
+    });
+
+    return Array.from(groups.values()).sort(
+      (left, right) => parseTimestampMs(right.timestamp) - parseTimestampMs(left.timestamp),
+    );
+  }, [candidates]);
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -2363,6 +2404,15 @@ function InputSelectionDialog({
       "Use the upcoming Rebalance Scan output plus the latest completed rebalance output so Technical Scan validates the freshest proposed adds, trims, exits, and holds.",
     actionables:
       "Use the upcoming Technical Scan output plus the latest completed Rebalance Scan and Technical Scan outputs so final actionables can combine portfolio rebalance intent with current chart validation.",
+  };
+
+  const toggleRunGroup = (groupCandidates: InputSelectionCandidate[]) => {
+    const groupAllSelected = groupCandidates.every((candidate) => selectedIds.has(candidate.id));
+    groupCandidates.forEach((candidate) => {
+      if (groupAllSelected ? selectedIds.has(candidate.id) : !selectedIds.has(candidate.id)) {
+        onToggle(candidate.id);
+      }
+    });
   };
 
   return (
@@ -2395,103 +2445,143 @@ function InputSelectionDialog({
           <span>
             {selectedCount} output{selectedCount === 1 ? "" : "s"} selected.
           </span>
-          <button
-            type="button"
-            onClick={onResetDefaults}
-            className="rounded-full border border-slate-300 bg-white px-5 py-2 text-xs font-extrabold uppercase tracking-[0.18em] text-slate-900 shadow-sm hover:bg-slate-50"
-          >
-            Reset defaults
-          </button>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.18em] text-blue-950">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allSelected}
+                onChange={onToggleAll}
+                aria-label="Select or deselect all inputs"
+              />
+              Select all
+            </label>
+            <button
+              type="button"
+              onClick={onResetDefaults}
+              className="rounded-full border border-slate-300 bg-white px-5 py-2 text-xs font-extrabold uppercase tracking-[0.18em] text-slate-900 shadow-sm hover:bg-slate-50"
+            >
+              Reset defaults
+            </button>
+          </div>
         </div>
-        <div className="mx-6 max-h-[58vh] overflow-auto rounded-2xl border border-slate-200">
+        <div className="mx-6 max-h-[58vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
           {loading ? (
-            <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 p-8 text-sm text-slate-500">
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> Loading eligible
               outputs…
             </div>
           ) : candidates.length === 0 ? (
-            <div className="rounded-2xl border border-slate-200 p-8 text-sm text-slate-500">
+            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
               No eligible outputs are available yet.
             </div>
           ) : (
-            <table className="w-full min-w-[860px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs font-extrabold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="w-12 px-3 py-3">
-                    <input
-                      ref={selectAllRef}
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={onToggleAll}
-                      aria-label="Select or deselect all inputs"
-                    />
-                  </th>
-                  <th className="px-3 py-3">Job / Run No</th>
-                  <th className="px-3 py-3">Timestamp</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="px-3 py-3">LLM / Source</th>
-                  <th className="px-3 py-3">Cost (INR)</th>
-                  <th className="px-3 py-3">Error</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {candidates.map((candidate) => (
-                  <tr
-                    key={candidate.id}
-                    className={
-                      candidate.source === "next" ? "bg-blue-50/60" : "bg-white"
-                    }
-                  >
-                    <td className="px-3 py-3 align-top">
+            <div className="space-y-3">
+              {runGroups.map((group) => {
+                const groupSelectedCount = group.candidates.filter((candidate) => selectedIds.has(candidate.id)).length;
+                const groupAllSelected = groupSelectedCount === group.candidates.length;
+                const expanded = expandedRunKeys.has(group.key);
+                const statusSummary = Array.from(new Set(group.candidates.map((candidate) => candidate.status || "unknown"))).join(", ");
+                const totalCostUsd = group.candidates.reduce(
+                  (total, candidate) => total + (typeof candidate.costUsd === "number" ? candidate.costUsd : 0),
+                  0,
+                );
+
+                return (
+                  <div key={group.key} className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex flex-wrap items-center gap-3 px-4 py-3">
                       <input
                         type="checkbox"
-                        checked={selectedIds.has(candidate.id)}
-                        onChange={() => onToggle(candidate.id)}
-                        aria-label={`Select ${candidate.label}`}
+                        checked={groupAllSelected}
+                        onChange={() => toggleRunGroup(group.candidates)}
+                        aria-label={`Select all LLM jobs in ${group.title}`}
                       />
-                    </td>
-                    <td className="px-3 py-3 align-top font-semibold text-slate-900">
-                      {candidate.run ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedRunKeys((current) => {
+                            const next = new Set(current);
+                            if (next.has(group.key)) next.delete(group.key);
+                            else next.add(group.key);
+                            return next;
+                          })
+                        }
+                        className="flex items-center gap-2 rounded-full px-2 py-1 text-left font-extrabold text-slate-950 hover:bg-slate-100"
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? "Collapse" : "Expand"} ${group.title} LLM job details`}
+                      >
+                        {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                      </button>
+                      {group.runId ? (
                         <Link
-                          href={URLs.routes.console.runDetail(candidate.run.id)}
-                          className="underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          href={URLs.routes.console.runDetail(group.runId)}
+                          className="font-extrabold text-slate-950 underline-offset-4 hover:text-blue-700 hover:underline"
                         >
-                          {candidate.jobNo}
+                          {group.title}
                         </Link>
                       ) : (
-                        candidate.jobNo
+                        <span className="font-extrabold text-slate-950">{group.title}</span>
                       )}
-                    </td>
-                    <td className="px-3 py-3 align-top text-slate-600">
-                      {candidate.timestamp
-                        ? formatTimestamp(candidate.timestamp)
-                        : "Reserved for next output"}
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <span
-                        className={cn(
-                          "rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1",
-                          getInputStatusBadgeClass(candidate.status),
-                        )}
-                      >
-                        {candidate.status}
+                      <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800">
+                        {groupSelectedCount}/{group.candidates.length} LLM job{group.candidates.length === 1 ? "" : "s"} selected
                       </span>
-                    </td>
-                    <td className="px-3 py-3 align-top text-slate-700">
-                      {candidate.label}
-                    </td>
-                    <td className="px-3 py-3 align-top text-slate-600">
-                      {typeof candidate.costUsd === "number"
-                        ? `₹${(candidate.costUsd * usdInrRate).toFixed(2)}`
-                        : "n/a"}
-                    </td>
-                    <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">
-                      {candidate.error || "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <span className="text-sm text-slate-500">
+                        {group.timestamp ? formatTimestamp(group.timestamp) : "Reserved for next output"}
+                      </span>
+                      <span className="text-sm capitalize text-slate-500">{statusSummary}</span>
+                      <span className="ml-auto text-sm font-semibold text-slate-600">
+                        {totalCostUsd > 0 ? `₹${(totalCostUsd * usdInrRate).toFixed(2)}` : "Cost n/a"}
+                      </span>
+                    </div>
+                    {expanded ? (
+                      <div className="border-t border-slate-100 px-4 pb-4 pt-2">
+                        <table className="w-full min-w-[760px] text-left text-sm">
+                          <thead className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                            <tr>
+                              <th className="w-10 py-2 pr-3">Select</th>
+                              <th className="px-3 py-2">Job</th>
+                              <th className="px-3 py-2">Timestamp</th>
+                              <th className="px-3 py-2">Status</th>
+                              <th className="px-3 py-2">LLM / Source</th>
+                              <th className="px-3 py-2">Cost (INR)</th>
+                              <th className="px-3 py-2">Error</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {group.candidates.map((candidate) => (
+                              <tr key={candidate.id} className={candidate.source === "next" ? "bg-blue-50/60" : "bg-white"}>
+                                <td className="py-3 pr-3 align-top">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedIds.has(candidate.id)}
+                                    onChange={() => onToggle(candidate.id)}
+                                    aria-label={`Select ${candidate.label}`}
+                                  />
+                                </td>
+                                <td className="px-3 py-3 align-top font-semibold text-slate-900">{candidate.jobNo}</td>
+                                <td className="px-3 py-3 align-top text-slate-600">
+                                  {candidate.timestamp ? formatTimestamp(candidate.timestamp) : "Reserved for next output"}
+                                </td>
+                                <td className="px-3 py-3 align-top">
+                                  <span className={cn("rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1", getInputStatusBadgeClass(candidate.status))}>
+                                    {candidate.status}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
+                                <td className="px-3 py-3 align-top text-slate-600">
+                                  {typeof candidate.costUsd === "number" ? `₹${(candidate.costUsd * usdInrRate).toFixed(2)}` : "n/a"}
+                                </td>
+                                <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">{candidate.error || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
         <div className="flex justify-end px-6 py-5">
