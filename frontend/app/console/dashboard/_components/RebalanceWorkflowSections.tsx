@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  Fragment,
   type SVGProps,
   useCallback,
   useEffect,
@@ -114,6 +115,7 @@ type StageInfo = {
   completedLlms?: number | null;
   totalLlms?: number | null;
   recommendedStocks?: number | null;
+  rebalanceInputs?: number | null;
 };
 type ZerodhaBasketOrderKind = "Market" | "Limit" | "After market";
 type ZerodhaBasketSubmission = {
@@ -577,6 +579,25 @@ const ZERODHA_BASKET_ACTIONS = new Set<ActionCategory>([
   "Trim",
   "Add more",
   "Buy New",
+]);
+const ZERODHA_BASKET_SECTION_ORDER: ActionCategory[] = [
+  "Sell All",
+  "Trim",
+  "Buy New",
+  "Add more",
+];
+const ZERODHA_BASKET_SECTION_LABELS: Partial<Record<ActionCategory, string>> = {
+  "Sell All": "Sell All",
+  Trim: "Trim",
+  "Buy New": "Buy New",
+  "Add more": "Buy More",
+  Hold: "Hold",
+};
+const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
+  "threats",
+  "swing",
+  "rebalance",
+  "technical",
 ]);
 const ZERODHA_ORDER_KINDS: ZerodhaBasketOrderKind[] = [
   "Market",
@@ -1241,10 +1262,37 @@ function formatLlmCompletion(info: StageInfo) {
   return `${info.completedLlms ?? 0}/${info.totalLlms}`;
 }
 
-function formatLlmRun(info: StageInfo) {
-  return (
-    [info.provider, info.model].filter(Boolean).join(" / ") || "Not available"
-  );
+function formatRecommendedStockProgress(info: StageInfo) {
+  const expected = info.totalLlms ? info.totalLlms * 5 : null;
+  const recommended = info.recommendedStocks ?? null;
+  if (recommended === null && expected === null) return "n/a";
+  return `${recommended ?? 0}${expected !== null ? `/${expected}` : ""}`;
+}
+
+function formatBriefTileError(error?: string | null) {
+  if (!error?.trim()) return "None";
+  const trimmed = error.trim().replace(/\s+/g, " ");
+  return trimmed.length > 96 ? `${trimmed.slice(0, 93)}…` : trimmed;
+}
+
+function getLlmStageTileRows(info: StageInfo, now: number) {
+  return [
+    { label: "Last scan", value: formatTimestamp(info.completedAt ?? info.startedAt) },
+    { label: "LLMs completed", value: formatLlmCompletion(info) },
+    { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
+    { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
+    { label: "Cost incurred", value: formatInrCost(info.costInr) },
+    { label: "Error", value: formatBriefTileError(info.error) },
+  ];
+}
+
+function getActionablesStageTileRows(info: StageInfo) {
+  return [
+    { label: "Last update", value: formatTimestamp(info.completedAt ?? info.startedAt) },
+    { label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" },
+    { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
+    { label: "Error", value: formatBriefTileError(info.error) },
+  ];
 }
 
 
@@ -1457,63 +1505,14 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
   );
 }
 
-function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo) {
+function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo, now: number) {
   if (stage === "sync") {
     return [{ label: "Latest sync", value: formatTimestamp(info.completedAt) }];
   }
-  if (stage === "swing") {
-    return [
-      {
-        label: "Last swing job",
-        value: info.lastRunId ? `#${info.lastRunId}` : "Not available",
-      },
-      { label: "Timestamp", value: formatTimestamp(info.completedAt) },
-      { label: "LLMs completed", value: formatLlmCompletion(info) },
-      {
-        label: "Stocks recommended",
-        value: info.recommendedStocks?.toString() ?? "n/a",
-      },
-      { label: "Cost incurred", value: formatInrCost(info.costInr) },
-    ];
+  if (LLM_STAGE_TILE_KEYS.has(stage)) {
+    return getLlmStageTileRows(info, now);
   }
-  if (stage === "threats") {
-    return [
-      {
-        label: "Latest guardrail scan",
-        value: formatTimestamp(info.completedAt),
-      },
-      { label: "LLM run", value: formatLlmRun(info) },
-      { label: "Cost incurred", value: formatInrCost(info.costInr) },
-    ];
-  }
-  if (stage === "rebalance") {
-    return [
-      {
-        label: "Last rebalance job",
-        value: info.lastRunId ? `#${info.lastRunId}` : "Not available",
-      },
-      { label: "Timestamp", value: formatTimestamp(info.completedAt) },
-      { label: "LLMs completed", value: formatLlmCompletion(info) },
-      {
-        label: "Stocks recommended",
-        value: info.recommendedStocks?.toString() ?? "n/a",
-      },
-      { label: "Cost incurred", value: formatInrCost(info.costInr) },
-    ];
-  }
-  if (stage === "technical") {
-    return [
-      { label: "Latest validation", value: formatTimestamp(info.completedAt) },
-      { label: "LLM run", value: formatLlmRun(info) },
-      { label: "Cost incurred", value: formatInrCost(info.costInr) },
-    ];
-  }
-  return [
-    {
-      label: "Latest actionables refresh",
-      value: formatTimestamp(info.completedAt),
-    },
-  ];
+  return getActionablesStageTileRows(info);
 }
 
 function getStageOutputRoute(
@@ -1790,7 +1789,7 @@ function WorkflowStageTile({
 
       <div className="mt-6 w-full space-y-2 text-sm leading-5 text-slate-600">
         {info.state === "idle" || info.state === "queued" ? (
-          getIdleStageRows(stage, info).map((row) => (
+          getIdleStageRows(stage, info, now).map((row) => (
             <p key={row.label}>
               <span className="font-semibold text-slate-600">
                 {row.label}:
@@ -1799,86 +1798,19 @@ function WorkflowStageTile({
             </p>
           ))
         ) : (
-          <>
-            {info.lastRunId ? (
-              <p>
-                <span className="font-semibold text-slate-600">
-                  Job Number:
-                </span>{" "}
-                #{info.lastRunId}
-              </p>
-            ) : null}
-            {info.completedAt ? (
-              <p>
-                <span className="font-semibold text-slate-600">
-                  Timestamp:
-                </span>{" "}
-                {formatTimestamp(info.completedAt)}
-              </p>
-            ) : null}
-            {formatDuration(info.startedAt, info.endedAt, now) ? (
-              <p>
-                <span className="font-semibold text-slate-600">Duration:</span>{" "}
-                {formatDuration(info.startedAt, info.endedAt, now)}
-              </p>
-            ) : null}
-            {info.totalLlms ? (
-              <p>
-                <span className="font-semibold text-slate-600">
-                  LLMs completed:
-                </span>{" "}
-                {info.completedLlms ?? 0}/{info.totalLlms}
-              </p>
-            ) : null}
-            {info.recommendedStocks ? (
-              <p>
-                <span className="font-semibold text-slate-600">
-                  Stocks recommended:
-                </span>{" "}
-                {info.recommendedStocks}
-              </p>
-            ) : null}
-            {stage !== "sync" &&
-            (info.provider ||
-              info.model ||
-              info.runStatus ||
-              info.exportStatus ||
-              info.costUsd ||
-              info.error) ? (
-              <>
-                <p>
-                  <span className="font-semibold text-slate-600">
-                    LLM run:
-                  </span>{" "}
-                  {[info.provider, info.model].filter(Boolean).join(" / ") ||
-                    "LLM details not available yet"}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-600">
-                    Run status:
-                  </span>{" "}
-                  {info.runStatus ?? "Waiting for job status"}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-600">
-                    Sheets export:
-                  </span>{" "}
-                  {info.exportStatus ?? "No sheet export status yet"}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-600">
-                    Cost incurred:
-                  </span>{" "}
-                  {formatInrCost(info.costInr)}
-                </p>
-                {info.error ? (
-                  <p className="text-red-700">
-                    <span className="font-extrabold">Error:</span> {info.error}
-                  </p>
-                ) : null}
-              </>
-            ) : null}
-          </>
+          (LLM_STAGE_TILE_KEYS.has(stage)
+            ? getLlmStageTileRows(info, now)
+            : stage === "actionables"
+              ? getActionablesStageTileRows(info)
+              : getIdleStageRows(stage, info, now)
+          ).map((row) => (
+            <p key={row.label} className={row.label === "Error" && row.value !== "None" ? "text-red-700" : undefined}>
+              <span className="font-semibold text-slate-600">
+                {row.label}:
+              </span>{" "}
+              {row.value}
+            </p>
+          ))
         )}
       </div>
 
@@ -1990,6 +1922,7 @@ function ZerodhaBasketPreviewDialog({
   onClose,
   onToggle,
   onToggleAll,
+  onToggleSection,
   onOrderKindChange,
   onPlaceOrder,
   placing,
@@ -2003,6 +1936,7 @@ function ZerodhaBasketPreviewDialog({
   onClose: () => void;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
+  onToggleSection: (action: ActionCategory) => void;
   onOrderKindChange: (id: string, orderKind: ZerodhaBasketOrderKind) => void;
   onPlaceOrder: () => void;
   placing: boolean;
@@ -2017,8 +1951,13 @@ function ZerodhaBasketPreviewDialog({
   const selectedSellAmount = selectedOrders
     .filter((order) => order.side === "SELL")
     .reduce((sum, order) => sum + (order.amount ?? 0), 0);
-  const allSelected = orders.length > 0 && selectedIds.size === orders.length;
+  const allSelected = orders.length > 0 && orders.every((order) => selectedIds.has(order.id));
   const marketStatus = getIndiaMarketStatus();
+  const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
+    action,
+    label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
+    orders: orders.filter((order) => order.action === action),
+  })).filter((group) => group.orders.length > 0);
 
   const renderPlaceOrderButton = () => (
     <Button
@@ -2043,7 +1982,7 @@ function ZerodhaBasketPreviewDialog({
               Zerodha India Place Order Basket
             </h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All, Trim, Add more, and Buy New actionables are pre-selected. Review the basket here, then open a Kite order tray to confirm and place the selected orders from Zerodha.
+              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, then open a Kite order tray to confirm and place the selected orders from Zerodha.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -2101,13 +2040,16 @@ function ZerodhaBasketPreviewDialog({
                   <thead>
                     <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                       <th className="px-4 py-3 font-semibold">
-                        <input
-                          type="checkbox"
-                          checked={allSelected}
-                          onChange={onToggleAll}
-                          aria-label="Select or deselect all Zerodha basket orders"
-                          className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        />
+                        <label className="inline-flex items-center gap-2 whitespace-nowrap">
+                          <input
+                            type="checkbox"
+                            checked={allSelected}
+                            onChange={onToggleAll}
+                            aria-label="Select or deselect all Zerodha basket orders"
+                            className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span>All Stocks</span>
+                        </label>
                       </th>
                       <th className="px-4 py-3 font-semibold">Stock</th>
                       <th className="px-4 py-3 font-semibold">Action</th>
@@ -2120,53 +2062,76 @@ function ZerodhaBasketPreviewDialog({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {orders.map((order) => (
-                      <tr key={order.id} className="bg-white">
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(order.id)}
-                            onChange={() => onToggle(order.id)}
-                            aria-label={`Select ${order.exchange} ${order.symbol}`}
-                            className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          />
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950">
-                          <span className="mr-2 text-xs font-semibold text-slate-500">{order.exchange}</span>
-                          {order.symbol}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">{order.action}</td>
-                        <td className="px-4 py-3">
-                          <span className={cn(
-                            "rounded-full px-3 py-1 text-xs font-bold",
-                            order.side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
-                          )}>
-                            {order.side}
-                          </span>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketQuantity(order.units)}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price)}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount)}</td>
-                        <td className="px-4 py-3">
-                          <select
-                            value={order.orderKind}
-                            onChange={(event) => onOrderKindChange(order.id, event.target.value as ZerodhaBasketOrderKind)}
-                            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                          >
-                            {ZERODHA_ORDER_KINDS.map((orderKind) => (
-                              <option key={orderKind} value={orderKind}>{orderKind}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
-                          {submission?.orders.some((submittedOrder) => submittedOrder.id === order.id) ? (
-                            <span className="text-blue-700">Sent to Kite tray</span>
-                          ) : (
-                            <span>Pending</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {sectionGroups.map((group) => {
+                      const sectionSelected = group.orders.filter((order) => selectedIds.has(order.id)).length;
+                      const sectionAllSelected = sectionSelected === group.orders.length;
+                      return (
+                        <Fragment key={group.action}>
+                          <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
+                            <td className="px-4 py-3" colSpan={9}>
+                              <label className="inline-flex items-center gap-3 text-sm font-black">
+                                <input
+                                  type="checkbox"
+                                  checked={sectionAllSelected}
+                                  onChange={() => onToggleSection(group.action)}
+                                  aria-label={`Select or deselect ${group.label} Zerodha basket orders`}
+                                  className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span>{group.label}</span>
+                                <span className="text-xs font-semibold text-slate-500">{sectionSelected}/{group.orders.length} selected</span>
+                              </label>
+                            </td>
+                          </tr>
+                          {group.orders.map((order) => (
+                            <tr key={order.id} className="bg-white">
+                              <td className="px-4 py-3">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIds.has(order.id)}
+                                  onChange={() => onToggle(order.id)}
+                                  aria-label={`Select ${order.exchange} ${order.symbol}`}
+                                  className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950">
+                                <span className="mr-2 text-xs font-semibold text-slate-500">{order.exchange}</span>
+                                {order.symbol}
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{order.action}</td>
+                              <td className="px-4 py-3">
+                                <span className={cn(
+                                  "rounded-full px-3 py-1 text-xs font-bold",
+                                  order.side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
+                                )}>
+                                  {order.side}
+                                </span>
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketQuantity(order.units)}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price)}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount)}</td>
+                              <td className="px-4 py-3">
+                                <select
+                                  value={order.orderKind}
+                                  onChange={(event) => onOrderKindChange(order.id, event.target.value as ZerodhaBasketOrderKind)}
+                                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                >
+                                  {ZERODHA_ORDER_KINDS.map((orderKind) => (
+                                    <option key={orderKind} value={orderKind}>{orderKind}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
+                                {submission?.orders.some((submittedOrder) => submittedOrder.id === order.id) ? (
+                                  <span className="text-blue-700">Sent to Kite tray</span>
+                                ) : (
+                                  <span>Pending</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -3790,10 +3755,29 @@ export function RebalanceWorkflowSections({
 
   const toggleAllZerodhaBasketOrders = useCallback(() => {
     setSelectedZerodhaBasketIds((current) => {
-      if (current.size === zerodhaBasketOrders.length) return new Set();
+      const allOrdersSelected = zerodhaBasketOrders.every((order) => current.has(order.id));
+      if (allOrdersSelected) return new Set();
       return new Set(zerodhaBasketOrders.map((order) => order.id));
     });
   }, [zerodhaBasketOrders]);
+
+  const toggleZerodhaBasketSection = useCallback(
+    (action: ActionCategory) => {
+      const sectionOrderIds = zerodhaBasketOrders
+        .filter((order) => order.action === action)
+        .map((order) => order.id);
+      setSelectedZerodhaBasketIds((current) => {
+        const next = new Set(current);
+        const sectionAllSelected = sectionOrderIds.every((id) => next.has(id));
+        sectionOrderIds.forEach((id) => {
+          if (sectionAllSelected) next.delete(id);
+          else next.add(id);
+        });
+        return next;
+      });
+    },
+    [zerodhaBasketOrders],
+  );
 
   const updateZerodhaBasketOrderKind = useCallback(
     (id: string, orderKind: ZerodhaBasketOrderKind) => {
@@ -3908,6 +3892,9 @@ export function RebalanceWorkflowSections({
           .map((run) => (run ? getLatestRunTimestamp(run) : null))
           .filter(Boolean)
           .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0];
+        const latestActionableStocks = latestRebalanceRuns.length
+          ? buildConsensusRows(latestRebalanceRuns, market)
+          : [];
 
         const overview =
           portfolio === "zerodha" ? zerodhaOverview : indmoneyOverview;
@@ -3957,6 +3944,8 @@ export function RebalanceWorkflowSections({
             runStatus: latestActionablesTimestamp
               ? "derived from latest rebalance/technical scan"
               : null,
+            rebalanceInputs: latestRebalanceRuns.length || null,
+            recommendedStocks: latestActionableStocks.length || null,
           },
         };
         return acc;
@@ -4139,14 +4128,27 @@ export function RebalanceWorkflowSections({
           const run = await apiService.getRun(runId);
           if (cancelled) return;
           const status = (run.status || "").toLowerCase();
+          const market: SwingTradeMarket =
+            runningPortfolio === "zerodha" ? "india" : "us";
           const runSummary = withInrCost(
-            { ...summarizeRun(run), ...getRunProgress(run), lastRunId: run.id },
+            {
+              ...summarizeRun(run),
+              ...getRunProgress(run),
+              lastRunId: run.id,
+              recommendedStocks:
+                stage === "swing" || stage === "technical"
+                  ? countUniqueStocksFromRun(run)
+                  : stage === "rebalance"
+                    ? buildConsensusRows(
+                        getLatestMatchingRebalanceRuns([run], market),
+                        market,
+                      ).length || null
+                    : undefined,
+            },
             usdInrRate,
           );
           updateStage(runningPortfolio, stage, runSummary);
           if (status === "completed" || status === "partial") {
-            const market: SwingTradeMarket =
-              runningPortfolio === "zerodha" ? "india" : "us";
             markCompleted(runningPortfolio, stage, {
               ...runSummary,
               recommendedStocks:
@@ -5180,6 +5182,7 @@ export function RebalanceWorkflowSections({
             ...summarizeRun(completedTechnicalRun),
             ...getRunProgress(completedTechnicalRun),
             lastRunId: completedTechnicalRun.id,
+            recommendedStocks: countUniqueStocksFromRun(completedTechnicalRun),
           });
         } else {
           completeSkippedStage(
@@ -5193,10 +5196,21 @@ export function RebalanceWorkflowSections({
 
         currentStage = "actionables";
         if (shouldRunCurrentStage("actionables")) {
-          markRunning(portfolio, "actionables");
+          const rebalanceInputCount = generatedRebalanceRun
+            ? 1
+            : selectedInputs[portfolio].actionables.size;
+          const actionableStockCount = generatedRebalanceRun
+            ? buildConsensusRows([generatedRebalanceRun], market).length || null
+            : null;
+          markRunning(portfolio, "actionables", {
+            rebalanceInputs: rebalanceInputCount || null,
+            recommendedStocks: actionableStockCount,
+          });
           await onDashboardRefresh();
           markCompleted(portfolio, "actionables", {
             runStatus: "fresh data loaded",
+            rebalanceInputs: rebalanceInputCount || null,
+            recommendedStocks: actionableStockCount,
           });
         } else {
           completeSkippedStage(
@@ -5713,6 +5727,7 @@ export function RebalanceWorkflowSections({
         onClose={() => setZerodhaBasketOpen(false)}
         onToggle={toggleZerodhaBasketOrder}
         onToggleAll={toggleAllZerodhaBasketOrders}
+        onToggleSection={toggleZerodhaBasketSection}
         onOrderKindChange={updateZerodhaBasketOrderKind}
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
         placing={zerodhaBasketPlacing}
