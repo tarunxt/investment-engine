@@ -81,7 +81,7 @@ type ConsensusBreakupEntry = {
   row: LlmBreakupRow | null;
 };
 
-type ActionEstimate = {
+export type ActionEstimate = {
   currentUnits: number | null;
   currentInvestmentAmount: number | null;
   units: number | null;
@@ -151,7 +151,7 @@ type ScoreMatrixContext = {
   bearishMeanUnits: number | null;
 };
 
-type ScoreMatrixDetail = {
+export type ScoreMatrixDetail = {
   stockKey: string;
   stockSymbol: string;
   stockName: string;
@@ -250,7 +250,7 @@ export type StockConsensus = {
   breakupEntries: ConsensusBreakupEntry[];
 };
 
-type TechnicalScanResult = {
+export type TechnicalScanResult = {
   stockSymbol: string;
   exchangeSymbol: string;
   primarySetup: string;
@@ -266,7 +266,7 @@ type TechnicalScanResult = {
   createdAt: string;
 };
 
-type TechnicalScanMap = Record<string, TechnicalScanResult>;
+export type TechnicalScanMap = Record<string, TechnicalScanResult>;
 
 type StockDetailsData = {
   portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null;
@@ -4967,7 +4967,7 @@ function ActionablesCalculationsModal({
 
 
 
-type DashboardActionRow = {
+export type DashboardActionRow = {
   id: string;
   market: SwingTradeMarket;
   stock: StockConsensus;
@@ -5143,7 +5143,7 @@ function buildFormulaActionEstimate(
   };
 }
 
-function buildDashboardActionRows(
+export function buildDashboardActionRows(
   stocks: StockConsensus[],
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,
