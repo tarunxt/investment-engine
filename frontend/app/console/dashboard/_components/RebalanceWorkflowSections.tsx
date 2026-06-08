@@ -15,11 +15,14 @@ import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, 
 
 import {
   buildConsensusRows,
+  buildDashboardActionRows,
+  buildTechnicalScanMap,
   buildTechnicalScanPrompt,
   type ActionCategory,
   extractRebalanceInputFingerprint,
   fetchAllFullRuns,
   isCompletedRebalanceRun,
+  type DashboardActionRow,
   type StockConsensus,
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
@@ -789,23 +792,25 @@ function getZerodhaBasketExchange(
 }
 
 function buildZerodhaBasketPreviewOrders(
-  stocks: StockConsensus[],
+  rows: DashboardActionRow[],
   snapshot?: ZerodhaPortfolioSnapshotDetail | null,
 ): ZerodhaBasketPreviewOrder[] {
   const holdingExchangeBySymbol = buildZerodhaHoldingExchangeMap(snapshot);
 
-  return stocks
-    .filter((stock) => ZERODHA_BASKET_ACTIONS.has(stock.consensusAction))
-    .map((stock) => {
-      const estimate = stock.actionAverages[stock.consensusAction];
+  return rows
+    .filter((row) => ZERODHA_BASKET_ACTIONS.has(row.formulaAction))
+    .map((row) => {
+      const { stock } = row;
+      const action = row.formulaAction;
+      const estimate = row.formulaEstimate;
       const units = estimate.units;
       const amount = estimate.amount;
-      const side: "BUY" | "SELL" = stock.consensusAction === "Sell All" || stock.consensusAction === "Trim" ? "SELL" : "BUY";
+      const side: "BUY" | "SELL" = action === "Sell All" || action === "Trim" ? "SELL" : "BUY";
       return {
-        id: `zerodha:${stock.key}`,
+        id: `zerodha:${row.id}`,
         exchange: getZerodhaBasketExchange(stock, side, holdingExchangeBySymbol),
         symbol: normalizeZerodhaBasketSymbol(stock.symbol) || stock.symbol,
-        action: stock.consensusAction,
+        action,
         side,
         units,
         price: getBasketPrice(stock, amount, units),
@@ -3732,7 +3737,9 @@ export function RebalanceWorkflowSections({
         "india",
         overview.latest,
       );
-      const orders = buildZerodhaBasketPreviewOrders(stocks, overview.latest);
+      const technicalScans = buildTechnicalScanMap(runs);
+      const actionRows = buildDashboardActionRows(stocks, "india", technicalScans);
+      const orders = buildZerodhaBasketPreviewOrders(actionRows, overview.latest);
       setZerodhaBasketOrders(orders);
       setSelectedZerodhaBasketIds(new Set(orders.map((order) => order.id)));
     } catch (error) {
