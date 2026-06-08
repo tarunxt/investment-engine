@@ -359,6 +359,10 @@ Formatting Rules:
 - Before writing the final table, internally build the complete current-holding symbol checklist from the Latest Portfolio Snapshot and verify every symbol appears exactly once in the output table.
 - Rank rows by action priority: Sell All / Trim first, then Buy New / Add, then Hold.
 - Keep rationale concise but meaningful.
+- Put the action label only in Action; put the signed numeric unit delta only in Units Change; never swap these two columns.
+- Current Units, Units Change, Final Units, Units to Buy, Price Per Unit, Total Buy Amount, Upside Horizon, Weeks, confidence, and rationale-score cells must be numeric-only.
+- Entry Range must contain only the trade entry price/range (example: 145-148), not the setup narrative.
+- Technical Setup must contain the chart/setup narrative or label, not the entry price range.
 - Upside Horizon (% return) must be numeric percent value only (example: 12.5).
 - Weeks must be a numeric average of the expected target-achievement range (example: for 6-8 weeks, write 7).
 - Mention key reason clearly: breakout, weak momentum, better opportunity, sector tailwind, earnings catalyst, overextension, support breach, consolidation, etc.
