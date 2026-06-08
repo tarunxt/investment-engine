@@ -643,6 +643,24 @@ function RunJobLink({
   );
 }
 
+
+function getInputStatusBadgeClass(status?: string | null) {
+  const normalized = (status || "").toLowerCase();
+  if (["reserved", "queued", "pending"].includes(normalized)) {
+    return "bg-blue-50 text-blue-700 ring-blue-200";
+  }
+  if (normalized === "partial") {
+    return "bg-amber-50 text-amber-700 ring-amber-200";
+  }
+  if (normalized === "completed" || normalized === "synced" || normalized === "parsed") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  }
+  if (normalized === "failed" || normalized === "error") {
+    return "bg-red-50 text-red-700 ring-red-200";
+  }
+  return "bg-slate-100 text-slate-700 ring-slate-200";
+}
+
 function normalizeAction(value: string): ActionCategory | null {
   const action = value
     .toLowerCase()
@@ -4036,7 +4054,7 @@ function buildActionablesCalculationRows(
 
     return sourceRows.map((source) => {
       const jobRunValue = source.isConsolidated
-        ? ""
+        ? source.llmName
         : source.runId
           ? <RunJobLink runId={source.runId}>{source.jobRun}</RunJobLink>
           : source.jobRun;
@@ -4047,7 +4065,7 @@ function buildActionablesCalculationRows(
       };
       const sortValues: Record<string, string | number> = {
         "Stock Info": stockLabel,
-        "Job / Run No (Timestamp)": source.isConsolidated ? "" : source.jobRun,
+        "Job / Run No (Timestamp)": source.isConsolidated ? source.llmName : source.jobRun,
         LLMs: source.isConsolidated ? "" : source.llmName,
       };
 
@@ -4403,7 +4421,7 @@ function ActionablesInputSelectionDialog({
                     </td>
                     <td className="px-3 py-3 align-top text-slate-600">{candidate.timestamp ? formatDateTime(candidate.timestamp) : "—"}</td>
                     <td className="px-3 py-3 align-top">
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{candidate.status}</span>
+                      <span className={cn("rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1", getInputStatusBadgeClass(candidate.status))}>{candidate.status}</span>
                     </td>
                     <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
                     <td className="px-3 py-3 align-top text-slate-600">

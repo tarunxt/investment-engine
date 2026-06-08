@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
-import { AlertCircle, CheckCircle2, FileSpreadsheet, Loader2, Play, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, FileSpreadsheet, History, Loader2, Play, X } from "lucide-react";
 
 import {
   buildConsensusRows,
@@ -81,6 +81,18 @@ type InputSelectionCandidate = {
   run?: RunResponse;
   jobId?: number;
   content?: string | null;
+};
+type StageLlmHistoryEntry = {
+  id: string;
+  runId: number;
+  jobId: number;
+  timestamp: string | null;
+  provider: string;
+  model: string;
+  runtime: string | null;
+  costUsd: number | null;
+  status: ReturnType<typeof classifyRunOutputJob>;
+  rawStatus: string;
 };
 type StageInfo = {
   state: StageState;
@@ -364,6 +376,23 @@ function getStageClasses(state: StageState) {
   if (state === "failed")
     return "border-red-300 bg-red-50 text-red-950 shadow-red-100 ring-1 ring-red-100";
   return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
+}
+
+function getInputStatusBadgeClass(status?: string | null) {
+  const normalized = (status || "").toLowerCase();
+  if (["reserved", "queued", "pending"].includes(normalized)) {
+    return "bg-blue-50 text-blue-700 ring-blue-200";
+  }
+  if (normalized === "partial") {
+    return "bg-amber-50 text-amber-700 ring-amber-200";
+  }
+  if (normalized === "completed" || normalized === "synced" || normalized === "parsed") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  }
+  if (normalized === "failed" || normalized === "error") {
+    return "bg-red-50 text-red-700 ring-red-200";
+  }
+  return "bg-slate-100 text-slate-700 ring-slate-200";
 }
 
 function getStageTileLabel(stage: WorkflowStageKey) {
@@ -1011,8 +1040,12 @@ function isCompletedTechnicalScanRun(
   run: RunResponse,
   market: SwingTradeMarket,
 ) {
-  if ((run.status || "").toLowerCase() !== "completed") return false;
   if (!/##\s*Technical Scan Input Bundle/i.test(run.prompt)) return false;
+  const hasUsableJob = (run.run_jobs ?? []).some((link) => {
+    const job = link.job;
+    return isUsableStageJob(job) && Boolean(job?.response?.trim());
+  });
+  if (!isUsableStageJob(run) && !hasUsableJob) return false;
   return market === "us"
     ? /Market:\s*US equities/i.test(run.prompt)
     : /Market:\s*India equities/i.test(run.prompt);
@@ -1191,6 +1224,52 @@ function getRunCostUsd(run: RunResponse) {
     (total, link) => total + (link.job?.estimated_cost ?? 0),
     0,
   );
+}
+
+
+function isRunForStageHistory(
+  run: RunResponse,
+  stage: WorkflowStageKey,
+  portfolio: WorkflowPortfolio,
+) {
+  const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
+  const prompt = run.prompt || "";
+  if (stage === "swing") return isRunInSwingTradeMarket(prompt, market);
+  if (stage === "rebalance") return isCompletedRebalanceRun(run, market);
+  if (stage === "technical") return isCompletedTechnicalScanRun(run, market);
+  if (stage === "threats") {
+    const marker = portfolio === "zerodha" ? "[ZERODHA_THREATS]" : "[INDMONEY_US_THREATS]";
+    return prompt.includes(marker) || /Threat Scan Flow/i.test(prompt);
+  }
+  return false;
+}
+
+function buildStageLlmHistoryEntries(
+  runs: RunResponse[],
+  stage: WorkflowStageKey,
+  portfolio: WorkflowPortfolio,
+): StageLlmHistoryEntry[] {
+  return runs
+    .filter((run) => isRunForStageHistory(run, stage, portfolio))
+    .flatMap((run) =>
+      (run.run_jobs ?? []).flatMap((link) => {
+        const job = link.job;
+        if (!job) return [];
+        return [{
+          id: `${run.id}:${job.id}`,
+          runId: run.id,
+          jobId: job.id,
+          timestamp: job.updated_at ?? job.created_at ?? run.updated_at ?? run.created_at ?? null,
+          provider: job.provider,
+          model: job.model,
+          runtime: getJobDuration(job),
+          costUsd: typeof job.estimated_cost === "number" ? job.estimated_cost : null,
+          status: classifyRunOutputJob(job),
+          rawStatus: job.status || run.status || "unknown",
+        }];
+      }),
+    )
+    .sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
 }
 
 function getRunOutputStatusClass(status: ReturnType<typeof classifyRunOutputJob>) {
@@ -2349,7 +2428,12 @@ function InputSelectionDialog({
                         : "Reserved for next output"}
                     </td>
                     <td className="px-3 py-3 align-top">
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1",
+                          getInputStatusBadgeClass(candidate.status),
+                        )}
+                      >
                         {candidate.status}
                       </span>
                     </td>
@@ -2998,6 +3082,7 @@ function ZerodhaRebalanceFlowCard() {
 function StageLlmSelectorDialog({
   open,
   stage,
+  portfolio,
   providers,
   selectedKeys,
   onToggle,
@@ -3009,6 +3094,7 @@ function StageLlmSelectorDialog({
 }: {
   open: boolean;
   stage: WorkflowStageKey | null;
+  portfolio: WorkflowPortfolio | null;
   providers: ProviderInfo[];
   selectedKeys: Set<string>;
   onToggle: (key: string) => void;
@@ -3022,6 +3108,37 @@ function StageLlmSelectorDialog({
     readSavedModelMixes(),
   );
   const [selectedMixId, setSelectedMixId] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyEntries, setHistoryEntries] = useState<StageLlmHistoryEntry[]>([]);
+  const [historyKey, setHistoryKey] = useState("");
+  const usdInrRate = useUsdInrRate();
+  const currentHistoryKey = stage && portfolio ? `${portfolio}:${stage}` : "";
+  const activeHistoryOpen = historyOpen && historyKey === currentHistoryKey;
+
+  const loadHistory = useCallback(async () => {
+    if (!stage || !portfolio || !currentHistoryKey) return;
+    if (historyKey === currentHistoryKey) {
+      setHistoryOpen((current) => !current);
+      if (historyEntries.length > 0) return;
+    } else {
+      setHistoryKey(currentHistoryKey);
+      setHistoryEntries([]);
+      setHistoryError(null);
+      setHistoryOpen(true);
+    }
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const runs = await fetchAllFullRuns();
+      setHistoryEntries(buildStageLlmHistoryEntries(runs, stage, portfolio).slice(0, 60));
+    } catch (error) {
+      setHistoryError(normalizeError(error));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [currentHistoryKey, historyEntries.length, historyKey, portfolio, stage]);
 
   const persistSavedMixes = useCallback((mixes: SavedModelMix[]) => {
     setSavedMixes(mixes);
@@ -3144,17 +3261,78 @@ function StageLlmSelectorDialog({
               Choose the provider/model targets this dashboard stage should use.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close LLM selector"
-          >
-            <X className="size-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={loadHistory}
+              className={cn(
+                "rounded-full p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-700",
+                activeHistoryOpen ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200" : "",
+              )}
+              aria-label="Show LLM run history for this stage"
+              title="LLM run history"
+            >
+              <History className="size-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setHistoryOpen(false);
+                onClose();
+              }}
+              className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              aria-label="Close LLM selector"
+            >
+              <X className="size-5" />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5">
+          {activeHistoryOpen ? (
+            <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-extrabold uppercase tracking-[0.16em] text-blue-900">LLM run history</h4>
+                  <p className="mt-1 text-xs text-slate-600">Click any LLM tile to open that job on the run details page.</p>
+                </div>
+                {historyLoading ? <Loader2 className="size-4 animate-spin text-blue-700" /> : null}
+              </div>
+              {historyError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{historyError}</div>
+              ) : historyLoading && historyEntries.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">Loading LLM history…</div>
+              ) : historyEntries.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">No prior LLM jobs were found for this stage.</div>
+              ) : (
+                <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                  {historyEntries.map((entry) => (
+                    <Link
+                      key={entry.id}
+                      href={`${URLs.routes.console.runDetail(entry.runId)}#llm-output-job-${entry.jobId}`}
+                      className="rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-slate-500">Run #{entry.runId} / Job #{entry.jobId}</p>
+                          <p className="mt-1 truncate text-sm font-bold text-slate-950">{entry.provider}/{entry.model}</p>
+                        </div>
+                        <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-bold capitalize", getRunOutputStatusClass(entry.status))}>
+                          {getRunOutputStatusLabel(entry.status)}
+                        </span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                        <span>{entry.timestamp ? formatTimestamp(entry.timestamp) : "No timestamp"}</span>
+                        <span>Runtime: {entry.runtime ?? "n/a"}</span>
+                        <span>Cost: {formatInrCostFromUsd(entry.costUsd, usdInrRate)}</span>
+                        <span>Status: {entry.rawStatus}</span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
           <LlmModelSelectionPanel
             providers={providers}
             selectedKeys={selectedKeys}
@@ -3347,6 +3525,9 @@ export function RebalanceWorkflowSections({
   >([]);
   const [inputCandidatesLoading, setInputCandidatesLoading] = useState(false);
   const [llmDialogStage, setLlmDialogStage] = useState<WorkflowStageKey | null>(
+    null,
+  );
+  const [llmDialogPortfolio, setLlmDialogPortfolio] = useState<WorkflowPortfolio | null>(
     null,
   );
   const [llmDialogProviders, setLlmDialogProviders] = useState<ProviderInfo[]>(
@@ -4177,9 +4358,10 @@ export function RebalanceWorkflowSections({
     [updateStage],
   );
 
-  const showStageLlmInfo = useCallback(async (stage: WorkflowStageKey) => {
+  const showStageLlmInfo = useCallback(async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
     if (stage === "sync" || stage === "actionables") return;
     setLlmDialogStage(stage);
+    setLlmDialogPortfolio(portfolio);
     setLlmDialogProviders([]);
     setLlmDialogSelectedKeys(new Set());
     try {
@@ -4194,6 +4376,7 @@ export function RebalanceWorkflowSections({
       setLlmDialogSelectedKeys(new Set(targets.map(targetKey)));
     } catch (error) {
       setLlmDialogStage(null);
+      setLlmDialogPortfolio(null);
       window.alert(`Could not load LLM details: ${normalizeError(error)}`);
     }
   }, []);
@@ -5252,7 +5435,7 @@ export function RebalanceWorkflowSections({
               }
               onInfoClick={
                 stage !== "sync" && stage !== "actionables"
-                  ? () => void showStageLlmInfo(stage)
+                  ? () => void showStageLlmInfo(section.portfolio, stage)
                   : undefined
               }
               onInputClick={
@@ -5337,6 +5520,7 @@ export function RebalanceWorkflowSections({
       <StageLlmSelectorDialog
         open={Boolean(llmDialogStage)}
         stage={llmDialogStage}
+        portfolio={llmDialogPortfolio}
         providers={llmDialogProviders}
         selectedKeys={llmDialogSelectedKeys}
         onToggle={toggleLlmTarget}
@@ -5344,7 +5528,10 @@ export function RebalanceWorkflowSections({
         onClear={clearLlmTargets}
         onResetDefaults={resetDefaultLlmTargets}
         onReplaceSelection={persistLlmDialogSelection}
-        onClose={() => setLlmDialogStage(null)}
+        onClose={() => {
+          setLlmDialogStage(null);
+          setLlmDialogPortfolio(null);
+        }}
       />
 
       <InputSelectionDialog
