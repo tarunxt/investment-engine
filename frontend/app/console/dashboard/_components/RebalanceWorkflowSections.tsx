@@ -734,7 +734,44 @@ function formatBasketCurrency(value: number | null) {
   }).format(value);
 }
 
-function buildZerodhaBasketPreviewOrders(stocks: StockConsensus[]): ZerodhaBasketPreviewOrder[] {
+function normalizeZerodhaBasketSymbol(value?: string | null) {
+  return (value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^(?:NSE|BSE):/, "")
+    .replace(/\.(?:NS|BO|NSE|BSE)$/i, "")
+    .trim();
+}
+
+function buildZerodhaHoldingExchangeMap(snapshot?: ZerodhaPortfolioSnapshotDetail | null) {
+  const map = new Map<string, string>();
+  snapshot?.holdings.forEach((holding) => {
+    const symbol = normalizeZerodhaBasketSymbol(holding.tradingsymbol);
+    const exchange = holding.exchange?.trim().toUpperCase();
+    if (symbol && exchange) map.set(symbol, exchange);
+  });
+  return map;
+}
+
+function getZerodhaBasketExchange(
+  stock: StockConsensus,
+  side: "BUY" | "SELL",
+  holdingExchangeBySymbol: Map<string, string>,
+) {
+  const symbol = normalizeZerodhaBasketSymbol(stock.symbol);
+  const holdingExchange = symbol ? holdingExchangeBySymbol.get(symbol) : null;
+  if (side === "SELL" && holdingExchange) return holdingExchange;
+
+  const rawExchange = stock.exchange || stock.representative["Exchange Symbol"]?.split(/\s+/)[0] || "NSE";
+  return rawExchange.trim().toUpperCase() || "NSE";
+}
+
+function buildZerodhaBasketPreviewOrders(
+  stocks: StockConsensus[],
+  snapshot?: ZerodhaPortfolioSnapshotDetail | null,
+): ZerodhaBasketPreviewOrder[] {
+  const holdingExchangeBySymbol = buildZerodhaHoldingExchangeMap(snapshot);
+
   return stocks
     .filter((stock) => ZERODHA_BASKET_ACTIONS.has(stock.consensusAction))
     .map((stock) => {
@@ -744,8 +781,8 @@ function buildZerodhaBasketPreviewOrders(stocks: StockConsensus[]): ZerodhaBaske
       const side: "BUY" | "SELL" = stock.consensusAction === "Sell All" || stock.consensusAction === "Trim" ? "SELL" : "BUY";
       return {
         id: `zerodha:${stock.key}`,
-        exchange: stock.exchange || stock.representative["Exchange Symbol"]?.split(/\s+/)[0] || "NSE",
-        symbol: stock.symbol,
+        exchange: getZerodhaBasketExchange(stock, side, holdingExchangeBySymbol),
+        symbol: normalizeZerodhaBasketSymbol(stock.symbol) || stock.symbol,
         action: stock.consensusAction,
         side,
         units,
@@ -3624,7 +3661,7 @@ export function RebalanceWorkflowSections({
         "india",
         overview.latest,
       );
-      const orders = buildZerodhaBasketPreviewOrders(stocks);
+      const orders = buildZerodhaBasketPreviewOrders(stocks, overview.latest);
       setZerodhaBasketOrders(orders);
       setSelectedZerodhaBasketIds(new Set(orders.map((order) => order.id)));
     } catch (error) {
