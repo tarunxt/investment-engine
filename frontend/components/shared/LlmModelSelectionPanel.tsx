@@ -24,6 +24,8 @@ interface LlmModelSelectionPanelProps {
     providerName: string,
     model: string,
   ) => number | undefined;
+  costSummaryLabel?: string;
+  costSummaryValue?: string;
 }
 
 function getModelKey(providerName: string, model: string) {
@@ -59,6 +61,8 @@ export function LlmModelSelectionPanel({
   onClear,
   onToggleProvider,
   getEstimatedCostInr,
+  costSummaryLabel = "Est",
+  costSummaryValue,
 }: LlmModelSelectionPanelProps) {
   const totalModelCount = providers.reduce(
     (total, provider) => total + provider.models.length,
@@ -102,7 +106,9 @@ export function LlmModelSelectionPanel({
             {selectedKeys.size} / {totalModelCount}
           </span>
           <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
-            Est: ₹{selectedEstimatedCostInr.toFixed(2)}
+            {costSummaryLabel}: {
+              costSummaryValue ?? `₹${selectedEstimatedCostInr.toFixed(2)}`
+            }
           </span>
           {showBulkActions && canBulkSelect ? (
             <button
