@@ -82,6 +82,8 @@ type InputSelectionCandidate = {
   jobId?: number;
   content?: string | null;
 };
+type RunOutputJobStatus = "completed" | "partial" | "failed" | "other";
+
 type StageLlmHistoryEntry = {
   id: string;
   runId: number;
@@ -91,7 +93,7 @@ type StageLlmHistoryEntry = {
   model: string;
   runtime: string | null;
   costUsd: number | null;
-  status: ReturnType<typeof classifyRunOutputJob>;
+  status: RunOutputJobStatus;
   rawStatus: string;
 };
 type StageInfo = {
@@ -1154,7 +1156,7 @@ function getRunDuration(run: RunResponse) {
 
 function classifyRunOutputJob(
   job: NonNullable<RunResponse["run_jobs"]>[number]["job"],
-) {
+): RunOutputJobStatus {
   const status = (job?.status || "").toLowerCase();
   const issueText = `${job?.error_message || ""}
 ${job?.response || ""}`.toLowerCase();
@@ -1272,14 +1274,14 @@ function buildStageLlmHistoryEntries(
     .sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
 }
 
-function getRunOutputStatusClass(status: ReturnType<typeof classifyRunOutputJob>) {
+function getRunOutputStatusClass(status: RunOutputJobStatus) {
   if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "partial") return "border-sky-200 bg-sky-50 text-sky-700";
   if (status === "failed") return "border-red-200 bg-red-50 text-red-700";
   return "border-slate-200 bg-slate-50 text-slate-600";
 }
 
-function getRunOutputStatusLabel(status: ReturnType<typeof classifyRunOutputJob>) {
+function getRunOutputStatusLabel(status: RunOutputJobStatus) {
   if (status === "completed") return "Completed";
   if (status === "partial") return "Partial";
   if (status === "failed") return "Failed";
