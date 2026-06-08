@@ -124,6 +124,11 @@ type DetailedRationaleScoreRow = {
   denominatorWeight?: number;
 };
 
+type ActionablesCalculationFocusTarget = {
+  stockKey: string;
+  header: ActionablesCalculationHeader;
+};
+
 type ActionablesCalculationRowGroup = {
   stockKey: string;
   stock: StockConsensus;
@@ -149,6 +154,7 @@ type ScoreMatrixContext = {
 type ScoreMatrixDetail = {
   stockKey: string;
   stockSymbol: string;
+  stockName: string;
   stockExchange: string;
   currentUnits: number | null;
   modeAction: ActionCategory | null;
@@ -402,7 +408,7 @@ function TechnicalSetupLink({
     return (
       <button
         type="button"
-        className={cn("text-left underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500", className)}
+        className={cn("cursor-pointer text-left underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500", className)}
         onClick={(event) => {
           event.stopPropagation();
           onSetupClick(setupGroup);
@@ -416,7 +422,7 @@ function TechnicalSetupLink({
   return (
     <Link
       href={getTechnicalSetupsHref(setup)}
-      className={cn("underline-offset-4 transition hover:text-blue-700 hover:underline", className)}
+      className={cn("cursor-pointer underline-offset-4 transition hover:text-blue-700 hover:underline", className)}
       onClick={stopRowToggle}
     >
       {label}
@@ -635,7 +641,7 @@ function RunJobLink({
   return (
     <Link
       href={URLs.routes.console.runDetail(runId)}
-      className={cn("underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500", className)}
+      className={cn("cursor-pointer underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500", className)}
       onClick={stopRowToggle}
     >
       {children}
@@ -1015,7 +1021,7 @@ function ScoreMatrixButton({
         onOpenDetail(detail);
       }}
       className={cn(
-        "rounded px-1.5 py-0.5 transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500",
+        "cursor-pointer rounded px-1.5 py-0.5 transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500",
         className,
       )}
       aria-label={`Open consolidated score matrix for ${detail.stockSymbol}`}
@@ -1407,6 +1413,7 @@ function buildScoreMatrixDetail(
   return {
     stockKey: stock.key,
     stockSymbol: stock.symbol,
+    stockName: stock.representative["Stock Name"] || stock.symbol,
     stockExchange: stock.exchange,
     currentUnits,
     modeAction,
@@ -2611,7 +2618,7 @@ function ConsensusBreakupButton({
           event.stopPropagation();
           setOpen(true);
         }}
-        className="rounded px-1.5 py-0.5 font-semibold text-blue-700 underline underline-offset-2 transition hover:bg-blue-50 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="cursor-pointer rounded px-1.5 py-0.5 font-semibold text-blue-700 underline underline-offset-2 transition hover:bg-blue-50 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
         aria-label={`Show ${stock.symbol} LLM recommendation breakup`}
         title={`Show ${stock.symbol} LLM recommendation breakup`}
       >
@@ -2664,7 +2671,7 @@ function ConsensusBreakupButton({
                               event.stopPropagation();
                               setOpen(false);
                             }}
-                            className="block truncate text-base font-bold text-slate-900 underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="block cursor-pointer truncate text-base font-bold text-slate-900 underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
                             title={`Open ${entry.meta.provider || "Unknown provider"} ${entry.meta.model || "Unknown model"} output`}
                           >
                             {index + 1}. {entry.meta.provider || "Unknown provider"} {entry.meta.model || "Unknown model"}
@@ -2723,7 +2730,7 @@ function StockDetailsButton({
           event.stopPropagation();
           setOpen(true);
         }}
-        className="mr-2 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="mr-2 inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         aria-label={`Open ${stock.symbol} captured details`}
         title={`Open ${stock.symbol} captured details`}
       >
@@ -3180,7 +3187,7 @@ function ScoreMatrixSection({
                   {row.isCalculated && row.action ? (
                     <button
                       type="button"
-                      className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       onClick={() => onOpenDetail(detail)}
                     >
                       <FinalActionTag action={row.action} />
@@ -3216,13 +3223,21 @@ function DetailedRationaleScoreSection({
   denominatorDraft,
   onMultiplierChange,
   onDenominatorChange,
+  onFocusCalculation,
 }: {
   detail: ScoreMatrixDetail;
   multiplierDrafts?: Record<string, string>;
   denominatorDraft?: string;
   onMultiplierChange?: (rowId: string, value: string) => void;
   onDenominatorChange?: (value: string) => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
+  const openCalculationColumn = (row: DetailedRationaleScoreRow) => {
+    const header = getDetailedRationaleCalculationHeader(row);
+    if (!header) return;
+    onFocusCalculation?.({ stockKey: detail.stockKey, header });
+  };
+
   return (
     <section className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
@@ -3244,9 +3259,29 @@ function DetailedRationaleScoreSection({
           <tbody className="divide-y divide-slate-100">
             {detail.detailedRationaleRows.map((row) => (
               <tr key={row.id}>
-                <td className="min-w-[24rem] px-4 py-2 text-slate-900">{row.parameter}</td>
+                <td className="min-w-[24rem] px-4 py-2 text-slate-900">
+                  {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded px-1 py-0.5 text-left underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onClick={() => openCalculationColumn(row)}
+                      title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
+                    >
+                      {row.parameter}
+                    </button>
+                  ) : row.parameter}
+                </td>
                 <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
-                  {formatScoreValue(row.score)}
+                  {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded px-1.5 py-0.5 font-semibold underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onClick={() => openCalculationColumn(row)}
+                      title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
+                    >
+                      {formatScoreValue(row.score)}
+                    </button>
+                  ) : formatScoreValue(row.score)}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
                   {onMultiplierChange ? (
@@ -3385,9 +3420,11 @@ function ScoreReferenceTables() {
 function ScoreMatrixModal({
   detail,
   onClose,
+  onFocusCalculation,
 }: {
   detail: ScoreMatrixDetail | null;
   onClose: () => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   const [editState, setEditState] = useState<{
     stockKey: string;
@@ -3438,6 +3475,10 @@ function ScoreMatrixModal({
             <h2 id="score-matrix-modal-title" className="mt-1 text-xl font-bold text-slate-950">
               Final Action Rule
             </h2>
+            <div className="mt-2 flex flex-wrap items-baseline gap-2 text-slate-950">
+              <span className="text-2xl font-extrabold tracking-tight">{editedDetail.stockSymbol}</span>
+              <span className="text-lg font-bold text-slate-800">{editedDetail.stockName}</span>
+            </div>
             <p className="mt-1 text-sm text-slate-500">
               {editedDetail.stockExchange || "Unknown exchange"} · {editedDetail.stockSymbol} · calculated score {formatActionScore(editedDetail.detailedRationaleFinalScore)} maps to{" "}
               <FinalActionTag action={editedDetail.calculatedAction} />
@@ -3474,6 +3515,7 @@ function ScoreMatrixModal({
               denominatorDraft: value,
               ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
             }))}
+            onFocusCalculation={onFocusCalculation}
           />
 
           <ScoreReferenceTables />
@@ -3936,6 +3978,21 @@ function getActionablesCalculationColumnLabel(header: string) {
   return header;
 }
 
+function getDetailedRationaleCalculationHeader(row: DetailedRationaleScoreRow): ActionablesCalculationHeader | null {
+  const rowHeaderMap: Record<string, ActionablesCalculationHeader> = {
+    cruxx: "Score Rationale Cruxx",
+    "technical-short": "Score Rationale Technical Setup Short Term 1–3 Months",
+    "technical-medium": "Score Rationale - Technical Setup (Medium Term)",
+    "technical-long": "Score Rationale - Technical Setup (Long Term)",
+    "fundamentals-short": "Score Rationale - Fundamentals Short Term",
+    "fundamentals-medium-long": "Score Rationale - Fundamentals Medium/Long Term",
+    "technical-scan-confidence": "Confidence Score",
+    "action-mean-mode": ACTION_HEADER,
+  };
+
+  return rowHeaderMap[row.id] ?? null;
+}
+
 function buildSummaryRowCells(
   stock: StockConsensus,
   detail: ScoreMatrixDetail,
@@ -4076,7 +4133,7 @@ function buildActionablesCalculationRows(
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 onClick={() => onMatrixOpen?.(source.detail!)}
               >
                 <FinalActionTag action={source.detail.calculatedAction} />
@@ -4274,6 +4331,7 @@ function ActionablesFormulaModal({ open, onClose }: { open: boolean; onClose: ()
           <DetailedRationaleScoreSection detail={{
             stockKey: "formula-reference",
             stockSymbol: "Reference",
+            stockName: "Reference",
             stockExchange: "",
             currentUnits: null,
             modeAction: null,
@@ -4459,6 +4517,7 @@ function ActionablesCalculationsModal({
   runs,
   detailsData,
   onSetupClick,
+  focusTarget,
 }: {
   open: boolean;
   onClose: () => void;
@@ -4470,15 +4529,19 @@ function ActionablesCalculationsModal({
   runs?: RunResponse[];
   detailsData?: StockDetailsData;
   onSetupClick?: (group: SetupStockGroup) => void;
+  focusTarget?: ActionablesCalculationFocusTarget | null;
 }) {
   const [sortState, setSortState] = useState<ActionablesCalculationSortState>({ key: "Stock Info", direction: "asc" });
   const [columnLayout, setColumnLayout] = useState<ActionablesCalculationColumnLayout>(() => loadActionablesCalculationLayout(market));
   const [draggedHeader, setDraggedHeader] = useState<ActionablesCalculationHeader | null>(null);
   const resizeStateRef = useRef<{ header: ActionablesCalculationHeader; startX: number; startWidth: number } | null>(null);
+  const targetCellRef = useRef<HTMLTableCellElement | null>(null);
   const [formulaOpen, setFormulaOpen] = useState(false);
   const [inputSelectionOpen, setInputSelectionOpen] = useState(false);
   const [selectedInputIds, setSelectedInputIds] = useState<Set<string> | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
+  const [internalFocusTarget, setInternalFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
+  const activeFocusTarget = focusTarget ?? internalFocusTarget;
   const usdInrRate = useUsdInrRate();
   const allRuns = useMemo(() => runs ?? [], [runs]);
   const inputCandidates = useMemo(
@@ -4541,6 +4604,20 @@ function ActionablesCalculationsModal({
       resizeStateRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!open || !activeFocusTarget) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      targetCellRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "center",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeFocusTarget, open, rowGroups]);
 
   if (!open) return null;
 
@@ -4612,7 +4689,7 @@ function ActionablesCalculationsModal({
               <button
                 type="button"
                 onClick={() => setInputSelectionOpen(true)}
-                className="mt-1 inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-white text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="mt-1 inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-white text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 aria-label="Select inputs for Actionables Calculations"
                 title="Select Inputs"
               >
@@ -4625,7 +4702,7 @@ function ActionablesCalculationsModal({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setFormulaOpen(true)} className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500" title="Show logics and formulas">
+              <button type="button" onClick={() => setFormulaOpen(true)} className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500" title="Show logics and formulas">
                 <FunctionSquare className="size-4" />
                 Logics & formulas
               </button>
@@ -4705,10 +4782,21 @@ function ActionablesCalculationsModal({
                             return (
                               <td
                                 key={`${row.id}-${header}`}
+                                ref={(node) => {
+                                  if (activeFocusTarget?.stockKey === group.stockKey && activeFocusTarget.header === header && rowIndex === 0) {
+                                    targetCellRef.current = node;
+                                  }
+                                }}
                                 className="overflow-hidden border border-slate-900 px-3 py-1.5 align-top text-slate-900"
                                 style={{ width, minWidth: width, maxWidth: width }}
                               >
-                                <ScrollableCalculationCell>
+                                <ScrollableCalculationCell
+                                  className={cn(
+                                    activeFocusTarget?.stockKey === group.stockKey && activeFocusTarget.header === header
+                                      ? "rounded bg-blue-100 p-1 ring-2 ring-blue-400"
+                                      : "",
+                                  )}
+                                >
                                   {row.values[header]}
                                 </ScrollableCalculationCell>
                               </td>
@@ -4755,7 +4843,14 @@ function ActionablesCalculationsModal({
         onClose={() => setInputSelectionOpen(false)}
       />
       <ActionablesFormulaModal open={formulaOpen} onClose={() => setFormulaOpen(false)} />
-      <ScoreMatrixModal detail={selectedMatrixDetail} onClose={() => setSelectedMatrixDetail(null)} />
+      <ScoreMatrixModal
+        detail={selectedMatrixDetail}
+        onClose={() => setSelectedMatrixDetail(null)}
+        onFocusCalculation={(target) => {
+          setInternalFocusTarget(target);
+          setSelectedMatrixDetail(null);
+        }}
+      />
     </>
   );
 }
@@ -5041,7 +5136,7 @@ function SortableActionHeader({
     <button
       type="button"
       onClick={() => onSort(sortKey)}
-      className={cn("inline-flex items-center gap-1 whitespace-nowrap font-semibold text-gray-500 transition hover:text-gray-900", className)}
+      className={cn("inline-flex cursor-pointer items-center gap-1 whitespace-nowrap font-semibold text-gray-500 transition hover:text-gray-900", className)}
       title={`Sort by ${label}`}
     >
       {label}
@@ -5079,6 +5174,7 @@ export function DashboardFinalActionablesTables() {
   const [draggedFinalActionableColumn, setDraggedFinalActionableColumn] = useState<FinalActionableColumnKey | null>(null);
   const finalActionableResizeStateRef = useRef<{ column: FinalActionableColumnKey; startX: number; startWidth: number } | null>(null);
   const [calculationsMarket, setCalculationsMarket] = useState<SwingTradeMarket | null>(null);
+  const [calculationFocusTarget, setCalculationFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
     india: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
@@ -5276,8 +5372,11 @@ export function DashboardFinalActionablesTables() {
           </div>
           <button
             type="button"
-            onClick={() => setCalculationsMarket(market)}
-            className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onClick={() => {
+              setCalculationFocusTarget(null);
+              setCalculationsMarket(market);
+            }}
+            className="inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             aria-label={`Open ${title} Actionables Calculations`}
             title="Actionables Calculations"
           >
@@ -5499,15 +5598,28 @@ export function DashboardFinalActionablesTables() {
       <ActionablesCalculationsModal
         key={calculationsMarket ?? "india"}
         open={calculationsMarket !== null}
-        onClose={() => setCalculationsMarket(null)}
+        onClose={() => {
+          setCalculationsMarket(null);
+          setCalculationFocusTarget(null);
+        }}
         title={calculationsMarket === "us" ? "Final Actionable US" : "Final Actionable Zerodha"}
         market={calculationsMarket ?? "india"}
         stocks={(calculationsMarket ? actionRowsByMarket[calculationsMarket] : actionRowsByMarket.india).map((row) => row.stock)}
         technicalScans={technicalScans}
         runs={runs}
         detailsData={calculationsMarket ? detailsDataByMarket[calculationsMarket] : detailsDataByMarket.india}
+        focusTarget={calculationFocusTarget}
       />
-      <ScoreMatrixModal detail={selectedMatrixDetail} onClose={() => setSelectedMatrixDetail(null)} />
+      <ScoreMatrixModal
+        detail={selectedMatrixDetail}
+        onClose={() => setSelectedMatrixDetail(null)}
+        onFocusCalculation={(target) => {
+          const targetMarket = actionRowsByMarket.us.some((row) => row.stock.key === target.stockKey) ? "us" : "india";
+          setCalculationFocusTarget(target);
+          setCalculationsMarket(targetMarket);
+          setSelectedMatrixDetail(null);
+        }}
+      />
     </section>
   );
 }
@@ -5535,6 +5647,7 @@ export function FinalActionablesConsole({
   const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [calculationsOpen, setCalculationsOpen] = useState(false);
+  const [calculationFocusTarget, setCalculationFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
   const [detailsData, setDetailsData] = useState<StockDetailsData>({
     portfolioSnapshot: null,
@@ -5847,8 +5960,11 @@ export function FinalActionablesConsole({
                 </CardTitle>
                 <button
                   type="button"
-                  onClick={() => setCalculationsOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onClick={() => {
+                    setCalculationFocusTarget(null);
+                    setCalculationsOpen(true);
+                  }}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   title="Actionables Calculations"
                 >
                   <ActionablesCalculationsIcon className="size-4" />
@@ -5922,7 +6038,10 @@ export function FinalActionablesConsole({
       <ActionablesCalculationsModal
         key={market}
         open={calculationsOpen}
-        onClose={() => setCalculationsOpen(false)}
+        onClose={() => {
+          setCalculationsOpen(false);
+          setCalculationFocusTarget(null);
+        }}
         title={PAGE_COPY[portfolio].title}
         market={market}
         stocks={consensus}
@@ -5931,6 +6050,7 @@ export function FinalActionablesConsole({
         runs={runs}
         detailsData={detailsData}
         onSetupClick={setSelectedSetupGroup}
+        focusTarget={calculationFocusTarget}
       />
       <SetupStocksModal
         group={selectedSetupGroup}
@@ -5939,6 +6059,11 @@ export function FinalActionablesConsole({
       <ScoreMatrixModal
         detail={selectedMatrixDetail}
         onClose={() => setSelectedMatrixDetail(null)}
+        onFocusCalculation={(target) => {
+          setCalculationFocusTarget(target);
+          setCalculationsOpen(true);
+          setSelectedMatrixDetail(null);
+        }}
       />
     </div>
   );
