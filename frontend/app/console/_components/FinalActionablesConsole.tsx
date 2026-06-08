@@ -4854,6 +4854,13 @@ type DashboardActionSortState = {
   direction: "asc" | "desc";
 };
 
+function getDefaultDashboardActionSortState(action: ActionCategory): DashboardActionSortState {
+  return {
+    key: "score",
+    direction: action === "Add more" || action === "Buy New" ? "desc" : "asc",
+  };
+}
+
 const EMPTY_SELECTED_DASHBOARD_ACTION_IDS = new Set<string>();
 
 function getDashboardActionRowId(market: SwingTradeMarket, stock: StockConsensus) {
@@ -4978,6 +4985,12 @@ function compareDashboardActionRows(
   technicalScans: TechnicalScanMap,
   selectedIds: Set<string> = EMPTY_SELECTED_DASHBOARD_ACTION_IDS,
 ) {
+  if (sortState.key === "score") {
+    const leftMissingScore = left.formulaScore === null;
+    const rightMissingScore = right.formulaScore === null;
+    if (leftMissingScore !== rightMissingScore) return leftMissingScore ? 1 : -1;
+  }
+
   const leftValue = getDashboardActionSortValue(left, action, sortState.key, technicalScans, selectedIds);
   const rightValue = getDashboardActionSortValue(right, action, sortState.key, technicalScans, selectedIds);
   let comparison = 0;
@@ -5212,14 +5225,19 @@ export function DashboardFinalActionablesTables() {
     }));
   }, [draggedFinalActionableColumn]);
 
-  const toggleActionSort = useCallback((tableKey: string, key: DashboardActionSortKey) => {
+  const toggleActionSort = useCallback((tableKey: string, action: ActionCategory, key: DashboardActionSortKey) => {
     setSortStates((current) => {
-      const existing = current[tableKey] ?? { key: "confidence" as DashboardActionSortKey, direction: "desc" as const };
+      const existing = current[tableKey] ?? getDefaultDashboardActionSortState(action);
       return {
         ...current,
         [tableKey]: existing.key === key
           ? { key, direction: existing.direction === "asc" ? "desc" : "asc" }
-          : { key, direction: key === "stock" || key === "score" || key === "technicalSetup" ? "asc" : "desc" },
+          : {
+            key,
+            direction: key === "score"
+              ? getDefaultDashboardActionSortState(action).direction
+              : key === "stock" || key === "technicalSetup" ? "asc" : "desc",
+          },
       };
     });
   }, []);
@@ -5257,7 +5275,7 @@ export function DashboardFinalActionablesTables() {
           ) : (
             ACTION_CATEGORIES.map((action) => {
               const tableKey = `${market}:${action}`;
-              const sortState = sortStates[tableKey] ?? { key: "score", direction: "asc" as const };
+              const sortState = sortStates[tableKey] ?? getDefaultDashboardActionSortState(action);
               const rows = actionRows
                 .filter((row) => row.formulaAction === action)
                 .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans));
@@ -5312,7 +5330,7 @@ export function DashboardFinalActionablesTables() {
                                       label={FINAL_ACTIONABLE_COLUMN_LABELS[column]}
                                       sortKey={FINAL_ACTIONABLE_COLUMN_SORT_KEYS[column]}
                                       currentSort={sortState}
-                                      onSort={(key) => toggleActionSort(tableKey, key)}
+                                      onSort={(key) => toggleActionSort(tableKey, action, key)}
                                       className="pr-3"
                                     />
                                     <button
