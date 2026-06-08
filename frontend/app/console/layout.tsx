@@ -50,7 +50,7 @@ export default function DashboardLayout({
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-background text-foreground">
             {/* Mobile sidebar backdrop */}
             {sidebarOpen && (
                 <div
@@ -61,20 +61,20 @@ export default function DashboardLayout({
 
             {/* Sidebar */}
             <div
-                className={`fixed inset-y-0 left-0 z-30 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                className={`fixed inset-y-0 left-0 z-30 w-64 border-r border-border bg-sidebar text-sidebar-foreground shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
                     }`}
             >
                 <div className="flex flex-col h-full">
                     {/* Logo */}
-                    <div className="relative flex min-h-28 items-center justify-center border-b px-5 py-5">
+                    <div className="relative flex min-h-28 items-center justify-center border-b border-sidebar-border px-5 py-5">
                         <Link href={URLs.routes.console.dashboard()} className="flex flex-col items-center gap-3 text-center">
                             <div className="rounded-2xl bg-linear-to-r from-indigo-600 via-violet-600 to-fuchsia-600 px-5 py-3 shadow-sm">
                                 <span className="text-xs font-bold uppercase tracking-[0.28em] text-white">{BRAND_ACRONYM}</span>
                             </div>
                             <div className="space-y-1 leading-tight">
-                                <div className="text-sm font-semibold text-gray-900">{brandExpansionLines.primary}</div>
+                                <div className="text-sm font-semibold text-sidebar-foreground">{brandExpansionLines.primary}</div>
                                 {brandExpansionLines.secondary ? (
-                                    <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                                         {brandExpansionLines.secondary}
                                     </div>
                                 ) : null}
@@ -83,7 +83,7 @@ export default function DashboardLayout({
                         <button
                             type="button"
                             onClick={() => setSidebarOpen(false)}
-                            className="absolute right-4 p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 lg:hidden"
+                            className="absolute right-4 rounded-md p-2 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground lg:hidden"
                         >
                             <HiOutlineX />
                         </button>
@@ -108,7 +108,7 @@ export default function DashboardLayout({
                 <button
                     type="button"
                     onClick={() => setSidebarOpen(true)}
-                    className="fixed left-4 top-4 z-10 rounded-full border border-gray-200 bg-white p-2 text-gray-500 shadow-sm hover:text-gray-700 hover:bg-gray-50 lg:hidden"
+                    className="fixed left-4 top-4 z-10 rounded-full border border-border bg-background p-2 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground lg:hidden"
                     aria-label="Open navigation"
                 >
                     <HiOutlineMenu />

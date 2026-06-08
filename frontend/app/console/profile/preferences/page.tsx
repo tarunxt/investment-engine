@@ -6,27 +6,46 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiService } from "@/services/api";
 import { FormAlert } from "@/components/auth/FormAlert";
+import {
+  applyThemePreference,
+  getStoredThemePreference,
+  isThemePreference,
+  persistThemePreference,
+  type ThemePreference,
+} from "@/lib/theme";
+
+type PreferencesFormData = {
+  timezone: string;
+  notification_preferences: string;
+  theme_preference: ThemePreference;
+};
 
 export default function PreferencesPage() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<PreferencesFormData>({
     timezone: "UTC",
     notification_preferences: "all",
-    theme_preference: "light",
+    theme_preference: getStoredThemePreference() ?? "light",
   });
 
   useEffect(() => {
     async function loadPreferences() {
       try {
         const profile = await apiService.getProfile();
+        const themePreference = isThemePreference(profile.theme_preference)
+          ? profile.theme_preference
+          : "light";
+
         setFormData({
           timezone: profile.timezone || "UTC",
           notification_preferences: profile.notification_preferences || "all",
-          theme_preference: profile.theme_preference || "light",
+          theme_preference: themePreference,
         });
+        persistThemePreference(themePreference);
+        applyThemePreference(themePreference);
       } catch (err) {
         console.error("Failed to load preferences:", err);
       }
@@ -36,6 +55,17 @@ export default function PreferencesPage() {
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const { name, value } = e.target;
+    if (name === "theme_preference") {
+      if (!isThemePreference(value)) {
+        return;
+      }
+
+      setFormData(prev => ({ ...prev, theme_preference: value }));
+      persistThemePreference(value);
+      applyThemePreference(value);
+      return;
+    }
+
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 

@@ -336,7 +336,7 @@ function DragHandle({
             ref={setActivatorNodeRef}
             type="button"
             aria-label="Drag to reorder navigation item"
-            className="flex h-8 w-8 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-gray-400 transition hover:bg-white hover:text-gray-600 active:cursor-grabbing"
+            className="flex h-8 w-8 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:cursor-grabbing"
             {...attributes}
             {...listeners}
         >
@@ -374,10 +374,10 @@ function SortableNavigationRow({
 
     const rowIsActive = isNavigationGroup(item) ? isPortfolioActive : isActive(item.href);
     const rowClassName = `flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition ${rowIsActive
-        ? 'bg-indigo-50 text-indigo-600 shadow-sm ring-1 ring-indigo-100'
-        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-        } ${isDragging ? 'bg-white shadow-lg ring-1 ring-indigo-100' : ''} ${isReordering ? 'select-none' : ''}`;
-    const iconClassName = `h-5 w-5 shrink-0 ${rowIsActive ? 'text-indigo-600' : 'text-gray-400'}`;
+        ? 'bg-sidebar-accent text-sidebar-primary shadow-sm ring-1 ring-sidebar-border'
+        : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+        } ${isDragging ? 'bg-sidebar shadow-lg ring-1 ring-sidebar-border' : ''} ${isReordering ? 'select-none' : ''}`;
+    const iconClassName = `h-5 w-5 shrink-0 ${rowIsActive ? 'text-sidebar-primary' : 'text-muted-foreground'}`;
 
     return (
         <div
@@ -405,7 +405,7 @@ function SortableNavigationRow({
                         >
                             <item.icon className={iconClassName} />
                             <span className="truncate">{item.name}</span>
-                            <span className="ml-auto text-gray-400">
+                            <span className="ml-auto text-muted-foreground">
                                 {isPortfolioExpanded ? (
                                     <ChevronDown className="h-4 w-4" />
                                 ) : (
@@ -416,18 +416,18 @@ function SortableNavigationRow({
                     )}
 
                     {!isReordering && isPortfolioExpanded ? (
-                        <div className="ml-6 space-y-1 border-l border-gray-200 pl-3">
+                        <div className="ml-6 space-y-1 border-l border-sidebar-border pl-3">
                             {item.children.map((child) => (
                                 <Link
                                     key={child.id}
                                     href={child.href}
                                     onClick={onNavigate}
                                     className={`flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isActive(child.href)
-                                        ? 'bg-indigo-50 text-indigo-600'
-                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                                        ? 'bg-sidebar-accent text-sidebar-primary'
+                                        : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                                         }`}
                                 >
-                                    <span className={`mr-2 text-xs ${isActive(child.href) ? 'text-indigo-500' : 'text-gray-300'}`}>
+                                    <span className={`mr-2 text-xs ${isActive(child.href) ? 'text-sidebar-primary' : 'text-muted-foreground/60'}`}>
                                         •
                                     </span>
                                     {child.name}
@@ -532,7 +532,7 @@ export function SidebarNavigation({
         <div className="space-y-3">
             <div className="px-2">
                 <div className="flex items-center justify-between gap-3">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                         Navigation
                     </span>
                     <div className="flex items-center gap-2">
@@ -540,7 +540,7 @@ export function SidebarNavigation({
                             <button
                                 type="button"
                                 onClick={() => persistNavigationOrder(storageKey, DEFAULT_NAVIGATION_ORDER)}
-                                className="text-xs font-medium text-gray-500 transition hover:text-gray-700"
+                                className="text-xs font-medium text-muted-foreground transition hover:text-sidebar-foreground"
                             >
                                 Reset
                             </button>
@@ -550,7 +550,7 @@ export function SidebarNavigation({
                             onClick={() => setIsReordering((current) => !current)}
                             aria-label={isReordering ? 'Finish reordering navigation' : 'Reorder navigation'}
                             title={isReordering ? 'Done' : 'Reorder'}
-                            className={`rounded-full border border-gray-200 text-xs font-semibold text-gray-600 transition hover:border-gray-300 hover:text-gray-900 ${
+                            className={`rounded-full border border-sidebar-border text-xs font-semibold text-sidebar-foreground/75 transition hover:border-sidebar-ring hover:text-sidebar-foreground ${
                                 isReordering ? 'px-3 py-1' : 'flex h-9 w-9 items-center justify-center p-0'
                             }`}
                         >
@@ -559,7 +559,7 @@ export function SidebarNavigation({
                     </div>
                 </div>
                 {isReordering ? (
-                    <p className="mt-2 text-xs leading-5 text-gray-500">
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         Drag the grip to move items up or down. Your order saves automatically for this account on this browser.
                     </p>
                 ) : null}
@@ -591,16 +591,16 @@ export function SidebarNavigation({
                 </SortableContext>
             </DndContext>
 
-            <div className="mx-3 mt-4 rounded-2xl border border-gray-200 bg-gray-50 p-3">
+            <div className="mx-3 mt-4 rounded-2xl border border-sidebar-border bg-sidebar-accent p-3">
                 <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-600 to-purple-600 text-sm font-semibold text-white">
                         {user?.full_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'}
                     </div>
                     <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-gray-900">
+                        <p className="truncate text-sm font-semibold text-sidebar-accent-foreground">
                             {user?.full_name || user?.username || 'User'}
                         </p>
-                        <p className="truncate text-xs text-gray-500">{user?.email}</p>
+                        <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
                     </div>
                 </div>
                 {onLogout ? (
@@ -610,7 +610,7 @@ export function SidebarNavigation({
                             onNavigate();
                             void onLogout();
                         }}
-                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 hover:text-gray-900"
+                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-sidebar-border bg-sidebar px-3 py-2 text-sm font-semibold text-sidebar-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                     >
                         <HiOutlineLogout className="h-4 w-4" />
                         Sign out
