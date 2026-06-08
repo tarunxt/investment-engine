@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import type {
   IndMoneyUsPortfolioSnapshotCreateRequest,
   JobResponse,
+  ZerodhaPortfolioSnapshotDetail,
   IndMoneyUsThreatAnalysis,
   ProviderInfo,
   ProviderModelTarget,
