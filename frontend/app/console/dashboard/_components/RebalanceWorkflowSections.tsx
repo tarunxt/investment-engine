@@ -3131,6 +3131,7 @@ function StageLlmSelectorDialog({
   onResetDefaults,
   onReplaceSelection,
   onClose,
+  lastRunCostInr,
 }: {
   open: boolean;
   stage: WorkflowStageKey | null;
@@ -3143,6 +3144,7 @@ function StageLlmSelectorDialog({
   onResetDefaults: () => void;
   onReplaceSelection: (keys: Set<string>) => void;
   onClose: () => void;
+  lastRunCostInr?: number | null;
 }) {
   const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
     readSavedModelMixes(),
@@ -3156,6 +3158,10 @@ function StageLlmSelectorDialog({
   const usdInrRate = useUsdInrRate();
   const currentHistoryKey = stage && portfolio ? `${portfolio}:${stage}` : "";
   const activeHistoryOpen = historyOpen && historyKey === currentHistoryKey;
+  const hasLastRunCost =
+    typeof lastRunCostInr === "number" &&
+    Number.isFinite(lastRunCostInr) &&
+    lastRunCostInr > 0;
 
   const loadHistory = useCallback(async () => {
     if (!stage || !portfolio || !currentHistoryKey) return;
@@ -3300,6 +3306,11 @@ function StageLlmSelectorDialog({
             <p className="mt-1 text-sm text-slate-500">
               Choose the provider/model targets this dashboard stage should use.
             </p>
+            {hasLastRunCost ? (
+              <p className="mt-2 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-100">
+                Last cost incurred: {formatInrCost(lastRunCostInr)}
+              </p>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -3383,6 +3394,10 @@ function StageLlmSelectorDialog({
             onToggle={onToggle}
             onSelectAll={singleSelect ? undefined : onSelectAll}
             onClear={onClear}
+            costSummaryLabel={hasLastRunCost ? "Last cost" : undefined}
+            costSummaryValue={
+              hasLastRunCost ? formatInrCost(lastRunCostInr) : undefined
+            }
             onToggleProvider={(providerName, models) => {
               const providerModelKeys = models.map(
                 (model) => `${providerName}::${model}`,
@@ -5568,6 +5583,14 @@ export function RebalanceWorkflowSections({
         onClear={clearLlmTargets}
         onResetDefaults={resetDefaultLlmTargets}
         onReplaceSelection={persistLlmDialogSelection}
+        lastRunCostInr={
+          llmDialogStage && llmDialogPortfolio
+            ? getStageCostInr(
+                states[llmDialogPortfolio][llmDialogStage],
+                usdInrRate,
+              )
+            : null
+        }
         onClose={() => {
           setLlmDialogStage(null);
           setLlmDialogPortfolio(null);
