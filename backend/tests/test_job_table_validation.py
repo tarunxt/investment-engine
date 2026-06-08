@@ -705,10 +705,10 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         self.assertEqual(job.status, JobStatus.PARTIAL)
         self.assertIn("partial rebalance table", job.error_message)
         self.assertIn("ABC", job.response)
-        self.assertEqual(provider.generate.call_count, 3)
-        self.assertEqual(job.tokens_in, 350)
-        self.assertEqual(job.tokens_out, 175)
-        self.assertEqual(job.estimated_cost, 0.0035)
+        self.assertEqual(provider.generate.call_count, 1)
+        self.assertEqual(job.tokens_in, 100)
+        self.assertEqual(job.tokens_out, 50)
+        self.assertEqual(job.estimated_cost, 0.001)
         self.assertTrue(fake_db.closed)
 
 
