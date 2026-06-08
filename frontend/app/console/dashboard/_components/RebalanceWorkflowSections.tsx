@@ -1196,6 +1196,46 @@ function getRunOutputSummary(run: RunResponse) {
     .join("\n");
 }
 
+
+function summarizeInputError(error: string) {
+  const normalized = error.replace(/\s+/g, " ").trim();
+  const partialMatch = normalized.match(
+    /returned partial rebalance table \(missing (\d+) current portfolio holding row\(s\)/i,
+  );
+  if (partialMatch) {
+    return `Partial rebalance table: missing ${partialMatch[1]} holding row${
+      partialMatch[1] === "1" ? "" : "s"
+    }.`;
+  }
+
+  const malformedMatch = normalized.match(/returned (malformed table output \([^)]*\))/i);
+  if (malformedMatch) return malformedMatch[1];
+
+  const firstSentence = normalized.match(/^(.{1,140}?[.!?])(?:\s|$)/)?.[1];
+  if (firstSentence) return firstSentence;
+  return normalized.length > 140 ? `${normalized.slice(0, 137)}…` : normalized;
+}
+
+function InputErrorPreview({ error }: { error: string | null }) {
+  if (!error) return <span className="text-slate-400">—</span>;
+
+  const summary = summarizeInputError(error);
+  if (summary === error) {
+    return <span className="text-red-700">{summary}</span>;
+  }
+
+  return (
+    <details className="group max-w-xs text-red-700">
+      <summary className="cursor-pointer list-none text-xs font-semibold leading-5 underline decoration-red-300 underline-offset-2 hover:text-red-800 focus:outline-none focus:ring-2 focus:ring-red-300">
+        {summary} <span className="font-bold text-red-500">Details</span>
+      </summary>
+      <div className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 p-2 text-xs leading-5 text-red-700">
+        {error}
+      </div>
+    </details>
+  );
+}
+
 function formatLlmCompletion(info: StageInfo) {
   if (!info.totalLlms) return "Not available";
   return `${info.completedLlms ?? 0}/${info.totalLlms}`;
@@ -2445,8 +2485,8 @@ function InputSelectionDialog({
                         ? `₹${(candidate.costUsd * usdInrRate).toFixed(2)}`
                         : "n/a"}
                     </td>
-                    <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">
-                      {candidate.error || "—"}
+                    <td className="max-w-xs px-3 py-3 align-top text-xs">
+                      <InputErrorPreview error={candidate.error} />
                     </td>
                   </tr>
                 ))}

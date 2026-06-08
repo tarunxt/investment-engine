@@ -1079,7 +1079,7 @@ def execute_ai_job(self, job_id: int) -> None:
             if _is_rebalance_output(job.prompt):
                 content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
-                    if not rebalance_table_issue:
+                    if not rebalance_table_issue or rebalance_table_issue.startswith("partial rebalance table"):
                         break
                     logger.info(
                         "Repairing rebalance table for job %s because %s (attempt %s/%s)",

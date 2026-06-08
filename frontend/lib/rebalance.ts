@@ -366,7 +366,8 @@ Formatting Rules:
 - For Sell All, Units Change must equal negative Current Units and Final Units must be 0.
 - For Hold, Units Change must be 0 and Final Units must equal Current Units.
 - Do not include any stock unless it is from my current holdings or from the attached LLM recommendation tables.
-- Do not output a partial rebalance table. Missing any current holding is a hard failure.
+- Output as many complete rows as you can. A complete table with every current holding is preferred, but a partial table with the generated rows is acceptable when some rows cannot be completed.
+- Never omit the table solely because some rows are unavailable; partial rows can still be used by later stages.
 - Use only factual/current market intelligence available online and the provided LLM tables.
 - Use numeric-only values in cells for all numeric fields (no ${copy.currency}/% text in values).
 - Be decisive. Avoid vague comments.
