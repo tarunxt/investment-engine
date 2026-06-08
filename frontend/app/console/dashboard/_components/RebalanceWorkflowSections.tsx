@@ -19,6 +19,7 @@ import {
   buildTechnicalScanMap,
   buildTechnicalScanPrompt,
   type ActionCategory,
+  type ActionEstimate,
   extractRebalanceInputFingerprint,
   fetchAllFullRuns,
   isCompletedRebalanceRun,
@@ -121,6 +122,7 @@ type StageInfo = {
   rebalanceInputs?: number | null;
 };
 type ZerodhaBasketOrderKind = "Market" | "Limit" | "After market";
+type ZerodhaBasketOrderPercent = 50 | 100;
 type ZerodhaBasketSubmission = {
   redirected: number;
   clipboardCopied: boolean;
@@ -133,8 +135,11 @@ type ZerodhaBasketPreviewOrder = {
   action: ActionCategory;
   side: "BUY" | "SELL";
   units: number | null;
+  baseUnits: number | null;
+  currentUnits: number | null;
   price: number | null;
   amount: number | null;
+  percent: ZerodhaBasketOrderPercent;
   orderKind: ZerodhaBasketOrderKind;
 };
 type WorkflowState = Record<WorkflowStageKey, StageInfo>;
@@ -745,6 +750,49 @@ function getBasketPrice(stock: StockConsensus, amount: number | null, units: num
   return parseBasketNumber(stock.representative["Price Per Unit"]);
 }
 
+function calculatePercentBasketUnits(baseUnits: number | null, percent: ZerodhaBasketOrderPercent) {
+  if (baseUnits === null || baseUnits <= 0) return null;
+  const rawUnits = Math.abs(baseUnits) * (percent / 100);
+  return Math.max(1, Math.floor(rawUnits));
+}
+
+function getZerodhaBasketBaseUnits(action: ActionCategory, estimate: ActionEstimate) {
+  if (action === "Sell All" || action === "Trim") {
+    return estimate.currentUnits !== null && estimate.currentUnits > 0
+      ? estimate.currentUnits
+      : estimate.units;
+  }
+  return estimate.units;
+}
+
+function getZerodhaBasketActionForPercent(order: ZerodhaBasketPreviewOrder) {
+  if (order.side === "SELL") return order.percent === 100 ? "Sell All" : "Trim";
+  return order.action;
+}
+
+function applyZerodhaBasketPercent(
+  order: ZerodhaBasketPreviewOrder,
+  percent: ZerodhaBasketOrderPercent,
+): ZerodhaBasketPreviewOrder {
+  const units = calculatePercentBasketUnits(
+    order.side === "SELL" ? order.currentUnits : order.baseUnits,
+    percent,
+  );
+  const amount = units !== null && order.price !== null
+    ? Math.abs(units * order.price)
+    : order.amount !== null
+      ? Math.abs(order.amount * (percent / Math.max(order.percent, 1)))
+      : null;
+
+  return {
+    ...order,
+    action: order.side === "SELL" ? (percent === 100 ? "Sell All" : "Trim") : order.action,
+    units,
+    amount,
+    percent,
+  };
+}
+
 function formatBasketQuantity(value: number | null) {
   if (value === null) return "—";
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 3 }).format(value);
@@ -803,9 +851,14 @@ function buildZerodhaBasketPreviewOrders(
       const { stock } = row;
       const action = row.formulaAction;
       const estimate = row.formulaEstimate;
-      const units = estimate.units;
-      const amount = estimate.amount;
       const side: "BUY" | "SELL" = action === "Sell All" || action === "Trim" ? "SELL" : "BUY";
+      const percent: ZerodhaBasketOrderPercent = action === "Trim" ? 50 : 100;
+      const baseUnits = getZerodhaBasketBaseUnits(action, estimate);
+      const units = calculatePercentBasketUnits(baseUnits, percent);
+      const price = getBasketPrice(stock, estimate.amount, estimate.units);
+      const amount = units !== null && price !== null
+        ? Math.abs(units * price)
+        : estimate.amount;
       return {
         id: `zerodha:${row.id}`,
         exchange: getZerodhaBasketExchange(stock, side, holdingExchangeBySymbol),
@@ -813,8 +866,11 @@ function buildZerodhaBasketPreviewOrders(
         action,
         side,
         units,
-        price: getBasketPrice(stock, amount, units),
+        baseUnits,
+        currentUnits: estimate.currentUnits,
+        price,
         amount,
+        percent,
         orderKind: "Market" as const,
       };
     })
@@ -1929,6 +1985,7 @@ function ZerodhaBasketPreviewDialog({
   onToggleAll,
   onToggleSection,
   onOrderKindChange,
+  onPercentChange,
   onPlaceOrder,
   placing,
   submission,
@@ -1943,6 +2000,7 @@ function ZerodhaBasketPreviewDialog({
   onToggleAll: () => void;
   onToggleSection: (action: ActionCategory) => void;
   onOrderKindChange: (id: string, orderKind: ZerodhaBasketOrderKind) => void;
+  onPercentChange: (id: string, percent: ZerodhaBasketOrderPercent) => void;
   onPlaceOrder: () => void;
   placing: boolean;
   submission: ZerodhaBasketSubmission | null;
@@ -1961,7 +2019,7 @@ function ZerodhaBasketPreviewDialog({
   const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
-    orders: orders.filter((order) => order.action === action),
+    orders: orders.filter((order) => getZerodhaBasketActionForPercent(order) === action),
   })).filter((group) => group.orders.length > 0);
 
   const renderPlaceOrderButton = () => (
@@ -2060,6 +2118,7 @@ function ZerodhaBasketPreviewDialog({
                       <th className="px-4 py-3 font-semibold">Action</th>
                       <th className="px-4 py-3 font-semibold">Side</th>
                       <th className="px-4 py-3 font-semibold">Units</th>
+                      <th className="px-4 py-3 font-semibold">%</th>
                       <th className="px-4 py-3 font-semibold">Price</th>
                       <th className="px-4 py-3 font-semibold">Amount</th>
                       <th className="px-4 py-3 font-semibold">Order Type</th>
@@ -2073,7 +2132,7 @@ function ZerodhaBasketPreviewDialog({
                       return (
                         <Fragment key={group.action}>
                           <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
-                            <td className="px-4 py-3" colSpan={9}>
+                            <td className="px-4 py-3" colSpan={10}>
                               <label className="inline-flex items-center gap-3 text-sm font-black">
                                 <input
                                   type="checkbox"
@@ -2102,7 +2161,7 @@ function ZerodhaBasketPreviewDialog({
                                 <span className="mr-2 text-xs font-semibold text-slate-500">{order.exchange}</span>
                                 {order.symbol}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{order.action}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{getZerodhaBasketActionForPercent(order)}</td>
                               <td className="px-4 py-3">
                                 <span className={cn(
                                   "rounded-full px-3 py-1 text-xs font-bold",
@@ -2112,6 +2171,17 @@ function ZerodhaBasketPreviewDialog({
                                 </span>
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketQuantity(order.units)}</td>
+                              <td className="px-4 py-3">
+                                <select
+                                  value={order.percent}
+                                  onChange={(event) => onPercentChange(order.id, Number(event.target.value) as ZerodhaBasketOrderPercent)}
+                                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                  aria-label={`Set ${order.exchange} ${order.symbol} basket percentage`}
+                                >
+                                  <option value={50}>50%</option>
+                                  <option value={100}>100%</option>
+                                </select>
+                              </td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price)}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount)}</td>
                               <td className="px-4 py-3">
@@ -3771,7 +3841,7 @@ export function RebalanceWorkflowSections({
   const toggleZerodhaBasketSection = useCallback(
     (action: ActionCategory) => {
       const sectionOrderIds = zerodhaBasketOrders
-        .filter((order) => order.action === action)
+        .filter((order) => getZerodhaBasketActionForPercent(order) === action)
         .map((order) => order.id);
       setSelectedZerodhaBasketIds((current) => {
         const next = new Set(current);
@@ -3790,6 +3860,15 @@ export function RebalanceWorkflowSections({
     (id: string, orderKind: ZerodhaBasketOrderKind) => {
       setZerodhaBasketOrders((current) =>
         current.map((order) => (order.id === id ? { ...order, orderKind } : order)),
+      );
+    },
+    [],
+  );
+
+  const updateZerodhaBasketPercent = useCallback(
+    (id: string, percent: ZerodhaBasketOrderPercent) => {
+      setZerodhaBasketOrders((current) =>
+        current.map((order) => (order.id === id ? applyZerodhaBasketPercent(order, percent) : order)),
       );
     },
     [],
@@ -5736,6 +5815,7 @@ export function RebalanceWorkflowSections({
         onToggleAll={toggleAllZerodhaBasketOrders}
         onToggleSection={toggleZerodhaBasketSection}
         onOrderKindChange={updateZerodhaBasketOrderKind}
+        onPercentChange={updateZerodhaBasketPercent}
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
         placing={zerodhaBasketPlacing}
         submission={zerodhaBasketSubmission}
