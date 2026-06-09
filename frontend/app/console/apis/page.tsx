@@ -13,7 +13,7 @@ const COMBINED_LLM_PROVIDERS = [
   { key: 'openai', name: 'OpenAI', color: '#4f46e5' },
   { key: 'anthropic', name: 'Anthropic', color: '#ea580c' },
   { key: 'gemini', name: 'Gemini', color: '#16a34a' },
-  { key: 'deepseek', name: 'DeepSeek', color: '#0891b2' },
+  { key: 'deepseek', name: 'DeepSeek', color: '#eab308' },
 ] as const;
 
 type CombinedLlmProviderKey = (typeof COMBINED_LLM_PROVIDERS)[number]['key'];
@@ -116,6 +116,8 @@ function CombinedLlmCostChart({
   visibility: CombinedLlmVisibility;
   onVisibilityChange: (provider: CombinedLlmProviderKey, visible: boolean) => void;
 }) {
+  const [selectedPointKey, setSelectedPointKey] = useState<{ provider: CombinedLlmProviderKey; date: string } | null>(null);
+
   const chart = useMemo(() => {
     const dates = Array.from(
       new Set(
@@ -153,6 +155,22 @@ function CombinedLlmCostChart({
   const yForCost = (cost: number) => padding.top + plotHeight - (cost / chart.yMax) * plotHeight;
   const gridValues = [0, chart.yMax * 0.25, chart.yMax * 0.5, chart.yMax * 0.75, chart.yMax];
   const xTickInterval = Math.max(1, Math.ceil(chart.dates.length / 8));
+  const selectedProvider = selectedPointKey
+    ? chart.activeProviders.find((provider) => provider.key === selectedPointKey.provider)
+    : null;
+  const selectedDateIndex = selectedPointKey ? chart.dates.indexOf(selectedPointKey.date) : -1;
+  const selectedCost = selectedProvider && selectedPointKey
+    ? chart.valuesByProvider[selectedProvider.key].get(selectedPointKey.date) ?? 0
+    : 0;
+  const selectedPoint = selectedProvider && selectedPointKey && selectedDateIndex >= 0
+    ? {
+        provider: selectedProvider,
+        date: selectedPointKey.date,
+        cost: selectedCost,
+        x: xForIndex(selectedDateIndex),
+        y: yForCost(selectedCost),
+      }
+    : null;
 
   return (
     <section className="border border-gray-200 bg-white p-4">
@@ -191,7 +209,13 @@ function CombinedLlmCostChart({
         <div className="py-12 text-center text-sm text-gray-500">Select at least one LLM API to view the cost chart.</div>
       ) : (
         <div className="overflow-x-auto">
-          <svg role="img" aria-label="Combined LLM API cost line chart" viewBox={`0 0 ${width} ${height}`} className="min-w-[760px]">
+          <svg
+            role="img"
+            aria-label="Combined LLM API cost line chart"
+            viewBox={`0 0 ${width} ${height}`}
+            className="min-w-[760px]"
+            onClick={() => setSelectedPointKey(null)}
+          >
             <line x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + plotHeight} stroke="#d1d5db" />
             <line
               x1={padding.left}
@@ -249,14 +273,73 @@ function CombinedLlmCostChart({
               return (
                 <g key={provider.key}>
                   <path d={path} fill="none" stroke={provider.color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-                  {points.map((point) => (
-                    <circle key={`${provider.key}-${point.date}`} cx={point.x} cy={point.y} r={3.5} fill={provider.color}>
-                      <title>{`${provider.name} ${formatChartDayLabel(point.date)}: ${formatInr(point.cost)}`}</title>
-                    </circle>
-                  ))}
+                  {points.map((point) => {
+                    const pointLabel = `${provider.name} ${formatChartDayLabel(point.date)}: ${formatInr(point.cost)}`;
+                    return (
+                      <g
+                        key={`${provider.key}-${point.date}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Show exact value for ${pointLabel}`}
+                        className="cursor-pointer outline-none"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedPointKey({ provider: provider.key, date: point.date });
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter' && event.key !== ' ') return;
+                          event.preventDefault();
+                          setSelectedPointKey({ provider: provider.key, date: point.date });
+                        }}
+                      >
+                        <circle cx={point.x} cy={point.y} r={8} fill="transparent" />
+                        <circle cx={point.x} cy={point.y} r={3.5} fill={provider.color}>
+                          <title>{pointLabel}</title>
+                        </circle>
+                      </g>
+                    );
+                  })}
                 </g>
               );
             })}
+            {selectedPoint ? (
+              <g pointerEvents="none">
+                <line
+                  x1={selectedPoint.x}
+                  y1={selectedPoint.y - 9}
+                  x2={selectedPoint.x}
+                  y2={Math.max(padding.top, selectedPoint.y - 34)}
+                  stroke={selectedPoint.provider.color}
+                  strokeDasharray="3 3"
+                />
+                <rect
+                  x={Math.min(Math.max(padding.left + 6, selectedPoint.x - 74), padding.left + plotWidth - 148)}
+                  y={Math.max(padding.top + 4, selectedPoint.y - 72)}
+                  width={148}
+                  height={46}
+                  rx={6}
+                  fill="white"
+                  stroke={selectedPoint.provider.color}
+                  strokeWidth={1.5}
+                />
+                <text
+                  x={Math.min(Math.max(padding.left + 80, selectedPoint.x), padding.left + plotWidth - 74)}
+                  y={Math.max(padding.top + 23, selectedPoint.y - 52)}
+                  textAnchor="middle"
+                  className="fill-gray-900 text-[11px] font-semibold"
+                >
+                  {selectedPoint.provider.name} · {formatChartDayLabel(selectedPoint.date)}
+                </text>
+                <text
+                  x={Math.min(Math.max(padding.left + 80, selectedPoint.x), padding.left + plotWidth - 74)}
+                  y={Math.max(padding.top + 40, selectedPoint.y - 35)}
+                  textAnchor="middle"
+                  className="fill-gray-700 text-[11px]"
+                >
+                  Exact value: {formatInr(selectedPoint.cost)}
+                </text>
+              </g>
+            ) : null}
           </svg>
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-gray-600">
             {COMBINED_LLM_PROVIDERS.map((provider) => {
