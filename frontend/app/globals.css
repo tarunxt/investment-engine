@@ -131,3 +131,166 @@
     @apply font-sans;
   }
 }
+/*
+ * Console dark-mode compatibility layer.
+ *
+ * Several console screens still use legacy Tailwind light utility classes
+ * (bg-white, bg-gray-50, border-gray-200, text-slate-900, etc.). When the
+ * user selects dark mode those hard-coded utilities otherwise keep rendering
+ * large white panels. Scope these overrides to `.dark` so light mode remains
+ * unchanged while the legacy surfaces inherit the app theme tokens.
+ */
+.dark .bg-white,
+.dark .bg-white\/40,
+.dark .bg-white\/60,
+.dark .bg-white\/70,
+.dark .bg-white\/80,
+.dark .bg-white\/90,
+.dark .bg-gray-50,
+.dark .bg-gray-50\/70,
+.dark .bg-gray-100,
+.dark .bg-slate-50,
+.dark .bg-slate-100,
+.dark .bg-zinc-50,
+.dark .bg-zinc-100,
+.dark .bg-neutral-50,
+.dark .bg-neutral-100,
+.dark .bg-stone-50,
+.dark .bg-stone-100 {
+  background-color: var(--card) !important;
+}
+
+.dark .from-white,
+.dark .from-gray-50,
+.dark .from-slate-50 {
+  --tw-gradient-from: var(--card) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: transparent var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position)) !important;
+}
+
+.dark .to-white,
+.dark .to-gray-50,
+.dark .to-slate-50 {
+  --tw-gradient-to: var(--card) var(--tw-gradient-to-position) !important;
+}
+
+.dark .via-white,
+.dark .via-gray-50,
+.dark .via-slate-50 {
+  --tw-gradient-via: var(--card) var(--tw-gradient-via-position) !important;
+  --tw-gradient-via-stops: var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-via) var(--tw-gradient-via-position), var(--tw-gradient-to) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-via-stops) !important;
+}
+
+.dark .bg-emerald-50,
+.dark .bg-green-50,
+.dark .bg-teal-50,
+.dark .bg-lime-50 {
+  background-color: color-mix(in oklch, oklch(0.55 0.16 155) 16%, var(--card)) !important;
+}
+
+.dark .bg-red-50,
+.dark .bg-rose-50,
+.dark .bg-pink-50 {
+  background-color: color-mix(in oklch, oklch(0.58 0.22 25) 16%, var(--card)) !important;
+}
+
+.dark .bg-blue-50,
+.dark .bg-sky-50,
+.dark .bg-indigo-50,
+.dark .bg-violet-50,
+.dark .bg-purple-50 {
+  background-color: color-mix(in oklch, oklch(0.52 0.2 265) 16%, var(--card)) !important;
+}
+
+.dark .bg-yellow-50,
+.dark .bg-amber-50,
+.dark .bg-orange-50 {
+  background-color: color-mix(in oklch, oklch(0.72 0.16 75) 16%, var(--card)) !important;
+}
+
+.dark .text-gray-950,
+.dark .text-gray-900,
+.dark .text-slate-950,
+.dark .text-slate-900,
+.dark .text-zinc-950,
+.dark .text-zinc-900,
+.dark .text-neutral-950,
+.dark .text-neutral-900,
+.dark .text-stone-950,
+.dark .text-stone-900 {
+  color: var(--foreground) !important;
+}
+
+.dark .text-gray-800,
+.dark .text-gray-700,
+.dark .text-gray-600,
+.dark .text-gray-500,
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-slate-600,
+.dark .text-slate-500,
+.dark .text-zinc-800,
+.dark .text-zinc-700,
+.dark .text-zinc-600,
+.dark .text-zinc-500,
+.dark .text-neutral-800,
+.dark .text-neutral-700,
+.dark .text-neutral-600,
+.dark .text-neutral-500,
+.dark .text-stone-800,
+.dark .text-stone-700,
+.dark .text-stone-600,
+.dark .text-stone-500 {
+  color: var(--muted-foreground) !important;
+}
+
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-slate-300,
+.dark .border-zinc-100,
+.dark .border-zinc-200,
+.dark .border-zinc-300,
+.dark .border-neutral-100,
+.dark .border-neutral-200,
+.dark .border-neutral-300,
+.dark .border-stone-100,
+.dark .border-stone-200,
+.dark .border-stone-300 {
+  border-color: var(--border) !important;
+}
+
+.dark .divide-gray-100 > :not(:last-child),
+.dark .divide-gray-200 > :not(:last-child),
+.dark .divide-slate-100 > :not(:last-child),
+.dark .divide-slate-200 > :not(:last-child) {
+  border-color: var(--border) !important;
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  color: var(--foreground);
+  background-color: var(--card);
+  border-color: var(--input);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--muted-foreground);
+}
+
+.dark table {
+  color: var(--foreground);
+}
+
+.dark thead,
+.dark tbody,
+.dark tr,
+.dark td,
+.dark th {
+  border-color: var(--border);
+}
