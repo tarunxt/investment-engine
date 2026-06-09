@@ -137,6 +137,7 @@ type StageLlmHistoryEntry = {
   status: RunOutputJobStatus;
   rawStatus: string;
 };
+type StageLlmActualCostMap = Record<string, number>;
 type StageInfo = {
   state: StageState;
   startedAt?: string | null;
@@ -1756,6 +1757,38 @@ function buildAutoRebalanceScanGroups(
       };
     })
     .sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
+}
+
+function getStageLlmActualCostKey(provider: string, model: string) {
+  return `${provider.toLowerCase()}::${model}`;
+}
+
+function buildLatestStageLlmActualCostMap(
+  runs: RunResponse[],
+  threatHistory: PortfolioAnalysisHistoryItem[],
+  portfolio: WorkflowPortfolio,
+  stage: Exclude<WorkflowStageKey, "sync" | "actionables">,
+  usdInrRate: number,
+): StageLlmActualCostMap {
+  const latestGroup = buildAutoRebalanceScanGroups(
+    runs,
+    threatHistory,
+    portfolio,
+  )[0];
+  if (!latestGroup) return {};
+
+  return latestGroup.items
+    .filter((item) => item.stage === stage)
+    .sort((a, b) => parseTimestampMs(a.timestamp) - parseTimestampMs(b.timestamp))
+    .reduce<StageLlmActualCostMap>((costs, item) => {
+      const costUsd =
+        typeof item.costUsd === "number" && Number.isFinite(item.costUsd)
+          ? item.costUsd
+          : 0;
+      costs[getStageLlmActualCostKey(item.provider, item.model)] =
+        costUsd * usdInrRate;
+      return costs;
+    }, {});
 }
 
 function formatAutoRebalanceStageLabel(
@@ -3899,6 +3932,7 @@ function StageLlmSelectorDialog({
   onReplaceSelection,
   onClose,
   lastRunCostInr,
+  actualCostInrByModel,
 }: {
   open: boolean;
   stage: WorkflowStageKey | null;
@@ -3912,6 +3946,7 @@ function StageLlmSelectorDialog({
   onReplaceSelection: (keys: Set<string>) => void;
   onClose: () => void;
   lastRunCostInr?: number | null;
+  actualCostInrByModel?: StageLlmActualCostMap;
 }) {
   const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
     readSavedModelMixes(),
@@ -3929,6 +3964,11 @@ function StageLlmSelectorDialog({
     typeof lastRunCostInr === "number" &&
     Number.isFinite(lastRunCostInr) &&
     lastRunCostInr > 0;
+  const getActualCostInr = useCallback(
+    (providerName: string, model: string) =>
+      actualCostInrByModel?.[getStageLlmActualCostKey(providerName, model)],
+    [actualCostInrByModel],
+  );
 
   const loadHistory = useCallback(async () => {
     if (!stage || !portfolio || !currentHistoryKey) return;
@@ -4161,6 +4201,7 @@ function StageLlmSelectorDialog({
             onToggle={onToggle}
             onSelectAll={singleSelect ? undefined : onSelectAll}
             onClear={onClear}
+            getEstimatedCostInr={getActualCostInr}
             costSummaryLabel={hasLastRunCost ? "Last cost" : undefined}
             costSummaryValue={
               hasLastRunCost ? formatInrCost(lastRunCostInr) : undefined
@@ -4358,6 +4399,8 @@ export function RebalanceWorkflowSections({
   const [llmDialogSelectedKeys, setLlmDialogSelectedKeys] = useState<
     Set<string>
   >(new Set());
+  const [llmDialogActualCostInrByModel, setLlmDialogActualCostInrByModel] =
+    useState<StageLlmActualCostMap>({});
   const [costHistoryPortfolio, setCostHistoryPortfolio] = useState<WorkflowPortfolio | null>(null);
   const [costHistoryGroups, setCostHistoryGroups] = useState<AutoRebalanceScanGroup[]>([]);
   const [costHistoryLoading, setCostHistoryLoading] = useState(false);
@@ -5294,22 +5337,44 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
     setLlmDialogPortfolio(portfolio);
     setLlmDialogProviders([]);
     setLlmDialogSelectedKeys(new Set());
+    setLlmDialogActualCostInrByModel({});
     try {
-      const providers = await apiService.getProviders({
-        prompt: buildSwingTradePrompt(
-          "india",
-          getSwingTradeDefaultInvestmentAmount("india"),
-        ),
-      });
+      const [providers, costInputs] = await Promise.all([
+        apiService.getProviders({
+          prompt: buildSwingTradePrompt(
+            "india",
+            getSwingTradeDefaultInvestmentAmount("india"),
+          ),
+        }),
+        Promise.all([
+          fetchAllFullRuns(),
+          portfolio === "zerodha"
+            ? apiService.zerodhaThreatsHistory({ limit: 200 })
+            : apiService.indmoneyUsThreatsHistory({ limit: 200 }),
+        ]).catch(() => null),
+      ]);
       const targets = getSavedStageTargets(stage, providers);
       setLlmDialogProviders(providers);
       setLlmDialogSelectedKeys(new Set(targets.map(targetKey)));
+      if (costInputs) {
+        const [runs, threatHistory] = costInputs;
+        setLlmDialogActualCostInrByModel(
+          buildLatestStageLlmActualCostMap(
+            runs,
+            threatHistory.history ?? [],
+            portfolio,
+            stage,
+            usdInrRate,
+          ),
+        );
+      }
     } catch (error) {
       setLlmDialogStage(null);
       setLlmDialogPortfolio(null);
+      setLlmDialogActualCostInrByModel({});
       window.alert(`Could not load LLM details: ${normalizeError(error)}`);
     }
-  }, []);
+  }, [usdInrRate]);
 
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
@@ -6506,9 +6571,11 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
               )
             : null
         }
+        actualCostInrByModel={llmDialogActualCostInrByModel}
         onClose={() => {
           setLlmDialogStage(null);
           setLlmDialogPortfolio(null);
+          setLlmDialogActualCostInrByModel({});
         }}
       />
 
