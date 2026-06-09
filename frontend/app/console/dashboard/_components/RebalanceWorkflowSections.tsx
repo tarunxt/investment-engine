@@ -609,6 +609,8 @@ const ZERODHA_BASKET_SECTION_LABELS: Partial<Record<ActionCategory, string>> = {
   "Add more": "Buy More",
   Hold: "Hold",
 };
+const ZERODHA_BASKET_INCREASING_SCORE_ACTIONS = new Set<ActionCategory>(["Sell All", "Trim"]);
+const ZERODHA_BASKET_DECREASING_SCORE_ACTIONS = new Set<ActionCategory>(["Add more", "Buy New"]);
 const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
   "threats",
   "swing",
@@ -809,6 +811,39 @@ function applyZerodhaBasketPercent(
   };
 }
 
+function getZerodhaBasketScore(order: ZerodhaBasketPreviewOrder) {
+  return order.detail.calculatedScore;
+}
+
+function compareZerodhaBasketOrdersByScore(left: ZerodhaBasketPreviewOrder, right: ZerodhaBasketPreviewOrder) {
+  const leftAction = getZerodhaBasketActionForPercent(left);
+  const rightAction = getZerodhaBasketActionForPercent(right);
+  const leftActionIndex = ZERODHA_BASKET_SECTION_ORDER.indexOf(leftAction);
+  const rightActionIndex = ZERODHA_BASKET_SECTION_ORDER.indexOf(rightAction);
+  const actionComparison = (leftActionIndex === -1 ? Number.MAX_SAFE_INTEGER : leftActionIndex)
+    - (rightActionIndex === -1 ? Number.MAX_SAFE_INTEGER : rightActionIndex);
+  if (actionComparison !== 0) return actionComparison;
+
+  const leftScore = getZerodhaBasketScore(left);
+  const rightScore = getZerodhaBasketScore(right);
+  const leftMissingScore = leftScore === null || !Number.isFinite(leftScore);
+  const rightMissingScore = rightScore === null || !Number.isFinite(rightScore);
+  if (leftMissingScore !== rightMissingScore) return leftMissingScore ? 1 : -1;
+
+  if (!leftMissingScore && !rightMissingScore) {
+    const shouldSortIncreasing = ZERODHA_BASKET_INCREASING_SCORE_ACTIONS.has(leftAction);
+    const shouldSortDecreasing = ZERODHA_BASKET_DECREASING_SCORE_ACTIONS.has(leftAction);
+    const scoreComparison = shouldSortIncreasing
+      ? leftScore - rightScore
+      : shouldSortDecreasing
+        ? rightScore - leftScore
+        : 0;
+    if (scoreComparison !== 0) return scoreComparison;
+  }
+
+  return left.symbol.localeCompare(right.symbol, undefined, { sensitivity: "base", numeric: true });
+}
+
 function formatBasketQuantity(value: number | null) {
   if (value === null) return "—";
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 3 }).format(value);
@@ -893,11 +928,7 @@ function buildZerodhaBasketPreviewOrders(
       };
     })
     .filter((order) => order.units !== null && order.units > 0)
-    .sort((a, b) => {
-      const actionOrder = ["Sell All", "Trim", "Add more", "Buy New"].indexOf(a.action) - ["Sell All", "Trim", "Add more", "Buy New"].indexOf(b.action);
-      if (actionOrder !== 0) return actionOrder;
-      return a.symbol.localeCompare(b.symbol, undefined, { sensitivity: "base" });
-    });
+    .sort(compareZerodhaBasketOrdersByScore);
 }
 
 function isActionablesFresh(completedAt: string | null | undefined, now: number) {
@@ -2039,7 +2070,9 @@ function ZerodhaBasketPreviewDialog({
   const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
-    orders: orders.filter((order) => getZerodhaBasketActionForPercent(order) === action),
+    orders: orders
+      .filter((order) => getZerodhaBasketActionForPercent(order) === action)
+      .sort(compareZerodhaBasketOrdersByScore),
   })).filter((group) => group.orders.length > 0);
 
   const renderPlaceOrderButton = (className?: string) => (
@@ -3912,7 +3945,9 @@ export function RebalanceWorkflowSections({
   );
 
   const placeSelectedZerodhaBasketOrders = useCallback(async () => {
-    const selectedOrders = zerodhaBasketOrders.filter((order) => selectedZerodhaBasketIds.has(order.id));
+    const selectedOrders = zerodhaBasketOrders
+      .filter((order) => selectedZerodhaBasketIds.has(order.id))
+      .sort(compareZerodhaBasketOrdersByScore);
     if (!selectedOrders.length) {
       window.alert("Select at least one Zerodha basket row before opening Kite.");
       return;
