@@ -49,6 +49,15 @@ class CreateRunUseCase:
         if not cmd.targets:
             raise ValidationException("At least one (provider, model) target is required.")
 
+        targets: list[RunModelTarget] = []
+        seen_targets: set[tuple[str, str]] = set()
+        for target in cmd.targets:
+            key = (target.provider.strip().lower(), target.model.strip().lower())
+            if key in seen_targets:
+                continue
+            seen_targets.add(key)
+            targets.append(target)
+
         now = datetime.now(timezone.utc)
         scheduled_at = cmd.scheduled_at
         if scheduled_at is not None and scheduled_at.tzinfo is None:
@@ -101,7 +110,7 @@ class CreateRunUseCase:
                 await self._run_repo.create(run)  # flush → run.id populated
 
                 jobs: list[Job] = []
-                for target in cmd.targets:
+                for target in targets:
                     job = Job(
                         prompt=cmd.prompt,
                         provider=target.provider,
