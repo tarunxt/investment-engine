@@ -543,7 +543,7 @@ function getRunTargetsFromStoredMix(providers: ProviderInfo[]) {
   );
   const sourceTargets = autoMix?.targets?.length ? autoMix.targets : [];
 
-  return sourceTargets
+  return uniqueTargetKeys(sourceTargets)
     .filter((target) => compatible.has(target))
     .map((target) => {
       const [provider, model] = target.split("::");
@@ -1070,6 +1070,18 @@ function parseTargetKey(key: string): ProviderModelTarget | null {
   return provider && model ? { provider, model } : null;
 }
 
+function uniqueTargetKeys(keys: string[]) {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  keys.forEach((key) => {
+    const normalized = key.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    unique.push(key);
+  });
+  return unique;
+}
+
 function getCompatibleTargets(providers: ProviderInfo[]) {
   return providers.flatMap((provider) =>
     provider.models
@@ -1122,7 +1134,7 @@ function getSavedStageTargets(
   const compatibleKeys = new Set(
     getCompatibleTargets(providers).map(targetKey),
   );
-  const savedTargets = readStageLlmSelection(stage)
+  const savedTargets = uniqueTargetKeys(readStageLlmSelection(stage))
     .filter((key) => compatibleKeys.has(key))
     .map(parseTargetKey)
     .filter((target): target is ProviderModelTarget => Boolean(target));
@@ -1161,9 +1173,13 @@ function buildRunPayload({
   sheetName?: string;
   runMetadata?: AutoRebalanceRunMetadata | null;
 }): RunCreate {
+  const uniqueTargets = uniqueTargetKeys(targets.map(targetKey))
+    .map(parseTargetKey)
+    .filter((target): target is ProviderModelTarget => Boolean(target));
+
   return {
     prompt,
-    targets,
+    targets: uniqueTargets,
     allow_parallel: true,
     auto_export_enabled: Boolean(sheetName),
     export_sheet_name: sheetName,
