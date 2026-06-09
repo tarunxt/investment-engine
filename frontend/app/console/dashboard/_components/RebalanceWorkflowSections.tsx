@@ -1781,12 +1781,15 @@ function buildLatestStageLlmActualCostMap(
     .filter((item) => item.stage === stage)
     .sort((a, b) => parseTimestampMs(a.timestamp) - parseTimestampMs(b.timestamp))
     .reduce<StageLlmActualCostMap>((costs, item) => {
+      const costKey = getStageLlmActualCostKey(item.provider, item.model);
+      if (costKey in costs) {
+        return costs;
+      }
       const costUsd =
         typeof item.costUsd === "number" && Number.isFinite(item.costUsd)
           ? item.costUsd
           : 0;
-      costs[getStageLlmActualCostKey(item.provider, item.model)] =
-        costUsd * usdInrRate;
+      costs[costKey] = costUsd * usdInrRate;
       return costs;
     }, {});
 }
