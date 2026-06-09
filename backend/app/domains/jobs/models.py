@@ -62,6 +62,9 @@ class Job(Base, TimestampMixin):
     export_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     exported_sheet_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auto_rebalance_portfolio: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    auto_rebalance_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    auto_rebalance_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

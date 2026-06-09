@@ -45,6 +45,8 @@ import {
   RefreshTokenResponse,
   RunCreate,
   RunListItem,
+  AutoRebalanceRunReservationResponse,
+  AutoRebalancePortfolioKey,
   RunResponse,
   UpdatePasswordRequest,
   UpdateProfileRequest,
@@ -514,6 +516,10 @@ class apiServiceClass implements IApiService {
    */
   createRun(data: RunCreate): Promise<RunResponse> {
     return this.post<RunResponse>(URLs.runs.create(), data);
+  }
+
+  reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey): Promise<AutoRebalanceRunReservationResponse> {
+    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio });
   }
 
   getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>> {

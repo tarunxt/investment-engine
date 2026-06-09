@@ -33,6 +33,9 @@ class CreateRunCommand:
     export_investment_amount: str | None = None
     export_title: str | None = None
     allow_parallel: bool = False
+    auto_rebalance_portfolio: str | None = None
+    auto_rebalance_sequence: int | None = None
+    auto_rebalance_label: str | None = None
 
 
 class CreateRunUseCase:
@@ -91,6 +94,9 @@ class CreateRunUseCase:
                     export_investment_amount=cmd.export_investment_amount,
                     export_title=cmd.export_title,
                     export_status="pending" if cmd.auto_export_enabled else "disabled",
+                    auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
+                    auto_rebalance_sequence=cmd.auto_rebalance_sequence,
+                    auto_rebalance_label=cmd.auto_rebalance_label,
                 )
                 await self._run_repo.create(run)  # flush → run.id populated
 
@@ -103,6 +109,9 @@ class CreateRunUseCase:
                         user_id=cmd.user_id,
                         status=initial_status,
                         scheduled_at=scheduled_at,
+                        auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
+                        auto_rebalance_sequence=cmd.auto_rebalance_sequence,
+                        auto_rebalance_label=cmd.auto_rebalance_label,
                     )
                     self._session.add(job)
                     jobs.append(job)

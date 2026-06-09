@@ -219,6 +219,7 @@ export const URLs = {
     list: () => `${resolveApiBaseUrl()}/runs`,
     get: (id: number) => `${resolveApiBaseUrl()}/runs/${id}`,
     cancel: (id: number) => `${resolveApiBaseUrl()}/runs/${id}/cancel`,
+    autoRebalanceLabel: () => `${resolveApiBaseUrl()}/runs/auto-rebalance-label`,
     ws: () => `${resolveWebSocketBaseUrl()}/ws/runs`,
     wsRun: (id: number) => `${resolveWebSocketBaseUrl()}/ws/runs/${id}`,
   },

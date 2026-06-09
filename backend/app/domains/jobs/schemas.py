@@ -28,6 +28,9 @@ class JobResponse(BaseModel):
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None
     exported_sheet_url: Optional[str] = None
+    auto_rebalance_portfolio: Optional[str] = None
+    auto_rebalance_sequence: Optional[int] = None
+    auto_rebalance_label: Optional[str] = None
     scheduled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

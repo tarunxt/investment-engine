@@ -1,6 +1,6 @@
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -8,9 +8,15 @@ from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.jobs.models import Job
-from app.domains.runs.models import RunJob
+from app.domains.runs.models import Run, RunJob
 from app.domains.runs.repository import PostgresRunRepository
-from app.domains.runs.schemas import RunCreate, RunListItem, RunResponse
+from app.domains.runs.schemas import (
+    AutoRebalanceRunReservationRequest,
+    AutoRebalanceRunReservationResponse,
+    RunCreate,
+    RunListItem,
+    RunResponse,
+)
 from app.domains.runs.use_cases.create_run import (
     CreateRunCommand,
     CreateRunUseCase,
@@ -24,10 +30,41 @@ from app.shared.types import JobStatus, UserId
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 RUN_PROMPT_PREVIEW_CHARS = 280
+AUTO_REBALANCE_LABEL_PREFIXES = {
+    "india": "India Run",
+    "indmoney_us": "IndMoney US Run",
+}
+
 
 
 def _get_redis() -> aioredis.Redis:
     return aioredis.from_url(settings.redis_url, decode_responses=True)
+
+
+def _format_auto_rebalance_label(portfolio: str, sequence: int) -> str:
+    return f"{AUTO_REBALANCE_LABEL_PREFIXES[portfolio]} #{sequence}"
+
+
+async def _get_max_auto_rebalance_sequence(db: AsyncSession, portfolio: str) -> int:
+    run_max = (await db.execute(
+        select(func.max(Run.auto_rebalance_sequence)).where(
+            Run.auto_rebalance_portfolio == portfolio,
+        )
+    )).scalar_one_or_none() or 0
+    job_max = (await db.execute(
+        select(func.max(Job.auto_rebalance_sequence)).where(
+            Job.auto_rebalance_portfolio == portfolio,
+        )
+    )).scalar_one_or_none() or 0
+    return max(int(run_max), int(job_max))
+
+
+async def _reserve_auto_rebalance_sequence(db: AsyncSession, redis: aioredis.Redis, portfolio: str) -> int:
+    key = f"auto_rebalance_run_sequence:{portfolio}"
+    seeded = await redis.setnx(f"{key}:seeded", "1")
+    if seeded:
+        await redis.set(key, await _get_max_auto_rebalance_sequence(db, portfolio))
+    return int(await redis.incr(key))
 
 
 def _preview_prompt(prompt: str) -> str:
@@ -50,8 +87,29 @@ def _serialize_run_list_item(run) -> RunListItem:
         export_error=run.export_error,
         exported_at=run.exported_at,
         exported_sheet_url=run.exported_sheet_url,
+        auto_rebalance_portfolio=run.auto_rebalance_portfolio,
+        auto_rebalance_sequence=run.auto_rebalance_sequence,
+        auto_rebalance_label=run.auto_rebalance_label,
         created_at=run.created_at,
         updated_at=run.updated_at,
+    )
+
+
+@router.post("/auto-rebalance-label", response_model=AutoRebalanceRunReservationResponse)
+async def reserve_auto_rebalance_label(
+    body: AutoRebalanceRunReservationRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    redis = _get_redis()
+    try:
+        sequence = await _reserve_auto_rebalance_sequence(db, redis, body.portfolio)
+    finally:
+        await redis.aclose()
+    return AutoRebalanceRunReservationResponse(
+        portfolio=body.portfolio,
+        sequence=sequence,
+        label=_format_auto_rebalance_label(body.portfolio, sequence),
     )
 
 
@@ -95,6 +153,9 @@ async def create_run(
                 export_investment_amount=body.export_investment_amount,
                 export_title=body.export_title,
                 allow_parallel=body.allow_parallel,
+                auto_rebalance_portfolio=body.auto_rebalance_portfolio,
+                auto_rebalance_sequence=body.auto_rebalance_sequence,
+                auto_rebalance_label=body.auto_rebalance_label,
             )
         )
     except AppException as exc:
