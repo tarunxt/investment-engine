@@ -1733,11 +1733,27 @@ function buildAutoRebalanceScanGroups(
     lastGroup.push(item);
   });
 
-  return groups
-    .map((group, index) => {
-      const sortedItems = [...group].sort(
-        (a, b) => parseTimestampMs(a.timestamp) - parseTimestampMs(b.timestamp),
-      );
+  const chronologicalGroups = groups.map((group, index) => {
+    const sortedItems = [...group].sort(
+      (a, b) => parseTimestampMs(a.timestamp) - parseTimestampMs(b.timestamp),
+    );
+    const explicitSequence = sortedItems.find((item) => item.autoRebalanceSequence)?.autoRebalanceSequence ?? null;
+    return {
+      chronologicalSequence: index + 1,
+      explicitSequence,
+      sortedItems,
+    };
+  });
+  const explicitSequenceCounts = chronologicalGroups.reduce<Record<number, number>>((counts, group) => {
+    if (typeof group.explicitSequence === "number" && group.explicitSequence > 0) {
+      counts[group.explicitSequence] = (counts[group.explicitSequence] ?? 0) + 1;
+    }
+    return counts;
+  }, {});
+
+  return chronologicalGroups
+    .map((group) => {
+      const { chronologicalSequence, explicitSequence, sortedItems } = group;
       const latestTimestamp = new Date(
         Math.max(...sortedItems.map((item) => parseTimestampMs(item.timestamp))),
       ).toISOString();
@@ -1748,10 +1764,19 @@ function buildAutoRebalanceScanGroups(
         technical: 4,
       };
       const idParts = sortedItems.map((item) => item.id).join("|");
-      const explicitSequence = sortedItems.find((item) => item.autoRebalanceSequence)?.autoRebalanceSequence ?? null;
-      const sequence = explicitSequence ?? index + 1;
+      let sequence = chronologicalSequence;
+      let canUseExplicitLabel = false;
+      if (
+        typeof explicitSequence === "number" &&
+        explicitSequence > 0 &&
+        explicitSequenceCounts[explicitSequence] === 1
+      ) {
+        sequence = explicitSequence;
+        canUseExplicitLabel = true;
+      }
       const fallbackLabel = portfolio === "zerodha" ? `India Run #${sequence}` : `IndMoney US Run #${sequence}`;
-      const label = sortedItems.find((item) => item.autoRebalanceLabel)?.autoRebalanceLabel ?? fallbackLabel;
+      const explicitLabel = sortedItems.find((item) => item.autoRebalanceLabel)?.autoRebalanceLabel ?? null;
+      const label = canUseExplicitLabel && explicitLabel ? explicitLabel : fallbackLabel;
       return {
         id: `${portfolio}:${sequence}:${idParts}`,
         portfolio,
