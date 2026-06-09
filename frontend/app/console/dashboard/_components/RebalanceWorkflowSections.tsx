@@ -54,6 +54,7 @@ import { cn } from "@/lib/utils";
 import type {
   IndMoneyUsPortfolioSnapshotCreateRequest,
   JobResponse,
+  PortfolioAnalysisHistoryItem,
   ZerodhaPortfolioSnapshotDetail,
   IndMoneyUsThreatAnalysis,
   ProviderInfo,
@@ -93,6 +94,28 @@ type InputSelectionCandidate = {
   content?: string | null;
 };
 type RunOutputJobStatus = "completed" | "partial" | "failed" | "other";
+
+type AutoRebalanceCostBreakdownItem = {
+  id: string;
+  stage: Exclude<WorkflowStageKey, "sync" | "actionables">;
+  sourceType: "run" | "job";
+  runId?: number | null;
+  jobId?: number | null;
+  timestamp: string | null;
+  provider: string;
+  model: string;
+  status: string;
+  costUsd: number | null;
+  llmCount: number;
+};
+
+type AutoRebalanceScanGroup = {
+  id: string;
+  portfolio: WorkflowPortfolio;
+  timestamp: string | null;
+  totalCostUsd: number;
+  items: AutoRebalanceCostBreakdownItem[];
+};
 
 type StageLlmHistoryEntry = {
   id: string;
@@ -1290,7 +1313,19 @@ function withInrCost(info: Partial<StageInfo>, usdInrRate: number) {
 }
 
 function getLatestRunTimestamp(run: RunResponse) {
-  return run.updated_at ?? run.exported_at ?? run.created_at;
+  const timestamps = [
+    run.updated_at,
+    run.exported_at,
+    run.created_at,
+    ...((run.run_jobs ?? []).flatMap((link) => [
+      link.job?.updated_at,
+      link.job?.created_at,
+    ])),
+  ]
+    .map(parseTimestampMs)
+    .filter(Boolean);
+  if (timestamps.length === 0) return run.updated_at ?? run.exported_at ?? run.created_at ?? null;
+  return new Date(Math.max(...timestamps)).toISOString();
 }
 
 function sortRunsByLatestTimestamp(runs: RunResponse[]) {
@@ -1516,6 +1551,147 @@ function getRunCostUsd(run: RunResponse) {
     (total, link) => total + (link.job?.estimated_cost ?? 0),
     0,
   );
+}
+
+function getRunLlmLabel(run: RunResponse) {
+  const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+  if (jobs.length === 0) return { provider: "Unknown", model: "No LLM jobs" };
+  if (jobs.length === 1) {
+    return { provider: jobs[0]?.provider ?? "Unknown", model: jobs[0]?.model ?? "Unknown" };
+  }
+  return { provider: `${jobs.length} LLMs`, model: "Model mix" };
+}
+
+
+function getAutoRebalanceStageForRun(
+  run: RunResponse,
+  portfolio: WorkflowPortfolio,
+): AutoRebalanceCostBreakdownItem["stage"] | null {
+  const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
+  if (isCompletedRebalanceRun(run, market)) return "rebalance";
+  if (isCompletedTechnicalScanRun(run, market)) return "technical";
+  if (isRunInSwingTradeMarket(run.prompt || "", market)) return "swing";
+  return null;
+}
+
+function buildThreatCostBreakdownItem(
+  item: PortfolioAnalysisHistoryItem,
+): AutoRebalanceCostBreakdownItem {
+  return {
+    id: `threat:${item.job_id}`,
+    stage: "threats",
+    sourceType: "job",
+    jobId: item.job_id,
+    timestamp: item.updated_at ?? item.created_at ?? null,
+    provider: item.provider,
+    model: item.model,
+    status: item.status,
+    costUsd: typeof item.estimated_cost === "number" ? item.estimated_cost : null,
+    llmCount: 1,
+  };
+}
+
+function buildRunCostBreakdownItems(
+  run: RunResponse,
+  portfolio: WorkflowPortfolio,
+): AutoRebalanceCostBreakdownItem[] {
+  const stage = getAutoRebalanceStageForRun(run, portfolio);
+  if (!stage) return [];
+  const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
+  if (jobs.length === 0) {
+    const { provider, model } = getRunLlmLabel(run);
+    return [{
+      id: `run:${run.id}:${stage}`,
+      stage,
+      sourceType: "run",
+      runId: run.id,
+      timestamp: getLatestRunTimestamp(run),
+      provider,
+      model,
+      status: run.status,
+      costUsd: getRunCostUsd(run),
+      llmCount: 0,
+    }];
+  }
+  return jobs.map((job) => ({
+    id: `run:${run.id}:job:${job.id}:${stage}`,
+    stage,
+    sourceType: "run",
+    runId: run.id,
+    jobId: job.id,
+    timestamp: job.updated_at ?? job.created_at ?? getLatestRunTimestamp(run),
+    provider: job.provider,
+    model: job.model,
+    status: job.status || run.status,
+    costUsd: typeof job.estimated_cost === "number" ? job.estimated_cost : null,
+    llmCount: 1,
+  }));
+}
+
+function buildAutoRebalanceScanGroups(
+  runs: RunResponse[],
+  threatHistory: PortfolioAnalysisHistoryItem[],
+  portfolio: WorkflowPortfolio,
+): AutoRebalanceScanGroup[] {
+  const maxGapMs = 90 * 60 * 1000;
+  const items = [
+    ...threatHistory.map(buildThreatCostBreakdownItem),
+    ...runs.flatMap((run) => buildRunCostBreakdownItems(run, portfolio)),
+  ]
+    .filter((item) => parseTimestampMs(item.timestamp) > 0)
+    .sort((a, b) => parseTimestampMs(a.timestamp) - parseTimestampMs(b.timestamp));
+
+  const groups: AutoRebalanceCostBreakdownItem[][] = [];
+  items.forEach((item) => {
+    const lastGroup = groups[groups.length - 1];
+    const lastItem = lastGroup?.[lastGroup.length - 1];
+    if (
+      !lastGroup ||
+      !lastItem ||
+      parseTimestampMs(item.timestamp) - parseTimestampMs(lastItem.timestamp) > maxGapMs
+    ) {
+      groups.push([item]);
+      return;
+    }
+    lastGroup.push(item);
+  });
+
+  return groups
+    .map((group, index) => {
+      const sortedItems = [...group].sort(
+        (a, b) => parseTimestampMs(a.timestamp) - parseTimestampMs(b.timestamp),
+      );
+      const latestTimestamp = new Date(
+        Math.max(...sortedItems.map((item) => parseTimestampMs(item.timestamp))),
+      ).toISOString();
+      const stageRank: Record<AutoRebalanceCostBreakdownItem["stage"], number> = {
+        threats: 1,
+        swing: 2,
+        rebalance: 3,
+        technical: 4,
+      };
+      const idParts = sortedItems.map((item) => item.id).join("|");
+      return {
+        id: `${portfolio}:${index}:${idParts}`,
+        portfolio,
+        timestamp: latestTimestamp,
+        totalCostUsd: sortedItems.reduce(
+          (total, item) => total + (item.costUsd ?? 0),
+          0,
+        ),
+        items: sortedItems.sort((a, b) => {
+          const rankDelta = stageRank[a.stage] - stageRank[b.stage];
+          return rankDelta || parseTimestampMs(a.timestamp) - parseTimestampMs(b.timestamp);
+        }),
+      };
+    })
+    .sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
+}
+
+function formatAutoRebalanceStageLabel(
+  stage: AutoRebalanceCostBreakdownItem["stage"],
+) {
+  return getStageTileLabel(stage);
 }
 
 
@@ -3444,6 +3620,176 @@ function ZerodhaRebalanceFlowCard() {
   );
 }
 
+function AutoRebalanceCostHistoryDialog({
+  open,
+  portfolio,
+  groups,
+  loading,
+  error,
+  usdInrRate,
+  selectedGroup,
+  onSelectGroup,
+  onClose,
+  onCloseBreakdown,
+}: {
+  open: boolean;
+  portfolio: WorkflowPortfolio | null;
+  groups: AutoRebalanceScanGroup[];
+  loading: boolean;
+  error: string | null;
+  usdInrRate: number;
+  selectedGroup: AutoRebalanceScanGroup | null;
+  onSelectGroup: (group: AutoRebalanceScanGroup) => void;
+  onClose: () => void;
+  onCloseBreakdown: () => void;
+}) {
+  if (!open || !portfolio) return null;
+  const title = portfolio === "zerodha" ? "Zerodha scan cost history" : "INDmoney US scan cost history";
+  return (
+    <>
+      <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4 backdrop-blur-sm">
+        <div className="flex h-full w-full max-w-xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+          <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-600">
+                Auto-rebalance history
+              </p>
+              <h3 className="mt-1 text-lg font-extrabold text-slate-950">{title}</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Previous scan groups are inferred from cost-bearing Threats, Swing, Rebalance, and Technical runs.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              aria-label="Close auto-rebalance cost history"
+            >
+              <X className="size-5" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5">
+            {loading ? (
+              <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 py-12 text-sm text-slate-500">
+                <Loader2 className="size-4 animate-spin" /> Loading scan groups…
+              </div>
+            ) : error ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
+            ) : groups.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                No previous scan groups were found for this portfolio yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {groups.map((group) => (
+                  <button
+                    key={group.id}
+                    type="button"
+                    onClick={() => onSelectGroup(group)}
+                    className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-extrabold text-slate-950">
+                          {formatTimestamp(group.timestamp)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {group.items.length} cost item{group.items.length === 1 ? "" : "s"} · {group.items.reduce((total, item) => total + item.llmCount, 0)} LLM job{group.items.reduce((total, item) => total + item.llmCount, 0) === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-base font-extrabold text-emerald-700">
+                          {formatInrCostFromUsd(group.totalCostUsd, usdInrRate)}
+                        </p>
+                        <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                          Total incurred
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {group.items.map((item) => (
+                        <span
+                          key={item.id}
+                          className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700"
+                        >
+                          {formatAutoRebalanceStageLabel(item.stage)} · {formatInrCostFromUsd(item.costUsd, usdInrRate)}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {selectedGroup ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-600">
+                  Cost breakup
+                </p>
+                <h3 className="mt-1 text-lg font-extrabold text-slate-950">
+                  Scan group · {formatTimestamp(selectedGroup.timestamp)}
+                </h3>
+                <p className="mt-1 text-sm font-semibold text-slate-600">
+                  Total incurred: {formatInrCostFromUsd(selectedGroup.totalCostUsd, usdInrRate)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onCloseBreakdown}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close scan group cost breakup"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="max-h-[65vh] overflow-y-auto p-5">
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Stage</th>
+                      <th className="px-4 py-3">LLM / Source</th>
+                      <th className="px-4 py-3">Timestamp</th>
+                      <th className="px-4 py-3 text-right">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {selectedGroup.items.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-4 py-3 align-top">
+                          <p className="font-bold text-slate-950">{formatAutoRebalanceStageLabel(item.stage)}</p>
+                          <p className="mt-1 text-xs text-slate-500 capitalize">{item.status || "unknown"}</p>
+                        </td>
+                        <td className="px-4 py-3 align-top">
+                          <p className="font-semibold text-slate-800">{item.provider}/{item.model}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {item.runId ? `Run #${item.runId}` : `Job #${item.jobId ?? "n/a"}`} · {item.llmCount} LLM job{item.llmCount === 1 ? "" : "s"}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3 align-top text-slate-600">{formatTimestamp(item.timestamp)}</td>
+                        <td className="px-4 py-3 align-top text-right font-extrabold text-emerald-700">
+                          {formatInrCostFromUsd(item.costUsd, usdInrRate)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function StageLlmSelectorDialog({
   open,
   stage,
@@ -3916,6 +4262,11 @@ export function RebalanceWorkflowSections({
   const [llmDialogSelectedKeys, setLlmDialogSelectedKeys] = useState<
     Set<string>
   >(new Set());
+  const [costHistoryPortfolio, setCostHistoryPortfolio] = useState<WorkflowPortfolio | null>(null);
+  const [costHistoryGroups, setCostHistoryGroups] = useState<AutoRebalanceScanGroup[]>([]);
+  const [costHistoryLoading, setCostHistoryLoading] = useState(false);
+  const [costHistoryError, setCostHistoryError] = useState<string | null>(null);
+  const [selectedCostGroup, setSelectedCostGroup] = useState<AutoRebalanceScanGroup | null>(null);
   const [outputDialog, setOutputDialog] = useState<{
     portfolio: WorkflowPortfolio;
     stage: WorkflowStageKey;
@@ -3986,6 +4337,35 @@ export function RebalanceWorkflowSections({
   }, []);
 
   const isBusy = Boolean(runningPortfolio);
+
+  const openAutoRebalanceCostHistory = useCallback(async (portfolio: WorkflowPortfolio) => {
+    setCostHistoryPortfolio(portfolio);
+    setSelectedCostGroup(null);
+    setCostHistoryLoading(true);
+    setCostHistoryError(null);
+    try {
+      const [runs, threatHistory] = await Promise.all([
+        fetchAllFullRuns(),
+        portfolio === "zerodha"
+          ? apiService.zerodhaThreatsHistory({ limit: 200 })
+          : apiService.indmoneyUsThreatsHistory({ limit: 200 }),
+      ]);
+      setCostHistoryGroups(
+        buildAutoRebalanceScanGroups(runs, threatHistory.history ?? [], portfolio).slice(0, 40),
+      );
+    } catch (error) {
+      setCostHistoryError(normalizeError(error));
+      setCostHistoryGroups([]);
+    } finally {
+      setCostHistoryLoading(false);
+    }
+  }, []);
+
+  const closeAutoRebalanceCostHistory = useCallback(() => {
+    setCostHistoryPortfolio(null);
+    setSelectedCostGroup(null);
+    setCostHistoryError(null);
+  }, []);
 
   const openZerodhaBasketPreview = useCallback(async () => {
     setZerodhaBasketOpen(true);
@@ -5955,15 +6335,26 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
             />
           ))}
         </div>
-        <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-normal text-emerald-950">
-          {getWorkflowRunDuration(states[section.portfolio], now)
-            ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · `
-            : ""}
-          Total cost incurred in last Auto-rebalance:{" "}
-          {formatInrCost(
-            getWorkflowRunCost(states[section.portfolio], usdInrRate) ||
-              lastAutoRebalanceCosts[section.portfolio],
-          )}
+        <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-normal text-emerald-950">
+          <div>
+            {getWorkflowRunDuration(states[section.portfolio], now)
+              ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · `
+              : ""}
+            Total cost incurred in last Auto-rebalance:{" "}
+            {formatInrCost(
+              getWorkflowRunCost(states[section.portfolio], usdInrRate) ||
+                lastAutoRebalanceCosts[section.portfolio],
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void openAutoRebalanceCostHistory(section.portfolio)}
+            className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-white text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            aria-label={`Open ${section.title} cost history`}
+            title="Open previous scan cost history"
+          >
+            <History className="size-5" />
+          </button>
         </div>
       </div>
     );
@@ -5982,6 +6373,19 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
       <section className="mt-6">
         <ZerodhaRebalanceFlowCard />
       </section>
+
+      <AutoRebalanceCostHistoryDialog
+        open={Boolean(costHistoryPortfolio)}
+        portfolio={costHistoryPortfolio}
+        groups={costHistoryGroups}
+        loading={costHistoryLoading}
+        error={costHistoryError}
+        usdInrRate={usdInrRate}
+        selectedGroup={selectedCostGroup}
+        onSelectGroup={setSelectedCostGroup}
+        onClose={closeAutoRebalanceCostHistory}
+        onCloseBreakdown={() => setSelectedCostGroup(null)}
+      />
 
       <StageLlmSelectorDialog
         open={Boolean(llmDialogStage)}
