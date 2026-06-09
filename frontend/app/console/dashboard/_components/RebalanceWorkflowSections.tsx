@@ -123,8 +123,10 @@ type StageInfo = {
 };
 type ZerodhaBasketOrderKind = "Market" | "Limit" | "After market";
 type ZerodhaBasketOrderPercent = 50 | 100;
+const ZERODHA_KITE_PUBLISHER_BATCH_SIZE = 5;
 type ZerodhaBasketSubmission = {
   redirected: number;
+  basketCount: number;
   clipboardCopied: boolean;
   orders: ZerodhaBasketPreviewOrder[];
 };
@@ -655,6 +657,14 @@ function getZerodhaPublisherApiKey(loginUrl: string) {
   } catch {
     return null;
   }
+}
+
+function chunkZerodhaBasketOrders(orders: ZerodhaBasketPreviewOrder[]) {
+  const chunks: ZerodhaBasketPreviewOrder[][] = [];
+  for (let index = 0; index < orders.length; index += ZERODHA_KITE_PUBLISHER_BATCH_SIZE) {
+    chunks.push(orders.slice(index, index + ZERODHA_KITE_PUBLISHER_BATCH_SIZE));
+  }
+  return chunks;
 }
 
 function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], marketOpen: boolean) {
@@ -2081,7 +2091,8 @@ function ZerodhaBasketPreviewDialog({
 
               {submission ? (
                 <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                  Created a Kite order tray for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
+                  Created {submission.basketCount} Kite order tray{submission.basketCount === 1 ? "" : "s"} for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
+                  {submission.basketCount > 1 ? ` Each tray contains at most ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders; place every tray in Kite.` : ""}
                   {submission.clipboardCopied ? " A backup order checklist was copied to your clipboard." : " Use the table below as your backup manual-entry checklist if Kite rejects the basket payload."}
                 </div>
               ) : null}
@@ -2223,7 +2234,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows are posted to Zerodha Kite Publisher to create a reviewable Kite order tray. Market rows are only sent while NSE/BSE regular market appears open; closed-market rows are sent as AMO limit orders using the displayed price.
+            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Market rows are only sent while NSE/BSE regular market appears open; closed-market rows are sent as AMO limit orders using the displayed price.
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
@@ -3889,28 +3900,40 @@ export function RebalanceWorkflowSections({
       window.alert("Cannot prepare limit/AMO rows without a valid displayed price. Unselect rows with missing prices and retry.");
       return;
     }
+    const orderChunks = chunkZerodhaBasketOrders(selectedOrders);
     const shouldContinue = window.confirm(
-      `${marketStatus.label}\n\nThis will open Kite for ${selectedOrders.length} selected Zerodha order${selectedOrders.length === 1 ? "" : "s"}. Review and place orders inside Kite. Continue?`,
+      `${marketStatus.label}
+
+This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 ? "" : "s"} for ${selectedOrders.length} selected Zerodha order${selectedOrders.length === 1 ? "" : "s"}. Orders are split into batches of ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} so Kite does not leave later rows unsubmitted. Review and place every tray inside Kite. Continue?`,
     );
     if (!shouldContinue) return;
 
     setZerodhaBasketPlacing(true);
     setZerodhaBasketSubmission(null);
     setZerodhaBasketError(null);
-    const kiteTargetName = `zerodha-basket-${Date.now()}`;
-    const kiteWindow = window.open("about:blank", kiteTargetName);
-    if (!kiteWindow) {
+    const kiteTargetPrefix = `zerodha-basket-${Date.now()}`;
+    const kiteWindows = orderChunks.map((_, index) => {
+      const targetName = `${kiteTargetPrefix}-${index + 1}`;
+      return {
+        targetName,
+        win: window.open("about:blank", targetName),
+      };
+    });
+    if (kiteWindows.some((entry) => !entry.win)) {
+      kiteWindows.forEach((entry) => entry.win?.close());
       setZerodhaBasketPlacing(false);
-      setZerodhaBasketError("Your browser blocked the Kite basket popup. Allow popups for this site, then try Open Kite again.");
+      setZerodhaBasketError(`Your browser blocked one or more Kite basket popups. Allow popups for this site, then try Open Kite again. ${orderChunks.length} popup${orderChunks.length === 1 ? "" : "s"} required for the selected rows.`);
       return;
     }
-    kiteWindow.opener = null;
+    kiteWindows.forEach((entry) => {
+      if (entry.win) entry.win.opener = null;
+    });
 
     try {
       const login = await apiService.zerodhaLoginUrl();
       const apiKey = login.configured ? getZerodhaPublisherApiKey(login.login_url) : null;
       if (!apiKey) {
-        kiteWindow.close();
+        kiteWindows.forEach((entry) => entry.win?.close());
         setZerodhaBasketError("Zerodha Kite Publisher is not configured. Add ZERODHA_API_KEY on the backend and try again.");
         return;
       }
@@ -3922,15 +3945,18 @@ export function RebalanceWorkflowSections({
         clipboardCopied = false;
       }
 
-      postZerodhaKiteBasket(apiKey, selectedOrders, marketStatus.open, kiteTargetName);
+      orderChunks.forEach((chunk, index) => {
+        postZerodhaKiteBasket(apiKey, chunk, marketStatus.open, kiteWindows[index].targetName);
+      });
 
       setZerodhaBasketSubmission({
         redirected: selectedOrders.length,
+        basketCount: orderChunks.length,
         clipboardCopied,
         orders: selectedOrders,
       });
     } catch (error) {
-      kiteWindow.close();
+      kiteWindows.forEach((entry) => entry.win?.close());
       setZerodhaBasketError(`Could not open the Kite order basket: ${normalizeError(error)}`);
     } finally {
       setZerodhaBasketPlacing(false);
