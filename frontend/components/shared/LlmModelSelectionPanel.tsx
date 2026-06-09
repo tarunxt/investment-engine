@@ -28,6 +28,11 @@ interface LlmModelSelectionPanelProps {
   costSummaryValue?: string;
 }
 
+type ProviderCostSummary = {
+  selectedCount: number;
+  estimatedCostInr: number;
+};
+
 function getModelKey(providerName: string, model: string) {
   return `${providerName}::${model}`;
 }
@@ -46,6 +51,27 @@ function getCompatibilityReason(provider: ProviderInfo, model: string) {
   );
 }
 
+function formatInrCost(cost: number) {
+  return `₹${cost.toFixed(2)}`;
+}
+
+function getModelEstimatedCostInr(
+  provider: ProviderInfo,
+  model: string,
+  getEstimatedCostInr?: (
+    providerName: string,
+    model: string,
+  ) => number | undefined,
+) {
+  const estimated =
+    getEstimatedCostInr?.(provider.name, model) ??
+    provider.model_estimated_cost_inr?.[model];
+
+  return typeof estimated === "number" && Number.isFinite(estimated)
+    ? estimated
+    : 0;
+}
+
 export function LlmModelSelectionPanel({
   providers,
   selectedKeys,
@@ -61,31 +87,38 @@ export function LlmModelSelectionPanel({
   onClear,
   onToggleProvider,
   getEstimatedCostInr,
-  costSummaryLabel = "Est",
+  costSummaryLabel = "Estimated total",
   costSummaryValue,
 }: LlmModelSelectionPanelProps) {
   const totalModelCount = providers.reduce(
     (total, provider) => total + provider.models.length,
     0,
   );
-  const selectedEstimatedCostInr = providers.reduce((total, provider) => {
-    return (
-      total +
-      provider.models.reduce((providerTotal, model) => {
-        const key = getModelKey(provider.name, model);
-        if (!selectedKeys.has(key)) return providerTotal;
-        const estimated =
-          getEstimatedCostInr?.(provider.name, model) ??
-          provider.model_estimated_cost_inr?.[model];
-        return (
-          providerTotal +
-          (typeof estimated === "number" && Number.isFinite(estimated)
-            ? estimated
-            : 0)
-        );
-      }, 0)
-    );
-  }, 0);
+  const providerCostSummaries = providers.reduce<Record<string, ProviderCostSummary>>(
+    (summaries, provider) => {
+      summaries[provider.name] = provider.models.reduce<ProviderCostSummary>(
+        (summary, model) => {
+          const key = getModelKey(provider.name, model);
+          if (!selectedKeys.has(key)) return summary;
+
+          return {
+            selectedCount: summary.selectedCount + 1,
+            estimatedCostInr:
+              summary.estimatedCostInr +
+              getModelEstimatedCostInr(provider, model, getEstimatedCostInr),
+          };
+        },
+        { selectedCount: 0, estimatedCostInr: 0 },
+      );
+
+      return summaries;
+    },
+    {},
+  );
+  const selectedEstimatedCostInr = Object.values(providerCostSummaries).reduce(
+    (total, summary) => total + summary.estimatedCostInr,
+    0,
+  );
   const canBulkSelect = selectionMode === "multiple" && Boolean(onSelectAll);
   const canBulkClear = Boolean(onClear);
 
@@ -107,7 +140,7 @@ export function LlmModelSelectionPanel({
           </span>
           <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
             {costSummaryLabel}: {
-              costSummaryValue ?? `₹${selectedEstimatedCostInr.toFixed(2)}`
+              costSummaryValue ?? formatInrCost(selectedEstimatedCostInr)
             }
           </span>
           {showBulkActions && canBulkSelect ? (
@@ -166,6 +199,10 @@ export function LlmModelSelectionPanel({
                 selectedKeys.has(getModelKey(provider.name, model)),
               );
             const someChecked = selectedProviderCount > 0;
+            const providerCostSummary = providerCostSummaries[provider.name] ?? {
+              selectedCount: 0,
+              estimatedCostInr: 0,
+            };
 
             return (
               <section
@@ -214,9 +251,14 @@ export function LlmModelSelectionPanel({
                       {provider.name}
                     </span>
                   </div>
-                  <span className="shrink-0 text-sm text-slate-500">
-                    {selectedProviderCount} / {provider.models.length}
-                  </span>
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-sm">
+                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
+                      Estimated: {formatInrCost(providerCostSummary.estimatedCostInr)}
+                    </span>
+                    <span className="text-slate-500">
+                      {selectedProviderCount} / {provider.models.length}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3">
@@ -225,14 +267,12 @@ export function LlmModelSelectionPanel({
                       const key = getModelKey(provider.name, model);
                       const selected = selectedKeys.has(key);
                       const compatible = isCompatible(provider, model);
-                      const estimated =
-                        getEstimatedCostInr?.(provider.name, model) ??
-                        provider.model_estimated_cost_inr?.[model];
-                      const costLabel =
-                        typeof estimated === "number" &&
-                        Number.isFinite(estimated)
-                          ? ` (₹${estimated.toFixed(2)})`
-                          : "";
+                      const estimated = getModelEstimatedCostInr(
+                        provider,
+                        model,
+                        getEstimatedCostInr,
+                      );
+                      const costLabel = ` (${formatInrCost(estimated)})`;
 
                       return (
                         <label

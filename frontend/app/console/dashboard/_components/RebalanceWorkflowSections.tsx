@@ -4205,10 +4205,6 @@ function StageLlmSelectorDialog({
             onSelectAll={singleSelect ? undefined : onSelectAll}
             onClear={onClear}
             getEstimatedCostInr={getActualCostInr}
-            costSummaryLabel={hasLastRunCost ? "Last cost" : undefined}
-            costSummaryValue={
-              hasLastRunCost ? formatInrCost(lastRunCostInr) : undefined
-            }
             onToggleProvider={(providerName, models) => {
               const providerModelKeys = models.map(
                 (model) => `${providerName}::${model}`,
