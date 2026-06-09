@@ -87,7 +87,7 @@ export function LlmModelSelectionPanel({
   onClear,
   onToggleProvider,
   getEstimatedCostInr,
-  costSummaryLabel = "Estimated total",
+  costSummaryLabel = "Estimated selected total",
   costSummaryValue,
 }: LlmModelSelectionPanelProps) {
   const totalModelCount = providers.reduce(
@@ -138,10 +138,8 @@ export function LlmModelSelectionPanel({
           <span className="rounded-full bg-indigo-50 px-3 py-1 font-semibold text-indigo-700">
             {selectedKeys.size} / {totalModelCount}
           </span>
-          <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
-            {costSummaryLabel}: {
-              costSummaryValue ?? formatInrCost(selectedEstimatedCostInr)
-            }
+          <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
+            {costSummaryLabel}: {costSummaryValue ?? formatInrCost(selectedEstimatedCostInr)}
           </span>
           {showBulkActions && canBulkSelect ? (
             <button
@@ -253,7 +251,7 @@ export function LlmModelSelectionPanel({
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-sm">
                     <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
-                      Estimated: {formatInrCost(providerCostSummary.estimatedCostInr)}
+                      Selected estimate: {formatInrCost(providerCostSummary.estimatedCostInr)}
                     </span>
                     <span className="text-slate-500">
                       {selectedProviderCount} / {provider.models.length}
@@ -272,7 +270,7 @@ export function LlmModelSelectionPanel({
                         model,
                         getEstimatedCostInr,
                       );
-                      const costLabel = ` (${formatInrCost(estimated)})`;
+                      const costLabel = ` · Est. ${formatInrCost(estimated)}`;
 
                       return (
                         <label
