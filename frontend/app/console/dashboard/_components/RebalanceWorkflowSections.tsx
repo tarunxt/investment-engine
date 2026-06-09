@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   Fragment,
+  type ReactNode,
   type SVGProps,
   useCallback,
   useEffect,
@@ -47,7 +48,7 @@ import {
   getSwingTradeDefaultInvestmentAmount,
   type SwingTradeMarket,
 } from "@/lib/swingTrade";
-import { isRunInSwingTradeMarket } from "@/lib/runPresentation";
+import { getRunDetailPathFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import { APIError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
@@ -101,6 +102,7 @@ type AutoRebalanceCostBreakdownItem = {
   sourceType: "run" | "job";
   runId?: number | null;
   jobId?: number | null;
+  runPrompt?: string | null;
   timestamp: string | null;
   provider: string;
   model: string;
@@ -1582,6 +1584,7 @@ function buildThreatCostBreakdownItem(
     stage: "threats",
     sourceType: "job",
     jobId: item.job_id,
+    runId: item.run_id ?? null,
     timestamp: item.updated_at ?? item.created_at ?? null,
     provider: item.provider,
     model: item.model,
@@ -1606,6 +1609,7 @@ function buildRunCostBreakdownItems(
       sourceType: "run",
       runId: run.id,
       timestamp: getLatestRunTimestamp(run),
+      runPrompt: run.prompt,
       provider,
       model,
       status: run.status,
@@ -1620,6 +1624,7 @@ function buildRunCostBreakdownItems(
     runId: run.id,
     jobId: job.id,
     timestamp: job.updated_at ?? job.created_at ?? getLatestRunTimestamp(run),
+    runPrompt: run.prompt,
     provider: job.provider,
     model: job.model,
     status: job.status || run.status,
@@ -1692,6 +1697,57 @@ function formatAutoRebalanceStageLabel(
   stage: AutoRebalanceCostBreakdownItem["stage"],
 ) {
   return getStageTileLabel(stage);
+}
+
+function getAutoRebalanceItemRunHref(item: AutoRebalanceCostBreakdownItem) {
+  if (item.runId) return getRunDetailPathFromPrompt(item.runId, item.runPrompt);
+  if (item.jobId) return URLs.routes.console.jobDetail(item.jobId);
+  return null;
+}
+
+function getAutoRebalanceItemLlmHref(item: AutoRebalanceCostBreakdownItem) {
+  const runHref = getAutoRebalanceItemRunHref(item);
+  if (!runHref) return null;
+  if (item.runId && item.jobId) return `${runHref}#llm-output-job-${item.jobId}`;
+  return runHref;
+}
+
+function getAutoRebalanceItemNumber(item: AutoRebalanceCostBreakdownItem) {
+  if (item.runId) return `Run #${item.runId}`;
+  if (item.jobId) return `Job #${item.jobId}`;
+  return "—";
+}
+
+function groupAutoRebalanceItemsByStage(items: AutoRebalanceCostBreakdownItem[]) {
+  const stageOrder: AutoRebalanceCostBreakdownItem["stage"][] = [
+    "threats",
+    "swing",
+    "rebalance",
+    "technical",
+  ];
+  return stageOrder
+    .map((stage) => ({
+      stage,
+      items: items.filter((item) => item.stage === stage),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
+function AutoRebalanceCostLink({
+  href,
+  children,
+  className,
+}: {
+  href: string | null;
+  children: ReactNode;
+  className?: string;
+}) {
+  if (!href) return <span className={className}>{children}</span>;
+  return (
+    <Link href={href} className={cn("hover:text-blue-700 hover:underline", className)}>
+      {children}
+    </Link>
+  );
 }
 
 
@@ -3627,10 +3683,7 @@ function AutoRebalanceCostHistoryDialog({
   loading,
   error,
   usdInrRate,
-  selectedGroup,
-  onSelectGroup,
   onClose,
-  onCloseBreakdown,
 }: {
   open: boolean;
   portfolio: WorkflowPortfolio | null;
@@ -3646,147 +3699,125 @@ function AutoRebalanceCostHistoryDialog({
   if (!open || !portfolio) return null;
   const title = portfolio === "zerodha" ? "Zerodha scan cost history" : "INDmoney US scan cost history";
   return (
-    <>
-      <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4 backdrop-blur-sm">
-        <div className="flex h-full w-full max-w-xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
-          <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-600">
-                Auto-rebalance history
-              </p>
-              <h3 className="mt-1 text-lg font-extrabold text-slate-950">{title}</h3>
-              <p className="mt-1 text-sm text-slate-500">
-                Previous scan groups are inferred from cost-bearing Threats, Swing, Rebalance, and Technical runs.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              aria-label="Close auto-rebalance cost history"
-            >
-              <X className="size-5" />
-            </button>
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4 backdrop-blur-sm">
+      <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-600">
+              Auto-rebalance history
+            </p>
+            <h3 className="mt-1 text-lg font-extrabold text-slate-950">{title}</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Previous scan groups are inferred from cost-bearing Threats, Swing, Rebalance, and Technical runs.
+              Each scan group is split by stage, and each stage can list one or many LLM/source rows.
+            </p>
           </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close auto-rebalance cost history"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
 
-          <div className="flex-1 overflow-y-auto p-5">
-            {loading ? (
-              <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 py-12 text-sm text-slate-500">
-                <Loader2 className="size-4 animate-spin" /> Loading scan groups…
-              </div>
-            ) : error ? (
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
-            ) : groups.length === 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                No previous scan groups were found for this portfolio yet.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {groups.map((group) => (
-                  <button
-                    key={group.id}
-                    type="button"
-                    onClick={() => onSelectGroup(group)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-extrabold text-slate-950">
-                          {formatTimestamp(group.timestamp)}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {group.items.length} cost item{group.items.length === 1 ? "" : "s"} · {group.items.reduce((total, item) => total + item.llmCount, 0)} LLM job{group.items.reduce((total, item) => total + item.llmCount, 0) === 1 ? "" : "s"}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-base font-extrabold text-emerald-700">
-                          {formatInrCostFromUsd(group.totalCostUsd, usdInrRate)}
-                        </p>
-                        <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
-                          Total incurred
-                        </p>
-                      </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 py-12 text-sm text-slate-500">
+              <Loader2 className="size-4 animate-spin" /> Loading scan groups…
+            </div>
+          ) : error ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
+          ) : groups.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+              No previous scan groups were found for this portfolio yet.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {groups.map((group) => (
+                <section key={group.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h4 className="text-sm font-extrabold text-slate-950">
+                        Scan group · {formatTimestamp(group.timestamp)}
+                      </h4>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {group.items.length} cost item{group.items.length === 1 ? "" : "s"} · {group.items.reduce((total, item) => total + item.llmCount, 0)} LLM job{group.items.reduce((total, item) => total + item.llmCount, 0) === 1 ? "" : "s"}
+                      </p>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {group.items.map((item) => (
-                        <span
-                          key={item.id}
-                          className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700"
-                        >
-                          {formatAutoRebalanceStageLabel(item.stage)} · {formatInrCostFromUsd(item.costUsd, usdInrRate)}
-                        </span>
-                      ))}
+                    <div className="text-left sm:text-right">
+                      <p className="text-base font-extrabold text-emerald-700">
+                        {formatInrCostFromUsd(group.totalCostUsd, usdInrRate)}
+                      </p>
+                      <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                        Total incurred
+                      </p>
                     </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                      <thead className="bg-white text-left text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3">Run/job No</th>
+                          <th className="px-4 py-3">Stage/Scan</th>
+                          <th className="px-4 py-3">LLM / Source</th>
+                          <th className="px-4 py-3">Timestamp</th>
+                          <th className="px-4 py-3 text-right">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {groupAutoRebalanceItemsByStage(group.items).map((section) => (
+                          <Fragment key={`${group.id}:${section.stage}`}>
+                            <tr className="bg-blue-50/70">
+                              <td colSpan={5} className="px-4 py-2 text-[11px] font-extrabold uppercase tracking-[0.18em] text-blue-700">
+                                {formatAutoRebalanceStageLabel(section.stage)}
+                              </td>
+                            </tr>
+                            {section.items.map((item) => {
+                              const runHref = getAutoRebalanceItemRunHref(item);
+                              const llmHref = getAutoRebalanceItemLlmHref(item);
+                              return (
+                                <tr key={item.id} className="align-top">
+                                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
+                                    <AutoRebalanceCostLink href={runHref}>
+                                      {getAutoRebalanceItemNumber(item)}
+                                    </AutoRebalanceCostLink>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <AutoRebalanceCostLink href={runHref} className="font-bold text-slate-950">
+                                      {formatAutoRebalanceStageLabel(item.stage)}
+                                    </AutoRebalanceCostLink>
+                                    <p className="mt-1 text-xs capitalize text-slate-500">{item.status || "unknown"}</p>
+                                  </td>
+                                  <td className="min-w-56 px-4 py-3">
+                                    <AutoRebalanceCostLink href={llmHref} className="font-semibold text-blue-700">
+                                      {item.provider}/{item.model}
+                                    </AutoRebalanceCostLink>
+                                    <p className="mt-1 text-xs text-slate-500">
+                                      {item.runId ? (item.jobId ? `Output section for job #${item.jobId}` : "Run-level source") : "Standalone source job"}
+                                    </p>
+                                  </td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatTimestamp(item.timestamp)}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-right font-extrabold text-emerald-700">
+                                    {formatInrCostFromUsd(item.costUsd, usdInrRate)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
         </div>
       </div>
-
-      {selectedGroup ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <div className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-600">
-                  Cost breakup
-                </p>
-                <h3 className="mt-1 text-lg font-extrabold text-slate-950">
-                  Scan group · {formatTimestamp(selectedGroup.timestamp)}
-                </h3>
-                <p className="mt-1 text-sm font-semibold text-slate-600">
-                  Total incurred: {formatInrCostFromUsd(selectedGroup.totalCostUsd, usdInrRate)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={onCloseBreakdown}
-                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Close scan group cost breakup"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-            <div className="max-h-[65vh] overflow-y-auto p-5">
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">Stage</th>
-                      <th className="px-4 py-3">LLM / Source</th>
-                      <th className="px-4 py-3">Timestamp</th>
-                      <th className="px-4 py-3 text-right">Cost</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {selectedGroup.items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="px-4 py-3 align-top">
-                          <p className="font-bold text-slate-950">{formatAutoRebalanceStageLabel(item.stage)}</p>
-                          <p className="mt-1 text-xs text-slate-500 capitalize">{item.status || "unknown"}</p>
-                        </td>
-                        <td className="px-4 py-3 align-top">
-                          <p className="font-semibold text-slate-800">{item.provider}/{item.model}</p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {item.runId ? `Run #${item.runId}` : `Job #${item.jobId ?? "n/a"}`} · {item.llmCount} LLM job{item.llmCount === 1 ? "" : "s"}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3 align-top text-slate-600">{formatTimestamp(item.timestamp)}</td>
-                        <td className="px-4 py-3 align-top text-right font-extrabold text-emerald-700">
-                          {formatInrCostFromUsd(item.costUsd, usdInrRate)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </>
+    </div>
   );
 }
 
