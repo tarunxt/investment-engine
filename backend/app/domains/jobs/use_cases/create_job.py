@@ -24,6 +24,9 @@ class CreateJobCommand:
     user_id: UserId
     scheduled_at: datetime | None = None
     idempotency_key: str | None = None
+    auto_rebalance_portfolio: str | None = None
+    auto_rebalance_sequence: int | None = None
+    auto_rebalance_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,9 @@ class CreateJobUseCase:
                     user_id=cmd.user_id,
                     status=initial_status,
                     scheduled_at=scheduled_at,
+                    auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
+                    auto_rebalance_sequence=cmd.auto_rebalance_sequence,
+                    auto_rebalance_label=cmd.auto_rebalance_label,
                 )
                 await self._repo.create(job)
 

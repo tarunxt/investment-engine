@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.domains.jobs.schemas import JobResponse
 from app.shared.types import JobStatus
@@ -10,6 +10,24 @@ from app.shared.types import JobStatus
 class RunModelTarget(BaseModel):
     provider: str
     model: str
+
+
+class AutoRebalanceRunReservationRequest(BaseModel):
+    portfolio: str
+
+    @field_validator("portfolio")
+    @classmethod
+    def normalize_portfolio(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in {"india", "indmoney_us"}:
+            raise ValueError("portfolio must be india or indmoney_us")
+        return normalized
+
+
+class AutoRebalanceRunReservationResponse(BaseModel):
+    portfolio: str
+    sequence: int
+    label: str
 
 
 class RunCreate(BaseModel):
@@ -24,6 +42,9 @@ class RunCreate(BaseModel):
     export_investment_amount: Optional[str] = None
     export_title: Optional[str] = None
     allow_parallel: bool = False
+    auto_rebalance_portfolio: Optional[str] = None
+    auto_rebalance_sequence: Optional[int] = None
+    auto_rebalance_label: Optional[str] = None
 
     @field_validator("targets")
     @classmethod
@@ -31,6 +52,29 @@ class RunCreate(BaseModel):
         if not v:
             raise ValueError("At least one (provider, model) target is required.")
         return v
+
+    @field_validator("auto_rebalance_portfolio")
+    @classmethod
+    def normalize_auto_rebalance_portfolio(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if normalized not in {"india", "indmoney_us"}:
+            raise ValueError("auto_rebalance_portfolio must be india or indmoney_us")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_auto_rebalance_metadata(self) -> "RunCreate":
+        metadata_values = [
+            self.auto_rebalance_portfolio,
+            self.auto_rebalance_sequence,
+            self.auto_rebalance_label,
+        ]
+        if any(value is not None for value in metadata_values) and not all(
+            value is not None for value in metadata_values
+        ):
+            raise ValueError("auto rebalance metadata requires portfolio, sequence, and label")
+        return self
 
 
 class RunJobResponse(BaseModel):
@@ -61,6 +105,9 @@ class RunResponse(BaseModel):
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None
     exported_sheet_url: Optional[str] = None
+    auto_rebalance_portfolio: Optional[str] = None
+    auto_rebalance_sequence: Optional[int] = None
+    auto_rebalance_label: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -80,6 +127,9 @@ class RunListJobResponse(BaseModel):
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None
     exported_sheet_url: Optional[str] = None
+    auto_rebalance_portfolio: Optional[str] = None
+    auto_rebalance_sequence: Optional[int] = None
+    auto_rebalance_label: Optional[str] = None
     scheduled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -109,6 +159,9 @@ class RunListItem(BaseModel):
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None
     exported_sheet_url: Optional[str] = None
+    auto_rebalance_portfolio: Optional[str] = None
+    auto_rebalance_sequence: Optional[int] = None
+    auto_rebalance_label: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

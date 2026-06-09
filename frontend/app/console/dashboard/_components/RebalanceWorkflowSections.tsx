@@ -61,6 +61,7 @@ import type {
   ProviderInfo,
   ProviderModelTarget,
   RunCreate,
+  AutoRebalanceRunMetadata,
   RunResponse,
   ZerodhaThreatAnalysis,
 } from "@/types/api";
@@ -109,6 +110,9 @@ type AutoRebalanceCostBreakdownItem = {
   status: string;
   costUsd: number | null;
   llmCount: number;
+  autoRebalancePortfolio?: string | null;
+  autoRebalanceSequence?: number | null;
+  autoRebalanceLabel?: string | null;
 };
 
 type AutoRebalanceScanGroup = {
@@ -116,6 +120,8 @@ type AutoRebalanceScanGroup = {
   portfolio: WorkflowPortfolio;
   timestamp: string | null;
   totalCostUsd: number;
+  label: string;
+  sequence: number;
   items: AutoRebalanceCostBreakdownItem[];
 };
 
@@ -1126,14 +1132,34 @@ function getSavedStageTargets(
     : getDefaultStageTargets(stage, providers);
 }
 
+
+function getAutoRebalancePortfolioKey(portfolio: WorkflowPortfolio): AutoRebalanceRunMetadata["auto_rebalance_portfolio"] {
+  return portfolio === "zerodha" ? "india" : "indmoney_us";
+}
+
+async function reserveAutoRebalanceRunMetadata(
+  portfolio: WorkflowPortfolio,
+): Promise<AutoRebalanceRunMetadata> {
+  const reserved = await apiService.reserveAutoRebalanceRunLabel(
+    getAutoRebalancePortfolioKey(portfolio),
+  );
+  return {
+    auto_rebalance_portfolio: reserved.portfolio,
+    auto_rebalance_sequence: reserved.sequence,
+    auto_rebalance_label: reserved.label,
+  };
+}
+
 function buildRunPayload({
   prompt,
   targets,
   sheetName,
+  runMetadata,
 }: {
   prompt: string;
   targets: ProviderModelTarget[];
   sheetName?: string;
+  runMetadata?: AutoRebalanceRunMetadata | null;
 }): RunCreate {
   return {
     prompt,
@@ -1141,6 +1167,7 @@ function buildRunPayload({
     allow_parallel: true,
     auto_export_enabled: Boolean(sheetName),
     export_sheet_name: sheetName,
+    ...(runMetadata ?? {}),
   };
 }
 
@@ -1591,6 +1618,9 @@ function buildThreatCostBreakdownItem(
     status: item.status,
     costUsd: typeof item.estimated_cost === "number" ? item.estimated_cost : null,
     llmCount: 1,
+    autoRebalancePortfolio: item.auto_rebalance_portfolio ?? null,
+    autoRebalanceSequence: item.auto_rebalance_sequence ?? null,
+    autoRebalanceLabel: item.auto_rebalance_label ?? null,
   };
 }
 
@@ -1615,6 +1645,9 @@ function buildRunCostBreakdownItems(
       status: run.status,
       costUsd: getRunCostUsd(run),
       llmCount: 0,
+      autoRebalancePortfolio: run.auto_rebalance_portfolio ?? null,
+      autoRebalanceSequence: run.auto_rebalance_sequence ?? null,
+      autoRebalanceLabel: run.auto_rebalance_label ?? null,
     }];
   }
   return jobs.map((job) => ({
@@ -1630,6 +1663,9 @@ function buildRunCostBreakdownItems(
     status: job.status || run.status,
     costUsd: typeof job.estimated_cost === "number" ? job.estimated_cost : null,
     llmCount: 1,
+    autoRebalancePortfolio: job.auto_rebalance_portfolio ?? run.auto_rebalance_portfolio ?? null,
+    autoRebalanceSequence: job.auto_rebalance_sequence ?? run.auto_rebalance_sequence ?? null,
+    autoRebalanceLabel: job.auto_rebalance_label ?? run.auto_rebalance_label ?? null,
   }));
 }
 
@@ -1650,11 +1686,18 @@ function buildAutoRebalanceScanGroups(
   items.forEach((item) => {
     const lastGroup = groups[groups.length - 1];
     const lastItem = lastGroup?.[lastGroup.length - 1];
-    if (
+    const sameReservedRun = Boolean(
+      item.autoRebalanceSequence &&
+      lastItem?.autoRebalanceSequence &&
+      item.autoRebalancePortfolio === lastItem.autoRebalancePortfolio &&
+      item.autoRebalanceSequence === lastItem.autoRebalanceSequence,
+    );
+    const shouldStartNewGroup =
       !lastGroup ||
       !lastItem ||
-      parseTimestampMs(item.timestamp) - parseTimestampMs(lastItem.timestamp) > maxGapMs
-    ) {
+      (!sameReservedRun &&
+        parseTimestampMs(item.timestamp) - parseTimestampMs(lastItem.timestamp) > maxGapMs);
+    if (shouldStartNewGroup) {
       groups.push([item]);
       return;
     }
@@ -1676,14 +1719,20 @@ function buildAutoRebalanceScanGroups(
         technical: 4,
       };
       const idParts = sortedItems.map((item) => item.id).join("|");
+      const explicitSequence = sortedItems.find((item) => item.autoRebalanceSequence)?.autoRebalanceSequence ?? null;
+      const sequence = explicitSequence ?? index + 1;
+      const fallbackLabel = portfolio === "zerodha" ? `India Run #${sequence}` : `IndMoney US Run #${sequence}`;
+      const label = sortedItems.find((item) => item.autoRebalanceLabel)?.autoRebalanceLabel ?? fallbackLabel;
       return {
-        id: `${portfolio}:${index}:${idParts}`,
+        id: `${portfolio}:${sequence}:${idParts}`,
         portfolio,
         timestamp: latestTimestamp,
         totalCostUsd: sortedItems.reduce(
           (total, item) => total + (item.costUsd ?? 0),
           0,
         ),
+        label,
+        sequence,
         items: sortedItems.sort((a, b) => {
           const rankDelta = stageRank[a.stage] - stageRank[b.stage];
           return rankDelta || parseTimestampMs(a.timestamp) - parseTimestampMs(b.timestamp);
@@ -1712,9 +1761,9 @@ function getAutoRebalanceItemLlmHref(item: AutoRebalanceCostBreakdownItem) {
   return runHref;
 }
 
-function getAutoRebalanceItemNumber(item: AutoRebalanceCostBreakdownItem) {
-  if (item.runId) return `Run #${item.runId}`;
+function getAutoRebalanceItemJobNumber(item: AutoRebalanceCostBreakdownItem) {
   if (item.jobId) return `Job #${item.jobId}`;
+  if (item.runId) return `Run #${item.runId}`;
   return "—";
 }
 
@@ -3708,8 +3757,8 @@ function AutoRebalanceCostHistoryDialog({
             </p>
             <h3 className="mt-1 text-lg font-extrabold text-slate-950">{title}</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Previous scan groups are inferred from cost-bearing Threats, Swing, Rebalance, and Technical runs.
-              Each scan group is split by stage, and each stage can list one or many LLM/source rows.
+              Each Run button press is tracked as an independent India or IndMoney US run.
+              Each run section is split by stage, and each stage can list one or many LLM/source rows.
             </p>
           </div>
           <button
@@ -3725,13 +3774,13 @@ function AutoRebalanceCostHistoryDialog({
         <div className="flex-1 overflow-y-auto p-5">
           {loading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 py-12 text-sm text-slate-500">
-              <Loader2 className="size-4 animate-spin" /> Loading scan groups…
+              <Loader2 className="size-4 animate-spin" /> Loading runs…
             </div>
           ) : error ? (
             <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
           ) : groups.length === 0 ? (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-              No previous scan groups were found for this portfolio yet.
+              No previous runs were found for this portfolio yet.
             </div>
           ) : (
             <div className="space-y-4">
@@ -3740,7 +3789,7 @@ function AutoRebalanceCostHistoryDialog({
                   <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <h4 className="text-sm font-extrabold text-slate-950">
-                        Scan group · {formatTimestamp(group.timestamp)}
+                        {group.label} · {formatTimestamp(group.timestamp)}
                       </h4>
                       <p className="mt-1 text-xs text-slate-500">
                         {group.items.length} cost item{group.items.length === 1 ? "" : "s"} · {group.items.reduce((total, item) => total + item.llmCount, 0)} LLM job{group.items.reduce((total, item) => total + item.llmCount, 0) === 1 ? "" : "s"}
@@ -3760,7 +3809,7 @@ function AutoRebalanceCostHistoryDialog({
                     <table className="min-w-full divide-y divide-slate-200 text-sm">
                       <thead className="bg-white text-left text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
                         <tr>
-                          <th className="px-4 py-3">Run/job No</th>
+                          <th className="px-4 py-3">Job No</th>
                           <th className="px-4 py-3">Stage/Scan</th>
                           <th className="px-4 py-3">LLM / Source</th>
                           <th className="px-4 py-3">Timestamp</th>
@@ -3782,7 +3831,7 @@ function AutoRebalanceCostHistoryDialog({
                                 <tr key={item.id} className="align-top">
                                   <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
                                     <AutoRebalanceCostLink href={runHref}>
-                                      {getAutoRebalanceItemNumber(item)}
+                                      {getAutoRebalanceItemJobNumber(item)}
                                     </AutoRebalanceCostLink>
                                   </td>
                                   <td className="px-4 py-3">
@@ -5526,6 +5575,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
         window.alert("Select at least one stage to run.");
         return;
       }
+      const runMetadata = await reserveAutoRebalanceRunMetadata(portfolio);
       const shouldRunCurrentStage = (stage: WorkflowStageKey) =>
         !runSpecificMode || stagesToRun.has(stage);
       const stopIfPaused = () => {
@@ -5667,8 +5717,8 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
           markRunning(portfolio, "threats", { totalLlms: 1, completedLlms: 0 });
           const queuedThreat =
             portfolio === "zerodha"
-              ? await apiService.zerodhaRunThreats(threatTargets[0])
-              : await apiService.indmoneyUsRunThreats(threatTargets[0]);
+              ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata })
+              : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata });
           updateStage(portfolio, "threats", {
             activeRunId: queuedThreat.job_id,
           });
@@ -5738,6 +5788,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
               )}${threatAppendix}`,
               targets: swingTargets,
               sheetName: getSwingTradeDefaultExportSheetName(market),
+              runMetadata,
             }),
           );
           const completedSwingRun = await waitForRunWithStageHandling(
@@ -5826,6 +5877,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
                 `${ensureRebalanceFlowMarker(buildRebalancePrompt(market), market)}\n\n---\n\n${inputBundle}`.trim(),
               targets: rebalanceTargets,
               sheetName: getRebalanceDefaultExportSheetName(market),
+              runMetadata,
             }),
           );
           const completedRebalanceRun = await waitForRunWithStageHandling(
@@ -5889,6 +5941,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
             buildRunPayload({
               prompt: buildTechnicalScanPrompt(consensus, market),
               targets: [technicalTargets[0]],
+              runMetadata,
             }),
           );
           const completedTechnicalRun = await waitForRunWithStageHandling(

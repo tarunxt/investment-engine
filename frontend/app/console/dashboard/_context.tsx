@@ -77,6 +77,9 @@ function toRunListItem(run: RunResponse): RunListItem {
     export_error: run.export_error,
     exported_at: run.exported_at,
     exported_sheet_url: run.exported_sheet_url,
+    auto_rebalance_portfolio: run.auto_rebalance_portfolio,
+    auto_rebalance_sequence: run.auto_rebalance_sequence,
+    auto_rebalance_label: run.auto_rebalance_label,
     created_at: run.created_at,
     updated_at: run.updated_at,
   };

@@ -122,6 +122,9 @@ async def run_threat_analysis(
                 provider=provider,
                 model=model,
                 user_id=UserId(current_user.id),
+                auto_rebalance_portfolio=body.auto_rebalance_portfolio if body else None,
+                auto_rebalance_sequence=body.auto_rebalance_sequence if body else None,
+                auto_rebalance_label=body.auto_rebalance_label if body else None,
             )
         )
     finally:
@@ -323,4 +326,7 @@ def _serialize_threat_history_item(job: Job) -> PortfolioAnalysisHistoryItemResp
         updated_at=job.updated_at,
         estimated_cost=job.estimated_cost,
         error_message=job.error_message,
+        auto_rebalance_portfolio=job.auto_rebalance_portfolio,
+        auto_rebalance_sequence=job.auto_rebalance_sequence,
+        auto_rebalance_label=job.auto_rebalance_label,
     )

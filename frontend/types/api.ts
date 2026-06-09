@@ -134,8 +134,11 @@ export interface ProviderModelTarget {
 }
 
 export interface PortfolioEventRunRequest {
-  provider?: string;
-  model?: string;
+  provider?: string | null;
+  model?: string | null;
+  auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;
+  auto_rebalance_sequence?: number | null;
+  auto_rebalance_label?: string | null;
 }
 
 export interface ApiUsageItem {
@@ -285,6 +288,9 @@ export interface JobResponse {
   export_error?: string | null;
   exported_at?: string | null;
   exported_sheet_url?: string | null;
+  auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;
+  auto_rebalance_sequence?: number | null;
+  auto_rebalance_label?: string | null;
   scheduled_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -302,6 +308,20 @@ export interface RunModelTarget {
   model: string;
 }
 
+export type AutoRebalancePortfolioKey = 'india' | 'indmoney_us';
+
+export interface AutoRebalanceRunReservationResponse {
+  portfolio: AutoRebalancePortfolioKey;
+  sequence: number;
+  label: string;
+}
+
+export interface AutoRebalanceRunMetadata {
+  auto_rebalance_portfolio: AutoRebalancePortfolioKey;
+  auto_rebalance_sequence: number;
+  auto_rebalance_label: string;
+}
+
 export interface RunCreate {
   prompt: string;
   targets: RunModelTarget[];
@@ -313,6 +333,9 @@ export interface RunCreate {
   export_investment_amount?: string | null;
   export_title?: string | null;
   allow_parallel?: boolean;
+  auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;
+  auto_rebalance_sequence?: number | null;
+  auto_rebalance_label?: string | null;
 }
 
 export interface RunJobResponse {
@@ -336,6 +359,9 @@ export interface RunListJobResponse {
   export_error?: string | null;
   exported_at?: string | null;
   exported_sheet_url?: string | null;
+  auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;
+  auto_rebalance_sequence?: number | null;
+  auto_rebalance_label?: string | null;
   scheduled_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -367,6 +393,9 @@ export interface RunResponse {
   export_error: string | null;
   exported_at: string | null;
   exported_sheet_url: string | null;
+  auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;
+  auto_rebalance_sequence?: number | null;
+  auto_rebalance_label?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -383,6 +412,9 @@ export interface RunListItem {
   export_error: string | null;
   exported_at: string | null;
   exported_sheet_url: string | null;
+  auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;
+  auto_rebalance_sequence?: number | null;
+  auto_rebalance_label?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -639,6 +671,9 @@ export interface PortfolioAnalysisHistoryItem {
   updated_at: string;
   estimated_cost?: number | null;
   error_message?: string | null;
+  auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;
+  auto_rebalance_sequence?: number | null;
+  auto_rebalance_label?: string | null;
 }
 
 export interface ZerodhaEventsAnalysis {

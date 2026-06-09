@@ -287,7 +287,7 @@ export default function RunDetailPage() {
 
   const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
   const isActive = ACTIVE_STATUSES.has(run.status);
-  const runLabel = getRunLabelFromPrompt(run.id, run.prompt);
+  const runLabel = run.auto_rebalance_label ?? getRunLabelFromPrompt(run.id, run.prompt);
   const runJobs = run.run_jobs ?? [];
   const knownCostJobs = runJobs.filter((rj) => hasKnownCost(rj.job.estimated_cost));
   const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
