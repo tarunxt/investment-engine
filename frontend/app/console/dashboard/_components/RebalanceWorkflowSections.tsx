@@ -2987,9 +2987,12 @@ function InputSelectionDialog({
       });
     });
 
-    return Array.from(groups.values()).sort(
-      (left, right) => parseTimestampMs(right.timestamp) - parseTimestampMs(left.timestamp),
-    );
+    return Array.from(groups.values()).sort((left, right) => {
+      const leftIsUpcoming = left.candidates.some((candidate) => candidate.source === "next");
+      const rightIsUpcoming = right.candidates.some((candidate) => candidate.source === "next");
+      if (leftIsUpcoming !== rightIsUpcoming) return leftIsUpcoming ? -1 : 1;
+      return parseTimestampMs(right.timestamp) - parseTimestampMs(left.timestamp);
+    });
   }, [candidates]);
 
   useEffect(() => {
@@ -3843,6 +3846,9 @@ function AutoRebalanceCostHistoryDialog({
   onClose: () => void;
   onCloseBreakdown: () => void;
 }) {
+  const [collapsedRunIds, setCollapsedRunIds] = useState<Set<string>>(() => new Set());
+  const [collapsedStageKeys, setCollapsedStageKeys] = useState<Set<string>>(() => new Set());
+
   if (!open || !portfolio) return null;
   const title = portfolio === "zerodha" ? "Zerodha scan cost history" : "INDmoney US scan cost history";
   return (
@@ -3882,101 +3888,145 @@ function AutoRebalanceCostHistoryDialog({
             </div>
           ) : (
             <div className="space-y-4">
-              {groups.map((group) => (
-                <section key={group.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                  <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h4 className="text-sm font-extrabold text-slate-950">
-                        {group.label} · {formatTimestamp(group.timestamp)}
-                      </h4>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {group.items.length} cost item{group.items.length === 1 ? "" : "s"} · {group.items.reduce((total, item) => total + item.llmCount, 0)} LLM job{group.items.reduce((total, item) => total + item.llmCount, 0) === 1 ? "" : "s"}
-                      </p>
-                    </div>
-                    <div className="text-left sm:text-right">
-                      <p className="text-base font-extrabold text-emerald-700">
-                        {formatInrCostFromUsd(group.totalCostUsd, usdInrRate)}
-                      </p>
-                      <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
-                        Total incurred
-                      </p>
-                    </div>
-                  </div>
+              {groups.map((group) => {
+                const runCollapsed = collapsedRunIds.has(group.id);
 
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200 text-sm">
-                      <thead className="bg-white text-left text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
-                        <tr>
-                          <th className="px-4 py-3">Job No</th>
-                          <th className="px-4 py-3">Stage/Scan</th>
-                          <th className="px-4 py-3">LLM / Source</th>
-                          <th className="px-4 py-3">Timestamp</th>
-                          <th className="px-4 py-3 text-right">Cost</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white">
-                        {groupAutoRebalanceItemsByStage(group.items).map((section) => {
-                          const sectionCostUsd = section.items.reduce(
-                            (total, item) => total + (item.costUsd ?? 0),
-                            0,
-                          );
-                          const showSectionCost =
-                            section.stage === "swing" || section.stage === "rebalance";
+                return (
+                  <section key={group.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex items-start gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCollapsedRunIds((current) => {
+                              const next = new Set(current);
+                              if (next.has(group.id)) next.delete(group.id);
+                              else next.add(group.id);
+                              return next;
+                            });
+                          }}
+                          className="mt-0.5 rounded-full p-1 text-slate-500 hover:bg-white hover:text-blue-700"
+                          aria-expanded={!runCollapsed}
+                          aria-label={`${runCollapsed ? "Expand" : "Collapse"} ${group.label}`}
+                        >
+                          {runCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
+                        </button>
+                        <div>
+                          <h4 className="text-sm font-extrabold text-slate-950">
+                            {group.label} · {formatTimestamp(group.timestamp)}
+                          </h4>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {group.items.length} cost item{group.items.length === 1 ? "" : "s"} · {group.items.reduce((total, item) => total + item.llmCount, 0)} LLM job{group.items.reduce((total, item) => total + item.llmCount, 0) === 1 ? "" : "s"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-left sm:text-right">
+                        <p className="text-base font-extrabold text-emerald-700">
+                          {formatInrCostFromUsd(group.totalCostUsd, usdInrRate)}
+                        </p>
+                        <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                          Total incurred
+                        </p>
+                      </div>
+                    </div>
 
-                          return (
-                            <Fragment key={`${group.id}:${section.stage}`}>
-                              <tr className="bg-blue-50/70">
-                                <td colSpan={5} className="px-4 py-2 text-[11px] font-extrabold uppercase tracking-[0.18em] text-blue-700">
-                                  <span className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                                    <span>{formatAutoRebalanceStageLabel(section.stage)}</span>
-                                    {showSectionCost ? (
-                                      <span className="text-emerald-700">
-                                        Cumulative cost:{" "}
-                                        {formatInrCostFromUsd(sectionCostUsd, usdInrRate)}
+                    {!runCollapsed ? (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-slate-200 text-sm">
+                          <thead className="bg-white text-left text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                            <tr>
+                              <th className="px-4 py-3">Job No</th>
+                              <th className="px-4 py-3">Stage/Scan</th>
+                              <th className="px-4 py-3">LLM / Source</th>
+                              <th className="px-4 py-3">Timestamp</th>
+                              <th className="px-4 py-3 text-right">Cost</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {groupAutoRebalanceItemsByStage(group.items).map((section) => {
+                              const sectionKey = `${group.id}:${section.stage}`;
+                              const sectionCollapsed = collapsedStageKeys.has(sectionKey);
+                              const sectionCostUsd = section.items.reduce(
+                                (total, item) => total + (item.costUsd ?? 0),
+                                0,
+                              );
+                              const showSectionCost =
+                                section.stage === "swing" || section.stage === "rebalance";
+
+                              return (
+                                <Fragment key={sectionKey}>
+                                  <tr className="bg-blue-50/70">
+                                    <td colSpan={5} className="px-4 py-2 text-[11px] font-extrabold uppercase tracking-[0.18em] text-blue-700">
+                                      <span className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setCollapsedStageKeys((current) => {
+                                              const next = new Set(current);
+                                              if (next.has(sectionKey)) next.delete(sectionKey);
+                                              else next.add(sectionKey);
+                                              return next;
+                                            });
+                                          }}
+                                          className="flex items-center gap-2 text-left hover:text-blue-900"
+                                          aria-expanded={!sectionCollapsed}
+                                          aria-label={`${sectionCollapsed ? "Expand" : "Collapse"} ${formatAutoRebalanceStageLabel(section.stage)} rows`}
+                                        >
+                                          {sectionCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
+                                          <span>{formatAutoRebalanceStageLabel(section.stage)}</span>
+                                        </button>
+                                        {showSectionCost ? (
+                                          <span className="text-emerald-700">
+                                            Cumulative cost:{" "}
+                                            {formatInrCostFromUsd(sectionCostUsd, usdInrRate)}
+                                          </span>
+                                        ) : null}
                                       </span>
-                                    ) : null}
-                                  </span>
-                                </td>
-                              </tr>
-                              {section.items.map((item) => {
-                                const runHref = getAutoRebalanceItemRunHref(item);
-                                const llmHref = getAutoRebalanceItemLlmHref(item);
-                                return (
-                                  <tr key={item.id} className="align-top">
-                                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
-                                      <AutoRebalanceCostLink href={runHref}>
-                                        {getAutoRebalanceItemJobNumber(item)}
-                                      </AutoRebalanceCostLink>
-                                    </td>
-                                    <td className="px-4 py-3">
-                                      <AutoRebalanceCostLink href={runHref} className="font-bold text-slate-950">
-                                        {formatAutoRebalanceStageLabel(item.stage)}
-                                      </AutoRebalanceCostLink>
-                                      <p className="mt-1 text-xs capitalize text-slate-500">{item.status || "unknown"}</p>
-                                    </td>
-                                    <td className="min-w-56 px-4 py-3">
-                                      <AutoRebalanceCostLink href={llmHref} className="font-semibold text-blue-700">
-                                        {item.provider}/{item.model}
-                                      </AutoRebalanceCostLink>
-                                      <p className="mt-1 text-xs text-slate-500">
-                                        {item.runId ? (item.jobId ? `Output section for job #${item.jobId}` : "Run-level source") : "Standalone source job"}
-                                      </p>
-                                    </td>
-                                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatTimestamp(item.timestamp)}</td>
-                                    <td className="whitespace-nowrap px-4 py-3 text-right font-extrabold text-emerald-700">
-                                      {formatInrCostFromUsd(item.costUsd, usdInrRate)}
                                     </td>
                                   </tr>
-                                );
-                              })}
-                            </Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              ))}
+                                  {!sectionCollapsed
+                                    ? section.items.map((item) => {
+                                        const runHref = getAutoRebalanceItemRunHref(item);
+                                        const llmHref = getAutoRebalanceItemLlmHref(item);
+                                        return (
+                                          <tr key={item.id} className="align-top">
+                                            <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
+                                              <AutoRebalanceCostLink href={runHref}>
+                                                {getAutoRebalanceItemJobNumber(item)}
+                                              </AutoRebalanceCostLink>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                              <AutoRebalanceCostLink href={runHref} className="font-bold text-slate-950">
+                                                {formatAutoRebalanceStageLabel(item.stage)}
+                                              </AutoRebalanceCostLink>
+                                              <p className="mt-1 text-xs capitalize text-slate-500">{item.status || "unknown"}</p>
+                                            </td>
+                                            <td className="min-w-56 px-4 py-3">
+                                              <AutoRebalanceCostLink href={llmHref} className="font-semibold text-blue-700">
+                                                {item.provider}/{item.model}
+                                              </AutoRebalanceCostLink>
+                                              <p className="mt-1 text-xs text-slate-500">
+                                                {item.runId ? (item.jobId ? `Output section for job #${item.jobId}` : "Run-level source") : "Standalone source job"}
+                                              </p>
+                                            </td>
+                                            <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatTimestamp(item.timestamp)}</td>
+                                            <td className="whitespace-nowrap px-4 py-3 text-right font-extrabold text-emerald-700">
+                                              {formatInrCostFromUsd(item.costUsd, usdInrRate)}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })
+                                    : null}
+                                </Fragment>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })}
             </div>
           )}
         </div>
@@ -6132,6 +6182,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
             rebalanceInputs: rebalanceInputCount || null,
             recommendedStocks: actionableStockCount,
           });
+          window.dispatchEvent(new CustomEvent("final-actionables-refresh"));
         } else {
           completeSkippedStage(
             portfolio,
