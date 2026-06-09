@@ -100,6 +100,13 @@ async function getAuthToken(): Promise<string | null> {
   return sessionStorage.getAccessToken();
 }
 
+type ApiRequestOptions = RequestInit & {
+  token?: string;
+  _retry?: boolean;
+  skipAuth?: boolean;
+  skipUnauthorizedRefresh?: boolean;
+};
+
 // Flag to prevent infinite refresh loops
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
@@ -110,7 +117,7 @@ let refreshPromise: Promise<boolean> | null = null;
 class apiServiceClass implements IApiService {
   async fetch<T>(
     url: string,
-    options: RequestInit & { token?: string; _retry?: boolean } = {},
+    options: ApiRequestOptions = {},
   ): Promise<T> {
     const method = options.method || "GET";
     // Start a collapsed group to keep the console clean
@@ -118,7 +125,7 @@ class apiServiceClass implements IApiService {
 
     try {
       let token = options.token;
-      if (!token) {
+      if (!token && !options.skipAuth) {
         token = (await getAuthToken()) || undefined;
       }
 
@@ -138,7 +145,12 @@ class apiServiceClass implements IApiService {
 
       if (!response.ok) {
         // Handle 401 Unauthorized with Retry Logic
-        if (response.status === 401 && !options._retry && !devAuthDisabled) {
+        if (
+          response.status === 401 &&
+          !options._retry &&
+          !options.skipUnauthorizedRefresh &&
+          !devAuthDisabled
+        ) {
           this.info("⚠️ 401 Unauthorized: Attempting token refresh...");
 
           if (!isRefreshing) {
@@ -205,8 +217,13 @@ class apiServiceClass implements IApiService {
     return this.fetch<T>(url, { method: "GET", ...options });
   }
 
-  post<T>(url: string, data?: unknown): Promise<T> {
+  post<T>(
+    url: string,
+    data?: unknown,
+    options: ApiRequestOptions = {},
+  ): Promise<T> {
     return this.fetch<T>(url, {
+      ...options,
       method: "POST",
       body: data ? JSON.stringify(data) : undefined,
     });
@@ -286,7 +303,10 @@ class apiServiceClass implements IApiService {
     password: string;
     full_name?: string;
   }): Promise<RegisterResponse> {
-    return this.post<RegisterResponse>(URLs.auth.register(), data);
+    return this.post<RegisterResponse>(URLs.auth.register(), data, {
+      skipAuth: true,
+      skipUnauthorizedRefresh: true,
+    });
   }
 
   /**
@@ -297,7 +317,10 @@ class apiServiceClass implements IApiService {
     username?: string;
     password: string;
   }): Promise<LoginResponse> {
-    return this.post<LoginResponse>(URLs.auth.login(), data);
+    return this.post<LoginResponse>(URLs.auth.login(), data, {
+      skipAuth: true,
+      skipUnauthorizedRefresh: true,
+    });
   }
 
   /**
@@ -382,7 +405,10 @@ class apiServiceClass implements IApiService {
    * Forgot password
    */
   forgotPassword(data: { email: string }): Promise<{ message: string }> {
-    return this.post<{ message: string }>(URLs.auth.forgotPassword(), data);
+    return this.post<{ message: string }>(URLs.auth.forgotPassword(), data, {
+      skipAuth: true,
+      skipUnauthorizedRefresh: true,
+    });
   }
 
   /**
@@ -393,7 +419,10 @@ class apiServiceClass implements IApiService {
     new_password: string;
     confirm_password: string;
   }): Promise<{ message: string }> {
-    return this.post<{ message: string }>(URLs.auth.resetPassword(), data);
+    return this.post<{ message: string }>(URLs.auth.resetPassword(), data, {
+      skipAuth: true,
+      skipUnauthorizedRefresh: true,
+    });
   }
 
   // ===== User Endpoints (Admin) =====

@@ -2022,12 +2022,15 @@ function ZerodhaBasketPreviewDialog({
     orders: orders.filter((order) => getZerodhaBasketActionForPercent(order) === action),
   })).filter((group) => group.orders.length > 0);
 
-  const renderPlaceOrderButton = () => (
+  const renderPlaceOrderButton = (className?: string) => (
     <Button
       type="button"
       onClick={onPlaceOrder}
       disabled={!selectedOrders.length || placing}
-      className="rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50"
+      className={cn(
+        "shrink-0 rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50",
+        className,
+      )}
     >
       {placing ? "Opening…" : "Open Kite"}
     </Button>
@@ -2035,7 +2038,7 @@ function ZerodhaBasketPreviewDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-      <div className="max-h-[90vh] w-full max-w-7xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+      <div className="flex max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-400">
@@ -2061,7 +2064,7 @@ function ZerodhaBasketPreviewDialog({
           </div>
         </div>
 
-        <div className="max-h-[72vh] overflow-auto p-5">
+        <div className="min-h-0 flex-1 overflow-auto p-5">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> Preparing Zerodha basket…
@@ -2218,11 +2221,11 @@ function ZerodhaBasketPreviewDialog({
           )}
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             Selected rows are posted to Zerodha Kite Publisher to create a reviewable Kite order tray. Market rows are only sent while NSE/BSE regular market appears open; closed-market rows are sent as AMO limit orders using the displayed price.
           </div>
-          {renderPlaceOrderButton()}
+          {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
       </div>
     </div>
