@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { apiService } from "@/services/api";
 import {
   applyThemePreference,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/theme";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const { status } = useSession();
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => getStoredThemePreference() ?? "light");
 
   useEffect(() => {
@@ -27,6 +29,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
 
     let cancelled = false;
+
+    if (status !== "authenticated") {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     async function loadServerThemePreference() {
       try {
@@ -50,7 +58,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [status]);
 
   useEffect(() => {
     const handleThemeChanged = (event: Event) => {

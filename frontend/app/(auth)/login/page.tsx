@@ -144,22 +144,16 @@ export default function LoginPage() {
 
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-slate-200" />
+                  <span className="w-full border-t border-border" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-2 text-slate-500">Don&apos;t have an account?</span>
+                  <span className="bg-card px-2 text-muted-foreground">Don&apos;t have an account?</span>
                 </div>
               </div>
 
-              <Link href={URLs.routes.register()}>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                >
-                  Create Account
-                </Button>
-              </Link>
+              <Button type="button" variant="outline" className="w-full" asChild>
+                <Link href={URLs.routes.register()}>Create Account</Link>
+              </Button>
 
               <div className="text-center mt-2">
                 <Link href={URLs.routes.forgotPassword()} className="text-sm text-purple-600 hover:text-purple-700">
