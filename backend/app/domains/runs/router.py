@@ -1,4 +1,5 @@
 import redis.asyncio as aioredis
+from redis.exceptions import WatchError
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,12 +60,40 @@ async def _get_max_auto_rebalance_sequence(db: AsyncSession, portfolio: str) -> 
     return max(int(run_max), int(job_max))
 
 
+def _coerce_auto_rebalance_sequence(value: object) -> int:
+    try:
+        sequence = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return sequence if sequence > 0 else 0
+
+
+def _next_auto_rebalance_sequence(current_sequence: object, persisted_max_sequence: int) -> int:
+    return max(
+        _coerce_auto_rebalance_sequence(current_sequence),
+        _coerce_auto_rebalance_sequence(persisted_max_sequence),
+    ) + 1
+
+
 async def _reserve_auto_rebalance_sequence(db: AsyncSession, redis: aioredis.Redis, portfolio: str) -> int:
     key = f"auto_rebalance_run_sequence:{portfolio}"
-    seeded = await redis.setnx(f"{key}:seeded", "1")
-    if seeded:
-        await redis.set(key, await _get_max_auto_rebalance_sequence(db, portfolio))
-    return int(await redis.incr(key))
+    persisted_max_sequence = await _get_max_auto_rebalance_sequence(db, portfolio)
+
+    while True:
+        async with redis.pipeline(transaction=True) as pipe:
+            try:
+                await pipe.watch(key)
+                current_sequence = await pipe.get(key)
+                next_sequence = _next_auto_rebalance_sequence(
+                    current_sequence,
+                    persisted_max_sequence,
+                )
+                pipe.multi()
+                pipe.set(key, next_sequence)
+                await pipe.execute()
+                return next_sequence
+            except WatchError:
+                continue
 
 
 def _preview_prompt(prompt: str) -> str:
