@@ -3903,46 +3903,63 @@ function AutoRebalanceCostHistoryDialog({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 bg-white">
-                        {groupAutoRebalanceItemsByStage(group.items).map((section) => (
-                          <Fragment key={`${group.id}:${section.stage}`}>
-                            <tr className="bg-blue-50/70">
-                              <td colSpan={5} className="px-4 py-2 text-[11px] font-extrabold uppercase tracking-[0.18em] text-blue-700">
-                                {formatAutoRebalanceStageLabel(section.stage)}
-                              </td>
-                            </tr>
-                            {section.items.map((item) => {
-                              const runHref = getAutoRebalanceItemRunHref(item);
-                              const llmHref = getAutoRebalanceItemLlmHref(item);
-                              return (
-                                <tr key={item.id} className="align-top">
-                                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
-                                    <AutoRebalanceCostLink href={runHref}>
-                                      {getAutoRebalanceItemJobNumber(item)}
-                                    </AutoRebalanceCostLink>
-                                  </td>
-                                  <td className="px-4 py-3">
-                                    <AutoRebalanceCostLink href={runHref} className="font-bold text-slate-950">
-                                      {formatAutoRebalanceStageLabel(item.stage)}
-                                    </AutoRebalanceCostLink>
-                                    <p className="mt-1 text-xs capitalize text-slate-500">{item.status || "unknown"}</p>
-                                  </td>
-                                  <td className="min-w-56 px-4 py-3">
-                                    <AutoRebalanceCostLink href={llmHref} className="font-semibold text-blue-700">
-                                      {item.provider}/{item.model}
-                                    </AutoRebalanceCostLink>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                      {item.runId ? (item.jobId ? `Output section for job #${item.jobId}` : "Run-level source") : "Standalone source job"}
-                                    </p>
-                                  </td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatTimestamp(item.timestamp)}</td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-right font-extrabold text-emerald-700">
-                                    {formatInrCostFromUsd(item.costUsd, usdInrRate)}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </Fragment>
-                        ))}
+                        {groupAutoRebalanceItemsByStage(group.items).map((section) => {
+                          const sectionCostUsd = section.items.reduce(
+                            (total, item) => total + (item.costUsd ?? 0),
+                            0,
+                          );
+                          const showSectionCost =
+                            section.stage === "swing" || section.stage === "rebalance";
+
+                          return (
+                            <Fragment key={`${group.id}:${section.stage}`}>
+                              <tr className="bg-blue-50/70">
+                                <td colSpan={5} className="px-4 py-2 text-[11px] font-extrabold uppercase tracking-[0.18em] text-blue-700">
+                                  <span className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                                    <span>{formatAutoRebalanceStageLabel(section.stage)}</span>
+                                    {showSectionCost ? (
+                                      <span className="text-emerald-700">
+                                        Cumulative cost:{" "}
+                                        {formatInrCostFromUsd(sectionCostUsd, usdInrRate)}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                </td>
+                              </tr>
+                              {section.items.map((item) => {
+                                const runHref = getAutoRebalanceItemRunHref(item);
+                                const llmHref = getAutoRebalanceItemLlmHref(item);
+                                return (
+                                  <tr key={item.id} className="align-top">
+                                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
+                                      <AutoRebalanceCostLink href={runHref}>
+                                        {getAutoRebalanceItemJobNumber(item)}
+                                      </AutoRebalanceCostLink>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <AutoRebalanceCostLink href={runHref} className="font-bold text-slate-950">
+                                        {formatAutoRebalanceStageLabel(item.stage)}
+                                      </AutoRebalanceCostLink>
+                                      <p className="mt-1 text-xs capitalize text-slate-500">{item.status || "unknown"}</p>
+                                    </td>
+                                    <td className="min-w-56 px-4 py-3">
+                                      <AutoRebalanceCostLink href={llmHref} className="font-semibold text-blue-700">
+                                        {item.provider}/{item.model}
+                                      </AutoRebalanceCostLink>
+                                      <p className="mt-1 text-xs text-slate-500">
+                                        {item.runId ? (item.jobId ? `Output section for job #${item.jobId}` : "Run-level source") : "Standalone source job"}
+                                      </p>
+                                    </td>
+                                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatTimestamp(item.timestamp)}</td>
+                                    <td className="whitespace-nowrap px-4 py-3 text-right font-extrabold text-emerald-700">
+                                      {formatInrCostFromUsd(item.costUsd, usdInrRate)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
