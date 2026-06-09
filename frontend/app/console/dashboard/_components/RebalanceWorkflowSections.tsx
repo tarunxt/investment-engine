@@ -653,9 +653,12 @@ function getIndiaMarketStatus(now = new Date()) {
 }
 
 function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
-  const orderType = order.orderKind === "Market" && marketOpen ? "MARKET" : "LIMIT";
+  // Kite Publisher/offsite baskets currently reject MARKET rows because the
+  // final basket submit does not forward market_protection. Use a limit order
+  // seeded with the displayed LTP instead, so the basket remains placeable and
+  // still lets the user review or edit the executable price inside Kite.
   return {
-    orderType,
+    orderType: "LIMIT" as const,
     variety: order.orderKind === "After market" || !marketOpen ? "amo" : "regular",
   };
 }
@@ -691,7 +694,7 @@ function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], mark
       readonly: false,
       tag: "credx",
     };
-    if (execution.orderType === "LIMIT" && order.price) {
+    if (order.price) {
       payload.price = Number(order.price.toFixed(2));
     }
     return payload;
@@ -732,7 +735,7 @@ function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], mark
 
   orders.forEach((order) => {
     const execution = getZerodhaBasketOrderExecution(order, marketOpen);
-    const price = execution.orderType === "LIMIT" && order.price ? order.price.toFixed(2) : "";
+    const price = order.price ? order.price.toFixed(2) : "";
     lines.push([
       order.exchange,
       order.symbol,
@@ -2407,7 +2410,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Market rows are only sent while NSE/BSE regular market appears open; closed-market rows are sent as AMO limit orders using the displayed price.
+            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Kite Publisher rows are submitted as limit orders using the displayed price because offsite market baskets can be rejected before Kite forwards market protection; closed-market rows are sent as AMO limit orders.
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
@@ -4084,9 +4087,9 @@ export function RebalanceWorkflowSections({
       return;
     }
     const marketStatus = getIndiaMarketStatus();
-    const invalidLimitOrders = selectedOrders.filter((order) => (order.orderKind !== "Market" || !marketStatus.open) && (!order.price || order.price <= 0));
-    if (invalidLimitOrders.length) {
-      window.alert("Cannot prepare limit/AMO rows without a valid displayed price. Unselect rows with missing prices and retry.");
+    const ordersMissingExecutablePrice = selectedOrders.filter((order) => !order.price || order.price <= 0);
+    if (ordersMissingExecutablePrice.length) {
+      window.alert("Cannot prepare Zerodha Publisher rows without a valid displayed price. Unselect rows with missing prices and retry.");
       return;
     }
     const orderChunks = chunkZerodhaBasketOrders(selectedOrders);
