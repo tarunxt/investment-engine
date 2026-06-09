@@ -137,6 +137,7 @@ type StageLlmHistoryEntry = {
   status: RunOutputJobStatus;
   rawStatus: string;
 };
+type HistoricalLlmCostMapInr = Record<string, number>;
 type StageInfo = {
   state: StageState;
   startedAt?: string | null;
@@ -1859,6 +1860,75 @@ function buildStageLlmHistoryEntries(
       }),
     )
     .sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
+}
+
+function hasKnownUsdCost(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function toHistoricalLlmCostKey(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+) {
+  return provider && model ? `${provider}::${model}` : null;
+}
+
+function toRoundedInrCost(usdCost: number, usdInrRate: number) {
+  return Math.round(usdCost * usdInrRate * 100) / 100;
+}
+
+function buildRunHistoricalCostMapInr(
+  runs: RunResponse[],
+  stage: WorkflowStageKey,
+  portfolio: WorkflowPortfolio,
+  usdInrRate: number,
+): HistoricalLlmCostMapInr {
+  const costs: HistoricalLlmCostMapInr = {};
+  buildStageLlmHistoryEntries(runs, stage, portfolio).forEach((entry) => {
+    const key = toHistoricalLlmCostKey(entry.provider, entry.model);
+    if (!key || costs[key] !== undefined) return;
+    if (entry.status !== "completed" || !hasKnownUsdCost(entry.costUsd)) return;
+    costs[key] = toRoundedInrCost(entry.costUsd, usdInrRate);
+  });
+  return costs;
+}
+
+function buildThreatHistoricalCostMapInr(
+  history: PortfolioAnalysisHistoryItem[],
+  usdInrRate: number,
+): HistoricalLlmCostMapInr {
+  const costs: HistoricalLlmCostMapInr = {};
+  history
+    .slice()
+    .sort(
+      (a, b) =>
+        parseTimestampMs(b.updated_at ?? b.created_at) -
+        parseTimestampMs(a.updated_at ?? a.created_at),
+    )
+    .forEach((item) => {
+      const key = toHistoricalLlmCostKey(item.provider, item.model);
+      if (!key || costs[key] !== undefined) return;
+      if (item.status !== "completed" || !hasKnownUsdCost(item.estimated_cost)) return;
+      costs[key] = toRoundedInrCost(item.estimated_cost, usdInrRate);
+    });
+  return costs;
+}
+
+async function loadStageHistoricalCostMapInr(
+  stage: WorkflowStageKey,
+  portfolio: WorkflowPortfolio,
+  usdInrRate: number,
+): Promise<HistoricalLlmCostMapInr> {
+  if (stage === "sync" || stage === "actionables") return {};
+  if (stage === "threats") {
+    const response = portfolio === "zerodha"
+      ? await apiService.zerodhaThreatsHistory({ limit: 200 })
+      : await apiService.indmoneyUsThreatsHistory({ limit: 200 });
+    return buildThreatHistoricalCostMapInr(response.history ?? [], usdInrRate);
+  }
+
+  const runs = await fetchAllFullRuns();
+  return buildRunHistoricalCostMapInr(runs, stage, portfolio, usdInrRate);
 }
 
 function getRunOutputStatusClass(status: RunOutputJobStatus) {
@@ -3899,6 +3969,7 @@ function StageLlmSelectorDialog({
   onReplaceSelection,
   onClose,
   lastRunCostInr,
+  historicalEstimatedCostInrByTarget = {},
 }: {
   open: boolean;
   stage: WorkflowStageKey | null;
@@ -3912,6 +3983,7 @@ function StageLlmSelectorDialog({
   onReplaceSelection: (keys: Set<string>) => void;
   onClose: () => void;
   lastRunCostInr?: number | null;
+  historicalEstimatedCostInrByTarget?: HistoricalLlmCostMapInr;
 }) {
   const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
     readSavedModelMixes(),
@@ -3960,6 +4032,18 @@ function StageLlmSelectorDialog({
       // Keep selector usable even when localStorage is unavailable.
     }
   }, []);
+
+  const getEstimatedCostInr = useCallback(
+    (providerName: string, model: string) => {
+      const override = historicalEstimatedCostInrByTarget[`${providerName}::${model}`];
+      if (typeof override === "number" && Number.isFinite(override)) {
+        return override;
+      }
+      return providers.find((provider) => provider.name === providerName)
+        ?.model_estimated_cost_inr?.[model];
+    },
+    [historicalEstimatedCostInrByTarget, providers],
+  );
 
   if (!open || !stage) return null;
 
@@ -4157,6 +4241,7 @@ function StageLlmSelectorDialog({
             emptyMessage="Loading provider models..."
             showBulkActions={!singleSelect}
             modelMixControls={modelMixControls}
+            getEstimatedCostInr={getEstimatedCostInr}
             onToggle={onToggle}
             onSelectAll={singleSelect ? undefined : onSelectAll}
             onClear={onClear}
@@ -4354,6 +4439,8 @@ export function RebalanceWorkflowSections({
   const [llmDialogSelectedKeys, setLlmDialogSelectedKeys] = useState<
     Set<string>
   >(new Set());
+  const [llmDialogHistoricalCosts, setLlmDialogHistoricalCosts] =
+    useState<HistoricalLlmCostMapInr>({});
   const [costHistoryPortfolio, setCostHistoryPortfolio] = useState<WorkflowPortfolio | null>(null);
   const [costHistoryGroups, setCostHistoryGroups] = useState<AutoRebalanceScanGroup[]>([]);
   const [costHistoryLoading, setCostHistoryLoading] = useState(false);
@@ -5290,22 +5377,29 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
     setLlmDialogPortfolio(portfolio);
     setLlmDialogProviders([]);
     setLlmDialogSelectedKeys(new Set());
+    setLlmDialogHistoricalCosts({});
     try {
-      const providers = await apiService.getProviders({
-        prompt: buildSwingTradePrompt(
-          "india",
-          getSwingTradeDefaultInvestmentAmount("india"),
-        ),
-      });
+      const [providers, historicalCosts] = await Promise.all([
+        apiService.getProviders({
+          prompt: buildSwingTradePrompt(
+            portfolio === "zerodha" ? "india" : "us",
+            getSwingTradeDefaultInvestmentAmount(
+              portfolio === "zerodha" ? "india" : "us",
+            ),
+          ),
+        }),
+        loadStageHistoricalCostMapInr(stage, portfolio, usdInrRate),
+      ]);
       const targets = getSavedStageTargets(stage, providers);
       setLlmDialogProviders(providers);
       setLlmDialogSelectedKeys(new Set(targets.map(targetKey)));
+      setLlmDialogHistoricalCosts(historicalCosts);
     } catch (error) {
       setLlmDialogStage(null);
       setLlmDialogPortfolio(null);
       window.alert(`Could not load LLM details: ${normalizeError(error)}`);
     }
-  }, []);
+  }, [usdInrRate]);
 
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
@@ -6489,6 +6583,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
         portfolio={llmDialogPortfolio}
         providers={llmDialogProviders}
         selectedKeys={llmDialogSelectedKeys}
+        historicalEstimatedCostInrByTarget={llmDialogHistoricalCosts}
         onToggle={toggleLlmTarget}
         onSelectAll={selectAllLlmTargets}
         onClear={clearLlmTargets}
