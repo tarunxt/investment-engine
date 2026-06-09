@@ -5324,6 +5324,14 @@ export function DashboardFinalActionablesTables() {
   }, [loadRuns]);
 
   useEffect(() => {
+    const handler = () => {
+      void loadRuns();
+    };
+    window.addEventListener("final-actionables-refresh", handler);
+    return () => window.removeEventListener("final-actionables-refresh", handler);
+  }, [loadRuns]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(getFinalActionableLayoutStorageKey(), JSON.stringify(normalizeFinalActionableLayout(finalActionableLayout)));
   }, [finalActionableLayout]);
