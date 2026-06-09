@@ -41,6 +41,7 @@ import {
   ensureRebalanceFlowMarker,
   getPreviousMarketClose,
   getRebalanceDefaultExportSheetName,
+  inferRebalanceMarketFromPrompt,
 } from "@/lib/rebalance";
 import {
   buildSwingTradePrompt,
@@ -1216,16 +1217,6 @@ function getRunProgress(run: RunResponse) {
   };
 }
 
-function getCompletedLlmProgress(run: RunResponse) {
-  const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
-  return {
-    completedLlms: jobs.filter(
-      (job) => (job.status || "").toLowerCase() === "completed",
-    ).length,
-    totalLlms: jobs.length,
-  };
-}
-
 function isUsableStageJob(job?: { status?: string; response?: string | null }) {
   const status = (job?.status || "").toLowerCase();
   return (
@@ -1382,19 +1373,40 @@ function sortRunsByLatestTimestamp(runs: RunResponse[]) {
   );
 }
 
+function isTechnicalScanRun(run: RunResponse, market: SwingTradeMarket) {
+  if (!/##\s*Technical Scan Input Bundle/i.test(run.prompt)) return false;
+  return market === "us"
+    ? /Market:\s*US equities/i.test(run.prompt)
+    : /Market:\s*India equities/i.test(run.prompt);
+}
+
 function isCompletedTechnicalScanRun(
   run: RunResponse,
   market: SwingTradeMarket,
 ) {
-  if (!/##\s*Technical Scan Input Bundle/i.test(run.prompt)) return false;
+  if (!isTechnicalScanRun(run, market)) return false;
   const hasUsableJob = (run.run_jobs ?? []).some((link) => {
     const job = link.job;
     return isUsableStageJob(job) && Boolean(job?.response?.trim());
   });
-  if (!isUsableStageJob(run) && !hasUsableJob) return false;
-  return market === "us"
-    ? /Market:\s*US equities/i.test(run.prompt)
-    : /Market:\s*India equities/i.test(run.prompt);
+  return isUsableStageJob(run) || hasUsableJob;
+}
+
+function isRebalanceRunForMarket(run: RunResponse, market: SwingTradeMarket) {
+  return inferRebalanceMarketFromPrompt(run.prompt) === market;
+}
+
+function getLatestStageRun(
+  runs: RunResponse[],
+  stage: Extract<WorkflowStageKey, "swing" | "rebalance" | "technical">,
+  market: SwingTradeMarket,
+) {
+  const matchingRuns = runs.filter((run) => {
+    if (stage === "swing") return isRunInSwingTradeMarket(run.prompt, market);
+    if (stage === "rebalance") return isRebalanceRunForMarket(run, market);
+    return isTechnicalScanRun(run, market);
+  });
+  return sortRunsByLatestTimestamp(matchingRuns)[0];
 }
 
 function countUniqueStocksFromRun(run: RunResponse) {
@@ -1433,7 +1445,7 @@ function summarizeCompletedRunForIdle(
   return withInrCost(
     {
       ...summarizeRun(run),
-      ...getCompletedLlmProgress(run),
+      ...getRunProgress(run),
       completedAt: getLatestRunTimestamp(run),
       lastRunId: run.id,
       recommendedStocks: recommendedStocks ?? null,
@@ -4733,12 +4745,12 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
 
   const loadLatestIdleStageInfo = useCallback(async () => {
     const [
-      zerodhaOverview,
-      indmoneyOverview,
-      zerodhaThreat,
-      indmoneyThreat,
-      runs,
-    ] = await Promise.all([
+      zerodhaOverviewResult,
+      indmoneyOverviewResult,
+      zerodhaThreatResult,
+      indmoneyThreatResult,
+      runsResult,
+    ] = await Promise.allSettled([
       apiService.zerodhaPortfolioOverview(),
       apiService.indmoneyUsPortfolioOverview(),
       apiService.zerodhaThreatsLatest(),
@@ -4746,25 +4758,31 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
       fetchAllFullRuns(),
     ]);
 
+    const zerodhaOverview =
+      zerodhaOverviewResult.status === "fulfilled"
+        ? zerodhaOverviewResult.value
+        : null;
+    const indmoneyOverview =
+      indmoneyOverviewResult.status === "fulfilled"
+        ? indmoneyOverviewResult.value
+        : null;
+    const zerodhaThreat =
+      zerodhaThreatResult.status === "fulfilled" ? zerodhaThreatResult.value : null;
+    const indmoneyThreat =
+      indmoneyThreatResult.status === "fulfilled"
+        ? indmoneyThreatResult.value
+        : null;
+    const runs = runsResult.status === "fulfilled" ? runsResult.value : [];
+
     const nextByPortfolio = (
       ["zerodha", "indmoneyUs"] as WorkflowPortfolio[]
     ).reduce(
       (acc, portfolio) => {
         const market: SwingTradeMarket =
           portfolio === "zerodha" ? "india" : "us";
-        const latestSwingRun = sortRunsByLatestTimestamp(
-          runs.filter(
-            (run) =>
-              (run.status || "").toLowerCase() === "completed" &&
-              isRunInSwingTradeMarket(run.prompt, market),
-          ),
-        )[0];
-        const latestRebalanceRun = sortRunsByLatestTimestamp(
-          runs.filter((run) => isCompletedRebalanceRun(run, market)),
-        )[0];
-        const latestTechnicalRun = sortRunsByLatestTimestamp(
-          runs.filter((run) => isCompletedTechnicalScanRun(run, market)),
-        )[0];
+        const latestSwingRun = getLatestStageRun(runs, "swing", market);
+        const latestRebalanceRun = getLatestStageRun(runs, "rebalance", market);
+        const latestTechnicalRun = getLatestStageRun(runs, "technical", market);
         const latestRebalanceRuns = latestRebalanceRun
           ? getLatestMatchingRebalanceRuns(runs, market)
           : [];
@@ -4781,19 +4799,18 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
 
         const overview =
           portfolio === "zerodha" ? zerodhaOverview : indmoneyOverview;
-        const threat =
-          portfolio === "zerodha"
-            ? zerodhaThreat.analysis
-            : indmoneyThreat.analysis;
+        const threatResponse =
+          portfolio === "zerodha" ? zerodhaThreat : indmoneyThreat;
+        const threat = threatResponse?.analysis ?? null;
         const syncStatus =
           portfolio === "zerodha"
             ? "last synced portfolio"
-            : (indmoneyOverview.latest?.parse_status ?? "last snapshot");
+            : (indmoneyOverview?.latest?.parse_status ?? "last snapshot");
 
         acc[portfolio] = {
           sync: {
-            completedAt: overview.latest?.captured_at ?? null,
-            runStatus: syncStatus,
+            completedAt: overview?.latest?.captured_at ?? null,
+            runStatus: overview?.latest ? syncStatus : null,
           },
           swing: summarizeCompletedRunForIdle(
             latestSwingRun,
@@ -4821,6 +4838,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
           technical: summarizeCompletedRunForIdle(
             latestTechnicalRun,
             usdInrRate,
+            latestTechnicalRun ? countUniqueStocksFromRun(latestTechnicalRun) : null,
           ),
           actionables: {
             completedAt: latestActionablesTimestamp ?? null,
@@ -4900,7 +4918,15 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
   const resetPortfolio = useCallback((portfolio: WorkflowPortfolio) => {
     setStates((current) => ({
       ...current,
-      [portfolio]: initialWorkflowState(),
+      [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
+        const info = current[portfolio][stage];
+        acc[stage] = {
+          ...info,
+          state: "idle",
+          activeRunId: null,
+        };
+        return acc;
+      }, {} as WorkflowState),
     }));
   }, []);
 
