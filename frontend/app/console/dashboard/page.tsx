@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
+  Eye,
+  EyeOff,
   Loader2,
   RefreshCw,
   Sparkles,
@@ -27,7 +29,10 @@ import {
   type PortfolioCardTopHolding,
 } from "./_components/MarketPortfolioCard";
 import { ThreatMarketCard } from "./_components/ThreatMarketCard";
-import { RebalanceWorkflowSections, ZERODHA_DASHBOARD_SYNC_NOW_EVENT } from "./_components/RebalanceWorkflowSections";
+import {
+  RebalanceWorkflowSections,
+  ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
+} from "./_components/RebalanceWorkflowSections";
 import {
   countThreatSeverities,
   extractUrgentActionRows,
@@ -219,6 +224,10 @@ function formatUsdValueAsInr(
   return formatInr(value * usdInrRate);
 }
 
+function maskInvestmentValue(value: string) {
+  return value.replace(/\p{N}/gu, "*");
+}
+
 function PortfolioCommandSummary({
   totalValue,
   zerodhaValue,
@@ -236,16 +245,49 @@ function PortfolioCommandSummary({
   indmoneyPortfolioValue: number | null | undefined;
   indmoneyFundsValue: number | null | undefined;
 }) {
+  const [showInvestmentNumbers, setShowInvestmentNumbers] = useState(false);
+  const formatPrivateInvestmentValue = (value: number | null | undefined) => {
+    const formattedValue = formatInr(value);
+    return showInvestmentNumbers
+      ? formattedValue
+      : maskInvestmentValue(formattedValue);
+  };
+  const VisibilityIcon = showInvestmentNumbers ? EyeOff : Eye;
+
   return (
     <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 shadow-2xl shadow-slate-950/15 backdrop-blur">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
         <div className="min-w-[210px] flex-1">
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">
-            <Target className="size-3.5" />
-            Total Investments
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">
+              <Target className="size-3.5" />
+              Total Investments
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-pressed={showInvestmentNumbers}
+              aria-label={
+                showInvestmentNumbers
+                  ? "Hide investment numbers"
+                  : "Show investment numbers"
+              }
+              title={
+                showInvestmentNumbers
+                  ? "Hide investment numbers"
+                  : "Show investment numbers"
+              }
+              onClick={() =>
+                setShowInvestmentNumbers((currentValue) => !currentValue)
+              }
+              className="size-9 shrink-0 rounded-full border border-white/10 bg-white/8 text-slate-200 hover:bg-white/15 hover:text-white"
+            >
+              <VisibilityIcon className="size-4" />
+            </Button>
           </div>
           <div className="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">
-            {formatInr(totalValue)}
+            {formatPrivateInvestmentValue(totalValue)}
           </div>
         </div>
 
@@ -253,22 +295,23 @@ function PortfolioCommandSummary({
           <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
             <div className="text-xs font-semibold text-white">Zerodha</div>
             <div className="mt-1 text-sm font-bold text-white">
-              {formatInr(zerodhaValue)}
+              {formatPrivateInvestmentValue(zerodhaValue)}
             </div>
             <div className="mt-3 text-xs leading-5 text-slate-200">
-              {formatInr(zerodhaPortfolioValue)} portfolio +{" "}
-              {formatInr(zerodhaMargin)} margin
+              {formatPrivateInvestmentValue(zerodhaPortfolioValue)} portfolio +{" "}
+              {formatPrivateInvestmentValue(zerodhaMargin)} margin
             </div>
           </div>
 
           <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
             <div className="text-xs font-semibold text-white">INDmoney</div>
             <div className="mt-1 text-sm font-bold text-white">
-              {formatInr(indmoneyValue)}
+              {formatPrivateInvestmentValue(indmoneyValue)}
             </div>
             <div className="mt-3 text-xs leading-5 text-slate-200">
-              {formatInr(indmoneyPortfolioValue)} total portfolio +{" "}
-              {formatInr(indmoneyFundsValue)} available funds
+              {formatPrivateInvestmentValue(indmoneyPortfolioValue)} total
+              portfolio + {formatPrivateInvestmentValue(indmoneyFundsValue)}{" "}
+              available funds
             </div>
           </div>
         </div>
@@ -463,7 +506,9 @@ export default function DashboardPage() {
             <div className="mt-5 flex flex-wrap gap-3">
               <Button
                 onClick={() => {
-                  window.dispatchEvent(new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT));
+                  window.dispatchEvent(
+                    new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT),
+                  );
                   void loadDashboard(false);
                 }}
                 disabled={refreshing}
