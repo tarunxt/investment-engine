@@ -17,6 +17,9 @@ from app.domains.google_sheets.service import GoogleSheetsService
 from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob
 from app.domains.api_usage.schemas import (
+    LlmCostHistoryDay,
+    LlmCostHistoryResponse,
+    LlmCostHistoryRun,
     LlmPerformanceGroup,
     LlmPerformanceResponse,
     LlmScanPerformanceItem,
@@ -117,6 +120,27 @@ def _build_llm_group(provider: str, model: str, scans: list[LlmScanPerformanceIt
 
 USD_INR_FALLBACK = 83.50
 FX_SOURCE = "https://open.er-api.com/v6/latest/USD"
+
+
+LLM_PROVIDER_LABELS = {
+    "openai": "OpenAI",
+    "anthropic": "Anthropic",
+    "gemini": "Gemini",
+    "deepseek": "DeepSeek",
+}
+
+
+def _normalize_llm_provider(provider: str) -> str:
+    normalized = provider.strip().lower()
+    if normalized not in LLM_PROVIDER_LABELS:
+        raise HTTPException(400, detail="Invalid LLM provider.")
+    return normalized
+
+
+def _ist_day_string(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(IST).date().isoformat()
 
 
 @dataclass
@@ -388,6 +412,123 @@ async def api_usage_summary(
         "fx_source": fx_source,
         "items": [asdict(item) for item in items],
     }
+
+
+@router.get("/llms/cost-history", response_model=LlmCostHistoryResponse)
+async def llm_cost_history(
+    provider: str = Query(..., min_length=1),
+    day_limit: int = Query(default=10, ge=1, le=100),
+    run_limit: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    normalized_provider = _normalize_llm_provider(provider)
+    usd_inr_rate, _fx_source = await _fetch_usd_inr_rate()
+
+    today_ist = datetime.now(IST).date()
+    oldest_day = today_ist - timedelta(days=day_limit - 1)
+    start_ist = datetime.combine(oldest_day, time.min, tzinfo=IST)
+    end_ist = datetime.combine(today_ist + timedelta(days=1), time.min, tzinfo=IST)
+    start_utc = _to_naive_utc(start_ist)
+    end_utc = _to_naive_utc(end_ist)
+
+    day_rows = (
+        await db.execute(
+            select(Job)
+            .where(
+                Job.user_id == current_user.id,
+                Job.provider == normalized_provider,
+                Job.created_at >= start_utc,
+                Job.created_at < end_utc,
+            )
+            .order_by(Job.created_at.desc(), Job.id.desc())
+        )
+    ).scalars().all()
+
+    daily_totals: dict[str, dict[str, float | int]] = {
+        (today_ist - timedelta(days=offset)).isoformat(): {
+            "cost": 0.0,
+            "requests": 0,
+            "tokens_in": 0,
+            "tokens_out": 0,
+        }
+        for offset in range(day_limit)
+    }
+    for job in day_rows:
+        day_key = _ist_day_string(job.created_at)
+        totals = daily_totals.get(day_key)
+        if totals is None:
+            continue
+        totals["cost"] = float(totals["cost"]) + float(job.estimated_cost or 0.0)
+        totals["requests"] = int(totals["requests"]) + 1
+        totals["tokens_in"] = int(totals["tokens_in"]) + int(job.tokens_in or 0)
+        totals["tokens_out"] = int(totals["tokens_out"]) + int(job.tokens_out or 0)
+
+    run_jobs = (
+        await db.execute(
+            select(Job)
+            .where(
+                Job.user_id == current_user.id,
+                Job.provider == normalized_provider,
+            )
+            .order_by(Job.created_at.desc(), Job.id.desc())
+            .limit(run_limit)
+        )
+    ).scalars().all()
+
+    total_runs = int(
+        await db.scalar(
+            select(func.count(Job.id)).where(
+                Job.user_id == current_user.id,
+                Job.provider == normalized_provider,
+            )
+        )
+        or 0
+    )
+
+    days = [
+        LlmCostHistoryDay(
+            date=day_key,
+            estimated_cost=round(float(totals["cost"]), 6),
+            estimated_cost_inr=round(float(totals["cost"]) * usd_inr_rate, 4),
+            requests=int(totals["requests"]),
+            tokens_in=int(totals["tokens_in"]),
+            tokens_out=int(totals["tokens_out"]),
+        )
+        for day_key, totals in sorted(daily_totals.items(), reverse=True)
+    ]
+
+    runs = []
+    for job in run_jobs:
+        status = job.status.value if hasattr(job.status, "value") else str(job.status)
+        cost = float(job.estimated_cost or 0.0)
+        runs.append(
+            LlmCostHistoryRun(
+                job_id=job.id,
+                model=job.model,
+                status=status,
+                timestamp=job.created_at,
+                estimated_cost=round(cost, 6),
+                estimated_cost_inr=round(cost * usd_inr_rate, 4),
+                tokens_in=job.tokens_in,
+                tokens_out=job.tokens_out,
+            )
+        )
+
+    return LlmCostHistoryResponse(
+        provider=normalized_provider,
+        name=LLM_PROVIDER_LABELS[normalized_provider],
+        timezone="Asia/Kolkata",
+        usd_inr_rate=round(usd_inr_rate, 4),
+        generated_at=datetime.now(ZoneInfo("UTC")),
+        day_limit=day_limit,
+        run_limit=run_limit,
+        days=days,
+        runs=runs,
+        total_runs=total_runs,
+        has_more_days=day_limit < 100,
+        has_more_runs=total_runs > len(runs),
+    )
 
 
 @router.get("/llms/performance", response_model=LlmPerformanceResponse)

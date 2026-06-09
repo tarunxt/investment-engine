@@ -58,3 +58,38 @@ class LlmPerformanceResponse(BaseModel):
     total_scans: int
     generated_at: datetime
     groups: list[LlmPerformanceGroup]
+
+
+class LlmCostHistoryDay(BaseModel):
+    date: str
+    estimated_cost: float
+    estimated_cost_inr: float
+    requests: int
+    tokens_in: int
+    tokens_out: int
+
+
+class LlmCostHistoryRun(BaseModel):
+    job_id: int
+    model: str
+    status: str
+    timestamp: datetime
+    estimated_cost: float
+    estimated_cost_inr: float
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+
+
+class LlmCostHistoryResponse(BaseModel):
+    provider: str
+    name: str
+    timezone: str
+    usd_inr_rate: float
+    generated_at: datetime
+    day_limit: int
+    run_limit: int
+    days: list[LlmCostHistoryDay]
+    runs: list[LlmCostHistoryRun]
+    total_runs: int
+    has_more_days: bool
+    has_more_runs: bool

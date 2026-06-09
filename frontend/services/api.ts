@@ -4,6 +4,7 @@ import { syncTokenToCookie } from "@/services/cookies";
 import { signOut } from "next-auth/react";
 import {
   ApiUsageSummaryResponse,
+  LlmCostHistoryResponse,
   GoogleSheetsAdminConfigResponse,
   GoogleSheetsAdminConfigUpdateRequest,
   GoogleSheetsAuthUrlResponse,
@@ -582,6 +583,21 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<ApiUsageSummaryResponse>(
       `${URLs.apiUsage.summary()}${query ? `?${query}` : ''}`,
+    );
+  }
+
+
+  getLlmCostHistory(params: {
+    provider: string;
+    day_limit?: number;
+    run_limit?: number;
+  }): Promise<LlmCostHistoryResponse> {
+    const qs = new URLSearchParams();
+    qs.set('provider', params.provider);
+    if (params.day_limit) qs.set('day_limit', String(params.day_limit));
+    if (params.run_limit) qs.set('run_limit', String(params.run_limit));
+    return this.get<LlmCostHistoryResponse>(
+      `${URLs.apiUsage.llmCostHistory()}?${qs.toString()}`,
     );
   }
 
