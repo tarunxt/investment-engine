@@ -126,7 +126,7 @@ type StageInfo = {
   rebalanceInputs?: number | null;
 };
 type ZerodhaBasketOrderKind = "Market" | "Limit" | "After market";
-type ZerodhaBasketOrderPercent = 50 | 100;
+type ZerodhaBasketOrderPercent = number;
 const ZERODHA_KITE_PUBLISHER_BATCH_SIZE = 5;
 type ZerodhaBasketSubmission = {
   redirected: number;
@@ -145,6 +145,7 @@ type ZerodhaBasketPreviewOrder = {
   currentUnits: number | null;
   price: number | null;
   amount: number | null;
+  availableBalance: number | null;
   percent: ZerodhaBasketOrderPercent;
   orderKind: ZerodhaBasketOrderKind;
   stock: StockConsensus;
@@ -774,6 +775,57 @@ function calculatePercentBasketUnits(baseUnits: number | null, percent: ZerodhaB
   return Math.max(1, Math.floor(rawUnits));
 }
 
+function getZerodhaBasketSellUnitLimit(order: ZerodhaBasketPreviewOrder) {
+  const availableUnits = order.currentUnits ?? order.baseUnits;
+  return availableUnits !== null && availableUnits > 0 ? Math.floor(availableUnits) : null;
+}
+
+function getZerodhaBasketBuyUnitLimit(order: ZerodhaBasketPreviewOrder) {
+  if (order.availableBalance === null || order.availableBalance <= 0 || order.price === null || order.price <= 0) {
+    return null;
+  }
+  return Math.floor(order.availableBalance / order.price);
+}
+
+function getZerodhaBasketUnitLimit(order: ZerodhaBasketPreviewOrder) {
+  return order.side === "SELL" ? getZerodhaBasketSellUnitLimit(order) : getZerodhaBasketBuyUnitLimit(order);
+}
+
+function clampZerodhaBasketUnits(units: number | null, maxUnits: number | null) {
+  if (units === null || !Number.isFinite(units)) return null;
+  const wholeUnits = Math.floor(Math.abs(units));
+  if (wholeUnits < 1) return null;
+  if (maxUnits !== null && maxUnits < 1) return null;
+  return Math.min(wholeUnits, maxUnits ?? wholeUnits);
+}
+
+function calculateZerodhaBasketAmount(units: number | null, price: number | null) {
+  return units !== null && price !== null ? Math.abs(units * price) : null;
+}
+
+function calculateZerodhaBasketPercent(
+  side: "BUY" | "SELL",
+  units: number | null,
+  amount: number | null,
+  totalUnits: number | null,
+  availableBalance: number | null,
+) {
+  if (side === "SELL") {
+    if (units === null || totalUnits === null || totalUnits <= 0) return 0;
+    return Math.min(100, Math.max(0, (units / totalUnits) * 100));
+  }
+  if (amount === null || availableBalance === null || availableBalance <= 0) return 0;
+  return Math.max(0, (amount / availableBalance) * 100);
+}
+
+function formatBasketPercent(value: number) {
+  if (!Number.isFinite(value)) return "0%";
+  const normalized = Math.max(0, value);
+  return `${new Intl.NumberFormat("en-IN", {
+    maximumFractionDigits: normalized > 0 && normalized < 10 ? 1 : 0,
+  }).format(normalized)}%`;
+}
+
 function getZerodhaBasketBaseUnits(action: ActionCategory, estimate: ActionEstimate) {
   if (action === "Sell All" || action === "Trim") {
     return estimate.currentUnits !== null && estimate.currentUnits > 0
@@ -784,7 +836,7 @@ function getZerodhaBasketBaseUnits(action: ActionCategory, estimate: ActionEstim
 }
 
 function getZerodhaBasketActionForPercent(order: ZerodhaBasketPreviewOrder) {
-  if (order.side === "SELL") return order.percent === 100 ? "Sell All" : "Trim";
+  if (order.side === "SELL") return order.percent >= 100 ? "Sell All" : "Trim";
   return order.action;
 }
 
@@ -792,19 +844,46 @@ function applyZerodhaBasketPercent(
   order: ZerodhaBasketPreviewOrder,
   percent: ZerodhaBasketOrderPercent,
 ): ZerodhaBasketPreviewOrder {
-  const units = calculatePercentBasketUnits(
-    order.side === "SELL" ? order.currentUnits : order.baseUnits,
-    percent,
+  const baseUnits = order.side === "SELL" ? (order.currentUnits ?? order.baseUnits) : order.baseUnits;
+  const units = clampZerodhaBasketUnits(
+    calculatePercentBasketUnits(baseUnits, percent),
+    getZerodhaBasketUnitLimit(order),
   );
-  const amount = units !== null && order.price !== null
-    ? Math.abs(units * order.price)
-    : order.amount !== null
-      ? Math.abs(order.amount * (percent / Math.max(order.percent, 1)))
-      : null;
+  const amount = calculateZerodhaBasketAmount(units, order.price);
+  const normalizedPercent = calculateZerodhaBasketPercent(
+    order.side,
+    units,
+    amount,
+    order.side === "SELL" ? (order.currentUnits ?? order.baseUnits) : order.baseUnits,
+    order.availableBalance,
+  );
 
   return {
     ...order,
-    action: order.side === "SELL" ? (percent === 100 ? "Sell All" : "Trim") : order.action,
+    action: order.side === "SELL" ? (normalizedPercent >= 100 ? "Sell All" : "Trim") : order.action,
+    units,
+    amount,
+    percent: normalizedPercent,
+  };
+}
+
+function applyZerodhaBasketUnitDelta(
+  order: ZerodhaBasketPreviewOrder,
+  delta: number,
+): ZerodhaBasketPreviewOrder {
+  const units = clampZerodhaBasketUnits((order.units ?? 0) + delta, getZerodhaBasketUnitLimit(order));
+  const amount = calculateZerodhaBasketAmount(units, order.price);
+  const percent = calculateZerodhaBasketPercent(
+    order.side,
+    units,
+    amount,
+    order.side === "SELL" ? (order.currentUnits ?? order.baseUnits) : order.baseUnits,
+    order.availableBalance,
+  );
+
+  return {
+    ...order,
+    action: order.side === "SELL" ? (percent >= 100 ? "Sell All" : "Trim") : order.action,
     units,
     amount,
     percent,
@@ -895,6 +974,7 @@ function buildZerodhaBasketPreviewOrders(
   snapshot?: ZerodhaPortfolioSnapshotDetail | null,
 ): ZerodhaBasketPreviewOrder[] {
   const holdingExchangeBySymbol = buildZerodhaHoldingExchangeMap(snapshot);
+  const availableBalance = snapshot?.available_margin ?? null;
 
   return rows
     .filter((row) => ZERODHA_BASKET_ACTIONS.has(row.formulaAction))
@@ -903,13 +983,23 @@ function buildZerodhaBasketPreviewOrders(
       const action = row.formulaAction;
       const estimate = row.formulaEstimate;
       const side: "BUY" | "SELL" = action === "Sell All" || action === "Trim" ? "SELL" : "BUY";
-      const percent: ZerodhaBasketOrderPercent = action === "Trim" ? 50 : 100;
+      const requestedPercent: ZerodhaBasketOrderPercent = action === "Trim" ? 50 : 100;
       const baseUnits = getZerodhaBasketBaseUnits(action, estimate);
-      const units = calculatePercentBasketUnits(baseUnits, percent);
       const price = getBasketPrice(stock, estimate.amount, estimate.units);
-      const amount = units !== null && price !== null
-        ? Math.abs(units * price)
-        : estimate.amount;
+      const rawUnits = calculatePercentBasketUnits(baseUnits, requestedPercent);
+      const sellAvailableUnits = estimate.currentUnits ?? baseUnits;
+      const maxUnits = side === "SELL"
+        ? (sellAvailableUnits !== null && sellAvailableUnits > 0 ? Math.floor(sellAvailableUnits) : null)
+        : (availableBalance !== null && price !== null && price > 0 ? Math.floor(availableBalance / price) : null);
+      const units = clampZerodhaBasketUnits(rawUnits, maxUnits);
+      const amount = calculateZerodhaBasketAmount(units, price) ?? estimate.amount;
+      const percent = calculateZerodhaBasketPercent(
+        side,
+        units,
+        amount,
+        side === "SELL" ? sellAvailableUnits : baseUnits,
+        availableBalance,
+      );
       return {
         id: `zerodha:${row.id}`,
         exchange: getZerodhaBasketExchange(stock, side, holdingExchangeBySymbol),
@@ -921,6 +1011,7 @@ function buildZerodhaBasketPreviewOrders(
         currentUnits: estimate.currentUnits,
         price,
         amount,
+        availableBalance,
         percent,
         orderKind: "Market" as const,
         stock,
@@ -2035,6 +2126,7 @@ function ZerodhaBasketPreviewDialog({
   onToggleSection,
   onOrderKindChange,
   onPercentChange,
+  onUnitsChange,
   onPlaceOrder,
   placing,
   submission,
@@ -2050,6 +2142,7 @@ function ZerodhaBasketPreviewDialog({
   onToggleSection: (action: ActionCategory) => void;
   onOrderKindChange: (id: string, orderKind: ZerodhaBasketOrderKind) => void;
   onPercentChange: (id: string, percent: ZerodhaBasketOrderPercent) => void;
+  onUnitsChange: (id: string, delta: number) => void;
   onPlaceOrder: () => void;
   placing: boolean;
   submission: ZerodhaBasketSubmission | null;
@@ -2235,17 +2328,46 @@ function ZerodhaBasketPreviewDialog({
                                   {order.side}
                                 </span>
                               </td>
-                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketQuantity(order.units)}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                                <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold shadow-sm">
+                                  <button
+                                    type="button"
+                                    onClick={() => onUnitsChange(order.id, -1)}
+                                    disabled={(order.units ?? 0) <= 1}
+                                    className="px-2 py-1 text-slate-500 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                                    aria-label={`Decrease ${order.exchange} ${order.symbol} units`}
+                                  >
+                                    -
+                                  </button>
+                                  <span className="min-w-10 px-2 py-1 text-center text-slate-800">
+                                    {formatBasketQuantity(order.units)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => onUnitsChange(order.id, 1)}
+                                    disabled={getZerodhaBasketUnitLimit(order) !== null && (order.units ?? 0) >= (getZerodhaBasketUnitLimit(order) ?? 0)}
+                                    className="px-2 py-1 text-slate-500 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                                    aria-label={`Increase ${order.exchange} ${order.symbol} units`}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </td>
                               <td className="px-4 py-3">
-                                <select
-                                  value={order.percent}
-                                  onChange={(event) => onPercentChange(order.id, Number(event.target.value) as ZerodhaBasketOrderPercent)}
-                                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                                  aria-label={`Set ${order.exchange} ${order.symbol} basket percentage`}
-                                >
-                                  <option value={50}>50%</option>
-                                  <option value={100}>100%</option>
-                                </select>
+                                {order.side === "SELL" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onPercentChange(order.id, order.percent >= 100 ? 50 : 100)}
+                                    className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                    aria-label={`Toggle ${order.exchange} ${order.symbol} basket percentage between trim and sell all`}
+                                  >
+                                    {formatBasketPercent(order.percent)}
+                                  </button>
+                                ) : (
+                                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                                    {formatBasketPercent(order.percent)}
+                                  </span>
+                                )}
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price)}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount)}</td>
@@ -3939,6 +4061,15 @@ export function RebalanceWorkflowSections({
     (id: string, percent: ZerodhaBasketOrderPercent) => {
       setZerodhaBasketOrders((current) =>
         current.map((order) => (order.id === id ? applyZerodhaBasketPercent(order, percent) : order)),
+      );
+    },
+    [],
+  );
+
+  const updateZerodhaBasketUnits = useCallback(
+    (id: string, delta: number) => {
+      setZerodhaBasketOrders((current) =>
+        current.map((order) => (order.id === id ? applyZerodhaBasketUnitDelta(order, delta) : order)),
       );
     },
     [],
@@ -5903,6 +6034,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
         onToggleSection={toggleZerodhaBasketSection}
         onOrderKindChange={updateZerodhaBasketOrderKind}
         onPercentChange={updateZerodhaBasketPercent}
+        onUnitsChange={updateZerodhaBasketUnits}
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
         placing={zerodhaBasketPlacing}
         submission={zerodhaBasketSubmission}
