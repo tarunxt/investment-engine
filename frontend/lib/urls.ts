@@ -306,6 +306,7 @@ export const URLs = {
   apiUsage: {
     summary: () => `${resolveApiBaseUrl()}/api-usage/summary`,
     llmPerformance: () => `${resolveApiBaseUrl()}/api-usage/llms/performance`,
+    llmCostHistory: () => `${resolveApiBaseUrl()}/api-usage/llms/cost-history`,
   },
 
   // Schedule endpoints

@@ -157,6 +157,42 @@ export interface ApiUsageItem {
   gemini_key_hidden_default?: boolean;
 }
 
+
+export interface LlmCostHistoryDay {
+  date: string;
+  estimated_cost: number;
+  estimated_cost_inr: number;
+  requests: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+export interface LlmCostHistoryRun {
+  job_id: number;
+  model: string;
+  status: string;
+  timestamp: string;
+  estimated_cost: number;
+  estimated_cost_inr: number;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+}
+
+export interface LlmCostHistoryResponse {
+  provider: string;
+  name: string;
+  timezone: string;
+  usd_inr_rate: number;
+  generated_at: string;
+  day_limit: number;
+  run_limit: number;
+  days: LlmCostHistoryDay[];
+  runs: LlmCostHistoryRun[];
+  total_runs: number;
+  has_more_days: boolean;
+  has_more_runs: boolean;
+}
+
 export interface ApiUsageSummaryResponse {
   timezone: string;
   date: string;
