@@ -18,12 +18,16 @@ import {
   buildDashboardActionRows,
   buildTechnicalScanMap,
   buildTechnicalScanPrompt,
+  ConsensusBreakupButton,
+  ScoreMatrixButton,
+  ScoreMatrixModal,
   type ActionCategory,
   type ActionEstimate,
   extractRebalanceInputFingerprint,
   fetchAllFullRuns,
   isCompletedRebalanceRun,
   type DashboardActionRow,
+  type ScoreMatrixDetail,
   type StockConsensus,
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
@@ -143,6 +147,8 @@ type ZerodhaBasketPreviewOrder = {
   amount: number | null;
   percent: ZerodhaBasketOrderPercent;
   orderKind: ZerodhaBasketOrderKind;
+  stock: StockConsensus;
+  detail: ScoreMatrixDetail;
 };
 type WorkflowState = Record<WorkflowStageKey, StageInfo>;
 type IndMoneySyncMode = "reuse" | "paste";
@@ -882,6 +888,8 @@ function buildZerodhaBasketPreviewOrders(
         amount,
         percent,
         orderKind: "Market" as const,
+        stock,
+        detail: row.detail,
       };
     })
     .filter((order) => order.units !== null && order.units > 0)
@@ -2015,6 +2023,8 @@ function ZerodhaBasketPreviewDialog({
   placing: boolean;
   submission: ZerodhaBasketSubmission | null;
 }) {
+  const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
+
   if (!open) return null;
 
   const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
@@ -2113,7 +2123,7 @@ function ZerodhaBasketPreviewDialog({
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <table className="min-w-[72rem] w-full text-sm">
+                <table className="min-w-[84rem] w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                       <th className="px-4 py-3 font-semibold">
@@ -2129,6 +2139,8 @@ function ZerodhaBasketPreviewDialog({
                         </label>
                       </th>
                       <th className="px-4 py-3 font-semibold">Stock</th>
+                      <th className="px-4 py-3 font-semibold">Score</th>
+                      <th className="px-4 py-3 font-semibold">Consensus</th>
                       <th className="px-4 py-3 font-semibold">Action</th>
                       <th className="px-4 py-3 font-semibold">Side</th>
                       <th className="px-4 py-3 font-semibold">Units</th>
@@ -2146,7 +2158,7 @@ function ZerodhaBasketPreviewDialog({
                       return (
                         <Fragment key={group.action}>
                           <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
-                            <td className="px-4 py-3" colSpan={10}>
+                            <td className="px-4 py-3" colSpan={12}>
                               <label className="inline-flex items-center gap-3 text-sm font-black">
                                 <input
                                   type="checkbox"
@@ -2174,6 +2186,12 @@ function ZerodhaBasketPreviewDialog({
                               <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950">
                                 <span className="mr-2 text-xs font-semibold text-slate-500">{order.exchange}</span>
                                 {order.symbol}
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                                <ScoreMatrixButton detail={order.detail} onOpenDetail={setSelectedMatrixDetail} />
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3">
+                                <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-700">{getZerodhaBasketActionForPercent(order)}</td>
                               <td className="px-4 py-3">
@@ -2238,6 +2256,11 @@ function ZerodhaBasketPreviewDialog({
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
+
+        <ScoreMatrixModal
+          detail={selectedMatrixDetail}
+          onClose={() => setSelectedMatrixDetail(null)}
+        />
       </div>
     </div>
   );

@@ -124,7 +124,7 @@ type DetailedRationaleScoreRow = {
   denominatorWeight?: number;
 };
 
-type ActionablesCalculationFocusTarget = {
+export type ActionablesCalculationFocusTarget = {
   stockKey: string;
   header: ActionablesCalculationHeader;
 };
@@ -1004,7 +1004,7 @@ function SelectInputsIcon({ className }: { className?: string }) {
   );
 }
 
-function ScoreMatrixButton({
+export function ScoreMatrixButton({
   detail,
   onOpenDetail,
   className,
@@ -2600,7 +2600,7 @@ function compareConsensusBreakupEntries(a: ConsensusBreakupEntry, b: ConsensusBr
   return (a.meta.model || "").localeCompare(b.meta.model || "", undefined, { sensitivity: "base" });
 }
 
-function ConsensusBreakupButton({
+export function ConsensusBreakupButton({
   stock,
   action,
 }: {
@@ -3417,7 +3417,7 @@ function ScoreReferenceTables() {
   );
 }
 
-function ScoreMatrixModal({
+export function ScoreMatrixModal({
   detail,
   onClose,
   onFocusCalculation,
