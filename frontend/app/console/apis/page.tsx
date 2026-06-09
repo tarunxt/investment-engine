@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, RefreshCw, X } from 'lucide-react';
 import { apiService } from '@/services/api';
 import { ApiUsageItem, ApiUsageSummaryResponse, LlmCostHistoryResponse } from '@/types/api';
@@ -8,6 +8,16 @@ import { ApiUsageItem, ApiUsageSummaryResponse, LlmCostHistoryResponse } from '@
 type Period = 'day' | 'week' | 'month' | 'custom';
 
 const API_TIMEZONE = 'Asia/Kolkata';
+
+const COMBINED_LLM_PROVIDERS = [
+  { key: 'openai', name: 'OpenAI', color: '#4f46e5' },
+  { key: 'anthropic', name: 'Anthropic', color: '#ea580c' },
+  { key: 'gemini', name: 'Gemini', color: '#16a34a' },
+  { key: 'deepseek', name: 'DeepSeek', color: '#0891b2' },
+] as const;
+
+type CombinedLlmProviderKey = (typeof COMBINED_LLM_PROVIDERS)[number]['key'];
+type CombinedLlmVisibility = Record<CombinedLlmProviderKey, boolean>;
 
 function getDateParts(date: Date, timeZone: string) {
   const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -74,6 +84,196 @@ function getLlmProviderKey(item: ApiUsageItem) {
 
 function formatInr(value: number) {
   return `₹${value.toFixed(4)}`;
+}
+
+function formatCompactInr(value: number) {
+  if (value >= 100000) return `₹${(value / 100000).toFixed(1)}L`;
+  if (value >= 1000) return `₹${(value / 1000).toFixed(1)}K`;
+  if (value >= 1) return `₹${value.toFixed(2)}`;
+  return `₹${value.toFixed(4)}`;
+}
+
+function formatChartDayLabel(isoDate: string) {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const utcDate = new Date(Date.UTC(year, month - 1, day));
+  return utcDate.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+}
+
+function CombinedLlmCostChart({
+  histories,
+  loading,
+  error,
+  visibility,
+  onVisibilityChange,
+}: {
+  histories: Partial<Record<CombinedLlmProviderKey, LlmCostHistoryResponse>>;
+  loading: boolean;
+  error: string | null;
+  visibility: CombinedLlmVisibility;
+  onVisibilityChange: (provider: CombinedLlmProviderKey, visible: boolean) => void;
+}) {
+  const chart = useMemo(() => {
+    const dates = Array.from(
+      new Set(
+        Object.values(histories)
+          .flatMap((history) => history?.days.map((day) => day.date) ?? [])
+      )
+    ).sort();
+
+    const valuesByProvider = COMBINED_LLM_PROVIDERS.reduce(
+      (acc, provider) => {
+        const history = histories[provider.key];
+        acc[provider.key] = new Map(history?.days.map((day) => [day.date, day.estimated_cost_inr]) ?? []);
+        return acc;
+      },
+      {} as Record<CombinedLlmProviderKey, Map<string, number>>
+    );
+
+    const activeProviders = COMBINED_LLM_PROVIDERS.filter((provider) => visibility[provider.key]);
+    const visibleValues = activeProviders.flatMap((provider) =>
+      dates.map((date) => valuesByProvider[provider.key].get(date) ?? 0)
+    );
+    const maxCost = Math.max(...visibleValues, 0);
+    const yMax = maxCost > 0 ? maxCost * 1.15 : 1;
+
+    return { dates, valuesByProvider, activeProviders, yMax };
+  }, [histories, visibility]);
+
+  const width = 920;
+  const height = 320;
+  const padding = { top: 24, right: 28, bottom: 58, left: 82 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const xForIndex = (index: number) =>
+    chart.dates.length <= 1 ? padding.left + plotWidth / 2 : padding.left + (index / (chart.dates.length - 1)) * plotWidth;
+  const yForCost = (cost: number) => padding.top + plotHeight - (cost / chart.yMax) * plotHeight;
+  const gridValues = [0, chart.yMax * 0.25, chart.yMax * 0.5, chart.yMax * 0.75, chart.yMax];
+  const xTickInterval = Math.max(1, Math.ceil(chart.dates.length / 8));
+
+  return (
+    <section className="border border-gray-200 bg-white p-4">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-950">Combined LLM API Cost Trend</h2>
+          <p className="text-sm text-gray-600">Daily estimated API cost by provider. Y-axis is INR cost; X-axis is day.</p>
+        </div>
+        <div className="flex flex-wrap gap-3" aria-label="Toggle LLM API cost lines">
+          {COMBINED_LLM_PROVIDERS.map((provider) => (
+            <label key={provider.key} className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={visibility[provider.key]}
+                onChange={(event) => onVisibilityChange(provider.key, event.target.checked)}
+                className="size-4 accent-indigo-600"
+              />
+              <span className="inline-flex items-center gap-1.5">
+                <span className="size-2.5 rounded-full" style={{ backgroundColor: provider.color }} />
+                {provider.name}
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {error ? (
+        <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      ) : null}
+
+      {loading && chart.dates.length === 0 ? (
+        <div className="py-12 text-center text-sm text-gray-500">Loading combined LLM cost chart...</div>
+      ) : chart.dates.length === 0 ? (
+        <div className="py-12 text-center text-sm text-gray-500">No LLM cost history available yet.</div>
+      ) : chart.activeProviders.length === 0 ? (
+        <div className="py-12 text-center text-sm text-gray-500">Select at least one LLM API to view the cost chart.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <svg role="img" aria-label="Combined LLM API cost line chart" viewBox={`0 0 ${width} ${height}`} className="min-w-[760px]">
+            <line x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + plotHeight} stroke="#d1d5db" />
+            <line
+              x1={padding.left}
+              y1={padding.top + plotHeight}
+              x2={padding.left + plotWidth}
+              y2={padding.top + plotHeight}
+              stroke="#d1d5db"
+            />
+            {gridValues.map((value) => {
+              const y = yForCost(value);
+              return (
+                <g key={value}>
+                  <line x1={padding.left} y1={y} x2={padding.left + plotWidth} y2={y} stroke="#eef2f7" />
+                  <text x={padding.left - 12} y={y + 4} textAnchor="end" className="fill-gray-500 text-[11px]">
+                    {formatCompactInr(value)}
+                  </text>
+                </g>
+              );
+            })}
+            {chart.dates.map((date, index) => {
+              if (index % xTickInterval !== 0 && index !== chart.dates.length - 1) return null;
+              const x = xForIndex(index);
+              return (
+                <g key={date}>
+                  <line x1={x} y1={padding.top + plotHeight} x2={x} y2={padding.top + plotHeight + 5} stroke="#9ca3af" />
+                  <text x={x} y={padding.top + plotHeight + 24} textAnchor="middle" className="fill-gray-500 text-[11px]">
+                    {formatChartDayLabel(date)}
+                  </text>
+                </g>
+              );
+            })}
+            <text
+              x={18}
+              y={padding.top + plotHeight / 2}
+              transform={`rotate(-90 18 ${padding.top + plotHeight / 2})`}
+              textAnchor="middle"
+              className="fill-gray-600 text-xs font-medium"
+            >
+              Cost (INR)
+            </text>
+            <text
+              x={padding.left + plotWidth / 2}
+              y={height - 12}
+              textAnchor="middle"
+              className="fill-gray-600 text-xs font-medium"
+            >
+              Day
+            </text>
+            {chart.activeProviders.map((provider) => {
+              const points = chart.dates.map((date, index) => {
+                const cost = chart.valuesByProvider[provider.key].get(date) ?? 0;
+                return { date, cost, x: xForIndex(index), y: yForCost(cost) };
+              });
+              const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+              return (
+                <g key={provider.key}>
+                  <path d={path} fill="none" stroke={provider.color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+                  {points.map((point) => (
+                    <circle key={`${provider.key}-${point.date}`} cx={point.x} cy={point.y} r={3.5} fill={provider.color}>
+                      <title>{`${provider.name} ${formatChartDayLabel(point.date)}: ${formatInr(point.cost)}`}</title>
+                    </circle>
+                  ))}
+                </g>
+              );
+            })}
+          </svg>
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-gray-600">
+            {COMBINED_LLM_PROVIDERS.map((provider) => {
+              const latestDate = chart.dates[chart.dates.length - 1];
+              const latestCost = chart.valuesByProvider[provider.key].get(latestDate) ?? 0;
+              return (
+                <div key={provider.key} className="inline-flex items-center gap-1.5">
+                  <span className="size-2.5 rounded-full" style={{ backgroundColor: provider.color }} />
+                  <span>{provider.name}: {formatInr(latestCost)} latest day</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function formatHistoryTimestamp(value: string, timeZone: string) {
@@ -274,6 +474,15 @@ export default function ApisPage() {
   const [costHistoryTab, setCostHistoryTab] = useState<CostHistoryTab>('day-wise');
   const [costHistoryDayLimit, setCostHistoryDayLimit] = useState(10);
   const [costHistoryRunLimit, setCostHistoryRunLimit] = useState(10);
+  const [combinedCostHistories, setCombinedCostHistories] = useState<Partial<Record<CombinedLlmProviderKey, LlmCostHistoryResponse>>>({});
+  const [combinedCostLoading, setCombinedCostLoading] = useState(true);
+  const [combinedCostError, setCombinedCostError] = useState<string | null>(null);
+  const [combinedCostVisibility, setCombinedCostVisibility] = useState<CombinedLlmVisibility>({
+    openai: true,
+    anthropic: true,
+    gemini: true,
+    deepseek: true,
+  });
 
   const todayIso = getTodayIso(API_TIMEZONE);
   const isViewingToday = selectedDate >= todayIso;
@@ -317,6 +526,32 @@ export default function ApisPage() {
     void load();
   }, [load]);
 
+  const loadCombinedCostHistories = useCallback(async () => {
+    setCombinedCostLoading(true);
+    setCombinedCostError(null);
+    try {
+      const histories = await Promise.all(
+        COMBINED_LLM_PROVIDERS.map(async (provider) => {
+          const history = await apiService.getLlmCostHistory({
+            provider: provider.key,
+            day_limit: 30,
+            run_limit: 1,
+          });
+          return [provider.key, history] as const;
+        })
+      );
+      setCombinedCostHistories(Object.fromEntries(histories) as Partial<Record<CombinedLlmProviderKey, LlmCostHistoryResponse>>);
+    } catch (err) {
+      setCombinedCostError(err instanceof Error ? err.message : 'Failed to load combined LLM cost history');
+    } finally {
+      setCombinedCostLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadCombinedCostHistories();
+  }, [loadCombinedCostHistories]);
 
   const loadCostHistory = useCallback(async (provider: string, dayLimit: number, runLimit: number) => {
     setCostHistoryLoading(true);
@@ -366,6 +601,15 @@ export default function ApisPage() {
     void loadCostHistory(costHistoryProvider, costHistoryDayLimit, nextLimit);
   }, [costHistoryDayLimit, costHistoryProvider, costHistoryRunLimit, loadCostHistory]);
 
+  const updateCombinedCostVisibility = useCallback((provider: CombinedLlmProviderKey, visible: boolean) => {
+    setCombinedCostVisibility((current) => ({ ...current, [provider]: visible }));
+  }, []);
+
+  const refreshAll = useCallback(() => {
+    void load();
+    void loadCombinedCostHistories();
+  }, [load, loadCombinedCostHistories]);
+
   const summaryLabel =
     period === 'day'
       ? formatSelectedDayLabel(selectedDate, todayIso)
@@ -390,7 +634,7 @@ export default function ApisPage() {
           ) : null}
         </div>
         <button
-          onClick={() => void load()}
+          onClick={refreshAll}
           className="inline-flex items-center border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
         >
           <RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />
@@ -568,6 +812,14 @@ export default function ApisPage() {
           </tbody>
         </table>
       </div>
+
+      <CombinedLlmCostChart
+        histories={combinedCostHistories}
+        loading={combinedCostLoading}
+        error={combinedCostError}
+        visibility={combinedCostVisibility}
+        onVisibilityChange={updateCombinedCostVisibility}
+      />
 
       {costHistoryProvider ? (
         <LlmCostHistoryModal
