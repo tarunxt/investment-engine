@@ -13,7 +13,12 @@ from app.domains.polymarket.bullpen import (
     utc_now,
 )
 from app.domains.polymarket.logger import PolymarketFileLogger, redact_secrets
-from app.domains.polymarket.providers import BullpenReadOnlyProvider, MarketDataProvider, MockProvider, identity_key
+from app.domains.polymarket.providers import (
+    BullpenReadOnlyProvider,
+    MarketDataProvider,
+    MockProvider,
+    identity_key,
+)
 from app.domains.polymarket.schemas import (
     BotMode,
     PolymarketActivity,
@@ -65,17 +70,25 @@ class PolymarketPaperCopyBot:
         self.trade_history: list[PolymarketPaperTrade] = []
         self.live_trade_history: list[PolymarketLiveTradeDecision] = []
         self.recent_activity: list[PolymarketActivity] = []
-        self.active_provider: MarketDataProvider = provider if config.use_live_reads else fallback_provider
+        self.active_provider: MarketDataProvider = (
+            provider if config.use_live_reads else fallback_provider
+        )
         self.active_mode: BotMode = "live-read" if config.use_live_reads else "mock"
         self.live_unlocked = False
         self.live_unlock_mode: str = "locked"
         self.live_manually_locked = False
         self.emergency_stopped = False
-        self.doctor_status = PolymarketDoctorStatus(ok=False, message="Bullpen doctor has not run.")
-        self.balance_state = PolymarketBalanceState(status="idle", message="Balance has not been refreshed.")
+        self.doctor_status = PolymarketDoctorStatus(
+            ok=False, message="Bullpen doctor has not run."
+        )
+        self.balance_state = PolymarketBalanceState(
+            status="idle", message="Balance has not been refreshed."
+        )
         self.live_source_status = PolymarketLiveSourceStatus(
             source_mode=self.active_mode,
-            discovery_mode="active feed + manual wallets" if config.use_live_reads else "mock",
+            discovery_mode=(
+                "active feed + manual wallets" if config.use_live_reads else "mock"
+            ),
             trending_market_activity_enabled=config.use_trending_market_activity,
         )
         self.live_guard = LiveTradeGuard(config)
@@ -189,7 +202,9 @@ class PolymarketPaperCopyBot:
             self.live_unlock_mode = "locked"
             self.live_manually_locked = True
             await self.logger.warn("Live trading locked by dashboard.")
-            self._add_activity("Live trading locked by dashboard. Future live proposals disabled.")
+            self._add_activity(
+                "Live trading locked by dashboard. Future live proposals disabled."
+            )
 
     async def refresh_doctor(self) -> None:
         async with self._lock:
@@ -221,7 +236,9 @@ class PolymarketPaperCopyBot:
             trade.updated_at = utc_now()
             trade.reason = f"{trade.reason} Rejected in dashboard."
             await self._save_live_trades_unlocked()
-            self._add_activity(f"Rejected live {trade.side}: {trade.market_id} {trade.outcome}.")
+            self._add_activity(
+                f"Rejected live {trade.side}: {trade.market_id} {trade.outcome}."
+            )
 
     async def reject_all_pending_live_trades(self) -> int:
         async with self._lock:
@@ -232,18 +249,28 @@ class PolymarketPaperCopyBot:
                 trade.updated_at = now
                 trade.reason = f"{trade.reason} Rejected in dashboard bulk action."
             await self._save_live_trades_unlocked()
-            self._add_activity(f"Rejected all pending live confirmations: {len(pending)}.")
+            self._add_activity(
+                f"Rejected all pending live confirmations: {len(pending)}."
+            )
             return len(pending)
 
     async def confirm_live_trade(self, trade_id: str) -> None:
         async with self._lock:
             trade = self._find_pending_live_trade(trade_id)
-            await self._execute_live_trade_unlocked(trade, "manual dashboard confirmation")
+            await self._execute_live_trade_unlocked(
+                trade, "manual dashboard confirmation"
+            )
 
     async def debug_discovery(self, target: str) -> object:
-        provider = self.provider if isinstance(self.provider, BullpenReadOnlyProvider) else None
+        provider = (
+            self.provider
+            if isinstance(self.provider, BullpenReadOnlyProvider)
+            else None
+        )
         if not provider:
-            raise RuntimeError("Live-read discovery debug is unavailable while USE_LIVE_READS=false.")
+            raise RuntimeError(
+                "Live-read discovery debug is unavailable while USE_LIVE_READS=false."
+            )
         return await provider.debug_discovery(target)
 
     async def get_state(self) -> PolymarketBotState:
@@ -310,15 +337,31 @@ class PolymarketPaperCopyBot:
         self.last_poll_at = utc_now()
         try:
             self.tracked_traders = await self._read_top_traders_unlocked()
-            source_trades = await self._read_recent_trades_unlocked(self.tracked_traders)
+            source_trades = await self._read_recent_trades_unlocked(
+                self.tracked_traders
+            )
             live_proposals_before = len(self._pending_live_trades())
 
             if self.config.paused:
                 for trade in source_trades:
                     self._mark_source_trade_seen(trade)
-                await self.logger.info(f"Paused. Marked {len(source_trades)} source trades as seen without copying.")
-                self._add_activity(f"Poll completed while paused. Marked {len(source_trades)} trades as seen.")
-                self._finish_poll_unlocked(len(source_trades), 0, 0, {"after_filters": 0, "skipped_by_filters": 0, "skipped_by_limits": 0, "skipped_duplicates": 0})
+                await self.logger.info(
+                    f"Paused. Marked {len(source_trades)} source trades as seen without copying."
+                )
+                self._add_activity(
+                    f"Poll completed while paused. Marked {len(source_trades)} trades as seen."
+                )
+                self._finish_poll_unlocked(
+                    len(source_trades),
+                    0,
+                    0,
+                    {
+                        "after_filters": 0,
+                        "skipped_by_filters": 0,
+                        "skipped_by_limits": 0,
+                        "skipped_duplicates": 0,
+                    },
+                )
                 return
 
             new_trade_count = 0
@@ -347,13 +390,19 @@ class PolymarketPaperCopyBot:
                 proposal_stats,
             )
             if self.active_mode == "live-trading" and not source_trades:
-                self._add_activity("Live mode is active. No live source trades detected yet.")
+                self._add_activity(
+                    "Live mode is active. No live source trades detected yet."
+                )
             elif self.active_mode == "live-trading" and new_trade_count == 0:
-                self._add_activity("Live mode is active. No new live source trades detected yet.")
+                self._add_activity(
+                    "Live mode is active. No new live source trades detected yet."
+                )
         except Exception as exc:
             self.last_error = str(exc)
             if self.active_mode in ("live-read", "live-trading"):
-                self.live_source_status.last_live_read_error = redact_secrets(self.last_error)
+                self.live_source_status.last_live_read_error = redact_secrets(
+                    self.last_error
+                )
             await self.logger.error("Polling failed", exc)
             self._add_activity(f"Poll failed: {self.last_error}.")
             self._schedule_next_poll_unlocked()
@@ -361,7 +410,9 @@ class PolymarketPaperCopyBot:
     async def _read_top_traders_unlocked(self) -> list[PolymarketTrader]:
         try:
             traders = await self.active_provider.get_top_traders()
-            self.live_source_status.live_read_traders_count = len([trader for trader in traders if trader.source == "live-read"])
+            self.live_source_status.live_read_traders_count = len(
+                [trader for trader in traders if trader.source == "live-read"]
+            )
             self._apply_provider_discovery_status_unlocked()
             return traders[: max(1, self.config.max_tracked_traders)]
         except Exception as exc:
@@ -370,13 +421,17 @@ class PolymarketPaperCopyBot:
             if self.active_mode == "live-trading":
                 self._add_activity(f"Live-read traders failed: {message}")
                 raise
-            await self.logger.warn("Read provider unavailable. Falling back to mock traders.")
+            await self.logger.warn(
+                "Read provider unavailable. Falling back to mock traders."
+            )
             self._add_activity("Live read unavailable. Switched to mock traders.")
             self.active_provider = self.fallback_provider
             self.active_mode = "mock"
             return await self.fallback_provider.get_top_traders()
 
-    async def _read_recent_trades_unlocked(self, traders: list[PolymarketTrader]) -> list[PolymarketSourceTrade]:
+    async def _read_recent_trades_unlocked(
+        self, traders: list[PolymarketTrader]
+    ) -> list[PolymarketSourceTrade]:
         try:
             trades = await self.active_provider.get_recent_trades(traders)
             if self.active_mode in ("live-read", "live-trading"):
@@ -388,7 +443,9 @@ class PolymarketPaperCopyBot:
             if self.active_mode == "live-trading":
                 self._add_activity(f"Live-read trades failed: {message}")
                 raise
-            await self.logger.warn("Read provider trades unavailable. Falling back to mock trades.")
+            await self.logger.warn(
+                "Read provider trades unavailable. Falling back to mock trades."
+            )
             self._add_activity("Live trade feed unavailable. Switched to mock trades.")
             self.active_provider = self.fallback_provider
             self.active_mode = "mock"
@@ -408,24 +465,43 @@ class PolymarketPaperCopyBot:
 
         risk_reason = self._risk_block_reason(source_trade)
         if risk_reason:
-            self._add_activity(f"Risk skipped {source_trade.side} {source_trade.market_id}: {risk_reason}")
-            await self._record_trade_unlocked(self._paper_trade(source_trade, "skipped", 0, 0, 0, risk_reason))
+            self._add_activity(
+                f"Risk skipped {source_trade.side} {source_trade.market_id}: {risk_reason}"
+            )
+            await self._record_trade_unlocked(
+                self._paper_trade(source_trade, "skipped", 0, 0, 0, risk_reason)
+            )
             return
 
         if source_trade.side == "BUY":
-            copied_usd = min(5, self.config.max_trade_size)
+            copied_usd = min(
+                self.config.fixed_copy_trade_size, self.config.max_trade_size
+            )
             shares = copied_usd / source_trade.price
-            await self._record_trade_unlocked(self._paper_trade(source_trade, "executed", copied_usd, shares, 0))
+            await self._record_trade_unlocked(
+                self._paper_trade(source_trade, "executed", copied_usd, shares, 0)
+            )
             self._add_activity(
                 f"Simulated BUY copied: {source_trade.market_id} {source_trade.outcome} for ${copied_usd:.2f}."
             )
             return
 
-        position = next((item for item in self._positions() if item.key == f"{source_trade.market_id}::{source_trade.outcome}"), None)
+        position = next(
+            (
+                item
+                for item in self._positions()
+                if item.key == f"{source_trade.market_id}::{source_trade.outcome}"
+            ),
+            None,
+        )
         if not position or position.shares <= 0:
             reason = "No matching paper position to exit."
-            await self._record_trade_unlocked(self._paper_trade(source_trade, "skipped", 0, 0, 0, reason))
-            self._add_activity(f"Simulated SELL skipped: {source_trade.market_id} {source_trade.outcome}. {reason}")
+            await self._record_trade_unlocked(
+                self._paper_trade(source_trade, "skipped", 0, 0, 0, reason)
+            )
+            self._add_activity(
+                f"Simulated SELL skipped: {source_trade.market_id} {source_trade.outcome}. {reason}"
+            )
             return
 
         implied_source_shares = source_trade.size_usd / source_trade.price
@@ -433,7 +509,9 @@ class PolymarketPaperCopyBot:
         copied_usd = sell_shares * source_trade.price
         realized_pnl = sell_shares * (source_trade.price - position.average_price)
         await self._record_trade_unlocked(
-            self._paper_trade(source_trade, "executed", copied_usd, -sell_shares, realized_pnl)
+            self._paper_trade(
+                source_trade, "executed", copied_usd, -sell_shares, realized_pnl
+            )
         )
         self._add_activity(
             f"Simulated SELL copied: {source_trade.market_id} {source_trade.outcome} for ${copied_usd:.2f}."
@@ -445,28 +523,44 @@ class PolymarketPaperCopyBot:
         proposal_stats: dict[str, object],
     ) -> None:
         if source_trade.source not in ("live-read", "live-market-read"):
-            await self.logger.warn(f"Ignored non-live source in live-trading mode: source={source_trade.source}")
+            await self.logger.warn(
+                f"Ignored non-live source in live-trading mode: source={source_trade.source}"
+            )
             self._add_activity("Ignored non-live source trade in live-trading mode.")
             return
 
         duplicate_reason = self._duplicate_live_source_reason(source_trade)
         if duplicate_reason:
-            proposal_stats["skipped_duplicates"] = int(proposal_stats["skipped_duplicates"]) + 1
+            proposal_stats["skipped_duplicates"] = (
+                int(proposal_stats["skipped_duplicates"]) + 1
+            )
             self._add_activity(f"{duplicate_reason}: {source_trade.id}.")
             return
 
         proposal_block = self._proposal_block_reason(source_trade, proposal_stats)
         if proposal_block:
-            key = "skipped_by_filters" if proposal_block["kind"] == "filter" else "skipped_by_limits"
+            key = (
+                "skipped_by_filters"
+                if proposal_block["kind"] == "filter"
+                else "skipped_by_limits"
+            )
             proposal_stats[key] = int(proposal_stats[key]) + 1
-            self._add_activity(f"Live proposal skipped {source_trade.side} {source_trade.market_id}: {proposal_block['reason']}")
+            self._add_activity(
+                f"Live proposal skipped {source_trade.side} {source_trade.market_id}: {proposal_block['reason']}"
+            )
             return
         proposal_stats["after_filters"] = int(proposal_stats["after_filters"]) + 1
 
-        risk_reason = self.live_guard.trade_block_reason(source_trade, self.live_trade_history, self._live_positions())
+        risk_reason = self.live_guard.trade_block_reason(
+            source_trade, self.live_trade_history, self._live_positions()
+        )
         if risk_reason:
-            await self._record_live_trade_unlocked(self._live_decision(source_trade, "skipped", 0, 0, risk_reason))
-            self._add_activity(f"Live skipped {source_trade.side} {source_trade.market_id}: {risk_reason}")
+            await self._record_live_trade_unlocked(
+                self._live_decision(source_trade, "skipped", 0, 0, risk_reason)
+            )
+            self._add_activity(
+                f"Live skipped {source_trade.side} {source_trade.market_id}: {risk_reason}"
+            )
             return
 
         decision = self._live_decision_from_source(source_trade)
@@ -476,25 +570,54 @@ class PolymarketPaperCopyBot:
             self.emergency_stopped,
             self.live_manually_locked,
         )
-        if not self.running or self.active_mode != "live-trading" or self.config.paused or block_reason:
-            proposal_stats["skipped_by_limits"] = int(proposal_stats["skipped_by_limits"]) + 1
-            self._add_activity(f"Live proposal skipped: {block_reason or 'proposals paused or stopped.'}")
+        if (
+            not self.running
+            or self.active_mode != "live-trading"
+            or self.config.paused
+            or block_reason
+        ):
+            proposal_stats["skipped_by_limits"] = (
+                int(proposal_stats["skipped_by_limits"]) + 1
+            )
+            self._add_activity(
+                f"Live proposal skipped: {block_reason or 'proposals paused or stopped.'}"
+            )
             return
 
         await self._record_live_trade_unlocked(decision)
         proposal_stats["created"] = int(proposal_stats["created"]) + 1
         trader_key = identity_key(
-            source_trade.clean_trader_identity or source_trade.trader_address or source_trade.trader_handle or source_trade.trader_id
+            source_trade.clean_trader_identity
+            or source_trade.trader_address
+            or source_trade.trader_handle
+            or source_trade.trader_id
         )
         proposal_stats["per_trader_created"][trader_key] += 1
-        self.proposal_cooldown_by_trader[trader_key] = datetime.now(timezone.utc).timestamp()
+        self.proposal_cooldown_by_trader[trader_key] = datetime.now(
+            timezone.utc
+        ).timestamp()
         self._add_activity(
             f"Live trade proposed from {source_trade.source}: {decision.side} {decision.market_id} {decision.outcome} for ${decision.amount:.2f}."
         )
-        if self.config.auto_execute_live and not self.config.require_manual_confirmation:
-            self._add_activity("AUTO_EXECUTE_LIVE is ignored; live orders require per-trade Confirm.")
+        if (
+            self.config.auto_execute_live
+            and not self.config.require_manual_confirmation
+        ):
+            try:
+                await self._execute_live_trade_unlocked(
+                    decision, "automatic copy trading enabled"
+                )
+            except Exception as exc:
+                proposal_stats["skipped_by_limits"] = (
+                    int(proposal_stats["skipped_by_limits"]) + 1
+                )
+                self._add_activity(
+                    f"Automatic live execution failed and bot kept looping: {redact_secrets(str(exc))}"
+                )
 
-    async def _execute_live_trade_unlocked(self, trade: PolymarketLiveTradeDecision, confirmation_reason: str) -> None:
+    async def _execute_live_trade_unlocked(
+        self, trade: PolymarketLiveTradeDecision, confirmation_reason: str
+    ) -> None:
         await self._refresh_doctor_unlocked()
         block_reason = self.live_guard.startup_block_reason(
             self.doctor_status,
@@ -517,7 +640,9 @@ class PolymarketPaperCopyBot:
                 trader_name=trade.trader_name,
                 trader_address=trade.trader_address,
                 trader_handle=trade.trader_handle,
-                clean_trader_identity=trade.trader_address or trade.trader_handle or trade.trader_id,
+                clean_trader_identity=trade.trader_address
+                or trade.trader_handle
+                or trade.trader_id,
                 market_id=trade.market_id,
                 market_title=trade.market_title,
                 outcome=trade.outcome,
@@ -578,7 +703,12 @@ class PolymarketPaperCopyBot:
                 len(source_trades),
                 0,
                 0,
-                {"after_filters": 0, "skipped_by_filters": 0, "skipped_by_limits": 0, "skipped_duplicates": 0},
+                {
+                    "after_filters": 0,
+                    "skipped_by_filters": 0,
+                    "skipped_by_limits": 0,
+                    "skipped_duplicates": 0,
+                },
             )
             await self.logger.info(
                 f"{label} live baseline completed. Existing {len(source_trades)} source trades marked seen; no proposals created."
@@ -599,8 +729,23 @@ class PolymarketPaperCopyBot:
         await self._try_auto_unlock_live_unlocked("doctor refresh")
 
     async def _refresh_balance_unlocked(self) -> None:
-        self.balance_state = PolymarketBalanceState(status="loading", message="Refreshing Bullpen balance...")
-        self.balance_state = self._with_next_balance_refresh(await self.balance_reader.refresh())
+        if self.config.auto_redeem_live and self._wants_live_execution():
+            try:
+                await self.live_executor.redeem(dry_run=False)
+                self._add_activity(
+                    "Auto-redeem checked and submitted any Bullpen redeemable positions."
+                )
+            except Exception as exc:
+                await self.logger.error("Auto-redeem failed", exc)
+                self._add_activity(
+                    f"Auto-redeem failed and bot kept looping: {redact_secrets(str(exc))}"
+                )
+        self.balance_state = PolymarketBalanceState(
+            status="loading", message="Refreshing Bullpen balance..."
+        )
+        self.balance_state = self._with_next_balance_refresh(
+            await self.balance_reader.refresh()
+        )
 
     async def _try_auto_unlock_live_unlocked(self, reason: str) -> None:
         if (
@@ -620,27 +765,53 @@ class PolymarketPaperCopyBot:
             self.active_provider = self.provider
             self.active_mode = "live-trading"
             self.live_source_status.source_mode = self.active_mode
-        await self.logger.warn(f"Live trading auto-unlocked after hard guards passed: {reason}.")
-        self._add_activity(f"Live trading auto-unlocked after hard guards passed: {reason}.")
+        await self.logger.warn(
+            f"Live trading auto-unlocked after hard guards passed: {reason}."
+        )
+        self._add_activity(
+            f"Live trading auto-unlocked after hard guards passed: {reason}."
+        )
 
-    def _live_decision_from_source(self, source_trade: PolymarketSourceTrade) -> PolymarketLiveTradeDecision:
+    def _live_decision_from_source(
+        self, source_trade: PolymarketSourceTrade
+    ) -> PolymarketLiveTradeDecision:
         reason = (
             "Detected live-market-read trade from trending market activity; requires manual confirmation."
             if source_trade.source == "live-market-read"
             else "Detected live-read trade from active trader; requires manual confirmation."
         )
         if source_trade.side == "BUY":
-            amount = min(1, self.config.max_live_trade_size, source_trade.size_usd)
-            return self._live_decision(source_trade, "proposed", amount, amount / source_trade.price, reason)
+            amount = min(
+                self.config.fixed_copy_trade_size,
+                self.config.max_live_trade_size,
+                source_trade.size_usd,
+            )
+            return self._live_decision(
+                source_trade, "proposed", amount, amount / source_trade.price, reason
+            )
 
         position = next(
-            (item for item in self._live_positions() if item.key == live_position_key(source_trade.market_id, source_trade.outcome)),
+            (
+                item
+                for item in self._live_positions()
+                if item.key
+                == live_position_key(source_trade.market_id, source_trade.outcome)
+            ),
             None,
         )
         implied_source_shares = source_trade.size_usd / source_trade.price
-        shares = min(position.shares if position else 0, max(0.0001, implied_source_shares * 0.05))
-        amount = min(1, self.config.max_live_trade_size, shares * source_trade.price)
-        return self._live_decision(source_trade, "proposed", amount, amount / source_trade.price, reason)
+        shares = min(
+            position.shares if position else 0,
+            max(0.0001, implied_source_shares * 0.05),
+        )
+        amount = min(
+            self.config.fixed_copy_trade_size,
+            self.config.max_live_trade_size,
+            shares * source_trade.price,
+        )
+        return self._live_decision(
+            source_trade, "proposed", amount, amount / source_trade.price, reason
+        )
 
     def _live_decision(
         self,
@@ -693,7 +864,9 @@ class PolymarketPaperCopyBot:
             balance=self.balance_state,
             source_status=self.live_source_status,
             max_live_trade_size=self.config.max_live_trade_size,
-            live_trades_today=self.live_guard.live_trades_today(self.live_trade_history),
+            live_trades_today=self.live_guard.live_trades_today(
+                self.live_trade_history
+            ),
             pending_confirmations=self._pending_live_trades(),
             recent_decisions=list(reversed(self.live_trade_history))[:50],
         )
@@ -708,37 +881,65 @@ class PolymarketPaperCopyBot:
         self.live_source_status.source_mode = self.active_mode
         self.live_source_status.last_poll_time = self.last_poll_at
         self.live_source_status.source_trades_found_last_poll = source_trade_count
-        self.live_source_status.new_live_proposals_created_last_poll = max(0, new_live_proposal_count)
-        self.live_source_status.source_trades_after_filters_last_poll = int(stats.get("after_filters", 0))
-        self.live_source_status.skipped_by_filters_last_poll = int(stats.get("skipped_by_filters", 0))
-        self.live_source_status.skipped_by_limits_last_poll = int(stats.get("skipped_by_limits", 0))
-        self.live_source_status.skipped_duplicates_last_poll = int(stats.get("skipped_duplicates", 0))
-        new_trade_label = "new live proposals" if self.active_mode == "live-trading" else "new trades"
-        activity_count = max(0, new_live_proposal_count) if self.active_mode == "live-trading" else new_trade_count
-        self._add_activity(f"Poll completed. Source trades={source_trade_count}, {new_trade_label}={activity_count}.")
+        self.live_source_status.new_live_proposals_created_last_poll = max(
+            0, new_live_proposal_count
+        )
+        self.live_source_status.source_trades_after_filters_last_poll = int(
+            stats.get("after_filters", 0)
+        )
+        self.live_source_status.skipped_by_filters_last_poll = int(
+            stats.get("skipped_by_filters", 0)
+        )
+        self.live_source_status.skipped_by_limits_last_poll = int(
+            stats.get("skipped_by_limits", 0)
+        )
+        self.live_source_status.skipped_duplicates_last_poll = int(
+            stats.get("skipped_duplicates", 0)
+        )
+        new_trade_label = (
+            "new live proposals" if self.active_mode == "live-trading" else "new trades"
+        )
+        activity_count = (
+            max(0, new_live_proposal_count)
+            if self.active_mode == "live-trading"
+            else new_trade_count
+        )
+        self._add_activity(
+            f"Poll completed. Source trades={source_trade_count}, {new_trade_label}={activity_count}."
+        )
         self._schedule_next_poll_unlocked()
 
     def _pending_live_trades(self) -> list[PolymarketLiveTradeDecision]:
         return [
             trade
             for trade in self.live_trade_history
-            if trade.status == "proposed" and trade.source in ("live-read", "live-market-read")
+            if trade.status == "proposed"
+            and trade.source in ("live-read", "live-market-read")
         ]
 
     def _is_source_trade_seen(self, source_trade: PolymarketSourceTrade) -> bool:
-        return source_trade.id in self.seen_source_trades or source_trade.source_trade_key in self.seen_source_trades
+        return (
+            source_trade.id in self.seen_source_trades
+            or source_trade.source_trade_key in self.seen_source_trades
+        )
 
     def _mark_source_trade_seen(self, source_trade: PolymarketSourceTrade) -> None:
         self.seen_source_trades.add(source_trade.id)
         self.seen_source_trades.add(source_trade.source_trade_key)
 
-    def _duplicate_live_source_reason(self, source_trade: PolymarketSourceTrade) -> str | None:
+    def _duplicate_live_source_reason(
+        self, source_trade: PolymarketSourceTrade
+    ) -> str | None:
         if any(
-            trade.source_trade_id == source_trade.id or trade.source_trade_key == source_trade.source_trade_key
+            trade.source_trade_id == source_trade.id
+            or trade.source_trade_key == source_trade.source_trade_key
             for trade in self.live_trade_history
         ):
             return "Duplicate live source trade ignored"
-        if any(trade.source_trade_key == source_trade.source_trade_key for trade in self._pending_live_trades()):
+        if any(
+            trade.source_trade_key == source_trade.source_trade_key
+            for trade in self._pending_live_trades()
+        ):
             return "Duplicate pending confirmation ignored"
         return None
 
@@ -750,7 +951,10 @@ class PolymarketPaperCopyBot:
         import re
 
         trader_key = identity_key(
-            source_trade.clean_trader_identity or source_trade.trader_address or source_trade.trader_handle or source_trade.trader_id
+            source_trade.clean_trader_identity
+            or source_trade.trader_address
+            or source_trade.trader_handle
+            or source_trade.trader_id
         )
         title = source_trade.market_title or source_trade.market_id
         handle = source_trade.trader_handle or source_trade.trader_name or ""
@@ -769,59 +973,100 @@ class PolymarketPaperCopyBot:
             return {"kind": "filter", "reason": "Manual tracked wallet required"}
         if regex_matches(self.config.exclude_market_title_regex, title):
             return {"kind": "filter", "reason": "Market excluded by title filter."}
-        if self.config.allow_market_title_regex and not regex_matches(self.config.allow_market_title_regex, title):
+        if self.config.allow_market_title_regex and not regex_matches(
+            self.config.allow_market_title_regex, title
+        ):
             return {"kind": "filter", "reason": "Market excluded by title filter."}
         if regex_matches(self.config.exclude_trader_handle_regex, handle):
             return {"kind": "filter", "reason": "Trader handle excluded by filter."}
-        if self.config.allow_trader_handle_regex and not regex_matches(self.config.allow_trader_handle_regex, handle):
+        if self.config.allow_trader_handle_regex and not regex_matches(
+            self.config.allow_trader_handle_regex, handle
+        ):
             return {"kind": "filter", "reason": "Trader handle excluded by filter."}
         if source_trade.size_usd < self.config.min_source_trade_size_usd:
             return {"kind": "filter", "reason": "Source trade size below minimum"}
-        if source_trade.price < self.config.min_copy_price or source_trade.price > self.config.max_copy_price:
+        if (
+            source_trade.price < self.config.min_copy_price
+            or source_trade.price > self.config.max_copy_price
+        ):
             return {"kind": "filter", "reason": "Price outside allowed range"}
         if len(self._pending_live_trades()) >= self.config.max_pending_confirmations:
             return {"kind": "limit", "reason": "Max pending confirmations reached"}
-        if int(proposal_stats["created"]) >= self.config.max_new_live_proposals_per_poll:
+        if (
+            int(proposal_stats["created"])
+            >= self.config.max_new_live_proposals_per_poll
+        ):
             return {"kind": "limit", "reason": "Max proposals per poll reached"}
-        if proposal_stats["per_trader_created"][trader_key] >= self.config.max_new_live_proposals_per_trader_per_poll:
+        if (
+            proposal_stats["per_trader_created"][trader_key]
+            >= self.config.max_new_live_proposals_per_trader_per_poll
+        ):
             return {"kind": "limit", "reason": "Max proposals per trader reached"}
         if (
             len(
                 [
                     trade
                     for trade in self._pending_live_trades()
-                    if identity_key(trade.trader_address or trade.trader_handle or trade.trader_id) == trader_key
+                    if identity_key(
+                        trade.trader_address or trade.trader_handle or trade.trader_id
+                    )
+                    == trader_key
                 ]
             )
             >= self.config.max_pending_per_trader
         ):
             return {"kind": "limit", "reason": "Max pending confirmations reached"}
         last_proposal_at = self.proposal_cooldown_by_trader.get(trader_key, 0)
-        if datetime.now(timezone.utc).timestamp() - last_proposal_at < self.config.proposal_cooldown_seconds_per_trader:
+        if (
+            datetime.now(timezone.utc).timestamp() - last_proposal_at
+            < self.config.proposal_cooldown_seconds_per_trader
+        ):
             return {"kind": "limit", "reason": "Trader cooldown active"}
         return None
 
     def _apply_provider_discovery_status_unlocked(self) -> None:
         provider = self.active_provider
-        status = provider.get_discovery_status() if hasattr(provider, "get_discovery_status") else None
+        status = (
+            provider.get_discovery_status()
+            if hasattr(provider, "get_discovery_status")
+            else None
+        )
         if not status:
             return
         self.live_source_status.discovery_mode = status.discovery_mode
         self.live_source_status.active_traders_found = status.active_traders_found
-        self.live_source_status.candidate_rows_considered = status.candidate_rows_considered
-        self.live_source_status.candidate_wallets_extracted = status.candidate_wallets_extracted
-        self.live_source_status.fallback_traders_selected = status.fallback_traders_selected
+        self.live_source_status.candidate_rows_considered = (
+            status.candidate_rows_considered
+        )
+        self.live_source_status.candidate_wallets_extracted = (
+            status.candidate_wallets_extracted
+        )
+        self.live_source_status.fallback_traders_selected = (
+            status.fallback_traders_selected
+        )
         self.live_source_status.activity_source_used = status.activity_source_used
-        self.live_source_status.rows_rejected_last_discovery = status.rows_rejected_last_discovery
-        self.live_source_status.accepted_activity_trades_last_discovery = status.accepted_activity_trades_last_discovery
-        self.live_source_status.manual_wallets_configured = status.manual_wallets_configured
+        self.live_source_status.rows_rejected_last_discovery = (
+            status.rows_rejected_last_discovery
+        )
+        self.live_source_status.accepted_activity_trades_last_discovery = (
+            status.accepted_activity_trades_last_discovery
+        )
+        self.live_source_status.manual_wallets_configured = (
+            status.manual_wallets_configured
+        )
         self.live_source_status.manual_wallets_valid = status.manual_wallets_valid
         self.live_source_status.manual_wallets_invalid = status.manual_wallets_invalid
         self.live_source_status.manual_tracked_wallets = status.manual_tracked_wallets
-        self.live_source_status.last_active_trader_discovery_time = status.last_active_trader_discovery_time
+        self.live_source_status.last_active_trader_discovery_time = (
+            status.last_active_trader_discovery_time
+        )
         self.live_source_status.last_discovery_error = status.last_discovery_error
-        self.live_source_status.trending_market_activity_enabled = status.trending_market_activity_enabled
-        self.live_source_status.trending_market_activity_unavailable = status.trending_market_activity_unavailable
+        self.live_source_status.trending_market_activity_enabled = (
+            status.trending_market_activity_enabled
+        )
+        self.live_source_status.trending_market_activity_unavailable = (
+            status.trending_market_activity_unavailable
+        )
 
     def _paper_trade(
         self,
@@ -857,7 +1102,9 @@ class PolymarketPaperCopyBot:
             f"{trade.status.upper()} {trade.side} {trade.market_id} {trade.outcome} copiedUsd={trade.copied_usd:.2f} reason={trade.reason or 'ok'}"
         )
 
-    async def _record_live_trade_unlocked(self, trade: PolymarketLiveTradeDecision) -> None:
+    async def _record_live_trade_unlocked(
+        self, trade: PolymarketLiveTradeDecision
+    ) -> None:
         self.live_trade_history.append(trade)
         await self._save_live_trades_unlocked()
         await self.logger.info(
@@ -868,13 +1115,19 @@ class PolymarketPaperCopyBot:
         await self.live_store.save(self.live_trade_history)
 
     def _find_pending_live_trade(self, trade_id: str) -> PolymarketLiveTradeDecision:
-        trade = next((item for item in self.live_trade_history if item.id == trade_id), None)
+        trade = next(
+            (item for item in self.live_trade_history if item.id == trade_id), None
+        )
         if not trade:
             raise RuntimeError("Live trade not found.")
         if trade.status != "proposed":
-            raise RuntimeError(f"Live trade is not pending confirmation: {trade.status}.")
+            raise RuntimeError(
+                f"Live trade is not pending confirmation: {trade.status}."
+            )
         if trade.source not in ("live-read", "live-market-read"):
-            raise RuntimeError("Live trade confirmation is allowed only for live-read or live-market-read source trades.")
+            raise RuntimeError(
+                "Live trade confirmation is allowed only for live-read or live-market-read source trades."
+            )
         return trade
 
     def _risk_block_reason(self, source_trade: PolymarketSourceTrade) -> str | None:
@@ -883,9 +1136,18 @@ class PolymarketPaperCopyBot:
         if self._metrics().total_pnl <= -self.config.max_daily_loss:
             return "Max daily loss reached."
         if source_trade.side == "BUY":
-            position = next((item for item in self._positions() if item.key == f"{source_trade.market_id}::{source_trade.outcome}"), None)
+            position = next(
+                (
+                    item
+                    for item in self._positions()
+                    if item.key == f"{source_trade.market_id}::{source_trade.outcome}"
+                ),
+                None,
+            )
             current_exposure = position.cost_basis if position else 0
-            next_exposure = current_exposure + min(5, self.config.max_trade_size)
+            next_exposure = current_exposure + min(
+                self.config.fixed_copy_trade_size, self.config.max_trade_size
+            )
             if next_exposure > self.config.max_exposure_per_market:
                 return "Max exposure per market reached."
         return None
@@ -893,7 +1155,11 @@ class PolymarketPaperCopyBot:
     def _trades_today_count(self) -> int:
         today = utc_now()[:10]
         return len(
-            [trade for trade in self.trade_history if trade.timestamp.startswith(today) and trade.status == "executed"]
+            [
+                trade
+                for trade in self.trade_history
+                if trade.timestamp.startswith(today) and trade.status == "executed"
+            ]
         )
 
     def _positions(self) -> list[PolymarketPosition]:
@@ -917,11 +1183,15 @@ class PolymarketPaperCopyBot:
             if trade.side == "BUY":
                 existing.cost_basis += trade.copied_usd
                 existing.shares += trade.shares
-                existing.average_price = existing.cost_basis / existing.shares if existing.shares > 0 else 0
+                existing.average_price = (
+                    existing.cost_basis / existing.shares if existing.shares > 0 else 0
+                )
             else:
                 sold_shares = abs(trade.shares)
                 existing.shares -= sold_shares
-                existing.cost_basis = max(0.0, existing.cost_basis - sold_shares * existing.average_price)
+                existing.cost_basis = max(
+                    0.0, existing.cost_basis - sold_shares * existing.average_price
+                )
             if existing.shares > 0.000001:
                 positions[key] = existing
             elif key in positions:
@@ -949,10 +1219,14 @@ class PolymarketPaperCopyBot:
             if trade.side == "BUY":
                 existing.cost_basis += trade.amount
                 existing.shares += trade.shares
-                existing.average_price = existing.cost_basis / existing.shares if existing.shares > 0 else 0
+                existing.average_price = (
+                    existing.cost_basis / existing.shares if existing.shares > 0 else 0
+                )
             else:
                 existing.shares -= trade.shares
-                existing.cost_basis = max(0.0, existing.cost_basis - trade.shares * existing.average_price)
+                existing.cost_basis = max(
+                    0.0, existing.cost_basis - trade.shares * existing.average_price
+                )
             if existing.shares > 0.000001:
                 positions[key] = existing
             elif key in positions:
@@ -970,21 +1244,33 @@ class PolymarketPaperCopyBot:
             total_trades=len(executed),
             winners=winners,
             losers=losers,
-            skipped=len([trade for trade in self.trade_history if trade.status == "skipped"]),
-            failed=len([trade for trade in self.trade_history if trade.status == "failed"]),
+            skipped=len(
+                [trade for trade in self.trade_history if trade.status == "skipped"]
+            ),
+            failed=len(
+                [trade for trade in self.trade_history if trade.status == "failed"]
+            ),
         )
 
-    def _with_next_balance_refresh(self, state: PolymarketBalanceState) -> PolymarketBalanceState:
+    def _with_next_balance_refresh(
+        self, state: PolymarketBalanceState
+    ) -> PolymarketBalanceState:
         next_refresh = datetime.now(timezone.utc).timestamp() + 5 * 60
-        state.next_refresh_at = datetime.fromtimestamp(next_refresh, tz=timezone.utc).isoformat()
+        state.next_refresh_at = datetime.fromtimestamp(
+            next_refresh, tz=timezone.utc
+        ).isoformat()
         return state
 
     def _schedule_next_poll_unlocked(self) -> None:
         if not self.running:
             self.next_poll_at = None
             return
-        next_poll = datetime.now(timezone.utc).timestamp() + max(self.config.poll_interval_ms / 1000, 1)
-        self.next_poll_at = datetime.fromtimestamp(next_poll, tz=timezone.utc).isoformat()
+        next_poll = datetime.now(timezone.utc).timestamp() + max(
+            self.config.poll_interval_ms / 1000, 1
+        )
+        self.next_poll_at = datetime.fromtimestamp(
+            next_poll, tz=timezone.utc
+        ).isoformat()
 
     def _seconds_until_next_poll(self, now_iso: str) -> int:
         if not self.running or not self.next_poll_at:
@@ -994,7 +1280,9 @@ class PolymarketPaperCopyBot:
         return max(0, int((next_dt - now_dt).total_seconds() + 0.999))
 
     def _add_activity(self, message: str) -> None:
-        self.recent_activity.insert(0, PolymarketActivity(timestamp=utc_now(), message=message))
+        self.recent_activity.insert(
+            0, PolymarketActivity(timestamp=utc_now(), message=message)
+        )
         self.recent_activity = self.recent_activity[:20]
 
     def _wants_live_execution(self) -> bool:
