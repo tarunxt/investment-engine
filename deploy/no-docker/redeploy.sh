@@ -133,6 +133,7 @@ install_bullpen_cli_if_needed() {
   if [[ -x "$bullpen_bin" ]]; then
     echo "==> Bullpen CLI already installed at $bullpen_bin"
     "$bullpen_bin" --version
+    ensure_bullpen_runtime_links "$bullpen_bin"
     return
   fi
 
@@ -148,11 +149,49 @@ install_bullpen_cli_if_needed() {
   rm -f "$installer"
 
   if [[ ! -x "$bullpen_bin" ]]; then
+    local discovered_bin=""
+    local candidate
+    for candidate in \
+      "/home/$APP_USER/.bullpen/bin/bullpen" \
+      "$APP_ROOT/backend/.runtime-tools/bullpen" \
+      "$APP_ROOT/backend/runtime-tools/bullpen" \
+      "/root/.bullpen/bin/bullpen"; do
+      if [[ -x "$candidate" ]]; then
+        discovered_bin="$candidate"
+        break
+      fi
+    done
+
+    if [[ -n "$discovered_bin" ]]; then
+      echo "==> Bullpen installer wrote $discovered_bin; linking expected path $bullpen_bin"
+      sudo ln -sfn "$discovered_bin" "$bullpen_bin"
+    fi
+  fi
+
+  if [[ ! -x "$bullpen_bin" ]]; then
     echo "Bullpen install completed but executable is still missing or not executable: $bullpen_bin" >&2
     exit 1
   fi
 
   "$bullpen_bin" --version
+  ensure_bullpen_runtime_links "$bullpen_bin"
+}
+
+ensure_bullpen_runtime_links() {
+  local bullpen_bin="$1"
+  local backend_root="$APP_ROOT/backend"
+  local link_dir
+
+  for link_dir in "$backend_root/.runtime-tools" "$backend_root/runtime-tools"; do
+    sudo mkdir -p "$link_dir"
+    sudo ln -sfn "$bullpen_bin" "$link_dir/bullpen"
+    sudo chown -h "$APP_USER:$APP_USER" "$link_dir/bullpen" || true
+  done
+
+  if [[ "$bullpen_bin" != "/usr/local/bin/bullpen" ]]; then
+    sudo mkdir -p /usr/local/bin
+    sudo ln -sfn "$bullpen_bin" /usr/local/bin/bullpen
+  fi
 }
 
 echo "==> Deploy scope: $SCOPE"
