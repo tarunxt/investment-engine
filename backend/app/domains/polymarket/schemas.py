@@ -4,11 +4,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 BotMode = Literal["mock", "live-read", "live-trading"]
 TradeSide = Literal["BUY", "SELL"]
 TradeSource = Literal["mock", "live-read", "live-market-read"]
-LiveTradeStatus = Literal["proposed", "confirmed", "rejected", "executed", "failed", "skipped"]
+LiveTradeStatus = Literal[
+    "proposed", "confirmed", "rejected", "executed", "failed", "skipped"
+]
 LiveUnlockMode = Literal["locked", "automatic", "manual"]
 BalanceStatus = Literal["idle", "loading", "ready", "unavailable", "error"]
 ActivitySource = Literal["wallet", "handle", "feed", "fallback"]
@@ -23,6 +24,7 @@ class PolymarketBotConfig(BaseModel):
     require_manual_confirmation: bool
     poll_interval_ms: int
     max_trade_size: float
+    fixed_copy_trade_size: float
     max_trades_per_day: int
     max_exposure_per_market: float
     max_daily_loss: float
@@ -30,6 +32,7 @@ class PolymarketBotConfig(BaseModel):
     max_live_trades_per_day: int
     max_live_daily_loss: float
     max_live_exposure_per_market: float
+    auto_redeem_live: bool
     jurisdiction_confirmation: bool
     manual_tracked_wallets: str
     use_trending_market_activity: bool
@@ -218,7 +221,9 @@ class PolymarketLiveControlState(BaseModel):
     source_status: PolymarketLiveSourceStatus
     max_live_trade_size: float
     live_trades_today: int
-    pending_confirmations: list[PolymarketLiveTradeDecision] = Field(default_factory=list)
+    pending_confirmations: list[PolymarketLiveTradeDecision] = Field(
+        default_factory=list
+    )
     recent_decisions: list[PolymarketLiveTradeDecision] = Field(default_factory=list)
 
 
@@ -287,7 +292,9 @@ class PolymarketDiscoveryDebugError(BaseModel):
 
 class PolymarketDiscoveryDebugReport(BaseModel):
     target: str
-    commands_attempted: list[PolymarketDiscoveryDebugCommand] = Field(default_factory=list)
+    commands_attempted: list[PolymarketDiscoveryDebugCommand] = Field(
+        default_factory=list
+    )
     rows_returned_count: int = 0
     accepted_trades_count: int = 0
     rejected_rows_count: int = 0

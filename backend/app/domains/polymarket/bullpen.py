@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shutil
+from collections.abc import Iterable
 
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.schemas import (
@@ -29,9 +30,9 @@ def bullpen_executable() -> str:
     if installed:
         return installed
 
-    mounted_fallback = "/backend/.runtime-tools/bullpen"
-    if os.path.isfile(mounted_fallback) and os.access(mounted_fallback, os.X_OK):
-        return mounted_fallback
+    for fallback in ("/usr/local/bin/bullpen", "/backend/.runtime-tools/bullpen"):
+        if os.path.isfile(fallback) and os.access(fallback, os.X_OK):
+            return fallback
 
     return "bullpen"
 
@@ -62,16 +63,24 @@ async def run_bullpen(
         ) from exc
 
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=timeout_seconds
+        )
     except asyncio.TimeoutError as exc:
         process.kill()
         await process.communicate()
-        raise BullpenCommandError(f"Command timed out after {timeout_seconds}s") from exc
+        raise BullpenCommandError(
+            f"Command timed out after {timeout_seconds}s"
+        ) from exc
 
     stdout_text = stdout.decode("utf-8", errors="replace").strip()
     stderr_text = stderr.decode("utf-8", errors="replace").strip()
     if process.returncode != 0:
-        message = stderr_text or stdout_text or f"Command exited with code {process.returncode}"
+        message = (
+            stderr_text
+            or stdout_text
+            or f"Command exited with code {process.returncode}"
+        )
         raise BullpenCommandError(redact_secrets(message))
     return stdout_text
 
@@ -81,22 +90,61 @@ async def run_bullpen_json(args: list[str], *, timeout_seconds: int = 20) -> obj
     return json.loads(stdout)
 
 
+async def run_first_bullpen_json(
+    command_variants: Iterable[list[str]], *, timeout_seconds: int = 20
+) -> object:
+    errors: list[str] = []
+    for args in command_variants:
+        try:
+            return await run_bullpen_json(args, timeout_seconds=timeout_seconds)
+        except Exception as exc:
+            errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
+    raise BullpenCommandError(
+        "All Bullpen command variants failed: " + " | ".join(errors)
+    )
+
+
 class BullpenLiveExecutor:
     async def doctor(self) -> PolymarketDoctorStatus:
         checked_at = utc_now()
-        try:
-            await run_bullpen(["polymarket", "doctor"], timeout_seconds=30, read_only=False)
+        checks = [
+            (["status", "--output", "json"], True, "status"),
+            (["polymarket", "doctor", "--output", "json"], True, "doctor"),
+            (["polymarket", "preflight", "--output", "json"], False, "preflight"),
+            (
+                ["polymarket", "approve", "--check", "--output", "json"],
+                False,
+                "approvals",
+            ),
+        ]
+        failures: list[str] = []
+        passed: list[str] = []
+        for args, read_only, label in checks:
+            try:
+                await run_bullpen(args, timeout_seconds=45, read_only=read_only)
+                passed.append(label)
+            except Exception as exc:
+                failures.append(f"{label}: {redact_secrets(str(exc))}")
+        if not failures:
             return PolymarketDoctorStatus(
                 checked_at=checked_at,
                 ok=True,
-                message="Bullpen doctor passed, including approvals.",
+                message="Bullpen status, preflight, and approval checks passed.",
             )
-        except Exception as exc:
-            return PolymarketDoctorStatus(
-                checked_at=checked_at,
-                ok=False,
-                message=f"Bullpen doctor failed: {redact_secrets(str(exc))}",
-            )
+        return PolymarketDoctorStatus(
+            checked_at=checked_at,
+            ok=False,
+            message=f"Bullpen doctor failed after {', '.join(passed) or 'no'} passed checks: {'; '.join(failures)}",
+        )
+
+    async def redeem(self, *, dry_run: bool) -> str:
+        args = ["polymarket", "redeem"]
+        if dry_run:
+            args.extend(["--dry-run", "--output", "json"])
+        else:
+            args.extend(["--yes", "--non-interactive", "--output", "json"])
+        stdout = await run_bullpen(args, timeout_seconds=60, read_only=dry_run)
+        return redact_secrets(stdout)
 
     async def execute(self, decision: PolymarketLiveTradeDecision) -> str:
         if decision.side == "BUY":
@@ -135,8 +183,36 @@ class BullpenBalanceReader:
     async def refresh(self) -> PolymarketBalanceState:
         checked_at = utc_now()
         try:
-            parsed = await run_bullpen_json(
-                ["funds", "balances", "--read-only", "--non-interactive", "--output", "json"],
+            parsed = await run_first_bullpen_json(
+                [
+                    [
+                        "polymarket",
+                        "clob",
+                        "balance",
+                        "--asset-type",
+                        "collateral",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                    [
+                        "portfolio",
+                        "balances",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                    [
+                        "funds",
+                        "balances",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                ],
                 timeout_seconds=30,
             )
             return PolymarketBalanceState(
@@ -180,8 +256,6 @@ class LiveTradeGuard:
         return None
 
     def hard_block_reason(self, doctor: PolymarketDoctorStatus) -> str | None:
-        if self.config.paper_trading:
-            return "PAPER_TRADING must be false."
         if not self.config.live_trading:
             return "LIVE_TRADING must be true."
         if not self.config.use_live_reads:
@@ -195,8 +269,8 @@ class LiveTradeGuard:
     def risk_settings_block_reason(self) -> str | None:
         if self.config.max_live_trade_size <= 0:
             return "MAX_LIVE_TRADE_SIZE must be greater than 0."
-        if self.config.max_live_trade_size > 1:
-            return "MAX_LIVE_TRADE_SIZE must start at 1 or less."
+        if self.config.max_live_trade_size > self.config.fixed_copy_trade_size:
+            return "MAX_LIVE_TRADE_SIZE cannot exceed FIXED_COPY_TRADE_SIZE."
         if self.config.max_live_trades_per_day <= 0:
             return "MAX_LIVE_TRADES_PER_DAY must be greater than 0."
         if self.config.max_live_daily_loss <= 0:
@@ -219,7 +293,12 @@ class LiveTradeGuard:
             return "Max live daily loss reached."
 
         position = next(
-            (item for item in positions if item.key == live_position_key(source_trade.market_id, source_trade.outcome)),
+            (
+                item
+                for item in positions
+                if item.key
+                == live_position_key(source_trade.market_id, source_trade.outcome)
+            ),
             None,
         )
         if source_trade.side == "SELL" and (not position or position.shares <= 0):
@@ -227,7 +306,11 @@ class LiveTradeGuard:
 
         if source_trade.side == "BUY":
             current_exposure = position.cost_basis if position else 0
-            next_exposure = current_exposure + min(self.config.max_live_trade_size, source_trade.size_usd)
+            next_exposure = current_exposure + min(
+                self.config.fixed_copy_trade_size,
+                self.config.max_live_trade_size,
+                source_trade.size_usd,
+            )
             if next_exposure > self.config.max_live_exposure_per_market:
                 return "Max live exposure per market reached."
         return None
@@ -237,10 +320,14 @@ class LiveTradeGuard:
         return sum(
             1
             for trade in live_trades
-            if trade.executed_at and trade.executed_at.startswith(today) and trade.status == "executed"
+            if trade.executed_at
+            and trade.executed_at.startswith(today)
+            and trade.status == "executed"
         )
 
-    def realized_live_pnl(self, live_trades: list[PolymarketLiveTradeDecision]) -> float:
+    def realized_live_pnl(
+        self, live_trades: list[PolymarketLiveTradeDecision]
+    ) -> float:
         return sum(
             max(-trade.max_loss, 0)
             for trade in live_trades
@@ -275,7 +362,10 @@ def _format_balance_message(parsed: object) -> str:
             item
             for item in candidates
             if "polymarket" in item["context"].lower()
-            and any(label in item["label"].lower() for label in ("available", "cash", "pusd", "usdc"))
+            and any(
+                label in item["label"].lower()
+                for label in ("available", "cash", "pusd", "usdc")
+            )
         ),
         None,
     )
@@ -283,7 +373,10 @@ def _format_balance_message(parsed: object) -> str:
         (
             item
             for item in candidates
-            if any(label in item["label"].lower() for label in ("available", "cash", "pusd", "usdc"))
+            if any(
+                label in item["label"].lower()
+                for label in ("available", "cash", "pusd", "usdc")
+            )
         ),
         None,
     ) or (candidates[0] if candidates else None)
@@ -297,11 +390,15 @@ def _format_balance_message(parsed: object) -> str:
     return f"{prefix} available balance: {_format_amount(balance['amount'])}{currency}"
 
 
-def _collect_balance_candidates(value: object, context: str = "", label: str = "") -> list[dict[str, object]]:
+def _collect_balance_candidates(
+    value: object, context: str = "", label: str = ""
+) -> list[dict[str, object]]:
     if isinstance(value, list):
         rows: list[dict[str, object]] = []
         for index, item in enumerate(value, start=1):
-            rows.extend(_collect_balance_candidates(item, context, label or f"row {index}"))
+            rows.extend(
+                _collect_balance_candidates(item, context, label or f"row {index}")
+            )
         return rows
 
     if not isinstance(value, dict):
@@ -316,19 +413,34 @@ def _collect_balance_candidates(value: object, context: str = "", label: str = "
         or record.get("walletKind")
         or context
     )
-    currency = _string_value(record.get("currency") or record.get("symbol") or record.get("token") or record.get("asset"))
+    currency = _string_value(
+        record.get("currency")
+        or record.get("symbol")
+        or record.get("token")
+        or record.get("asset")
+    )
     rows: list[dict[str, object]] = []
 
     for key, raw in record.items():
         if isinstance(raw, dict) or isinstance(raw, list):
             rows.extend(_collect_balance_candidates(raw, next_context, key))
             continue
-        if not any(token in key.lower() for token in ("available", "balance", "cash", "pusd", "usdc", "collateral")):
+        if not any(
+            token in key.lower()
+            for token in ("available", "balance", "cash", "pusd", "usdc", "collateral")
+        ):
             continue
         amount = _number_value(raw)
         if amount is None:
             continue
-        rows.append({"context": next_context, "label": key or label, "amount": amount, "currency": currency})
+        rows.append(
+            {
+                "context": next_context,
+                "label": key or label,
+                "amount": amount,
+                "currency": currency,
+            }
+        )
     return rows
 
 

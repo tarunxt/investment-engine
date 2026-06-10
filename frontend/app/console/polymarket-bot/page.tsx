@@ -9,8 +9,6 @@ import { apiService, APIError } from '@/services/api';
 import type {
   PolymarketBotState,
   PolymarketDiscoveryDebugReport,
-  PolymarketPaperTrade,
-  PolymarketPosition,
 } from '@/types/api';
 
 import { MetricGrid, type MetricItem } from './_components/MetricGrid';
@@ -55,63 +53,6 @@ function formatMoney(value: number, digits = 2) {
     currency: 'USD',
     maximumFractionDigits: digits,
   }).format(value || 0);
-}
-
-function formatPercent(value: number) {
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function renderHistoryRows(rows: PolymarketPaperTrade[]) {
-  if (rows.length === 0) {
-    return (
-      <tr>
-        <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">
-          No paper trade history yet.
-        </td>
-      </tr>
-    );
-  }
-
-  return rows.slice(0, 100).map((trade) => (
-    <tr key={trade.id} className="align-top">
-      <td className="px-4 py-3 text-slate-700">{formatTs(trade.timestamp)}</td>
-      <td className="px-4 py-3 text-slate-950">{trade.trader_name}</td>
-      <td className="px-4 py-3 text-slate-700">
-        <div className="font-medium text-slate-950">{trade.market_title}</div>
-        <div className="mt-1 text-xs text-slate-500">{trade.outcome}</div>
-      </td>
-      <td className="px-4 py-3 text-slate-700">{trade.side}</td>
-      <td className="px-4 py-3 text-slate-700">{formatMoney(trade.copied_usd)}</td>
-      <td className="px-4 py-3 text-slate-700">{formatMoney(trade.price, 4)}</td>
-      <td className="px-4 py-3 text-slate-700">{formatMoney(trade.realized_pnl)}</td>
-      <td className="px-4 py-3 text-slate-700">
-        <div className="font-medium capitalize text-slate-950">{trade.status}</div>
-        {trade.reason ? <div className="mt-1 text-xs text-slate-500">{trade.reason}</div> : null}
-      </td>
-    </tr>
-  ));
-}
-
-function renderPositionRows(rows: PolymarketPosition[]) {
-  if (rows.length === 0) {
-    return (
-      <tr>
-        <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">
-          No paper positions open.
-        </td>
-      </tr>
-    );
-  }
-
-  return rows.map((position) => (
-    <tr key={position.key}>
-      <td className="px-4 py-3 text-slate-950">{position.market_title}</td>
-      <td className="px-4 py-3 text-slate-700">{position.outcome}</td>
-      <td className="px-4 py-3 text-slate-700">{position.shares.toFixed(4)}</td>
-      <td className="px-4 py-3 text-slate-700">{formatMoney(position.average_price, 4)}</td>
-      <td className="px-4 py-3 text-slate-700">{formatMoney(position.cost_basis)}</td>
-    </tr>
-  ));
 }
 
 export default function PolymarketBotPage() {
@@ -224,7 +165,7 @@ export default function PolymarketBotPage() {
     );
   }
 
-  const subtitle = `${state.running ? 'Running' : 'Stopped'} | ${state.paused ? 'Paused' : 'Active'} | ${state.mode} | live trading guarded`;
+  const subtitle = `${state.running ? 'Running' : 'Stopped'} | ${state.paused ? 'Paused' : 'Active'} | ${state.mode} | Bullpen real-money mode`;
   const visiblePending = state.live.pending_confirmations.slice(0, showAllPending ? undefined : 25);
   const confirmDisabled = !state.live.unlocked || state.live.emergency_stopped;
   const manualInvalid = state.live.source_status.manual_wallets_invalid;
@@ -232,7 +173,6 @@ export default function PolymarketBotPage() {
   const botStatusItems: MetricItem[] = [
     { label: 'Bot Status', value: state.running ? 'RUNNING' : 'STOPPED', tone: state.running ? 'positive' : 'negative' },
     { label: 'Mode', value: state.mode },
-    { label: 'Paper Trading', value: state.config.paper_trading ? 'ON' : 'OFF', tone: state.config.paper_trading ? 'warning' : 'default' },
     { label: 'Last Poll Time', value: formatTs(state.last_poll_at) },
     { label: 'Next Poll Countdown', value: `${state.seconds_until_next_poll}s` },
     { label: 'Session Runtime', value: formatRuntime(state.session_started_at) },
@@ -386,7 +326,7 @@ export default function PolymarketBotPage() {
         <CardHeader className="pb-0">
           <CardTitle className="text-base tracking-[0.18em] text-slate-950">Live Trading Control</CardTitle>
           <CardDescription>
-            Live trading remains guarded. Real Polymarket orders still require a per-trade Confirm action.
+            Real Polymarket orders are routed through Bullpen with live risk limits and emergency controls.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
@@ -468,16 +408,16 @@ export default function PolymarketBotPage() {
         <CardHeader className="pb-0">
           <CardTitle className="text-base tracking-[0.18em] text-slate-950">Pending Confirmations</CardTitle>
           <CardDescription>
-            Confirming a pending trade may place a real Polymarket order through Bullpen. Confirm is disabled
-            whenever live is locked or emergency stop is active.
+            Pending trades are real Bullpen-backed copy-trade candidates. Confirm is disabled whenever live is
+            locked or emergency stop is active.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
           <div className="flex items-start gap-3 rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             <ShieldAlert className="mt-0.5 size-4 shrink-0" />
             <span>
-              Every real order still requires an explicit per-trade Confirm. Mock or paper rows never bypass into
-              live execution.
+              This dashboard no longer runs paper-money mode. Confirmed or auto-executed orders can spend real
+              funds through Bullpen, subject to the live risk limits shown above.
             </span>
           </div>
 
@@ -560,81 +500,23 @@ export default function PolymarketBotPage() {
 
       <Card className="border border-slate-200 bg-white py-6">
         <CardHeader className="pb-0">
-          <CardTitle className="text-base tracking-[0.18em] text-slate-950">Paper History</CardTitle>
-          <CardDescription>
-            {state.mode === 'live-trading'
-              ? 'Paper history only. Mock history below is not live Polymarket activity.'
-              : 'Paper trading history and simulated positions.'}
-          </CardDescription>
+          <CardTitle className="text-base tracking-[0.18em] text-slate-950">Live Bot Activity</CardTitle>
+          <CardDescription>Recent Bullpen copy-trading events, skips, errors, and guard actions.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4 pt-4">
-          <MetricGrid
-            items={[
-              { label: 'Paper History P&L', value: formatMoney(state.metrics.total_pnl), tone: state.metrics.total_pnl >= 0 ? 'positive' : 'negative' },
-              { label: 'Win Rate', value: formatPercent(state.metrics.win_rate) },
-              { label: 'Total Trades', value: state.metrics.total_trades },
-              { label: 'Winners', value: state.metrics.winners },
-              { label: 'Losers', value: state.metrics.losers },
-              { label: 'Skipped', value: state.metrics.skipped },
-              { label: 'Failed', value: state.metrics.failed },
-              { label: 'Paper History Positions', value: state.open_positions.length },
-            ]}
-            columns="md:grid-cols-2 xl:grid-cols-4"
-          />
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
-              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Market</th>
-                    <th className="px-4 py-3">Outcome</th>
-                    <th className="px-4 py-3">Shares</th>
-                    <th className="px-4 py-3">Average Price</th>
-                    <th className="px-4 py-3">Cost Basis</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">{renderPositionRows(state.open_positions)}</tbody>
-              </table>
-            </div>
-
-            <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Recent Activity
-              </div>
-              <div className="mt-3 space-y-3">
-                {state.recent_activity.length === 0 ? (
-                  <div className="text-sm text-slate-500">No bot activity yet.</div>
-                ) : (
-                  state.recent_activity.map((entry) => (
-                    <div key={`${entry.timestamp}-${entry.message}`} className="rounded-[18px] bg-white px-3 py-3 shadow-sm ring-1 ring-slate-200">
-                      <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                        {formatTs(entry.timestamp)}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-700">{entry.message}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
-            <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-              <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Timestamp</th>
-                  <th className="px-4 py-3">Trader</th>
-                  <th className="px-4 py-3">Market</th>
-                  <th className="px-4 py-3">Side</th>
-                  <th className="px-4 py-3">Copied USD</th>
-                  <th className="px-4 py-3">Price</th>
-                  <th className="px-4 py-3">Realized P&amp;L</th>
-                  <th className="px-4 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">{renderHistoryRows(state.trade_history)}</tbody>
-            </table>
+        <CardContent className="pt-4">
+          <div className="space-y-3 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm">
+            {state.recent_activity.length === 0 ? (
+              <div className="text-sm text-slate-500">No bot activity yet.</div>
+            ) : (
+              state.recent_activity.map((entry) => (
+                <div key={`${entry.timestamp}-${entry.message}`} className="rounded-[18px] bg-white px-3 py-3 shadow-sm ring-1 ring-slate-200">
+                  <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                    {formatTs(entry.timestamp)}
+                  </div>
+                  <div className="mt-1 text-sm text-slate-700">{entry.message}</div>
+                </div>
+              ))
+            )}
           </div>
         </CardContent>
       </Card>
