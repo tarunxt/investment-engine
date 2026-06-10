@@ -418,8 +418,9 @@ class PolymarketPaperCopyBot:
         except Exception as exc:
             message = redact_secrets(str(exc))
             self.live_source_status.last_live_read_error = message
-            if self.active_mode == "live-trading":
-                self._add_activity(f"Live-read traders failed: {message}")
+            if self.active_mode == "live-trading" or self._wants_live_execution():
+                self._add_activity(f"Bullpen live-read traders failed: {message}")
+                await self.logger.warn(f"Bullpen live-read traders failed: {message}")
                 raise
             await self.logger.warn(
                 "Read provider unavailable. Falling back to mock traders."
@@ -440,8 +441,9 @@ class PolymarketPaperCopyBot:
         except Exception as exc:
             message = redact_secrets(str(exc))
             self.live_source_status.last_live_read_error = message
-            if self.active_mode == "live-trading":
-                self._add_activity(f"Live-read trades failed: {message}")
+            if self.active_mode == "live-trading" or self._wants_live_execution():
+                self._add_activity(f"Bullpen live-read trades failed: {message}")
+                await self.logger.warn(f"Bullpen live-read trades failed: {message}")
                 raise
             await self.logger.warn(
                 "Read provider trades unavailable. Falling back to mock trades."
@@ -461,6 +463,15 @@ class PolymarketPaperCopyBot:
         )
         if self.active_mode == "live-trading":
             await self._handle_live_source_trade_unlocked(source_trade, proposal_stats)
+            return
+
+        if not self.config.paper_trading:
+            self._add_activity(
+                "Sandbox trading is disabled; source trade was observed but no simulated trade was recorded."
+            )
+            await self.logger.warn(
+                f"Skipped non-live source trade while PAPER_TRADING=false: source={source_trade.source}"
+            )
             return
 
         risk_reason = self._risk_block_reason(source_trade)
