@@ -21,17 +21,65 @@ class BullpenCommandError(RuntimeError):
     pass
 
 
-def bullpen_executable() -> str:
-    candidates = [
-        os.getenv("BULLPEN_BIN"),
-        shutil.which("bullpen"),
-        os.path.join(os.getcwd(), ".runtime-tools", "bullpen"),
-        "/backend/.runtime-tools/bullpen",
-        "/usr/local/bin/bullpen",
+BULLPEN_RUNTIME_RELATIVE_PATHS = (
+    (".runtime-tools", "bullpen"),
+    ("runtime-tools", "bullpen"),
+)
+
+
+def _unique_paths(paths: Iterable[str | None]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for path in paths:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
+
+def bullpen_candidate_paths() -> list[str]:
+    runtime_roots = _unique_paths(
+        [
+            os.getcwd(),
+            os.getenv("APP_ROOT"),
+            os.getenv("BACKEND_ROOT"),
+            "/srv/investor/backend",
+            "/backend",
+        ]
+    )
+    runtime_tool_paths = [
+        os.path.join(root, *relative_path)
+        for root in runtime_roots
+        for relative_path in BULLPEN_RUNTIME_RELATIVE_PATHS
     ]
 
-    for candidate in candidates:
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+    return _unique_paths(
+        [
+            os.getenv("BULLPEN_BIN"),
+            shutil.which("bullpen"),
+            *runtime_tool_paths,
+            os.path.expanduser("~/.bullpen/bin/bullpen"),
+            "/home/appuser/.bullpen/bin/bullpen",
+            "/home/investor/.bullpen/bin/bullpen",
+            "/usr/local/bin/bullpen",
+        ]
+    )
+
+
+def _bullpen_install_hint() -> str:
+    attempted = ", ".join(bullpen_candidate_paths())
+    return (
+        "Bullpen CLI executable was not found. Install Bullpen in the backend runtime, "
+        "place it at <backend>/.runtime-tools/bullpen, <backend>/runtime-tools/bullpen, "
+        "/usr/local/bin/bullpen, ~/.bullpen/bin/bullpen, or set BULLPEN_BIN to an executable path. "
+        f"Checked: {attempted}"
+    )
+
+
+def bullpen_executable() -> str:
+    for candidate in bullpen_candidate_paths():
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
 
     return os.getenv("BULLPEN_BIN") or "bullpen"
@@ -57,9 +105,11 @@ async def run_bullpen(
             env=env,
         )
     except FileNotFoundError as exc:
+        raise BullpenCommandError(_bullpen_install_hint()) from exc
+    except PermissionError as exc:
         raise BullpenCommandError(
-            "Bullpen CLI executable was not found. Install Bullpen in the backend runtime, place it at "
-            "<backend>/.runtime-tools/bullpen, /usr/local/bin/bullpen, or set BULLPEN_BIN to an executable path."
+            f"Bullpen CLI executable is not runnable: {redact_secrets(str(exc))}. "
+            "Verify BULLPEN_BIN points to an executable file owned/readable by the backend service user."
         ) from exc
 
     try:
