@@ -74,12 +74,25 @@ type ActionablesInputCandidate = {
   error: string | null;
   runId: number;
   jobId: number;
+  market: SwingTradeMarket;
 };
 
 type ConsensusBreakupEntry = {
   meta: LlmMeta;
   row: LlmBreakupRow | null;
 };
+
+function getInputMarketLabel(market?: SwingTradeMarket) {
+  if (market === "india") return "India";
+  if (market === "us") return "US";
+  return "Market unknown";
+}
+
+function getInputMarketBadgeClass(market?: SwingTradeMarket) {
+  if (market === "india") return "border-orange-200 bg-orange-50 text-orange-800";
+  if (market === "us") return "border-indigo-200 bg-indigo-50 text-indigo-800";
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
 
 export type ActionEstimate = {
   currentUnits: number | null;
@@ -2182,6 +2195,7 @@ function buildActionablesInputCandidates(runs: RunResponse[], market: SwingTrade
           error: job.error_message ?? null,
           runId: run.id,
           jobId: link.job_id,
+          market,
         }];
       }),
     );
@@ -4405,6 +4419,7 @@ function ActionablesInputSelectionDialog({
         runId: number;
         title: string;
         timestamp: string | null;
+        market: SwingTradeMarket;
         candidates: ActionablesInputCandidate[];
       }
     >();
@@ -4428,6 +4443,7 @@ function ActionablesInputSelectionDialog({
         runId: candidate.runId,
         title: `Run #${candidate.runId}`,
         timestamp: candidate.timestamp,
+        market: candidate.market,
         candidates: [candidate],
       });
     });
@@ -4542,6 +4558,15 @@ function ActionablesInputSelectionDialog({
                         {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
                         {group.title}
                       </button>
+                      <span
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-xs font-extrabold uppercase tracking-[0.14em]",
+                          getInputMarketBadgeClass(group.market),
+                        )}
+                        title={`Scan market: ${getInputMarketLabel(group.market)}`}
+                      >
+                        {getInputMarketLabel(group.market)}
+                      </span>
                       <RunJobLink runId={group.runId}>{stageSummary}</RunJobLink>
                       <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800">
                         {groupSelectedCount}/{group.candidates.length} LLM job{group.candidates.length === 1 ? "" : "s"} selected
@@ -4561,6 +4586,7 @@ function ActionablesInputSelectionDialog({
                               <th className="px-3 py-2">Job</th>
                               <th className="px-3 py-2">Timestamp</th>
                               <th className="px-3 py-2">Status</th>
+                              <th className="px-3 py-2">Market</th>
                               <th className="px-3 py-2">LLM / Source</th>
                               <th className="px-3 py-2">Cost (INR)</th>
                               <th className="px-3 py-2">Error</th>
@@ -4583,6 +4609,11 @@ function ActionablesInputSelectionDialog({
                                 <td className="px-3 py-3 align-top text-slate-600">{candidate.timestamp ? formatDateTime(candidate.timestamp) : "—"}</td>
                                 <td className="px-3 py-3 align-top">
                                   <span className={cn("rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1", getInputStatusBadgeClass(candidate.status))}>{candidate.status}</span>
+                                </td>
+                                <td className="px-3 py-3 align-top">
+                                  <span className={cn("rounded-full border px-2 py-1 text-xs font-bold", getInputMarketBadgeClass(candidate.market))}>
+                                    {getInputMarketLabel(candidate.market)}
+                                  </span>
                                 </td>
                                 <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
                                 <td className="px-3 py-3 align-top text-slate-600">

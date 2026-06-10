@@ -95,6 +95,7 @@ type InputSelectionCandidate = {
   run?: RunResponse;
   jobId?: number;
   content?: string | null;
+  market?: SwingTradeMarket;
 };
 type RunOutputJobStatus = "completed" | "partial" | "failed" | "other";
 
@@ -1253,6 +1254,7 @@ function buildRunJobCandidate(
   run: RunResponse,
   jobId: number | undefined,
   stageLabel: string,
+  market: SwingTradeMarket,
 ): InputSelectionCandidate | null {
   const link = run.run_jobs?.find((item) => item.job?.id === jobId);
   const job = link?.job;
@@ -1271,20 +1273,22 @@ function buildRunJobCandidate(
     run,
     jobId: job.id,
     content: job.response,
+    market,
   };
 }
 
-function buildRunJobCandidates(runs: RunResponse[], stageLabel: string) {
+function buildRunJobCandidates(runs: RunResponse[], stageLabel: string, market: SwingTradeMarket) {
   return runs.flatMap(
     (run) =>
       (run.run_jobs ?? [])
-        .map((link) => buildRunJobCandidate(run, link.job?.id, stageLabel))
+        .map((link) => buildRunJobCandidate(run, link.job?.id, stageLabel, market))
         .filter(Boolean) as InputSelectionCandidate[],
   );
 }
 
 function buildNextCandidate(
   stage: InputSelectionStage,
+  market: SwingTradeMarket,
 ): InputSelectionCandidate {
   const labelByStage: Record<InputSelectionStage, string> = {
     threats: "Upcoming portfolio snapshot",
@@ -1302,7 +1306,20 @@ function buildNextCandidate(
     status: "reserved",
     costUsd: null,
     error: null,
+    market,
   };
+}
+
+function getInputMarketLabel(market?: SwingTradeMarket) {
+  if (market === "india") return "India";
+  if (market === "us") return "US";
+  return "Market unknown";
+}
+
+function getInputMarketBadgeClass(market?: SwingTradeMarket) {
+  if (market === "india") return "border-orange-200 bg-orange-50 text-orange-800";
+  if (market === "us") return "border-indigo-200 bg-indigo-50 text-indigo-800";
+  return "border-slate-200 bg-slate-50 text-slate-600";
 }
 
 function getStagePromptPreview(portfolio: WorkflowPortfolio, stage: PromptPreviewStage) {
@@ -3001,6 +3018,7 @@ function InputSelectionDialog({
         runId: number | null;
         title: string;
         timestamp: string | null;
+        market?: SwingTradeMarket;
         candidates: InputSelectionCandidate[];
       }
     >();
@@ -3010,6 +3028,7 @@ function InputSelectionDialog({
       const existing = groups.get(key);
       if (existing) {
         existing.candidates.push(candidate);
+        existing.market = existing.market ?? candidate.market;
         if (
           candidate.timestamp &&
           (!existing.timestamp || parseTimestampMs(candidate.timestamp) > parseTimestampMs(existing.timestamp))
@@ -3024,6 +3043,7 @@ function InputSelectionDialog({
         runId: candidate.run?.id ?? null,
         title: candidate.run ? `Run #${candidate.run.id}` : candidate.jobNo,
         timestamp: candidate.timestamp,
+        market: candidate.market,
         candidates: [candidate],
       });
     });
@@ -3180,6 +3200,15 @@ function InputSelectionDialog({
                       ) : (
                         <span className="font-extrabold text-slate-950">{group.title}</span>
                       )}
+                      <span
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-xs font-extrabold uppercase tracking-[0.14em]",
+                          getInputMarketBadgeClass(group.market),
+                        )}
+                        title={`Scan market: ${getInputMarketLabel(group.market)}`}
+                      >
+                        {getInputMarketLabel(group.market)}
+                      </span>
                       <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800">
                         {groupSelectedCount}/{group.candidates.length} LLM job{group.candidates.length === 1 ? "" : "s"} selected
                       </span>
@@ -3200,6 +3229,7 @@ function InputSelectionDialog({
                               <th className="px-3 py-2">Job</th>
                               <th className="px-3 py-2">Timestamp</th>
                               <th className="px-3 py-2">Status</th>
+                              <th className="px-3 py-2">Market</th>
                               <th className="px-3 py-2">LLM / Source</th>
                               <th className="px-3 py-2">Cost (INR)</th>
                               <th className="px-3 py-2">Error</th>
@@ -3223,6 +3253,11 @@ function InputSelectionDialog({
                                 <td className="px-3 py-3 align-top">
                                   <span className={cn("rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1", getInputStatusBadgeClass(candidate.status))}>
                                     {candidate.status}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3 align-top">
+                                  <span className={cn("rounded-full border px-2 py-1 text-xs font-bold", getInputMarketBadgeClass(candidate.market))}>
+                                    {getInputMarketLabel(candidate.market)}
                                   </span>
                                 </td>
                                 <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
@@ -5215,7 +5250,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
       try {
         const market: SwingTradeMarket =
           portfolio === "zerodha" ? "india" : "us";
-        const nextCandidate = buildNextCandidate(stage);
+        const nextCandidate = buildNextCandidate(stage, market);
         let candidates: InputSelectionCandidate[] = [nextCandidate];
 
         if (stage === "threats") {
@@ -5242,6 +5277,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
               costUsd: null,
               error: null,
               content: JSON.stringify(overview.latest, null, 2),
+              market,
             });
           }
         } else if (stage === "swing") {
@@ -5266,6 +5302,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
               costUsd: latest.estimated_cost ?? null,
               error: latest.error_message ?? null,
               content: latest.report?.raw_markdown ?? null,
+              market,
             });
           }
         } else {
@@ -5286,6 +5323,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
                     ),
                 ),
                 "Swing Scan",
+                market,
               ),
             );
           } else if (stage === "technical") {
@@ -5295,6 +5333,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
                   runs.filter((run) => isCompletedRebalanceRun(run, market)),
                 ),
                 "Rebalance Scan",
+                market,
               ),
             );
           } else {
@@ -5303,12 +5342,14 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
                 runs.filter((run) => isCompletedRebalanceRun(run, market)),
               ),
               "Rebalance Scan",
+              market,
             );
             const technicalCandidates = buildRunJobCandidates(
               sortRunsByLatestTimestamp(
                 runs.filter((run) => isCompletedTechnicalScanRun(run, market)),
               ),
               "Technical Scan",
+              market,
             );
             candidates = candidates.concat(
               rebalanceCandidates,
@@ -6087,6 +6128,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
               isRunInSwingTradeMarket(run.prompt, market),
             ),
             "Swing Scan",
+            market,
           );
           const selectedRebalanceInputs = selectedInputs[portfolio].rebalance;
           const selectedSwingRuns = selectedRebalanceInputs.size
@@ -6162,6 +6204,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
                 buildRunJobCandidates(
                   allRuns.filter((run) => isCompletedRebalanceRun(run, market)),
                   "Rebalance Scan",
+                  market,
                 ),
                 selectedTechnicalInputs,
               )
