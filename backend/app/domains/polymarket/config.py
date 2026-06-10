@@ -44,9 +44,9 @@ def load_polymarket_config() -> PolymarketBotConfig:
     data_dir = Path(os.getenv("POLYMARKET_DATA_DIR", "data/polymarket")).expanduser()
 
     return PolymarketBotConfig(
-        paper_trading=_bool_from_env("PAPER_TRADING", True),
-        live_trading=_bool_from_env("LIVE_TRADING", False),
-        use_live_reads=_bool_from_env("USE_LIVE_READS", False),
+        paper_trading=_bool_from_env("PAPER_TRADING", False),
+        live_trading=_bool_from_env("LIVE_TRADING", True),
+        use_live_reads=_bool_from_env("USE_LIVE_READS", True),
         auto_execute_live=_bool_from_env("AUTO_EXECUTE_LIVE", False),
         live_unlock_mode=live_unlock_mode,
         require_manual_confirmation=_bool_from_env("REQUIRE_MANUAL_CONFIRMATION", True),
@@ -61,7 +61,7 @@ def load_polymarket_config() -> PolymarketBotConfig:
         max_live_daily_loss=_float_from_env("MAX_LIVE_DAILY_LOSS", 10),
         max_live_exposure_per_market=_float_from_env("MAX_LIVE_EXPOSURE_PER_MARKET", 5),
         auto_redeem_live=_bool_from_env("AUTO_REDEEM_LIVE", False),
-        jurisdiction_confirmation=_bool_from_env("JURISDICTION_CONFIRMATION", False),
+        jurisdiction_confirmation=_bool_from_env("JURISDICTION_CONFIRMATION", True),
         manual_tracked_wallets=os.getenv("MANUAL_TRACKED_WALLETS", ""),
         use_trending_market_activity=_bool_from_env(
             "USE_TRENDING_MARKET_ACTIVITY", False
