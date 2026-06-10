@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class ZerodhaLoginUrlResponse(BaseModel):
@@ -24,11 +24,11 @@ class ZerodhaStatusResponse(BaseModel):
 
 class ZerodhaPlaceOrderRequest(BaseModel):
     tradingsymbol: str
-    exchange: str          # NSE | BSE | NFO | CDS | BCD | BFO | MCX
+    exchange: str  # NSE | BSE | NFO | CDS | BCD | BFO | MCX
     transaction_type: str  # BUY | SELL
-    order_type: str        # MARKET | LIMIT | SL | SL-M
+    order_type: str  # MARKET | LIMIT | SL | SL-M
     quantity: int
-    product: str           # CNC | MIS | NRML
+    product: str  # CNC | MIS | NRML
     validity: str = "DAY"  # DAY | IOC | TTL
     price: float = 0
     trigger_price: float = 0
@@ -71,6 +71,53 @@ class ZerodhaPlaceOrderResponse(BaseModel):
     variety: str = "regular"
     market_open: bool = True
     auto_converted_to_amo: bool = False
+
+
+class ZerodhaPrepareBasketOrderRequest(BaseModel):
+    tradingsymbol: str
+    exchange: str
+    transaction_type: str
+    quantity: int
+    price: float
+
+    @field_validator("quantity")
+    @classmethod
+    def quantity_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("quantity must be positive")
+        return v
+
+    @field_validator("transaction_type")
+    @classmethod
+    def validate_transaction_type(cls, v: str) -> str:
+        normalized = v.upper()
+        if normalized not in ("BUY", "SELL"):
+            raise ValueError("transaction_type must be BUY or SELL")
+        return normalized
+
+
+class ZerodhaPrepareBasketRequest(BaseModel):
+    orders: list[ZerodhaPrepareBasketOrderRequest]
+
+
+class ZerodhaPreparedBasketOrder(BaseModel):
+    tradingsymbol: str
+    exchange: str
+    transaction_type: str
+    quantity: int
+    requested_price: float
+    price: float
+    last_price: float
+    tick_size: float
+    lower_circuit_limit: float | None = None
+    upper_circuit_limit: float | None = None
+    adjusted: bool
+    reasons: list[str] = Field(default_factory=list)
+
+
+class ZerodhaPrepareBasketResponse(BaseModel):
+    orders: list[ZerodhaPreparedBasketOrder]
+    adjusted_count: int
 
 
 class ZerodhaPortfolioHolding(BaseModel):

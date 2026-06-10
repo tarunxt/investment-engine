@@ -734,6 +734,22 @@ function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], mark
   });
 }
 
+async function prepareZerodhaBasketOrdersForKite(orders: ZerodhaBasketPreviewOrder[]) {
+  const response = await apiService.zerodhaPrepareBasketOrders({
+    orders: orders.map((order) => ({
+      tradingsymbol: order.symbol.toUpperCase(),
+      exchange: order.exchange.toUpperCase(),
+      transaction_type: order.side,
+      quantity: Math.max(1, Math.floor(order.units ?? 0)),
+      price: order.price ?? 0,
+    })),
+  });
+  return orders.map((order, index) => {
+    const prepared = response.orders[index];
+    return prepared ? { ...order, price: prepared.price, amount: calculateZerodhaBasketAmount(order.units, prepared.price) } : order;
+  });
+}
+
 function postZerodhaKiteBasket(apiKey: string, orders: ZerodhaBasketPreviewOrder[], marketOpen: boolean, targetName: string) {
   const form = document.createElement("form");
   form.method = "post";
@@ -4793,22 +4809,25 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
         return;
       }
 
+      const preparedOrders = await prepareZerodhaBasketOrdersForKite(selectedOrders);
+      const preparedChunks = chunkZerodhaBasketOrders(preparedOrders);
+
       let clipboardCopied = false;
       try {
-        clipboardCopied = await copyZerodhaKiteBasketToClipboard(selectedOrders, marketStatus.open);
+        clipboardCopied = await copyZerodhaKiteBasketToClipboard(preparedOrders, marketStatus.open);
       } catch {
         clipboardCopied = false;
       }
 
-      orderChunks.forEach((chunk, index) => {
+      preparedChunks.forEach((chunk, index) => {
         postZerodhaKiteBasket(apiKey, chunk, marketStatus.open, kiteWindows[index].targetName);
       });
 
       setZerodhaBasketSubmission({
-        redirected: selectedOrders.length,
-        basketCount: orderChunks.length,
+        redirected: preparedOrders.length,
+        basketCount: preparedChunks.length,
         clipboardCopied,
-        orders: selectedOrders,
+        orders: preparedOrders,
       });
     } catch (error) {
       kiteWindows.forEach((entry) => entry.win?.close());

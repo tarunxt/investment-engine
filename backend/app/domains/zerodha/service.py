@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from collections.abc import Mapping, Sequence
 
 import httpx
 
@@ -59,6 +60,7 @@ class ZerodhaService:
         *,
         access_token: str | None = None,
         data: dict[str, Any] | None = None,
+        params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> Any:
@@ -71,6 +73,7 @@ class ZerodhaService:
                 method,
                 f"{self.KITE_BASE}{path}",
                 data=data,
+                params=params,
                 headers=request_headers,
             )
             self._raise_for_kite(resp)
@@ -83,6 +86,7 @@ class ZerodhaService:
         *,
         access_token: str | None = None,
         data: dict[str, Any] | None = None,
+        params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> Any:
@@ -95,6 +99,7 @@ class ZerodhaService:
                 method,
                 f"{self.KITE_BASE}{path}",
                 data=data,
+                params=params,
                 headers=request_headers,
             )
             self._raise_for_kite(resp)
@@ -120,6 +125,15 @@ class ZerodhaService:
     async def get_orders(self, access_token: str) -> list:
         data = await self._request_async("GET", "/orders", access_token=access_token)
         return data or []
+
+    async def get_quotes(
+        self, access_token: str, instruments: list[str]
+    ) -> dict[str, Any]:
+        params = [("i", instrument) for instrument in instruments]
+        data = await self._request_async(
+            "GET", "/quote", access_token=access_token, params=params
+        )
+        return data or {}
 
     async def get_holdings(self, access_token: str) -> list[dict[str, Any]]:
         data = await self._request_async(
