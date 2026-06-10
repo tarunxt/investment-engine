@@ -3,7 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
-from app.domains.polymarket.bullpen import run_bullpen_json, utc_now
+from app.domains.polymarket.bullpen import (
+    run_bullpen_json,
+    run_first_bullpen_json,
+    utc_now,
+)
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.schemas import (
     ActivitySource,
@@ -32,7 +36,9 @@ MOCK_MARKETS: list[tuple[str, str, str]] = [
 class MarketDataProvider(Protocol):
     async def get_top_traders(self) -> list[PolymarketTrader]: ...
 
-    async def get_recent_trades(self, traders: list[PolymarketTrader]) -> list[PolymarketSourceTrade]: ...
+    async def get_recent_trades(
+        self, traders: list[PolymarketTrader]
+    ) -> list[PolymarketSourceTrade]: ...
 
 
 class MockProvider:
@@ -54,7 +60,9 @@ class MockProvider:
             for index in range(10)
         ]
 
-    async def get_recent_trades(self, traders: list[PolymarketTrader]) -> list[PolymarketSourceTrade]:
+    async def get_recent_trades(
+        self, traders: list[PolymarketTrader]
+    ) -> list[PolymarketSourceTrade]:
         self._counter += 1
         batch_size = 6 if self._counter == 1 else 1 + (self._counter % 3)
         rows: list[PolymarketSourceTrade] = []
@@ -98,64 +106,193 @@ class BullpenReadOnlyProvider:
     async def get_top_traders(self) -> list[PolymarketTrader]:
         discovery = await self._discover_active_traders()
         manual = await self._read_manual_wallets()
+        leaderboard = await self._read_weekly_leaderboard_traders()
         fallback = (
-            {"traders": [], "rows_considered": 0, "wallets_extracted": 0, "rows_rejected": 0}
-            if discovery["active"]
+            {
+                "traders": [],
+                "rows_considered": 0,
+                "wallets_extracted": 0,
+                "rows_rejected": 0,
+            }
+            if leaderboard["traders"] or discovery["active"]
             else await self._read_fallback_wallets()
         )
-        merged = merge_traders([*discovery["active"], *fallback["traders"], *manual])
-        selected = select_tracked_traders(merged, manual, self.config.max_tracked_traders)
+        merged = merge_traders(
+            [
+                *leaderboard["traders"],
+                *discovery["active"],
+                *fallback["traders"],
+                *manual,
+            ]
+        )
+        selected = select_tracked_traders(
+            merged, manual, self.config.max_tracked_traders
+        )
         self.last_discovery_status = PolymarketLiveSourceStatus(
             source_mode="live-read",
             discovery_mode=(
-                "active feed + manual wallets + optional trending market activity"
+                "weekly P&L leaderboard + active feed + manual wallets + optional trending market activity"
                 if self.config.use_trending_market_activity
-                else "active feed + manual wallets"
+                else "weekly P&L leaderboard + active feed + manual wallets"
             ),
-            active_traders_found=len(discovery["active"]),
-            candidate_rows_considered=discovery["candidate_rows_considered"] + fallback["rows_considered"],
-            candidate_wallets_extracted=discovery["candidate_wallets_extracted"] + fallback["wallets_extracted"],
+            active_traders_found=len(leaderboard["traders"]) + len(discovery["active"]),
+            candidate_rows_considered=leaderboard["rows_considered"]
+            + discovery["candidate_rows_considered"]
+            + fallback["rows_considered"],
+            candidate_wallets_extracted=leaderboard["wallets_extracted"]
+            + discovery["candidate_wallets_extracted"]
+            + fallback["wallets_extracted"],
             fallback_traders_selected=len(fallback["traders"]),
-            activity_source_used="feed" if discovery["active"] else ("fallback" if fallback["traders"] else None),
-            rows_rejected_last_discovery=discovery["rows_rejected"] + fallback["rows_rejected"],
+            activity_source_used=(
+                "wallet"
+                if leaderboard["traders"]
+                else (
+                    "feed"
+                    if discovery["active"]
+                    else ("fallback" if fallback["traders"] else None)
+                )
+            ),
+            rows_rejected_last_discovery=leaderboard["rows_rejected"]
+            + discovery["rows_rejected"]
+            + fallback["rows_rejected"],
             accepted_activity_trades_last_discovery=discovery["accepted_trades"],
-            manual_wallets_configured=len(self.manual_wallets) + len(self.invalid_manual_wallets),
+            manual_wallets_configured=len(self.manual_wallets)
+            + len(self.invalid_manual_wallets),
             manual_wallets_valid=len(self.manual_wallets),
-            manual_wallets_invalid=[redact_manual_wallet_input(item) for item in self.invalid_manual_wallets],
+            manual_wallets_invalid=[
+                redact_manual_wallet_input(item) for item in self.invalid_manual_wallets
+            ],
             manual_tracked_wallets=manual,
             last_active_trader_discovery_time=utc_now(),
-            last_discovery_error=discovery["error"],
+            last_discovery_error=leaderboard["error"] or discovery["error"],
             trending_market_activity_enabled=self.config.use_trending_market_activity,
             trending_market_activity_unavailable=(
-                None if self.config.use_trending_market_activity else "Trending market activity disabled"
+                None
+                if self.config.use_trending_market_activity
+                else "Trending market activity disabled"
             ),
         )
         return selected
 
-    async def get_recent_trades(self, traders: list[PolymarketTrader]) -> list[PolymarketSourceTrade]:
+    async def get_recent_trades(
+        self, traders: list[PolymarketTrader]
+    ) -> list[PolymarketSourceTrade]:
         manual = [trader for trader in traders if "Manual" in trader.source_reason]
-        selected = select_tracked_traders(traders, manual, self.config.max_tracked_traders)
+        selected = select_tracked_traders(
+            traders, manual, self.config.max_tracked_traders
+        )
         live_read_trades = await self._read_tracked_wallet_trades(selected)
-        market_trades = await self._read_trending_market_trades() if self.config.use_trending_market_activity else []
+        market_trades = (
+            await self._read_trending_market_trades()
+            if self.config.use_trending_market_activity
+            else []
+        )
         return dedupe_trades([*live_read_trades, *market_trades])[:100]
 
     def get_discovery_status(self) -> PolymarketLiveSourceStatus:
         return self.last_discovery_status
 
-    async def debug_discovery(self, target: str = "swisstony") -> PolymarketDiscoveryDebugReport:
+    async def debug_discovery(
+        self, target: str = "swisstony"
+    ) -> PolymarketDiscoveryDebugReport:
         return await debug_discovery(target)
+
+    async def _read_weekly_leaderboard_traders(self) -> dict[str, Any]:
+        try:
+            parsed = await run_first_bullpen_json(
+                [
+                    [
+                        "polymarket",
+                        "data",
+                        "leaderboard",
+                        "--time-period",
+                        "7d",
+                        "--sort",
+                        "pnl",
+                        "--hide-farmers",
+                        "--hide-bots",
+                        "--limit",
+                        "25",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                    [
+                        "polymarket",
+                        "data",
+                        "leaderboard",
+                        "--period",
+                        "week",
+                        "--sort",
+                        "pnl",
+                        "--limit",
+                        "25",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                ]
+            )
+            rows = collect_rows(parsed)
+            normalized = [normalize_fallback_trader_row(row) for row in rows]
+            traders = [trader for trader in normalized if trader]
+            active = [
+                trader
+                for trader in traders
+                if trader.volume_24h > 0
+                or trader.trades_24h > 0
+                or trader.last_trade_at
+            ]
+            selected = active or traders
+            for trader in selected:
+                trader.source_reason = (
+                    "Weekly P&L leaderboard trader discovered via Bullpen"
+                )
+            return {
+                "traders": selected[:25],
+                "rows_considered": len(rows),
+                "wallets_extracted": len(
+                    {trader.address.lower() for trader in selected if trader.address}
+                ),
+                "rows_rejected": len(rows) - len(traders),
+                "error": None,
+            }
+        except Exception as exc:
+            return {
+                "traders": [],
+                "rows_considered": 0,
+                "wallets_extracted": 0,
+                "rows_rejected": 0,
+                "error": f"Weekly leaderboard unavailable: {redact_secrets(str(exc))}",
+            }
 
     async def _discover_active_traders(self) -> dict[str, Any]:
         try:
             parsed = await run_bullpen_json(
-                ["polymarket", "feed", "trades", "--read-only", "--non-interactive", "--limit", "1000", "--output", "json"]
+                [
+                    "polymarket",
+                    "feed",
+                    "trades",
+                    "--read-only",
+                    "--non-interactive",
+                    "--limit",
+                    "1000",
+                    "--output",
+                    "json",
+                ]
             )
             rows = collect_rows(parsed)
             normalized = [normalize_trade_row(row) for row in rows]
             trades = [item["trade"] for item in normalized if item["accepted"]]
             active = [
                 trader
-                for trader in aggregate_traders(trades, "live-read", "Active trader discovered from recent Bullpen trade feed")
+                for trader in aggregate_traders(
+                    trades,
+                    "live-read",
+                    "Active trader discovered from recent Bullpen trade feed",
+                )
                 if trader.trades_24h > 0
             ]
             return {
@@ -168,7 +305,9 @@ class BullpenReadOnlyProvider:
                         if isinstance(trade.get("address"), str) and trade["address"]
                     }
                 ),
-                "rows_rejected": len([item for item in normalized if not item["accepted"]]),
+                "rows_rejected": len(
+                    [item for item in normalized if not item["accepted"]]
+                ),
                 "accepted_trades": len(trades),
                 "error": None,
             }
@@ -185,25 +324,48 @@ class BullpenReadOnlyProvider:
     async def _read_fallback_wallets(self) -> dict[str, Any]:
         try:
             parsed = await run_bullpen_json(
-                ["polymarket", "data", "leaderboard", "--read-only", "--non-interactive", "--limit", "25", "--output", "json"]
+                [
+                    "polymarket",
+                    "data",
+                    "leaderboard",
+                    "--read-only",
+                    "--non-interactive",
+                    "--limit",
+                    "25",
+                    "--output",
+                    "json",
+                ]
             )
             rows = collect_rows(parsed)
-            traders = [item for item in (normalize_fallback_trader_row(row) for row in rows) if item][:10]
+            traders = [
+                item
+                for item in (normalize_fallback_trader_row(row) for row in rows)
+                if item
+            ][:10]
             return {
                 "traders": traders,
                 "rows_considered": len(rows),
-                "wallets_extracted": len({trader.address.lower() for trader in traders if trader.address}),
+                "wallets_extracted": len(
+                    {trader.address.lower() for trader in traders if trader.address}
+                ),
                 "rows_rejected": len(rows) - len(traders),
             }
         except Exception:
-            return {"traders": [], "rows_considered": 0, "wallets_extracted": 0, "rows_rejected": 0}
+            return {
+                "traders": [],
+                "rows_considered": 0,
+                "wallets_extracted": 0,
+                "rows_rejected": 0,
+            }
 
     async def _read_manual_wallets(self) -> list[PolymarketTrader]:
         traders: list[PolymarketTrader] = []
         for address in self.manual_wallets:
             try:
                 trades = await self._read_wallet_activity(address)
-                aggregated = aggregate_traders(trades, "live-read", "Manual tracked wallet")
+                aggregated = aggregate_traders(
+                    trades, "live-read", "Manual tracked wallet"
+                )
                 traders.append(
                     aggregated[0]
                     if aggregated
@@ -235,12 +397,20 @@ class BullpenReadOnlyProvider:
                 )
         return traders
 
-    async def _read_tracked_wallet_trades(self, traders: list[PolymarketTrader]) -> list[PolymarketSourceTrade]:
+    async def _read_tracked_wallet_trades(
+        self, traders: list[PolymarketTrader]
+    ) -> list[PolymarketSourceTrade]:
         rows: list[PolymarketSourceTrade] = []
         for trader in [item for item in traders if item.source == "live-read"]:
             try:
-                wallet_trades = await self._read_wallet_activity(trader.address) if is_public_wallet_address(trader.address) else []
-                trades = wallet_trades or await self._read_handle_or_feed_activity(trader)
+                wallet_trades = (
+                    await self._read_wallet_activity(trader.address)
+                    if is_public_wallet_address(trader.address)
+                    else []
+                )
+                trades = wallet_trades or await self._read_handle_or_feed_activity(
+                    trader
+                )
                 if wallet_trades:
                     trader.activity_source = "wallet"
                 elif trades:
@@ -254,20 +424,33 @@ class BullpenReadOnlyProvider:
         return [trade for trade in rows if trade.source == "live-read"]
 
     async def _read_wallet_activity(self, address: str) -> list[dict[str, Any]]:
-        parsed = await run_bullpen_json(
+        parsed = await run_first_bullpen_json(
             [
-                "polymarket",
-                "activity",
-                "--address",
-                address,
-                "--type",
-                "trade",
-                "--limit",
-                "50",
-                "--read-only",
-                "--non-interactive",
-                "--output",
-                "json",
+                [
+                    "polymarket",
+                    "data",
+                    "profile",
+                    address,
+                    "--trades",
+                    "--read-only",
+                    "--non-interactive",
+                    "--output",
+                    "json",
+                ],
+                [
+                    "polymarket",
+                    "activity",
+                    "--address",
+                    address,
+                    "--type",
+                    "trade",
+                    "--limit",
+                    "50",
+                    "--read-only",
+                    "--non-interactive",
+                    "--output",
+                    "json",
+                ],
             ]
         )
         normalized = [
@@ -276,9 +459,21 @@ class BullpenReadOnlyProvider:
         ]
         return [item["trade"] for item in normalized if item["accepted"]]
 
-    async def _read_handle_or_feed_activity(self, trader: PolymarketTrader) -> list[dict[str, Any]]:
+    async def _read_handle_or_feed_activity(
+        self, trader: PolymarketTrader
+    ) -> list[dict[str, Any]]:
         parsed = await run_bullpen_json(
-            ["polymarket", "feed", "trades", "--read-only", "--non-interactive", "--limit", "1000", "--output", "json"]
+            [
+                "polymarket",
+                "feed",
+                "trades",
+                "--read-only",
+                "--non-interactive",
+                "--limit",
+                "1000",
+                "--output",
+                "json",
+            ]
         )
         identities = trader_identity_candidates(trader)
         normalized = [normalize_trade_row(row) for row in collect_rows(parsed)]
@@ -315,11 +510,23 @@ class BullpenReadOnlyProvider:
             market_rows = collect_rows(markets)
             trades: list[PolymarketSourceTrade] = []
             for market in market_rows:
-                slug = string_value(market.get("slug") or market.get("marketSlug") or market.get("id"))
+                slug = string_value(
+                    market.get("slug") or market.get("marketSlug") or market.get("id")
+                )
                 if not slug:
                     continue
                 parsed = await run_bullpen_json(
-                    ["polymarket", "trades", slug, "--limit", "25", "--read-only", "--non-interactive", "--output", "json"]
+                    [
+                        "polymarket",
+                        "trades",
+                        slug,
+                        "--limit",
+                        "25",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ]
                 )
                 rows = collect_rows(parsed)
                 for index, row in enumerate(rows):
@@ -327,11 +534,19 @@ class BullpenReadOnlyProvider:
                         {
                             **row,
                             "slug": slug,
-                            "marketTitle": row.get("marketTitle") or row.get("title") or market.get("title") or market.get("question") or slug,
+                            "marketTitle": row.get("marketTitle")
+                            or row.get("title")
+                            or market.get("title")
+                            or market.get("question")
+                            or slug,
                         }
                     )
                     if normalized["accepted"]:
-                        trades.append(source_trade_from_normalized(normalized["trade"], None, "live-market-read", index))
+                        trades.append(
+                            source_trade_from_normalized(
+                                normalized["trade"], None, "live-market-read", index
+                            )
+                        )
             self.last_discovery_status.trending_market_activity_unavailable = None
             return trades
         except Exception as exc:
@@ -349,18 +564,25 @@ class BullpenReadOnlyProvider:
                 if self.config.use_trending_market_activity
                 else "active feed + manual wallets"
             ),
-            manual_wallets_configured=len(self.manual_wallets) + len(self.invalid_manual_wallets),
+            manual_wallets_configured=len(self.manual_wallets)
+            + len(self.invalid_manual_wallets),
             manual_wallets_valid=len(self.manual_wallets),
-            manual_wallets_invalid=[redact_manual_wallet_input(item) for item in self.invalid_manual_wallets],
+            manual_wallets_invalid=[
+                redact_manual_wallet_input(item) for item in self.invalid_manual_wallets
+            ],
             manual_tracked_wallets=[],
             trending_market_activity_enabled=self.config.use_trending_market_activity,
             trending_market_activity_unavailable=(
-                None if self.config.use_trending_market_activity else "Trending market activity disabled"
+                None
+                if self.config.use_trending_market_activity
+                else "Trending market activity disabled"
             ),
         )
 
 
-def aggregate_traders(trades: list[dict[str, Any]], source: TradeSource, source_reason: str) -> list[PolymarketTrader]:
+def aggregate_traders(
+    trades: list[dict[str, Any]], source: TradeSource, source_reason: str
+) -> list[PolymarketTrader]:
     now_ms = datetime.now(timezone.utc).timestamp() * 1000
     aggregated: dict[str, PolymarketTrader] = {}
     for trade in trades:
@@ -374,14 +596,28 @@ def aggregate_traders(trades: list[dict[str, Any]], source: TradeSource, source_
             key,
             PolymarketTrader(
                 id=identity,
-                name=trade.get("trader_name") or handle or (short_address(address) if address else identity),
+                name=trade.get("trader_name")
+                or handle
+                or (short_address(address) if address else identity),
                 address=address,
                 handle=handle,
                 profile_slug=handle,
-                profile_url=polymarket_handle_profile_url(handle) if handle else polymarket_profile_url(address),
-                activity_url=polymarket_handle_activity_url(handle) if handle else polymarket_profile_url(address),
+                profile_url=(
+                    polymarket_handle_profile_url(handle)
+                    if handle
+                    else polymarket_profile_url(address)
+                ),
+                activity_url=(
+                    polymarket_handle_activity_url(handle)
+                    if handle
+                    else polymarket_profile_url(address)
+                ),
                 activity_source="feed",
-                polymarket_profile_url=polymarket_handle_profile_url(handle) if handle else polymarket_profile_url(address),
+                polymarket_profile_url=(
+                    polymarket_handle_profile_url(handle)
+                    if handle
+                    else polymarket_profile_url(address)
+                ),
                 volume_24h=0,
                 trades_1h=0,
                 trades_6h=0,
@@ -398,7 +634,9 @@ def aggregate_traders(trades: list[dict[str, Any]], source: TradeSource, source_
         if 0 <= age_ms <= 24 * 60 * 60 * 1000:
             trader.trades_24h += 1
             trader.volume_24h += float(trade["size_usd"])
-        if not trader.last_trade_at or datetime.fromisoformat(trade["timestamp"]) > datetime.fromisoformat(trader.last_trade_at):
+        if not trader.last_trade_at or datetime.fromisoformat(
+            trade["timestamp"]
+        ) > datetime.fromisoformat(trader.last_trade_at):
             trader.last_trade_at = trade["timestamp"]
             trader.last_trade_age = age_label(age_ms)
         aggregated[key] = trader
@@ -412,11 +650,16 @@ def source_trade_from_normalized(
     index: int,
 ) -> PolymarketSourceTrade:
     identity = clean_trade_identity(trade, trader) or "unknown"
-    raw_identity = trade.get("raw_identity") or (trader.id if trader else None) or trade.get("trader_name") or trade.get("handle") or trade.get("address") or identity
-    stable_key = stable_trade_key(source, identity, trade)
-    fallback_trade_id = (
-        f"{trade['market_id']}:{identity}:{trade['timestamp']}:{index}"
+    raw_identity = (
+        trade.get("raw_identity")
+        or (trader.id if trader else None)
+        or trade.get("trader_name")
+        or trade.get("handle")
+        or trade.get("address")
+        or identity
     )
+    stable_key = stable_trade_key(source, identity, trade)
+    fallback_trade_id = f"{trade['market_id']}:{identity}:{trade['timestamp']}:{index}"
     return PolymarketSourceTrade(
         id=stable_key or f"{source}:{trade.get('id') or fallback_trade_id}",
         source_trade_key=stable_key
@@ -427,7 +670,11 @@ def source_trade_from_normalized(
             if trader
             else trade.get("trader_name")
             or trade.get("handle")
-            or (short_address(identity) if is_public_wallet_address(identity) else identity)
+            or (
+                short_address(identity)
+                if is_public_wallet_address(identity)
+                else identity
+            )
         ),
         trader_address=trade.get("address") or (trader.address if trader else ""),
         trader_handle=(trader.handle if trader else None) or trade.get("handle"),
@@ -450,7 +697,25 @@ def normalize_fallback_trader_row(row: dict[str, Any]) -> PolymarketTrader | Non
     handle = extract_handle(row)
     if not address and not handle:
         return None
-    volume_24h = number_value(row.get("volume24h") or row.get("volume_24h") or row.get("volume") or row.get("pnl") or row.get("profit")) or 0
+    volume_24h = (
+        number_value(
+            row.get("volume24h")
+            or row.get("volume_24h")
+            or row.get("volume")
+            or row.get("totalVolume")
+            or row.get("weeklyVolume")
+        )
+        or 0
+    )
+    trades_24h = int(
+        number_value(
+            row.get("trades24h")
+            or row.get("trades_24h")
+            or row.get("trades")
+            or row.get("tradeCount")
+        )
+        or 0
+    )
     name = string_value(
         row.get("name")
         or row.get("username")
@@ -466,14 +731,33 @@ def normalize_fallback_trader_row(row: dict[str, Any]) -> PolymarketTrader | Non
         address=address or "",
         handle=handle,
         profile_slug=handle,
-        profile_url=polymarket_handle_profile_url(handle) if handle else polymarket_profile_url(address or ""),
-        activity_url=polymarket_handle_activity_url(handle) if handle else polymarket_profile_url(address or ""),
+        profile_url=(
+            polymarket_handle_profile_url(handle)
+            if handle
+            else polymarket_profile_url(address or "")
+        ),
+        activity_url=(
+            polymarket_handle_activity_url(handle)
+            if handle
+            else polymarket_profile_url(address or "")
+        ),
         activity_source="fallback",
-        bullpen_profile_url=safe_http_url(row.get("bullpenProfileUrl") or row.get("profileUrl") or row.get("url")),
-        polymarket_profile_url=polymarket_handle_profile_url(handle) if handle else polymarket_profile_url(address or ""),
+        bullpen_profile_url=safe_http_url(
+            row.get("bullpenProfileUrl") or row.get("profileUrl") or row.get("url")
+        ),
+        polymarket_profile_url=(
+            polymarket_handle_profile_url(handle)
+            if handle
+            else polymarket_profile_url(address or "")
+        ),
         volume_24h=volume_24h,
-        trades_24h=0,
-        last_trade_at=parse_timestamp(row.get("lastTradeAt") or row.get("last_trade_at") or row.get("lastActiveAt") or row.get("updatedAt")),
+        trades_24h=trades_24h,
+        last_trade_at=parse_timestamp(
+            row.get("lastTradeAt")
+            or row.get("last_trade_at")
+            or row.get("lastActiveAt")
+            or row.get("updatedAt")
+        ),
         source_reason="Fallback tracked wallet; no recent trade detected yet",
         source="live-read",
     )
@@ -512,8 +796,19 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         or row.get("condition_id")
     )
     sample_keys = list(row.keys())[:40]
-    side = "SELL" if "sell" in str(row.get("side") or row.get("action") or row.get("type") or "").lower() else "BUY"
-    row_type = string_value(row.get("type") or row.get("activityType") or row.get("activity_type") or row.get("eventType") or row.get("event_type"))
+    side = (
+        "SELL"
+        if "sell"
+        in str(row.get("side") or row.get("action") or row.get("type") or "").lower()
+        else "BUY"
+    )
+    row_type = string_value(
+        row.get("type")
+        or row.get("activityType")
+        or row.get("activity_type")
+        or row.get("eventType")
+        or row.get("event_type")
+    )
     amount = number_value(
         row.get("sizeUsd")
         or row.get("size_usd")
@@ -538,16 +833,43 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         "size_usd": amount,
         "timestamp": timestamp,
     }
-    if row_type and not any(token in row_type.lower() for token in ("trade", "buy", "sell")):
-        return {"accepted": False, "reason": "unsupported row type", "sample_keys": sample_keys, "extracted": extracted}
+    if row_type and not any(
+        token in row_type.lower() for token in ("trade", "buy", "sell")
+    ):
+        return {
+            "accepted": False,
+            "reason": "unsupported row type",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
     if not address and not handle and not trader_name:
-        return {"accepted": False, "reason": "missing trader identity", "sample_keys": sample_keys, "extracted": extracted}
+        return {
+            "accepted": False,
+            "reason": "missing trader identity",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
     if not market_id:
-        return {"accepted": False, "reason": "missing market", "sample_keys": sample_keys, "extracted": extracted}
+        return {
+            "accepted": False,
+            "reason": "missing market",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
     if not timestamp:
-        return {"accepted": False, "reason": "missing timestamp", "sample_keys": sample_keys, "extracted": extracted}
+        return {
+            "accepted": False,
+            "reason": "missing timestamp",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
     if not amount or amount <= 0:
-        return {"accepted": False, "reason": "missing amount", "sample_keys": sample_keys, "extracted": extracted}
+        return {
+            "accepted": False,
+            "reason": "missing amount",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
     price = clamp_price(
         number_value(
             row.get("price")
@@ -561,7 +883,17 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         )
         or 0.5
     )
-    trade_id = string_value(row.get("id") or row.get("tradeId") or row.get("trade_id") or row.get("transactionHash") or row.get("txHash") or row.get("hash")) or f"{market_id}:{address}:{timestamp}:{side}"
+    trade_id = (
+        string_value(
+            row.get("id")
+            or row.get("tradeId")
+            or row.get("trade_id")
+            or row.get("transactionHash")
+            or row.get("txHash")
+            or row.get("hash")
+        )
+        or f"{market_id}:{address}:{timestamp}:{side}"
+    )
     return {
         "accepted": True,
         "sample_keys": sample_keys,
@@ -573,8 +905,22 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
             "trader_name": trader_name,
             "raw_identity": raw_identity,
             "market_id": market_id,
-            "market_title": string_value(row.get("title") or row.get("marketTitle") or row.get("market_title") or row.get("market") or row.get("question")) or market_id,
-            "outcome": string_value(row.get("outcome") or row.get("outcomeName") or row.get("outcome_name") or row.get("token") or row.get("asset")) or "Yes",
+            "market_title": string_value(
+                row.get("title")
+                or row.get("marketTitle")
+                or row.get("market_title")
+                or row.get("market")
+                or row.get("question")
+            )
+            or market_id,
+            "outcome": string_value(
+                row.get("outcome")
+                or row.get("outcomeName")
+                or row.get("outcome_name")
+                or row.get("token")
+                or row.get("asset")
+            )
+            or "Yes",
             "side": side,
             "price": price,
             "size_usd": max(0.0, amount),
@@ -592,9 +938,23 @@ def collect_rows(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, dict):
         return []
 
-    direct_keys = ["data", "trades", "items", "results", "activity", "activities", "feed", "markets", "leaderboard", "profiles", "events"]
+    direct_keys = [
+        "data",
+        "trades",
+        "items",
+        "results",
+        "activity",
+        "activities",
+        "feed",
+        "markets",
+        "leaderboard",
+        "profiles",
+        "events",
+    ]
     nested: list[dict[str, Any]] = []
-    has_array = any(isinstance(value.get(key), list) for key in direct_keys) or any(isinstance(item, list) for item in value.values())
+    has_array = any(isinstance(value.get(key), list) for key in direct_keys) or any(
+        isinstance(item, list) for item in value.values()
+    )
     for key in direct_keys:
         nested.extend(collect_rows(value.get(key)))
     return [value, *nested] if not has_array else nested
@@ -615,16 +975,30 @@ def merge_traders(traders: list[PolymarketTrader]) -> list[PolymarketTrader]:
                 "trades_1h": max(existing.trades_1h, trader.trades_1h),
                 "trades_6h": max(existing.trades_6h, trader.trades_6h),
                 "trades_24h": max(existing.trades_24h, trader.trades_24h),
-                "last_trade_at": newest_iso(existing.last_trade_at, trader.last_trade_at),
-                "last_trade_age": trader.last_trade_age if newest_iso(existing.last_trade_at, trader.last_trade_at) == trader.last_trade_at else existing.last_trade_age,
+                "last_trade_at": newest_iso(
+                    existing.last_trade_at, trader.last_trade_at
+                ),
+                "last_trade_age": (
+                    trader.last_trade_age
+                    if newest_iso(existing.last_trade_at, trader.last_trade_at)
+                    == trader.last_trade_at
+                    else existing.last_trade_age
+                ),
                 "handle": existing.handle or trader.handle,
                 "profile_slug": existing.profile_slug or trader.profile_slug,
                 "profile_url": existing.profile_url or trader.profile_url,
                 "activity_url": existing.activity_url or trader.activity_url,
-                "activity_source": existing.activity_source if existing.trades_24h >= trader.trades_24h else trader.activity_source,
-                "source_reason": "Manual tracked wallet"
-                if "Manual" in existing.source_reason or "Manual" in trader.source_reason
-                else existing.source_reason,
+                "activity_source": (
+                    existing.activity_source
+                    if existing.trades_24h >= trader.trades_24h
+                    else trader.activity_source
+                ),
+                "source_reason": (
+                    "Manual tracked wallet"
+                    if "Manual" in existing.source_reason
+                    or "Manual" in trader.source_reason
+                    else existing.source_reason
+                ),
             }
         )
     return list(merged.values())
@@ -648,7 +1022,10 @@ def dedupe_trades(trades: list[PolymarketSourceTrade]) -> list[PolymarketSourceT
     seen: set[str] = set()
     deduped: list[PolymarketSourceTrade] = []
     for trade in trades:
-        key = trade.source_trade_key or f"{trade.source}:{trade.id}:{identity_key(trade.clean_trader_identity)}"
+        key = (
+            trade.source_trade_key
+            or f"{trade.source}:{trade.id}:{identity_key(trade.clean_trader_identity)}"
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -682,7 +1059,11 @@ def is_public_wallet_address(address: str) -> bool:
 
 
 def polymarket_profile_url(address: str) -> str | None:
-    return f"https://polymarket.com/profile/{address}" if is_public_wallet_address(address) else None
+    return (
+        f"https://polymarket.com/profile/{address}"
+        if is_public_wallet_address(address)
+        else None
+    )
 
 
 def polymarket_handle_profile_url(handle: str | None) -> str | None:
@@ -800,7 +1181,13 @@ def identity_key(value: str) -> str:
 
 
 def trader_identity_candidates(trader: PolymarketTrader) -> set[str]:
-    values = [trader.address, trader.handle, trader.profile_slug, trader.name, trader.id]
+    values = [
+        trader.address,
+        trader.handle,
+        trader.profile_slug,
+        trader.name,
+        trader.id,
+    ]
     return {identity_key(item) for item in values if item}
 
 
@@ -825,7 +1212,9 @@ def select_tracked_traders(
     max_tracked: int,
 ) -> list[PolymarketTrader]:
     limit = max(1, max_tracked or 10)
-    manual_selected = sorted(merge_traders(manual), key=compare_trader_key, reverse=True)
+    manual_selected = sorted(
+        merge_traders(manual), key=compare_trader_key, reverse=True
+    )
     if manual_selected:
         return manual_selected[:limit]
     return sorted(merge_traders(traders), key=compare_trader_key, reverse=True)[:limit]
@@ -867,11 +1256,20 @@ def raw_identity_value(row: dict[str, Any]) -> str | None:
     )
 
 
-def clean_trade_identity(trade: dict[str, Any], trader: PolymarketTrader | None = None) -> str | None:
-    address = clean_wallet_prefix(trade.get("address")) or (clean_wallet_prefix(trader.address) if trader else None)
+def clean_trade_identity(
+    trade: dict[str, Any], trader: PolymarketTrader | None = None
+) -> str | None:
+    address = clean_wallet_prefix(trade.get("address")) or (
+        clean_wallet_prefix(trader.address) if trader else None
+    )
     if address:
         return address
-    return clean_handle(trade.get("handle")) or (clean_handle(trader.handle) if trader else None) or clean_handle(trade.get("trader_name")) or (clean_handle(trader.name) if trader else None)
+    return (
+        clean_handle(trade.get("handle"))
+        or (clean_handle(trader.handle) if trader else None)
+        or clean_handle(trade.get("trader_name"))
+        or (clean_handle(trader.name) if trader else None)
+    )
 
 
 def newest_iso(a: str | None, b: str | None) -> str | None:
@@ -929,21 +1327,29 @@ def safe_command_args(args: list[str]) -> list[str]:
     return ["[address]" if is_public_wallet_address(arg) else arg for arg in args]
 
 
-async def run_debug_command(label: str, args: list[str], report: PolymarketDiscoveryDebugReport) -> object | None:
-    report.commands_attempted.append(PolymarketDiscoveryDebugCommand(label=label, args=safe_command_args(args)))
+async def run_debug_command(
+    label: str, args: list[str], report: PolymarketDiscoveryDebugReport
+) -> object | None:
+    report.commands_attempted.append(
+        PolymarketDiscoveryDebugCommand(label=label, args=safe_command_args(args))
+    )
     try:
         return await run_bullpen_json(args)
     except Exception as exc:
         report.errors.append(
             PolymarketDiscoveryDebugError(
                 command=label,
-                error=redact_secrets(str(exc)).replace("0x", "[address]" if "0x" in str(exc) else "0x"),
+                error=redact_secrets(str(exc)).replace(
+                    "0x", "[address]" if "0x" in str(exc) else "0x"
+                ),
             )
         )
         return None
 
 
-def add_debug_rows(report: PolymarketDiscoveryDebugReport, parsed: object) -> list[dict[str, Any]]:
+def add_debug_rows(
+    report: PolymarketDiscoveryDebugReport, parsed: object
+) -> list[dict[str, Any]]:
     rows = collect_rows(parsed)
     report.rows_returned_count += len(rows)
     report.sample_row_keys.extend([list(row.keys())[:40] for row in rows[:5]])
@@ -956,9 +1362,15 @@ def add_debug_rows(report: PolymarketDiscoveryDebugReport, parsed: object) -> li
             report.accepted.append(
                 PolymarketDiscoveryDebugAccepted(
                     address="[address]" if trade.get("address") else None,
-                    clean_identity="[address]" if trade.get("address") else (trade.get("handle") or trade.get("trader_name")),
+                    clean_identity=(
+                        "[address]"
+                        if trade.get("address")
+                        else (trade.get("handle") or trade.get("trader_name"))
+                    ),
                     raw_identity=(
-                        redact_secrets(str(trade.get("raw_identity"))).replace(trade.get("address") or "", "[address]")
+                        redact_secrets(str(trade.get("raw_identity"))).replace(
+                            trade.get("address") or "", "[address]"
+                        )
                         if trade.get("raw_identity")
                         else None
                     ),
@@ -981,17 +1393,23 @@ def add_debug_rows(report: PolymarketDiscoveryDebugReport, parsed: object) -> li
             if extracted.get("address"):
                 extracted["address"] = "[address]"
             report.rejected.append(
-                PolymarketDiscoveryDebugRejected(keys=item["sample_keys"], reason=item["reason"], extracted=extracted)
+                PolymarketDiscoveryDebugRejected(
+                    keys=item["sample_keys"], reason=item["reason"], extracted=extracted
+                )
             )
     return accepted
 
 
-def add_debug_candidates(report: PolymarketDiscoveryDebugReport, parsed: object) -> str | None:
+def add_debug_candidates(
+    report: PolymarketDiscoveryDebugReport, parsed: object
+) -> str | None:
     rows = collect_rows(parsed)
     for row in rows[:10]:
         address = extract_address(row)
         handle = extract_handle(row)
-        username = string_value(row.get("username") or row.get("user_name") or row.get("name"))
+        username = string_value(
+            row.get("username") or row.get("user_name") or row.get("name")
+        )
         report.candidates.append(
             PolymarketDiscoveryDebugCandidate(
                 address="[address]" if address else None,
@@ -1013,7 +1431,17 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
 
     feed = await run_debug_command(
         "feed trades",
-        ["polymarket", "feed", "trades", "--read-only", "--non-interactive", "--limit", "1000", "--output", "json"],
+        [
+            "polymarket",
+            "feed",
+            "trades",
+            "--read-only",
+            "--non-interactive",
+            "--limit",
+            "1000",
+            "--output",
+            "json",
+        ],
         report,
     )
     feed_accepted = add_debug_rows(report, feed) if feed else []
@@ -1021,12 +1449,30 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
     feed_hits = [
         item
         for item in feed_accepted
-        if handle_key in {identity_key(str(value)) for value in [item.get("address"), item.get("handle"), item.get("trader_name")] if value}
+        if handle_key
+        in {
+            identity_key(str(value))
+            for value in [
+                item.get("address"),
+                item.get("handle"),
+                item.get("trader_name"),
+            ]
+            if value
+        }
     ]
 
     activity = await run_debug_command(
         "activity",
-        ["polymarket", "activity", "--read-only", "--non-interactive", "--limit", "20", "--output", "json"],
+        [
+            "polymarket",
+            "activity",
+            "--read-only",
+            "--non-interactive",
+            "--limit",
+            "20",
+            "--output",
+            "json",
+        ],
         report,
     )
     if activity:
@@ -1034,14 +1480,35 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
 
     search = await run_debug_command(
         "search handle",
-        ["polymarket", "search", handle, "--type", "user", "--limit", "5", "--read-only", "--non-interactive", "--output", "json"],
+        [
+            "polymarket",
+            "search",
+            handle,
+            "--type",
+            "user",
+            "--limit",
+            "5",
+            "--read-only",
+            "--non-interactive",
+            "--output",
+            "json",
+        ],
         report,
     )
     address = add_debug_candidates(report, search) if search else None
 
     profile_by_handle = await run_debug_command(
         "profile handle",
-        ["polymarket", "data", "profile", handle, "--read-only", "--non-interactive", "--output", "json"],
+        [
+            "polymarket",
+            "data",
+            "profile",
+            handle,
+            "--read-only",
+            "--non-interactive",
+            "--output",
+            "json",
+        ],
         report,
     )
     if profile_by_handle:
@@ -1049,7 +1516,16 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
 
     profile_at_handle = await run_debug_command(
         "profile @handle",
-        ["polymarket", "data", "profile", f"@{handle}", "--read-only", "--non-interactive", "--output", "json"],
+        [
+            "polymarket",
+            "data",
+            "profile",
+            f"@{handle}",
+            "--read-only",
+            "--non-interactive",
+            "--output",
+            "json",
+        ],
         report,
     )
     if profile_at_handle:
@@ -1058,7 +1534,20 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
     if address:
         by_address = await run_debug_command(
             "activity address",
-            ["polymarket", "activity", "--address", address, "--type", "trade", "--read-only", "--non-interactive", "--limit", "20", "--output", "json"],
+            [
+                "polymarket",
+                "activity",
+                "--address",
+                address,
+                "--type",
+                "trade",
+                "--read-only",
+                "--non-interactive",
+                "--limit",
+                "20",
+                "--output",
+                "json",
+            ],
             report,
         )
         if by_address:

@@ -1001,6 +1001,7 @@ export interface PolymarketBotConfig {
   require_manual_confirmation: boolean;
   poll_interval_ms: number;
   max_trade_size: number;
+  fixed_copy_trade_size: number;
   max_trades_per_day: number;
   max_exposure_per_market: number;
   max_daily_loss: number;
@@ -1008,6 +1009,7 @@ export interface PolymarketBotConfig {
   max_live_trades_per_day: number;
   max_live_daily_loss: number;
   max_live_exposure_per_market: number;
+  auto_redeem_live: boolean;
   jurisdiction_confirmation: boolean;
   manual_tracked_wallets: string;
   use_trending_market_activity: boolean;
