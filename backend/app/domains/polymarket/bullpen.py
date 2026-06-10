@@ -22,19 +22,19 @@ class BullpenCommandError(RuntimeError):
 
 
 def bullpen_executable() -> str:
-    override = os.getenv("BULLPEN_BIN")
-    if override:
-        return override
+    candidates = [
+        os.getenv("BULLPEN_BIN"),
+        shutil.which("bullpen"),
+        os.path.join(os.getcwd(), ".runtime-tools", "bullpen"),
+        "/backend/.runtime-tools/bullpen",
+        "/usr/local/bin/bullpen",
+    ]
 
-    installed = shutil.which("bullpen")
-    if installed:
-        return installed
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
 
-    mounted_fallback = "/backend/.runtime-tools/bullpen"
-    if os.path.isfile(mounted_fallback) and os.access(mounted_fallback, os.X_OK):
-        return mounted_fallback
-
-    return "bullpen"
+    return os.getenv("BULLPEN_BIN") or "bullpen"
 
 
 async def run_bullpen(
@@ -59,7 +59,7 @@ async def run_bullpen(
     except FileNotFoundError as exc:
         raise BullpenCommandError(
             "Bullpen CLI executable was not found. Install Bullpen in the backend runtime, place it at "
-            "/backend/.runtime-tools/bullpen, or set BULLPEN_BIN."
+            "<backend>/.runtime-tools/bullpen, /usr/local/bin/bullpen, or set BULLPEN_BIN to an executable path."
         ) from exc
 
     try:
