@@ -174,29 +174,32 @@ class BullpenLiveExecutor:
         return redact_secrets(stdout)
 
 
+BALANCE_COMMAND_VARIANTS = [
+    [
+        "portfolio",
+        "balances",
+        "--read-only",
+        "--non-interactive",
+        "--output",
+        "json",
+    ],
+    [
+        "funds",
+        "balances",
+        "--read-only",
+        "--non-interactive",
+        "--output",
+        "json",
+    ],
+]
+
+
 class BullpenBalanceReader:
     async def refresh(self) -> PolymarketBalanceState:
         checked_at = utc_now()
         try:
             parsed = await run_first_bullpen_json(
-                [
-                    [
-                        "portfolio",
-                        "balances",
-                        "--read-only",
-                        "--non-interactive",
-                        "--output",
-                        "json",
-                    ],
-                    [
-                        "funds",
-                        "balances",
-                        "--read-only",
-                        "--non-interactive",
-                        "--output",
-                        "json",
-                    ],
-                ],
+                BALANCE_COMMAND_VARIANTS,
                 timeout_seconds=30,
             )
             return PolymarketBalanceState(
@@ -333,12 +336,17 @@ def utc_now() -> str:
 
 def _is_missing_balance_command(message: str) -> bool:
     lowered = message.lower()
-    return (
-        "unrecognized subcommand" in lowered
-        or "unknown command" in lowered
-        or "no such command" in lowered
-        or "not found" in lowered
+    if "bullpen cli executable was not found" in lowered:
+        return False
+
+    missing_command_markers = (
+        "unrecognized subcommand",
+        "unknown command",
+        "no such command",
+        "invalid subcommand",
+        "command not found",
     )
+    return any(marker in lowered for marker in missing_command_markers)
 
 
 def _format_balance_message(parsed: object) -> str:
@@ -348,22 +356,12 @@ def _format_balance_message(parsed: object) -> str:
             item
             for item in candidates
             if "polymarket" in item["context"].lower()
-            and any(
-                label in item["label"].lower()
-                for label in ("available", "cash", "pusd", "usdc")
-            )
+            and _is_cash_balance_candidate(item)
         ),
         None,
     )
     fallback = next(
-        (
-            item
-            for item in candidates
-            if any(
-                label in item["label"].lower()
-                for label in ("available", "cash", "pusd", "usdc")
-            )
-        ),
+        (item for item in candidates if _is_cash_balance_candidate(item)),
         None,
     ) or (candidates[0] if candidates else None)
 
@@ -374,6 +372,15 @@ def _format_balance_message(parsed: object) -> str:
     prefix = "Polymarket" if "polymarket" in balance["context"].lower() else "Bullpen"
     currency = f" {balance['currency']}" if balance.get("currency") else ""
     return f"{prefix} available balance: {_format_amount(balance['amount'])}{currency}"
+
+
+def _is_cash_balance_candidate(item: dict[str, object]) -> bool:
+    label = str(item.get("label") or "").lower()
+    currency = str(item.get("currency") or "").lower()
+    return any(
+        token in label or token in currency
+        for token in ("available", "balance", "cash", "collateral", "pusd", "usdc")
+    )
 
 
 def _collect_balance_candidates(
