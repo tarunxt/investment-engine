@@ -8,6 +8,7 @@ APP_USER="${APP_USER:-investor}"
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-/etc/investor/backend.env}"
 FRONTEND_ENV_FILE="${FRONTEND_ENV_FILE:-/etc/investor/frontend.env}"
 SKIP_GIT_SYNC="${SKIP_GIT_SYNC:-false}"
+BULLPEN_VERSION="${BULLPEN_VERSION:-0.1.101}"
 
 case "$SCOPE" in
   backend|full)
@@ -108,11 +109,58 @@ run_as_app_user() {
   sudo -u "$APP_USER" -H bash -lc "$1"
 }
 
+install_bullpen_cli_if_needed() {
+  local bullpen_bin
+  bullpen_bin="$(
+    BACKEND_ENV_FILE="$BACKEND_ENV_FILE" bash -c '
+      set -euo pipefail
+      set -a
+      source "$BACKEND_ENV_FILE"
+      set +a
+      printf "%s" "${BULLPEN_BIN:-/usr/local/bin/bullpen}"
+    '
+  )"
+
+  if [[ -z "$bullpen_bin" ]]; then
+    bullpen_bin="/usr/local/bin/bullpen"
+  fi
+
+  if [[ "$bullpen_bin" != /* ]]; then
+    echo "BULLPEN_BIN must be an absolute path for production deploys: $bullpen_bin" >&2
+    exit 1
+  fi
+
+  if [[ -x "$bullpen_bin" ]]; then
+    echo "==> Bullpen CLI already installed at $bullpen_bin"
+    "$bullpen_bin" --version
+    return
+  fi
+
+  echo "==> Bullpen CLI missing at $bullpen_bin; installing version $BULLPEN_VERSION"
+  local install_dir
+  install_dir="$(dirname "$bullpen_bin")"
+  local installer
+  installer="$(mktemp)"
+  curl -fsSL https://cli.bullpen.fi/install.sh -o "$installer"
+  chmod +x "$installer"
+  sudo mkdir -p "$install_dir"
+  sudo env BULLPEN_VERSION="$BULLPEN_VERSION" BULLPEN_INSTALL_DIR="$install_dir" "$installer"
+  rm -f "$installer"
+
+  if [[ ! -x "$bullpen_bin" ]]; then
+    echo "Bullpen install completed but executable is still missing or not executable: $bullpen_bin" >&2
+    exit 1
+  fi
+
+  "$bullpen_bin" --version
+}
+
 echo "==> Deploy scope: $SCOPE"
 echo "==> App root: $APP_ROOT"
 echo "==> App user: $APP_USER"
 
 validate_backend_env_file
+install_bullpen_cli_if_needed
 if [[ "$SCOPE" == "full" ]]; then
   validate_frontend_env_file
 fi

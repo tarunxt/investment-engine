@@ -47,3 +47,26 @@ def test_format_balance_message_prefers_polymarket_available_pusd():
         bullpen._format_balance_message(parsed)
         == "Polymarket available balance: 432.11 pUSD"
     )
+
+
+def test_bullpen_executable_uses_runtime_tools_when_env_path_missing(monkeypatch, tmp_path):
+    runtime_tools = tmp_path / ".runtime-tools"
+    runtime_tools.mkdir()
+    fallback = runtime_tools / "bullpen"
+    fallback.write_text("#!/usr/bin/env sh\necho bullpen\n")
+    fallback.chmod(0o755)
+
+    monkeypatch.setenv("BULLPEN_BIN", str(tmp_path / "missing-bullpen"))
+    monkeypatch.chdir(tmp_path)
+
+    assert bullpen.bullpen_executable() == str(fallback)
+
+
+def test_bullpen_executable_prefers_executable_env_path(monkeypatch, tmp_path):
+    configured = tmp_path / "configured-bullpen"
+    configured.write_text("#!/usr/bin/env sh\necho bullpen\n")
+    configured.chmod(0o755)
+
+    monkeypatch.setenv("BULLPEN_BIN", str(configured))
+
+    assert bullpen.bullpen_executable() == str(configured)
