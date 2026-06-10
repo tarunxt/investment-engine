@@ -10,6 +10,10 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.zerodha.audit import ZerodhaAuditRepository
 from app.domains.zerodha.models import ZerodhaPortfolioSnapshot
+from app.domains.zerodha.order_validation import (
+    ZerodhaPriceGuardInput,
+    guard_zerodha_limit_price,
+)
 from app.domains.zerodha.portfolio import current_snapshot_date
 from app.domains.zerodha.repository import (
     ZerodhaCredentialRepository,
@@ -18,6 +22,9 @@ from app.domains.zerodha.repository import (
 from app.domains.zerodha.schemas import (
     ZerodhaCallbackRequest,
     ZerodhaLoginUrlResponse,
+    ZerodhaPrepareBasketRequest,
+    ZerodhaPrepareBasketResponse,
+    ZerodhaPreparedBasketOrder,
     ZerodhaPortfolioOverviewResponse,
     ZerodhaPortfolioSnapshotDetailResponse,
     ZerodhaPortfolioSnapshotSummaryResponse,
@@ -56,6 +63,43 @@ def _is_regular_market_open(exchange: str, now: datetime | None = None) -> bool:
         return False
     current_time = current.time()
     return INDIA_MARKET_OPEN <= current_time <= INDIA_MARKET_CLOSE
+
+
+def _instrument_key(exchange: str, tradingsymbol: str) -> str:
+    return f"{exchange.upper()}:{tradingsymbol.upper()}"
+
+
+def _quote_number(quote: dict, key: str) -> float | None:
+    value = quote.get(key)
+    return float(value) if isinstance(value, (int, float)) and value > 0 else None
+
+
+def _prepared_basket_order_from_quote(order, quote: dict) -> ZerodhaPreparedBasketOrder:
+    last_price = _quote_number(quote, "last_price") or order.price
+    guard = guard_zerodha_limit_price(
+        ZerodhaPriceGuardInput(
+            side=order.transaction_type,
+            requested_price=order.price,
+            last_price=last_price,
+            lower_circuit_limit=_quote_number(quote, "lower_circuit_limit"),
+            upper_circuit_limit=_quote_number(quote, "upper_circuit_limit"),
+            tick_size=_quote_number(quote, "tick_size"),
+        )
+    )
+    return ZerodhaPreparedBasketOrder(
+        tradingsymbol=order.tradingsymbol.upper(),
+        exchange=order.exchange.upper(),
+        transaction_type=order.transaction_type,
+        quantity=order.quantity,
+        requested_price=order.price,
+        price=guard.price,
+        last_price=last_price,
+        tick_size=guard.tick_size,
+        lower_circuit_limit=guard.lower_circuit_limit,
+        upper_circuit_limit=guard.upper_circuit_limit,
+        adjusted=guard.adjusted,
+        reasons=list(guard.reasons),
+    )
 
 
 def _client_ip(request: Request) -> str | None:
@@ -123,12 +167,16 @@ async def callback(
     try:
         data = await _svc.exchange_token(body.request_token)
     except KiteError as exc:
-        await audit.log(current_user.id, "token_exchange_failed", ip, {"error": exc.message})
+        await audit.log(
+            current_user.id, "token_exchange_failed", ip, {"error": exc.message}
+        )
         await db.commit()
         raise HTTPException(400, detail=exc.message)
     except Exception:
         logger.exception("Zerodha token exchange failed for user %s", current_user.id)
-        await audit.log(current_user.id, "token_exchange_failed", ip, {"error": "unexpected"})
+        await audit.log(
+            current_user.id, "token_exchange_failed", ip, {"error": "unexpected"}
+        )
         await db.commit()
         raise HTTPException(502, detail="Token exchange with Zerodha failed")
 
@@ -138,7 +186,9 @@ async def callback(
 
     repo = ZerodhaCredentialRepository(db)
     await repo.upsert(current_user.id, access_token, login_time, expires_at)
-    await audit.log(current_user.id, "token_exchange", ip, {"expires_at": expires_at.isoformat()})
+    await audit.log(
+        current_user.id, "token_exchange", ip, {"expires_at": expires_at.isoformat()}
+    )
     await db.commit()
 
     try:
@@ -149,10 +199,16 @@ async def callback(
             task.id,
         )
     except Exception:
-        logger.exception("Failed to queue Zerodha login portfolio sync for user %s", current_user.id)
+        logger.exception(
+            "Failed to queue Zerodha login portfolio sync for user %s", current_user.id
+        )
 
-    logger.info("Zerodha connected for user %s, expires %s", current_user.id, expires_at)
-    return ZerodhaStatusResponse(connected=True, login_time=login_time, expires_at=expires_at)
+    logger.info(
+        "Zerodha connected for user %s, expires %s", current_user.id, expires_at
+    )
+    return ZerodhaStatusResponse(
+        connected=True, login_time=login_time, expires_at=expires_at
+    )
 
 
 @router.get("/status", response_model=ZerodhaStatusResponse)
@@ -165,8 +221,12 @@ async def get_status(
     cred = await repo.get_by_user(current_user.id)
     latest_snapshot = await snapshot_repo.get_latest_by_user(current_user.id)
     snapshot_meta = {
-        "last_portfolio_sync_at": latest_snapshot.captured_at if latest_snapshot else None,
-        "last_portfolio_snapshot_date": latest_snapshot.snapshot_date if latest_snapshot else None,
+        "last_portfolio_sync_at": (
+            latest_snapshot.captured_at if latest_snapshot else None
+        ),
+        "last_portfolio_snapshot_date": (
+            latest_snapshot.snapshot_date if latest_snapshot else None
+        ),
     }
     if not cred:
         return ZerodhaStatusResponse(connected=False, **snapshot_meta)
@@ -187,7 +247,9 @@ async def get_portfolio_overview(
     current_user: User = Depends(get_current_user),
 ):
     snapshot_repo = ZerodhaPortfolioSnapshotRepository(db)
-    snapshots = await snapshot_repo.list_by_user(current_user.id, limit=min(max(limit, 1), 120))
+    snapshots = await snapshot_repo.list_by_user(
+        current_user.id, limit=min(max(limit, 1), 120)
+    )
     latest = _snapshot_detail(snapshots[0]) if snapshots else None
     return ZerodhaPortfolioOverviewResponse(
         latest=latest,
@@ -213,7 +275,9 @@ async def queue_portfolio_sync(
     try:
         task = sync_portfolio_snapshot_task.delay(current_user.id, "manual")  # type: ignore[attr-defined]
     except Exception:
-        logger.exception("Failed to queue Zerodha portfolio sync for user %s", current_user.id)
+        logger.exception(
+            "Failed to queue Zerodha portfolio sync for user %s", current_user.id
+        )
         await audit.log(
             current_user.id,
             "portfolio_sync_queue_failed",
@@ -243,7 +307,9 @@ async def queue_portfolio_sync(
     )
 
 
-@router.get("/portfolio/{snapshot_date}", response_model=ZerodhaPortfolioSnapshotDetailResponse)
+@router.get(
+    "/portfolio/{snapshot_date}", response_model=ZerodhaPortfolioSnapshotDetailResponse
+)
 async def get_portfolio_snapshot(
     snapshot_date: date,
     db: AsyncSession = Depends(get_async_db),
@@ -275,18 +341,110 @@ async def get_orders(
     try:
         orders = await _svc.get_orders(token)
     except KiteError as exc:
-        await audit.log(current_user.id, "get_orders_failed", ip, {"error": exc.message})
+        await audit.log(
+            current_user.id, "get_orders_failed", ip, {"error": exc.message}
+        )
         await db.commit()
         raise HTTPException(400, detail=exc.message)
     except Exception:
         logger.exception("Failed to fetch Zerodha orders for user %s", current_user.id)
-        await audit.log(current_user.id, "get_orders_failed", ip, {"error": "unexpected"})
+        await audit.log(
+            current_user.id, "get_orders_failed", ip, {"error": "unexpected"}
+        )
         await db.commit()
         raise HTTPException(502, detail="Failed to fetch orders from Zerodha")
 
     await audit.log(current_user.id, "get_orders", ip, {"count": len(orders)})
     await db.commit()
     return {"data": orders}
+
+
+@router.post("/orders/prepare-basket", response_model=ZerodhaPrepareBasketResponse)
+async def prepare_basket_orders(
+    request: Request,
+    body: ZerodhaPrepareBasketRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    ip = _client_ip(request)
+    repo = ZerodhaCredentialRepository(db)
+    audit = ZerodhaAuditRepository(db)
+
+    token = await repo.get_plaintext_token(current_user.id)
+    if not token:
+        raise HTTPException(401, detail="Not connected to Zerodha. Please login first.")
+
+    if not body.orders:
+        return ZerodhaPrepareBasketResponse(orders=[], adjusted_count=0)
+
+    instruments = [
+        _instrument_key(order.exchange, order.tradingsymbol) for order in body.orders
+    ]
+    await audit.log(
+        current_user.id,
+        "token_used",
+        ip,
+        {"operation": "prepare_basket_orders", "count": len(instruments)},
+    )
+
+    try:
+        quotes = await _svc.get_quotes(token, instruments)
+    except KiteError as exc:
+        await audit.log(
+            current_user.id, "prepare_basket_orders_failed", ip, {"error": exc.message}
+        )
+        await db.commit()
+        raise HTTPException(400, detail=exc.message)
+    except Exception:
+        logger.exception(
+            "Failed to prepare Zerodha basket orders for user %s", current_user.id
+        )
+        await audit.log(
+            current_user.id, "prepare_basket_orders_failed", ip, {"error": "unexpected"}
+        )
+        await db.commit()
+        raise HTTPException(502, detail="Failed to validate basket orders with Zerodha")
+
+    prepared_orders: list[ZerodhaPreparedBasketOrder] = []
+    for order in body.orders:
+        key = _instrument_key(order.exchange, order.tradingsymbol)
+        quote = quotes.get(key)
+        if not isinstance(quote, dict):
+            await audit.log(
+                current_user.id,
+                "prepare_basket_orders_failed",
+                ip,
+                {"error": f"missing_quote:{key}"},
+            )
+            await db.commit()
+            raise HTTPException(
+                400, detail=f"Could not fetch live Zerodha quote for {key}"
+            )
+        try:
+            prepared_orders.append(_prepared_basket_order_from_quote(order, quote))
+        except ValueError as exc:
+            await audit.log(
+                current_user.id,
+                "prepare_basket_orders_failed",
+                ip,
+                {"error": str(exc), "instrument": key},
+            )
+            await db.commit()
+            raise HTTPException(
+                400, detail=f"Could not compute a safe order price for {key}: {exc}"
+            )
+
+    adjusted_count = sum(1 for order in prepared_orders if order.adjusted)
+    await audit.log(
+        current_user.id,
+        "prepare_basket_orders",
+        ip,
+        {"count": len(prepared_orders), "adjusted_count": adjusted_count},
+    )
+    await db.commit()
+    return ZerodhaPrepareBasketResponse(
+        orders=prepared_orders, adjusted_count=adjusted_count
+    )
 
 
 @router.post("/orders", response_model=ZerodhaPlaceOrderResponse)
@@ -307,7 +465,13 @@ async def place_order(
     exchange = body.exchange.upper()
     requested_variety = body.variety.lower()
     market_open = _is_regular_market_open(exchange)
-    variety = "amo" if requested_variety == "regular" and body.auto_amo_when_closed and not market_open else requested_variety
+    variety = (
+        "amo"
+        if requested_variety == "regular"
+        and body.auto_amo_when_closed
+        and not market_open
+        else requested_variety
+    )
 
     order_data: dict[str, str] = {
         "tradingsymbol": body.tradingsymbol.upper(),
@@ -319,7 +483,9 @@ async def place_order(
         "validity": body.validity,
     }
     if body.order_type in {"MARKET", "SL-M"}:
-        order_data["market_protection"] = str(body.market_protection if body.market_protection else -1)
+        order_data["market_protection"] = str(
+            body.market_protection if body.market_protection else -1
+        )
     if body.price:
         order_data["price"] = str(body.price)
     if body.trigger_price:
@@ -338,22 +504,36 @@ async def place_order(
         "market_open": market_open,
         "auto_converted_to_amo": requested_variety != variety,
     }
-    await audit.log(current_user.id, "token_used", ip, {"operation": "place_order", **order_meta})
+    await audit.log(
+        current_user.id, "token_used", ip, {"operation": "place_order", **order_meta}
+    )
 
     try:
         result = await _svc.place_order(token, order_data, variety=variety)
     except KiteError as exc:
-        await audit.log(current_user.id, "place_order_failed", ip, {"error": exc.message, **order_meta})
+        await audit.log(
+            current_user.id,
+            "place_order_failed",
+            ip,
+            {"error": exc.message, **order_meta},
+        )
         await db.commit()
         raise HTTPException(400, detail=exc.message)
     except Exception:
         logger.exception("Failed to place Zerodha order for user %s", current_user.id)
-        await audit.log(current_user.id, "place_order_failed", ip, {"error": "unexpected", **order_meta})
+        await audit.log(
+            current_user.id,
+            "place_order_failed",
+            ip,
+            {"error": "unexpected", **order_meta},
+        )
         await db.commit()
         raise HTTPException(502, detail="Failed to place order on Zerodha")
 
     order_id = result.get("order_id", "")
-    await audit.log(current_user.id, "place_order", ip, {"order_id": order_id, **order_meta})
+    await audit.log(
+        current_user.id, "place_order", ip, {"order_id": order_id, **order_meta}
+    )
     await db.commit()
 
     logger.info("Order placed for user %s: %s", current_user.id, result)

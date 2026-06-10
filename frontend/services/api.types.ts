@@ -48,6 +48,8 @@ import {
     PolymarketDiscoveryDebugRequest,
     ZerodhaLoginUrlResponse,
     ZerodhaOrder,
+    ZerodhaPrepareBasketRequest,
+    ZerodhaPrepareBasketResponse,
     ZerodhaPlaceOrderRequest,
     ZerodhaPlaceOrderResponse,
     ZerodhaThreatAnalysis,
@@ -120,6 +122,7 @@ export interface IApiService {
     zerodhaPortfolioSnapshot(snapshotDate: string): Promise<ZerodhaPortfolioSnapshotDetail>;
     zerodhaSyncPortfolio(): Promise<ZerodhaPortfolioSyncResponse>;
     zerodhaOrders(): Promise<{ data: ZerodhaOrder[] }>;
+    zerodhaPrepareBasketOrders(data: ZerodhaPrepareBasketRequest): Promise<ZerodhaPrepareBasketResponse>;
     zerodhaPlaceOrder(data: ZerodhaPlaceOrderRequest): Promise<ZerodhaPlaceOrderResponse>;
     zerodhaDisconnect(): Promise<{ message: string }>;
     zerodhaEventsLatest(): Promise<ZerodhaEventsLatestResponse>;

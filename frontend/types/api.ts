@@ -806,6 +806,39 @@ export interface ZerodhaOrder {
   pending_quantity: number;
 }
 
+
+export interface ZerodhaPrepareBasketOrderRequest {
+  tradingsymbol: string;
+  exchange: string;
+  transaction_type: 'BUY' | 'SELL';
+  quantity: number;
+  price: number;
+}
+
+export interface ZerodhaPrepareBasketRequest {
+  orders: ZerodhaPrepareBasketOrderRequest[];
+}
+
+export interface ZerodhaPreparedBasketOrder {
+  tradingsymbol: string;
+  exchange: string;
+  transaction_type: 'BUY' | 'SELL';
+  quantity: number;
+  requested_price: number;
+  price: number;
+  last_price: number;
+  tick_size: number;
+  lower_circuit_limit?: number | null;
+  upper_circuit_limit?: number | null;
+  adjusted: boolean;
+  reasons: string[];
+}
+
+export interface ZerodhaPrepareBasketResponse {
+  orders: ZerodhaPreparedBasketOrder[];
+  adjusted_count: number;
+}
+
 export interface ZerodhaPlaceOrderRequest {
   tradingsymbol: string;
   exchange: string;
