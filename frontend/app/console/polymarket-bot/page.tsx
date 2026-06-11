@@ -181,6 +181,9 @@ export default function PolymarketBotPage() {
   const visiblePending = state.live.pending_confirmations.slice(0, showAllPending ? undefined : 25);
   const confirmDisabled = !state.live.unlocked || state.live.emergency_stopped;
   const manualInvalid = state.live.source_status.manual_wallets_invalid;
+  const isActionPending = pendingAction !== null;
+  const startDisabled = state.running || isActionPending;
+  const stopDisabled = !state.running || isActionPending;
 
   const botStatusItems: MetricItem[] = [
     { label: 'Bot Status', value: state.running ? 'RUNNING' : 'STOPPED', tone: state.running ? 'positive' : 'negative' },
@@ -292,8 +295,9 @@ export default function PolymarketBotPage() {
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
-            className="rounded-full bg-sky-300 px-5 text-slate-950 hover:bg-sky-200"
-            disabled={pendingAction !== null}
+            className="rounded-full bg-sky-300 px-5 text-slate-950 hover:bg-sky-200 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100"
+            disabled={startDisabled}
+            aria-disabled={startDisabled}
             onClick={() => runAction('start', () => apiService.polymarketStart())}
           >
             Start bot
@@ -301,8 +305,13 @@ export default function PolymarketBotPage() {
           <Button
             size="sm"
             variant="outline"
-            className="rounded-full border-slate-300"
-            disabled={pendingAction !== null}
+            className={
+              state.running
+                ? 'rounded-full border-rose-600 bg-rose-600 text-white hover:border-rose-700 hover:bg-rose-700 hover:text-white disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100'
+                : 'rounded-full border-slate-300 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100'
+            }
+            disabled={stopDisabled}
+            aria-disabled={stopDisabled}
             onClick={() => runAction('stop', () => apiService.polymarketStop())}
           >
             Stop bot
