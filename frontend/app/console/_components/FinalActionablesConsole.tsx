@@ -704,6 +704,21 @@ function parseNumericCell(value?: string | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseStrictNumericCell(value?: string | null) {
+  const normalized = String(value || "")
+    .replace(/,/g, "")
+    .trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return null;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseRationaleScoreCell(value?: string | null) {
+  const parsed = parseStrictNumericCell(value);
+  return parsed !== null && parsed >= -3 && parsed <= 3 ? parsed : null;
+}
+
 function average(values: number[]) {
   if (!values.length) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -1051,10 +1066,10 @@ function formatScoreValue(value: number | null) {
   return value.toFixed(2);
 }
 
-function getAverageNumericCell(rows: LlmBreakupRow[], header: RebalanceHeader) {
+function getAverageRationaleScoreCell(rows: LlmBreakupRow[], header: RebalanceHeader) {
   return average(
     rows
-      .map((row) => parseNumericCell(row.cells[header]))
+      .map((row) => parseRationaleScoreCell(row.cells[header]))
       .filter((value): value is number => value !== null),
   );
 }
@@ -1115,37 +1130,37 @@ function buildDetailedRationaleScoreRows(
     {
       id: "cruxx",
       parameter: "Average of Score Rationale Cruxx",
-      score: getAverageNumericCell(stock.rows, "Score Rationale Cruxx"),
+      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale Cruxx"),
       multiplier: 3,
     },
     {
       id: "technical-short",
       parameter: "Average of Score Rationale - Technical Setup (Short Term 1–3 Months)",
-      score: getAverageNumericCell(stock.rows, "Score Rationale Technical Setup Short Term 1–3 Months"),
+      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale Technical Setup Short Term 1–3 Months"),
       multiplier: 3,
     },
     {
       id: "technical-medium",
       parameter: "Average of Score Rationale - Technical Setup (Medium Term)",
-      score: getAverageNumericCell(stock.rows, "Score Rationale - Technical Setup (Medium Term)"),
+      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Technical Setup (Medium Term)"),
       multiplier: 2,
     },
     {
       id: "technical-long",
       parameter: "Average of Score Rationale - Technical Setup (Long Term)",
-      score: getAverageNumericCell(stock.rows, "Score Rationale - Technical Setup (Long Term)"),
+      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Technical Setup (Long Term)"),
       multiplier: 1,
     },
     {
       id: "fundamentals-short",
       parameter: "Average of Score Rationale - Fundamentals Short Term",
-      score: getAverageNumericCell(stock.rows, "Score Rationale - Fundamentals Short Term"),
+      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Fundamentals Short Term"),
       multiplier: 3,
     },
     {
       id: "fundamentals-medium-long",
       parameter: "Average of Score Rationale - Fundamentals Medium/Long Term",
-      score: getAverageNumericCell(stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
+      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
       multiplier: 1,
     },
     {
