@@ -2723,11 +2723,13 @@ export function StockDetailsButton({
   market,
   technicalScan,
   detailsData,
+  onFocusCalculation,
 }: {
   stock: StockConsensus;
   market: SwingTradeMarket;
   technicalScan: TechnicalScanResult | null;
   detailsData: StockDetailsData;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   const [open, setOpen] = useState(false);
   const eventRows = getAnalysisTableRowsForStock(
@@ -2780,14 +2782,30 @@ export function StockDetailsButton({
                   Swing/all LLM runs, technical scan, threats, and events context captured in prior flows.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                aria-label="Close stock details"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {onFocusCalculation ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onFocusCalculation({ stockKey: stock.key, header: "Stock Info" });
+                      setOpen(false);
+                    }}
+                    className="inline-flex size-9 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    aria-label={`Open Actionables Calculations for ${stock.symbol}`}
+                    title="Actionables Calculations"
+                  >
+                    <ActionablesCalculationsIcon className="size-4" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  aria-label="Close stock details"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             <div className="max-h-[75vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
@@ -2902,6 +2920,7 @@ function ActionSummarySections({
   setupGroups,
   detailsData,
   onSetupClick,
+  onFocusCalculation,
 }: {
   consensus: StockConsensus[];
   market: SwingTradeMarket;
@@ -2909,6 +2928,7 @@ function ActionSummarySections({
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
   onSetupClick: (group: SetupStockGroup) => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -2944,6 +2964,7 @@ function ActionSummarySections({
                       setupGroups={setupGroups}
                       detailsData={detailsData}
                       onSetupClick={onSetupClick}
+                      onFocusCalculation={onFocusCalculation}
                     />
                   ))}
                 </div>
@@ -2966,6 +2987,7 @@ function ActionSummaryStockTile({
   setupGroups,
   detailsData,
   onSetupClick,
+  onFocusCalculation,
 }: {
   action: ActionCategory;
   stock: StockConsensus;
@@ -2974,6 +2996,7 @@ function ActionSummaryStockTile({
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
   onSetupClick: (group: SetupStockGroup) => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   const estimate = stock.actionAverages[action];
   const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
@@ -2990,6 +3013,7 @@ function ActionSummaryStockTile({
               market={market}
               technicalScan={technicalScan}
               detailsData={detailsData}
+              onFocusCalculation={onFocusCalculation}
             />
             <TradingViewSymbolLink
               symbol={stock.symbol}
@@ -3499,14 +3523,27 @@ export function ScoreMatrixModal({
               {" "}with units change {formatSignedQuantity(editedDetail.calculatedUnitsChange)}.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            aria-label="Close score matrix popup"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onFocusCalculation ? (
+              <button
+                type="button"
+                onClick={() => onFocusCalculation({ stockKey: editedDetail.stockKey, header: "Stock Info" })}
+                className="inline-flex size-9 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                aria-label={`Open Actionables Calculations for ${editedDetail.stockSymbol}`}
+                title="Actionables Calculations"
+              >
+                <ActionablesCalculationsIcon className="size-4" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label="Close score matrix popup"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
@@ -4046,7 +4083,13 @@ function getStockSummaryJobRunLabel(stock: StockConsensus) {
   return newestMeta ? formatJobRunTimestamp(newestMeta) : "—";
 }
 
-function renderStockInfoBlock(stock: StockConsensus, detailsData?: StockDetailsData, market?: SwingTradeMarket, technicalScan?: TechnicalScanResult | null) {
+function renderStockInfoBlock(
+  stock: StockConsensus,
+  detailsData?: StockDetailsData,
+  market?: SwingTradeMarket,
+  technicalScan?: TechnicalScanResult | null,
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void,
+) {
   const stockName = stock.representative["Stock Name"] || stock.symbol;
   return (
     <div className="flex min-w-[16rem] items-start gap-2 py-1">
@@ -4056,6 +4099,7 @@ function renderStockInfoBlock(stock: StockConsensus, detailsData?: StockDetailsD
           market={market}
           technicalScan={technicalScan ?? null}
           detailsData={detailsData}
+          onFocusCalculation={onFocusCalculation}
         />
       ) : null}
       <div className="space-y-2 whitespace-normal text-slate-950">
@@ -4243,6 +4287,7 @@ function buildActionablesCalculationRowGroups(
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,
   detailsData?: StockDetailsData,
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void,
 ): ActionablesCalculationRowGroup[] {
   const groupMap = new Map<string, ActionablesCalculationRowGroup>();
 
@@ -4261,6 +4306,7 @@ function buildActionablesCalculationRowGroups(
         detailsData,
         market,
         getTechnicalScanForStock(technicalScans, row.stock),
+        onFocusCalculation,
       ),
       sortValues: row.sortValues,
       rows: [row],
@@ -4727,7 +4773,7 @@ function ActionablesCalculationsModal({
     [displayedSetupGroups, displayedStocks, displayedTechnicalScans, market, onSetupClick, setupGroups],
   );
   const rowGroups = useMemo(
-    () => buildActionablesCalculationRowGroups(rows, sortState, market, displayedTechnicalScans, detailsData),
+    () => buildActionablesCalculationRowGroups(rows, sortState, market, displayedTechnicalScans, detailsData, setInternalFocusTarget),
     [detailsData, displayedTechnicalScans, market, rows, sortState],
   );
 
@@ -4748,6 +4794,7 @@ function ActionablesCalculationsModal({
   useEffect(() => {
     if (!open || !activeFocusTarget) return;
 
+    targetCellRef.current = null;
     const frameId = window.requestAnimationFrame(() => {
       targetCellRef.current?.scrollIntoView({
         behavior: "smooth",
@@ -4908,11 +4955,23 @@ function ActionablesCalculationsModal({
                               return rowIndex === 0 ? (
                                 <td
                                   key={`${group.stockKey}-stock-info`}
+                                  ref={(node) => {
+                                    if (activeFocusTarget?.stockKey === group.stockKey && activeFocusTarget.header === "Stock Info") {
+                                      targetCellRef.current = node;
+                                    }
+                                  }}
                                   rowSpan={group.rows.length}
                                   className="sticky left-0 z-[1] overflow-hidden border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
                                   style={{ width, minWidth: width, maxWidth: width }}
                                 >
-                                  <ScrollableCalculationCell className="max-h-36">
+                                  <ScrollableCalculationCell
+                                    className={cn(
+                                      "max-h-36",
+                                      activeFocusTarget?.stockKey === group.stockKey && activeFocusTarget.header === "Stock Info"
+                                        ? "rounded bg-blue-100 p-1 ring-2 ring-blue-400"
+                                        : "",
+                                    )}
+                                  >
                                     {group.stockInfo}
                                   </ScrollableCalculationCell>
                                 </td>
@@ -5624,6 +5683,10 @@ export function DashboardFinalActionablesTables() {
                                         market={market}
                                         technicalScan={scan}
                                         detailsData={detailsData}
+                                        onFocusCalculation={(target) => {
+                                          setCalculationFocusTarget(target);
+                                          setCalculationsMarket(market);
+                                        }}
                                       />
                                       <TradingViewSymbolLink
                                         symbol={stock.symbol}
@@ -6095,6 +6158,10 @@ export function FinalActionablesConsole({
               setupGroups={setupStockGroups}
               detailsData={detailsData}
               onSetupClick={setSelectedSetupGroup}
+              onFocusCalculation={(target) => {
+                setCalculationFocusTarget(target);
+                setCalculationsOpen(true);
+              }}
             />
           </>
         )}
@@ -6165,6 +6232,10 @@ export function FinalActionablesConsole({
                             detailsData={detailsData}
                             onSetupClick={setSelectedSetupGroup}
                             onMatrixDetailOpen={setSelectedMatrixDetail}
+                            onFocusCalculation={(target) => {
+                              setCalculationFocusTarget(target);
+                              setCalculationsOpen(true);
+                            }}
                           />
                         );
                       })}
@@ -6306,6 +6377,7 @@ function FragmentRows({
   detailsData,
   onSetupClick,
   onMatrixDetailOpen,
+  onFocusCalculation,
 }: {
   stock: StockConsensus;
   isExpanded: boolean;
@@ -6316,6 +6388,7 @@ function FragmentRows({
   detailsData: StockDetailsData;
   onSetupClick: (group: SetupStockGroup) => void;
   onMatrixDetailOpen: (detail: ScoreMatrixDetail) => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   return (
     <>
@@ -6345,6 +6418,7 @@ function FragmentRows({
               market={market}
               technicalScan={technicalScan}
               detailsData={detailsData}
+              onFocusCalculation={onFocusCalculation}
             />
             <div>
               <TradingViewSymbolLink
@@ -6372,6 +6446,7 @@ function FragmentRows({
                   market={market}
                   technicalScan={technicalScan}
                   detailsData={detailsData}
+                  onFocusCalculation={onFocusCalculation}
                 />
                 <RebalanceCell
                   row={stock.representative}
