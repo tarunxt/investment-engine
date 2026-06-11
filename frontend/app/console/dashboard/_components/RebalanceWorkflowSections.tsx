@@ -22,6 +22,8 @@ import {
   ConsensusBreakupButton,
   ScoreMatrixButton,
   ScoreMatrixModal,
+  StockDetailsButton,
+  getTechnicalScanForStock,
   type ActionCategory,
   type ActionEstimate,
   extractRebalanceInputFingerprint,
@@ -29,9 +31,12 @@ import {
   isCompletedRebalanceRun,
   type DashboardActionRow,
   type ScoreMatrixDetail,
+  type StockDetailsData,
+  type TechnicalScanResult,
   type StockConsensus,
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
+import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
 import MarkdownRenderer from "@/components/shared/MarkdownRenderer";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
@@ -184,6 +189,7 @@ type ZerodhaBasketPreviewOrder = {
   orderKind: ZerodhaBasketOrderKind;
   stock: StockConsensus;
   detail: ScoreMatrixDetail;
+  technicalScan: TechnicalScanResult | null;
 };
 type WorkflowState = Record<WorkflowStageKey, StageInfo>;
 type IndMoneySyncMode = "reuse" | "paste";
@@ -1024,6 +1030,7 @@ function getZerodhaBasketExchange(
 
 function buildZerodhaBasketPreviewOrders(
   rows: DashboardActionRow[],
+  technicalScans: Record<string, TechnicalScanResult>,
   snapshot?: ZerodhaPortfolioSnapshotDetail | null,
 ): ZerodhaBasketPreviewOrder[] {
   const holdingExchangeBySymbol = buildZerodhaHoldingExchangeMap(snapshot);
@@ -1069,6 +1076,7 @@ function buildZerodhaBasketPreviewOrders(
         orderKind: "Market" as const,
         stock,
         detail: row.detail,
+        technicalScan: getTechnicalScanForStock(technicalScans, stock),
       };
     })
     .filter((order) => order.units !== null && order.units > 0)
@@ -2570,6 +2578,7 @@ function ZerodhaBasketPreviewDialog({
   onPlaceOrder,
   placing,
   submission,
+  detailsData,
 }: {
   open: boolean;
   loading: boolean;
@@ -2586,6 +2595,7 @@ function ZerodhaBasketPreviewDialog({
   onPlaceOrder: () => void;
   placing: boolean;
   submission: ZerodhaBasketSubmission | null;
+  detailsData: StockDetailsData;
 }) {
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
 
@@ -2750,8 +2760,23 @@ function ZerodhaBasketPreviewDialog({
                                 />
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950">
-                                <span className="mr-2 text-xs font-semibold text-slate-500">{order.exchange}</span>
-                                {order.symbol}
+                                <div className="inline-flex items-center gap-1.5">
+                                  <StockDetailsButton
+                                    stock={order.stock}
+                                    market="india"
+                                    technicalScan={order.technicalScan}
+                                    detailsData={detailsData}
+                                  />
+                                  <span className="text-xs font-semibold text-slate-500">{order.exchange}</span>
+                                  <TradingViewSymbolLink
+                                    symbol={order.symbol}
+                                    market="india"
+                                    exchange={order.exchange}
+                                    className="underline-offset-4 transition hover:text-blue-700 hover:underline"
+                                  >
+                                    {order.symbol}
+                                  </TradingViewSymbolLink>
+                                </div>
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
                                 <ScoreMatrixButton detail={order.detail} onOpenDetail={setSelectedMatrixDetail} />
@@ -4623,6 +4648,12 @@ export function RebalanceWorkflowSections({
   const [zerodhaBasketSubmission, setZerodhaBasketSubmission] = useState<ZerodhaBasketSubmission | null>(null);
   const [zerodhaBasketError, setZerodhaBasketError] = useState<string | null>(null);
   const [zerodhaBasketOrders, setZerodhaBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
+  const [zerodhaBasketDetailsData, setZerodhaBasketDetailsData] = useState<StockDetailsData>({
+    portfolioSnapshot: null,
+    eventsAnalysis: null,
+    threatsAnalysis: null,
+    error: null,
+  });
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
@@ -4711,6 +4742,10 @@ export function RebalanceWorkflowSections({
         fetchAllFullRuns(),
         apiService.zerodhaPortfolioOverview(),
       ]);
+      const [eventsResult, threatsResult] = await Promise.allSettled([
+        apiService.zerodhaEventsLatest(),
+        apiService.zerodhaThreatsLatest(),
+      ]);
       const stocks = buildConsensusRows(
         getLatestMatchingRebalanceRuns(runs, "india"),
         "india",
@@ -4718,11 +4753,24 @@ export function RebalanceWorkflowSections({
       );
       const technicalScans = buildTechnicalScanMap(runs);
       const actionRows = buildDashboardActionRows(stocks, "india", technicalScans);
-      const orders = buildZerodhaBasketPreviewOrders(actionRows, overview.latest);
+      const orders = buildZerodhaBasketPreviewOrders(actionRows, technicalScans, overview.latest);
+      const capturedDetailsErrors = [eventsResult, threatsResult]
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => normalizeError(result.reason));
+      setZerodhaBasketDetailsData({
+        portfolioSnapshot: overview.latest,
+        eventsAnalysis: eventsResult.status === "fulfilled" ? eventsResult.value.analysis : null,
+        threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
+        error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
+      });
       setZerodhaBasketOrders(orders);
       setSelectedZerodhaBasketIds(new Set(orders.map((order) => order.id)));
     } catch (error) {
       setZerodhaBasketOrders([]);
+      setZerodhaBasketDetailsData((current) => ({
+        ...current,
+        error: normalizeError(error),
+      }));
       setSelectedZerodhaBasketIds(new Set());
       setZerodhaBasketError(`Could not prepare Zerodha basket: ${normalizeError(error)}`);
     } finally {
@@ -6817,6 +6865,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
         placing={zerodhaBasketPlacing}
         submission={zerodhaBasketSubmission}
+        detailsData={zerodhaBasketDetailsData}
       />
 
       {promptDialog ? (
