@@ -112,13 +112,13 @@ run_as_app_user() {
 install_bullpen_cli_if_needed() {
   local bullpen_bin
   bullpen_bin="$(
-    BACKEND_ENV_FILE="$BACKEND_ENV_FILE" bash -c '
+    run_as_app_user "
       set -euo pipefail
       set -a
-      source "$BACKEND_ENV_FILE"
+      source '$BACKEND_ENV_FILE'
       set +a
-      printf "%s" "${BULLPEN_BIN:-/usr/local/bin/bullpen}"
-    '
+      printf '%s' "\${BULLPEN_BIN:-/usr/local/bin/bullpen}"
+    "
   )"
 
   if [[ -z "$bullpen_bin" ]]; then
