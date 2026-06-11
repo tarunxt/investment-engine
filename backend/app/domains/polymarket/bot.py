@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.domains.polymarket.bullpen import (
@@ -37,7 +37,6 @@ from app.domains.polymarket.schemas import (
 )
 from app.domains.polymarket.storage import JsonModelStore
 
-DOCTOR_START_CACHE_TTL = timedelta(minutes=5)
 
 
 class PolymarketPaperCopyBot:
@@ -144,8 +143,9 @@ class PolymarketPaperCopyBot:
                     self.live_manually_locked,
                 )
                 if block_reason:
-                    self._add_activity(f"Live mode refused to start: {block_reason}")
-                    raise RuntimeError(f"Live mode locked: {block_reason}")
+                    message = self._startup_block_message(block_reason)
+                    self._add_activity(f"Live mode refused to start: {message}")
+                    raise RuntimeError(f"Live mode locked: {message}")
                 self.active_mode = "live-trading"
             self.running = True
             started_at = utc_now()
@@ -769,21 +769,15 @@ class PolymarketPaperCopyBot:
         await self._try_auto_unlock_live_unlocked("doctor refresh")
 
     async def _refresh_doctor_for_start_unlocked(self) -> None:
-        if self._doctor_checked_recently():
-            return
         await self._refresh_doctor_unlocked()
 
-    def _doctor_checked_recently(self) -> bool:
-        checked_at = self.doctor_status.checked_at
-        if not checked_at:
-            return False
-        try:
-            checked = datetime.fromisoformat(checked_at)
-        except ValueError:
-            return False
-        if checked.tzinfo is None:
-            checked = checked.replace(tzinfo=timezone.utc)
-        return datetime.now(timezone.utc) - checked <= DOCTOR_START_CACHE_TTL
+    def _startup_block_message(self, block_reason: str) -> str:
+        if block_reason != "Bullpen doctor must pass.":
+            return block_reason
+        doctor_message = redact_secrets(self.doctor_status.message).strip()
+        if not doctor_message:
+            return block_reason
+        return f"{block_reason} Last doctor result: {doctor_message}"
 
     async def _refresh_balance_unlocked(self) -> None:
         if self.config.auto_redeem_live and self._wants_live_execution():
