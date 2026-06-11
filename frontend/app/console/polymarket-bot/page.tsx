@@ -55,9 +55,11 @@ function formatMoney(value: number, digits = 2) {
   }).format(value || 0);
 }
 
-const BULLPEN_LOGIN_COMMAND = 'docker exec -it investor-backend-1 bullpen login';
-const BULLPEN_LOGIN_COMMAND_WITH_SUDO = 'sudo docker exec -it investor-backend-1 bullpen login';
-const BULLPEN_CONTAINER_CHECK_COMMAND = 'docker ps --format "{{.Names}}" | grep investor-backend-1';
+const BULLPEN_BACKEND_CONTAINER_COMMAND =
+  'sudo docker ps --filter \"label=com.docker.compose.service=backend\" --format \"{{.Names}}\" | head -n 1';
+const BULLPEN_LOGIN_COMMAND =
+  'BACKEND_CONTAINER=\"$(sudo docker ps --filter \\\"label=com.docker.compose.service=backend\\\" --format \\\"{{.Names}}\\\" | head -n 1)\"; if [ -n \"$BACKEND_CONTAINER\" ]; then sudo docker exec -it \"$BACKEND_CONTAINER\" bullpen login; else echo \"No running Docker Compose backend container found. Run: sudo docker ps --format \\\"{{.Names}}\\\"\"; fi';
+const BULLPEN_FALLBACK_LOGIN_COMMAND = 'sudo -u investor -H bullpen login';
 
 function requiresBullpenLogin(state: PolymarketBotState) {
   const loginMessages = [state.live.doctor.message, state.live.balance.message, state.live.locked_reason]
@@ -384,14 +386,15 @@ export default function PolymarketBotPage() {
                     {bullpenLoginRequired ? 'Bullpen login required in backend' : 'Bullpen login setup'}
                   </div>
                   <p className="mt-1 max-w-3xl text-sm text-slate-700">
-                    Use the EC2 terminal that is already open on the production host. The login must run inside the
-                    backend container so Bullpen stores its session where the API and worker can read it.
+                    Use the EC2 terminal that is already open on the production host. The Docker command below finds the
+                    running Compose backend container dynamically, so it works even when the container name includes
+                    the Compose project prefix.
                   </p>
                   <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-700">
                     <li>
-                      Confirm the backend container is present:
+                      Find the running Compose backend container:
                       <code className="mt-1 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
-                        {BULLPEN_CONTAINER_CHECK_COMMAND}
+                        {BULLPEN_BACKEND_CONTAINER_COMMAND}
                       </code>
                     </li>
                     <li>
@@ -401,9 +404,10 @@ export default function PolymarketBotPage() {
                       </code>
                     </li>
                     <li>
-                      If Docker says permission denied, retry with sudo:
+                      If the command reports no running Compose backend container, this host is likely using the
+                      no-Docker/systemd deployment. In that case, run Bullpen as the backend service user instead:
                       <code className="mt-1 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
-                        {BULLPEN_LOGIN_COMMAND_WITH_SUDO}
+                        {BULLPEN_FALLBACK_LOGIN_COMMAND}
                       </code>
                     </li>
                     <li>After Bullpen reports a successful login, click “I logged in — refresh checks”.</li>
