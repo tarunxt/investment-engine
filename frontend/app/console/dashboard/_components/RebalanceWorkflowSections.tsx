@@ -665,6 +665,11 @@ const ZERODHA_ORDER_KINDS: ZerodhaBasketOrderKind[] = [
 ];
 
 const KITE_BASKET_URL = "https://kite.zerodha.com/connect/basket";
+function buildKiteBasketUrl(apiKey: string) {
+  const url = new URL(KITE_BASKET_URL);
+  url.searchParams.set("api_key", apiKey);
+  return url.toString();
+}
 const INDIA_MARKET_TIME_ZONE = "Asia/Kolkata";
 const INDIA_MARKET_OPEN_MINUTES = 9 * 60 + 15;
 const INDIA_MARKET_CLOSE_MINUTES = 15 * 60 + 30;
@@ -760,7 +765,7 @@ async function prepareZerodhaBasketOrdersForKite(orders: ZerodhaBasketPreviewOrd
 function postZerodhaKiteBasket(apiKey: string, orders: ZerodhaBasketPreviewOrder[], marketOpen: boolean, targetName: string) {
   const form = document.createElement("form");
   form.method = "post";
-  form.action = KITE_BASKET_URL;
+  form.action = buildKiteBasketUrl(apiKey);
   form.target = targetName;
   form.style.display = "none";
 
@@ -823,9 +828,11 @@ function parseBasketNumber(value?: string | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function getBasketPrice(stock: StockConsensus, amount: number | null, units: number | null) {
-  if (amount !== null && units !== null && units !== 0) return Math.abs(amount / units);
-  return parseBasketNumber(stock.representative["Price Per Unit"]);
+function getBasketPrice(stock: StockConsensus, amount: number | null, units: number | null, fallbackPrice: number | null = null) {
+  if (amount !== null && amount > 0 && units !== null && units !== 0) return Math.abs(amount / units);
+  const representativePrice = parseBasketNumber(stock.representative["Price Per Unit"]);
+  if (representativePrice !== null && representativePrice > 0) return representativePrice;
+  return fallbackPrice !== null && fallbackPrice > 0 ? fallbackPrice : null;
 }
 
 function calculatePercentBasketUnits(baseUnits: number | null, percent: ZerodhaBasketOrderPercent) {
@@ -1015,6 +1022,21 @@ function buildZerodhaHoldingExchangeMap(snapshot?: ZerodhaPortfolioSnapshotDetai
   return map;
 }
 
+function buildZerodhaSnapshotPriceMap(snapshot?: ZerodhaPortfolioSnapshotDetail | null) {
+  const map = new Map<string, number>();
+  snapshot?.holdings.forEach((holding) => {
+    const symbol = normalizeZerodhaBasketSymbol(holding.tradingsymbol);
+    const price = holding.last_price || holding.close_price || holding.average_price || 0;
+    if (symbol && price > 0) map.set(symbol, price);
+  });
+  [...(snapshot?.positions.net ?? []), ...(snapshot?.positions.day ?? [])].forEach((position) => {
+    const symbol = normalizeZerodhaBasketSymbol(position.tradingsymbol);
+    const price = position.last_price || position.close_price || position.average_price || 0;
+    if (symbol && price > 0 && !map.has(symbol)) map.set(symbol, price);
+  });
+  return map;
+}
+
 function getZerodhaBasketExchange(
   stock: StockConsensus,
   side: "BUY" | "SELL",
@@ -1034,6 +1056,7 @@ function buildZerodhaBasketPreviewOrders(
   snapshot?: ZerodhaPortfolioSnapshotDetail | null,
 ): ZerodhaBasketPreviewOrder[] {
   const holdingExchangeBySymbol = buildZerodhaHoldingExchangeMap(snapshot);
+  const snapshotPriceBySymbol = buildZerodhaSnapshotPriceMap(snapshot);
   const availableBalance = snapshot?.available_margin ?? null;
 
   return rows
@@ -1045,7 +1068,8 @@ function buildZerodhaBasketPreviewOrders(
       const side: "BUY" | "SELL" = action === "Sell All" || action === "Trim" ? "SELL" : "BUY";
       const requestedPercent: ZerodhaBasketOrderPercent = action === "Trim" ? 50 : 100;
       const baseUnits = getZerodhaBasketBaseUnits(action, estimate);
-      const price = getBasketPrice(stock, estimate.amount, estimate.units);
+      const normalizedSymbol = normalizeZerodhaBasketSymbol(stock.symbol) || stock.symbol;
+      const price = getBasketPrice(stock, estimate.amount, estimate.units, snapshotPriceBySymbol.get(normalizedSymbol) ?? null);
       const rawUnits = calculatePercentBasketUnits(baseUnits, requestedPercent);
       const sellAvailableUnits = estimate.currentUnits ?? baseUnits;
       const maxUnits = side === "SELL"
@@ -1063,7 +1087,7 @@ function buildZerodhaBasketPreviewOrders(
       return {
         id: `zerodha:${row.id}`,
         exchange: getZerodhaBasketExchange(stock, side, holdingExchangeBySymbol),
-        symbol: normalizeZerodhaBasketSymbol(stock.symbol) || stock.symbol,
+        symbol: normalizedSymbol,
         action,
         side,
         units,
@@ -2872,7 +2896,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Kite Publisher rows are submitted as limit orders using the displayed price because offsite market baskets can be rejected before Kite forwards market protection; closed-market rows are sent as AMO limit orders.
+            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Kite Publisher rows are submitted as limit orders. Missing or stale displayed prices are refreshed from live Zerodha quotes before opening Kite because offsite market baskets can be rejected before Kite forwards market protection; closed-market rows are sent as AMO limit orders.
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
@@ -4849,11 +4873,6 @@ export function RebalanceWorkflowSections({
       return;
     }
     const marketStatus = getIndiaMarketStatus();
-    const ordersMissingExecutablePrice = selectedOrders.filter((order) => !order.price || order.price <= 0);
-    if (ordersMissingExecutablePrice.length) {
-      window.alert("Cannot prepare Zerodha Publisher rows without a valid displayed price. Unselect rows with missing prices and retry.");
-      return;
-    }
     const orderChunks = chunkZerodhaBasketOrders(selectedOrders);
     const shouldContinue = window.confirm(
       `${marketStatus.label}
