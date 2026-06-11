@@ -62,6 +62,7 @@ class PolymarketPaperCopyBot:
         self.running = False
         self.session_started_at = utc_now()
         self.started_at: str | None = None
+        self.stopped_at: str | None = None
         self.last_poll_at: str | None = None
         self.next_poll_at: str | None = None
         self.last_error: str | None = None
@@ -119,6 +120,8 @@ class PolymarketPaperCopyBot:
 
     async def shutdown(self) -> None:
         async with self._lock:
+            if self.running and not self.stopped_at:
+                self.stopped_at = utc_now()
             self.running = False
             await self._cancel_task(self._poll_task)
             self._poll_task = None
@@ -143,8 +146,11 @@ class PolymarketPaperCopyBot:
                     raise RuntimeError(f"Live mode locked: {block_reason}")
                 self.active_mode = "live-trading"
             self.running = True
-            self.started_at = utc_now()
-            self.next_poll_at = utc_now()
+            started_at = utc_now()
+            self.session_started_at = started_at
+            self.started_at = started_at
+            self.stopped_at = None
+            self.next_poll_at = started_at
             await self.logger.info(f"Bot started. mode={self.active_mode}")
             self._add_activity(f"Bot started in {self.active_mode} mode.")
             if (
@@ -157,6 +163,8 @@ class PolymarketPaperCopyBot:
 
     async def stop(self) -> None:
         async with self._lock:
+            if self.running or not self.stopped_at:
+                self.stopped_at = utc_now()
             self.running = False
             self.next_poll_at = None
             await self._cancel_task(self._poll_task)
@@ -290,6 +298,7 @@ class PolymarketPaperCopyBot:
             server_now=now,
             session_started_at=self.session_started_at,
             started_at=self.started_at,
+            stopped_at=self.stopped_at,
             last_poll_at=self.last_poll_at,
             next_poll_at=self.next_poll_at,
             seconds_until_next_poll=self._seconds_until_next_poll(now),
