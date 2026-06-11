@@ -281,7 +281,7 @@ export type TechnicalScanResult = {
 
 export type TechnicalScanMap = Record<string, TechnicalScanResult>;
 
-type StockDetailsData = {
+export type StockDetailsData = {
   portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null;
   eventsAnalysis: ZerodhaEventsAnalysis | IndMoneyUsEventsAnalysis | null;
   threatsAnalysis: ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis | null;
@@ -1947,7 +1947,7 @@ function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistor
     .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at));
 }
 
-function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsensus) {
+export function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsensus) {
   const symbolCandidates = [
     stock.symbol,
     stock.representative["Stock Symbol"],
@@ -2718,7 +2718,7 @@ export function ConsensusBreakupButton({
   );
 }
 
-function StockDetailsButton({
+export function StockDetailsButton({
   stock,
   market,
   technicalScan,
