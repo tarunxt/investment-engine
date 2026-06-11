@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Check, Copy, Loader2, RefreshCw, ShieldAlert, Terminal } from 'lucide-react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -55,6 +55,17 @@ function formatMoney(value: number, digits = 2) {
   }).format(value || 0);
 }
 
+const BULLPEN_LOGIN_COMMAND = 'docker exec -it investor-backend-1 bullpen login';
+
+function requiresBullpenLogin(state: PolymarketBotState) {
+  const loginMessages = [state.live.doctor.message, state.live.balance.message, state.live.locked_reason]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return loginMessages.includes('bullpen login') || loginMessages.includes('login required');
+}
+
 export default function PolymarketBotPage() {
   const [state, setState] = useState<PolymarketBotState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,6 +77,7 @@ export default function PolymarketBotPage() {
   const [debugTarget, setDebugTarget] = useState('swisstony');
   const [debugReport, setDebugReport] = useState<PolymarketDiscoveryDebugReport | null>(null);
   const [debugLoading, setDebugLoading] = useState(false);
+  const [loginCommandCopied, setLoginCommandCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,6 +160,16 @@ export default function PolymarketBotPage() {
     }
   }
 
+  async function copyBullpenLoginCommand() {
+    try {
+      await navigator.clipboard.writeText(BULLPEN_LOGIN_COMMAND);
+      setLoginCommandCopied(true);
+      window.setTimeout(() => setLoginCommandCopied(false), 2500);
+    } catch {
+      setActionError(`Copy failed. Run this in your terminal: ${BULLPEN_LOGIN_COMMAND}`);
+    }
+  }
+
   if (loading && !state) {
     return (
       <div className="flex items-center gap-3 text-sm text-slate-500">
@@ -169,6 +191,7 @@ export default function PolymarketBotPage() {
   const visiblePending = state.live.pending_confirmations.slice(0, showAllPending ? undefined : 25);
   const confirmDisabled = !state.live.unlocked || state.live.emergency_stopped;
   const manualInvalid = state.live.source_status.manual_wallets_invalid;
+  const bullpenLoginRequired = requiresBullpenLogin(state);
 
   const botStatusItems: MetricItem[] = [
     { label: 'Bot Status', value: state.running ? 'RUNNING' : 'STOPPED', tone: state.running ? 'positive' : 'negative' },
@@ -331,6 +354,38 @@ export default function PolymarketBotPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
+          <div
+            className={`rounded-[24px] border px-4 py-4 shadow-sm ${
+              bullpenLoginRequired ? 'border-amber-200 bg-amber-50' : 'border-sky-200 bg-sky-50'
+            }`}
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-start gap-3">
+                <Terminal className={`mt-1 size-5 shrink-0 ${bullpenLoginRequired ? 'text-amber-700' : 'text-sky-700'}`} />
+                <div>
+                  <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-950">
+                    {bullpenLoginRequired ? 'Bullpen login required in backend' : 'Bullpen login setup'}
+                  </div>
+                  <p className="mt-1 max-w-3xl text-sm text-slate-700">
+                    To connect Bullpen, open a terminal on the server and run the login command below in the backend
+                    container. After login succeeds, use Refresh doctor and Refresh balance here.
+                  </p>
+                  <code className="mt-3 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
+                    {BULLPEN_LOGIN_COMMAND}
+                  </code>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                className="rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
+                onClick={() => void copyBullpenLoginCommand()}
+              >
+                {loginCommandCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                {loginCommandCopied ? 'Copied login command' : 'Copy Bullpen login command'}
+              </Button>
+            </div>
+          </div>
+
           <MetricGrid items={liveControlItems} columns="md:grid-cols-2 xl:grid-cols-4" />
 
           <div className="flex flex-wrap gap-2">
