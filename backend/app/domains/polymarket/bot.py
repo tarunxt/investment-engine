@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.domains.polymarket.bullpen import (
@@ -36,6 +36,8 @@ from app.domains.polymarket.schemas import (
     PolymarketTrader,
 )
 from app.domains.polymarket.storage import JsonModelStore
+
+DOCTOR_START_CACHE_TTL = timedelta(minutes=5)
 
 
 class PolymarketPaperCopyBot:
@@ -133,7 +135,7 @@ class PolymarketPaperCopyBot:
             if self.running:
                 return
             if self._wants_live_execution():
-                await self._refresh_doctor_unlocked()
+                await self._refresh_doctor_for_start_unlocked()
                 await self._try_auto_unlock_live_unlocked("Start Bot")
                 block_reason = self.live_guard.startup_block_reason(
                     self.doctor_status,
@@ -153,13 +155,7 @@ class PolymarketPaperCopyBot:
             self.next_poll_at = started_at
             await self.logger.info(f"Bot started. mode={self.active_mode}")
             self._add_activity(f"Bot started in {self.active_mode} mode.")
-            if (
-                self.active_mode in ("live-trading", "live-read")
-                and not self.live_source_status.live_baseline_completed_at
-            ):
-                await self._perform_live_baseline_unlocked("Start Bot")
-            await self._poll_unlocked()
-            self._ensure_poll_task()
+            self._ensure_poll_task(initial_delay=0)
 
     async def stop(self) -> None:
         async with self._lock:
@@ -312,25 +308,46 @@ class PolymarketPaperCopyBot:
             live=self._live_state(),
         )
 
-    def _ensure_poll_task(self) -> None:
+    def _ensure_poll_task(self, *, initial_delay: float | None = None) -> None:
         if self._poll_task and not self._poll_task.done():
             return
-        self._poll_task = asyncio.create_task(self._poll_loop())
+        self._poll_task = asyncio.create_task(
+            self._poll_loop(initial_delay=initial_delay)
+        )
 
     def _ensure_balance_task(self) -> None:
         if self._balance_task and not self._balance_task.done():
             return
         self._balance_task = asyncio.create_task(self._balance_loop())
 
-    async def _poll_loop(self) -> None:
+    async def _poll_loop(self, *, initial_delay: float | None = None) -> None:
         try:
+            delay = max(self.config.poll_interval_ms / 1000, 1)
+            if initial_delay is not None:
+                delay = max(initial_delay, 0)
             while True:
-                await asyncio.sleep(max(self.config.poll_interval_ms / 1000, 1))
+                await asyncio.sleep(delay)
                 async with self._lock:
                     if not self.running:
                         self.next_poll_at = None
                         break
-                    await self._poll_unlocked()
+                    try:
+                        if (
+                            self.active_mode in ("live-trading", "live-read")
+                            and not self.live_source_status.live_baseline_completed_at
+                        ):
+                            await self._perform_live_baseline_unlocked("Start Bot")
+                        await self._poll_unlocked()
+                    except Exception as exc:
+                        self.last_error = str(exc)
+                        if self.active_mode in ("live-read", "live-trading"):
+                            self.live_source_status.last_live_read_error = (
+                                redact_secrets(self.last_error)
+                            )
+                        await self.logger.error("Polling failed", exc)
+                        self._add_activity(f"Poll failed: {self.last_error}.")
+                        self._schedule_next_poll_unlocked()
+                delay = max(self.config.poll_interval_ms / 1000, 1)
         except asyncio.CancelledError:
             return
 
@@ -750,6 +767,23 @@ class PolymarketPaperCopyBot:
     async def _refresh_doctor_unlocked(self) -> None:
         self.doctor_status = await self.live_executor.doctor()
         await self._try_auto_unlock_live_unlocked("doctor refresh")
+
+    async def _refresh_doctor_for_start_unlocked(self) -> None:
+        if self._doctor_checked_recently():
+            return
+        await self._refresh_doctor_unlocked()
+
+    def _doctor_checked_recently(self) -> bool:
+        checked_at = self.doctor_status.checked_at
+        if not checked_at:
+            return False
+        try:
+            checked = datetime.fromisoformat(checked_at)
+        except ValueError:
+            return False
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - checked <= DOCTOR_START_CACHE_TTL
 
     async def _refresh_balance_unlocked(self) -> None:
         if self.config.auto_redeem_live and self._wants_live_execution():
