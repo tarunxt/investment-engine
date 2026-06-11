@@ -56,6 +56,8 @@ function formatMoney(value: number, digits = 2) {
 }
 
 const BULLPEN_LOGIN_COMMAND = 'docker exec -it investor-backend-1 bullpen login';
+const BULLPEN_LOGIN_COMMAND_WITH_SUDO = 'sudo docker exec -it investor-backend-1 bullpen login';
+const BULLPEN_CONTAINER_CHECK_COMMAND = 'docker ps --format "{{.Names}}" | grep investor-backend-1';
 
 function requiresBullpenLogin(state: PolymarketBotState) {
   const loginMessages = [state.live.doctor.message, state.live.balance.message, state.live.locked_reason]
@@ -167,6 +169,21 @@ export default function PolymarketBotPage() {
       window.setTimeout(() => setLoginCommandCopied(false), 2500);
     } catch {
       setActionError(`Copy failed. Run this in your terminal: ${BULLPEN_LOGIN_COMMAND}`);
+    }
+  }
+
+  async function refreshBullpenChecksAfterLogin() {
+    setPendingAction('bullpen-login-refresh');
+    setActionError(null);
+    try {
+      const doctorState = await apiService.polymarketLiveDoctor();
+      setState(doctorState);
+      const balanceState = await apiService.polymarketLiveBalanceRefresh();
+      setState(balanceState);
+    } catch (refreshError) {
+      setActionError(normalizeError(refreshError));
+    } finally {
+      setPendingAction(null);
     }
   }
 
@@ -367,22 +384,56 @@ export default function PolymarketBotPage() {
                     {bullpenLoginRequired ? 'Bullpen login required in backend' : 'Bullpen login setup'}
                   </div>
                   <p className="mt-1 max-w-3xl text-sm text-slate-700">
-                    To connect Bullpen, open a terminal on the server and run the login command below in the backend
-                    container. After login succeeds, use Refresh doctor and Refresh balance here.
+                    Use the EC2 terminal that is already open on the production host. The login must run inside the
+                    backend container so Bullpen stores its session where the API and worker can read it.
                   </p>
-                  <code className="mt-3 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
-                    {BULLPEN_LOGIN_COMMAND}
-                  </code>
+                  <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-700">
+                    <li>
+                      Confirm the backend container is present:
+                      <code className="mt-1 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
+                        {BULLPEN_CONTAINER_CHECK_COMMAND}
+                      </code>
+                    </li>
+                    <li>
+                      Run the interactive Bullpen login and complete the browser/code prompt it prints:
+                      <code className="mt-1 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
+                        {BULLPEN_LOGIN_COMMAND}
+                      </code>
+                    </li>
+                    <li>
+                      If Docker says permission denied, retry with sudo:
+                      <code className="mt-1 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
+                        {BULLPEN_LOGIN_COMMAND_WITH_SUDO}
+                      </code>
+                    </li>
+                    <li>After Bullpen reports a successful login, click “I logged in — refresh checks”.</li>
+                  </ol>
                 </div>
               </div>
-              <Button
-                size="sm"
-                className="rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
-                onClick={() => void copyBullpenLoginCommand()}
-              >
-                {loginCommandCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                {loginCommandCopied ? 'Copied login command' : 'Copy Bullpen login command'}
-              </Button>
+              <div className="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
+                <Button
+                  size="sm"
+                  className="rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
+                  onClick={() => void copyBullpenLoginCommand()}
+                >
+                  {loginCommandCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                  {loginCommandCopied ? 'Copied login command' : 'Copy Bullpen login command'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="rounded-full border-slate-300 bg-white"
+                  disabled={pendingAction !== null}
+                  onClick={() => void refreshBullpenChecksAfterLogin()}
+                >
+                  {pendingAction === 'bullpen-login-refresh' ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3.5" />
+                  )}
+                  I logged in — refresh checks
+                </Button>
+              </div>
             </div>
           </div>
 
