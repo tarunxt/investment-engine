@@ -147,7 +147,10 @@ class PolymarketPaperCopyBot:
             self.next_poll_at = utc_now()
             await self.logger.info(f"Bot started. mode={self.active_mode}")
             self._add_activity(f"Bot started in {self.active_mode} mode.")
-            if self.active_mode in ("live-trading", "live-read"):
+            if (
+                self.active_mode in ("live-trading", "live-read")
+                and not self.live_source_status.live_baseline_completed_at
+            ):
                 await self._perform_live_baseline_unlocked("Start Bot")
             await self._poll_unlocked()
             self._ensure_poll_task()
