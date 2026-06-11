@@ -1068,7 +1068,7 @@ def polymarket_profile_url(address: str) -> str | None:
 
 def polymarket_handle_profile_url(handle: str | None) -> str | None:
     slug = clean_handle(handle)
-    return f"https://polymarket.com/profile/{slug}" if slug else None
+    return f"https://polymarket.com/@{slug}" if slug else None
 
 
 def polymarket_handle_activity_url(handle: str | None) -> str | None:
