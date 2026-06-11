@@ -773,6 +773,39 @@ def _publish_run_update(
         _redis_publish(f"user_run_updates:{user_id}", payload)
 
 
+def _queue_run_completion_email_once(run_id: int, status: JobStatus) -> None:
+    """Queue a single completion email for this run/status using Redis SETNX."""
+    if status not in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
+        return
+
+    dedupe_key = f"run_completion_email_sent:{run_id}:{status.value}"
+    redis_client: _sync_redis.Redis | None = None
+    try:
+        redis_client = _sync_redis.from_url(settings.redis_url, decode_responses=True)
+        if not redis_client.set(dedupe_key, "1", nx=True, ex=60 * 60 * 24 * 30):
+            return
+        from app.domains.runs.tasks import send_run_completion_email_task
+
+        send_run_completion_email_task.delay(run_id)  # type: ignore
+        logger.info("Queued run completion email for run %s", run_id)
+    except Exception:
+        logger.exception("Failed to queue run completion email for run %s", run_id)
+        if redis_client is not None:
+            try:
+                redis_client.delete(dedupe_key)
+            except Exception:
+                logger.exception(
+                    "Failed to release run completion email dedupe key for run %s",
+                    run_id,
+                )
+    finally:
+        if redis_client is not None:
+            try:
+                redis_client.close()
+            except Exception:
+                pass
+
+
 def _refresh_run_status(db, job_id: int) -> None:
     """Recalculate and persist Run.status when a child job reaches a terminal state."""
     try:
@@ -881,6 +914,7 @@ def _refresh_run_status(db, job_id: int) -> None:
                     run.exported_sheet_url,
                 )
                 logger.info("Run %s status → %s", run_id, new_status.value)
+                _queue_run_completion_email_once(run_id, new_status)
 
             # Trigger auto-export per model as soon as a model completes, or when
             # a failed model still produced complete stock rows that can be exported.

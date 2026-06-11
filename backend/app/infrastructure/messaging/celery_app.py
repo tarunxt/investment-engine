@@ -21,6 +21,7 @@ celery.conf.task_default_queue = "ai"
 celery.conf.task_routes = {
     "app.domains.jobs.tasks.*": {"queue": "ai"},
     "app.domains.auth.tasks.*": {"queue": "email"},
+    "app.domains.runs.tasks.*": {"queue": "email"},
     "app.domains.zerodha.tasks.*": {"queue": "ai"},
     "app.infrastructure.database.outbox.tasks.*": {"queue": "beat"},
 }
@@ -47,6 +48,7 @@ celery.conf.task_reject_on_worker_lost = True  # requeue if worker crashes mid-t
 celery.autodiscover_tasks([
     "app.domains.jobs",
     "app.domains.auth",
+    "app.domains.runs",
     "app.domains.google_sheets",
     "app.domains.zerodha",
     "app.infrastructure.database.outbox",
