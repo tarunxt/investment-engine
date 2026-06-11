@@ -7,6 +7,7 @@ export type MetricItem = {
   value: string | number;
   helper?: string | null;
   tone?: 'default' | 'positive' | 'negative' | 'warning';
+  onClick?: () => void;
 };
 
 const TONE_STYLES: Record<NonNullable<MetricItem['tone']>, string> = {
@@ -23,24 +24,41 @@ export function MetricGrid({
   items: MetricItem[];
   columns?: string;
 }) {
+  const renderContent = (item: MetricItem) => (
+    <>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        {item.label}
+      </div>
+      <div className={cn('mt-2 text-sm font-semibold', TONE_STYLES[item.tone ?? 'default'])}>
+        {item.value}
+      </div>
+      {item.helper ? (
+        <div className="mt-1 text-xs leading-5 text-slate-500">{item.helper}</div>
+      ) : null}
+    </>
+  );
+
   return (
     <div className={cn('grid gap-3', columns)}>
-      {items.map((item) => (
-        <div
-          key={item.label}
-          className="rounded-[24px] border border-slate-200 bg-slate-50/80 px-4 py-3 shadow-sm"
-        >
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            {item.label}
+      {items.map((item) =>
+        item.onClick ? (
+          <button
+            key={item.label}
+            type="button"
+            onClick={item.onClick}
+            className="cursor-pointer rounded-[24px] border border-slate-200 bg-slate-50/80 px-4 py-3 text-left shadow-sm transition hover:border-sky-300 hover:bg-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-200"
+          >
+            {renderContent(item)}
+          </button>
+        ) : (
+          <div
+            key={item.label}
+            className="rounded-[24px] border border-slate-200 bg-slate-50/80 px-4 py-3 text-left shadow-sm"
+          >
+            {renderContent(item)}
           </div>
-          <div className={cn('mt-2 text-sm font-semibold', TONE_STYLES[item.tone ?? 'default'])}>
-            {item.value}
-          </div>
-          {item.helper ? (
-            <div className="mt-1 text-xs leading-5 text-slate-500">{item.helper}</div>
-          ) : null}
-        </div>
-      ))}
+        ),
+      )}
     </div>
   );
 }

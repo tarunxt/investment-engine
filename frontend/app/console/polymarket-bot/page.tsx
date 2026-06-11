@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Check, Copy, Loader2, RefreshCw, ShieldAlert, Terminal } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -55,21 +55,6 @@ function formatMoney(value: number, digits = 2) {
   }).format(value || 0);
 }
 
-const BULLPEN_BACKEND_CONTAINER_COMMAND =
-  'sudo docker ps --filter \"label=com.docker.compose.service=backend\" --format \"{{.Names}}\" | head -n 1';
-const BULLPEN_LOGIN_COMMAND =
-  'BACKEND_CONTAINER=\"$(sudo docker ps --filter \\\"label=com.docker.compose.service=backend\\\" --format \\\"{{.Names}}\\\" | head -n 1)\"; if [ -n \"$BACKEND_CONTAINER\" ]; then sudo docker exec -it \"$BACKEND_CONTAINER\" bullpen login; else echo \"No running Docker Compose backend container found. Run: sudo docker ps --format \\\"{{.Names}}\\\"\"; fi';
-const BULLPEN_FALLBACK_LOGIN_COMMAND = 'sudo -u investor -H bullpen login';
-
-function requiresBullpenLogin(state: PolymarketBotState) {
-  const loginMessages = [state.live.doctor.message, state.live.balance.message, state.live.locked_reason]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  return loginMessages.includes('bullpen login') || loginMessages.includes('login required');
-}
-
 export default function PolymarketBotPage() {
   const [state, setState] = useState<PolymarketBotState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,15 +66,17 @@ export default function PolymarketBotPage() {
   const [debugTarget, setDebugTarget] = useState('swisstony');
   const [debugReport, setDebugReport] = useState<PolymarketDiscoveryDebugReport | null>(null);
   const [debugLoading, setDebugLoading] = useState(false);
-  const [loginCommandCopied, setLoginCommandCopied] = useState(false);
+  const lastMutationAt = useRef(0);
+  const actionInFlight = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
+      const requestedAt = Date.now();
       try {
         const nextState = await apiService.polymarketState();
-        if (cancelled) return;
+        if (cancelled || actionInFlight.current || requestedAt < lastMutationAt.current) return;
         setState(nextState);
         setError(null);
       } catch (loadError) {
@@ -115,19 +102,25 @@ export default function PolymarketBotPage() {
   }, []);
 
   async function runAction(label: string, action: () => Promise<PolymarketBotState>) {
+    actionInFlight.current = true;
+    lastMutationAt.current = Date.now();
     setPendingAction(label);
     setActionError(null);
     try {
       const nextState = await action();
+      lastMutationAt.current = Date.now();
       setState(nextState);
     } catch (runError) {
       setActionError(normalizeError(runError));
     } finally {
+      actionInFlight.current = false;
       setPendingAction(null);
     }
   }
 
   async function runTradeAction(tradeId: string, kind: 'confirm' | 'reject') {
+    actionInFlight.current = true;
+    lastMutationAt.current = Date.now();
     setBusyTradeId(tradeId);
     setActionError(null);
     try {
@@ -135,10 +128,12 @@ export default function PolymarketBotPage() {
         kind === 'confirm'
           ? await apiService.polymarketLiveTradeConfirm(tradeId)
           : await apiService.polymarketLiveTradeReject(tradeId);
+      lastMutationAt.current = Date.now();
       setState(nextState);
     } catch (tradeError) {
       setActionError(normalizeError(tradeError));
     } finally {
+      actionInFlight.current = false;
       setBusyTradeId(null);
     }
   }
@@ -164,31 +159,6 @@ export default function PolymarketBotPage() {
     }
   }
 
-  async function copyBullpenLoginCommand() {
-    try {
-      await navigator.clipboard.writeText(BULLPEN_LOGIN_COMMAND);
-      setLoginCommandCopied(true);
-      window.setTimeout(() => setLoginCommandCopied(false), 2500);
-    } catch {
-      setActionError(`Copy failed. Run this in your terminal: ${BULLPEN_LOGIN_COMMAND}`);
-    }
-  }
-
-  async function refreshBullpenChecksAfterLogin() {
-    setPendingAction('bullpen-login-refresh');
-    setActionError(null);
-    try {
-      const doctorState = await apiService.polymarketLiveDoctor();
-      setState(doctorState);
-      const balanceState = await apiService.polymarketLiveBalanceRefresh();
-      setState(balanceState);
-    } catch (refreshError) {
-      setActionError(normalizeError(refreshError));
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
   if (loading && !state) {
     return (
       <div className="flex items-center gap-3 text-sm text-slate-500">
@@ -210,7 +180,6 @@ export default function PolymarketBotPage() {
   const visiblePending = state.live.pending_confirmations.slice(0, showAllPending ? undefined : 25);
   const confirmDisabled = !state.live.unlocked || state.live.emergency_stopped;
   const manualInvalid = state.live.source_status.manual_wallets_invalid;
-  const bullpenLoginRequired = requiresBullpenLogin(state);
 
   const botStatusItems: MetricItem[] = [
     { label: 'Bot Status', value: state.running ? 'RUNNING' : 'STOPPED', tone: state.running ? 'positive' : 'negative' },
@@ -222,7 +191,12 @@ export default function PolymarketBotPage() {
     { label: 'Bot Runtime', value: formatRuntime(state.started_at) },
     { label: 'Poll Interval', value: `${Math.round(state.config.poll_interval_ms / 1000)}s` },
     { label: 'Tracked Traders Count', value: state.tracked_traders.length },
-    { label: 'Open Positions Count', value: state.open_positions.length },
+    {
+      label: 'Open Positions Count',
+      value: state.open_positions.length,
+      onClick: () => document.getElementById('open-positions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      helper: 'Click to view open positions.',
+    },
   ];
 
   const liveControlItems: MetricItem[] = [
@@ -365,6 +339,50 @@ export default function PolymarketBotPage() {
         </CardContent>
       </Card>
 
+      <Card id="open-positions" className="scroll-mt-6 border border-slate-200 bg-white py-6">
+        <CardHeader className="pb-0">
+          <CardTitle className="text-base tracking-[0.18em] text-slate-950">Open Positions</CardTitle>
+          <CardDescription>Current open Polymarket positions tracked by the copy bot.</CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+            <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+              <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Market</th>
+                  <th className="px-4 py-3">Outcome</th>
+                  <th className="px-4 py-3">Shares</th>
+                  <th className="px-4 py-3">Average Price</th>
+                  <th className="px-4 py-3">Cost Basis</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {state.open_positions.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">
+                      No open positions are currently tracked.
+                    </td>
+                  </tr>
+                ) : (
+                  state.open_positions.map((position) => (
+                    <tr key={position.key} className="align-top">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-950">{position.market_title || position.market_id}</div>
+                        <div className="mt-1 text-xs text-slate-500">{position.market_id}</div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{position.outcome}</td>
+                      <td className="px-4 py-3 text-slate-700">{position.shares.toFixed(4)}</td>
+                      <td className="px-4 py-3 text-slate-700">{formatMoney(position.average_price, 4)}</td>
+                      <td className="px-4 py-3 text-slate-700">{formatMoney(position.cost_basis)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="border border-slate-200 bg-white py-6">
         <CardHeader className="pb-0">
           <CardTitle className="text-base tracking-[0.18em] text-slate-950">Live Trading Control</CardTitle>
@@ -373,74 +391,6 @@ export default function PolymarketBotPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
-          <div
-            className={`rounded-[24px] border px-4 py-4 shadow-sm ${
-              bullpenLoginRequired ? 'border-amber-200 bg-amber-50' : 'border-sky-200 bg-sky-50'
-            }`}
-          >
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-start gap-3">
-                <Terminal className={`mt-1 size-5 shrink-0 ${bullpenLoginRequired ? 'text-amber-700' : 'text-sky-700'}`} />
-                <div>
-                  <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-950">
-                    {bullpenLoginRequired ? 'Bullpen login required in backend' : 'Bullpen login setup'}
-                  </div>
-                  <p className="mt-1 max-w-3xl text-sm text-slate-700">
-                    Use the EC2 terminal that is already open on the production host. The Docker command below finds the
-                    running Compose backend container dynamically, so it works even when the container name includes
-                    the Compose project prefix.
-                  </p>
-                  <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-700">
-                    <li>
-                      Find the running Compose backend container:
-                      <code className="mt-1 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
-                        {BULLPEN_BACKEND_CONTAINER_COMMAND}
-                      </code>
-                    </li>
-                    <li>
-                      Run the interactive Bullpen login and complete the browser/code prompt it prints:
-                      <code className="mt-1 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
-                        {BULLPEN_LOGIN_COMMAND}
-                      </code>
-                    </li>
-                    <li>
-                      If the command reports no running Compose backend container, this host is likely using the
-                      no-Docker/systemd deployment. In that case, run Bullpen as the backend service user instead:
-                      <code className="mt-1 block w-fit max-w-full overflow-x-auto rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 shadow-sm">
-                        {BULLPEN_FALLBACK_LOGIN_COMMAND}
-                      </code>
-                    </li>
-                    <li>After Bullpen reports a successful login, click “I logged in — refresh checks”.</li>
-                  </ol>
-                </div>
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
-                <Button
-                  size="sm"
-                  className="rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
-                  onClick={() => void copyBullpenLoginCommand()}
-                >
-                  {loginCommandCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                  {loginCommandCopied ? 'Copied login command' : 'Copy Bullpen login command'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="rounded-full border-slate-300 bg-white"
-                  disabled={pendingAction !== null}
-                  onClick={() => void refreshBullpenChecksAfterLogin()}
-                >
-                  {pendingAction === 'bullpen-login-refresh' ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="size-3.5" />
-                  )}
-                  I logged in — refresh checks
-                </Button>
-              </div>
-            </div>
-          </div>
-
           <MetricGrid items={liveControlItems} columns="md:grid-cols-2 xl:grid-cols-4" />
 
           <div className="flex flex-wrap gap-2">
