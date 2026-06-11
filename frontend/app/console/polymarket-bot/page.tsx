@@ -36,9 +36,10 @@ function formatCountdown(iso?: string | null) {
   return `${diff}s`;
 }
 
-function formatRuntime(from?: string | null) {
+function formatRuntime(from?: string | null, to?: string | null) {
   if (!from) return '—';
-  const diff = Math.max(0, Math.floor((Date.now() - new Date(from).getTime()) / 1000));
+  const endTime = to ? new Date(to).getTime() : Date.now();
+  const diff = Math.max(0, Math.floor((endTime - new Date(from).getTime()) / 1000));
   const hours = Math.floor(diff / 3600);
   const minutes = Math.floor((diff % 3600) / 60);
   const seconds = diff % 60;
@@ -187,8 +188,17 @@ export default function PolymarketBotPage() {
     { label: 'Execution Mode', value: state.config.paper_trading ? 'Sandbox mode active' : 'Real money via Bullpen', tone: state.config.paper_trading ? 'warning' : 'positive' },
     { label: 'Last Poll Time', value: formatTs(state.last_poll_at) },
     { label: 'Next Poll Countdown', value: `${state.seconds_until_next_poll}s` },
-    { label: 'Session Runtime', value: formatRuntime(state.session_started_at) },
-    { label: 'Bot Runtime', value: formatRuntime(state.started_at) },
+    {
+      label: 'Session Runtime',
+      value:
+        state.running || state.started_at
+          ? formatRuntime(state.session_started_at, state.running ? null : state.stopped_at)
+          : '—',
+    },
+    {
+      label: 'Bot Runtime',
+      value: formatRuntime(state.started_at, state.running ? null : state.stopped_at),
+    },
     { label: 'Poll Interval', value: `${Math.round(state.config.poll_interval_ms / 1000)}s` },
     { label: 'Tracked Traders Count', value: state.tracked_traders.length },
     {

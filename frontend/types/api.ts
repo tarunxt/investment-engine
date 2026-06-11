@@ -1189,6 +1189,7 @@ export interface PolymarketBotState {
   server_now: string;
   session_started_at: string;
   started_at?: string | null;
+  stopped_at?: string | null;
   last_poll_at?: string | null;
   next_poll_at?: string | null;
   seconds_until_next_poll: number;

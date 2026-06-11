@@ -234,6 +234,7 @@ class PolymarketBotState(BaseModel):
     server_now: str
     session_started_at: str
     started_at: str | None = None
+    stopped_at: str | None = None
     last_poll_at: str | None = None
     next_poll_at: str | None = None
     seconds_until_next_poll: int
