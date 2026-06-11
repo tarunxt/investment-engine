@@ -262,11 +262,7 @@ class BullpenBalanceReader:
             return PolymarketBalanceState(
                 status="error",
                 checked_at=checked_at,
-                message=(
-                    "Balance unavailable: Bullpen CLI balance command not found"
-                    if _is_missing_balance_command(message)
-                    else f"Balance unavailable: {message}"
-                ),
+                message=_format_balance_error_message(message),
             )
 
 
@@ -382,6 +378,27 @@ def utc_now() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).isoformat()
+
+
+def _format_balance_error_message(message: str) -> str:
+    if _is_missing_balance_command(message):
+        return "Balance unavailable: Bullpen CLI balance command not found"
+    if _is_auth_required_error(message):
+        return "Balance unavailable: Bullpen login required. Run: bullpen login"
+    return f"Balance unavailable: {message}"
+
+
+def _is_auth_required_error(message: str) -> bool:
+    lowered = message.lower()
+    auth_markers = (
+        "auth_required",
+        "auth reauthentication required",
+        "not logged in",
+        "requires_auth",
+        "requires_login",
+        "bullpen login",
+    )
+    return any(marker in lowered for marker in auth_markers)
 
 
 def _is_missing_balance_command(message: str) -> bool:

@@ -27,6 +27,32 @@ def test_missing_balance_command_detects_subcommand_errors():
     assert bullpen._is_missing_balance_command(message) is True
 
 
+def test_format_balance_error_message_summarizes_auth_required_json():
+    message = (
+        'All Bullpen command variants failed: portfolio balances => '
+        '{"error":"not logged in. Run: bullpen login","error_code":"AUTH_REQUIRED",'
+        '"requires_auth":true,"requires_login":true,"status":"error"} | '
+        'funds balances => Auth reauthentication required'
+    )
+
+    assert (
+        bullpen._format_balance_error_message(message)
+        == "Balance unavailable: Bullpen login required. Run: bullpen login"
+    )
+
+
+def test_format_balance_error_message_preserves_missing_cli_executable_detail():
+    message = (
+        "All Bullpen command variants failed: portfolio balances => "
+        "Bullpen CLI executable was not found. Install Bullpen in the backend runtime."
+    )
+
+    assert (
+        bullpen._format_balance_error_message(message)
+        == f"Balance unavailable: {message}"
+    )
+
+
 def test_format_balance_message_prefers_polymarket_available_pusd():
     parsed = {
         "data": {
