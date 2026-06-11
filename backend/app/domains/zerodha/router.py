@@ -9,6 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.zerodha.audit import ZerodhaAuditRepository
+from app.domains.zerodha.basket import (
+    is_kite_quote_permission_error_message,
+    prepare_basket_order_from_request,
+)
 from app.domains.zerodha.models import ZerodhaPortfolioSnapshot
 from app.domains.zerodha.order_validation import (
     ZerodhaPriceGuardInput,
@@ -387,14 +391,22 @@ async def prepare_basket_orders(
         {"operation": "prepare_basket_orders", "count": len(instruments)},
     )
 
+    quote_permission_error: KiteError | None = None
     try:
         quotes = await _svc.get_quotes(token, instruments)
     except KiteError as exc:
-        await audit.log(
-            current_user.id, "prepare_basket_orders_failed", ip, {"error": exc.message}
-        )
-        await db.commit()
-        raise HTTPException(400, detail=exc.message)
+        if is_kite_quote_permission_error_message(exc.message):
+            quote_permission_error = exc
+            quotes = {}
+        else:
+            await audit.log(
+                current_user.id,
+                "prepare_basket_orders_failed",
+                ip,
+                {"error": exc.message},
+            )
+            await db.commit()
+            raise HTTPException(400, detail=exc.message)
     except Exception:
         logger.exception(
             "Failed to prepare Zerodha basket orders for user %s", current_user.id
@@ -405,10 +417,38 @@ async def prepare_basket_orders(
         await db.commit()
         raise HTTPException(502, detail="Failed to validate basket orders with Zerodha")
 
+    if quote_permission_error:
+        logger.warning(
+            "Falling back to requested Zerodha basket prices for user %s because live quote permission is unavailable: %s",
+            current_user.id,
+            quote_permission_error.message,
+        )
+        await audit.log(
+            current_user.id,
+            "prepare_basket_orders_quote_fallback",
+            ip,
+            {"error": quote_permission_error.message, "count": len(instruments)},
+        )
+
     prepared_orders: list[ZerodhaPreparedBasketOrder] = []
     for order in body.orders:
         key = _instrument_key(order.exchange, order.tradingsymbol)
         quote = quotes.get(key)
+        if quote_permission_error:
+            try:
+                prepared_orders.append(prepare_basket_order_from_request(order))
+                continue
+            except ValueError as exc:
+                await audit.log(
+                    current_user.id,
+                    "prepare_basket_orders_failed",
+                    ip,
+                    {"error": str(exc), "instrument": key},
+                )
+                await db.commit()
+                raise HTTPException(
+                    400, detail=f"Could not compute a safe order price for {key}: {exc}"
+                )
         if not isinstance(quote, dict):
             await audit.log(
                 current_user.id,
