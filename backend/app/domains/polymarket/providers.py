@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Protocol
+from urllib.parse import urlencode
+
+import httpx
 
 from app.domains.polymarket.bullpen import (
     run_bullpen_json,
@@ -10,7 +13,6 @@ from app.domains.polymarket.bullpen import (
 )
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.schemas import (
-    ActivitySource,
     PolymarketBotConfig,
     PolymarketDiscoveryDebugAccepted,
     PolymarketDiscoveryDebugCandidate,
@@ -23,6 +25,9 @@ from app.domains.polymarket.schemas import (
     PolymarketTrader,
     TradeSource,
 )
+
+POLYMARKET_DATA_API_BASE_URL = "https://data-api.polymarket.com"
+POLYMARKET_DATA_API_TIMEOUT_SECONDS = 10
 
 MOCK_MARKETS: list[tuple[str, str, str]] = [
     ("btc-100k-2026", "Will Bitcoin hit $100k in 2026?", "Yes"),
@@ -424,40 +429,70 @@ class BullpenReadOnlyProvider:
         return [trade for trade in rows if trade.source == "live-read"]
 
     async def _read_wallet_activity(self, address: str) -> list[dict[str, Any]]:
-        parsed = await run_first_bullpen_json(
-            [
+        bullpen_error: Exception | None = None
+        bullpen_trades: list[dict[str, Any]] = []
+        try:
+            parsed = await run_first_bullpen_json(
                 [
-                    "polymarket",
-                    "data",
-                    "profile",
-                    address,
-                    "--trades",
-                    "--read-only",
-                    "--non-interactive",
-                    "--output",
-                    "json",
-                ],
-                [
-                    "polymarket",
-                    "activity",
-                    "--address",
-                    address,
-                    "--type",
-                    "trade",
-                    "--limit",
-                    "50",
-                    "--read-only",
-                    "--non-interactive",
-                    "--output",
-                    "json",
-                ],
-            ]
+                    [
+                        "polymarket",
+                        "data",
+                        "profile",
+                        address,
+                        "--trades",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                    [
+                        "polymarket",
+                        "activity",
+                        "--address",
+                        address,
+                        "--type",
+                        "trade",
+                        "--limit",
+                        "50",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                ]
+            )
+            bullpen_trades = normalize_trade_rows_for_wallet(parsed, address)
+        except Exception as exc:
+            bullpen_error = exc
+
+        try:
+            data_api_trades = await self._read_data_api_wallet_activity(address)
+            return dedupe_normalized_trade_rows([*data_api_trades, *bullpen_trades])
+        except Exception as exc:
+            if bullpen_trades:
+                return bullpen_trades
+            if bullpen_error:
+                raise bullpen_error from exc
+            raise
+
+    async def _read_data_api_wallet_activity(self, address: str) -> list[dict[str, Any]]:
+        query = urlencode(
+            {
+                "user": address,
+                "type": "TRADE",
+                "limit": "100",
+                "sortBy": "TIMESTAMP",
+                "sortDirection": "DESC",
+            }
         )
-        normalized = [
-            normalize_trade_row({**row, "address": extract_address(row) or address})
-            for row in collect_rows(parsed)
-        ]
-        return [item["trade"] for item in normalized if item["accepted"]]
+        url = f"{POLYMARKET_DATA_API_BASE_URL}/activity?{query}"
+        async with httpx.AsyncClient(
+            timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+            headers={"User-Agent": "investment-engine-polymarket-bot/1.0"},
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return normalize_trade_rows_for_wallet(response.json(), address)
 
     async def _read_handle_or_feed_activity(
         self, trader: PolymarketTrader
@@ -812,16 +847,23 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
     amount = number_value(
         row.get("sizeUsd")
         or row.get("size_usd")
+        or row.get("usdcSize")
+        or row.get("usdc_size")
         or row.get("usdAmount")
         or row.get("usd_amount")
         or row.get("amountUsd")
         or row.get("amount_usd")
+        or row.get("amountUSDC")
+        or row.get("amount_usdc")
         or row.get("cash")
-        or row.get("amount")
+        or row.get("cashAmount")
+        or row.get("cash_amount")
+        or row.get("notional")
         or row.get("value")
-        or row.get("size")
         or row.get("valueUsd")
         or row.get("value_usd")
+        or row.get("amount")
+        or row.get("size")
         or row.get("shares")
     )
     extracted = {
@@ -927,6 +969,26 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
             "timestamp": timestamp,
         },
     }
+
+
+def normalize_trade_rows_for_wallet(value: Any, address: str) -> list[dict[str, Any]]:
+    normalized = [
+        normalize_trade_row({**row, "address": extract_address(row) or address})
+        for row in collect_rows(value)
+    ]
+    return [item["trade"] for item in normalized if item["accepted"]]
+
+
+def dedupe_normalized_trade_rows(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for trade in trades:
+        key = stable_trade_key("live-read", clean_trade_identity(trade), trade)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(trade)
+    return deduped
 
 
 def collect_rows(value: Any) -> list[dict[str, Any]]:
