@@ -76,7 +76,7 @@ export default function PolymarketBotPage() {
   const [newAccountDraft, setNewAccountDraft] = useState<TrackedAccountDraft>({
     target: '',
     threshold_percent: 5,
-    net_worth_usd: 100,
+    net_worth_usd: 0,
     copy_trade_usd: 1,
     enabled: true,
   });
@@ -213,7 +213,7 @@ export default function PolymarketBotPage() {
     try {
       const nextState = await apiService.polymarketAddTrackedAccount(newAccountDraft);
       applyTrackedAccountState(nextState);
-      setNewAccountDraft({ target: '', threshold_percent: 5, net_worth_usd: 100, copy_trade_usd: 1, enabled: true });
+      setNewAccountDraft({ target: '', threshold_percent: 5, net_worth_usd: 0, copy_trade_usd: 1, enabled: true });
     } catch (accountError) {
       setActionError(normalizeError(accountError));
     } finally {

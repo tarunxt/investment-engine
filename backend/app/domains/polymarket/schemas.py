@@ -21,9 +21,16 @@ class PolymarketTrackedAccount(BaseModel):
     handle: str | None = None
     address: str = ""
     profile_url: str | None = None
+    proxy_wallet: str | None = None
     enabled: bool = True
     threshold_percent: float = Field(default=5, ge=0, le=100)
     net_worth_usd: float = Field(default=100, ge=0)
+    positions_value_usd: float | None = Field(default=None, ge=0)
+    cash_balance_usd: float | None = Field(default=None, ge=0)
+    redeemable_value_usd: float | None = Field(default=None, ge=0)
+    net_worth_source: str | None = None
+    net_worth_checked_at: str | None = None
+    net_worth_error: str | None = None
     copy_trade_usd: float = Field(default=1, ge=0.01, le=1)
     created_at: str
     updated_at: str

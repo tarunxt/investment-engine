@@ -19,6 +19,27 @@ function formatMoney(value: number, digits = 2) {
   }).format(value || 0);
 }
 
+function netWorthBreakdown(account: import('@/types/api').PolymarketTrackedAccount) {
+  if (account.net_worth_error) {
+    return `Auto fetch failed: ${account.net_worth_error}`;
+  }
+
+  if (!account.net_worth_source) {
+    return 'Auto net worth fetch pending';
+  }
+
+  const parts = [
+    `positions ${formatMoney(account.positions_value_usd || 0)}`,
+    `pUSD ${formatMoney(account.cash_balance_usd || 0)}`,
+  ];
+
+  if ((account.redeemable_value_usd || 0) > 0) {
+    parts.push(`redeemable ${formatMoney(account.redeemable_value_usd || 0)}`);
+  }
+
+  return `Auto: ${parts.join(' + ')}`;
+}
+
 function normalizePolymarketProfileUrl(trader: PolymarketTrader) {
   const handle = trader.handle || trader.profile_slug;
   if (handle) {
@@ -222,6 +243,15 @@ export function TrackedAccountsTable({
                     onChange={(event) => onDraftChange(account.id, { ...draft, net_worth_usd: Number(event.target.value) })}
                     className="h-9 w-28 rounded-full border border-slate-300 px-3 text-sm outline-none focus:border-sky-400"
                   />
+                  <div className="mt-1 max-w-56 text-xs leading-5 text-slate-500">
+                    {netWorthBreakdown(account)}
+                    {account.net_worth_checked_at ? ` · ${formatTs(account.net_worth_checked_at)}` : ''}
+                  </div>
+                  {account.proxy_wallet ? (
+                    <div className="mt-0.5 max-w-56 truncate text-[11px] text-slate-400" title={account.proxy_wallet}>
+                      wallet {account.proxy_wallet}
+                    </div>
+                  ) : null}
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
