@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Eye,
@@ -323,36 +323,139 @@ function PortfolioCommandSummary({
   );
 }
 
+type PortfolioCommandRange = "1D" | "1W" | "1M" | "1Y" | "YTD" | "ALL";
+
+type PortfolioCommandPoint = {
+  timestamp: number;
+  value: number;
+};
+
+const PORTFOLIO_COMMAND_RANGES: PortfolioCommandRange[] = [
+  "1D",
+  "1W",
+  "1M",
+  "1Y",
+  "YTD",
+  "ALL",
+];
+
+const PORTFOLIO_COMMAND_RANGE_LABELS: Record<PortfolioCommandRange, string> = {
+  "1D": "Past Day",
+  "1W": "Past Week",
+  "1M": "Past Month",
+  "1Y": "Past Year",
+  YTD: "Year to Date",
+  ALL: "All Time",
+};
+
+function getPortfolioCommandRangeStart(
+  range: PortfolioCommandRange,
+  endTimestamp: number,
+) {
+  const endDate = new Date(endTimestamp);
+
+  if (range === "ALL") return null;
+  if (range === "YTD") return Date.UTC(endDate.getUTCFullYear(), 0, 1);
+
+  const startDate = new Date(endTimestamp);
+  if (range === "1D") startDate.setUTCDate(startDate.getUTCDate() - 1);
+  if (range === "1W") startDate.setUTCDate(startDate.getUTCDate() - 7);
+  if (range === "1M") startDate.setUTCMonth(startDate.getUTCMonth() - 1);
+  if (range === "1Y") startDate.setUTCFullYear(startDate.getUTCFullYear() - 1);
+  return startDate.getTime();
+}
+
 function buildPortfolioCommandTrend(
   zerodhaHistory: ZerodhaPortfolioSnapshotSummary[],
   indmoneyHistory: IndMoneyUsPortfolioSnapshotSummary[],
   usdInrRate: number,
-) {
-  const trendPoints = [
-    ...zerodhaHistory
-      .slice(-6)
-      .map((snapshot) =>
-        Math.max(0, snapshot.holdings_market_value + snapshot.available_margin),
+): PortfolioCommandPoint[] {
+  const events = [
+    ...zerodhaHistory.map((snapshot) => ({
+      source: "india" as const,
+      timestamp: Date.parse(snapshot.captured_at),
+      value: Math.max(
+        0,
+        snapshot.holdings_market_value + snapshot.available_margin,
       ),
-    ...indmoneyHistory
-      .slice(-6)
-      .map((snapshot) =>
-        Math.max(
-          0,
-          ((snapshot.current_value ?? 0) + (snapshot.wallet_balance ?? 0)) *
-            usdInrRate,
-        ),
+    })),
+    ...indmoneyHistory.map((snapshot) => ({
+      source: "us" as const,
+      timestamp: Date.parse(snapshot.captured_at),
+      value: Math.max(
+        0,
+        ((snapshot.current_value ?? 0) + (snapshot.wallet_balance ?? 0)) *
+          usdInrRate,
       ),
-  ].filter((value) => Number.isFinite(value) && value > 0);
+    })),
+  ]
+    .filter(
+      (event) =>
+        Number.isFinite(event.timestamp) &&
+        Number.isFinite(event.value) &&
+        event.value > 0,
+    )
+    .sort((left, right) => left.timestamp - right.timestamp);
 
-  if (trendPoints.length >= 4) {
-    return trendPoints.slice(-12);
+  let indiaValue = 0;
+  let usValue = 0;
+
+  const points = events
+    .map((event) => {
+      if (event.source === "india") {
+        indiaValue = event.value;
+      } else {
+        usValue = event.value;
+      }
+
+      return {
+        timestamp: event.timestamp,
+        value: indiaValue + usValue,
+      };
+    })
+    .filter((point) => point.value > 0);
+
+  if (points.length >= 4) {
+    return points;
   }
 
-  return [
+  const now = Date.now();
+  const fallbackValues = [
     0.18, 0.16, 0.19, 0.21, 0.36, 0.58, 0.64, 0.46, 0.48, 0.38, 0.34, 0.42,
     0.49, 0.47, 0.32, 0.33, 0.35, 0.31, 0.72, 0.82, 0.75, 0.71,
   ];
+
+  return fallbackValues.map((value, index) => ({
+    timestamp: now - (fallbackValues.length - index - 1) * 60 * 60 * 1000,
+    value,
+  }));
+}
+
+function getVisiblePortfolioCommandPoints(
+  points: PortfolioCommandPoint[],
+  range: PortfolioCommandRange,
+) {
+  if (points.length <= 1) return points;
+
+  const lastPoint = points[points.length - 1];
+  const rangeStart = getPortfolioCommandRangeStart(range, lastPoint.timestamp);
+  const visiblePoints =
+    rangeStart == null
+      ? points
+      : points.filter((point) => point.timestamp >= rangeStart);
+
+  if (visiblePoints.length >= 2) return visiblePoints;
+
+  const fallbackPointCount: Record<PortfolioCommandRange, number> = {
+    "1D": 8,
+    "1W": 12,
+    "1M": 16,
+    "1Y": 20,
+    YTD: 20,
+    ALL: points.length,
+  };
+
+  return points.slice(-Math.min(points.length, fallbackPointCount[range]));
 }
 
 function buildCommandChartPath(
@@ -377,23 +480,43 @@ function buildCommandChartPath(
 function PortfolioCommandChart({
   profitLossValue,
   dayChangeValue,
-  trendValues,
+  trendPoints,
 }: {
   profitLossValue: number;
   dayChangeValue: number;
-  trendValues: number[];
+  trendPoints: PortfolioCommandPoint[];
 }) {
+  const [selectedRange, setSelectedRange] =
+    useState<PortfolioCommandRange>("1D");
   const chartWidth = 420;
-  const chartHeight = 118;
-  const linePath = buildCommandChartPath(trendValues, chartWidth, chartHeight);
+  const chartHeight = 92;
+  const visibleTrendPoints = useMemo(
+    () => getVisiblePortfolioCommandPoints(trendPoints, selectedRange),
+    [selectedRange, trendPoints],
+  );
+  const visibleTrendValues = visibleTrendPoints.map((point) => point.value);
+  const linePath = buildCommandChartPath(
+    visibleTrendValues,
+    chartWidth,
+    chartHeight,
+  );
   const areaPath = `${linePath} L ${chartWidth} ${chartHeight} L 0 ${chartHeight} Z`;
   const isPositive = profitLossValue >= 0;
+  const firstTrendValue = visibleTrendValues[0];
+  const latestTrendValue = visibleTrendValues[visibleTrendValues.length - 1];
+  const selectedRangeChangeValue =
+    firstTrendValue != null && latestTrendValue != null
+      ? latestTrendValue - firstTrendValue
+      : dayChangeValue;
+  const displayedRangeChangeValue =
+    selectedRange === "1D" ? dayChangeValue : selectedRangeChangeValue;
+  const displayedRangeLabel = PORTFOLIO_COMMAND_RANGE_LABELS[selectedRange];
 
   return (
-    <div className="min-h-[260px] rounded-[30px] border border-white/10 bg-slate-950/50 p-5 shadow-2xl shadow-slate-950/20 backdrop-blur xl:min-w-[430px]">
+    <div className="rounded-[30px] border border-white/10 bg-slate-950/50 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur xl:min-w-[430px]">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3 text-xl font-semibold text-slate-400">
+          <div className="flex items-center gap-3 text-lg font-semibold text-slate-400">
             <span
               className={`h-4 w-5 rounded-full ${
                 isPositive ? "bg-emerald-400" : "bg-rose-400"
@@ -402,49 +525,61 @@ function PortfolioCommandChart({
             />
             Profit/Loss
           </div>
-          <div className="mt-8 flex items-center gap-4">
+          <div className="mt-5 flex items-center gap-4">
             <div className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
               {formatInr(profitLossValue)}
             </div>
             <Upload className="size-6 text-slate-200" aria-hidden="true" />
           </div>
           <div
-            className={`mt-5 text-lg font-semibold ${
-              dayChangeValue >= 0 ? "text-emerald-300" : "text-rose-300"
+            className={`mt-3 text-base font-semibold ${
+              displayedRangeChangeValue >= 0
+                ? "text-emerald-300"
+                : "text-rose-300"
             }`}
           >
-            {formatInr(dayChangeValue)} Past Day
+            {formatInr(displayedRangeChangeValue)} {displayedRangeLabel}
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-400">
-          {["1D", "1W", "1M", "1Y", "YTD", "ALL"].map((range) => (
-            <span
-              key={range}
-              className={
-                range === "1D"
-                  ? "rounded-2xl bg-blue-500/20 px-3 py-3 text-blue-400"
-                  : "px-2 py-3"
-              }
-            >
-              {range}
-            </span>
-          ))}
+        <div
+          className="flex items-center gap-1 text-sm font-semibold text-slate-400"
+          aria-label="Portfolio chart time range"
+        >
+          {PORTFOLIO_COMMAND_RANGES.map((range) => {
+            const selected = range === selectedRange;
+
+            return (
+              <button
+                key={range}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setSelectedRange(range)}
+                className={
+                  selected
+                    ? "rounded-2xl bg-blue-500/20 px-3 py-2.5 text-blue-400 transition hover:bg-blue-500/30"
+                    : "rounded-2xl px-2 py-2.5 transition hover:bg-white/10 hover:text-white"
+                }
+              >
+                {range}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div className="mt-5 flex items-center justify-end gap-3 text-2xl font-semibold text-slate-500">
-        <span className="relative h-8 w-8 overflow-hidden" aria-hidden="true">
-          <span className="absolute inset-y-1 left-1 w-6 border-y-4 border-l-4 border-slate-500 [clip-path:polygon(0_0,100%_22%,100%_78%,0_100%)]" />
+      <div className="mt-2 flex items-center justify-end gap-3 text-xl font-semibold text-slate-500">
+        <span className="relative h-7 w-7 overflow-hidden" aria-hidden="true">
+          <span className="absolute inset-y-1 left-1 w-5 border-y-4 border-l-4 border-slate-500 [clip-path:polygon(0_0,100%_22%,100%_78%,0_100%)]" />
         </span>
         Portfolio
       </div>
 
       <svg
         viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-        className="mt-6 h-28 w-full overflow-visible"
+        className="mt-2 h-20 w-full overflow-visible"
         role="img"
-        aria-label="Portfolio profit and loss trend"
+        aria-label={`${displayedRangeLabel} portfolio profit and loss trend`}
       >
         <defs>
           <linearGradient id="commandChartLine" x1="0" x2="1" y1="0" y2="0">
@@ -703,7 +838,7 @@ export default function DashboardPage() {
           <PortfolioCommandChart
             profitLossValue={totalProfitLossValue}
             dayChangeValue={totalDayChangeValue}
-            trendValues={portfolioCommandTrend}
+            trendPoints={portfolioCommandTrend}
           />
         </div>
       </section>
