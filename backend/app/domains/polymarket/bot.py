@@ -17,7 +17,10 @@ from app.domains.polymarket.providers import (
     BullpenReadOnlyProvider,
     MarketDataProvider,
     MockProvider,
+    aggregate_traders,
     identity_key,
+    newest_iso,
+    trader_identity_candidates,
 )
 from app.domains.polymarket.schemas import (
     BotMode,
@@ -373,6 +376,9 @@ class PolymarketPaperCopyBot:
             source_trades = await self.active_provider.get_recent_trades(
                 selected_traders
             )
+            selected_traders = self._traders_with_recent_activity(
+                selected_traders, source_trades
+            )
         except Exception as exc:
             message = redact_secrets(str(exc))
             async with self._lock:
@@ -461,6 +467,7 @@ class PolymarketPaperCopyBot:
             source_trades = await self._read_recent_trades_unlocked(
                 self.tracked_traders
             )
+            self._refresh_tracked_trader_activity_unlocked(source_trades)
             live_proposals_before = len(self._pending_live_trades())
 
             if self.config.paused:
@@ -573,6 +580,95 @@ class PolymarketPaperCopyBot:
             self.active_provider = self.fallback_provider
             self.active_mode = "mock"
             return await self.fallback_provider.get_recent_trades(traders)
+
+    def _refresh_tracked_trader_activity_unlocked(
+        self, source_trades: list[PolymarketSourceTrade]
+    ) -> None:
+        self.tracked_traders = self._traders_with_recent_activity(
+            self.tracked_traders, source_trades
+        )
+
+    def _traders_with_recent_activity(
+        self,
+        traders: list[PolymarketTrader],
+        source_trades: list[PolymarketSourceTrade],
+    ) -> list[PolymarketTrader]:
+        if not traders or not source_trades:
+            return traders
+
+        trade_rows = [
+            {
+                "address": trade.trader_address,
+                "handle": trade.trader_handle,
+                "trader_name": trade.trader_name,
+                "market_id": trade.market_id,
+                "market_title": trade.market_title,
+                "outcome": trade.outcome,
+                "side": trade.side,
+                "price": trade.price,
+                "size_usd": trade.size_usd,
+                "timestamp": trade.timestamp,
+            }
+            for trade in source_trades
+            if trade.source in ("live-read", "live-market-read", "mock")
+        ]
+        recent_activity = aggregate_traders(
+            trade_rows,
+            "live-read" if self.active_mode != "mock" else "mock",
+            "Recent source trade activity",
+        )
+        activity_by_identity = {
+            candidate: activity
+            for activity in recent_activity
+            for candidate in trader_identity_candidates(activity)
+        }
+
+        updated: list[PolymarketTrader] = []
+        for trader in traders:
+            activity = next(
+                (
+                    activity_by_identity[candidate]
+                    for candidate in trader_identity_candidates(trader)
+                    if candidate in activity_by_identity
+                ),
+                None,
+            )
+            if not activity:
+                updated.append(trader)
+                continue
+
+            latest_trade_at = newest_iso(trader.last_trade_at, activity.last_trade_at)
+            latest_trade_age = (
+                activity.last_trade_age
+                if latest_trade_at == activity.last_trade_at
+                else trader.last_trade_age
+            )
+            detected_activity_source = (
+                "wallet"
+                if activity.address
+                else activity.activity_source or trader.activity_source
+            )
+            updated.append(
+                PolymarketTrader(
+                    **{
+                        **trader.model_dump(),
+                        "activity_source": detected_activity_source,
+                        "volume_24h": max(trader.volume_24h, activity.volume_24h),
+                        "trades_1h": max(trader.trades_1h, activity.trades_1h),
+                        "trades_6h": max(trader.trades_6h, activity.trades_6h),
+                        "trades_24h": max(trader.trades_24h, activity.trades_24h),
+                        "last_trade_at": latest_trade_at,
+                        "last_trade_age": latest_trade_age,
+                        "source_reason": (
+                            "Recent trade activity detected from tracked wallet"
+                            if trader.source_reason.startswith("Fallback")
+                            and activity.trades_24h > 0
+                            else trader.source_reason
+                        ),
+                    }
+                )
+            )
+        return updated
 
     async def _handle_source_trade_unlocked(
         self,
@@ -827,6 +923,7 @@ class PolymarketPaperCopyBot:
             traders = await self._read_top_traders_unlocked()
             self.tracked_traders = traders
             source_trades = await self._read_recent_trades_unlocked(traders)
+            self._refresh_tracked_trader_activity_unlocked(source_trades)
             for trade in source_trades:
                 self._mark_source_trade_seen(trade)
             self.live_source_status.live_baseline_completed_at = utc_now()
