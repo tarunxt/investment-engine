@@ -17,11 +17,25 @@ export function formatApiTimestamp(
     locale = 'en-IN',
     timeZone = 'Asia/Kolkata',
     timeZoneName = 'short',
+    weekday,
+    year = 'numeric',
+    month = 'short',
+    day = 'numeric',
+    hour = 'numeric',
+    minute = '2-digit',
+    second = '2-digit',
   }: {
-    emptyValue?: string;
+    emptyValue?: string | null;
     locale?: string;
     timeZone?: string;
     timeZoneName?: 'short' | 'long' | 'shortOffset' | 'longOffset' | 'shortGeneric' | 'longGeneric';
+    weekday?: 'long' | 'short' | 'narrow';
+    year?: 'numeric' | '2-digit';
+    month?: 'numeric' | '2-digit' | 'long' | 'short' | 'narrow';
+    day?: 'numeric' | '2-digit';
+    hour?: 'numeric' | '2-digit';
+    minute?: 'numeric' | '2-digit';
+    second?: 'numeric' | '2-digit';
   } = {},
 ) {
   const date = parseApiTimestamp(value);
@@ -29,12 +43,13 @@ export function formatApiTimestamp(
 
   return date.toLocaleString(locale, {
     timeZone,
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
+    weekday,
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
     timeZoneName,
   });
 }

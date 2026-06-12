@@ -57,6 +57,7 @@ import {
 import { getRunDetailPathFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import { APIError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
+import { INDIA_TIMEZONE } from "../_context";
 import { cn } from "@/lib/utils";
 import type {
   IndMoneyUsPortfolioSnapshotCreateRequest,
@@ -416,6 +417,7 @@ function formatTimestamp(value?: string | null) {
   const ms = parseTimestampMs(value);
   if (!ms) return value;
   return new Intl.DateTimeFormat("en-IN", {
+    timeZone: INDIA_TIMEZONE,
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(ms));
@@ -1757,9 +1759,9 @@ function buildRunCostBreakdownItems(
     status: job.status || run.status,
     costUsd: typeof job.estimated_cost === "number" ? job.estimated_cost : null,
     llmCount: 1,
-    autoRebalancePortfolio: job.auto_rebalance_portfolio ?? run.auto_rebalance_portfolio ?? null,
-    autoRebalanceSequence: job.auto_rebalance_sequence ?? run.auto_rebalance_sequence ?? null,
-    autoRebalanceLabel: job.auto_rebalance_label ?? run.auto_rebalance_label ?? null,
+    autoRebalancePortfolio: run.auto_rebalance_portfolio ?? job.auto_rebalance_portfolio ?? null,
+    autoRebalanceSequence: run.auto_rebalance_sequence ?? job.auto_rebalance_sequence ?? null,
+    autoRebalanceLabel: run.auto_rebalance_label ?? job.auto_rebalance_label ?? null,
   }));
 }
 
@@ -1780,15 +1782,22 @@ function buildAutoRebalanceScanGroups(
   items.forEach((item) => {
     const lastGroup = groups[groups.length - 1];
     const lastItem = lastGroup?.[lastGroup.length - 1];
-    const sameReservedRun = Boolean(
+    const hasReservedRunBoundary = Boolean(
       item.autoRebalanceSequence &&
       lastItem?.autoRebalanceSequence &&
-      item.autoRebalancePortfolio === lastItem.autoRebalancePortfolio &&
-      item.autoRebalanceSequence === lastItem.autoRebalanceSequence,
+      item.autoRebalancePortfolio &&
+      lastItem.autoRebalancePortfolio,
     );
+    const sameReservedRun = Boolean(
+      hasReservedRunBoundary &&
+      item.autoRebalancePortfolio === lastItem?.autoRebalancePortfolio &&
+      item.autoRebalanceSequence === lastItem?.autoRebalanceSequence,
+    );
+    const differentReservedRun = Boolean(hasReservedRunBoundary && !sameReservedRun);
     const shouldStartNewGroup =
       !lastGroup ||
       !lastItem ||
+      differentReservedRun ||
       (!sameReservedRun &&
         parseTimestampMs(item.timestamp) - parseTimestampMs(lastItem.timestamp) > maxGapMs);
     if (shouldStartNewGroup) {
