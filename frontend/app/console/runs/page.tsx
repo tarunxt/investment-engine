@@ -19,7 +19,7 @@ import { RunListItem } from '@/types/api';
 import { formatApiTimestamp } from '@/lib/datetime';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
-import { getRunDetailPathFromPrompt } from '@/lib/runPresentation';
+import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt } from '@/lib/runPresentation';
 import { WSClient } from '@/services/websocket';
 import { INDIA_TIMEZONE } from '../dashboard/_context';
 
@@ -266,7 +266,7 @@ export default function RunsPage() {
                       className="cursor-pointer align-top hover:bg-gray-50"
                     >
                       <td className="max-w-90 px-5 py-4">
-                        <div className="font-medium text-gray-950">{run.auto_rebalance_label ?? `#${run.id}`}</div>
+                        <div className="font-medium text-gray-950">{getAutoRebalanceRunDisplayLabel(run)}</div>
                         <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">
                           {run.prompt_preview}
                         </div>

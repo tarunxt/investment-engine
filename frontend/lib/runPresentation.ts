@@ -1,4 +1,12 @@
 import type { SwingTradeMarket } from '@/lib/swingTrade';
+import type { AutoRebalancePortfolioKey } from '@/types/api';
+
+type AutoRebalanceRunLike = {
+  id: number;
+  auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;
+  auto_rebalance_sequence?: number | null;
+  auto_rebalance_label?: string | null;
+};
 
 type SheetsPresentationState =
   | 'pending'
@@ -187,6 +195,25 @@ export function getRunScopeLabelFromPrompt(prompt?: string | null) {
   }
 
   return null;
+}
+
+function getAutoRebalancePortfolioRunPrefix(portfolio?: AutoRebalancePortfolioKey | null) {
+  if (portfolio === 'india') return 'India Run';
+  if (portfolio === 'indmoney_us') return 'IndMoney US Run';
+  return null;
+}
+
+export function getAutoRebalanceRunDisplayLabel(run: AutoRebalanceRunLike) {
+  const explicitLabel = run.auto_rebalance_label?.trim();
+  if (explicitLabel) return explicitLabel;
+
+  const sequence = run.auto_rebalance_sequence;
+  const prefix = getAutoRebalancePortfolioRunPrefix(run.auto_rebalance_portfolio);
+  if (prefix && typeof sequence === 'number' && sequence > 0) {
+    return `${prefix} #${sequence}`;
+  }
+
+  return `#${run.id}`;
 }
 
 export function formatRunLabel(runId: number, scopeLabel?: string | null) {
