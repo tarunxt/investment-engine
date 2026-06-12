@@ -136,6 +136,9 @@ class PolymarketPaperCopyBot:
                 "Bot initialized. Startup checks are refreshing in the background."
             )
 
+    def add_activity(self, message: str) -> None:
+        self._add_activity(message)
+
     async def shutdown(self) -> None:
         async with self._lock:
             if self.running and not self.stopped_at:
