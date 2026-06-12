@@ -38,7 +38,6 @@ from app.domains.polymarket.schemas import (
 from app.domains.polymarket.storage import JsonModelStore
 
 
-
 class PolymarketPaperCopyBot:
     def __init__(
         self,
@@ -98,6 +97,7 @@ class PolymarketPaperCopyBot:
 
         self._poll_task: asyncio.Task[None] | None = None
         self._balance_task: asyncio.Task[None] | None = None
+        self._startup_warmup_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
 
     async def init(self) -> None:
@@ -108,16 +108,14 @@ class PolymarketPaperCopyBot:
             for trade in self.live_trade_history:
                 self.seen_source_trades.add(trade.source_trade_id)
                 self.seen_source_trades.add(trade.source_trade_key)
-            await self._refresh_doctor_unlocked()
-            await self._try_auto_unlock_live_unlocked("server initialization")
-            await self._refresh_balance_unlocked()
             self._ensure_balance_task()
+            self._ensure_startup_warmup_task()
             await self.logger.info(
                 f"Bot initialized. paperTrading={self.config.paper_trading} liveTrading={self.config.live_trading}"
             )
-            self._add_activity("Bot initialized.")
-            if self.config.use_live_reads:
-                await self._perform_live_baseline_unlocked("server start")
+            self._add_activity(
+                "Bot initialized. Startup checks are refreshing in the background."
+            )
 
     async def shutdown(self) -> None:
         async with self._lock:
@@ -128,6 +126,8 @@ class PolymarketPaperCopyBot:
             self._poll_task = None
             await self._cancel_task(self._balance_task)
             self._balance_task = None
+            await self._cancel_task(self._startup_warmup_task)
+            self._startup_warmup_task = None
 
     async def start(self) -> None:
         async with self._lock:
@@ -319,6 +319,98 @@ class PolymarketPaperCopyBot:
         if self._balance_task and not self._balance_task.done():
             return
         self._balance_task = asyncio.create_task(self._balance_loop())
+
+    def _ensure_startup_warmup_task(self) -> None:
+        if self._startup_warmup_task and not self._startup_warmup_task.done():
+            return
+        self._startup_warmup_task = asyncio.create_task(self._startup_warmup_loop())
+
+    async def _startup_warmup_loop(self) -> None:
+        try:
+            results = await asyncio.gather(
+                self._refresh_startup_doctor_background(),
+                self._refresh_startup_balance_background(),
+                self._perform_startup_live_baseline_background(),
+                return_exceptions=True,
+            )
+        except asyncio.CancelledError:
+            return
+
+        for result in results:
+            if not isinstance(result, Exception):
+                continue
+            message = redact_secrets(str(result))
+            async with self._lock:
+                self.last_error = message
+                if self.active_mode in ("live-read", "live-trading"):
+                    self.live_source_status.last_live_read_error = message
+                self._add_activity(f"Startup background refresh failed: {message}.")
+            await self.logger.error("Startup background refresh failed", result)
+
+    async def _refresh_startup_doctor_background(self) -> None:
+        doctor_status = await self.live_executor.doctor()
+        async with self._lock:
+            self.doctor_status = doctor_status
+            await self._try_auto_unlock_live_unlocked("server initialization")
+
+    async def _refresh_startup_balance_background(self) -> None:
+        async with self._lock:
+            self.balance_state = PolymarketBalanceState(
+                status="loading", message="Refreshing Bullpen balance..."
+            )
+        balance_state = self._with_next_balance_refresh(
+            await self.balance_reader.refresh()
+        )
+        async with self._lock:
+            self.balance_state = balance_state
+
+    async def _perform_startup_live_baseline_background(self) -> None:
+        if not self.config.use_live_reads or self.active_mode == "mock":
+            return
+        try:
+            traders = await self.active_provider.get_top_traders()
+            selected_traders = traders[: max(1, self.config.max_tracked_traders)]
+            source_trades = await self.active_provider.get_recent_trades(
+                selected_traders
+            )
+        except Exception as exc:
+            message = redact_secrets(str(exc))
+            async with self._lock:
+                self.last_error = str(exc)
+                self.live_source_status.last_live_read_error = message
+                self._add_activity(f"Startup live baseline failed: {message}.")
+            await self.logger.warn(f"Startup live baseline failed: {message}")
+            return
+
+        async with self._lock:
+            if self.running or self.live_source_status.live_baseline_completed_at:
+                return
+            self.tracked_traders = selected_traders
+            self.live_source_status.live_read_traders_count = len(
+                [trader for trader in selected_traders if trader.source == "live-read"]
+            )
+            self._apply_provider_discovery_status_unlocked()
+            for trade in source_trades:
+                self._mark_source_trade_seen(trade)
+            self.live_source_status.live_baseline_completed_at = utc_now()
+            self.live_source_status.seen_live_trades_baseline_count = len(source_trades)
+            self._finish_poll_unlocked(
+                len(source_trades),
+                0,
+                0,
+                {
+                    "after_filters": 0,
+                    "skipped_by_filters": 0,
+                    "skipped_by_limits": 0,
+                    "skipped_duplicates": 0,
+                },
+            )
+            self._add_activity(
+                f"Startup live baseline completed. Existing {len(source_trades)} source trades marked seen; no proposals created."
+            )
+        await self.logger.info(
+            f"Startup live baseline completed. Existing {len(source_trades)} source trades marked seen; no proposals created."
+        )
 
     async def _poll_loop(self, *, initial_delay: float | None = None) -> None:
         try:
