@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -31,9 +33,15 @@ POLYMARKET_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 POLYMARKET_GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
 POLYMARKET_DATA_API_TIMEOUT_SECONDS = 10
 POLYMARKET_POLYGON_RPC_URL = "https://polygon-rpc.com"
+POLYMARKET_POLYGON_RPC_FALLBACK_URLS = [
+    "https://polygon-bor-rpc.publicnode.com",
+    "https://polygon.drpc.org",
+    "https://polygon-rpc.publicnode.com",
+]
 POLYMARKET_PUSD_TOKEN_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 POLYMARKET_PUSD_DECIMALS = 1_000_000
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-polymarket-bot/1.0"}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -858,17 +866,47 @@ async def _read_pusd_balance(client: httpx.AsyncClient, wallet: str) -> float:
             "latest",
         ],
     }
-    response = await client.post(
-        POLYMARKET_POLYGON_RPC_URL,
-        json=body,
-        headers={"content-type": "application/json", **POLYMARKET_HTTP_HEADERS},
+    errors: list[str] = []
+    for rpc_url in _polygon_rpc_urls():
+        try:
+            response = await client.post(
+                rpc_url,
+                json=body,
+                headers={"content-type": "application/json", **POLYMARKET_HTTP_HEADERS},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            result = payload.get("result") if isinstance(payload, dict) else None
+            if not isinstance(result, str) or not result.startswith("0x"):
+                raise RuntimeError("Polygon RPC did not return a pUSD balance result.")
+            return int(result, 16) / POLYMARKET_PUSD_DECIMALS
+        except Exception as exc:
+            errors.append(f"{rpc_url}: {redact_secrets(str(exc))}")
+
+    logger.warning(
+        "Polymarket pUSD balance unavailable from all Polygon RPC endpoints: %s",
+        "; ".join(errors) or "no RPC endpoints configured",
     )
-    response.raise_for_status()
-    payload = response.json()
-    result = payload.get("result") if isinstance(payload, dict) else None
-    if not isinstance(result, str) or not result.startswith("0x"):
-        raise RuntimeError("Polygon RPC did not return a pUSD balance result.")
-    return int(result, 16) / POLYMARKET_PUSD_DECIMALS
+    # Net-worth refreshes should not fail solely because public Polygon RPC
+    # endpoints are unavailable or rate-limited. Positions/redeemables still
+    # provide a useful lower-bound estimate, so use a zero cash balance when
+    # every configured RPC endpoint fails.
+    return 0.0
+
+
+def _polygon_rpc_urls() -> list[str]:
+    configured = os.getenv("POLYMARKET_POLYGON_RPC_URLS")
+    raw_urls = (
+        configured.split(",")
+        if configured
+        else [POLYMARKET_POLYGON_RPC_URL, *POLYMARKET_POLYGON_RPC_FALLBACK_URLS]
+    )
+    urls: list[str] = []
+    for url in raw_urls:
+        normalized = url.strip()
+        if normalized and normalized not in urls:
+            urls.append(normalized)
+    return urls
 
 
 def _erc20_balance_of_calldata(wallet: str) -> str:
