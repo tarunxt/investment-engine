@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from app.domains.polymarket.bullpen import (
@@ -36,6 +38,9 @@ from app.domains.polymarket.schemas import (
     PolymarketPaperTrade,
     PolymarketPosition,
     PolymarketSourceTrade,
+    PolymarketTrackedAccount,
+    PolymarketTrackedAccountCreate,
+    PolymarketTrackedAccountUpdate,
     PolymarketTrader,
 )
 from app.domains.polymarket.storage import JsonModelStore
@@ -52,12 +57,17 @@ class PolymarketPaperCopyBot:
         live_executor: BullpenLiveExecutor,
         balance_reader: BullpenBalanceReader,
         logger: PolymarketFileLogger,
+        tracked_account_store: JsonModelStore[PolymarketTrackedAccount] | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
         self.fallback_provider = fallback_provider
         self.store = store
         self.live_store = live_store
+        self.tracked_account_store = tracked_account_store or JsonModelStore(
+            Path(config.data_dir) / "polymarket-tracked-accounts.json",
+            PolymarketTrackedAccount,
+        )
         self.live_executor = live_executor
         self.balance_reader = balance_reader
         self.logger = logger
@@ -69,6 +79,7 @@ class PolymarketPaperCopyBot:
         self.last_poll_at: str | None = None
         self.next_poll_at: str | None = None
         self.last_error: str | None = None
+        self.tracked_accounts: list[PolymarketTrackedAccount] = []
         self.tracked_traders: list[PolymarketTrader] = []
         self.seen_source_trades: set[str] = set()
         self.trade_history: list[PolymarketPaperTrade] = []
@@ -108,6 +119,8 @@ class PolymarketPaperCopyBot:
             await self.logger.init()
             self.trade_history = await self.store.load()
             self.live_trade_history = await self.live_store.load()
+            self.tracked_accounts = await self._load_or_seed_tracked_accounts_unlocked()
+            self._apply_tracked_accounts_to_provider_unlocked()
             for trade in self.live_trade_history:
                 self.seen_source_trades.add(trade.source_trade_id)
                 self.seen_source_trades.add(trade.source_trade_key)
@@ -271,6 +284,66 @@ class PolymarketPaperCopyBot:
                 trade, "manual dashboard confirmation"
             )
 
+    async def add_tracked_account(
+        self, request: PolymarketTrackedAccountCreate
+    ) -> PolymarketTrackedAccount:
+        async with self._lock:
+            account = self._tracked_account_from_request(request)
+            if any(existing.id == account.id for existing in self.tracked_accounts):
+                raise RuntimeError("Tracked account already exists.")
+            self.tracked_accounts.append(account)
+            await self._save_tracked_accounts_unlocked()
+            self._apply_tracked_accounts_to_provider_unlocked()
+            self.live_source_status.live_baseline_completed_at = None
+            self._add_activity(f"Tracked account added: {account.target}.")
+            return account
+
+    async def update_tracked_account(
+        self, account_id: str, request: PolymarketTrackedAccountUpdate
+    ) -> PolymarketTrackedAccount:
+        async with self._lock:
+            account = self._find_tracked_account(account_id)
+            update = request.model_dump(exclude_unset=True)
+            if "target" in update and update["target"]:
+                normalized = normalize_tracked_account_target(str(update["target"]))
+                new_id = tracked_account_id(normalized)
+                if new_id != account.id and any(
+                    item.id == new_id for item in self.tracked_accounts
+                ):
+                    raise RuntimeError("Tracked account already exists.")
+                account.id = new_id
+                account.target = normalized
+                account.handle = tracked_account_handle(normalized)
+                account.address = normalized if normalized.startswith("0x") else ""
+                account.profile_url = tracked_account_profile_url(normalized)
+            for field in (
+                "threshold_percent",
+                "net_worth_usd",
+                "copy_trade_usd",
+                "enabled",
+            ):
+                if field in update:
+                    setattr(account, field, update[field])
+            account.updated_at = utc_now()
+            await self._save_tracked_accounts_unlocked()
+            self._apply_tracked_accounts_to_provider_unlocked()
+            self.live_source_status.live_baseline_completed_at = None
+            self._add_activity(f"Tracked account updated: {account.target}.")
+            return account
+
+    async def delete_tracked_account(self, account_id: str) -> None:
+        async with self._lock:
+            before = len(self.tracked_accounts)
+            self.tracked_accounts = [
+                item for item in self.tracked_accounts if item.id != account_id
+            ]
+            if len(self.tracked_accounts) == before:
+                raise RuntimeError("Tracked account not found.")
+            await self._save_tracked_accounts_unlocked()
+            self._apply_tracked_accounts_to_provider_unlocked()
+            self.live_source_status.live_baseline_completed_at = None
+            self._add_activity("Tracked account deleted.")
+
     async def debug_discovery(self, target: str) -> object:
         provider = (
             self.provider
@@ -302,6 +375,7 @@ class PolymarketPaperCopyBot:
             next_poll_at=self.next_poll_at,
             seconds_until_next_poll=self._seconds_until_next_poll(now),
             last_error=self.last_error,
+            tracked_accounts=self.tracked_accounts,
             tracked_traders=self.tracked_traders,
             open_positions=open_positions,
             trade_history=list(reversed(self.trade_history)),
@@ -1020,9 +1094,13 @@ class PolymarketPaperCopyBot:
             if source_trade.source == "live-market-read"
             else "Detected live-read trade from active trader; requires manual confirmation."
         )
+        account = self._matched_tracked_account(source_trade)
+        copy_trade_usd = (
+            account.copy_trade_usd if account else self.config.fixed_copy_trade_size
+        )
         if source_trade.side == "BUY":
             amount = min(
-                self.config.fixed_copy_trade_size,
+                copy_trade_usd,
                 self.config.max_live_trade_size,
                 source_trade.size_usd,
             )
@@ -1045,7 +1123,7 @@ class PolymarketPaperCopyBot:
             max(0.0001, implied_source_shares * 0.05),
         )
         amount = min(
-            self.config.fixed_copy_trade_size,
+            copy_trade_usd,
             self.config.max_live_trade_size,
             shares * source_trade.price,
         )
@@ -1223,7 +1301,18 @@ class PolymarketPaperCopyBot:
             self.config.allow_trader_handle_regex, handle
         ):
             return {"kind": "filter", "reason": "Trader handle excluded by filter."}
-        if source_trade.size_usd < self.config.min_source_trade_size_usd:
+        account = self._matched_tracked_account(source_trade)
+        if account:
+            threshold_usd = account.net_worth_usd * (account.threshold_percent / 100)
+            if source_trade.size_usd < threshold_usd:
+                return {
+                    "kind": "filter",
+                    "reason": (
+                        f"Source trade ${source_trade.size_usd:.2f} below "
+                        f"{account.threshold_percent:.2f}% net-worth threshold (${threshold_usd:.2f})."
+                    ),
+                }
+        elif source_trade.size_usd < self.config.min_source_trade_size_usd:
             return {"kind": "filter", "reason": "Source trade size below minimum"}
         if (
             source_trade.price < self.config.min_copy_price
@@ -1307,6 +1396,110 @@ class PolymarketPaperCopyBot:
         self.live_source_status.trending_market_activity_unavailable = (
             status.trending_market_activity_unavailable
         )
+
+    async def _load_or_seed_tracked_accounts_unlocked(
+        self,
+    ) -> list[PolymarketTrackedAccount]:
+        accounts = await self.tracked_account_store.load()
+        if accounts:
+            return accounts
+        defaults = [
+            "https://polymarket.com/@weatherstappen",
+            "https://polymarket.com/@weatherhk",
+            "https://polymarket.com/@opopv2",
+            "https://polymarket.com/@empusa",
+        ]
+        now = utc_now()
+        accounts = [
+            PolymarketTrackedAccount(
+                id=tracked_account_id(normalize_tracked_account_target(target)),
+                target=normalize_tracked_account_target(target),
+                handle=tracked_account_handle(normalize_tracked_account_target(target)),
+                address=(
+                    normalize_tracked_account_target(target)
+                    if normalize_tracked_account_target(target).startswith("0x")
+                    else ""
+                ),
+                profile_url=tracked_account_profile_url(
+                    normalize_tracked_account_target(target)
+                ),
+                threshold_percent=5,
+                net_worth_usd=100,
+                copy_trade_usd=1,
+                enabled=True,
+                created_at=now,
+                updated_at=now,
+            )
+            for target in defaults
+        ]
+        await self.tracked_account_store.save(accounts)
+        return accounts
+
+    def _tracked_account_from_request(
+        self, request: PolymarketTrackedAccountCreate
+    ) -> PolymarketTrackedAccount:
+        normalized = normalize_tracked_account_target(request.target)
+        now = utc_now()
+        return PolymarketTrackedAccount(
+            id=tracked_account_id(normalized),
+            target=normalized,
+            handle=tracked_account_handle(normalized),
+            address=normalized if normalized.startswith("0x") else "",
+            profile_url=tracked_account_profile_url(normalized),
+            threshold_percent=request.threshold_percent,
+            net_worth_usd=request.net_worth_usd,
+            copy_trade_usd=request.copy_trade_usd,
+            enabled=request.enabled,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def _find_tracked_account(self, account_id: str) -> PolymarketTrackedAccount:
+        account = next(
+            (item for item in self.tracked_accounts if item.id == account_id), None
+        )
+        if not account:
+            raise RuntimeError("Tracked account not found.")
+        return account
+
+    async def _save_tracked_accounts_unlocked(self) -> None:
+        await self.tracked_account_store.save(self.tracked_accounts)
+
+    def _apply_tracked_accounts_to_provider_unlocked(self) -> None:
+        targets = ",".join(
+            account.target for account in self.tracked_accounts if account.enabled
+        )
+        self.config.manual_tracked_wallets = targets
+        if hasattr(self.provider, "update_manual_targets"):
+            self.provider.update_manual_targets(targets)
+        if hasattr(self.active_provider, "update_manual_targets"):
+            self.active_provider.update_manual_targets(targets)
+
+    def _matched_tracked_account(
+        self, source_trade: PolymarketSourceTrade
+    ) -> PolymarketTrackedAccount | None:
+        identities = {
+            identity_key(value)
+            for value in (
+                source_trade.clean_trader_identity,
+                source_trade.trader_address,
+                source_trade.trader_handle,
+                source_trade.trader_name,
+                source_trade.trader_id,
+            )
+            if value
+        }
+        for account in self.tracked_accounts:
+            if not account.enabled:
+                continue
+            account_ids = {
+                identity_key(value)
+                for value in (account.target, account.handle, account.address)
+                if value
+            }
+            if identities & account_ids:
+                return account
+        return None
 
     def _paper_trade(
         self,
@@ -1537,3 +1730,28 @@ class PolymarketPaperCopyBot:
             await task
         except asyncio.CancelledError:
             return
+
+
+def normalize_tracked_account_target(value: str) -> str:
+    raw = value.strip().rstrip("?")
+    parsed = urlparse(raw)
+    if parsed.netloc:
+        segment = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+        raw = segment or raw
+    raw = raw.lstrip("@").strip().strip("/").split("?", 1)[0]
+    return raw
+
+
+def tracked_account_id(target: str) -> str:
+    return identity_key(target)
+
+
+def tracked_account_handle(target: str) -> str | None:
+    return None if target.startswith("0x") else target.lstrip("@")
+
+
+def tracked_account_profile_url(target: str) -> str | None:
+    if target.startswith("0x"):
+        return f"https://polymarket.com/profile/{target}"
+    handle = tracked_account_handle(target)
+    return f"https://polymarket.com/@{handle}" if handle else None

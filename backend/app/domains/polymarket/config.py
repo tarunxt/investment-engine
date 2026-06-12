@@ -47,12 +47,14 @@ def load_polymarket_config() -> PolymarketBotConfig:
         paper_trading=_bool_from_env("PAPER_TRADING", False),
         live_trading=_bool_from_env("LIVE_TRADING", True),
         use_live_reads=_bool_from_env("USE_LIVE_READS", True),
-        auto_execute_live=_bool_from_env("AUTO_EXECUTE_LIVE", False),
+        auto_execute_live=_bool_from_env("AUTO_EXECUTE_LIVE", True),
         live_unlock_mode=live_unlock_mode,
-        require_manual_confirmation=_bool_from_env("REQUIRE_MANUAL_CONFIRMATION", True),
+        require_manual_confirmation=_bool_from_env(
+            "REQUIRE_MANUAL_CONFIRMATION", False
+        ),
         poll_interval_ms=_int_from_env("POLYMARKET_POLL_INTERVAL_MS", 30_000),
-        max_trade_size=_float_from_env("MAX_TRADE_SIZE", 5),
-        fixed_copy_trade_size=_float_from_env("FIXED_COPY_TRADE_SIZE", 5),
+        max_trade_size=_float_from_env("MAX_TRADE_SIZE", 1),
+        fixed_copy_trade_size=_float_from_env("FIXED_COPY_TRADE_SIZE", 1),
         max_trades_per_day=_int_from_env("MAX_TRADES_PER_DAY", 25),
         max_exposure_per_market=_float_from_env("MAX_EXPOSURE_PER_MARKET", 25),
         max_daily_loss=_float_from_env("MAX_DAILY_LOSS", 50),

@@ -16,7 +16,10 @@ _SECRET_PATTERNS = [
         ),
         lambda match: f"{match.group(1)}=[REDACTED]",
     ),
-    (re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE), lambda _m: "Bearer [REDACTED]"),
+    (
+        re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
+        lambda _m: "Bearer [REDACTED]",
+    ),
     (re.compile(r"0x[a-fA-F0-9]{64}"), lambda _m: "[REDACTED_PRIVATE_KEY]"),
 ]
 
@@ -34,8 +37,12 @@ class PolymarketFileLogger:
         self.error_log_path = error_log_path
 
     async def init(self) -> None:
-        await asyncio.to_thread(self.bot_log_path.parent.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(self.error_log_path.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(
+            self.bot_log_path.parent.mkdir, parents=True, exist_ok=True
+        )
+        await asyncio.to_thread(
+            self.error_log_path.parent.mkdir, parents=True, exist_ok=True
+        )
         await asyncio.to_thread(self.bot_log_path.touch, exist_ok=True)
         await asyncio.to_thread(self.error_log_path.touch, exist_ok=True)
 

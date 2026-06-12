@@ -109,6 +109,12 @@ class BullpenReadOnlyProvider:
         self.invalid_manual_wallets = parsed_wallets["invalid"]
         self.last_discovery_status = self._empty_status()
 
+    def update_manual_targets(self, targets: str) -> None:
+        parsed_wallets = parse_manual_wallets(targets)
+        self.manual_wallets = parsed_wallets["valid"]
+        self.invalid_manual_wallets = parsed_wallets["invalid"]
+        self.last_discovery_status = self._empty_status()
+
     async def get_top_traders(self) -> list[PolymarketTrader]:
         discovery = await self._discover_active_traders()
         manual = await self._read_manual_wallets()
@@ -366,38 +372,76 @@ class BullpenReadOnlyProvider:
 
     async def _read_manual_wallets(self) -> list[PolymarketTrader]:
         traders: list[PolymarketTrader] = []
-        for address in self.manual_wallets:
+        for target in self.manual_wallets:
+            is_wallet = is_public_wallet_address(target)
+            handle = None if is_wallet else clean_handle(target)
             try:
-                trades = await self._read_wallet_activity(address)
+                seed = PolymarketTrader(
+                    id=target,
+                    name=short_address(target) if is_wallet else f"@{handle or target}",
+                    address=target if is_wallet else "",
+                    handle=handle,
+                    profile_slug=handle,
+                    activity_source="wallet" if is_wallet else "handle",
+                    polymarket_profile_url=(
+                        polymarket_profile_url(target)
+                        if is_wallet
+                        else polymarket_handle_profile_url(handle)
+                    ),
+                    profile_url=polymarket_handle_profile_url(handle),
+                    activity_url=polymarket_handle_activity_url(handle),
+                    volume_24h=0,
+                    trades_24h=0,
+                    source_reason="Manual tracked account",
+                    source="live-read",
+                )
+                trades = (
+                    await self._read_wallet_activity(target)
+                    if is_wallet
+                    else await self._read_handle_or_feed_activity(seed)
+                )
                 aggregated = aggregate_traders(
-                    trades, "live-read", "Manual tracked wallet"
+                    trades, "live-read", "Manual tracked account"
                 )
-                traders.append(
-                    aggregated[0]
-                    if aggregated
-                    else PolymarketTrader(
-                        id=address,
-                        name=short_address(address),
-                        address=address,
-                        activity_source="wallet",
-                        polymarket_profile_url=polymarket_profile_url(address),
-                        volume_24h=0,
-                        trades_24h=0,
-                        source_reason="Manual tracked wallet",
-                        source="live-read",
+                if aggregated:
+                    trader = aggregated[0]
+                    trader.handle = trader.handle or handle
+                    trader.profile_slug = trader.profile_slug or handle
+                    trader.profile_url = (
+                        trader.profile_url or polymarket_handle_profile_url(handle)
                     )
-                )
+                    trader.activity_url = (
+                        trader.activity_url or polymarket_handle_activity_url(handle)
+                    )
+                    trader.polymarket_profile_url = (
+                        trader.polymarket_profile_url or seed.polymarket_profile_url
+                    )
+                    traders.append(trader)
+                else:
+                    traders.append(seed)
             except Exception:
                 traders.append(
                     PolymarketTrader(
-                        id=address,
-                        name=short_address(address),
-                        address=address,
-                        activity_source="wallet",
-                        polymarket_profile_url=polymarket_profile_url(address),
+                        id=target,
+                        name=(
+                            short_address(target)
+                            if is_wallet
+                            else f"@{handle or target}"
+                        ),
+                        address=target if is_wallet else "",
+                        handle=handle,
+                        profile_slug=handle,
+                        activity_source="wallet" if is_wallet else "handle",
+                        profile_url=polymarket_handle_profile_url(handle),
+                        activity_url=polymarket_handle_activity_url(handle),
+                        polymarket_profile_url=(
+                            polymarket_profile_url(target)
+                            if is_wallet
+                            else polymarket_handle_profile_url(handle)
+                        ),
                         volume_24h=0,
                         trades_24h=0,
-                        source_reason="Manual tracked wallet; recent activity unavailable",
+                        source_reason="Manual tracked account; recent activity unavailable",
                         source="live-read",
                     )
                 )
@@ -1153,12 +1197,15 @@ def parse_manual_wallets(value: str) -> dict[str, list[str]]:
     raw = [item.strip() for item in value.split(",") if item.strip()]
     valid: list[str] = []
     invalid: list[str] = []
-    for address in raw:
-        cleaned = clean_wallet_prefix(address)
-        if cleaned:
-            valid.append(cleaned)
+    for target in raw:
+        cleaned_wallet = clean_wallet_prefix(target)
+        cleaned_handle = clean_handle(target) or clean_handle(target.rsplit("/", 1)[-1])
+        if cleaned_wallet:
+            valid.append(cleaned_wallet)
+        elif cleaned_handle:
+            valid.append(cleaned_handle)
         else:
-            invalid.append(address)
+            invalid.append(target)
     return {"valid": list(dict.fromkeys(valid)), "invalid": invalid}
 
 

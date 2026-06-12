@@ -1032,6 +1032,37 @@ export interface PolymarketBotConfig {
   data_dir: string;
 }
 
+
+export interface PolymarketTrackedAccount {
+  id: string;
+  target: string;
+  handle?: string | null;
+  address: string;
+  profile_url?: string | null;
+  enabled: boolean;
+  threshold_percent: number;
+  net_worth_usd: number;
+  copy_trade_usd: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolymarketTrackedAccountCreate {
+  target: string;
+  threshold_percent?: number;
+  net_worth_usd?: number;
+  copy_trade_usd?: number;
+  enabled?: boolean;
+}
+
+export interface PolymarketTrackedAccountUpdate {
+  target?: string;
+  threshold_percent?: number;
+  net_worth_usd?: number;
+  copy_trade_usd?: number;
+  enabled?: boolean;
+}
+
 export interface PolymarketTrader {
   id: string;
   name: string;
@@ -1194,6 +1225,7 @@ export interface PolymarketBotState {
   next_poll_at?: string | null;
   seconds_until_next_poll: number;
   last_error?: string | null;
+  tracked_accounts: PolymarketTrackedAccount[];
   tracked_traders: PolymarketTrader[];
   open_positions: PolymarketPosition[];
   trade_history: PolymarketPaperTrade[];

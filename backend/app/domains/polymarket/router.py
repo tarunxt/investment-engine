@@ -8,6 +8,8 @@ from app.domains.polymarket.schemas import (
     PolymarketBotState,
     PolymarketDiscoveryDebugReport,
     PolymarketDiscoveryDebugRequest,
+    PolymarketTrackedAccountCreate,
+    PolymarketTrackedAccountUpdate,
 )
 from app.domains.polymarket.service import polymarket_bot_manager
 
@@ -87,21 +89,27 @@ async def refresh_polymarket_balance(current_user: User = Depends(get_current_us
 
 
 @router.post("/live/emergency-stop", response_model=PolymarketBotState)
-async def emergency_stop_polymarket_live(current_user: User = Depends(get_current_user)):
+async def emergency_stop_polymarket_live(
+    current_user: User = Depends(get_current_user),
+):
     bot = await _get_bot(current_user)
     await bot.emergency_stop()
     return await bot.get_state()
 
 
 @router.post("/live/reset-emergency-stop", response_model=PolymarketBotState)
-async def reset_polymarket_live_emergency_stop(current_user: User = Depends(get_current_user)):
+async def reset_polymarket_live_emergency_stop(
+    current_user: User = Depends(get_current_user),
+):
     bot = await _get_bot(current_user)
     await bot.reset_emergency_stop()
     return await bot.get_state()
 
 
 @router.post("/live/trades/{trade_id}/confirm", response_model=PolymarketBotState)
-async def confirm_polymarket_trade(trade_id: str, current_user: User = Depends(get_current_user)):
+async def confirm_polymarket_trade(
+    trade_id: str, current_user: User = Depends(get_current_user)
+):
     bot = await _get_bot(current_user)
     try:
         await bot.confirm_live_trade(trade_id)
@@ -111,7 +119,9 @@ async def confirm_polymarket_trade(trade_id: str, current_user: User = Depends(g
 
 
 @router.post("/live/trades/{trade_id}/reject", response_model=PolymarketBotState)
-async def reject_polymarket_trade(trade_id: str, current_user: User = Depends(get_current_user)):
+async def reject_polymarket_trade(
+    trade_id: str, current_user: User = Depends(get_current_user)
+):
     bot = await _get_bot(current_user)
     try:
         await bot.reject_live_trade(trade_id)
@@ -124,6 +134,45 @@ async def reject_polymarket_trade(trade_id: str, current_user: User = Depends(ge
 async def reject_all_polymarket_trades(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
     await bot.reject_all_pending_live_trades()
+    return await bot.get_state()
+
+
+@router.post("/tracked-accounts", response_model=PolymarketBotState)
+async def add_polymarket_tracked_account(
+    request: PolymarketTrackedAccountCreate,
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        await bot.add_tracked_account(request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await bot.get_state()
+
+
+@router.patch("/tracked-accounts/{account_id}", response_model=PolymarketBotState)
+async def update_polymarket_tracked_account(
+    account_id: str,
+    request: PolymarketTrackedAccountUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        await bot.update_tracked_account(account_id, request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await bot.get_state()
+
+
+@router.delete("/tracked-accounts/{account_id}", response_model=PolymarketBotState)
+async def delete_polymarket_tracked_account(
+    account_id: str, current_user: User = Depends(get_current_user)
+):
+    bot = await _get_bot(current_user)
+    try:
+        await bot.delete_tracked_account(account_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return await bot.get_state()
 
 

@@ -8,7 +8,11 @@ from app.domains.polymarket.bullpen import BullpenBalanceReader, BullpenLiveExec
 from app.domains.polymarket.config import load_polymarket_config
 from app.domains.polymarket.logger import PolymarketFileLogger
 from app.domains.polymarket.providers import BullpenReadOnlyProvider, MockProvider
-from app.domains.polymarket.schemas import PolymarketLiveTradeDecision, PolymarketPaperTrade
+from app.domains.polymarket.schemas import (
+    PolymarketLiveTradeDecision,
+    PolymarketPaperTrade,
+    PolymarketTrackedAccount,
+)
 from app.domains.polymarket.storage import JsonModelStore
 
 
@@ -25,15 +29,30 @@ class PolymarketBotManager:
 
             base_config = load_polymarket_config()
             user_data_dir = Path(base_config.data_dir) / f"user-{user_id}"
-            user_config = base_config.model_copy(update={"data_dir": str(user_data_dir)})
+            user_config = base_config.model_copy(
+                update={"data_dir": str(user_data_dir)}
+            )
             mock_provider = MockProvider()
-            read_provider = BullpenReadOnlyProvider(user_config) if user_config.use_live_reads else mock_provider
+            read_provider = (
+                BullpenReadOnlyProvider(user_config)
+                if user_config.use_live_reads
+                else mock_provider
+            )
             bot = PolymarketPaperCopyBot(
                 config=user_config,
                 provider=read_provider,
                 fallback_provider=mock_provider,
-                store=JsonModelStore(user_data_dir / "polymarket-trades.json", PolymarketPaperTrade),
-                live_store=JsonModelStore(user_data_dir / "polymarket-live-trades.json", PolymarketLiveTradeDecision),
+                store=JsonModelStore(
+                    user_data_dir / "polymarket-trades.json", PolymarketPaperTrade
+                ),
+                live_store=JsonModelStore(
+                    user_data_dir / "polymarket-live-trades.json",
+                    PolymarketLiveTradeDecision,
+                ),
+                tracked_account_store=JsonModelStore(
+                    user_data_dir / "polymarket-tracked-accounts.json",
+                    PolymarketTrackedAccount,
+                ),
                 live_executor=BullpenLiveExecutor(),
                 balance_reader=BullpenBalanceReader(),
                 logger=PolymarketFileLogger(
