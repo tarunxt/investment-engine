@@ -54,7 +54,7 @@ import {
   getSwingTradeDefaultInvestmentAmount,
   type SwingTradeMarket,
 } from "@/lib/swingTrade";
-import { getRunDetailPathFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
+import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import { APIError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
 import { INDIA_TIMEZONE } from "../_context";
@@ -3099,7 +3099,7 @@ function InputSelectionDialog({
       groups.set(key, {
         key,
         runId: candidate.run?.id ?? null,
-        title: candidate.run ? `Run #${candidate.run.id}` : candidate.jobNo,
+        title: candidate.run ? getAutoRebalanceRunDisplayLabel(candidate.run) : candidate.jobNo,
         timestamp: candidate.timestamp,
         market: candidate.market,
         candidates: [candidate],

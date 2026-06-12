@@ -28,6 +28,7 @@ import {
   type SetupRow,
 } from "@/lib/technicalSetups";
 import { STANDARD_ACTION_ORDER, getStandardActionBadgeClass } from "@/lib/actionColorScheme";
+import { getAutoRebalanceRunDisplayLabel } from "@/lib/runPresentation";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -74,6 +75,7 @@ type ActionablesInputCandidate = {
   error: string | null;
   runId: number;
   jobId: number;
+  runLabel: string;
   market: SwingTradeMarket;
 };
 
@@ -2210,6 +2212,7 @@ function buildActionablesInputCandidates(runs: RunResponse[], market: SwingTrade
           error: job.error_message ?? null,
           runId: run.id,
           jobId: link.job_id,
+          runLabel: getAutoRebalanceRunDisplayLabel(run),
           market,
         }];
       }),
@@ -4502,7 +4505,7 @@ function ActionablesInputSelectionDialog({
       groups.set(key, {
         key,
         runId: candidate.runId,
-        title: `Run #${candidate.runId}`,
+        title: candidate.runLabel,
         timestamp: candidate.timestamp,
         market: candidate.market,
         candidates: [candidate],
