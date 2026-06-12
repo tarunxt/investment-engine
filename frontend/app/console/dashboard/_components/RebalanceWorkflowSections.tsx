@@ -471,6 +471,34 @@ function getStageTileLabel(stage: WorkflowStageKey) {
   return labels[stage];
 }
 
+function getLlmSelectorScanLabel(
+  stage: WorkflowStageKey,
+  portfolio: WorkflowPortfolio | null,
+) {
+  const marketLabel =
+    portfolio === "zerodha" ? "India" : portfolio === "indmoneyUs" ? "US" : "";
+  const scanLabels: Record<WorkflowStageKey, string> = {
+    sync: "Sync",
+    threats: "Threats",
+    swing: "Swing",
+    rebalance: "Rebalance",
+    technical: "Technical",
+    actionables: "Actionables",
+  };
+
+  return [scanLabels[stage], marketLabel].filter(Boolean).join(" ");
+}
+
+function getLlmSelectorTitle(
+  stage: WorkflowStageKey,
+  portfolio: WorkflowPortfolio | null,
+  costInr?: number | null,
+) {
+  const scanLabel = getLlmSelectorScanLabel(stage, portfolio);
+  const costLabel = formatInrCost(costInr);
+  return `Select LLMs- ${scanLabel}${costLabel !== "n/a" ? ` (Cost incurred: ${costLabel})` : ""}`;
+}
+
 function summarizeRun(run: RunResponse) {
   const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
   const firstJob = jobs[0];
@@ -4230,6 +4258,12 @@ function StageLlmSelectorDialog({
     typeof lastRunCostInr === "number" &&
     Number.isFinite(lastRunCostInr) &&
     lastRunCostInr > 0;
+  const selectorScanLabel = stage
+    ? getLlmSelectorScanLabel(stage, portfolio)
+    : "this scan";
+  const selectorTitle = stage
+    ? getLlmSelectorTitle(stage, portfolio, lastRunCostInr)
+    : "Select LLMs";
   const loadHistory = useCallback(async () => {
     if (!stage || !portfolio || !currentHistoryKey) return;
     if (historyKey === currentHistoryKey) {
@@ -4377,7 +4411,7 @@ function StageLlmSelectorDialog({
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
-              Select LLMs
+              {selectorTitle}
             </p>
             <h3 className="mt-1 text-xl font-bold text-slate-950">
               {getStageLabel(stage, "idle")}
@@ -4387,7 +4421,7 @@ function StageLlmSelectorDialog({
             </p>
             {hasLastRunCost ? (
               <p className="mt-2 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-100">
-                Last cost incurred: {formatInrCost(lastRunCostInr)}
+                Last {selectorScanLabel} cost incurred: {formatInrCost(lastRunCostInr)}
               </p>
             ) : null}
           </div>
@@ -4399,8 +4433,8 @@ function StageLlmSelectorDialog({
                 "rounded-full p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-700",
                 activeHistoryOpen ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200" : "",
               )}
-              aria-label="Show LLM run history for this stage"
-              title="LLM run history"
+              aria-label={`Show LLM run history for ${selectorTitle}`}
+              title={`${selectorTitle} run history`}
             >
               <History className="size-5" />
             </button>
