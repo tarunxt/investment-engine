@@ -2009,7 +2009,12 @@ function buildRunHistoricalCostMapInr(
   buildStageLlmHistoryEntries(runs, stage, portfolio).forEach((entry) => {
     const key = toHistoricalLlmCostKey(entry.provider, entry.model);
     if (!key || costs[key] !== undefined) return;
-    if (entry.status !== "completed" || !hasKnownUsdCost(entry.costUsd)) return;
+    // The Auto-rebalance history popup reports actual incurred cost for any
+    // job that reached the backend and recorded spend, including partial runs.
+    // Use the same source for Select LLM indicatory costs so the selector
+    // mirrors the latest incurred amount instead of falling back to stale
+    // provider estimates for non-completed-but-charged jobs.
+    if (!hasKnownUsdCost(entry.costUsd)) return;
     costs[key] = toRoundedInrCost(entry.costUsd, usdInrRate);
   });
   return costs;
@@ -2030,7 +2035,7 @@ function buildThreatHistoricalCostMapInr(
     .forEach((item) => {
       const key = toHistoricalLlmCostKey(item.provider, item.model);
       if (!key || costs[key] !== undefined) return;
-      if (item.status !== "completed" || !hasKnownUsdCost(item.estimated_cost)) return;
+      if (!hasKnownUsdCost(item.estimated_cost)) return;
       costs[key] = toRoundedInrCost(item.estimated_cost, usdInrRate);
     });
   return costs;
