@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Sparkles,
   Target,
+  Upload,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,8 +18,10 @@ import { URLs } from "@/lib/urls";
 import { apiService } from "@/services/api";
 import type {
   IndMoneyUsPortfolioOverviewResponse,
+  IndMoneyUsPortfolioSnapshotSummary,
   IndMoneyUsThreatAnalysis,
   ZerodhaPortfolioOverviewResponse,
+  ZerodhaPortfolioSnapshotSummary,
   ZerodhaStatusResponse,
   ZerodhaThreatAnalysis,
 } from "@/types/api";
@@ -320,6 +323,154 @@ function PortfolioCommandSummary({
   );
 }
 
+function buildPortfolioCommandTrend(
+  zerodhaHistory: ZerodhaPortfolioSnapshotSummary[],
+  indmoneyHistory: IndMoneyUsPortfolioSnapshotSummary[],
+  usdInrRate: number,
+) {
+  const trendPoints = [
+    ...zerodhaHistory
+      .slice(-6)
+      .map((snapshot) =>
+        Math.max(0, snapshot.holdings_market_value + snapshot.available_margin),
+      ),
+    ...indmoneyHistory
+      .slice(-6)
+      .map((snapshot) =>
+        Math.max(
+          0,
+          ((snapshot.current_value ?? 0) + (snapshot.wallet_balance ?? 0)) *
+            usdInrRate,
+        ),
+      ),
+  ].filter((value) => Number.isFinite(value) && value > 0);
+
+  if (trendPoints.length >= 4) {
+    return trendPoints.slice(-12);
+  }
+
+  return [
+    0.18, 0.16, 0.19, 0.21, 0.36, 0.58, 0.64, 0.46, 0.48, 0.38, 0.34, 0.42,
+    0.49, 0.47, 0.32, 0.33, 0.35, 0.31, 0.72, 0.82, 0.75, 0.71,
+  ];
+}
+
+function buildCommandChartPath(
+  values: number[],
+  width: number,
+  height: number,
+) {
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const valueRange = maxValue - minValue || 1;
+  const xStep = width / (values.length - 1 || 1);
+
+  return values
+    .map((value, index) => {
+      const x = index * xStep;
+      const y = height - ((value - minValue) / valueRange) * height;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function PortfolioCommandChart({
+  profitLossValue,
+  dayChangeValue,
+  trendValues,
+}: {
+  profitLossValue: number;
+  dayChangeValue: number;
+  trendValues: number[];
+}) {
+  const chartWidth = 420;
+  const chartHeight = 118;
+  const linePath = buildCommandChartPath(trendValues, chartWidth, chartHeight);
+  const areaPath = `${linePath} L ${chartWidth} ${chartHeight} L 0 ${chartHeight} Z`;
+  const isPositive = profitLossValue >= 0;
+
+  return (
+    <div className="min-h-[260px] rounded-[30px] border border-white/10 bg-slate-950/50 p-5 shadow-2xl shadow-slate-950/20 backdrop-blur xl:min-w-[430px]">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3 text-xl font-semibold text-slate-400">
+            <span
+              className={`h-4 w-5 rounded-full ${
+                isPositive ? "bg-emerald-400" : "bg-rose-400"
+              } [clip-path:polygon(50%_0%,100%_100%,0%_100%)]`}
+              aria-hidden="true"
+            />
+            Profit/Loss
+          </div>
+          <div className="mt-8 flex items-center gap-4">
+            <div className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
+              {formatInr(profitLossValue)}
+            </div>
+            <Upload className="size-6 text-slate-200" aria-hidden="true" />
+          </div>
+          <div
+            className={`mt-5 text-lg font-semibold ${
+              dayChangeValue >= 0 ? "text-emerald-300" : "text-rose-300"
+            }`}
+          >
+            {formatInr(dayChangeValue)} Past Day
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-400">
+          {["1D", "1W", "1M", "1Y", "YTD", "ALL"].map((range) => (
+            <span
+              key={range}
+              className={
+                range === "1D"
+                  ? "rounded-2xl bg-blue-500/20 px-3 py-3 text-blue-400"
+                  : "px-2 py-3"
+              }
+            >
+              {range}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-5 flex items-center justify-end gap-3 text-2xl font-semibold text-slate-500">
+        <span className="relative h-8 w-8 overflow-hidden" aria-hidden="true">
+          <span className="absolute inset-y-1 left-1 w-6 border-y-4 border-l-4 border-slate-500 [clip-path:polygon(0_0,100%_22%,100%_78%,0_100%)]" />
+        </span>
+        Portfolio
+      </div>
+
+      <svg
+        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+        className="mt-6 h-28 w-full overflow-visible"
+        role="img"
+        aria-label="Portfolio profit and loss trend"
+      >
+        <defs>
+          <linearGradient id="commandChartLine" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#a855f7" />
+            <stop offset="55%" stopColor="#6366f1" />
+            <stop offset="100%" stopColor="#0ea5e9" />
+          </linearGradient>
+          <linearGradient id="commandChartArea" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#2563eb" stopOpacity="0.34" />
+            <stop offset="100%" stopColor="#1e293b" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#commandChartArea)" />
+        <path
+          d={linePath}
+          fill="none"
+          stroke="url(#commandChartLine)"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="4"
+        />
+      </svg>
+    </div>
+  );
+}
+
 function buildUsTopHoldings(
   overview: IndMoneyUsPortfolioOverviewResponse | null,
   usdInrRate: number,
@@ -468,6 +619,21 @@ export default function DashboardPage() {
     (indmoneyPortfolioValueInr ?? 0) + (indmoneyAvailableFundsValueInr ?? 0);
   const totalCommandValue = zerodhaCommandValue + indmoneyCommandValue;
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
+  const totalProfitLossValue =
+    (indiaSnapshot?.holdings_pnl ?? 0) +
+    (usSnapshot?.total_return_value == null
+      ? 0
+      : usSnapshot.total_return_value * usdInrRate);
+  const totalDayChangeValue =
+    (indiaSnapshot?.holdings_day_change_value ?? 0) +
+    (usSnapshot?.day_return_value == null
+      ? 0
+      : usSnapshot.day_return_value * usdInrRate);
+  const portfolioCommandTrend = buildPortfolioCommandTrend(
+    dashboard.zerodhaOverview?.history ?? [],
+    dashboard.indmoneyOverview?.history ?? [],
+    usdInrRate,
+  );
   if (
     loading &&
     !indiaSnapshot &&
@@ -488,7 +654,7 @@ export default function DashboardPage() {
       <section className="relative overflow-hidden rounded-[36px] border border-slate-200 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.22),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.22),_transparent_35%)]" />
 
-        <div className="relative grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_minmax(460px,0.95fr)] lg:items-center lg:px-8">
+        <div className="relative grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.85fr)] lg:items-center lg:px-8 2xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.75fr)_minmax(430px,0.9fr)]">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
               <Sparkles className="size-3.5" />
@@ -532,6 +698,12 @@ export default function DashboardPage() {
             indmoneyValue={indmoneyCommandValue}
             indmoneyPortfolioValue={indmoneyPortfolioValueInr}
             indmoneyFundsValue={indmoneyAvailableFundsValueInr}
+          />
+
+          <PortfolioCommandChart
+            profitLossValue={totalProfitLossValue}
+            dayChangeValue={totalDayChangeValue}
+            trendValues={portfolioCommandTrend}
           />
         </div>
       </section>
