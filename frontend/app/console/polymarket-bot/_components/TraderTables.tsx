@@ -19,6 +19,15 @@ function formatMoney(value: number, digits = 2) {
   }).format(value || 0);
 }
 
+function normalizePolymarketProfileUrl(trader: PolymarketTrader) {
+  const handle = trader.handle || trader.profile_slug;
+  if (handle) {
+    return `https://polymarket.com/@${handle.replace(/^@/, '')}`;
+  }
+
+  return trader.polymarket_profile_url || trader.profile_url;
+}
+
 function EmptyState({ colSpan, message }: { colSpan: number; message: string }) {
   return (
     <tr>
@@ -45,46 +54,46 @@ export function TrackedTradersTable({ traders }: { traders: PolymarketTrader[] }
             <th className="px-4 py-3">Last Trade Time</th>
             <th className="px-4 py-3">Last Trade Age</th>
             <th className="px-4 py-3">Volume 24h</th>
-            <th className="px-4 py-3">Polymarket Profile</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {traders.length === 0 ? (
-            <EmptyState colSpan={11} message="Start the bot to load tracked traders." />
+            <EmptyState colSpan={10} message="Start the bot to load tracked traders." />
           ) : (
-            traders.map((trader) => (
-              <tr key={trader.id} className="align-top">
-                <td className="px-4 py-3">
-                  <div className="font-medium text-slate-950">{trader.name}</div>
-                  <div className="mt-1 text-xs text-slate-500">{trader.address || trader.id}</div>
-                </td>
-                <td className="px-4 py-3 text-slate-700">
-                  {trader.handle ? `@${trader.handle}` : trader.profile_slug || '—'}
-                </td>
-                <td className="px-4 py-3 text-slate-700">{trader.activity_source || '—'}</td>
-                <td className="px-4 py-3 text-xs leading-5 text-slate-600">{trader.source_reason}</td>
-                <td className="px-4 py-3 text-slate-700">{trader.trades_1h}</td>
-                <td className="px-4 py-3 text-slate-700">{trader.trades_6h}</td>
-                <td className="px-4 py-3 text-slate-700">{trader.trades_24h}</td>
-                <td className="px-4 py-3 text-slate-700">{formatTs(trader.last_trade_at)}</td>
-                <td className="px-4 py-3 text-slate-700">{trader.last_trade_age || '—'}</td>
-                <td className="px-4 py-3 text-slate-700">{formatMoney(trader.volume_24h)}</td>
-                <td className="px-4 py-3">
-                  {trader.polymarket_profile_url ? (
-                    <a
-                      href={trader.polymarket_profile_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs font-medium text-sky-700 underline underline-offset-4"
-                    >
-                      Open profile
-                    </a>
-                  ) : (
-                    <span className="text-xs text-slate-400">—</span>
-                  )}
-                </td>
-              </tr>
-            ))
+            traders.map((trader) => {
+              const profileUrl = normalizePolymarketProfileUrl(trader);
+
+              return (
+                <tr key={trader.id} className="align-top">
+                  <td className="px-4 py-3">
+                    {profileUrl ? (
+                      <a
+                        href={profileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-slate-950 underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700 hover:decoration-sky-700"
+                      >
+                        {trader.name}
+                      </a>
+                    ) : (
+                      <div className="font-medium text-slate-950">{trader.name}</div>
+                    )}
+                    <div className="mt-1 text-xs text-slate-500">{trader.address || trader.id}</div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-700">
+                    {trader.handle ? `@${trader.handle}` : trader.profile_slug || '—'}
+                  </td>
+                  <td className="px-4 py-3 text-slate-700">{trader.activity_source || '—'}</td>
+                  <td className="px-4 py-3 text-xs leading-5 text-slate-600">{trader.source_reason}</td>
+                  <td className="px-4 py-3 text-slate-700">{trader.trades_1h}</td>
+                  <td className="px-4 py-3 text-slate-700">{trader.trades_6h}</td>
+                  <td className="px-4 py-3 text-slate-700">{trader.trades_24h}</td>
+                  <td className="px-4 py-3 text-slate-700">{formatTs(trader.last_trade_at)}</td>
+                  <td className="px-4 py-3 text-slate-700">{trader.last_trade_age || '—'}</td>
+                  <td className="px-4 py-3 text-slate-700">{formatMoney(trader.volume_24h)}</td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>
