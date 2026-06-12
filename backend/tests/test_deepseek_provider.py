@@ -10,18 +10,21 @@ os.environ.setdefault(
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("DEEPSEEK_API_KEY", "test-deepseek-key")
 
-from app.domains.ai_providers.deepseek import DeepSeekProvider, _extract_dsml_web_search_calls
+from app.domains.ai_providers.deepseek import (
+    DeepSeekProvider,
+    _extract_dsml_web_search_calls,
+)
 
 
 class DeepSeekProviderTests(unittest.TestCase):
     def test_extract_dsml_web_search_calls_parses_queries(self):
         dsml = (
-            '<｜｜DSML｜｜tool_calls>\n'
+            "<｜｜DSML｜｜tool_calls>\n"
             '<｜｜DSML｜｜invoke name="web_search">\n'
             '<｜｜DSML｜｜parameter name="query" string="true">best breakout stocks India May 2026</｜｜DSML｜｜parameter>\n'
             '<｜｜DSML｜｜parameter name="max_results" string="false">10</｜｜DSML｜｜parameter>\n'
-            '</｜｜DSML｜｜invoke>\n'
-            '</｜｜DSML｜｜tool_calls>'
+            "</｜｜DSML｜｜invoke>\n"
+            "</｜｜DSML｜｜tool_calls>"
         )
 
         calls = _extract_dsml_web_search_calls(dsml)
@@ -39,12 +42,12 @@ class DeepSeekProviderTests(unittest.TestCase):
         web_search_execute_mock,
     ):
         dsml_trace = (
-            '<｜｜DSML｜｜tool_calls>\n'
+            "<｜｜DSML｜｜tool_calls>\n"
             '<｜｜DSML｜｜invoke name="web_search">\n'
             '<｜｜DSML｜｜parameter name="query" string="true">Indian stocks bullish breakout February 2025 brokerage upgrade</｜｜DSML｜｜parameter>\n'
             '<｜｜DSML｜｜parameter name="max_results" string="false">5</｜｜DSML｜｜parameter>\n'
-            '</｜｜DSML｜｜invoke>\n'
-            '</｜｜DSML｜｜tool_calls>'
+            "</｜｜DSML｜｜invoke>\n"
+            "</｜｜DSML｜｜tool_calls>"
         )
         recovered_table = (
             "| Stock Symbol | Stock Name | Technical Setup | Entry Range | Units to Buy |\n"
@@ -60,11 +63,17 @@ class DeepSeekProviderTests(unittest.TestCase):
         mock_client.chat.completions.create.side_effect = [
             SimpleNamespace(
                 usage=SimpleNamespace(prompt_tokens=100, completion_tokens=40),
-                choices=[SimpleNamespace(message=SimpleNamespace(content=dsml_trace, tool_calls=None))],
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=dsml_trace, tool_calls=None)
+                    )
+                ],
             ),
             SimpleNamespace(
                 usage=SimpleNamespace(prompt_tokens=200, completion_tokens=120),
-                choices=[SimpleNamespace(message=SimpleNamespace(content=recovered_table))],
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=recovered_table))
+                ],
             ),
         ]
         openai_cls_mock.return_value = mock_client
@@ -82,6 +91,7 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(result.content, recovered_table)
         self.assertEqual(result.tokens_in, 300)
         self.assertEqual(result.tokens_out, 160)
+        self.assertEqual(result.cost, 0.000087)
         web_search_execute_mock.assert_called_once_with(
             "web_search",
             {
@@ -89,9 +99,67 @@ class DeepSeekProviderTests(unittest.TestCase):
                 "max_results": 5,
             },
         )
-        second_call_kwargs = mock_client.chat.completions.create.call_args_list[1].kwargs
+        second_call_kwargs = mock_client.chat.completions.create.call_args_list[
+            1
+        ].kwargs
         self.assertEqual(second_call_kwargs["tool_choice"], "none")
-        self.assertIn("Collected search results JSON", second_call_kwargs["messages"][1]["content"])
+        self.assertIn(
+            "Collected search results JSON",
+            second_call_kwargs["messages"][1]["content"],
+        )
+
+    @patch("app.domains.ai_providers.deepseek.OpenAI")
+    def test_generate_uses_deepseek_cache_hit_pricing(self, openai_cls_mock):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = SimpleNamespace(
+            usage=SimpleNamespace(
+                prompt_tokens=100_000,
+                prompt_cache_hit_tokens=90_000,
+                prompt_cache_miss_tokens=10_000,
+                completion_tokens=20_000,
+            ),
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(
+                            "| Stock | Setup | Entry | Stop | Target |\n"
+                            "| --- | --- | --- | --- | --- |\n"
+                            "| A | Breakout | 1 | 0.9 | 1.2 |\n"
+                            "| B | Pullback | 1 | 0.9 | 1.2 |\n"
+                            "| C | Momentum | 1 | 0.9 | 1.2 |\n"
+                            "| D | Reversal | 1 | 0.9 | 1.2 |\n"
+                            "| E | Base | 1 | 0.9 | 1.2 |"
+                        ),
+                        tool_calls=None,
+                    )
+                )
+            ],
+        )
+        openai_cls_mock.return_value = mock_client
+
+        provider = DeepSeekProvider()
+        result = provider.generate(
+            prompt="Return a valid markdown table", model="deepseek-v4-pro"
+        )
+
+        self.assertEqual(result.tokens_in, 100_000)
+        self.assertEqual(result.tokens_out, 20_000)
+        self.assertEqual(result.cost, 0.022076)
+
+    def test_token_usage_treats_missing_cache_breakdown_as_cache_miss(self):
+        token_usage = DeepSeekProvider._token_usage_from_response_usage(
+            SimpleNamespace(prompt_tokens=100_000, completion_tokens=20_000)
+        )
+
+        self.assertEqual(
+            token_usage,
+            {
+                "tokens_in": 100_000,
+                "tokens_out": 20_000,
+                "cache_hit_tokens": 0,
+                "cache_miss_tokens": 100_000,
+            },
+        )
 
 
 if __name__ == "__main__":
