@@ -50,6 +50,7 @@ export type ActionCategory = "Sell All" | "Trim" | "Hold" | "Add more" | "Buy Ne
 type LlmMeta = {
   runId: number;
   jobId: number;
+  runLabel: string;
   provider: string;
   model: string;
   createdAt: string;
@@ -2283,13 +2284,22 @@ export async function fetchAllFullRuns() {
   ];
 }
 
+function getRunDisplayLabelForBreakup(run: RunResponse) {
+  if (run.auto_rebalance_label?.trim() || (typeof run.auto_rebalance_sequence === "number" && run.auto_rebalance_sequence > 0)) {
+    return getAutoRebalanceRunDisplayLabel(run);
+  }
+  return `Run #${run.id}`;
+}
+
 function getRunJobMetas(run: RunResponse): LlmMeta[] {
+  const runLabel = getRunDisplayLabelForBreakup(run);
   return (run.run_jobs ?? []).flatMap((link) => {
     const job = link.job;
     if (!job) return [];
     return [{
       runId: run.id,
       jobId: link.job_id,
+      runLabel,
       provider: job.provider,
       model: job.model,
       createdAt: job.created_at,
@@ -2321,6 +2331,7 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
       meta: {
         runId: run.id,
         jobId: link.job_id,
+        runLabel: getRunDisplayLabelForBreakup(run),
         provider: job.provider,
         model: job.model,
         createdAt: job.created_at,
@@ -2709,7 +2720,7 @@ export function ConsensusBreakupButton({
                             {index + 1}. {entry.meta.provider || "Unknown provider"} {entry.meta.model || "Unknown model"}
                           </Link>
                           <div className="mt-0.5 text-sm text-slate-500">
-                            Run #{entry.meta.runId} · Job #{entry.meta.jobId}
+                            {entry.meta.runLabel} · Job #{entry.meta.jobId}
                           </div>
                         </div>
                         <div className="whitespace-nowrap text-sm text-slate-500">
