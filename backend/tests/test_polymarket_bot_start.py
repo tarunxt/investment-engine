@@ -67,6 +67,54 @@ async def test_start_returns_before_initial_poll_finishes(tmp_path):
     await asyncio.gather(bot._poll_task, return_exceptions=True)
 
 
+class SlowDoctorExecutor:
+    async def doctor(self):
+        await asyncio.sleep(30)
+        raise AssertionError("doctor must run in the background after init returns")
+
+
+class SlowBalanceReader:
+    async def refresh(self):
+        await asyncio.sleep(30)
+        raise AssertionError("balance must run in the background after init returns")
+
+
+@pytest.mark.anyio
+async def test_init_returns_before_startup_warmup_finishes(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": True,
+            "live_trading": False,
+            "use_live_reads": False,
+            "poll_interval_ms": 1000,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = SlowProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=SlowDoctorExecutor(),
+        balance_reader=SlowBalanceReader(),
+        logger=logger,
+    )
+
+    started_at = time.perf_counter()
+    await bot.init()
+    elapsed = time.perf_counter() - started_at
+
+    assert elapsed < 0.5
+    assert bot._startup_warmup_task is not None
+    assert bot._balance_task is not None
+
+    await bot.shutdown()
+
+
 class EmptyProvider:
     async def get_top_traders(self):
         return []
