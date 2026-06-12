@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 from urllib.parse import urlencode
@@ -29,6 +30,20 @@ from app.domains.polymarket.schemas import (
 POLYMARKET_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 POLYMARKET_GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
 POLYMARKET_DATA_API_TIMEOUT_SECONDS = 10
+POLYMARKET_POLYGON_RPC_URL = "https://polygon-rpc.com"
+POLYMARKET_PUSD_TOKEN_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+POLYMARKET_PUSD_DECIMALS = 1_000_000
+POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-polymarket-bot/1.0"}
+
+
+@dataclass(frozen=True)
+class PolymarketNetWorthEstimate:
+    wallet: str
+    positions_value_usd: float
+    cash_balance_usd: float
+    redeemable_value_usd: float
+    net_worth_usd: float
+
 
 MOCK_MARKETS: list[tuple[str, str, str]] = [
     ("btc-100k-2026", "Will Bitcoin hit $100k in 2026?", "Yes"),
@@ -710,6 +725,200 @@ class BullpenReadOnlyProvider:
                 else "Trending market activity disabled"
             ),
         )
+
+
+async def estimate_polymarket_net_worth(target: str) -> PolymarketNetWorthEstimate:
+    wallet = await resolve_polymarket_proxy_wallet(target)
+    async with httpx.AsyncClient(
+        timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+        headers=POLYMARKET_HTTP_HEADERS,
+    ) as client:
+        positions_value, positions = await _read_positions_value_and_rows(client, wallet)
+        cash_balance = await _read_pusd_balance(client, wallet)
+    redeemable_value = _sum_redeemable_value(positions)
+    net_worth = positions_value + cash_balance + redeemable_value
+    return PolymarketNetWorthEstimate(
+        wallet=wallet,
+        positions_value_usd=round(positions_value, 6),
+        cash_balance_usd=round(cash_balance, 6),
+        redeemable_value_usd=round(redeemable_value, 6),
+        net_worth_usd=round(net_worth, 6),
+    )
+
+
+async def resolve_polymarket_proxy_wallet(target: str) -> str:
+    normalized = target.strip()
+    if is_public_wallet_address(normalized):
+        return normalized
+
+    handle = clean_handle(normalized)
+    if not handle:
+        raise RuntimeError("Polymarket handle or wallet address is required.")
+
+    query = urlencode(
+        {"q": handle, "search_profiles": "true", "limit_per_type": "10"}
+    )
+    url = f"{POLYMARKET_GAMMA_API_BASE_URL}/public-search?{query}"
+    async with httpx.AsyncClient(
+        timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+        headers=POLYMARKET_HTTP_HEADERS,
+    ) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        payload = response.json()
+
+    profiles = payload.get("profiles") if isinstance(payload, dict) else None
+    if not isinstance(profiles, list):
+        profiles = collect_rows(payload)
+
+    wanted = identity_key(handle)
+    profile = next(
+        (
+            item
+            for item in profiles
+            if isinstance(item, dict)
+            and wanted
+            in profile_identity_candidates(item)
+        ),
+        None,
+    )
+    if profile is None:
+        profile = next((item for item in profiles if isinstance(item, dict)), None)
+
+    wallet = extract_address(profile or {}) if isinstance(profile, dict) else None
+    if not wallet:
+        raise RuntimeError(f"No proxyWallet found for Polymarket profile @{handle}.")
+    return wallet
+
+
+async def _read_positions_value_and_rows(
+    client: httpx.AsyncClient, wallet: str
+) -> tuple[float, list[dict[str, Any]]]:
+    value_url = f"{POLYMARKET_DATA_API_BASE_URL}/value?{urlencode({'user': wallet})}"
+    value_response = await client.get(value_url)
+    value_response.raise_for_status()
+    positions_value = _extract_positions_value(value_response.json())
+
+    positions: list[dict[str, Any]] = []
+    offset = 0
+    limit = 500
+    while True:
+        query = urlencode(
+            {
+                "user": wallet,
+                "sizeThreshold": "0",
+                "limit": str(limit),
+                "offset": str(offset),
+                "sortBy": "CURRENT",
+                "sortDirection": "DESC",
+            }
+        )
+        positions_url = f"{POLYMARKET_DATA_API_BASE_URL}/positions?{query}"
+        response = await client.get(positions_url)
+        response.raise_for_status()
+        page = [row for row in collect_rows(response.json()) if isinstance(row, dict)]
+        positions.extend(page)
+        if len(page) < limit:
+            break
+        offset += limit
+    return positions_value, positions
+
+
+def _extract_positions_value(payload: Any) -> float:
+    if isinstance(payload, list):
+        for item in payload:
+            value = _extract_positions_value(item)
+            if value > 0:
+                return value
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    return (
+        number_value(
+            payload.get("value")
+            or payload.get("positionsValue")
+            or payload.get("positions_value")
+            or payload.get("currentValue")
+            or payload.get("current_value")
+        )
+        or 0
+    )
+
+
+async def _read_pusd_balance(client: httpx.AsyncClient, wallet: str) -> float:
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+            {
+                "to": POLYMARKET_PUSD_TOKEN_ADDRESS,
+                "data": _erc20_balance_of_calldata(wallet),
+            },
+            "latest",
+        ],
+    }
+    response = await client.post(
+        POLYMARKET_POLYGON_RPC_URL,
+        json=body,
+        headers={"content-type": "application/json", **POLYMARKET_HTTP_HEADERS},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    result = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(result, str) or not result.startswith("0x"):
+        raise RuntimeError("Polygon RPC did not return a pUSD balance result.")
+    return int(result, 16) / POLYMARKET_PUSD_DECIMALS
+
+
+def _erc20_balance_of_calldata(wallet: str) -> str:
+    return "0x70a08231" + "0" * 24 + wallet[2:].lower()
+
+
+def _sum_redeemable_value(positions: list[dict[str, Any]]) -> float:
+    total = 0.0
+    for position in positions:
+        flag = string_value(
+            position.get("redeemable")
+            or position.get("isRedeemable")
+            or position.get("claimable")
+            or position.get("isClaimable")
+            or position.get("status")
+        )
+        is_redeemable = (
+            flag is not None
+            and flag.strip().lower() in {"true", "redeemable", "claimable", "won"}
+        ) or any(
+            bool(position.get(key))
+            for key in ("redeemable", "isRedeemable", "claimable", "isClaimable")
+        )
+        if not is_redeemable:
+            continue
+        total += (
+            number_value(
+                position.get("redeemableValue")
+                or position.get("redeemable_value")
+                or position.get("claimableValue")
+                or position.get("claimable_value")
+                or position.get("currentValue")
+                or position.get("current_value")
+                or position.get("value")
+            )
+            or 0
+        )
+    return total
+
+
+def profile_identity_candidates(profile: dict[str, Any]) -> set[str]:
+    values = [
+        profile.get("name"),
+        profile.get("username"),
+        profile.get("userName"),
+        profile.get("handle"),
+        profile.get("slug"),
+        profile.get("pseudonym"),
+    ]
+    return {identity_key(str(value)) for value in values if value}
 
 
 def aggregate_traders(

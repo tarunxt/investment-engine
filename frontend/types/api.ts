@@ -1039,9 +1039,16 @@ export interface PolymarketTrackedAccount {
   handle?: string | null;
   address: string;
   profile_url?: string | null;
+  proxy_wallet?: string | null;
   enabled: boolean;
   threshold_percent: number;
   net_worth_usd: number;
+  positions_value_usd?: number | null;
+  cash_balance_usd?: number | null;
+  redeemable_value_usd?: number | null;
+  net_worth_source?: string | null;
+  net_worth_checked_at?: string | null;
+  net_worth_error?: string | null;
   copy_trade_usd: number;
   created_at: string;
   updated_at: string;

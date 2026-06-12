@@ -20,6 +20,7 @@ from app.domains.polymarket.providers import (
     MarketDataProvider,
     MockProvider,
     aggregate_traders,
+    estimate_polymarket_net_worth,
     identity_key,
     newest_iso,
     trader_identity_candidates,
@@ -112,6 +113,7 @@ class PolymarketPaperCopyBot:
         self._poll_task: asyncio.Task[None] | None = None
         self._balance_task: asyncio.Task[None] | None = None
         self._startup_warmup_task: asyncio.Task[None] | None = None
+        self._net_worth_refresh_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
 
     async def init(self) -> None:
@@ -126,6 +128,7 @@ class PolymarketPaperCopyBot:
                 self.seen_source_trades.add(trade.source_trade_key)
             self._ensure_balance_task()
             self._ensure_startup_warmup_task()
+            self._ensure_net_worth_refresh_task()
             await self.logger.info(
                 f"Bot initialized. paperTrading={self.config.paper_trading} liveTrading={self.config.live_trading}"
             )
@@ -144,6 +147,8 @@ class PolymarketPaperCopyBot:
             self._balance_task = None
             await self._cancel_task(self._startup_warmup_task)
             self._startup_warmup_task = None
+            await self._cancel_task(self._net_worth_refresh_task)
+            self._net_worth_refresh_task = None
 
     async def start(self) -> None:
         async with self._lock:
@@ -296,7 +301,7 @@ class PolymarketPaperCopyBot:
             self._apply_tracked_accounts_to_provider_unlocked()
             self.live_source_status.live_baseline_completed_at = None
             self._add_activity(f"Tracked account added: {account.target}.")
-            return account
+        return await self.refresh_tracked_account_net_worth(account.id)
 
     async def update_tracked_account(
         self, account_id: str, request: PolymarketTrackedAccountUpdate
@@ -304,6 +309,7 @@ class PolymarketPaperCopyBot:
         async with self._lock:
             account = self._find_tracked_account(account_id)
             update = request.model_dump(exclude_unset=True)
+            target_changed = False
             if "target" in update and update["target"]:
                 normalized = normalize_tracked_account_target(str(update["target"]))
                 new_id = tracked_account_id(normalized)
@@ -313,9 +319,12 @@ class PolymarketPaperCopyBot:
                     raise RuntimeError("Tracked account already exists.")
                 account.id = new_id
                 account.target = normalized
+                target_changed = True
                 account.handle = tracked_account_handle(normalized)
                 account.address = normalized if normalized.startswith("0x") else ""
+                account.proxy_wallet = account.address or None
                 account.profile_url = tracked_account_profile_url(normalized)
+                account.net_worth_error = None
             for field in (
                 "threshold_percent",
                 "net_worth_usd",
@@ -329,7 +338,11 @@ class PolymarketPaperCopyBot:
             self._apply_tracked_accounts_to_provider_unlocked()
             self.live_source_status.live_baseline_completed_at = None
             self._add_activity(f"Tracked account updated: {account.target}.")
-            return account
+            refresh_account_id = account.id if target_changed else None
+        if refresh_account_id:
+            return await self.refresh_tracked_account_net_worth(refresh_account_id)
+        async with self._lock:
+            return self._find_tracked_account(account_id)
 
     async def delete_tracked_account(self, account_id: str) -> None:
         async with self._lock:
@@ -1397,6 +1410,68 @@ class PolymarketPaperCopyBot:
             status.trending_market_activity_unavailable
         )
 
+    def _ensure_net_worth_refresh_task(self) -> None:
+        if self._net_worth_refresh_task and not self._net_worth_refresh_task.done():
+            return
+        self._net_worth_refresh_task = asyncio.create_task(
+            self._refresh_all_tracked_account_net_worths()
+        )
+
+    async def _refresh_all_tracked_account_net_worths(self) -> None:
+        async with self._lock:
+            account_ids = [account.id for account in self.tracked_accounts]
+        for account_id in account_ids:
+            try:
+                await self.refresh_tracked_account_net_worth(account_id)
+            except Exception as exc:
+                await self.logger.error(
+                    f"Tracked account net worth refresh failed account={account_id}: {redact_secrets(str(exc))}"
+                )
+
+    async def refresh_tracked_account_net_worth(
+        self, account_id: str
+    ) -> PolymarketTrackedAccount:
+        async with self._lock:
+            account = self._find_tracked_account(account_id)
+            target = account.target
+
+        try:
+            estimate = await estimate_polymarket_net_worth(target)
+        except Exception as exc:
+            message = redact_secrets(str(exc))
+            async with self._lock:
+                account = self._find_tracked_account(account_id)
+                account.net_worth_error = message
+                account.net_worth_checked_at = utc_now()
+                account.updated_at = utc_now()
+                await self._save_tracked_accounts_unlocked()
+                self._add_activity(
+                    f"Net worth refresh failed for {account.target}: {message}"
+                )
+                return account
+
+        async with self._lock:
+            account = self._find_tracked_account(account_id)
+            if account.target != target:
+                return account
+            account.proxy_wallet = estimate.wallet
+            account.address = estimate.wallet
+            account.net_worth_usd = estimate.net_worth_usd
+            account.positions_value_usd = estimate.positions_value_usd
+            account.cash_balance_usd = estimate.cash_balance_usd
+            account.redeemable_value_usd = estimate.redeemable_value_usd
+            account.net_worth_source = "polymarket_public_api_plus_polygon_pusd"
+            account.net_worth_checked_at = utc_now()
+            account.net_worth_error = None
+            account.updated_at = utc_now()
+            await self._save_tracked_accounts_unlocked()
+            self._apply_tracked_accounts_to_provider_unlocked()
+            self._add_activity(
+                f"Net worth refreshed for {account.target}: ${account.net_worth_usd:.2f}."
+            )
+            return account
+
+
     async def _load_or_seed_tracked_accounts_unlocked(
         self,
     ) -> list[PolymarketTrackedAccount]:
@@ -1419,6 +1494,11 @@ class PolymarketPaperCopyBot:
                     normalize_tracked_account_target(target)
                     if normalize_tracked_account_target(target).startswith("0x")
                     else ""
+                ),
+                proxy_wallet=(
+                    normalize_tracked_account_target(target)
+                    if normalize_tracked_account_target(target).startswith("0x")
+                    else None
                 ),
                 profile_url=tracked_account_profile_url(
                     normalize_tracked_account_target(target)
@@ -1445,6 +1525,7 @@ class PolymarketPaperCopyBot:
             target=normalized,
             handle=tracked_account_handle(normalized),
             address=normalized if normalized.startswith("0x") else "",
+            proxy_wallet=normalized if normalized.startswith("0x") else None,
             profile_url=tracked_account_profile_url(normalized),
             threshold_percent=request.threshold_percent,
             net_worth_usd=request.net_worth_usd,
