@@ -48,6 +48,7 @@ def load_polymarket_config() -> PolymarketBotConfig:
         live_trading=_bool_from_env("LIVE_TRADING", True),
         use_live_reads=_bool_from_env("USE_LIVE_READS", True),
         auto_execute_live=_bool_from_env("AUTO_EXECUTE_LIVE", True),
+        auto_start=_bool_from_env("POLYMARKET_AUTO_START", True),
         live_unlock_mode=live_unlock_mode,
         require_manual_confirmation=_bool_from_env(
             "REQUIRE_MANUAL_CONFIRMATION", False

@@ -997,6 +997,7 @@ export interface PolymarketBotConfig {
   live_trading: boolean;
   use_live_reads: boolean;
   auto_execute_live: boolean;
+  auto_start: boolean;
   live_unlock_mode: 'automatic' | 'manual';
   require_manual_confirmation: boolean;
   poll_interval_ms: number;

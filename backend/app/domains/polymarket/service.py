@@ -6,7 +6,7 @@ from pathlib import Path
 from app.domains.polymarket.bot import PolymarketPaperCopyBot
 from app.domains.polymarket.bullpen import BullpenBalanceReader, BullpenLiveExecutor
 from app.domains.polymarket.config import load_polymarket_config
-from app.domains.polymarket.logger import PolymarketFileLogger
+from app.domains.polymarket.logger import PolymarketFileLogger, redact_secrets
 from app.domains.polymarket.providers import BullpenReadOnlyProvider, MockProvider
 from app.domains.polymarket.schemas import (
     PolymarketLiveTradeDecision,
@@ -61,6 +61,14 @@ class PolymarketBotManager:
                 ),
             )
             await bot.init()
+            if user_config.auto_start:
+                try:
+                    await bot.start()
+                except Exception as exc:
+                    sanitized_error = redact_secrets(str(exc))
+                    bot.last_error = f"Auto-start failed: {sanitized_error}"
+                    await bot.logger.error("Polymarket bot auto-start failed", exc)
+                    bot.add_activity(f"Auto-start failed: {sanitized_error}.")
             self._bots[user_id] = bot
             return bot
 

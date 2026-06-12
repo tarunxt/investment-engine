@@ -67,6 +67,7 @@ class PolymarketBotConfig(BaseModel):
     live_trading: bool
     use_live_reads: bool
     auto_execute_live: bool
+    auto_start: bool
     live_unlock_mode: Literal["automatic", "manual"]
     require_manual_confirmation: bool
     poll_interval_ms: int
