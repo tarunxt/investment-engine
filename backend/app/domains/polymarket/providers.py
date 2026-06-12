@@ -27,6 +27,7 @@ from app.domains.polymarket.schemas import (
 )
 
 POLYMARKET_DATA_API_BASE_URL = "https://data-api.polymarket.com"
+POLYMARKET_GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
 POLYMARKET_DATA_API_TIMEOUT_SECONDS = 10
 
 MOCK_MARKETS: list[tuple[str, str, str]] = [
@@ -465,18 +466,46 @@ class BullpenReadOnlyProvider:
         except Exception as exc:
             bullpen_error = exc
 
-        try:
-            data_api_trades = await self._read_data_api_wallet_activity(address)
-            return dedupe_normalized_trade_rows([*data_api_trades, *bullpen_trades])
-        except Exception as exc:
-            if bullpen_trades:
-                return bullpen_trades
-            if bullpen_error:
-                raise bullpen_error from exc
-            raise
+        data_api_errors: list[Exception] = []
+        data_api_trades: list[dict[str, Any]] = []
+        for candidate_address in await self._wallet_activity_addresses(address):
+            try:
+                data_api_trades.extend(
+                    await self._read_data_api_wallet_activity(candidate_address)
+                )
+            except Exception as exc:
+                data_api_errors.append(exc)
 
-    async def _read_data_api_wallet_activity(self, address: str) -> list[dict[str, Any]]:
-        query = urlencode(
+        if data_api_trades or bullpen_trades:
+            return dedupe_normalized_trade_rows([*data_api_trades, *bullpen_trades])
+        if bullpen_error:
+            raise bullpen_error from (data_api_errors[0] if data_api_errors else None)
+        if data_api_errors:
+            raise data_api_errors[0]
+        return []
+
+    async def _wallet_activity_addresses(self, address: str) -> list[str]:
+        resolved = await self._read_public_profile_wallet_addresses(address)
+        return unique_wallet_addresses([address, *resolved])
+
+    async def _read_public_profile_wallet_addresses(self, address: str) -> list[str]:
+        query = urlencode({"address": address})
+        url = f"{POLYMARKET_GAMMA_API_BASE_URL}/public-profile?{query}"
+        try:
+            async with httpx.AsyncClient(
+                timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+                headers={"User-Agent": "investment-engine-polymarket-bot/1.0"},
+            ) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                return extract_wallet_addresses(response.json())
+        except Exception:
+            return []
+
+    async def _read_data_api_wallet_activity(
+        self, address: str
+    ) -> list[dict[str, Any]]:
+        activity_query = urlencode(
             {
                 "user": address,
                 "type": "TRADE",
@@ -485,14 +514,38 @@ class BullpenReadOnlyProvider:
                 "sortDirection": "DESC",
             }
         )
-        url = f"{POLYMARKET_DATA_API_BASE_URL}/activity?{query}"
+        trades_query = urlencode(
+            {
+                "user": address,
+                "limit": "100",
+                "offset": "0",
+                "takerOnly": "false",
+            }
+        )
+        urls = [
+            f"{POLYMARKET_DATA_API_BASE_URL}/activity?{activity_query}",
+            f"{POLYMARKET_DATA_API_BASE_URL}/trades?{trades_query}",
+        ]
         async with httpx.AsyncClient(
             timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
             headers={"User-Agent": "investment-engine-polymarket-bot/1.0"},
         ) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            return normalize_trade_rows_for_wallet(response.json(), address)
+            rows: list[dict[str, Any]] = []
+            first_error: Exception | None = None
+            for url in urls:
+                try:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    rows.extend(
+                        normalize_trade_rows_for_wallet(response.json(), address)
+                    )
+                except Exception as exc:
+                    first_error = first_error or exc
+            if rows:
+                return dedupe_normalized_trade_rows(rows)
+            if first_error:
+                raise first_error
+            return []
 
     async def _read_handle_or_feed_activity(
         self, trader: PolymarketTrader
@@ -844,6 +897,19 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         or row.get("eventType")
         or row.get("event_type")
     )
+    price = clamp_price(
+        number_value(
+            row.get("price")
+            or row.get("avgPrice")
+            or row.get("avg_price")
+            or row.get("averagePrice")
+            or row.get("average_price")
+            or row.get("outcomePrice")
+            or row.get("outcome_price")
+            or 0.5
+        )
+        or 0.5
+    )
     amount = number_value(
         row.get("sizeUsd")
         or row.get("size_usd")
@@ -863,9 +929,10 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         or row.get("valueUsd")
         or row.get("value_usd")
         or row.get("amount")
-        or row.get("size")
-        or row.get("shares")
     )
+    if amount is None:
+        shares = number_value(row.get("size") or row.get("shares"))
+        amount = shares * price if shares is not None else None
     extracted = {
         "address": address,
         "handle": handle,
@@ -912,19 +979,6 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
             "sample_keys": sample_keys,
             "extracted": extracted,
         }
-    price = clamp_price(
-        number_value(
-            row.get("price")
-            or row.get("avgPrice")
-            or row.get("avg_price")
-            or row.get("averagePrice")
-            or row.get("average_price")
-            or row.get("outcomePrice")
-            or row.get("outcome_price")
-            or 0.5
-        )
-        or 0.5
-    )
     trade_id = (
         string_value(
             row.get("id")
@@ -1145,6 +1199,43 @@ def safe_http_url(value: object) -> str | None:
         return None
     parsed = urlparse(value)
     return value if parsed.scheme in {"http", "https"} else None
+
+
+def extract_wallet_addresses(value: Any) -> list[str]:
+    wallets: list[str] = []
+
+    def walk(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                if key in {
+                    "address",
+                    "wallet",
+                    "userAddress",
+                    "user_address",
+                    "proxyWallet",
+                    "proxy_wallet",
+                    "profileAddress",
+                    "account",
+                }:
+                    cleaned = clean_wallet_prefix(nested)
+                    if cleaned:
+                        wallets.append(cleaned)
+                walk(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                walk(nested)
+
+    walk(value)
+    return unique_wallet_addresses(wallets)
+
+
+def unique_wallet_addresses(addresses: list[str]) -> list[str]:
+    unique: dict[str, str] = {}
+    for address in addresses:
+        cleaned = clean_wallet_prefix(address)
+        if cleaned:
+            unique.setdefault(cleaned.lower(), cleaned)
+    return list(unique.values())
 
 
 def extract_address(row: dict[str, Any]) -> str | None:
