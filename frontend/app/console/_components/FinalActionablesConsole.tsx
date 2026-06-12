@@ -140,6 +140,15 @@ type DetailedRationaleScoreRow = {
   denominatorWeight?: number;
 };
 
+type TechnicalScanMultiplierKey = "bullish" | "bearish";
+
+type ScoreMatrixFormulaConfig = {
+  detailedRationaleMultipliers: Record<string, number>;
+  detailedRationaleDenominator: number | null;
+  actionScores: Record<ActionCategory, number>;
+  technicalScanMultipliers: Record<TechnicalScanMultiplierKey, number>;
+};
+
 export type ActionablesCalculationFocusTarget = {
   stockKey: string;
   header: ActionablesCalculationHeader;
@@ -536,15 +545,15 @@ const ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
   "Buy New": 2,
 };
 
-const ACTION_SCORE_TABLE_ROWS: Array<{ label: string; score: number }> = [
-  { label: "Sell All", score: -2.5 },
-  { label: "Trim", score: -1.5 },
-  { label: "Hold", score: 0 },
-  { label: "Buy / Buy New", score: 1.5 },
-  { label: "Add/Add more", score: 2.5 },
+const ACTION_SCORE_TABLE_ROWS: Array<{ label: string; category: ActionCategory }> = [
+  { label: "Sell All", category: "Sell All" },
+  { label: "Trim", category: "Trim" },
+  { label: "Hold", category: "Hold" },
+  { label: "Buy / Buy New", category: "Buy New" },
+  { label: "Add/Add more", category: "Add more" },
 ];
 
-const DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
+const DEFAULT_DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
   "Sell All": -2.5,
   Trim: -1.5,
   Hold: 0,
@@ -552,10 +561,102 @@ const DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number
   "Add more": 2.5,
 };
 
-const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; multiplier: number }> = [
-  { label: "Bullish", multiplier: 1 },
-  { label: "Bearish", multiplier: -1 },
+const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; key: TechnicalScanMultiplierKey }> = [
+  { label: "Bullish", key: "bullish" },
+  { label: "Bearish", key: "bearish" },
 ];
+
+const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
+  detailedRationaleMultipliers: {
+    cruxx: 3,
+    "technical-short": 3,
+    "technical-medium": 2,
+    "technical-long": 1,
+    "fundamentals-short": 3,
+    "fundamentals-medium-long": 1,
+    "technical-scan-confidence": 1,
+    "mean-mode-action": 4,
+  },
+  detailedRationaleDenominator: null,
+  actionScores: DEFAULT_DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY,
+  technicalScanMultipliers: {
+    bullish: 1,
+    bearish: -1,
+  },
+};
+
+const SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY = "investor:final-actionables:score-matrix-formula-config:v1";
+
+function normalizeScoreMatrixFormulaConfig(
+  config?: Partial<ScoreMatrixFormulaConfig> | null,
+): ScoreMatrixFormulaConfig {
+  const detailedRationaleMultipliers = {
+    ...DEFAULT_SCORE_MATRIX_FORMULA_CONFIG.detailedRationaleMultipliers,
+  };
+  if (config?.detailedRationaleMultipliers) {
+    Object.entries(config.detailedRationaleMultipliers).forEach(([key, value]) => {
+      if (Number.isFinite(value)) detailedRationaleMultipliers[key] = value;
+    });
+  }
+
+  const actionScores = { ...DEFAULT_SCORE_MATRIX_FORMULA_CONFIG.actionScores };
+  if (config?.actionScores) {
+    ACTION_CATEGORIES.forEach((action) => {
+      const value = config.actionScores?.[action];
+      if (Number.isFinite(value)) actionScores[action] = value as number;
+    });
+  }
+
+  const technicalScanMultipliers = { ...DEFAULT_SCORE_MATRIX_FORMULA_CONFIG.technicalScanMultipliers };
+  if (config?.technicalScanMultipliers) {
+    TECHNICAL_SCAN_MULTIPLIER_ROWS.forEach((row) => {
+      const value = config.technicalScanMultipliers?.[row.key];
+      if (Number.isFinite(value)) technicalScanMultipliers[row.key] = value as number;
+    });
+  }
+
+  const denominator = config?.detailedRationaleDenominator;
+
+  return {
+    detailedRationaleMultipliers,
+    detailedRationaleDenominator:
+      typeof denominator === "number" && Number.isFinite(denominator) ? denominator : null,
+    actionScores,
+    technicalScanMultipliers,
+  };
+}
+
+function loadScoreMatrixFormulaConfig() {
+  if (typeof window === "undefined") return DEFAULT_SCORE_MATRIX_FORMULA_CONFIG;
+
+  try {
+    const raw = window.localStorage.getItem(SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY);
+    if (!raw) return DEFAULT_SCORE_MATRIX_FORMULA_CONFIG;
+    return normalizeScoreMatrixFormulaConfig(JSON.parse(raw));
+  } catch (error) {
+    console.warn("Failed to restore score matrix formula config:", error);
+    return DEFAULT_SCORE_MATRIX_FORMULA_CONFIG;
+  }
+}
+
+function saveScoreMatrixFormulaConfig(config: ScoreMatrixFormulaConfig) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY,
+      JSON.stringify(normalizeScoreMatrixFormulaConfig(config)),
+    );
+  } catch (error) {
+    console.warn("Failed to save score matrix formula config:", error);
+  }
+}
+
+function parseFiniteDraft(value: string) {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 
 function ActionablesCalculationsIcon({ className }: { className?: string }) {
@@ -1101,14 +1202,15 @@ function getTechnicalScanScoreMultiplier(
   technicalScan: TechnicalScanResult | null,
   row: CanonicalRow,
   score: number | null,
+  config: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ) {
   if (score === null) return 0;
 
   const approvedSetup = resolveApprovedTechnicalSetup(technicalScan, row);
-  if (approvedSetup?.direction === "bearish") return -1;
-  if (approvedSetup?.direction === "bullish") return 1;
-  if (technicalScan?.bias === "bearish") return -1;
-  if (technicalScan?.bias === "bullish") return 1;
+  if (approvedSetup?.direction === "bearish") return config.technicalScanMultipliers.bearish;
+  if (approvedSetup?.direction === "bullish") return config.technicalScanMultipliers.bullish;
+  if (technicalScan?.bias === "bearish") return config.technicalScanMultipliers.bearish;
+  if (technicalScan?.bias === "bullish") return config.technicalScanMultipliers.bullish;
   return 0;
 }
 
@@ -1116,6 +1218,7 @@ function buildDetailedRationaleScoreRows(
   stock: StockConsensus,
   technicalScan: TechnicalScanResult | null,
   meanModeAction: ActionCategory | null,
+  config: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ): DetailedRationaleScoreRow[] {
   const technicalConfidenceScore = parseNumericCell(
     formatTechnicalConfidence(technicalScan, stock.representative),
@@ -1124,9 +1227,10 @@ function buildDetailedRationaleScoreRows(
     technicalScan,
     stock.representative,
     technicalConfidenceScore,
+    config,
   );
   const meanModeActionScore = meanModeAction
-    ? DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY[meanModeAction]
+    ? config.actionScores[meanModeAction]
     : null;
 
   return [
@@ -1134,37 +1238,37 @@ function buildDetailedRationaleScoreRows(
       id: "cruxx",
       parameter: "Average of Score Rationale Cruxx",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale Cruxx"),
-      multiplier: 3,
+      multiplier: config.detailedRationaleMultipliers.cruxx,
     },
     {
       id: "technical-short",
       parameter: "Average of Score Rationale - Technical Setup (Short Term 1–3 Months)",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale Technical Setup Short Term 1–3 Months"),
-      multiplier: 3,
+      multiplier: config.detailedRationaleMultipliers["technical-short"],
     },
     {
       id: "technical-medium",
       parameter: "Average of Score Rationale - Technical Setup (Medium Term)",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Technical Setup (Medium Term)"),
-      multiplier: 2,
+      multiplier: config.detailedRationaleMultipliers["technical-medium"],
     },
     {
       id: "technical-long",
       parameter: "Average of Score Rationale - Technical Setup (Long Term)",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Technical Setup (Long Term)"),
-      multiplier: 1,
+      multiplier: config.detailedRationaleMultipliers["technical-long"],
     },
     {
       id: "fundamentals-short",
       parameter: "Average of Score Rationale - Fundamentals Short Term",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Fundamentals Short Term"),
-      multiplier: 3,
+      multiplier: config.detailedRationaleMultipliers["fundamentals-short"],
     },
     {
       id: "fundamentals-medium-long",
       parameter: "Average of Score Rationale - Fundamentals Medium/Long Term",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
-      multiplier: 1,
+      multiplier: config.detailedRationaleMultipliers["fundamentals-medium-long"],
     },
     {
       id: "technical-scan-confidence",
@@ -1177,7 +1281,7 @@ function buildDetailedRationaleScoreRows(
       id: "mean-mode-action",
       parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in final Consolidated (Mean and Mode) row",
       score: meanModeActionScore,
-      multiplier: 4,
+      multiplier: config.detailedRationaleMultipliers["mean-mode-action"],
     },
   ];
 }
@@ -1362,6 +1466,7 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
 function buildScoreMatrixDetail(
   stock: StockConsensus,
   technicalScan: TechnicalScanResult | null = null,
+  formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ): ScoreMatrixDetail {
   const entries: ScoreMatrixEntry[] = stock.rows.map((row) => {
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
@@ -1418,9 +1523,9 @@ function buildScoreMatrixDetail(
       .map((value) => Math.abs(value)),
   );
 
-  const detailedRationaleRows = buildDetailedRationaleScoreRows(stock, technicalScan, modeAction);
+  const detailedRationaleRows = buildDetailedRationaleScoreRows(stock, technicalScan, modeAction, formulaConfig);
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
-    calculateWeightedRationaleScore(detailedRationaleRows);
+    calculateWeightedRationaleScore(detailedRationaleRows, formulaConfig.detailedRationaleDenominator);
   const calculatedScore = detailedRationaleFinalScore ?? meanScore;
 
   const context: ScoreMatrixContext = {
@@ -1515,24 +1620,6 @@ function applyScoreMatrixEdits(
       typeof denominatorOverride === "number" && Number.isFinite(denominatorOverride) ? denominatorOverride : null,
     );
   const calculatedScore = detailedRationaleFinalScore ?? detail.meanScore;
-  const rules = detail.rules.map((rule) => {
-    const draft = ruleDrafts[rule.id];
-    const action = draft?.action ?? rule.action;
-    const manualUnits = draft?.unitsChange?.trim() ? Number(draft.unitsChange) : undefined;
-    return {
-      ...rule,
-      action,
-      unitsStrategy: manualUnits === undefined || !Number.isFinite(manualUnits)
-        ? rule.unitsStrategy
-        : `Manual Units Change ${formatSignedQuantity(manualUnits)}.`,
-      summary: getEditableRuleSummary(
-        rule,
-        action,
-        manualUnits !== undefined && Number.isFinite(manualUnits) ? manualUnits : undefined,
-      ),
-    };
-  });
-  const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
   const context: ScoreMatrixContext = {
     currentUnits: detail.currentUnits,
     meanScore: detail.meanScore,
@@ -1557,6 +1644,24 @@ function applyScoreMatrixEdits(
         .map((value) => Math.abs(value)),
     ),
   };
+  const rules = evaluateScoreMatrixRules(context).map((rule) => {
+    const draft = ruleDrafts[rule.id];
+    const action = draft?.action ?? rule.action;
+    const manualUnits = draft?.unitsChange?.trim() ? Number(draft.unitsChange) : undefined;
+    return {
+      ...rule,
+      action,
+      unitsStrategy: manualUnits === undefined || !Number.isFinite(manualUnits)
+        ? rule.unitsStrategy
+        : `Manual Units Change ${formatSignedQuantity(manualUnits)}.`,
+      summary: getEditableRuleSummary(
+        rule,
+        action,
+        manualUnits !== undefined && Number.isFinite(manualUnits) ? manualUnits : undefined,
+      ),
+    };
+  });
+  const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
   const matchedDraft = ruleDrafts[matchedRule.id];
   const manualUnits = matchedDraft?.unitsChange?.trim() ? Number(matchedDraft.unitsChange) : null;
   const calculatedUnitsChange = manualUnits !== null && Number.isFinite(manualUnits)
@@ -3194,15 +3299,17 @@ function RebalanceCell({
 function ScoreMatrixSection({
   stock,
   technicalScan,
+  formulaConfig,
   onOpenDetail,
 }: {
   stock: StockConsensus;
   technicalScan: TechnicalScanResult | null;
+  formulaConfig: ScoreMatrixFormulaConfig;
   onOpenDetail: (detail: ScoreMatrixDetail) => void;
 }) {
   const detail = useMemo(
-    () => buildScoreMatrixDetail(stock, technicalScan),
-    [stock, technicalScan],
+    () => buildScoreMatrixDetail(stock, technicalScan, formulaConfig),
+    [formulaConfig, stock, technicalScan],
   );
   const matchedRule = detail.rules.find((rule) => rule.matched);
 
@@ -3394,7 +3501,31 @@ function DetailedRationaleScoreSection({
   );
 }
 
-function ScoreReferenceTables() {
+function ScoreReferenceTables({
+  formulaConfig,
+  onFormulaConfigChange,
+}: {
+  formulaConfig: ScoreMatrixFormulaConfig;
+  onFormulaConfigChange?: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
+}) {
+  const updateActionScore = (action: ActionCategory, value: string) => {
+    const parsed = parseFiniteDraft(value);
+    if (parsed === null) return;
+    onFormulaConfigChange?.((current) => normalizeScoreMatrixFormulaConfig({
+      ...current,
+      actionScores: { ...current.actionScores, [action]: parsed },
+    }));
+  };
+
+  const updateTechnicalMultiplier = (key: TechnicalScanMultiplierKey, value: string) => {
+    const parsed = parseFiniteDraft(value);
+    if (parsed === null) return;
+    onFormulaConfigChange?.((current) => normalizeScoreMatrixFormulaConfig({
+      ...current,
+      technicalScanMultipliers: { ...current.technicalScanMultipliers, [key]: parsed },
+    }));
+  };
+
   return (
     <section className="grid gap-4 lg:grid-cols-3">
       <div className="rounded-xl border border-slate-200 bg-white">
@@ -3414,7 +3545,16 @@ function ScoreReferenceTables() {
                 <tr key={row.label}>
                   <td className="px-4 py-2 text-slate-900">{row.label}</td>
                   <td className="px-4 py-2 text-right font-medium text-slate-900">
-                    {formatScoreValue(row.score)}
+                    {onFormulaConfigChange ? (
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={formulaConfig.actionScores[row.category]}
+                        onChange={(event) => updateActionScore(row.category, event.target.value)}
+                        className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        aria-label={`Score for ${row.label}`}
+                      />
+                    ) : formatScoreValue(formulaConfig.actionScores[row.category])}
                   </td>
                 </tr>
               ))}
@@ -3440,7 +3580,16 @@ function ScoreReferenceTables() {
                 <tr key={row.label}>
                   <td className="px-4 py-2 text-slate-900">{row.label}</td>
                   <td className="px-4 py-2 text-right font-medium text-slate-900">
-                    {row.multiplier}
+                    {onFormulaConfigChange ? (
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={formulaConfig.technicalScanMultipliers[row.key]}
+                        onChange={(event) => updateTechnicalMultiplier(row.key, event.target.value)}
+                        className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        aria-label={`Multiplier for ${row.label} technical scan`}
+                      />
+                    ) : formulaConfig.technicalScanMultipliers[row.key]}
                   </td>
                 </tr>
               ))}
@@ -3486,10 +3635,14 @@ function ScoreReferenceTables() {
 
 export function ScoreMatrixModal({
   detail,
+  formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+  onFormulaConfigChange,
   onClose,
   onFocusCalculation,
 }: {
   detail: ScoreMatrixDetail | null;
+  formulaConfig?: ScoreMatrixFormulaConfig;
+  onFormulaConfigChange?: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
   onClose: () => void;
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
@@ -3512,9 +3665,42 @@ export function ScoreMatrixModal({
     [detail, editState],
   );
 
+  const configuredDetail = useMemo(() => {
+    if (!detail) return null;
+    return {
+      ...detail,
+      detailedRationaleRows: detail.detailedRationaleRows.map((row) => {
+        if (row.id === "mean-mode-action") {
+          return {
+            ...row,
+            score: detail.meanModeAction ? formulaConfig.actionScores[detail.meanModeAction] : null,
+            multiplier: formulaConfig.detailedRationaleMultipliers[row.id] ?? row.multiplier,
+          };
+        }
+        if (row.id === "technical-scan-confidence") {
+          const multiplier = row.multiplier === 0
+            ? 0
+            : row.multiplier > 0
+              ? formulaConfig.technicalScanMultipliers.bullish
+              : formulaConfig.technicalScanMultipliers.bearish;
+          return {
+            ...row,
+            multiplier,
+            denominatorWeight: multiplier === 0 ? 0 : 2,
+          };
+        }
+        return {
+          ...row,
+          multiplier: formulaConfig.detailedRationaleMultipliers[row.id] ?? row.multiplier,
+        };
+      }),
+      detailedRationaleDenominator: formulaConfig.detailedRationaleDenominator ?? detail.detailedRationaleDenominator,
+    };
+  }, [detail, formulaConfig]);
+
   const editedDetail = useMemo(
-    () => (detail ? applyScoreMatrixEdits(detail, multiplierDrafts, denominatorDraft, ruleDrafts) : null),
-    [detail, multiplierDrafts, denominatorDraft, ruleDrafts],
+    () => (configuredDetail ? applyScoreMatrixEdits(configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts) : null),
+    [configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts],
   );
 
   if (!editedDetail) return null;
@@ -3580,25 +3766,62 @@ export function ScoreMatrixModal({
             detail={editedDetail}
             multiplierDrafts={multiplierDrafts}
             denominatorDraft={denominatorDraft || String(editedDetail.detailedRationaleDenominator)}
-            onMultiplierChange={(rowId, value) => setEditState((current) => ({
-              stockKey: editedDetail.stockKey,
-              multiplierDrafts: {
-                ...(current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {}),
-                [rowId]: value,
-              },
-              denominatorDraft: current.stockKey === editedDetail.stockKey ? current.denominatorDraft : "",
-              ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
-            }))}
-            onDenominatorChange={(value) => setEditState((current) => ({
-              stockKey: editedDetail.stockKey,
-              multiplierDrafts: current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {},
-              denominatorDraft: value,
-              ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
-            }))}
+            onMultiplierChange={(rowId, value) => {
+              const parsed = parseFiniteDraft(value);
+              if (parsed !== null) {
+                const editedRow = editedDetail.detailedRationaleRows.find((row) => row.id === rowId);
+                onFormulaConfigChange?.((current) => {
+                  if (rowId === "technical-scan-confidence") {
+                    if (!editedRow || editedRow.multiplier === 0) return current;
+                    const multiplierKey: TechnicalScanMultiplierKey = editedRow.multiplier > 0 ? "bullish" : "bearish";
+                    return normalizeScoreMatrixFormulaConfig({
+                      ...current,
+                      technicalScanMultipliers: {
+                        ...current.technicalScanMultipliers,
+                        [multiplierKey]: parsed,
+                      },
+                    });
+                  }
+
+                  return normalizeScoreMatrixFormulaConfig({
+                    ...current,
+                    detailedRationaleMultipliers: {
+                      ...current.detailedRationaleMultipliers,
+                      [rowId]: parsed,
+                    },
+                  });
+                });
+              }
+              setEditState((current) => ({
+                stockKey: editedDetail.stockKey,
+                multiplierDrafts: {
+                  ...(current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {}),
+                  [rowId]: value,
+                },
+                denominatorDraft: current.stockKey === editedDetail.stockKey ? current.denominatorDraft : "",
+                ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
+              }));
+            }}
+            onDenominatorChange={(value) => {
+              const parsed = parseFiniteDraft(value);
+              onFormulaConfigChange?.((current) => normalizeScoreMatrixFormulaConfig({
+                ...current,
+                detailedRationaleDenominator: parsed,
+              }));
+              setEditState((current) => ({
+                stockKey: editedDetail.stockKey,
+                multiplierDrafts: current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {},
+                denominatorDraft: value,
+                ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
+              }));
+            }}
             onFocusCalculation={onFocusCalculation}
           />
 
-          <ScoreReferenceTables />
+          <ScoreReferenceTables
+            formulaConfig={formulaConfig}
+            onFormulaConfigChange={onFormulaConfigChange}
+          />
 
           {matchedRule ? (
             <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
@@ -4146,13 +4369,14 @@ function buildActionablesCalculationRows(
   stocks: StockConsensus[],
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,
+  formulaConfig: ScoreMatrixFormulaConfig,
   setupGroups?: Record<string, SetupStockGroup>,
   onSetupClick?: (group: SetupStockGroup) => void,
   onMatrixOpen?: (detail: ScoreMatrixDetail) => void,
 ): ActionablesCalculationRow[] {
   return stocks.flatMap((stock) => {
     const technicalScan = getTechnicalScanForStock(technicalScans, stock);
-    const detail = buildScoreMatrixDetail(stock, technicalScan);
+    const detail = buildScoreMatrixDetail(stock, technicalScan, formulaConfig);
     const meanModeCells = buildSummaryRowCells(stock, detail, detail.meanModeAction, detail.meanModeUnitsChange);
     const formulaCells = buildSummaryRowCells(stock, detail, detail.calculatedAction, detail.calculatedUnitsChange);
     const stockLabel = `${stock.exchange || "—"} · ${stock.symbol} · ${stock.representative["Stock Name"] || stock.symbol}`;
@@ -4395,7 +4619,17 @@ function SortableCalculationHeader({
   );
 }
 
-function ActionablesFormulaModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+function ActionablesFormulaModal({
+  open,
+  formulaConfig,
+  onFormulaConfigChange,
+  onClose,
+}: {
+  open: boolean;
+  formulaConfig: ScoreMatrixFormulaConfig;
+  onFormulaConfigChange: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
+  onClose: () => void;
+}) {
   if (!open) return null;
 
   return (
@@ -4445,7 +4679,10 @@ function ActionablesFormulaModal({ open, onClose }: { open: boolean; onClose: ()
             detailedRationaleFinalScore: null,
             detailedRationaleDenominator: 13,
           }} />
-          <ScoreReferenceTables />
+          <ScoreReferenceTables
+            formulaConfig={formulaConfig}
+            onFormulaConfigChange={onFormulaConfigChange}
+          />
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <h3 className="font-semibold text-slate-950">Consolidation rules</h3>
             <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -4728,6 +4965,8 @@ function ActionablesCalculationsModal({
   market,
   stocks,
   technicalScans,
+  formulaConfig,
+  onFormulaConfigChange,
   setupGroups,
   runs,
   detailsData,
@@ -4740,6 +4979,8 @@ function ActionablesCalculationsModal({
   market: SwingTradeMarket;
   stocks: StockConsensus[];
   technicalScans: TechnicalScanMap;
+  formulaConfig: ScoreMatrixFormulaConfig;
+  onFormulaConfigChange: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
   setupGroups?: Record<string, SetupStockGroup>;
   runs?: RunResponse[];
   detailsData?: StockDetailsData;
@@ -4798,8 +5039,8 @@ function ActionablesCalculationsModal({
     [displayedStocks, displayedTechnicalScans, market],
   );
   const rows = useMemo(
-    () => buildActionablesCalculationRows(displayedStocks, market, displayedTechnicalScans, displayedSetupGroups ?? setupGroups, onSetupClick, setSelectedMatrixDetail),
-    [displayedSetupGroups, displayedStocks, displayedTechnicalScans, market, onSetupClick, setupGroups],
+    () => buildActionablesCalculationRows(displayedStocks, market, displayedTechnicalScans, formulaConfig, displayedSetupGroups ?? setupGroups, onSetupClick, setSelectedMatrixDetail),
+    [displayedSetupGroups, displayedStocks, displayedTechnicalScans, formulaConfig, market, onSetupClick, setupGroups],
   );
   const rowGroups = useMemo(
     () => buildActionablesCalculationRowGroups(rows, sortState, market, displayedTechnicalScans, detailsData, setInternalFocusTarget),
@@ -5070,9 +5311,16 @@ function ActionablesCalculationsModal({
         onResetDefaults={() => setSelectedInputIds(null)}
         onClose={() => setInputSelectionOpen(false)}
       />
-      <ActionablesFormulaModal open={formulaOpen} onClose={() => setFormulaOpen(false)} />
+      <ActionablesFormulaModal
+        open={formulaOpen}
+        formulaConfig={formulaConfig}
+        onFormulaConfigChange={onFormulaConfigChange}
+        onClose={() => setFormulaOpen(false)}
+      />
       <ScoreMatrixModal
         detail={selectedMatrixDetail}
+        formulaConfig={formulaConfig}
+        onFormulaConfigChange={onFormulaConfigChange}
         onClose={() => setSelectedMatrixDetail(null)}
         onFocusCalculation={(target) => {
           setInternalFocusTarget(target);
@@ -5266,9 +5514,10 @@ export function buildDashboardActionRows(
   stocks: StockConsensus[],
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,
+  formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ): DashboardActionRow[] {
   return stocks.map((stock) => {
-    const detail = buildScoreMatrixDetail(stock, getTechnicalScanForStock(technicalScans, stock));
+    const detail = buildScoreMatrixDetail(stock, getTechnicalScanForStock(technicalScans, stock), formulaConfig);
     const formulaAction = detail.calculatedAction;
     return {
       id: getDashboardActionRowId(market, stock),
@@ -5404,6 +5653,7 @@ export function DashboardFinalActionablesTables() {
   const [calculationsMarket, setCalculationsMarket] = useState<SwingTradeMarket | null>(null);
   const [calculationFocusTarget, setCalculationFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
+  const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
   const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
     india: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
     us: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
@@ -5517,18 +5767,24 @@ export function DashboardFinalActionablesTables() {
       ignore = true;
     };
   }, []);
+  useEffect(() => {
+    saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
+  }, [scoreMatrixFormulaConfig]);
+
   const actionRowsByMarket = useMemo(() => ({
     india: buildDashboardActionRows(
       buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india),
       "india",
       technicalScans,
+      scoreMatrixFormulaConfig,
     ),
     us: buildDashboardActionRows(
       buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us", portfolioSnapshots.us),
       "us",
       technicalScans,
+      scoreMatrixFormulaConfig,
     ),
-  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, technicalScans]);
+  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, scoreMatrixFormulaConfig, technicalScans]);
 
   const updateFinalActionableColumnWidth = useCallback((column: FinalActionableColumnKey, width: number) => {
     setFinalActionableLayout((current) => ({
@@ -5846,12 +6102,16 @@ export function DashboardFinalActionablesTables() {
         market={calculationsMarket ?? "india"}
         stocks={(calculationsMarket ? actionRowsByMarket[calculationsMarket] : actionRowsByMarket.india).map((row) => row.stock)}
         technicalScans={technicalScans}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={setScoreMatrixFormulaConfig}
         runs={runs}
         detailsData={calculationsMarket ? detailsDataByMarket[calculationsMarket] : detailsDataByMarket.india}
         focusTarget={calculationFocusTarget}
       />
       <ScoreMatrixModal
         detail={selectedMatrixDetail}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={setScoreMatrixFormulaConfig}
         onClose={() => setSelectedMatrixDetail(null)}
         onFocusCalculation={(target) => {
           const targetMarket = actionRowsByMarket.us.some((row) => row.stock.key === target.stockKey) ? "us" : "india";
@@ -5886,6 +6146,7 @@ export function FinalActionablesConsole({
   const [showRunDetails, setShowRunDetails] = useState(false);
   const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
+  const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
   const [calculationsOpen, setCalculationsOpen] = useState(false);
   const [calculationFocusTarget, setCalculationFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
@@ -5991,6 +6252,10 @@ export function FinalActionablesConsole({
       ignore = true;
     };
   }, [portfolio]);
+
+  useEffect(() => {
+    saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
+  }, [scoreMatrixFormulaConfig]);
 
   const groupedRuns = useMemo(() => {
     const marketRuns = runs
@@ -6257,6 +6522,7 @@ export function FinalActionablesConsole({
                             onToggle={() => toggleExpanded(stock.key)}
                             market={market}
                             technicalScan={getTechnicalScanForStock(technicalScans, stock)}
+                            formulaConfig={scoreMatrixFormulaConfig}
                             setupGroups={setupStockGroups}
                             detailsData={detailsData}
                             onSetupClick={setSelectedSetupGroup}
@@ -6294,6 +6560,8 @@ export function FinalActionablesConsole({
         market={market}
         stocks={consensus}
         technicalScans={technicalScans}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={setScoreMatrixFormulaConfig}
         setupGroups={setupStockGroups}
         runs={runs}
         detailsData={detailsData}
@@ -6306,6 +6574,8 @@ export function FinalActionablesConsole({
       />
       <ScoreMatrixModal
         detail={selectedMatrixDetail}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={setScoreMatrixFormulaConfig}
         onClose={() => setSelectedMatrixDetail(null)}
         onFocusCalculation={(target) => {
           setCalculationFocusTarget(target);
@@ -6402,6 +6672,7 @@ function FragmentRows({
   onToggle,
   market,
   technicalScan,
+  formulaConfig,
   setupGroups,
   detailsData,
   onSetupClick,
@@ -6413,6 +6684,7 @@ function FragmentRows({
   onToggle: () => void;
   market: SwingTradeMarket;
   technicalScan: TechnicalScanResult | null;
+  formulaConfig: ScoreMatrixFormulaConfig;
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
   onSetupClick: (group: SetupStockGroup) => void;
@@ -6502,6 +6774,7 @@ function FragmentRows({
               <ScoreMatrixSection
                 stock={stock}
                 technicalScan={technicalScan}
+                formulaConfig={formulaConfig}
                 onOpenDetail={onMatrixDetailOpen}
               />
 
