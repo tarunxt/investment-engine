@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import {
   formatRunLabel,
+  getAutoRebalanceRunDisplayLabel,
   getJobSheetsPresentation,
   getRunDetailPathFromPrompt,
   getRunSheetsPresentation,
@@ -269,7 +270,9 @@ export function RecentJobsTable() {
                   >
                     <td className="max-w-90 px-5 py-4">
                       <div className="font-medium text-gray-950">
-                        {run.auto_rebalance_label ?? formatRunLabel(run.id, runScopeLabel)}
+                        {run.auto_rebalance_label
+                          ? getAutoRebalanceRunDisplayLabel(run)
+                          : formatRunLabel(run.id, runScopeLabel)}
                       </div>
                       <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">
                         {run.prompt_preview}

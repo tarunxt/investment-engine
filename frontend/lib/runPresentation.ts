@@ -3,6 +3,8 @@ import type { AutoRebalancePortfolioKey } from '@/types/api';
 
 type AutoRebalanceRunLike = {
   id: number;
+  prompt?: string | null;
+  prompt_preview?: string | null;
   auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;
   auto_rebalance_sequence?: number | null;
   auto_rebalance_label?: string | null;
@@ -60,6 +62,7 @@ const PORTFOLIO_LABELS: Record<SwingTradeMarket, string> = {
 };
 
 const TECHNICAL_SCAN_MARKER_RE = /##\s*Technical Scan Input Bundle/i;
+const SCAN_SUFFIX_RE = /\s\((?:Technical|Rebalance|Swing) Scan\)$/i;
 const REBALANCE_MARKET_MARKERS: Record<SwingTradeMarket, RegExp> = {
   india: /\[rebalance_flow:india\]/i,
   us: /\[rebalance_flow:us\]/i,
@@ -178,6 +181,25 @@ export function getPortfolioLabelForMarket(market?: SwingTradeMarket | null) {
   return PORTFOLIO_LABELS[market] ?? null;
 }
 
+export function getRunScanTypeLabelFromPrompt(prompt?: string | null) {
+  const text = prompt?.trim();
+  if (!text) return null;
+
+  if (TECHNICAL_SCAN_MARKER_RE.test(text)) {
+    return 'Technical Scan';
+  }
+
+  if (Object.values(REBALANCE_MARKET_MARKERS).some((pattern) => pattern.test(text))) {
+    return 'Rebalance Scan';
+  }
+
+  if (inferSwingTradeMarketFromPrompt(text)) {
+    return 'Swing Scan';
+  }
+
+  return null;
+}
+
 export function getRunScopeLabelFromPrompt(prompt?: string | null) {
   const text = prompt?.trim();
   if (!text) return null;
@@ -203,14 +225,22 @@ function getAutoRebalancePortfolioRunPrefix(portfolio?: AutoRebalancePortfolioKe
   return null;
 }
 
+function appendRunScanType(label: string, prompt?: string | null) {
+  if (SCAN_SUFFIX_RE.test(label)) return label;
+
+  const scanType = getRunScanTypeLabelFromPrompt(prompt);
+  return scanType ? `${label} (${scanType})` : label;
+}
+
 export function getAutoRebalanceRunDisplayLabel(run: AutoRebalanceRunLike) {
+  const prompt = run.prompt ?? run.prompt_preview;
   const explicitLabel = run.auto_rebalance_label?.trim();
-  if (explicitLabel) return explicitLabel;
+  if (explicitLabel) return appendRunScanType(explicitLabel, prompt);
 
   const sequence = run.auto_rebalance_sequence;
   const prefix = getAutoRebalancePortfolioRunPrefix(run.auto_rebalance_portfolio);
   if (prefix && typeof sequence === 'number' && sequence > 0) {
-    return `${prefix} #${sequence}`;
+    return appendRunScanType(`${prefix} #${sequence}`, prompt);
   }
 
   return `#${run.id}`;

@@ -19,7 +19,12 @@ import { URLs } from '@/lib/urls';
 import { type RunResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
 import InvestmentRecommendationTable from '@/components/InvestmentRecommendationTable';
-import { getJobSheetsPresentation, getRunDetailPathFromPrompt, getRunLabelFromPrompt } from '@/lib/runPresentation';
+import {
+  getAutoRebalanceRunDisplayLabel,
+  getJobSheetsPresentation,
+  getRunDetailPathFromPrompt,
+  getRunLabelFromPrompt,
+} from '@/lib/runPresentation';
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
@@ -287,7 +292,9 @@ export default function RunDetailPage() {
 
   const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
   const isActive = ACTIVE_STATUSES.has(run.status);
-  const runLabel = run.auto_rebalance_label ?? getRunLabelFromPrompt(run.id, run.prompt);
+  const runLabel = run.auto_rebalance_label
+    ? getAutoRebalanceRunDisplayLabel(run)
+    : getRunLabelFromPrompt(run.id, run.prompt);
   const runJobs = run.run_jobs ?? [];
   const knownCostJobs = runJobs.filter((rj) => hasKnownCost(rj.job.estimated_cost));
   const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);

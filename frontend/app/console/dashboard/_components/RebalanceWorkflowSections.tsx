@@ -1220,15 +1220,26 @@ function buildRunPayload({
   targets,
   sheetName,
   runMetadata,
+  scanLabel,
 }: {
   prompt: string;
   targets: ProviderModelTarget[];
   sheetName?: string;
   runMetadata?: AutoRebalanceRunMetadata | null;
+  scanLabel?: "Swing Scan" | "Rebalance Scan" | "Technical Scan";
 }): RunCreate {
   const uniqueTargets = uniqueTargetKeys(targets.map(targetKey))
     .map(parseTargetKey)
     .filter((target): target is ProviderModelTarget => Boolean(target));
+
+  const metadata = runMetadata
+    ? {
+        ...runMetadata,
+        auto_rebalance_label: scanLabel
+          ? `${runMetadata.auto_rebalance_label} (${scanLabel})`
+          : runMetadata.auto_rebalance_label,
+      }
+    : {};
 
   return {
     prompt,
@@ -1236,7 +1247,7 @@ function buildRunPayload({
     allow_parallel: true,
     auto_export_enabled: Boolean(sheetName),
     export_sheet_name: sheetName,
-    ...(runMetadata ?? {}),
+    ...metadata,
   };
 }
 
@@ -6149,6 +6160,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
               targets: swingTargets,
               sheetName: getSwingTradeDefaultExportSheetName(market),
               runMetadata,
+              scanLabel: "Swing Scan",
             }),
           );
           const completedSwingRun = await waitForRunWithStageHandling(
@@ -6239,6 +6251,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
               targets: rebalanceTargets,
               sheetName: getRebalanceDefaultExportSheetName(market),
               runMetadata,
+              scanLabel: "Rebalance Scan",
             }),
           );
           const completedRebalanceRun = await waitForRunWithStageHandling(
@@ -6304,6 +6317,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
               prompt: buildTechnicalScanPrompt(consensus, market),
               targets: [technicalTargets[0]],
               runMetadata,
+              scanLabel: "Technical Scan",
             }),
           );
           const completedTechnicalRun = await waitForRunWithStageHandling(
