@@ -13,7 +13,12 @@ import type {
 
 import { MetricGrid, type MetricItem } from './_components/MetricGrid';
 import { PendingConfirmationsTable } from './_components/PendingConfirmationsTable';
-import { ManualWalletsTable, TrackedTradersTable } from './_components/TraderTables';
+import {
+  ManualWalletsTable,
+  TrackedAccountsTable,
+  TrackedTradersTable,
+  type TrackedAccountDraft,
+} from './_components/TraderTables';
 
 function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
@@ -67,6 +72,15 @@ export default function PolymarketBotPage() {
   const [debugTarget, setDebugTarget] = useState('swisstony');
   const [debugReport, setDebugReport] = useState<PolymarketDiscoveryDebugReport | null>(null);
   const [debugLoading, setDebugLoading] = useState(false);
+  const [accountDrafts, setAccountDrafts] = useState<Record<string, TrackedAccountDraft>>({});
+  const [newAccountDraft, setNewAccountDraft] = useState<TrackedAccountDraft>({
+    target: '',
+    threshold_percent: 5,
+    net_worth_usd: 100,
+    copy_trade_usd: 1,
+    enabled: true,
+  });
+  const [busyAccountId, setBusyAccountId] = useState<string | null>(null);
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
 
@@ -79,6 +93,20 @@ export default function PolymarketBotPage() {
         const nextState = await apiService.polymarketState();
         if (cancelled || actionInFlight.current || requestedAt < lastMutationAt.current) return;
         setState(nextState);
+        setAccountDrafts((current) => ({
+          ...Object.fromEntries(
+            nextState.tracked_accounts.map((account) => [
+              account.id,
+              current[account.id] || {
+                target: account.target,
+                threshold_percent: account.threshold_percent,
+                net_worth_usd: account.net_worth_usd,
+                copy_trade_usd: account.copy_trade_usd,
+                enabled: account.enabled,
+              },
+            ]),
+          ),
+        }));
         setError(null);
       } catch (loadError) {
         if (cancelled) return;
@@ -157,6 +185,67 @@ export default function PolymarketBotPage() {
       setActionError(normalizeError(debugError));
     } finally {
       setDebugLoading(false);
+    }
+  }
+
+
+  function applyTrackedAccountState(nextState: PolymarketBotState) {
+    setState(nextState);
+    setAccountDrafts(
+      Object.fromEntries(
+        nextState.tracked_accounts.map((account) => [
+          account.id,
+          {
+            target: account.target,
+            threshold_percent: account.threshold_percent,
+            net_worth_usd: account.net_worth_usd,
+            copy_trade_usd: account.copy_trade_usd,
+            enabled: account.enabled,
+          },
+        ]),
+      ),
+    );
+  }
+
+  async function addTrackedAccount() {
+    setBusyAccountId('new');
+    setActionError(null);
+    try {
+      const nextState = await apiService.polymarketAddTrackedAccount(newAccountDraft);
+      applyTrackedAccountState(nextState);
+      setNewAccountDraft({ target: '', threshold_percent: 5, net_worth_usd: 100, copy_trade_usd: 1, enabled: true });
+    } catch (accountError) {
+      setActionError(normalizeError(accountError));
+    } finally {
+      setBusyAccountId(null);
+    }
+  }
+
+  async function saveTrackedAccount(accountId: string) {
+    const draft = accountDrafts[accountId];
+    if (!draft) return;
+    setBusyAccountId(accountId);
+    setActionError(null);
+    try {
+      const nextState = await apiService.polymarketUpdateTrackedAccount(accountId, draft);
+      applyTrackedAccountState(nextState);
+    } catch (accountError) {
+      setActionError(normalizeError(accountError));
+    } finally {
+      setBusyAccountId(null);
+    }
+  }
+
+  async function deleteTrackedAccount(accountId: string) {
+    setBusyAccountId(accountId);
+    setActionError(null);
+    try {
+      const nextState = await apiService.polymarketDeleteTrackedAccount(accountId);
+      applyTrackedAccountState(nextState);
+    } catch (accountError) {
+      setActionError(normalizeError(accountError));
+    } finally {
+      setBusyAccountId(null);
     }
   }
 
@@ -399,6 +488,50 @@ export default function PolymarketBotPage() {
               </tbody>
             </table>
           </div>
+
+          <div className="mt-5 overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+            <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+              <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Copied At</th>
+                  <th className="px-4 py-3">Trader</th>
+                  <th className="px-4 py-3">Market</th>
+                  <th className="px-4 py-3">Side</th>
+                  <th className="px-4 py-3">Outcome</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Price</th>
+                  <th className="px-4 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {state.live.recent_decisions.filter((trade) => ['executed', 'confirmed'].includes(trade.status)).length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">
+                      No copied live trades are currently recorded.
+                    </td>
+                  </tr>
+                ) : (
+                  state.live.recent_decisions
+                    .filter((trade) => ['executed', 'confirmed'].includes(trade.status))
+                    .map((trade) => (
+                      <tr key={trade.id} className="align-top">
+                        <td className="px-4 py-3 text-slate-700">{formatTs(trade.executed_at || trade.updated_at)}</td>
+                        <td className="px-4 py-3 text-slate-700">{trade.trader_handle ? `@${trade.trader_handle}` : trade.trader_name}</td>
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-slate-950">{trade.market_title || trade.market_id}</div>
+                          <div className="mt-1 text-xs text-slate-500">{trade.market_id}</div>
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-800">{trade.side}</td>
+                        <td className="px-4 py-3 text-slate-700">{trade.outcome}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatMoney(trade.price, 4)}</td>
+                        <td className="px-4 py-3 text-slate-700">{trade.status}</td>
+                      </tr>
+                    ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
 
@@ -553,6 +686,29 @@ export default function PolymarketBotPage() {
         </CardHeader>
         <CardContent className="pt-4">
           <MetricGrid items={liveSourceItems} columns="md:grid-cols-2 xl:grid-cols-4" />
+        </CardContent>
+      </Card>
+
+
+      <Card className="border border-slate-200 bg-white py-6">
+        <CardHeader className="pb-0">
+          <CardTitle className="text-base tracking-[0.18em] text-slate-950">Tracked Copy Accounts</CardTitle>
+          <CardDescription>
+            Add, delete, enable, and tune each Polymarket account. The bot copies BUY and SELL trades with ${state.config.fixed_copy_trade_size.toFixed(2)} or the per-account copy size when the source trade is at least the configured percentage of the account net worth.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <TrackedAccountsTable
+            accounts={state.tracked_accounts}
+            drafts={accountDrafts}
+            newDraft={newAccountDraft}
+            busyId={busyAccountId}
+            onDraftChange={(id, draft) => setAccountDrafts((current) => ({ ...current, [id]: draft }))}
+            onNewDraftChange={setNewAccountDraft}
+            onAdd={() => void addTrackedAccount()}
+            onSave={(accountId) => void saveTrackedAccount(accountId)}
+            onDelete={(accountId) => void deleteTrackedAccount(accountId)}
+          />
         </CardContent>
       </Card>
 

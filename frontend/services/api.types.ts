@@ -44,6 +44,8 @@ import {
     IndMoneyUsThreatLatestResponse,
     IndMoneyUsThreatRunResponse,
     PolymarketBotState,
+    PolymarketTrackedAccountCreate,
+    PolymarketTrackedAccountUpdate,
     PolymarketDiscoveryDebugReport,
     PolymarketDiscoveryDebugRequest,
     ZerodhaLoginUrlResponse,
@@ -165,6 +167,9 @@ export interface IApiService {
     polymarketLiveTradeConfirm(tradeId: string): Promise<PolymarketBotState>;
     polymarketLiveTradeReject(tradeId: string): Promise<PolymarketBotState>;
     polymarketLiveRejectAll(): Promise<PolymarketBotState>;
+    polymarketAddTrackedAccount(data: PolymarketTrackedAccountCreate): Promise<PolymarketBotState>;
+    polymarketUpdateTrackedAccount(accountId: string, data: PolymarketTrackedAccountUpdate): Promise<PolymarketBotState>;
+    polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState>;
     polymarketDiscoveryDebug(data: PolymarketDiscoveryDebugRequest): Promise<PolymarketDiscoveryDebugReport>;
 }
 

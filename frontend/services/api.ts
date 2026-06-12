@@ -29,6 +29,8 @@ import {
   IndMoneyUsThreatLatestResponse,
   IndMoneyUsThreatRunResponse,
   PolymarketBotState,
+  PolymarketTrackedAccountCreate,
+  PolymarketTrackedAccountUpdate,
   PolymarketDiscoveryDebugReport,
   PolymarketDiscoveryDebugRequest,
   JobCreate,
@@ -844,6 +846,21 @@ class apiServiceClass implements IApiService {
 
   polymarketLiveRejectAll(): Promise<PolymarketBotState> {
     return this.post<PolymarketBotState>(URLs.polymarket.liveRejectAll());
+  }
+
+  polymarketAddTrackedAccount(data: PolymarketTrackedAccountCreate): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarket.trackedAccounts(), data);
+  }
+
+  polymarketUpdateTrackedAccount(
+    accountId: string,
+    data: PolymarketTrackedAccountUpdate,
+  ): Promise<PolymarketBotState> {
+    return this.patch<PolymarketBotState>(URLs.polymarket.trackedAccount(accountId), data);
+  }
+
+  polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState> {
+    return this.delete<PolymarketBotState>(URLs.polymarket.trackedAccount(accountId));
   }
 
   polymarketDiscoveryDebug(

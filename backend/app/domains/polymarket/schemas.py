@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 BotMode = Literal["mock", "live-read", "live-trading"]
 TradeSide = Literal["BUY", "SELL"]
@@ -13,6 +13,46 @@ LiveTradeStatus = Literal[
 LiveUnlockMode = Literal["locked", "automatic", "manual"]
 BalanceStatus = Literal["idle", "loading", "ready", "unavailable", "error"]
 ActivitySource = Literal["wallet", "handle", "feed", "fallback"]
+
+
+class PolymarketTrackedAccount(BaseModel):
+    id: str
+    target: str = Field(min_length=1, max_length=180)
+    handle: str | None = None
+    address: str = ""
+    profile_url: str | None = None
+    enabled: bool = True
+    threshold_percent: float = Field(default=5, ge=0, le=100)
+    net_worth_usd: float = Field(default=100, ge=0)
+    copy_trade_usd: float = Field(default=1, ge=0.01, le=1)
+    created_at: str
+    updated_at: str
+
+
+class PolymarketTrackedAccountCreate(BaseModel):
+    target: str = Field(min_length=1, max_length=180)
+    threshold_percent: float = Field(default=5, ge=0, le=100)
+    net_worth_usd: float = Field(default=100, ge=0)
+    copy_trade_usd: float = Field(default=1, ge=0.01, le=1)
+    enabled: bool = True
+
+    @field_validator("target")
+    @classmethod
+    def strip_target(cls, value: str) -> str:
+        return value.strip()
+
+
+class PolymarketTrackedAccountUpdate(BaseModel):
+    target: str | None = Field(default=None, min_length=1, max_length=180)
+    threshold_percent: float | None = Field(default=None, ge=0, le=100)
+    net_worth_usd: float | None = Field(default=None, ge=0)
+    copy_trade_usd: float | None = Field(default=None, ge=0.01, le=1)
+    enabled: bool | None = None
+
+    @field_validator("target")
+    @classmethod
+    def strip_target(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else value
 
 
 class PolymarketBotConfig(BaseModel):
@@ -239,6 +279,7 @@ class PolymarketBotState(BaseModel):
     next_poll_at: str | None = None
     seconds_until_next_poll: int
     last_error: str | None = None
+    tracked_accounts: list[PolymarketTrackedAccount] = Field(default_factory=list)
     tracked_traders: list[PolymarketTrader] = Field(default_factory=list)
     open_positions: list[PolymarketPosition] = Field(default_factory=list)
     trade_history: list[PolymarketPaperTrade] = Field(default_factory=list)
