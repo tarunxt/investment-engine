@@ -356,3 +356,74 @@ async def test_live_read_provider_reads_fallback_wallet_activity(monkeypatch):
     assert len(trades) == 1
     assert trades[0].trader_name == "RN1"
     assert trades[0].trader_address == "0x2005D16a84CEEfa912D4e380cD32E7ff827875Ea"
+
+
+def test_normalize_trade_row_accepts_polymarket_data_api_usdc_size():
+    from app.domains.polymarket.providers import normalize_trade_row
+
+    normalized = normalize_trade_row(
+        {
+            "proxyWallet": "0x56687BF447DB6FFA42FFE2204A05EDAA20F55839",
+            "timestamp": 1781268000,
+            "conditionId": "0xdd22472e552920b8438158ea7238bfadfa4f736aa4cee91a6b86c39ead110917",
+            "type": "TRADE",
+            "size": 1079.0,
+            "usdcSize": 399.23,
+            "transactionHash": "0xabc123",
+            "price": 0.37,
+            "side": "BUY",
+            "title": "Lyon: Daniel Galan vs Kimmer Coppejans",
+            "slug": "lyon-daniel-galan-vs-kimmer-coppejans",
+            "outcome": "Daniel Galan",
+            "name": "RN1",
+            "pseudonym": "RN1",
+        }
+    )
+
+    assert normalized["accepted"] is True
+    assert normalized["trade"]["address"] == "0x56687BF447DB6FFA42FFE2204A05EDAA20F55839"
+    assert normalized["trade"]["market_id"] == "lyon-daniel-galan-vs-kimmer-coppejans"
+    assert normalized["trade"]["size_usd"] == 399.23
+    assert normalized["trade"]["price"] == 0.37
+
+
+@pytest.mark.anyio
+async def test_wallet_activity_falls_back_to_public_data_api_when_bullpen_empty(monkeypatch):
+    from app.domains.polymarket.providers import BullpenReadOnlyProvider
+
+    config = load_polymarket_config().model_copy(update={"manual_tracked_wallets": ""})
+    provider = BullpenReadOnlyProvider(config)
+    address = "0x56687BF447DB6FFA42FFE2204A05EDAA20F55839"
+    calls = []
+
+    async def fake_bullpen_json(*args, **kwargs):
+        return []
+
+    async def fake_data_api_wallet_activity(wallet):
+        calls.append(wallet)
+        return [
+            {
+                "id": "0xabc123",
+                "address": wallet,
+                "market_id": "tennis-match",
+                "market_title": "Tennis Match",
+                "outcome": "Player A",
+                "side": "BUY",
+                "price": 0.63,
+                "size_usd": 399.23,
+                "timestamp": "2026-06-12T10:00:00+00:00",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "app.domains.polymarket.providers.run_first_bullpen_json", fake_bullpen_json
+    )
+    monkeypatch.setattr(
+        provider, "_read_data_api_wallet_activity", fake_data_api_wallet_activity
+    )
+
+    trades = await provider._read_wallet_activity(address)
+
+    assert calls == [address]
+    assert trades[0]["id"] == "0xabc123"
+    assert trades[0]["size_usd"] == 399.23
