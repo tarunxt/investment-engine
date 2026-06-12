@@ -16,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { apiService, APIError } from '@/services/api';
 import { RunListItem } from '@/types/api';
+import { formatApiTimestamp } from '@/lib/datetime';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { getRunDetailPathFromPrompt } from '@/lib/runPresentation';
@@ -49,12 +50,10 @@ function normalizeError(error: unknown) {
 }
 
 function formatTimestamp(value?: string | null) {
-  if (!value) return null;
-  return new Date(value).toLocaleString('en-IN', {
+  return formatApiTimestamp(value, {
+    emptyValue: null,
     timeZone: INDIA_TIMEZONE,
     weekday: 'short',
-    year: 'numeric',
-    month: 'short',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
