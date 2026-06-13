@@ -48,6 +48,24 @@ function formatTs(iso?: string | null) {
   });
 }
 
+function getIstDateKey(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getApiTimestampIstDateKey(iso?: string | null) {
+  const date = parseApiTimestamp(iso);
+  return date ? getIstDateKey(date) : null;
+}
+
+function isApiTimestampTodayIst(iso?: string | null) {
+  return getApiTimestampIstDateKey(iso) === getIstDateKey(new Date());
+}
+
 function formatEventEnd(iso?: string | null, fallbackText?: string | null) {
   const candidate = iso || fallbackText?.match(/20\d{2}-\d{2}-\d{2}/)?.[0];
   if (!candidate) return "Today";
@@ -380,9 +398,13 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
 
   const rows = liveRows.length > 0 ? liveRows : paperRows;
 
-  return rows.sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-  );
+  return rows
+    .filter((row) => isApiTimestampTodayIst(row.timestamp))
+    .sort(
+      (a, b) =>
+        (parseApiTimestamp(b.timestamp)?.getTime() ?? 0) -
+        (parseApiTimestamp(a.timestamp)?.getTime() ?? 0),
+    );
 }
 
 function getTraderDisplayName(trade: PolymarketSourceTradeDecision) {
@@ -1632,7 +1654,7 @@ export default function PolymarketBotPage() {
                 Redeemed Trades
               </CardTitle>
               <CardDescription>
-                Closed or redeemed Bullpen trades with timestamp, profit and loss, execution price, and market details.
+                Closed or redeemed Bullpen trades for the current IST day with timestamp, profit and loss, execution price, and market details.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -1656,7 +1678,7 @@ export default function PolymarketBotPage() {
                     {redeemedTradeRows.length === 0 ? (
                       <tr>
                         <td className="px-4 py-6 text-sm text-slate-500" colSpan={10}>
-                          No redeemed trades have been recorded yet.
+                          No redeemed trades have been recorded for today in IST yet.
                         </td>
                       </tr>
                     ) : redeemedTradeRows.map((trade) => (
