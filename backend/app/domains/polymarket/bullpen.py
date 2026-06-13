@@ -40,6 +40,10 @@ BULLPEN_MAX_PRICE_ERROR_PATTERN = re.compile(
     r"Fill price \$?(?P<fill_price>\d+(?:\.\d+)?) exceeds maximum acceptable price \$?(?P<max_price>\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
+BULLPEN_INSUFFICIENT_COLLATERAL_PATTERN = re.compile(
+    r"Insufficient collateral to place this order \(?(?P<needed>\d+(?:\.\d+)?)\s*pUSD needed",
+    re.IGNORECASE,
+)
 
 
 BULLPEN_RUNTIME_RELATIVE_PATHS = (
@@ -97,6 +101,16 @@ def extract_bullpen_buy_fill_price_error(message: str) -> float | None:
         return None
     try:
         return float(match.group("fill_price"))
+    except (TypeError, ValueError):
+        return None
+
+
+def extract_bullpen_insufficient_collateral_amount(message: str) -> float | None:
+    match = BULLPEN_INSUFFICIENT_COLLATERAL_PATTERN.search(message)
+    if not match:
+        return None
+    try:
+        return float(match.group("needed"))
     except (TypeError, ValueError):
         return None
 
@@ -302,7 +316,29 @@ class BullpenLiveExecutor:
         except BullpenCommandError as exc:
             if decision.side != "BUY":
                 raise
-            fill_price = extract_bullpen_buy_fill_price_error(str(exc))
+            error_message = str(exc)
+            collateral_needed = extract_bullpen_insufficient_collateral_amount(
+                error_message
+            )
+            if collateral_needed is not None:
+                wrap_amount = max(collateral_needed, decision.amount)
+                await run_bullpen(
+                    [
+                        "polymarket",
+                        "wrap",
+                        f"{wrap_amount:.2f}",
+                        "--yes",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                    timeout_seconds=45,
+                    read_only=False,
+                )
+                stdout = await run_bullpen(args, timeout_seconds=45, read_only=False)
+                return redact_secrets(stdout)
+
+            fill_price = extract_bullpen_buy_fill_price_error(error_message)
             if fill_price is None:
                 raise
             retry_max_price = buy_retry_max_price_for_execution(fill_price)
