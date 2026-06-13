@@ -1463,6 +1463,17 @@ export default function PolymarketBotPage() {
                 </Button>
                 <Button
                   size="sm"
+                  variant="outline"
+                  className="rounded-full border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                  disabled={pendingAction !== null}
+                  onClick={() =>
+                    runAction("redeem", () => apiService.polymarketLiveRedeem())
+                  }
+                >
+                  Redeem resolved
+                </Button>
+                <Button
+                  size="sm"
                   variant="destructive"
                   className="rounded-full"
                   disabled={pendingAction !== null}
