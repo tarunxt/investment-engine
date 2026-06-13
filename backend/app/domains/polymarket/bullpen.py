@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 from collections.abc import Iterable
 
@@ -31,10 +32,14 @@ def is_redeem_metadata_lookup_warning(message: str) -> bool:
 
 BULLPEN_REDEEM_TIMEOUT_SECONDS = 180
 BULLPEN_BALANCE_TIMEOUT_SECONDS = 8
-DEFAULT_BULLPEN_BUY_MAX_PRICE_BUFFER = 0.05
+DEFAULT_BULLPEN_BUY_MAX_PRICE_BUFFER = 0.10
 DEFAULT_BULLPEN_SELL_MIN_PRICE_BUFFER = 0.05
 MIN_POLYMARKET_LIMIT_PRICE = 0.01
 MAX_POLYMARKET_LIMIT_PRICE = 0.99
+BULLPEN_MAX_PRICE_ERROR_PATTERN = re.compile(
+    r"Fill price \$?(?P<fill_price>\d+(?:\.\d+)?) exceeds maximum acceptable price \$?(?P<max_price>\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
 
 
 BULLPEN_RUNTIME_RELATIVE_PATHS = (
@@ -76,6 +81,24 @@ def buy_max_price_for_execution(price: float) -> float:
         ),
     )
     return _clamp_limit_price(price + buffer)
+
+
+def buy_retry_max_price_for_execution(fill_price: float) -> float:
+    retry_buffer = max(
+        0.0,
+        _float_from_env("BULLPEN_BUY_RETRY_PRICE_BUFFER", 0.01),
+    )
+    return _clamp_limit_price(fill_price + retry_buffer)
+
+
+def extract_bullpen_buy_fill_price_error(message: str) -> float | None:
+    match = BULLPEN_MAX_PRICE_ERROR_PATTERN.search(message)
+    if not match:
+        return None
+    try:
+        return float(match.group("fill_price"))
+    except (TypeError, ValueError):
+        return None
 
 
 def sell_min_price_for_execution(price: float) -> float:
@@ -274,7 +297,22 @@ class BullpenLiveExecutor:
                 "--output",
                 "json",
             ]
-        stdout = await run_bullpen(args, timeout_seconds=45, read_only=False)
+        try:
+            stdout = await run_bullpen(args, timeout_seconds=45, read_only=False)
+        except BullpenCommandError as exc:
+            if decision.side != "BUY":
+                raise
+            fill_price = extract_bullpen_buy_fill_price_error(str(exc))
+            if fill_price is None:
+                raise
+            retry_max_price = buy_retry_max_price_for_execution(fill_price)
+            current_max_price = max_price
+            if retry_max_price <= current_max_price:
+                raise
+            retry_args = [*args]
+            max_price_index = retry_args.index("--max-price") + 1
+            retry_args[max_price_index] = f"{retry_max_price:.4f}"
+            stdout = await run_bullpen(retry_args, timeout_seconds=45, read_only=False)
         return redact_secrets(stdout)
 
 

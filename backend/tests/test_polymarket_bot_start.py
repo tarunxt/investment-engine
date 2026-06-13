@@ -725,9 +725,7 @@ async def test_bullpen_redeem_uses_extended_timeout(monkeypatch):
         )
         return "{}"
 
-    monkeypatch.setattr(
-        "app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen
-    )
+    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
 
     result = await BullpenLiveExecutor().redeem(dry_run=False)
 
@@ -752,7 +750,7 @@ def test_bullpen_execution_limit_prices_include_safety_buffer(monkeypatch):
     monkeypatch.delenv("BULLPEN_BUY_MAX_PRICE_BUFFER", raising=False)
     monkeypatch.delenv("BULLPEN_SELL_MIN_PRICE_BUFFER", raising=False)
 
-    assert buy_max_price_for_execution(0.65) == pytest.approx(0.70)
+    assert buy_max_price_for_execution(0.65) == pytest.approx(0.75)
     assert buy_max_price_for_execution(0.98) == pytest.approx(0.99)
     assert sell_min_price_for_execution(0.65) == pytest.approx(0.60)
     assert sell_min_price_for_execution(0.02) == pytest.approx(0.01)
@@ -773,9 +771,7 @@ async def test_bullpen_execute_uses_buffered_limit_prices(monkeypatch):
         return "{}"
 
     monkeypatch.delenv("BULLPEN_BUY_MAX_PRICE_BUFFER", raising=False)
-    monkeypatch.setattr(
-        "app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen
-    )
+    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
 
     await BullpenLiveExecutor().execute(
         PolymarketLiveTradeDecision(
@@ -809,12 +805,56 @@ async def test_bullpen_execute_uses_buffered_limit_prices(monkeypatch):
         "Yes",
         "1.00",
         "--max-price",
-        "0.7000",
+        "0.7500",
         "--yes",
         "--non-interactive",
         "--output",
         "json",
     ]
+
+
+@pytest.mark.anyio
+async def test_bullpen_execute_retries_buy_when_fill_price_exceeds_limit(monkeypatch):
+    calls = []
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        calls.append(args)
+        if len(calls) == 1:
+            raise BullpenCommandError(
+                '{"error":"Fill price $0.7000 exceeds maximum acceptable price $0.6900. Use a limit order for precise price control, or increase --max-price."}'
+            )
+        return "{}"
+
+    monkeypatch.setenv("BULLPEN_BUY_MAX_PRICE_BUFFER", "0.05")
+    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
+
+    await BullpenLiveExecutor().execute(
+        PolymarketLiveTradeDecision(
+            id="decision-1",
+            source_trade_id="source-1",
+            source_trade_key="source-key-1",
+            proposed_at="2026-06-13T00:00:00Z",
+            updated_at="2026-06-13T00:00:00Z",
+            trader_id="trader-1",
+            trader_name="Trader 1",
+            trader_address="",
+            market_id="market-1",
+            market_title="Market 1",
+            outcome="Yes",
+            side="BUY",
+            amount=1,
+            price=0.64,
+            shares=1.5625,
+            max_loss=1,
+            reason="test",
+            status="confirmed",
+            command="buy",
+            source="live-read",
+        )
+    )
+
+    assert calls[0][calls[0].index("--max-price") + 1] == "0.6900"
+    assert calls[1][calls[1].index("--max-price") + 1] == "0.7100"
 
 
 def test_redeem_metadata_lookup_warning_detects_gamma_condition_miss():
@@ -896,6 +936,7 @@ async def test_startup_balance_refresh_runs_auto_redeem(tmp_path):
 
     assert executor.redeem_calls == 1
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
+
 
 @pytest.mark.anyio
 async def test_manual_live_redeem_submits_and_refreshes_balance(tmp_path):
