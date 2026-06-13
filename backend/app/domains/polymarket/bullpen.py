@@ -30,6 +30,10 @@ def is_redeem_metadata_lookup_warning(message: str) -> bool:
 
 
 BULLPEN_REDEEM_TIMEOUT_SECONDS = 180
+DEFAULT_BULLPEN_BUY_MAX_PRICE_BUFFER = 0.05
+DEFAULT_BULLPEN_SELL_MIN_PRICE_BUFFER = 0.05
+MIN_POLYMARKET_LIMIT_PRICE = 0.01
+MAX_POLYMARKET_LIMIT_PRICE = 0.99
 
 
 BULLPEN_RUNTIME_RELATIVE_PATHS = (
@@ -47,6 +51,40 @@ def _unique_paths(paths: Iterable[str | None]) -> list[str]:
         seen.add(path)
         unique.append(path)
     return unique
+
+
+def _float_from_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _clamp_limit_price(price: float) -> float:
+    return max(MIN_POLYMARKET_LIMIT_PRICE, min(MAX_POLYMARKET_LIMIT_PRICE, price))
+
+
+def buy_max_price_for_execution(price: float) -> float:
+    buffer = max(
+        0.0,
+        _float_from_env(
+            "BULLPEN_BUY_MAX_PRICE_BUFFER", DEFAULT_BULLPEN_BUY_MAX_PRICE_BUFFER
+        ),
+    )
+    return _clamp_limit_price(price + buffer)
+
+
+def sell_min_price_for_execution(price: float) -> float:
+    buffer = max(
+        0.0,
+        _float_from_env(
+            "BULLPEN_SELL_MIN_PRICE_BUFFER", DEFAULT_BULLPEN_SELL_MIN_PRICE_BUFFER
+        ),
+    )
+    return _clamp_limit_price(price - buffer)
 
 
 def bullpen_candidate_paths() -> list[str]:
@@ -206,6 +244,7 @@ class BullpenLiveExecutor:
 
     async def execute(self, decision: PolymarketLiveTradeDecision) -> str:
         if decision.side == "BUY":
+            max_price = buy_max_price_for_execution(decision.price)
             args = [
                 "polymarket",
                 "buy",
@@ -213,13 +252,14 @@ class BullpenLiveExecutor:
                 decision.outcome,
                 f"{decision.amount:.2f}",
                 "--max-price",
-                f"{decision.price:.4f}",
+                f"{max_price:.4f}",
                 "--yes",
                 "--non-interactive",
                 "--output",
                 "json",
             ]
         else:
+            min_price = sell_min_price_for_execution(decision.price)
             args = [
                 "polymarket",
                 "sell",
@@ -227,7 +267,7 @@ class BullpenLiveExecutor:
                 decision.outcome,
                 f"{decision.shares:.6f}",
                 "--min-price",
-                f"{decision.price:.4f}",
+                f"{min_price:.4f}",
                 "--yes",
                 "--non-interactive",
                 "--output",
