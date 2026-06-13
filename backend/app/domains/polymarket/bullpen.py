@@ -467,6 +467,9 @@ def _is_account_value_candidate(item: dict[str, object]) -> bool:
             "valueusd",
             "equity",
             "netliquidation",
+            "totalaccountvalue",
+            "totalbalance",
+            "totalportfolio",
         )
     )
 
@@ -526,6 +529,9 @@ def _collect_balance_candidates(
                 "collateral",
                 "equity",
                 "netliquidation",
+                "totalaccountvalue",
+                "totalbalance",
+                "totalportfolio",
                 "portfoliovalue",
                 "pusd",
                 "totalvalue",

@@ -409,6 +409,9 @@ export default function PolymarketBotPage() {
   const isActionPending = pendingAction !== null;
   const startDisabled = state.running || isActionPending;
   const stopDisabled = !state.running || isActionPending;
+  const stoppedWarning = !state.running
+    ? "Warning: Bot is Stopped. It will only stay active after Start succeeds; press Start now if you did not intentionally stop it. If it stops while showing Running, the backend watchdog automatically restarts the poller and logs a warning in Recent Bullpen Activity."
+    : null;
 
   const bullpenAccountValueUsd = parseUsdFromBalanceMessage(
     state.live.balance.message,
@@ -809,6 +812,13 @@ export default function PolymarketBotPage() {
             </Button>
           </div>
 
+
+
+          {stoppedWarning ? (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+              {stoppedWarning}
+            </div>
+          ) : null}
 
 
           <Card className="border border-slate-200 bg-white py-6">

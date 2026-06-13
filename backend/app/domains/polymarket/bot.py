@@ -377,6 +377,11 @@ class PolymarketPaperCopyBot:
             return self._build_state_unlocked()
 
     def _build_state_unlocked(self) -> PolymarketBotState:
+        if self.running and (self._poll_task is None or self._poll_task.done()):
+            self._add_activity(
+                "Warning: Bot poller stopped automatically; restarting it now."
+            )
+            self._ensure_poll_task(initial_delay=0)
         now = utc_now()
         open_positions = (
             self._live_positions()
@@ -1208,7 +1213,7 @@ class PolymarketPaperCopyBot:
                 self.live_trade_history
             ),
             pending_confirmations=self._pending_live_trades(),
-            recent_decisions=list(reversed(self.live_trade_history))[:50],
+            recent_decisions=list(reversed(self.live_trade_history)),
         )
 
     def _finish_poll_unlocked(
