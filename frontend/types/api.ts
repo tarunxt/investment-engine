@@ -1104,6 +1104,7 @@ export interface PolymarketSourceTradeDecision {
   trader_handle?: string | null;
   market_id: string;
   market_title: string;
+  event_end_at?: string | null;
   outcome: string;
   side: 'BUY' | 'SELL';
   amount: number;

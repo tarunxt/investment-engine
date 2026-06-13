@@ -1085,6 +1085,7 @@ def source_trade_from_normalized(
         clean_trader_identity=identity,
         market_id=trade["market_id"],
         market_title=trade["market_title"],
+        event_end_at=trade.get("event_end_at"),
         outcome=trade["outcome"],
         side=trade["side"],
         price=float(trade["price"]),
@@ -1177,6 +1178,21 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         or row.get("pseudonym")
     )
     raw_identity = raw_identity_value(row)
+    event_end_at = parse_timestamp(
+        row.get("eventEndAt")
+        or row.get("event_end_at")
+        or row.get("marketEndAt")
+        or row.get("market_end_at")
+        or row.get("endDate")
+        or row.get("end_date")
+        or row.get("endTime")
+        or row.get("end_time")
+        or row.get("deadline")
+        or row.get("resolutionTime")
+        or row.get("resolution_time")
+        or row.get("closeTime")
+        or row.get("close_time")
+    )
     timestamp = parse_timestamp(
         row.get("timestamp")
         or row.get("createdAt")
@@ -1323,6 +1339,7 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
                 or row.get("question")
             )
             or market_id,
+            "event_end_at": event_end_at,
             "outcome": string_value(
                 row.get("outcome")
                 or row.get("outcomeName")
