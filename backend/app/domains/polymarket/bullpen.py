@@ -29,6 +29,9 @@ def is_redeem_metadata_lookup_warning(message: str) -> bool:
     )
 
 
+BULLPEN_REDEEM_TIMEOUT_SECONDS = 180
+
+
 BULLPEN_RUNTIME_RELATIVE_PATHS = (
     (".runtime-tools", "bullpen"),
     ("runtime-tools", "bullpen"),
@@ -196,7 +199,9 @@ class BullpenLiveExecutor:
             args.extend(["--dry-run", "--output", "json"])
         else:
             args.extend(["--yes", "--non-interactive", "--output", "json"])
-        stdout = await run_bullpen(args, timeout_seconds=60, read_only=dry_run)
+        stdout = await run_bullpen(
+            args, timeout_seconds=BULLPEN_REDEEM_TIMEOUT_SECONDS, read_only=dry_run
+        )
         return redact_secrets(stdout)
 
     async def execute(self, decision: PolymarketLiveTradeDecision) -> str:

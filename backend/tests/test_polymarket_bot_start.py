@@ -674,6 +674,43 @@ class ReadyBalanceReader:
         )
 
 
+@pytest.mark.anyio
+async def test_bullpen_redeem_uses_extended_timeout(monkeypatch):
+    calls = []
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        calls.append(
+            {
+                "args": args,
+                "timeout_seconds": timeout_seconds,
+                "read_only": read_only,
+            }
+        )
+        return "{}"
+
+    monkeypatch.setattr(
+        "app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen
+    )
+
+    result = await BullpenLiveExecutor().redeem(dry_run=False)
+
+    assert result == "{}"
+    assert calls == [
+        {
+            "args": [
+                "polymarket",
+                "redeem",
+                "--yes",
+                "--non-interactive",
+                "--output",
+                "json",
+            ],
+            "timeout_seconds": 180,
+            "read_only": False,
+        }
+    ]
+
+
 def test_redeem_metadata_lookup_warning_detects_gamma_condition_miss():
     assert is_redeem_metadata_lookup_warning(
         "[warn] 0xd9027272: payoutDenominator preflight RPC failed "
