@@ -141,7 +141,7 @@ class BullpenReadOnlyProvider:
     async def get_top_traders(self) -> list[PolymarketTrader]:
         discovery = await self._discover_active_traders()
         manual = await self._read_manual_wallets()
-        leaderboard = await self._read_weekly_leaderboard_traders()
+        leaderboard = await self._read_profit_leaderboard_traders()
         fallback = (
             {
                 "traders": [],
@@ -166,9 +166,9 @@ class BullpenReadOnlyProvider:
         self.last_discovery_status = PolymarketLiveSourceStatus(
             source_mode="live-read",
             discovery_mode=(
-                "weekly P&L leaderboard + active feed + manual wallets + optional trending market activity"
+                "weekly + today profit leaderboards (top 100 each) + active feed + manual wallets + optional trending market activity"
                 if self.config.use_trending_market_activity
-                else "weekly P&L leaderboard + active feed + manual wallets"
+                else "weekly + today profit leaderboards (top 100 each) + active feed + manual wallets"
             ),
             active_traders_found=len(leaderboard["traders"]) + len(discovery["active"]),
             candidate_rows_considered=leaderboard["rows_considered"]
@@ -222,7 +222,9 @@ class BullpenReadOnlyProvider:
             if self.config.use_trending_market_activity
             else []
         )
-        return dedupe_trades([*live_read_trades, *market_trades])[:100]
+        return dedupe_trades([*live_read_trades, *market_trades])[
+            : max(100, self.config.max_tracked_traders * 2)
+        ]
 
     def get_discovery_status(self) -> PolymarketLiveSourceStatus:
         return self.last_discovery_status
@@ -232,22 +234,48 @@ class BullpenReadOnlyProvider:
     ) -> PolymarketDiscoveryDebugReport:
         return await debug_discovery(target)
 
-    async def _read_weekly_leaderboard_traders(self) -> dict[str, Any]:
-        try:
-            parsed = await run_first_bullpen_json(
+    async def _read_profit_leaderboard_traders(self) -> dict[str, Any]:
+        weekly = await self._read_leaderboard_traders(
+            label="weekly",
+            period_values=("7d", "week", "weekly"),
+            limit=100,
+        )
+        today = await self._read_leaderboard_traders(
+            label="today",
+            period_values=("1d", "today", "day"),
+            limit=100,
+        )
+        traders = merge_traders([*weekly["traders"], *today["traders"]])
+        errors = [item["error"] for item in (weekly, today) if item.get("error")]
+        return {
+            "traders": traders,
+            "rows_considered": weekly["rows_considered"] + today["rows_considered"],
+            "wallets_extracted": len(
+                {trader.address.lower() for trader in traders if trader.address}
+            ),
+            "rows_rejected": weekly["rows_rejected"] + today["rows_rejected"],
+            "error": "; ".join(errors) if errors else None,
+        }
+
+    async def _read_leaderboard_traders(
+        self, *, label: str, period_values: tuple[str, ...], limit: int
+    ) -> dict[str, Any]:
+        commands: list[list[str]] = []
+        for period in period_values:
+            commands.extend(
                 [
                     [
                         "polymarket",
                         "data",
                         "leaderboard",
                         "--time-period",
-                        "7d",
+                        period,
                         "--sort",
                         "pnl",
                         "--hide-farmers",
                         "--hide-bots",
                         "--limit",
-                        "25",
+                        str(limit),
                         "--read-only",
                         "--non-interactive",
                         "--output",
@@ -258,11 +286,13 @@ class BullpenReadOnlyProvider:
                         "data",
                         "leaderboard",
                         "--period",
-                        "week",
+                        period,
                         "--sort",
                         "pnl",
+                        "--hide-farmers",
+                        "--hide-bots",
                         "--limit",
-                        "25",
+                        str(limit),
                         "--read-only",
                         "--non-interactive",
                         "--output",
@@ -270,23 +300,18 @@ class BullpenReadOnlyProvider:
                     ],
                 ]
             )
+        try:
+            parsed = await run_first_bullpen_json(commands)
             rows = collect_rows(parsed)
             normalized = [normalize_fallback_trader_row(row) for row in rows]
             traders = [trader for trader in normalized if trader]
-            active = [
-                trader
-                for trader in traders
-                if trader.volume_24h > 0
-                or trader.trades_24h > 0
-                or trader.last_trade_at
-            ]
-            selected = active or traders
-            for trader in selected:
+            for trader in traders:
                 trader.source_reason = (
-                    "Weekly P&L leaderboard trader discovered via Bullpen"
+                    f"{label.title()} profit leaderboard trader discovered via Bullpen"
                 )
+            selected = traders[:limit]
             return {
-                "traders": selected[:25],
+                "traders": selected,
                 "rows_considered": len(rows),
                 "wallets_extracted": len(
                     {trader.address.lower() for trader in selected if trader.address}
@@ -300,7 +325,7 @@ class BullpenReadOnlyProvider:
                 "rows_considered": 0,
                 "wallets_extracted": 0,
                 "rows_rejected": 0,
-                "error": f"Weekly leaderboard unavailable: {redact_secrets(str(exc))}",
+                "error": f"{label.title()} leaderboard unavailable: {redact_secrets(str(exc))}",
             }
 
     async def _discover_active_traders(self) -> dict[str, Any]:
@@ -741,7 +766,9 @@ async def estimate_polymarket_net_worth(target: str) -> PolymarketNetWorthEstima
         timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
         headers=POLYMARKET_HTTP_HEADERS,
     ) as client:
-        positions_value, positions = await _read_positions_value_and_rows(client, wallet)
+        positions_value, positions = await _read_positions_value_and_rows(
+            client, wallet
+        )
         cash_balance = await _read_pusd_balance(client, wallet)
     redeemable_value = _sum_redeemable_value(positions)
     net_worth = positions_value + cash_balance + redeemable_value
@@ -763,9 +790,7 @@ async def resolve_polymarket_proxy_wallet(target: str) -> str:
     if not handle:
         raise RuntimeError("Polymarket handle or wallet address is required.")
 
-    query = urlencode(
-        {"q": handle, "search_profiles": "true", "limit_per_type": "10"}
-    )
+    query = urlencode({"q": handle, "search_profiles": "true", "limit_per_type": "10"})
     url = f"{POLYMARKET_GAMMA_API_BASE_URL}/public-search?{query}"
     async with httpx.AsyncClient(
         timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
@@ -784,9 +809,7 @@ async def resolve_polymarket_proxy_wallet(target: str) -> str:
         (
             item
             for item in profiles
-            if isinstance(item, dict)
-            and wanted
-            in profile_identity_candidates(item)
+            if isinstance(item, dict) and wanted in profile_identity_candidates(item)
         ),
         None,
     )
@@ -1662,9 +1685,20 @@ def select_tracked_traders(
     manual_selected = sorted(
         merge_traders(manual), key=compare_trader_key, reverse=True
     )
-    if manual_selected:
-        return manual_selected[:limit]
-    return sorted(merge_traders(traders), key=compare_trader_key, reverse=True)[:limit]
+    selected = manual_selected[:limit]
+    selected_keys = {
+        identity_key(trader.address or trader.handle or trader.name or trader.id)
+        for trader in selected
+    }
+    remaining = [
+        trader
+        for trader in sorted(
+            merge_traders(traders), key=compare_trader_key, reverse=True
+        )
+        if identity_key(trader.address or trader.handle or trader.name or trader.id)
+        not in selected_keys
+    ]
+    return [*selected, *remaining][:limit]
 
 
 def clean_wallet_prefix(value: object) -> str | None:

@@ -628,11 +628,13 @@ class PolymarketPaperCopyBot:
     async def _read_top_traders_unlocked(self) -> list[PolymarketTrader]:
         try:
             traders = await self.active_provider.get_top_traders()
+            selected = traders[: max(1, self.config.max_tracked_traders)]
+            await self._sync_leaderboard_tracked_accounts_unlocked(selected)
             self.live_source_status.live_read_traders_count = len(
-                [trader for trader in traders if trader.source == "live-read"]
+                [trader for trader in selected if trader.source == "live-read"]
             )
             self._apply_provider_discovery_status_unlocked()
-            return traders[: max(1, self.config.max_tracked_traders)]
+            return selected
         except Exception as exc:
             message = redact_secrets(str(exc))
             self.live_source_status.last_live_read_error = message
@@ -1319,6 +1321,14 @@ class PolymarketPaperCopyBot:
             return {"kind": "filter", "reason": "Trader handle excluded by filter."}
         account = self._matched_tracked_account(source_trade)
         if account:
+            if (
+                account.tracking_source == "leaderboard"
+                and not account.net_worth_checked_at
+            ):
+                return {
+                    "kind": "filter",
+                    "reason": "Tracked account net worth refresh pending.",
+                }
             threshold_usd = account.net_worth_usd * (account.threshold_percent / 100)
             if source_trade.size_usd < threshold_usd:
                 return {
@@ -1474,7 +1484,6 @@ class PolymarketPaperCopyBot:
             )
             return account
 
-
     async def _load_or_seed_tracked_accounts_unlocked(
         self,
     ) -> list[PolymarketTrackedAccount]:
@@ -1510,6 +1519,7 @@ class PolymarketPaperCopyBot:
                 net_worth_usd=100,
                 copy_trade_usd=1,
                 enabled=True,
+                tracking_source="manual",
                 created_at=now,
                 updated_at=now,
             )
@@ -1517,6 +1527,102 @@ class PolymarketPaperCopyBot:
         ]
         await self.tracked_account_store.save(accounts)
         return accounts
+
+    async def _sync_leaderboard_tracked_accounts_unlocked(
+        self, traders: list[PolymarketTrader]
+    ) -> None:
+        leaderboard_traders = [
+            trader
+            for trader in traders
+            if "leaderboard" in trader.source_reason.lower()
+        ]
+        if not leaderboard_traders:
+            return
+
+        now = utc_now()
+        leaderboard_ids = {
+            tracked_account_id(
+                normalize_tracked_account_target(
+                    trader.address or trader.handle or trader.name or trader.id
+                )
+            )
+            for trader in leaderboard_traders
+            if trader.address or trader.handle or trader.name or trader.id
+        }
+        existing_by_id = {account.id: account for account in self.tracked_accounts}
+        changed = False
+
+        for trader in leaderboard_traders:
+            target = normalize_tracked_account_target(
+                trader.address or trader.handle or trader.name or trader.id
+            )
+            if not target:
+                continue
+            account_id = tracked_account_id(target)
+            existing = existing_by_id.get(account_id)
+            if existing:
+                existing.target = target
+                existing.handle = tracked_account_handle(target) or trader.handle
+                existing.address = trader.address or existing.address
+                existing.proxy_wallet = trader.address or existing.proxy_wallet
+                existing.profile_url = (
+                    trader.polymarket_profile_url
+                    or trader.profile_url
+                    or tracked_account_profile_url(target)
+                )
+                if existing.tracking_source != "manual":
+                    existing.tracking_source = "leaderboard"
+                    existing.threshold_percent = 5
+                    existing.copy_trade_usd = 1
+                    existing.enabled = True
+                existing.updated_at = now
+                changed = True
+                continue
+
+            self.tracked_accounts.append(
+                PolymarketTrackedAccount(
+                    id=account_id,
+                    target=target,
+                    handle=tracked_account_handle(target) or trader.handle,
+                    address=trader.address
+                    or (target if target.startswith("0x") else ""),
+                    proxy_wallet=(
+                        trader.address or (target if target.startswith("0x") else None)
+                    ),
+                    profile_url=(
+                        trader.polymarket_profile_url
+                        or trader.profile_url
+                        or tracked_account_profile_url(target)
+                    ),
+                    threshold_percent=5,
+                    net_worth_usd=100,
+                    copy_trade_usd=1,
+                    enabled=True,
+                    tracking_source="leaderboard",
+                    net_worth_source="pending_refresh",
+                    net_worth_error="Net worth refresh pending for leaderboard account.",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            changed = True
+
+        kept_accounts = [
+            account
+            for account in self.tracked_accounts
+            if account.tracking_source == "manual" or account.id in leaderboard_ids
+        ]
+        if len(kept_accounts) != len(self.tracked_accounts):
+            self.tracked_accounts = kept_accounts
+            changed = True
+
+        if changed:
+            await self._save_tracked_accounts_unlocked()
+            self._apply_tracked_accounts_to_provider_unlocked()
+            self._ensure_net_worth_refresh_task()
+            self._add_activity(
+                f"Synced {len(leaderboard_ids)} leaderboard tracked accounts from weekly/today profit leaderboards."
+            )
 
     def _tracked_account_from_request(
         self, request: PolymarketTrackedAccountCreate
@@ -1534,6 +1640,7 @@ class PolymarketPaperCopyBot:
             net_worth_usd=request.net_worth_usd,
             copy_trade_usd=request.copy_trade_usd,
             enabled=request.enabled,
+            tracking_source="manual",
             created_at=now,
             updated_at=now,
         )

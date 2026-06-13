@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+from collections import defaultdict
 from datetime import datetime
 
 os.environ.setdefault(
@@ -508,3 +509,90 @@ async def test_wallet_activity_falls_back_to_public_data_api_when_bullpen_empty(
     assert calls == [address]
     assert trades[0]["id"] == "0xabc123"
     assert trades[0]["size_usd"] == 399.23
+
+
+def test_select_tracked_traders_keeps_manual_and_fills_with_leaderboard():
+    from app.domains.polymarket.providers import select_tracked_traders
+    from app.domains.polymarket.schemas import PolymarketTrader
+
+    manual = [
+        PolymarketTrader(
+            id="manual",
+            name="Manual",
+            address="0x1000000000000000000000000000000000000000",
+            source_reason="Manual tracked account",
+            source="live-read",
+        )
+    ]
+    leaderboard = [
+        PolymarketTrader(
+            id=f"leader-{index}",
+            name=f"Leader {index}",
+            address=f"0x{index + 2:040x}",
+            trades_24h=10 - index,
+            volume_24h=1000 - index,
+            source_reason="Weekly profit leaderboard trader discovered via Bullpen",
+            source="live-read",
+        )
+        for index in range(3)
+    ]
+
+    selected = select_tracked_traders([*leaderboard, *manual], manual, 3)
+
+    assert [trader.name for trader in selected] == ["Manual", "Leader 0", "Leader 1"]
+
+
+@pytest.mark.anyio
+async def test_leaderboard_sync_tracks_dynamic_accounts_and_waits_for_net_worth(
+    tmp_path,
+):
+    from app.domains.polymarket.schemas import PolymarketSourceTrade, PolymarketTrader
+
+    bot = await build_live_bot(tmp_path, StaticDoctorExecutor([]))
+    bot._net_worth_refresh_task = asyncio.create_task(asyncio.sleep(30))
+    trader = PolymarketTrader(
+        id="0x2000000000000000000000000000000000000000",
+        name="Leader",
+        address="0x2000000000000000000000000000000000000000",
+        source_reason="Today profit leaderboard trader discovered via Bullpen",
+        source="live-read",
+    )
+
+    await bot._sync_leaderboard_tracked_accounts_unlocked([trader])
+    account = bot.tracked_accounts[-1]
+
+    assert account.tracking_source == "leaderboard"
+    assert account.threshold_percent == 5
+    assert account.copy_trade_usd == 1
+    assert account.net_worth_source == "pending_refresh"
+
+    block = bot._proposal_block_reason(
+        PolymarketSourceTrade(
+            id="trade-1",
+            source_trade_key="trade-1-key",
+            trader_id=trader.id,
+            trader_name=trader.name,
+            trader_address=trader.address,
+            clean_trader_identity=trader.address,
+            market_id="market",
+            market_title="Market",
+            outcome="Yes",
+            side="BUY",
+            price=0.5,
+            size_usd=100,
+            timestamp="2026-06-12T10:00:00+00:00",
+            source="live-read",
+        ),
+        {
+            "created": 0,
+            "per_trader_created": defaultdict(int),
+        },
+    )
+
+    assert block == {
+        "kind": "filter",
+        "reason": "Tracked account net worth refresh pending.",
+    }
+
+    bot._net_worth_refresh_task.cancel()
+    await asyncio.gather(bot._net_worth_refresh_task, return_exceptions=True)
