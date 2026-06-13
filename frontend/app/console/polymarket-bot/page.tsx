@@ -246,6 +246,24 @@ function getTradeStatusReason(trade: PolymarketSourceTradeDecision) {
   return trade.status;
 }
 
+
+function summarizeFailureReason(reason: string, maxLength = 72) {
+  const cleaned = reason.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "No reason provided";
+  if (cleaned.length <= maxLength) return cleaned;
+  return `${cleaned.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function getCopiedEventFailureTrades(event: CopiedEventGroup) {
+  return event.traders.filter((trade) => trade.status === "failed");
+}
+
+function getCopiedEventFailureSummary(event: CopiedEventGroup) {
+  const failedTrade = getCopiedEventFailureTrades(event)[0];
+  if (!failedTrade) return null;
+  return summarizeFailureReason(getTradeStatusReason(failedTrade));
+}
+
 function getCopiedEventStatus(event: CopiedEventGroup) {
   const problemTrade = event.traders.find((trade) =>
     ["failed", "skipped", "rejected"].includes(trade.status),
@@ -386,6 +404,8 @@ export default function PolymarketBotPage() {
     useState<CopiedEventGroup | null>(null);
   const [selectedMissedTrade, setSelectedMissedTrade] =
     useState<MissedTradeGroup | null>(null);
+  const [selectedFailedCopiedEvent, setSelectedFailedCopiedEvent] =
+    useState<CopiedEventGroup | null>(null);
   const [copiedPositionsTab, setCopiedPositionsTab] = useState<
     "positions" | "history"
   >("positions");
@@ -1273,6 +1293,8 @@ export default function PolymarketBotPage() {
                       </tr>
                     ) : copiedEventGroups.map((event) => {
                       const hasMultipleTraders = event.traders.length > 1;
+                      const failedTrades = getCopiedEventFailureTrades(event);
+                      const failureSummary = getCopiedEventFailureSummary(event);
                       return (
                         <tr key={event.key} className="align-top">
                           <td className="px-4 py-3 text-slate-700">{formatTs(event.copiedAt)}</td>
@@ -1331,7 +1353,26 @@ export default function PolymarketBotPage() {
                             </td>
                           ) : null}
                           <td className="px-4 py-3 text-slate-700">{formatMoney(event.averagePrice, 4)}</td>
-                          <td className="px-4 py-3 text-slate-700">{copiedPositionsTab === "positions" && copiedPositionStatus === "closed" ? getCopiedEventStatus(event) : event.status}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {failureSummary ? (
+                              <div className="flex max-w-[18rem] items-start gap-2">
+                                <span className="leading-5 text-rose-700">failed ({failureSummary})</span>
+                                <button
+                                  type="button"
+                                  className="mt-0.5 rounded-full p-1 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
+                                  aria-label={`Show failure details for ${event.marketTitle}`}
+                                  onClick={() => setSelectedFailedCopiedEvent(event)}
+                                >
+                                  <Info className="size-4" />
+                                </button>
+                                {failedTrades.length > 1 ? (
+                                  <span className="mt-0.5 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">
+                                    {failedTrades.length}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : copiedPositionsTab === "positions" && copiedPositionStatus === "closed" ? getCopiedEventStatus(event) : event.status}
+                          </td>
                         </tr>
                       );
                     })}
@@ -1661,6 +1702,53 @@ export default function PolymarketBotPage() {
 
 
 
+
+      {selectedFailedCopiedEvent ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSelectedFailedCopiedEvent(null)}
+        >
+          <div
+            className="relative w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              aria-label="Close failure details popup"
+              onClick={() => setSelectedFailedCopiedEvent(null)}
+            >
+              <X className="size-5" />
+            </button>
+            <div className="pr-12">
+              <h2 className="text-lg font-semibold text-slate-950">Failed copy details</h2>
+              <p className="mt-1 text-sm text-slate-500">{selectedFailedCopiedEvent.marketTitle}</p>
+            </div>
+            <div className="mt-5 space-y-3">
+              {getCopiedEventFailureTrades(selectedFailedCopiedEvent).map((trade) => (
+                <div key={trade.id} className="rounded-[20px] border border-rose-100 bg-rose-50/60 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span className="font-semibold text-slate-950">{getTraderDisplayName(trade)}</span>
+                    <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                      {formatTs(trade.executed_at || trade.updated_at || trade.proposed_at)}
+                    </span>
+                  </div>
+                  <div className="mt-3 text-sm font-medium text-rose-800">
+                    {getTradeStatusReason(trade)}
+                  </div>
+                  <dl className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                    <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Outcome</dt><dd>{trade.outcome}</dd></div>
+                    <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Side</dt><dd>{trade.side}</dd></div>
+                    <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Amount</dt><dd>{formatMoney(trade.amount)}</dd></div>
+                  </dl>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
       {selectedMissedTrade ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
