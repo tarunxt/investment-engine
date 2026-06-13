@@ -40,6 +40,7 @@ from app.domains.polymarket.schemas import (
     PolymarketPosition,
     PolymarketSourceTrade,
     PolymarketTrackedAccount,
+    PolymarketLiveLimitUpdate,
     PolymarketTrackedAccountCreate,
     PolymarketTrackedAccountUpdate,
     PolymarketTrader,
@@ -290,6 +291,16 @@ class PolymarketPaperCopyBot:
             trade = self._find_pending_live_trade(trade_id)
             await self._execute_live_trade_unlocked(
                 trade, "manual dashboard confirmation"
+            )
+
+    async def update_live_limits(self, request: PolymarketLiveLimitUpdate) -> None:
+        async with self._lock:
+            self.config.max_live_trades_per_day = request.max_live_trades_per_day
+            await self.logger.info(
+                f"Updated max live trades per day to {request.max_live_trades_per_day}."
+            )
+            self._add_activity(
+                f"Updated max live trades per day to {request.max_live_trades_per_day}."
             )
 
     async def add_tracked_account(
@@ -1186,6 +1197,7 @@ class PolymarketPaperCopyBot:
             price=source_trade.price,
             shares=shares,
             max_loss=amount if source_trade.side == "BUY" else 0,
+            trader_invested_usd=source_trade.size_usd,
             reason=reason,
             status=status,
             command="buy" if source_trade.side == "BUY" else "sell",

@@ -8,6 +8,7 @@ from app.domains.polymarket.schemas import (
     PolymarketBotState,
     PolymarketDiscoveryDebugReport,
     PolymarketDiscoveryDebugRequest,
+    PolymarketLiveLimitUpdate,
     PolymarketTrackedAccountCreate,
     PolymarketTrackedAccountUpdate,
 )
@@ -103,6 +104,19 @@ async def reset_polymarket_live_emergency_stop(
 ):
     bot = await _get_bot(current_user)
     await bot.reset_emergency_stop()
+    return await bot.get_state()
+
+
+@router.patch("/live/limits", response_model=PolymarketBotState)
+async def update_polymarket_live_limits(
+    request: PolymarketLiveLimitUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        await bot.update_live_limits(request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return await bot.get_state()
 
 

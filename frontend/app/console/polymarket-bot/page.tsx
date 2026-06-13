@@ -69,6 +69,10 @@ function parseUsdFromBalanceMessage(message?: string | null) {
   return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
 }
 
+function formatPercent(value: number) {
+  return `${value.toFixed(2)}%`;
+}
+
 function formatMoney(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -109,6 +113,12 @@ type CopiedEventGroup = {
 
 function getTraderDisplayName(trade: PolymarketSourceTradeDecision) {
   return trade.trader_handle ? `@${trade.trader_handle}` : trade.trader_name;
+}
+
+function getTraderActivityUrl(trade: PolymarketSourceTradeDecision) {
+  const handle = trade.trader_handle || trade.trader_name.replace(/^@/, "");
+  if (!handle) return null;
+  return `https://polymarket.com/@${encodeURIComponent(handle)}?tab=activity`;
 }
 
 function getCopiedEventKey(trade: PolymarketSourceTradeDecision) {
@@ -260,6 +270,7 @@ export default function PolymarketBotPage() {
   const [copiedPositionStatus, setCopiedPositionStatus] = useState<
     "active" | "closed"
   >("active");
+  const [liveTradeLimitDraft, setLiveTradeLimitDraft] = useState("");
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
 
@@ -291,6 +302,7 @@ export default function PolymarketBotPage() {
             ]),
           ),
         }));
+        setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
         setError(null);
       } catch (loadError) {
         if (cancelled) return;
@@ -326,6 +338,7 @@ export default function PolymarketBotPage() {
       const nextState = await action();
       lastMutationAt.current = Date.now();
       setState(nextState);
+      setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
     } catch (runError) {
       setActionError(normalizeError(runError));
     } finally {
@@ -336,6 +349,7 @@ export default function PolymarketBotPage() {
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
     setState(nextState);
+    setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
     setAccountDrafts(
       Object.fromEntries(
         nextState.tracked_accounts.map((account) => [
@@ -349,6 +363,19 @@ export default function PolymarketBotPage() {
           },
         ]),
       ),
+    );
+  }
+
+  async function saveLiveTradeLimit() {
+    const nextLimit = Number.parseInt(liveTradeLimitDraft, 10);
+    if (!Number.isFinite(nextLimit) || nextLimit < 1) {
+      setActionError("Max live trades per day must be at least 1.");
+      return;
+    }
+    await runAction("update-live-limit", () =>
+      apiService.polymarketUpdateLiveLimits({
+        max_live_trades_per_day: nextLimit,
+      }),
     );
   }
 
@@ -451,6 +478,13 @@ export default function PolymarketBotPage() {
   const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades);
   const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
   const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
+
+  const trackedAccountByIdentity = new Map<string, (typeof state.tracked_accounts)[number]>();
+  for (const account of state.tracked_accounts) {
+    for (const key of [account.handle, account.target, account.address, account.proxy_wallet]) {
+      if (key) trackedAccountByIdentity.set(key.toLowerCase().replace(/^@/, ""), account);
+    }
+  }
 
   const visibleTrackedTraders = state.tracked_traders.filter(
     (trader) => trader.activity_source !== "handle",
@@ -785,7 +819,29 @@ export default function PolymarketBotPage() {
 
       {activeScreen === "main" ? (
         <>
-          <div className="flex flex-wrap gap-2 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+          <div className="flex flex-wrap items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+
+            <div className="flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <span className="font-medium">Max live trades/day:</span>
+              <span className="font-semibold text-slate-950">{state.config.max_live_trades_per_day}</span>
+              <input
+                className="h-8 w-20 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
+                type="number"
+                min={1}
+                value={liveTradeLimitDraft}
+                onChange={(event) => setLiveTradeLimitDraft(event.target.value)}
+                aria-label="Max live trades per day"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="rounded-full border-slate-300"
+                disabled={pendingAction !== null}
+                onClick={() => void saveLiveTradeLimit()}
+              >
+                Change limit
+              </Button>
+            </div>
             <Button
               size="sm"
               className="rounded-full bg-sky-300 px-5 text-slate-950 hover:bg-sky-200 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100"
@@ -939,7 +995,16 @@ export default function PolymarketBotPage() {
                               >
                                 multiple
                               </button>
-                            ) : getTraderDisplayName(event.traders[0])}
+                            ) : (
+                              <a
+                                className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-900"
+                                href={getTraderActivityUrl(event.traders[0]) || "#"}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {getTraderDisplayName(event.traders[0])}
+                              </a>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-slate-700">
                             <div className="flex items-start gap-2">
@@ -1334,7 +1399,7 @@ export default function PolymarketBotPage() {
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl">
+          <div className="w-full max-w-4xl rounded-[28px] bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-950">Copied traders</h2>
@@ -1356,18 +1421,47 @@ export default function PolymarketBotPage() {
                     <th className="px-4 py-3">Trader</th>
                     <th className="px-4 py-3">Timestamp</th>
                     <th className="px-4 py-3">Amount</th>
+                    <th className="px-4 py-3">Trader invested</th>
+                    <th className="px-4 py-3">% of Net Worth</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {selectedCopiedEvent.traders.map((trade) => (
-                    <tr key={trade.id}>
-                      <td className="px-4 py-3 font-medium text-slate-950">{getTraderDisplayName(trade)}</td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {formatTs(trade.executed_at || trade.updated_at || trade.proposed_at)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
-                    </tr>
-                  ))}
+                  {selectedCopiedEvent.traders.map((trade) => {
+                    const traderInvested = trade.trader_invested_usd || 0;
+                    const traderAccount = trackedAccountByIdentity.get(
+                      (trade.trader_handle || trade.trader_name || trade.trader_address)
+                        .toLowerCase()
+                        .replace(/^@/, ""),
+                    );
+                    const netWorth = traderAccount?.net_worth_usd || 0;
+                    const netWorthPercent =
+                      netWorth > 0 ? (traderInvested / netWorth) * 100 : null;
+                    const activityUrl = getTraderActivityUrl(trade);
+                    return (
+                      <tr key={trade.id}>
+                        <td className="px-4 py-3 font-medium text-slate-950">
+                          {activityUrl ? (
+                            <a
+                              className="text-sky-700 underline underline-offset-2 hover:text-sky-900"
+                              href={activityUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {getTraderDisplayName(trade)}
+                            </a>
+                          ) : getTraderDisplayName(trade)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {formatTs(trade.executed_at || trade.updated_at || trade.proposed_at)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatMoney(traderInvested)}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {netWorthPercent === null ? "—" : formatPercent(netWorthPercent)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

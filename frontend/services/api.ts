@@ -29,6 +29,7 @@ import {
   IndMoneyUsThreatLatestResponse,
   IndMoneyUsThreatRunResponse,
   PolymarketBotState,
+  PolymarketLiveLimitUpdate,
   PolymarketTrackedAccountCreate,
   PolymarketTrackedAccountUpdate,
   PolymarketDiscoveryDebugReport,
@@ -834,6 +835,10 @@ class apiServiceClass implements IApiService {
 
   polymarketLiveResetEmergencyStop(): Promise<PolymarketBotState> {
     return this.post<PolymarketBotState>(URLs.polymarket.liveResetEmergencyStop());
+  }
+
+  polymarketUpdateLiveLimits(data: PolymarketLiveLimitUpdate): Promise<PolymarketBotState> {
+    return this.patch<PolymarketBotState>(URLs.polymarket.liveLimits(), data);
   }
 
   polymarketLiveTradeConfirm(tradeId: string): Promise<PolymarketBotState> {

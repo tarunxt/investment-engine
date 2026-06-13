@@ -273,6 +273,7 @@ export const URLs = {
     liveBalanceRefresh: () => `${resolveApiBaseUrl()}/polymarket/live/balance/refresh`,
     liveEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/live/emergency-stop`,
     liveResetEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/live/reset-emergency-stop`,
+    liveLimits: () => `${resolveApiBaseUrl()}/polymarket/live/limits`,
     liveTradeConfirm: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket/live/trades/${tradeId}/confirm`,
     liveTradeReject: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket/live/trades/${tradeId}/reject`,
     liveRejectAll: () => `${resolveApiBaseUrl()}/polymarket/live/trades/reject-all`,
