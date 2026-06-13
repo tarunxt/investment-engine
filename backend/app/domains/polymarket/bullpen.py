@@ -33,6 +33,9 @@ def is_redeem_metadata_lookup_warning(message: str) -> bool:
 BULLPEN_REDEEM_TIMEOUT_SECONDS = 180
 BULLPEN_BALANCE_TIMEOUT_SECONDS = 8
 DEFAULT_BULLPEN_BUY_MAX_PRICE_BUFFER = 0.10
+DEFAULT_BULLPEN_BUY_MIN_PRICE_BUFFER = 0.02
+DEFAULT_BULLPEN_BUY_RETRY_PRICE_BUFFER = 0.02
+DEFAULT_BULLPEN_BUY_MAX_PRICE_RETRIES = 3
 DEFAULT_BULLPEN_SELL_MIN_PRICE_BUFFER = 0.05
 MIN_POLYMARKET_LIMIT_PRICE = 0.01
 MAX_POLYMARKET_LIMIT_PRICE = 0.99
@@ -78,21 +81,42 @@ def _clamp_limit_price(price: float) -> float:
 
 
 def buy_max_price_for_execution(price: float) -> float:
-    buffer = max(
+    configured_buffer = max(
         0.0,
         _float_from_env(
             "BULLPEN_BUY_MAX_PRICE_BUFFER", DEFAULT_BULLPEN_BUY_MAX_PRICE_BUFFER
         ),
     )
-    return _clamp_limit_price(price + buffer)
+    minimum_buffer = max(
+        0.0,
+        _float_from_env(
+            "BULLPEN_BUY_MIN_PRICE_BUFFER", DEFAULT_BULLPEN_BUY_MIN_PRICE_BUFFER
+        ),
+    )
+    return _clamp_limit_price(price + max(configured_buffer, minimum_buffer))
 
 
 def buy_retry_max_price_for_execution(fill_price: float) -> float:
     retry_buffer = max(
         0.0,
-        _float_from_env("BULLPEN_BUY_RETRY_PRICE_BUFFER", 0.01),
+        _float_from_env(
+            "BULLPEN_BUY_RETRY_PRICE_BUFFER",
+            DEFAULT_BULLPEN_BUY_RETRY_PRICE_BUFFER,
+        ),
     )
     return _clamp_limit_price(fill_price + retry_buffer)
+
+
+def buy_max_price_retry_attempts() -> int:
+    return max(
+        1,
+        int(
+            _float_from_env(
+                "BULLPEN_BUY_MAX_PRICE_RETRIES",
+                DEFAULT_BULLPEN_BUY_MAX_PRICE_RETRIES,
+            )
+        ),
+    )
 
 
 def extract_bullpen_buy_fill_price_error(message: str) -> float | None:
@@ -310,45 +334,58 @@ class BullpenLiveExecutor:
                 "--output",
                 "json",
             ]
-        try:
-            stdout = await run_bullpen(args, timeout_seconds=45, read_only=False)
-        except BullpenCommandError as exc:
-            if decision.side != "BUY":
-                raise
-            error_message = str(exc)
-            collateral_needed = extract_bullpen_insufficient_collateral_amount(
-                error_message
-            )
-            if collateral_needed is not None:
-                wrap_amount = max(collateral_needed, decision.amount)
-                await run_bullpen(
-                    [
-                        "polymarket",
-                        "wrap",
-                        f"{wrap_amount:.2f}",
-                        "--yes",
-                        "--non-interactive",
-                        "--output",
-                        "json",
-                    ],
-                    timeout_seconds=45,
-                    read_only=False,
+        attempts_remaining = (
+            buy_max_price_retry_attempts() if decision.side == "BUY" else 1
+        )
+        current_args = args
+        current_max_price = max_price if decision.side == "BUY" else None
+        wrapped_collateral = False
+        while True:
+            try:
+                stdout = await run_bullpen(
+                    current_args, timeout_seconds=45, read_only=False
                 )
-                stdout = await run_bullpen(args, timeout_seconds=45, read_only=False)
                 return redact_secrets(stdout)
+            except BullpenCommandError as exc:
+                if decision.side != "BUY":
+                    raise
+                error_message = str(exc)
+                collateral_needed = extract_bullpen_insufficient_collateral_amount(
+                    error_message
+                )
+                if collateral_needed is not None and not wrapped_collateral:
+                    wrapped_collateral = True
+                    wrap_amount = max(collateral_needed, decision.amount)
+                    await run_bullpen(
+                        [
+                            "polymarket",
+                            "wrap",
+                            f"{wrap_amount:.2f}",
+                            "--yes",
+                            "--non-interactive",
+                            "--output",
+                            "json",
+                        ],
+                        timeout_seconds=45,
+                        read_only=False,
+                    )
+                    continue
 
-            fill_price = extract_bullpen_buy_fill_price_error(error_message)
-            if fill_price is None:
-                raise
-            retry_max_price = buy_retry_max_price_for_execution(fill_price)
-            current_max_price = max_price
-            if retry_max_price <= current_max_price:
-                raise
-            retry_args = [*args]
-            max_price_index = retry_args.index("--max-price") + 1
-            retry_args[max_price_index] = f"{retry_max_price:.4f}"
-            stdout = await run_bullpen(retry_args, timeout_seconds=45, read_only=False)
-        return redact_secrets(stdout)
+                fill_price = extract_bullpen_buy_fill_price_error(error_message)
+                if fill_price is None or attempts_remaining <= 1:
+                    raise
+                retry_max_price = buy_retry_max_price_for_execution(fill_price)
+                if (
+                    current_max_price is not None
+                    and retry_max_price <= current_max_price
+                ):
+                    raise
+                attempts_remaining -= 1
+                current_max_price = retry_max_price
+                retry_args = [*current_args]
+                max_price_index = retry_args.index("--max-price") + 1
+                retry_args[max_price_index] = f"{retry_max_price:.4f}"
+                current_args = retry_args
 
 
 BALANCE_COMMAND_VARIANTS = [

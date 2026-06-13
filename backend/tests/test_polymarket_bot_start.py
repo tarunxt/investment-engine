@@ -811,12 +811,20 @@ async def test_bullpen_redeem_uses_extended_timeout(monkeypatch):
 
 def test_bullpen_execution_limit_prices_include_safety_buffer(monkeypatch):
     monkeypatch.delenv("BULLPEN_BUY_MAX_PRICE_BUFFER", raising=False)
+    monkeypatch.delenv("BULLPEN_BUY_MIN_PRICE_BUFFER", raising=False)
     monkeypatch.delenv("BULLPEN_SELL_MIN_PRICE_BUFFER", raising=False)
 
     assert buy_max_price_for_execution(0.65) == pytest.approx(0.75)
     assert buy_max_price_for_execution(0.98) == pytest.approx(0.99)
     assert sell_min_price_for_execution(0.65) == pytest.approx(0.60)
     assert sell_min_price_for_execution(0.02) == pytest.approx(0.01)
+
+
+def test_bullpen_buy_limit_price_keeps_minimum_buffer_when_configured_zero(monkeypatch):
+    monkeypatch.setenv("BULLPEN_BUY_MAX_PRICE_BUFFER", "0")
+    monkeypatch.delenv("BULLPEN_BUY_MIN_PRICE_BUFFER", raising=False)
+
+    assert buy_max_price_for_execution(0.19) == pytest.approx(0.21)
 
 
 @pytest.mark.anyio
@@ -889,6 +897,7 @@ async def test_bullpen_execute_retries_buy_when_fill_price_exceeds_limit(monkeyp
         return "{}"
 
     monkeypatch.setenv("BULLPEN_BUY_MAX_PRICE_BUFFER", "0.05")
+    monkeypatch.delenv("BULLPEN_BUY_RETRY_PRICE_BUFFER", raising=False)
     monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
 
     await BullpenLiveExecutor().execute(
@@ -917,7 +926,60 @@ async def test_bullpen_execute_retries_buy_when_fill_price_exceeds_limit(monkeyp
     )
 
     assert calls[0][calls[0].index("--max-price") + 1] == "0.6900"
-    assert calls[1][calls[1].index("--max-price") + 1] == "0.7100"
+    assert calls[1][calls[1].index("--max-price") + 1] == "0.7200"
+
+
+@pytest.mark.anyio
+async def test_bullpen_execute_retries_multiple_moving_buy_fill_prices(monkeypatch):
+    calls = []
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        calls.append(args)
+        if len(calls) == 1:
+            raise BullpenCommandError(
+                '{"error":"Fill price $0.2000 exceeds maximum acceptable price $0.1900. Use a limit order for precise price control, or increase --max-price."}'
+            )
+        if len(calls) == 2:
+            raise BullpenCommandError(
+                '{"error":"Fill price $0.2300 exceeds maximum acceptable price $0.2200. Use a limit order for precise price control, or increase --max-price."}'
+            )
+        return "{}"
+
+    monkeypatch.setenv("BULLPEN_BUY_MAX_PRICE_BUFFER", "0")
+    monkeypatch.delenv("BULLPEN_BUY_MIN_PRICE_BUFFER", raising=False)
+    monkeypatch.delenv("BULLPEN_BUY_RETRY_PRICE_BUFFER", raising=False)
+    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
+
+    await BullpenLiveExecutor().execute(
+        PolymarketLiveTradeDecision(
+            id="decision-1",
+            source_trade_id="source-1",
+            source_trade_key="source-key-1",
+            proposed_at="2026-06-13T00:00:00Z",
+            updated_at="2026-06-13T00:00:00Z",
+            trader_id="trader-1",
+            trader_name="Trader 1",
+            trader_address="",
+            market_id="market-1",
+            market_title="Market 1",
+            outcome="No",
+            side="BUY",
+            amount=1,
+            price=0.17,
+            shares=5.882353,
+            max_loss=1,
+            reason="test",
+            status="confirmed",
+            command="buy",
+            source="live-read",
+        )
+    )
+
+    assert [call[call.index("--max-price") + 1] for call in calls] == [
+        "0.1900",
+        "0.2200",
+        "0.2500",
+    ]
 
 
 @pytest.mark.anyio
