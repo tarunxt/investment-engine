@@ -1281,12 +1281,18 @@ class PolymarketPaperCopyBot:
                     "Auto-redeem checked and submitted any Bullpen redeemable positions."
                 )
 
+    def _loading_balance_state(self) -> PolymarketBalanceState:
+        return self.balance_state.model_copy(
+            update={
+                "status": "loading",
+                "message": "Refreshing Bullpen balance...",
+            }
+        )
+
     async def _refresh_balance_background(self) -> None:
         await self._auto_redeem_background()
         async with self._lock:
-            self.balance_state = PolymarketBalanceState(
-                status="loading", message="Refreshing Bullpen balance..."
-            )
+            self.balance_state = self._loading_balance_state()
         balance_state = self._with_next_balance_refresh(
             await self.balance_reader.refresh()
         )
@@ -1295,9 +1301,7 @@ class PolymarketPaperCopyBot:
 
     async def _refresh_balance_unlocked(self) -> None:
         await self._auto_redeem_unlocked()
-        self.balance_state = PolymarketBalanceState(
-            status="loading", message="Refreshing Bullpen balance..."
-        )
+        self.balance_state = self._loading_balance_state()
         self.balance_state = self._with_next_balance_refresh(
             await self.balance_reader.refresh()
         )
@@ -1549,7 +1553,7 @@ class PolymarketPaperCopyBot:
             return {"kind": "filter", "reason": "Trader handle excluded by filter."}
         account = self._matched_tracked_account(source_trade)
         if account:
-            if (
+            if account.net_worth_usd <= 0 or (
                 account.tracking_source == "leaderboard"
                 and not account.net_worth_checked_at
             ):
