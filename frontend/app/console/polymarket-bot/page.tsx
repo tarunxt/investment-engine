@@ -261,6 +261,8 @@ function formatCompactMoney(value: number) {
 
 const BULLPEN_ACCOUNT_URL =
   "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
+const AWS_EC2_TERMINAL_URL =
+  "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
 const TABLE_PAGE_SIZE = 20;
 
 function formatRelativePollTime(iso?: string | null) {
@@ -1324,7 +1326,7 @@ export default function PolymarketBotPage() {
               size="sm"
               className="rounded-full bg-amber-950 px-5 text-white hover:bg-amber-900"
             >
-              <a href={BULLPEN_ACCOUNT_URL} target="_blank" rel="noreferrer">
+              <a href={AWS_EC2_TERMINAL_URL} target="_blank" rel="noreferrer">
                 Open AWS EC2 Terminal
                 <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
               </a>
