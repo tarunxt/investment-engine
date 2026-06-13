@@ -378,7 +378,11 @@ class PolymarketPaperCopyBot:
 
     def _build_state_unlocked(self) -> PolymarketBotState:
         now = utc_now()
-        open_positions = self._positions()
+        open_positions = (
+            self._live_positions()
+            if self.active_mode == "live-trading"
+            else self._positions()
+        )
         return PolymarketBotState(
             running=self.running,
             paused=self.config.paused,
