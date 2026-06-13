@@ -242,8 +242,7 @@ function PortfolioCommandSummary({
   indmoneyValue,
   indmoneyPortfolioValue,
   indmoneyFundsValue,
-  bullpenValueUsd,
-  usdInrRate,
+  bullpenValueInr,
 }: {
   totalValue: number;
   zerodhaValue: number;
@@ -252,8 +251,7 @@ function PortfolioCommandSummary({
   indmoneyValue: number;
   indmoneyPortfolioValue: number | null | undefined;
   indmoneyFundsValue: number | null | undefined;
-  bullpenValueUsd: number | null | undefined;
-  usdInrRate: number;
+  bullpenValueInr: number | null | undefined;
 }) {
   const [showInvestmentNumbers, setShowInvestmentNumbers] = useState(false);
   const formatPrivateInvestmentValue = (value: number | null | undefined) => {
@@ -262,17 +260,6 @@ function PortfolioCommandSummary({
       ? formattedValue
       : maskInvestmentValue(formattedValue);
   };
-  const formatPrivateBullpenValue = (value: number | null | undefined) => {
-    const formattedValue = new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(value ?? 0);
-    return showInvestmentNumbers
-      ? formattedValue
-      : maskInvestmentValue(formattedValue);
-  };
-  const bullpenValueInr = (bullpenValueUsd ?? 0) * usdInrRate;
   const VisibilityIcon = showInvestmentNumbers ? EyeOff : Eye;
 
   return (
@@ -339,10 +326,10 @@ function PortfolioCommandSummary({
           <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
             <div className="text-xs font-semibold text-white">Bullpen</div>
             <div className="mt-1 text-sm font-bold text-white">
-              {formatPrivateBullpenValue(bullpenValueUsd)}
+              {formatPrivateInvestmentValue(bullpenValueInr)}
             </div>
             <div className="mt-3 text-xs leading-5 text-slate-200">
-              {formatPrivateInvestmentValue(bullpenValueInr)} INR equivalent included in total investments
+              {formatPrivateInvestmentValue(bullpenValueInr)} included in total investments
             </div>
           </div>
         </div>
@@ -967,8 +954,7 @@ export default function DashboardPage() {
             indmoneyValue={indmoneyCommandValue}
             indmoneyPortfolioValue={indmoneyPortfolioValueInr}
             indmoneyFundsValue={indmoneyAvailableFundsValueInr}
-            bullpenValueUsd={bullpenAccountValueUsd}
-            usdInrRate={usdInrRate}
+            bullpenValueInr={bullpenAccountValueInr}
           />
 
           <PortfolioCommandChart

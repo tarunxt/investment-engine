@@ -37,6 +37,35 @@ function formatTs(iso?: string | null) {
   });
 }
 
+function formatEventEnd(iso?: string | null, fallbackText?: string | null) {
+  const candidate = iso || fallbackText?.match(/20\d{2}-\d{2}-\d{2}/)?.[0];
+  if (!candidate) return "Today";
+
+  const endDate = new Date(candidate);
+  if (Number.isNaN(endDate.getTime())) return "Today";
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endDay = new Date(
+    endDate.getFullYear(),
+    endDate.getMonth(),
+    endDate.getDate(),
+  );
+  const daysAway = Math.round(
+    (endDay.getTime() - today.getTime()) / (24 * 60 * 60 * 1000),
+  );
+  const dateLabel = endDate.toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+  });
+
+  if (daysAway === 0) return `Today, ${dateLabel}`;
+  if (daysAway === 1) return `Tomorrow, ${dateLabel}`;
+  if (daysAway === -1) return `Yesterday, ${dateLabel}`;
+  return dateLabel;
+}
+
 function formatCountdown(iso?: string | null) {
   if (!iso) return "0s";
   const diff = Math.max(
@@ -109,6 +138,8 @@ type CopiedEventGroup = {
   averagePrice: number;
   status: string;
   traders: PolymarketSourceTradeDecision[];
+  currentPrice: number;
+  currentPnl: number;
 };
 
 function getTraderDisplayName(trade: PolymarketSourceTradeDecision) {
@@ -214,18 +245,23 @@ function buildCopiedEventGroups(trades: PolymarketSourceTradeDecision[]) {
         averagePrice: trade.price,
         status: trade.status,
         traders: [trade],
+        currentPrice: trade.price,
+        currentPnl:
+          trade.side === "BUY"
+            ? trade.shares * trade.price - trade.amount
+            : trade.amount - trade.shares * trade.price,
       });
       continue;
     }
 
     existing.amount += trade.amount;
     existing.traders.push(trade);
+    const tradeTimestamp = trade.executed_at || trade.updated_at || trade.proposed_at;
+    if (new Date(tradeTimestamp).getTime() > new Date(existing.copiedAt).getTime()) {
+      existing.copiedAt = tradeTimestamp;
+      existing.currentPrice = trade.price;
+    }
     existing.eventEndAt = existing.eventEndAt || trade.event_end_at;
-    existing.copiedAt =
-      new Date(trade.executed_at || trade.updated_at || trade.proposed_at).getTime() >
-      new Date(existing.copiedAt).getTime()
-        ? trade.executed_at || trade.updated_at || trade.proposed_at
-        : existing.copiedAt;
     existing.status = existing.traders.some((item) => item.status === "executed")
       ? "executed"
       : existing.status;
@@ -235,6 +271,12 @@ function buildCopiedEventGroups(trades: PolymarketSourceTradeDecision[]) {
           0,
         ) / existing.amount
       : existing.averagePrice;
+    existing.currentPnl = existing.traders.reduce((total, item) => {
+      const markValue = item.shares * existing.currentPrice;
+      return total + (
+        item.side === "BUY" ? markValue - item.amount : item.amount - markValue
+      );
+    }, 0);
   }
 
   return Array.from(groups.values()).sort(
@@ -478,6 +520,7 @@ export default function PolymarketBotPage() {
   const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades);
   const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
   const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
+  const copiedPositionsRefreshSeconds = 5;
 
   const trackedAccountByIdentity = new Map<string, (typeof state.tracked_accounts)[number]>();
   for (const account of state.tracked_accounts) {
@@ -971,6 +1014,14 @@ export default function PolymarketBotPage() {
                       <th className="px-4 py-3">Side</th>
                       <th className="px-4 py-3">Outcome</th>
                       <th className="px-4 py-3">Amount</th>
+                      {copiedPositionsTab === "positions" && copiedPositionStatus === "active" ? (
+                        <th className="px-4 py-3">
+                          Current PnL
+                          <span className="mt-1 block text-[10px] normal-case tracking-normal text-slate-400">
+                            refreshes every {copiedPositionsRefreshSeconds}s
+                          </span>
+                        </th>
+                      ) : null}
                       <th className="px-4 py-3">Price</th>
                       <th className="px-4 py-3">Status</th>
                     </tr>
@@ -978,7 +1029,15 @@ export default function PolymarketBotPage() {
                   <tbody className="divide-y divide-slate-100">
                     {copiedEventGroups.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={9}>
+                        <td
+                          className="px-4 py-6 text-sm text-slate-500"
+                          colSpan={
+                            copiedPositionsTab === "positions" &&
+                            copiedPositionStatus === "active"
+                              ? 10
+                              : 9
+                          }
+                        >
                           No copied Bullpen rows for this tab yet.
                         </td>
                       </tr>
@@ -1021,10 +1080,26 @@ export default function PolymarketBotPage() {
                               </button>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-slate-700">{formatTs(event.eventEndAt)}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatEventEnd(
+                              event.eventEndAt,
+                              `${event.marketId} ${event.marketTitle}`,
+                            )}
+                          </td>
                           <td className="px-4 py-3 font-semibold text-slate-800">{event.side}</td>
                           <td className="px-4 py-3 text-slate-700">{event.outcome}</td>
                           <td className="px-4 py-3 text-slate-700">{formatMoney(event.amount)}</td>
+                          {copiedPositionsTab === "positions" && copiedPositionStatus === "active" ? (
+                            <td
+                              className={`px-4 py-3 font-semibold ${
+                                event.currentPnl >= 0
+                                  ? "text-emerald-600"
+                                  : "text-rose-600"
+                              }`}
+                            >
+                              {formatMoney(event.currentPnl)}
+                            </td>
+                          ) : null}
                           <td className="px-4 py-3 text-slate-700">{formatMoney(event.averagePrice, 4)}</td>
                           <td className="px-4 py-3 text-slate-700">{copiedPositionsTab === "positions" && copiedPositionStatus === "closed" ? getCopiedEventStatus(event) : event.status}</td>
                         </tr>
