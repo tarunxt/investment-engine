@@ -13,7 +13,12 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 import pytest
 
 from app.domains.polymarket.bot import PolymarketPaperCopyBot
-from app.domains.polymarket.bullpen import BullpenBalanceReader, BullpenLiveExecutor
+from app.domains.polymarket.bullpen import (
+    BullpenBalanceReader,
+    BullpenCommandError,
+    BullpenLiveExecutor,
+    is_redeem_metadata_lookup_warning,
+)
 from app.domains.polymarket.config import load_polymarket_config
 from app.domains.polymarket.logger import PolymarketFileLogger
 from app.domains.polymarket.schemas import (
@@ -641,8 +646,9 @@ async def test_live_limit_update_persists_for_recreated_user_bot(tmp_path, monke
 
 
 class RedeemTrackingExecutor:
-    def __init__(self):
+    def __init__(self, redeem_error: Exception | None = None):
         self.redeem_calls = 0
+        self.redeem_error = redeem_error
 
     async def doctor(self):
         from app.domains.polymarket.schemas import PolymarketDoctorStatus
@@ -651,6 +657,8 @@ class RedeemTrackingExecutor:
 
     async def redeem(self, *, dry_run: bool):
         self.redeem_calls += 1
+        if self.redeem_error:
+            raise self.redeem_error
         return "{}"
 
     async def execute(self, decision):
@@ -664,6 +672,55 @@ class ReadyBalanceReader:
         return PolymarketBalanceState(
             status="ready", message="Bullpen account value: 114.07 USD"
         )
+
+
+def test_redeem_metadata_lookup_warning_detects_gamma_condition_miss():
+    assert is_redeem_metadata_lookup_warning(
+        "[warn] 0xd9027272: payoutDenominator preflight RPC failed "
+        "(falling through to relayer): market not found in Gamma for condition "
+        "[REDACTED_PRIVATE_KEY]"
+    )
+
+
+@pytest.mark.anyio
+async def test_manual_live_redeem_treats_gamma_condition_miss_as_non_fatal(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": False,
+            "live_trading": True,
+            "use_live_reads": True,
+            "auto_redeem_live": False,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = EmptyProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    executor = RedeemTrackingExecutor(
+        BullpenCommandError(
+            "[warn] 0xd9027272: payoutDenominator preflight RPC failed "
+            "(falling through to relayer): market not found in Gamma for condition "
+            "[REDACTED_PRIVATE_KEY]"
+        )
+    )
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=executor,
+        balance_reader=ReadyBalanceReader(),
+        logger=logger,
+    )
+
+    await bot.redeem_live_positions()
+
+    assert executor.redeem_calls == 1
+    assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
+    assert bot.recent_activity[0].message == (
+        "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
+    )
 
 
 @pytest.mark.anyio

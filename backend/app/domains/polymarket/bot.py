@@ -9,8 +9,10 @@ from uuid import uuid4
 
 from app.domains.polymarket.bullpen import (
     BullpenBalanceReader,
+    BullpenCommandError,
     BullpenLiveExecutor,
     LiveTradeGuard,
+    is_redeem_metadata_lookup_warning,
     live_position_key,
     utc_now,
 )
@@ -1231,12 +1233,25 @@ class PolymarketPaperCopyBot:
             raise RuntimeError(
                 "Live execution is disabled; Bullpen redeem is unavailable."
             )
-        await self.live_executor.redeem(dry_run=False)
-        self._add_activity(
-            "Auto-redeem checked and submitted any Bullpen redeemable positions."
-            if automatic
-            else "Manual Bullpen redeem submitted for all resolved positions."
-        )
+        try:
+            await self.live_executor.redeem(dry_run=False)
+        except BullpenCommandError as exc:
+            message = redact_secrets(str(exc))
+            if not is_redeem_metadata_lookup_warning(message):
+                raise
+            await self.logger.warn(
+                "Bullpen redeem skipped a resolved market missing Gamma metadata: "
+                f"{message}"
+            )
+            self._add_activity(
+                "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
+            )
+        else:
+            self._add_activity(
+                "Auto-redeem checked and submitted any Bullpen redeemable positions."
+                if automatic
+                else "Manual Bullpen redeem submitted for all resolved positions."
+            )
         self.balance_state = self._with_next_balance_refresh(
             await self.balance_reader.refresh()
         )
