@@ -1132,6 +1132,8 @@ export interface PolymarketBalanceState {
   next_refresh_at?: string | null;
   account_value_usd?: number | null;
   available_balance_usd?: number | null;
+  pnl_usd?: number | null;
+  upnl_usd?: number | null;
 }
 
 export interface PolymarketLiveSourceStatus {

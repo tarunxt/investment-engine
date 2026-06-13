@@ -312,6 +312,8 @@ class BullpenBalanceReader:
                 message=_format_balance_message(parsed),
                 account_value_usd=balance_values["account_value_usd"],
                 available_balance_usd=balance_values["available_balance_usd"],
+                pnl_usd=balance_values["pnl_usd"],
+                upnl_usd=balance_values["upnl_usd"],
             )
         except Exception as exc:
             message = redact_secrets(str(exc))
@@ -476,11 +478,15 @@ def _extract_balance_values(parsed: object) -> dict[str, float | None]:
     candidates = _collect_balance_candidates(parsed)
     account_value = _select_account_value_candidate(candidates)
     available_balance = _select_available_balance_candidate(candidates)
+    pnl = _select_pnl_candidate(candidates)
+    upnl = _select_upnl_candidate(candidates)
     return {
         "account_value_usd": float(account_value["amount"]) if account_value else None,
         "available_balance_usd": (
             float(available_balance["amount"]) if available_balance else None
         ),
+        "pnl_usd": float(pnl["amount"]) if pnl else None,
+        "upnl_usd": float(upnl["amount"]) if upnl else None,
     }
 
 
@@ -511,11 +517,51 @@ def _select_available_balance_candidate(
             for item in candidates
             if "polymarket" in item["context"].lower()
             and _is_cash_balance_candidate(item)
+            and not _is_account_value_candidate(item)
         ),
         None,
     )
     return preferred_cash_balance or next(
-        (item for item in candidates if _is_cash_balance_candidate(item)),
+        (
+            item
+            for item in candidates
+            if _is_cash_balance_candidate(item)
+            and not _is_account_value_candidate(item)
+        ),
+        None,
+    )
+
+
+def _select_pnl_candidate(
+    candidates: list[dict[str, object]],
+) -> dict[str, object] | None:
+    preferred_pnl = next(
+        (
+            item
+            for item in candidates
+            if "polymarket" in item["context"].lower() and _is_pnl_candidate(item)
+        ),
+        None,
+    )
+    return preferred_pnl or next(
+        (item for item in candidates if _is_pnl_candidate(item)),
+        None,
+    )
+
+
+def _select_upnl_candidate(
+    candidates: list[dict[str, object]],
+) -> dict[str, object] | None:
+    preferred_upnl = next(
+        (
+            item
+            for item in candidates
+            if "polymarket" in item["context"].lower() and _is_upnl_candidate(item)
+        ),
+        None,
+    )
+    return preferred_upnl or next(
+        (item for item in candidates if _is_upnl_candidate(item)),
         None,
     )
 
@@ -533,7 +579,9 @@ def _format_balance_message(parsed: object) -> str:
 
     prefix = "Polymarket" if "polymarket" in balance["context"].lower() else "Bullpen"
     currency = f" {balance['currency']}" if balance.get("currency") else ""
-    label = "account value" if _is_account_value_candidate(balance) else "available balance"
+    label = (
+        "account value" if _is_account_value_candidate(balance) else "available balance"
+    )
     return f"{prefix} {label}: {_format_amount(balance['amount'])}{currency}"
 
 
@@ -562,6 +610,44 @@ def _is_cash_balance_candidate(item: dict[str, object]) -> bool:
     return any(
         token in label or token in currency
         for token in ("available", "balance", "cash", "collateral", "pusd", "usdc")
+    )
+
+
+def _normalized_balance_label(item: dict[str, object]) -> str:
+    return (
+        str(item.get("label") or "")
+        .lower()
+        .replace("_", "")
+        .replace("-", "")
+        .replace(" ", "")
+    )
+
+
+def _is_upnl_candidate(item: dict[str, object]) -> bool:
+    normalized = _normalized_balance_label(item)
+    return any(
+        token in normalized
+        for token in (
+            "upnl",
+            "unrealizedpnl",
+            "unrealizedprofitloss",
+            "unrealizedprofitandloss",
+        )
+    )
+
+
+def _is_pnl_candidate(item: dict[str, object]) -> bool:
+    normalized = _normalized_balance_label(item)
+    if _is_upnl_candidate(item):
+        return False
+    return any(
+        token in normalized
+        for token in (
+            "pnl",
+            "realizedpnl",
+            "profitloss",
+            "profitandloss",
+        )
     )
 
 
@@ -619,6 +705,12 @@ def _collect_balance_candidates(
                 "totalvalue",
                 "usdc",
                 "valueusd",
+                "pnl",
+                "upnl",
+                "realizedpnl",
+                "unrealizedpnl",
+                "profitloss",
+                "profitandloss",
             )
         ):
             continue

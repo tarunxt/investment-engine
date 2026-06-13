@@ -29,10 +29,10 @@ def test_missing_balance_command_detects_subcommand_errors():
 
 def test_format_balance_error_message_summarizes_auth_required_json():
     message = (
-        'All Bullpen command variants failed: portfolio balances => '
+        "All Bullpen command variants failed: portfolio balances => "
         '{"error":"not logged in. Run: bullpen login","error_code":"AUTH_REQUIRED",'
         '"requires_auth":true,"requires_login":true,"status":"error"} | '
-        'funds balances => Auth reauthentication required'
+        "funds balances => Auth reauthentication required"
     )
 
     assert (
@@ -83,10 +83,7 @@ def test_format_balance_message_prefers_bullpen_account_value_over_cash():
         "currency": "USD",
     }
 
-    assert (
-        bullpen._format_balance_message(parsed)
-        == "Bullpen account value: 8.03 USD"
-    )
+    assert bullpen._format_balance_message(parsed) == "Bullpen account value: 8.03 USD"
 
 
 def test_format_balance_message_treats_total_balance_as_account_value():
@@ -97,10 +94,7 @@ def test_format_balance_message_treats_total_balance_as_account_value():
         "currency": "USD",
     }
 
-    assert (
-        bullpen._format_balance_message(parsed)
-        == "Bullpen account value: 8.03 USD"
-    )
+    assert bullpen._format_balance_message(parsed) == "Bullpen account value: 8.03 USD"
 
 
 def test_balance_reader_returns_account_and_available_values():
@@ -117,7 +111,9 @@ def test_balance_reader_returns_account_and_available_values():
     assert values["available_balance_usd"] == 97.48
 
 
-def test_bullpen_executable_uses_runtime_tools_when_env_path_missing(monkeypatch, tmp_path):
+def test_bullpen_executable_uses_runtime_tools_when_env_path_missing(
+    monkeypatch, tmp_path
+):
     runtime_tools = tmp_path / ".runtime-tools"
     runtime_tools.mkdir()
     fallback = runtime_tools / "bullpen"
@@ -153,7 +149,9 @@ def test_bullpen_executable_uses_non_dot_runtime_tools(monkeypatch, tmp_path):
     assert bullpen.bullpen_executable() == str(fallback)
 
 
-def test_bullpen_candidate_paths_include_systemd_and_home_locations(monkeypatch, tmp_path):
+def test_bullpen_candidate_paths_include_systemd_and_home_locations(
+    monkeypatch, tmp_path
+):
     monkeypatch.setenv("BULLPEN_BIN", "/custom/bin/bullpen")
     monkeypatch.setenv("APP_ROOT", str(tmp_path / "app"))
     monkeypatch.setenv("BACKEND_ROOT", str(tmp_path / "backend"))
@@ -165,3 +163,21 @@ def test_bullpen_candidate_paths_include_systemd_and_home_locations(monkeypatch,
     assert str(tmp_path / "backend" / "runtime-tools" / "bullpen") in candidates
     assert "/home/investor/.bullpen/bin/bullpen" in candidates
     assert "/usr/local/bin/bullpen" in candidates
+
+
+def test_balance_reader_returns_exact_bullpen_wallet_values():
+    parsed = {
+        "account": "Bullpen",
+        "account_value": "$83.36",
+        "cash": "17.04",
+        "pnl": "$5.57",
+        "uPNL": "-2.87",
+        "currency": "USD",
+    }
+
+    values = bullpen._extract_balance_values(parsed)
+
+    assert values["account_value_usd"] == 83.36
+    assert values["available_balance_usd"] == 17.04
+    assert values["pnl_usd"] == 5.57
+    assert values["upnl_usd"] == -2.87
