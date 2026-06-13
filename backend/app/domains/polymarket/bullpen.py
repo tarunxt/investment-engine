@@ -30,6 +30,22 @@ def is_redeem_metadata_lookup_warning(message: str) -> bool:
     )
 
 
+def is_claim_command_unavailable_warning(message: str) -> bool:
+    normalized = message.lower()
+    return (
+        any(
+            marker in normalized
+            for marker in (
+                "unrecognized subcommand",
+                "unknown command",
+                "no such command",
+                "invalid subcommand",
+            )
+        )
+        and "claim" in normalized
+    )
+
+
 BULLPEN_REDEEM_TIMEOUT_SECONDS = 180
 BULLPEN_BALANCE_TIMEOUT_SECONDS = 8
 DEFAULT_BULLPEN_BUY_MAX_PRICE_BUFFER = 0.10
@@ -294,6 +310,17 @@ class BullpenLiveExecutor:
 
     async def redeem(self, *, dry_run: bool) -> str:
         args = ["polymarket", "redeem"]
+        if dry_run:
+            args.extend(["--dry-run", "--output", "json"])
+        else:
+            args.extend(["--yes", "--non-interactive", "--output", "json"])
+        stdout = await run_bullpen(
+            args, timeout_seconds=BULLPEN_REDEEM_TIMEOUT_SECONDS, read_only=dry_run
+        )
+        return redact_secrets(stdout)
+
+    async def claim(self, *, dry_run: bool) -> str:
+        args = ["polymarket", "claim"]
         if dry_run:
             args.extend(["--dry-run", "--output", "json"])
         else:

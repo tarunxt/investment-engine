@@ -14,6 +14,7 @@ from app.domains.polymarket.bullpen import (
     BullpenCommandError,
     BullpenLiveExecutor,
     LiveTradeGuard,
+    is_claim_command_unavailable_warning,
     is_redeem_metadata_lookup_warning,
     live_position_key,
     utc_now,
@@ -54,6 +55,9 @@ from app.domains.polymarket.storage import JsonModelStore, JsonObjectStore
 
 BALANCE_REFRESH_INTERVAL_SECONDS = max(
     5, int(float(os.getenv("POLYMARKET_BALANCE_REFRESH_INTERVAL_SECONDS", "5")))
+)
+FORCED_REDEEM_CLAIM_INTERVAL_SECONDS = max(
+    60, int(float(os.getenv("POLYMARKET_FORCED_REDEEM_CLAIM_INTERVAL_SECONDS", "300")))
 )
 
 
@@ -129,8 +133,10 @@ class PolymarketPaperCopyBot:
         self._manual_balance_refresh_task: asyncio.Task[None] | None = None
         self._startup_warmup_task: asyncio.Task[None] | None = None
         self._net_worth_refresh_task: asyncio.Task[None] | None = None
+        self._forced_redeem_claim_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._balance_refresh_lock = asyncio.Lock()
+        self._redeem_claim_lock = asyncio.Lock()
 
     async def init(self) -> None:
         async with self._lock:
@@ -145,6 +151,7 @@ class PolymarketPaperCopyBot:
             self._ensure_balance_task()
             self._ensure_startup_warmup_task()
             self._ensure_net_worth_refresh_task()
+            self._ensure_forced_redeem_claim_task()
             await self.logger.info(
                 f"Bot initialized. paperTrading={self.config.paper_trading} liveTrading={self.config.live_trading}"
             )
@@ -170,6 +177,8 @@ class PolymarketPaperCopyBot:
             self._startup_warmup_task = None
             await self._cancel_task(self._net_worth_refresh_task)
             self._net_worth_refresh_task = None
+            await self._cancel_task(self._forced_redeem_claim_task)
+            self._forced_redeem_claim_task = None
 
     async def start(self) -> None:
         async with self._lock:
@@ -499,6 +508,13 @@ class PolymarketPaperCopyBot:
             return
         self._startup_warmup_task = asyncio.create_task(self._startup_warmup_loop())
 
+    def _ensure_forced_redeem_claim_task(self) -> None:
+        if self._forced_redeem_claim_task and not self._forced_redeem_claim_task.done():
+            return
+        self._forced_redeem_claim_task = asyncio.create_task(
+            self._forced_redeem_claim_loop()
+        )
+
     async def _startup_warmup_loop(self) -> None:
         try:
             results = await asyncio.gather(
@@ -617,6 +633,14 @@ class PolymarketPaperCopyBot:
             while True:
                 await asyncio.sleep(BALANCE_REFRESH_INTERVAL_SECONDS)
                 await self._refresh_balance_background()
+        except asyncio.CancelledError:
+            return
+
+    async def _forced_redeem_claim_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(FORCED_REDEEM_CLAIM_INTERVAL_SECONDS)
+                await self._force_redeem_claim_background()
         except asyncio.CancelledError:
             return
 
@@ -883,7 +907,7 @@ class PolymarketPaperCopyBot:
                     "automatic favorable-price exit threshold reached",
                     bypass_trade_risk=True,
                 )
-                await self.live_executor.redeem(dry_run=False)
+                await self._redeem_and_claim_completed_positions()
                 self._add_activity(
                     f"Auto-exited and redeemed favorable live position: {position.market_title} "
                     f"{position.outcome} at {trigger_price * 100:.1f}¢."
@@ -1262,13 +1286,49 @@ class PolymarketPaperCopyBot:
                 f"Auto-redeem failed and bot kept looping: {redact_secrets(str(exc))}"
             )
 
+    async def _redeem_and_claim_completed_positions(self) -> bool:
+        had_redeem_metadata_warning = False
+        async with self._redeem_claim_lock:
+            try:
+                await self.live_executor.redeem(dry_run=False)
+            except BullpenCommandError as exc:
+                message = redact_secrets(str(exc))
+                if not is_redeem_metadata_lookup_warning(message):
+                    raise
+                had_redeem_metadata_warning = True
+                await self.logger.warn(
+                    "Bullpen redeem skipped a resolved market missing Gamma metadata: "
+                    f"{message}"
+                )
+                self._add_activity(
+                    "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
+                )
+
+            claim = getattr(self.live_executor, "claim", None)
+            if claim is None:
+                return had_redeem_metadata_warning
+            try:
+                await claim(dry_run=False)
+            except BullpenCommandError as exc:
+                message = redact_secrets(str(exc))
+                if is_claim_command_unavailable_warning(message):
+                    await self.logger.warn(
+                        "Bullpen claim command is unavailable in this runtime; redeem completed: "
+                        f"{message}"
+                    )
+                    return had_redeem_metadata_warning
+                raise
+            return had_redeem_metadata_warning
+
     async def _redeem_live_positions_unlocked(self, *, automatic: bool = False) -> None:
         if not self._wants_live_execution():
             raise RuntimeError(
                 "Live execution is disabled; Bullpen redeem is unavailable."
             )
         try:
-            await self.live_executor.redeem(dry_run=False)
+            had_redeem_metadata_warning = (
+                await self._redeem_and_claim_completed_positions()
+            )
         except BullpenCommandError as exc:
             message = redact_secrets(str(exc))
             if not is_redeem_metadata_lookup_warning(message):
@@ -1281,11 +1341,12 @@ class PolymarketPaperCopyBot:
                 "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
             )
         else:
-            self._add_activity(
-                "Auto-redeem checked and submitted any Bullpen redeemable positions."
-                if automatic
-                else "Manual Bullpen redeem submitted for all resolved positions."
-            )
+            if not had_redeem_metadata_warning:
+                self._add_activity(
+                    "Auto-redeem checked and submitted any Bullpen redeemable/claimable positions."
+                    if automatic
+                    else "Manual Bullpen redeem/claim submitted for all resolved positions."
+                )
         self.balance_state = self._with_next_balance_refresh(
             await self.balance_reader.refresh()
         )
@@ -1297,25 +1358,34 @@ class PolymarketPaperCopyBot:
             )
         if not should_redeem:
             return
+        await self._run_redeem_claim_background(
+            success_message="Auto-redeem checked and submitted any Bullpen redeemable/claimable positions."
+        )
+
+    async def _force_redeem_claim_background(self) -> None:
+        async with self._lock:
+            should_redeem = self._wants_live_execution()
+        if not should_redeem:
+            return
+        await self._run_redeem_claim_background(
+            success_message="Forced redeem/claim checked completed Bullpen positions."
+        )
+
+    async def _run_redeem_claim_background(self, *, success_message: str) -> None:
         try:
-            await self.live_executor.redeem(dry_run=False)
-        except BullpenCommandError as exc:
-            message = redact_secrets(str(exc))
-            if not is_redeem_metadata_lookup_warning(message):
-                raise
-            await self.logger.warn(
-                "Bullpen redeem skipped a resolved market missing Gamma metadata: "
-                f"{message}"
+            had_redeem_metadata_warning = (
+                await self._redeem_and_claim_completed_positions()
             )
+        except Exception as exc:
+            await self.logger.error("Bullpen redeem/claim background check failed", exc)
             async with self._lock:
                 self._add_activity(
-                    "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
+                    f"Bullpen redeem/claim check failed and bot kept looping: {redact_secrets(str(exc))}"
                 )
         else:
-            async with self._lock:
-                self._add_activity(
-                    "Auto-redeem checked and submitted any Bullpen redeemable positions."
-                )
+            if not had_redeem_metadata_warning:
+                async with self._lock:
+                    self._add_activity(success_message)
 
     def _loading_balance_state(self) -> PolymarketBalanceState:
         return self.balance_state.model_copy(
