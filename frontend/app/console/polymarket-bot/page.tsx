@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Activity, AlertTriangle, ExternalLink, Info, Loader2, TrendingUp, Wallet } from "lucide-react";
+import { Activity, AlertTriangle, ExternalLink, Info, Loader2, TrendingUp, Wallet, X } from "lucide-react";
 
 import {
   Card,
@@ -1658,21 +1658,25 @@ export default function PolymarketBotPage() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
           role="dialog"
           aria-modal="true"
+          onClick={() => setSelectedMissedTrade(null)}
         >
-          <div className="w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
+          <div
+            className="relative w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              aria-label="Close missed trade traders popup"
+              onClick={() => setSelectedMissedTrade(null)}
+            >
+              <X className="size-5" />
+            </button>
+            <div className="flex items-start justify-between gap-4 pr-12">
               <div>
                 <h2 className="text-lg font-semibold text-slate-950">Missed trade traders</h2>
                 <p className="mt-1 text-sm text-slate-500">{selectedMissedTrade.marketTitle}</p>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="rounded-full border-slate-300"
-                onClick={() => setSelectedMissedTrade(null)}
-              >
-                Close
-              </Button>
             </div>
             <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
@@ -1706,21 +1710,25 @@ export default function PolymarketBotPage() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
           role="dialog"
           aria-modal="true"
+          onClick={() => setSelectedCopiedEvent(null)}
         >
-          <div className="w-full max-w-4xl rounded-[28px] bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
+          <div
+            className="relative w-full max-w-4xl rounded-[28px] bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              aria-label="Close copied traders popup"
+              onClick={() => setSelectedCopiedEvent(null)}
+            >
+              <X className="size-5" />
+            </button>
+            <div className="flex items-start justify-between gap-4 pr-12">
               <div>
                 <h2 className="text-lg font-semibold text-slate-950">Copied traders</h2>
                 <p className="mt-1 text-sm text-slate-500">{selectedCopiedEvent.marketTitle}</p>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="rounded-full border-slate-300"
-                onClick={() => setSelectedCopiedEvent(null)}
-              >
-                Close
-              </Button>
             </div>
             <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
