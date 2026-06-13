@@ -638,3 +638,61 @@ async def test_live_limit_update_persists_for_recreated_user_bot(tmp_path, monke
     assert (tmp_path / "user-42" / "polymarket-config.json").exists()
 
     await recreated_manager.shutdown()
+
+
+class RedeemTrackingExecutor:
+    def __init__(self):
+        self.redeem_calls = 0
+
+    async def doctor(self):
+        from app.domains.polymarket.schemas import PolymarketDoctorStatus
+
+        return PolymarketDoctorStatus(ok=True, message="ok")
+
+    async def redeem(self, *, dry_run: bool):
+        self.redeem_calls += 1
+        return "{}"
+
+    async def execute(self, decision):
+        return "{}"
+
+
+class ReadyBalanceReader:
+    async def refresh(self):
+        from app.domains.polymarket.schemas import PolymarketBalanceState
+
+        return PolymarketBalanceState(
+            status="ready", message="Bullpen account value: 114.07 USD"
+        )
+
+
+@pytest.mark.anyio
+async def test_startup_balance_refresh_runs_auto_redeem(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": False,
+            "live_trading": True,
+            "use_live_reads": True,
+            "auto_redeem_live": True,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = EmptyProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    executor = RedeemTrackingExecutor()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=executor,
+        balance_reader=ReadyBalanceReader(),
+        logger=logger,
+    )
+
+    await bot._refresh_startup_balance_background()
+
+    assert executor.redeem_calls == 1
+    assert bot.balance_state.message == "Bullpen account value: 114.07 USD"

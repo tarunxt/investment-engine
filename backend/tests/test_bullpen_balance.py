@@ -103,6 +103,20 @@ def test_format_balance_message_treats_total_balance_as_account_value():
     )
 
 
+def test_balance_reader_returns_account_and_available_values():
+    parsed = {
+        "account": "Bullpen",
+        "account_value": "$114.07",
+        "cash": "97.48",
+        "currency": "USD",
+    }
+
+    values = bullpen._extract_balance_values(parsed)
+
+    assert values["account_value_usd"] == 114.07
+    assert values["available_balance_usd"] == 97.48
+
+
 def test_bullpen_executable_uses_runtime_tools_when_env_path_missing(monkeypatch, tmp_path):
     runtime_tools = tmp_path / ".runtime-tools"
     runtime_tools.mkdir()
