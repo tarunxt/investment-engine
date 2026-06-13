@@ -21,6 +21,14 @@ class BullpenCommandError(RuntimeError):
     pass
 
 
+def is_redeem_metadata_lookup_warning(message: str) -> bool:
+    normalized = message.lower()
+    return (
+        "payoutdenominator preflight rpc failed" in normalized
+        and "market not found in gamma for condition" in normalized
+    )
+
+
 BULLPEN_RUNTIME_RELATIVE_PATHS = (
     (".runtime-tools", "bullpen"),
     ("runtime-tools", "bullpen"),
