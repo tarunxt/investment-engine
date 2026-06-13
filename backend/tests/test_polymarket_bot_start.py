@@ -988,7 +988,7 @@ async def test_bullpen_execute_wraps_collateral_then_retries_buy(monkeypatch):
 
     async def fake_run_bullpen(args, *, timeout_seconds, read_only):
         calls.append(args)
-        if len(calls) == 1:
+        if len(calls) in {1, 3}:
             raise BullpenCommandError(
                 '{"error":"Insufficient collateral to place this order (1.020000 pUSD needed). Wrap USDC first: `bullpen polymarket wrap <AMOUNT> --yes`"}'
             )
@@ -1023,6 +1023,14 @@ async def test_bullpen_execute_wraps_collateral_then_retries_buy(monkeypatch):
 
     assert calls[1] == [
         "polymarket",
+        "redeem",
+        "--yes",
+        "--non-interactive",
+        "--output",
+        "json",
+    ]
+    assert calls[3] == [
+        "polymarket",
         "wrap",
         "1.02",
         "--yes",
@@ -1030,7 +1038,53 @@ async def test_bullpen_execute_wraps_collateral_then_retries_buy(monkeypatch):
         "--output",
         "json",
     ]
-    assert calls[2][0:2] == ["polymarket", "buy"]
+    assert calls[4][0:2] == ["polymarket", "buy"]
+
+
+@pytest.mark.anyio
+async def test_bullpen_execute_redeems_collateral_then_retries_buy(monkeypatch):
+    calls = []
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        calls.append(args)
+        if len(calls) == 1:
+            raise BullpenCommandError(
+                '{"error":"Insufficient collateral to place this order (1.020000 pUSD needed). Wrap USDC first: `bullpen polymarket wrap <AMOUNT> --yes`"}'
+            )
+        return "{}"
+
+    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
+
+    await BullpenLiveExecutor().execute(
+        PolymarketLiveTradeDecision(
+            id="decision-1",
+            source_trade_id="source-1",
+            source_trade_key="source-key-1",
+            proposed_at="2026-06-13T00:00:00Z",
+            updated_at="2026-06-13T00:00:00Z",
+            trader_id="trader-1",
+            trader_name="Trader 1",
+            trader_address="",
+            market_id="market-1",
+            market_title="Market 1",
+            outcome="Yes",
+            side="BUY",
+            amount=1,
+            price=0.64,
+            shares=1.5625,
+            max_loss=1,
+            reason="test",
+            status="confirmed",
+            command="buy",
+            source="live-read",
+        )
+    )
+
+    assert [call[0:2] for call in calls] == [
+        ["polymarket", "buy"],
+        ["polymarket", "redeem"],
+        ["polymarket", "buy"],
+    ]
 
 
 def test_extract_bullpen_insufficient_collateral_amount():
