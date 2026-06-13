@@ -1344,6 +1344,8 @@ class PolymarketPaperCopyBot:
         reason: str,
     ) -> PolymarketLiveTradeDecision:
         now = utc_now()
+        account = self._matched_tracked_account(source_trade)
+        trader_net_worth_usd = account.net_worth_usd if account else 0
         return PolymarketLiveTradeDecision(
             id=str(uuid4()),
             source_trade_id=source_trade.id,
@@ -1364,6 +1366,7 @@ class PolymarketPaperCopyBot:
             shares=shares,
             max_loss=amount if source_trade.side == "BUY" else 0,
             trader_invested_usd=source_trade.size_usd,
+            trader_net_worth_usd=trader_net_worth_usd,
             reason=reason,
             status=status,
             command="buy" if source_trade.side == "BUY" else "sell",

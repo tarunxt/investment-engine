@@ -1834,6 +1834,7 @@ export default function PolymarketBotPage() {
                     <th className="px-4 py-3">Timestamp</th>
                     <th className="px-4 py-3">Amount</th>
                     <th className="px-4 py-3">Trader invested</th>
+                    <th className="px-4 py-3">Net worth</th>
                     <th className="px-4 py-3">% of Net Worth</th>
                   </tr>
                 </thead>
@@ -1845,7 +1846,8 @@ export default function PolymarketBotPage() {
                         .toLowerCase()
                         .replace(/^@/, ""),
                     );
-                    const netWorth = traderAccount?.net_worth_usd || 0;
+                    const netWorth =
+                      trade.trader_net_worth_usd || traderAccount?.net_worth_usd || 0;
                     const netWorthPercent =
                       netWorth > 0 ? (traderInvested / netWorth) * 100 : null;
                     const activityUrl = getTraderActivityUrl(trade);
@@ -1868,6 +1870,9 @@ export default function PolymarketBotPage() {
                         </td>
                         <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
                         <td className="px-4 py-3 text-slate-700">{formatMoney(traderInvested)}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {netWorth > 0 ? formatMoney(netWorth) : "—"}
+                        </td>
                         <td className="px-4 py-3 text-slate-700">
                           {netWorthPercent === null ? "—" : formatPercent(netWorthPercent)}
                         </td>

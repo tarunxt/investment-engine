@@ -196,6 +196,7 @@ class PolymarketLiveTradeDecision(BaseModel):
     shares: float
     max_loss: float
     trader_invested_usd: float = 0
+    trader_net_worth_usd: float = 0
     reason: str
     status: LiveTradeStatus
     command: Literal["buy", "sell"] | None = None
