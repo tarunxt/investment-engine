@@ -12,7 +12,11 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { apiService, APIError } from "@/services/api";
-import type { PolymarketBotState, PolymarketSourceTradeDecision } from "@/types/api";
+import type {
+  PolymarketBotState,
+  PolymarketPaperTrade,
+  PolymarketSourceTradeDecision,
+} from "@/types/api";
 
 import { MetricGrid, type MetricItem } from "./_components/MetricGrid";
 import {
@@ -221,6 +225,89 @@ type CopiedEventGroup = {
   currentPrice: number;
   currentPnl: number;
 };
+
+type RedeemedTradeRow = {
+  key: string;
+  timestamp: string;
+  marketId: string;
+  marketTitle: string;
+  outcome: string;
+  side: PolymarketPaperTrade["side"] | PolymarketSourceTradeDecision["side"];
+  amount: number;
+  shares: number;
+  price: number;
+  profitLoss: number;
+  status: string;
+  source: string;
+  detail: string;
+};
+
+function isRedeemedPaperTrade(trade: PolymarketPaperTrade) {
+  const searchable = `${trade.reason || ""} ${trade.status || ""}`.toLowerCase();
+  return (
+    trade.status === "executed" &&
+    (trade.side === "SELL" ||
+      trade.realized_pnl !== 0 ||
+      searchable.includes("redeem") ||
+      searchable.includes("resolved"))
+  );
+}
+
+function isRedeemedLiveDecision(trade: PolymarketSourceTradeDecision) {
+  const searchable =
+    `${trade.command || ""} ${trade.reason || ""} ${trade.status || ""}`.toLowerCase();
+  return (
+    trade.status === "executed" &&
+    (trade.command === "sell" ||
+      trade.side === "SELL" ||
+      searchable.includes("redeem") ||
+      searchable.includes("resolved") ||
+      searchable.includes("auto-exit"))
+  );
+}
+
+function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
+  const paperRows: RedeemedTradeRow[] = state.trade_history
+    .filter(isRedeemedPaperTrade)
+    .map((trade) => ({
+      key: `paper-${trade.id}`,
+      timestamp: trade.timestamp,
+      marketId: trade.market_id,
+      marketTitle: trade.market_title,
+      outcome: trade.outcome,
+      side: trade.side,
+      amount: trade.copied_usd,
+      shares: Math.abs(trade.shares),
+      price: trade.price,
+      profitLoss: trade.realized_pnl,
+      status: trade.status,
+      source: "Trade history",
+      detail: trade.reason || "Closed or redeemed trade",
+    }));
+
+  const liveRows: RedeemedTradeRow[] = state.live.recent_decisions
+    .filter(isRedeemedLiveDecision)
+    .map((trade) => ({
+      key: `live-${trade.id}`,
+      timestamp: trade.executed_at || trade.updated_at || trade.proposed_at,
+      marketId: trade.market_id,
+      marketTitle: trade.market_title,
+      outcome: trade.outcome,
+      side: trade.side,
+      amount: trade.amount,
+      shares: Math.abs(trade.shares),
+      price: trade.price,
+      profitLoss:
+        trade.side === "SELL" ? trade.amount : trade.shares * trade.price - trade.amount,
+      status: trade.status,
+      source: trade.command === "sell" ? "Live sell/redeem" : "Live execution",
+      detail: trade.reason || trade.command || "Redeemed live trade",
+    }));
+
+  return [...paperRows, ...liveRows].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+}
 
 function getTraderDisplayName(trade: PolymarketSourceTradeDecision) {
   return trade.trader_handle ? `@${trade.trader_handle}` : trade.trader_name;
@@ -655,6 +742,7 @@ export default function PolymarketBotPage() {
   const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades);
   const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
   const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
+  const redeemedTradeRows = buildRedeemedTradeRows(state);
   const copiedPositionsRefreshSeconds = 5;
 
   const trackedAccountByIdentity = new Map<string, (typeof state.tracked_accounts)[number]>();
@@ -1380,6 +1468,74 @@ export default function PolymarketBotPage() {
               </div>
             </CardContent>
           </Card>
+
+          <Card className="border border-slate-200 bg-white py-6">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                Redeemed Trades
+              </CardTitle>
+              <CardDescription>
+                Closed or redeemed Bullpen trades with timestamp, profit and loss, execution price, and market details.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Redeemed At</th>
+                      <th className="px-4 py-3">Event</th>
+                      <th className="px-4 py-3">Outcome</th>
+                      <th className="px-4 py-3">Side</th>
+                      <th className="px-4 py-3">Amount</th>
+                      <th className="px-4 py-3">Shares</th>
+                      <th className="px-4 py-3">Price</th>
+                      <th className="px-4 py-3">Profit / Loss</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {redeemedTradeRows.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={10}>
+                          No redeemed trades have been recorded yet.
+                        </td>
+                      </tr>
+                    ) : redeemedTradeRows.map((trade) => (
+                      <tr key={trade.key} className="align-top">
+                        <td className="px-4 py-3 text-slate-700">{formatTs(trade.timestamp)}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          <div className="font-medium text-slate-950">{trade.marketTitle}</div>
+                          <div className="mt-1 text-xs text-slate-500">{trade.marketId}</div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{trade.outcome}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-800">{trade.side}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
+                        <td className="px-4 py-3 text-slate-700">{trade.shares.toFixed(4)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatMoney(trade.price, 4)}</td>
+                        <td
+                          className={`px-4 py-3 font-semibold ${
+                            trade.profitLoss >= 0 ? "text-emerald-600" : "text-rose-600"
+                          }`}
+                        >
+                          {formatMoney(trade.profitLoss)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{trade.status}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          <div className="max-w-[18rem]">
+                            <div>{trade.source}</div>
+                            <div className="mt-1 text-xs text-slate-500">{trade.detail}</div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card className="border border-slate-200 bg-white py-6">
             <CardHeader className="pb-0">
               <CardTitle className="text-base tracking-[0.18em] text-slate-950">
