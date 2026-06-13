@@ -187,6 +187,9 @@ type MissedTradeGroup = {
 
 type CopiedHistoryFilter =
   | "all"
+  | "executed"
+  | "skipped"
+  | "failed"
   | "buy"
   | "sell"
   | "redeem"
@@ -590,6 +593,9 @@ export default function PolymarketBotPage() {
     label: string;
   }[] = [
     { key: "all", label: "All" },
+    { key: "executed", label: "Executed" },
+    { key: "skipped", label: "Skipped" },
+    { key: "failed", label: "Failed" },
     { key: "buy", label: "Buy" },
     { key: "sell", label: "Sell" },
     { key: "redeem", label: "Redeem" },
@@ -599,6 +605,9 @@ export default function PolymarketBotPage() {
   ];
   const copiedFilteredHistoryTrades = copiedHistoryTrades.filter((trade) => {
     if (copiedHistoryFilter === "all") return true;
+    if (["executed", "skipped", "failed"].includes(copiedHistoryFilter)) {
+      return trade.status === copiedHistoryFilter;
+    }
     if (copiedHistoryFilter === "buy" || copiedHistoryFilter === "sell") {
       return trade.side.toLowerCase() === copiedHistoryFilter;
     }
