@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 
 import {
   Card,
@@ -67,6 +67,16 @@ function formatMoney(value: number, digits = 2) {
     currency: "USD",
     maximumFractionDigits: digits,
   }).format(value || 0);
+}
+
+const BULLPEN_ACCOUNT_URL =
+  "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
+
+function bullpenMarketUrl(marketId?: string | null) {
+  const slug = marketId?.trim();
+  return slug
+    ? `https://app.bullpen.fi/prediction/polymarket/event/${encodeURIComponent(slug)}`
+    : null;
 }
 
 export default function PolymarketBotPage() {
@@ -500,6 +510,17 @@ export default function PolymarketBotPage() {
         </div>
         <div className="flex flex-wrap gap-2 xl:justify-end">
           <Button
+            asChild
+            size="sm"
+            variant="outline"
+            className="rounded-full border-emerald-300 bg-emerald-50 px-5 text-emerald-800 hover:border-emerald-400 hover:bg-emerald-100 hover:text-emerald-900"
+          >
+            <a href={BULLPEN_ACCOUNT_URL} target="_blank" rel="noreferrer">
+              Open Bullpen Account
+              <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
+            </a>
+          </Button>
+          <Button
             size="sm"
             variant={activeScreen === "main" ? "default" : "outline"}
             className={
@@ -637,30 +658,52 @@ export default function PolymarketBotPage() {
                         </td>
                       </tr>
                     ) : (
-                      state.open_positions.map((position) => (
-                        <tr key={position.key} className="align-top">
-                          <td className="px-4 py-3">
-                            <div className="font-medium text-slate-950">
-                              {position.market_title || position.market_id}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {position.market_id}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {position.outcome}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {position.shares.toFixed(4)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatMoney(position.average_price, 4)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatMoney(position.cost_basis)}
-                          </td>
-                        </tr>
-                      ))
+                      state.open_positions.map((position) => {
+                        const marketUrl = bullpenMarketUrl(position.market_id);
+
+                        return (
+                          <tr key={position.key} className="align-top">
+                            <td className="px-4 py-3">
+                              {marketUrl ? (
+                                <a
+                                  href={marketUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="group inline-flex items-start gap-1.5 font-medium text-slate-950 underline decoration-transparent underline-offset-4 transition hover:text-sky-700 hover:decoration-sky-700"
+                                >
+                                  <span>
+                                    {position.market_title ||
+                                      position.market_id}
+                                  </span>
+                                  <ExternalLink
+                                    className="mt-0.5 size-3.5 shrink-0 text-slate-400 transition group-hover:text-sky-700"
+                                    aria-hidden="true"
+                                  />
+                                </a>
+                              ) : (
+                                <div className="font-medium text-slate-950">
+                                  {position.market_title || position.market_id}
+                                </div>
+                              )}
+                              <div className="mt-1 text-xs text-slate-500">
+                                {position.market_id}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {position.outcome}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {position.shares.toFixed(4)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatMoney(position.average_price, 4)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatMoney(position.cost_basis)}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -697,41 +740,64 @@ export default function PolymarketBotPage() {
                         .filter((trade) =>
                           ["executed", "confirmed"].includes(trade.status),
                         )
-                        .map((trade) => (
-                          <tr key={trade.id} className="align-top">
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatTs(trade.executed_at || trade.updated_at)}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {trade.trader_handle
-                                ? `@${trade.trader_handle}`
-                                : trade.trader_name}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="font-medium text-slate-950">
-                                {trade.market_title || trade.market_id}
-                              </div>
-                              <div className="mt-1 text-xs text-slate-500">
-                                {trade.market_id}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 font-semibold text-slate-800">
-                              {trade.side}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {trade.outcome}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatMoney(trade.amount)}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatMoney(trade.price, 4)}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {trade.status}
-                            </td>
-                          </tr>
-                        ))
+                        .map((trade) => {
+                          const marketUrl = bullpenMarketUrl(trade.market_id);
+
+                          return (
+                            <tr key={trade.id} className="align-top">
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatTs(
+                                  trade.executed_at || trade.updated_at,
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {trade.trader_handle
+                                  ? `@${trade.trader_handle}`
+                                  : trade.trader_name}
+                              </td>
+                              <td className="px-4 py-3">
+                                {marketUrl ? (
+                                  <a
+                                    href={marketUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="group inline-flex items-start gap-1.5 font-medium text-slate-950 underline decoration-transparent underline-offset-4 transition hover:text-sky-700 hover:decoration-sky-700"
+                                  >
+                                    <span>
+                                      {trade.market_title || trade.market_id}
+                                    </span>
+                                    <ExternalLink
+                                      className="mt-0.5 size-3.5 shrink-0 text-slate-400 transition group-hover:text-sky-700"
+                                      aria-hidden="true"
+                                    />
+                                  </a>
+                                ) : (
+                                  <div className="font-medium text-slate-950">
+                                    {trade.market_title || trade.market_id}
+                                  </div>
+                                )}
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {trade.market_id}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-slate-800">
+                                {trade.side}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {trade.outcome}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatMoney(trade.amount)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatMoney(trade.price, 4)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {trade.status}
+                              </td>
+                            </tr>
+                          );
+                        })
                     )}
                   </tbody>
                 </table>
