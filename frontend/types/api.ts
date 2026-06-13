@@ -1116,6 +1116,7 @@ export interface PolymarketSourceTradeDecision {
   shares: number;
   max_loss: number;
   trader_invested_usd?: number;
+  trader_net_worth_usd?: number;
   reason: string;
   status: 'proposed' | 'confirmed' | 'rejected' | 'executed' | 'failed' | 'skipped';
   command?: 'buy' | 'sell' | null;
