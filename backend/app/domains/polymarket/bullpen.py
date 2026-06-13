@@ -303,6 +303,14 @@ class BullpenLiveExecutor:
         )
         return redact_secrets(stdout)
 
+    async def _redeem_before_buy_retry(self) -> None:
+        try:
+            await self.redeem(dry_run=False)
+        except BullpenCommandError as exc:
+            if is_redeem_metadata_lookup_warning(str(exc)):
+                return
+            raise
+
     async def execute(self, decision: PolymarketLiveTradeDecision) -> str:
         if decision.side == "BUY":
             max_price = buy_max_price_for_execution(decision.price)
@@ -339,6 +347,7 @@ class BullpenLiveExecutor:
         )
         current_args = args
         current_max_price = max_price if decision.side == "BUY" else None
+        redeemed_collateral = False
         wrapped_collateral = False
         while True:
             try:
@@ -353,6 +362,11 @@ class BullpenLiveExecutor:
                 collateral_needed = extract_bullpen_insufficient_collateral_amount(
                     error_message
                 )
+                if collateral_needed is not None and not redeemed_collateral:
+                    redeemed_collateral = True
+                    await self._redeem_before_buy_retry()
+                    continue
+
                 if collateral_needed is not None and not wrapped_collateral:
                     wrapped_collateral = True
                     wrap_amount = max(collateral_needed, decision.amount)
