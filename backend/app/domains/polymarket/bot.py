@@ -269,6 +269,10 @@ class PolymarketPaperCopyBot:
         async with self._lock:
             await self._refresh_balance_unlocked()
 
+    async def redeem_live_positions(self) -> None:
+        async with self._lock:
+            await self._redeem_live_positions_unlocked()
+
     async def emergency_stop(self) -> None:
         async with self._lock:
             self.emergency_stopped = True
@@ -1215,15 +1219,27 @@ class PolymarketPaperCopyBot:
         if not self.config.auto_redeem_live or not self._wants_live_execution():
             return
         try:
-            await self.live_executor.redeem(dry_run=False)
-            self._add_activity(
-                "Auto-redeem checked and submitted any Bullpen redeemable positions."
-            )
+            await self._redeem_live_positions_unlocked(automatic=True)
         except Exception as exc:
             await self.logger.error("Auto-redeem failed", exc)
             self._add_activity(
                 f"Auto-redeem failed and bot kept looping: {redact_secrets(str(exc))}"
             )
+
+    async def _redeem_live_positions_unlocked(self, *, automatic: bool = False) -> None:
+        if not self._wants_live_execution():
+            raise RuntimeError(
+                "Live execution is disabled; Bullpen redeem is unavailable."
+            )
+        await self.live_executor.redeem(dry_run=False)
+        self._add_activity(
+            "Auto-redeem checked and submitted any Bullpen redeemable positions."
+            if automatic
+            else "Manual Bullpen redeem submitted for all resolved positions."
+        )
+        self.balance_state = self._with_next_balance_refresh(
+            await self.balance_reader.refresh()
+        )
 
     async def _refresh_balance_unlocked(self) -> None:
         await self._auto_redeem_unlocked()

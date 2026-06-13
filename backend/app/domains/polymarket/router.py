@@ -89,6 +89,18 @@ async def refresh_polymarket_balance(current_user: User = Depends(get_current_us
     return await bot.get_state()
 
 
+@router.post("/live/redeem", response_model=PolymarketBotState)
+async def redeem_polymarket_live_positions(
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        await bot.redeem_live_positions()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await bot.get_state()
+
+
 @router.post("/live/emergency-stop", response_model=PolymarketBotState)
 async def emergency_stop_polymarket_live(
     current_user: User = Depends(get_current_user),

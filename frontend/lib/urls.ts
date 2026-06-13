@@ -271,6 +271,7 @@ export const URLs = {
     liveLock: () => `${resolveApiBaseUrl()}/polymarket/live/lock`,
     liveDoctor: () => `${resolveApiBaseUrl()}/polymarket/live/doctor`,
     liveBalanceRefresh: () => `${resolveApiBaseUrl()}/polymarket/live/balance/refresh`,
+    liveRedeem: () => `${resolveApiBaseUrl()}/polymarket/live/redeem`,
     liveEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/live/emergency-stop`,
     liveResetEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/live/reset-emergency-stop`,
     liveLimits: () => `${resolveApiBaseUrl()}/polymarket/live/limits`,

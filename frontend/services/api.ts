@@ -829,6 +829,10 @@ class apiServiceClass implements IApiService {
     return this.post<PolymarketBotState>(URLs.polymarket.liveBalanceRefresh());
   }
 
+  polymarketLiveRedeem(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarket.liveRedeem());
+  }
+
   polymarketLiveEmergencyStop(): Promise<PolymarketBotState> {
     return this.post<PolymarketBotState>(URLs.polymarket.liveEmergencyStop());
   }

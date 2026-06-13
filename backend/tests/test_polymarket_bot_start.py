@@ -696,3 +696,37 @@ async def test_startup_balance_refresh_runs_auto_redeem(tmp_path):
 
     assert executor.redeem_calls == 1
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
+
+@pytest.mark.anyio
+async def test_manual_live_redeem_submits_and_refreshes_balance(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": False,
+            "live_trading": True,
+            "use_live_reads": True,
+            "auto_redeem_live": False,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = EmptyProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    executor = RedeemTrackingExecutor()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=executor,
+        balance_reader=ReadyBalanceReader(),
+        logger=logger,
+    )
+
+    await bot.redeem_live_positions()
+
+    assert executor.redeem_calls == 1
+    assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
+    assert bot.recent_activity[0].message == (
+        "Manual Bullpen redeem submitted for all resolved positions."
+    )
