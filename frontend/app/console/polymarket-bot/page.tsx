@@ -127,6 +127,64 @@ function isBullpenLoginRequired(message?: string | null, status?: string | null)
   );
 }
 
+function trackedAccountKey(value?: string | null) {
+  return (value || "").toLowerCase().replace(/^@/, "").trim();
+}
+
+function getTradeIdentityKeys(trade: PolymarketSourceTradeDecision) {
+  return [
+    trade.trader_handle,
+    trade.trader_name,
+    trade.trader_address,
+    trade.trader_id,
+  ]
+    .map(trackedAccountKey)
+    .filter(Boolean);
+}
+
+function getTrackedAccountForTrade(
+  trade: PolymarketSourceTradeDecision,
+  accounts: PolymarketBotState["tracked_accounts"],
+) {
+  const tradeKeys = new Set(getTradeIdentityKeys(trade));
+  return accounts.find((account) =>
+    [account.handle, account.target, account.address, account.proxy_wallet]
+      .map(trackedAccountKey)
+      .some((key) => key && tradeKeys.has(key)),
+  );
+}
+
+function getTradeNetWorth(
+  trade: PolymarketSourceTradeDecision,
+  account?: PolymarketBotState["tracked_accounts"][number],
+) {
+  return trade.trader_net_worth_usd || account?.net_worth_usd || 0;
+}
+
+function getNetWorthMissingReason(
+  trade: PolymarketSourceTradeDecision,
+  account?: PolymarketBotState["tracked_accounts"][number],
+) {
+  if (!account) return "No matching tracked account found";
+  if (account.net_worth_source === "pending_refresh" || !account.net_worth_checked_at) {
+    return "Net worth refresh pending";
+  }
+  return trade.trader_net_worth_usd || account.net_worth_usd
+    ? "—"
+    : "Net worth unavailable from provider";
+}
+
+function isBelowTrackedNetWorthThreshold(
+  trade: PolymarketSourceTradeDecision,
+  accounts: PolymarketBotState["tracked_accounts"],
+) {
+  const account = getTrackedAccountForTrade(trade, accounts);
+  if (!account) return false;
+  const netWorth = getTradeNetWorth(trade, account);
+  if (netWorth <= 0) return true;
+  return (trade.trader_invested_usd || 0) < netWorth * (account.threshold_percent / 100);
+}
+
 function formatPercent(value: number) {
   return `${value.toFixed(2)}%`;
 }
@@ -320,7 +378,9 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       detail: trade.reason || trade.command || "Redeemed live trade",
     }));
 
-  return [...paperRows, ...liveRows].sort(
+  const rows = liveRows.length > 0 ? liveRows : paperRows;
+
+  return rows.sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 }
@@ -723,15 +783,18 @@ export default function PolymarketBotPage() {
     state.live.balance.status,
   );
   const copiedActiveStatuses = new Set(["executed", "confirmed"]);
-  const executedLiveTrades = state.live.recent_decisions.filter((trade) =>
+  const thresholdEligibleRecentDecisions = state.live.recent_decisions.filter(
+    (trade) => !isBelowTrackedNetWorthThreshold(trade, state.tracked_accounts),
+  );
+  const executedLiveTrades = thresholdEligibleRecentDecisions.filter((trade) =>
     copiedActiveStatuses.has(trade.status),
   );
-  const copiedPositionTrades = state.live.recent_decisions.filter((trade) =>
+  const copiedPositionTrades = thresholdEligibleRecentDecisions.filter((trade) =>
     copiedPositionStatus === "active"
       ? copiedActiveStatuses.has(trade.status)
       : !copiedActiveStatuses.has(trade.status),
   );
-  const copiedHistoryTrades = state.live.recent_decisions;
+  const copiedHistoryTrades = thresholdEligibleRecentDecisions;
   const copiedHistoryFilterOptions: {
     key: CopiedHistoryFilter;
     label: string;
@@ -768,13 +831,6 @@ export default function PolymarketBotPage() {
   const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
   const redeemedTradeRows = buildRedeemedTradeRows(state);
   const copiedPositionsRefreshSeconds = 5;
-  const trackedAccountByIdentity = new Map<string, (typeof state.tracked_accounts)[number]>();
-  for (const account of state.tracked_accounts) {
-    for (const key of [account.handle, account.target, account.address, account.proxy_wallet]) {
-      if (key) trackedAccountByIdentity.set(key.toLowerCase().replace(/^@/, ""), account);
-    }
-  }
-
   const visibleTrackedTraders = state.tracked_traders.filter(
     (trader) => trader.activity_source !== "handle",
   );
@@ -2070,13 +2126,12 @@ export default function PolymarketBotPage() {
                 <tbody className="divide-y divide-slate-100">
                   {selectedCopiedEvent.traders.map((trade) => {
                     const traderInvested = trade.trader_invested_usd || 0;
-                    const traderAccount = trackedAccountByIdentity.get(
-                      (trade.trader_handle || trade.trader_name || trade.trader_address)
-                        .toLowerCase()
-                        .replace(/^@/, ""),
+                    const traderAccount = getTrackedAccountForTrade(
+                      trade,
+                      state.tracked_accounts,
                     );
-                    const netWorth =
-                      trade.trader_net_worth_usd || traderAccount?.net_worth_usd || 0;
+                    const netWorth = getTradeNetWorth(trade, traderAccount);
+                    const missingReason = getNetWorthMissingReason(trade, traderAccount);
                     const netWorthPercent =
                       netWorth > 0 ? (traderInvested / netWorth) * 100 : null;
                     const activityUrl = getTraderActivityUrl(trade);
@@ -2100,10 +2155,10 @@ export default function PolymarketBotPage() {
                         <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
                         <td className="px-4 py-3 text-slate-700">{formatMoney(traderInvested)}</td>
                         <td className="px-4 py-3 text-slate-700">
-                          {netWorth > 0 ? formatMoney(netWorth) : "—"}
+                          {netWorth > 0 ? formatMoney(netWorth) : missingReason}
                         </td>
                         <td className="px-4 py-3 text-slate-700">
-                          {netWorthPercent === null ? "—" : formatPercent(netWorthPercent)}
+                          {netWorthPercent === null ? missingReason : formatPercent(netWorthPercent)}
                         </td>
                       </tr>
                     );
