@@ -1063,6 +1063,10 @@ export interface PolymarketTrackedAccountCreate {
   enabled?: boolean;
 }
 
+export interface PolymarketLiveLimitUpdate {
+  max_live_trades_per_day: number;
+}
+
 export interface PolymarketTrackedAccountUpdate {
   target?: string;
   threshold_percent?: number;
@@ -1111,6 +1115,7 @@ export interface PolymarketSourceTradeDecision {
   price: number;
   shares: number;
   max_loss: number;
+  trader_invested_usd?: number;
   reason: string;
   status: 'proposed' | 'confirmed' | 'rejected' | 'executed' | 'failed' | 'skipped';
   command?: 'buy' | 'sell' | null;

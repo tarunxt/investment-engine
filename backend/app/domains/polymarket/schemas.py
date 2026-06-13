@@ -53,6 +53,10 @@ class PolymarketTrackedAccountCreate(BaseModel):
         return value.strip()
 
 
+class PolymarketLiveLimitUpdate(BaseModel):
+    max_live_trades_per_day: int = Field(ge=1, le=1000)
+
+
 class PolymarketTrackedAccountUpdate(BaseModel):
     target: str | None = Field(default=None, min_length=1, max_length=180)
     threshold_percent: float | None = Field(default=None, ge=0, le=100)
@@ -187,6 +191,7 @@ class PolymarketLiveTradeDecision(BaseModel):
     price: float
     shares: float
     max_loss: float
+    trader_invested_usd: float = 0
     reason: str
     status: LiveTradeStatus
     command: Literal["buy", "sell"] | None = None
