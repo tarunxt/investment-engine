@@ -114,6 +114,65 @@ const BULLPEN_ACCOUNT_URL =
   "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
 
 
+function formatRelativePollTime(iso?: string | null) {
+  if (!iso) return "waiting for first poll";
+  const diff = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(iso).getTime()) / 1000),
+  );
+  if (diff < 5) return "just now";
+  if (diff < 60) return `${diff}s ago`;
+  const minutes = Math.floor(diff / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function getActionStatusMessage(
+  pendingAction: string | null,
+  state: PolymarketBotState,
+) {
+  if (pendingAction === "start") {
+    return "Starting bot… controls are disabled until the backend confirms it is running.";
+  }
+  if (pendingAction === "stop") {
+    return "Stopping bot… waiting for the backend to shut down the poller.";
+  }
+  if (pendingAction === "pause") {
+    return "Pausing proposals… existing reads may still finish.";
+  }
+  if (pendingAction === "resume") {
+    return "Resuming proposals… new matches can be queued again.";
+  }
+  if (pendingAction === "update-live-limit") return "Saving live trade limit…";
+  if (state.running) {
+    return state.paused
+      ? "Bot is running, but proposals are paused."
+      : "Bot is running; the live poller checks for new trades automatically.";
+  }
+  return "Bot is stopped. Press Start to begin polling tracked traders.";
+}
+
+function getLiveParsingStatusMessage(state: PolymarketBotState) {
+  const source = state.live.source_status;
+  if (!state.running) return "Trade parsing is idle until the bot starts.";
+  if (source.last_live_read_error) {
+    return `Live-read error: ${source.last_live_read_error}`;
+  }
+  const lastPoll = formatRelativePollTime(
+    source.last_poll_time || state.last_poll_at,
+  );
+  const afterFilters = source.source_trades_after_filters_last_poll;
+  const found = source.source_trades_found_last_poll;
+  const proposals = source.new_live_proposals_created_last_poll;
+  const skipped =
+    source.skipped_by_filters_last_poll +
+    source.skipped_by_limits_last_poll +
+    source.skipped_duplicates_last_poll;
+  return `Reading trades continuously · last poll ${lastPoll} · found ${found}, processed ${afterFilters}, queued ${proposals}, skipped ${skipped}.`;
+}
+
+
 type MissedTradeGroup = {
   key: string;
   missedAt: string;
@@ -499,6 +558,8 @@ export default function PolymarketBotPage() {
   const stoppedWarning = !state.running
     ? "Warning: Bot is Stopped. It will only stay active after Start succeeds; press Start now if you did not intentionally stop it. If it stops while showing Running, the backend watchdog automatically restarts the poller and logs a warning in Recent Bullpen Activity."
     : null;
+  const actionStatusMessage = getActionStatusMessage(pendingAction, state);
+  const liveParsingStatusMessage = getLiveParsingStatusMessage(state);
 
   const bullpenAccountValueUsd = parseUsdFromBalanceMessage(
     state.live.balance.message,
@@ -927,6 +988,43 @@ export default function PolymarketBotPage() {
             >
               {state.paused ? "Resume proposals" : "Pause proposals"}
             </Button>
+            <div
+              className="flex min-w-[280px] flex-1 flex-col gap-2 text-sm text-slate-600 lg:ml-2"
+              aria-live="polite"
+            >
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-700">
+                {isActionPending ? (
+                  <Loader2
+                    className="size-4 animate-spin text-sky-600"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <span
+                    className={
+                      state.running
+                        ? "size-2 rounded-full bg-emerald-500"
+                        : "size-2 rounded-full bg-slate-400"
+                    }
+                    aria-hidden="true"
+                  />
+                )}
+                {actionStatusMessage}
+              </div>
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-2 font-medium text-sky-900">
+                {state.running ? (
+                  <Loader2
+                    className="size-4 animate-spin text-sky-600"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Activity
+                    className="size-4 text-slate-500"
+                    aria-hidden="true"
+                  />
+                )}
+                <span>{liveParsingStatusMessage}</span>
+              </div>
+            </div>
           </div>
 
 
