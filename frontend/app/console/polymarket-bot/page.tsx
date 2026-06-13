@@ -192,6 +192,18 @@ function getNetWorthMissingReason(
     : "Net worth unavailable from provider";
 }
 
+function getPositionsValueMissingReason(
+  account?: PolymarketBotState["tracked_accounts"][number],
+) {
+  if (!account) return "No matching tracked account found";
+  if (account.net_worth_source === "pending_refresh" || !account.net_worth_checked_at) {
+    return "Positions refresh pending";
+  }
+  return account.positions_value_usd == null
+    ? "Positions value unavailable from Bullpen"
+    : "—";
+}
+
 function isBelowTrackedNetWorthThreshold(
   trade: PolymarketSourceTradeDecision,
   accounts: PolymarketBotState["tracked_accounts"],
@@ -212,6 +224,15 @@ function formatMoney(value: number, digits = 2) {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: digits,
+  }).format(value || 0);
+}
+
+function formatCompactMoney(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1,
   }).format(value || 0);
 }
 
@@ -2143,7 +2164,7 @@ export default function PolymarketBotPage() {
           onClick={() => setSelectedCopiedEvent(null)}
         >
           <div
-            className="relative w-full max-w-4xl rounded-[28px] bg-white p-6 shadow-2xl"
+            className="relative w-full max-w-6xl rounded-[28px] bg-white p-6 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <button
@@ -2160,7 +2181,7 @@ export default function PolymarketBotPage() {
                 <p className="mt-1 text-sm text-slate-500">{selectedCopiedEvent.marketTitle}</p>
               </div>
             </div>
-            <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200">
+            <div className="mt-5 overflow-x-auto rounded-[20px] border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
                 <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                   <tr>
@@ -2168,6 +2189,7 @@ export default function PolymarketBotPage() {
                     <th className="px-4 py-3">Timestamp</th>
                     <th className="px-4 py-3">Amount</th>
                     <th className="px-4 py-3">Trader invested</th>
+                    <th className="px-4 py-3">Positions Value</th>
                     <th className="px-4 py-3">Net worth</th>
                     <th className="px-4 py-3">% of Net Worth</th>
                   </tr>
@@ -2180,6 +2202,9 @@ export default function PolymarketBotPage() {
                       state.tracked_accounts,
                     );
                     const netWorth = getTradeNetWorth(trade, traderAccount);
+                    const positionsValue = traderAccount?.positions_value_usd;
+                    const positionsValueMissingReason =
+                      getPositionsValueMissingReason(traderAccount);
                     const missingReason = getNetWorthMissingReason(trade, traderAccount);
                     const netWorthPercent =
                       netWorth > 0 ? (traderInvested / netWorth) * 100 : null;
@@ -2203,6 +2228,11 @@ export default function PolymarketBotPage() {
                         </td>
                         <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
                         <td className="px-4 py-3 text-slate-700">{formatMoney(traderInvested)}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {positionsValue == null
+                            ? positionsValueMissingReason
+                            : formatCompactMoney(positionsValue)}
+                        </td>
                         <td className="px-4 py-3 text-slate-700">
                           {netWorth > 0 ? formatMoney(netWorth) : missingReason}
                         </td>
