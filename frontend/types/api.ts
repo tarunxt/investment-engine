@@ -1220,6 +1220,7 @@ export interface PolymarketPaperTrade {
   trader_name: string;
   market_id: string;
   market_title: string;
+  event_end_at?: string | null;
   outcome: string;
   side: 'BUY' | 'SELL';
   price: number;
