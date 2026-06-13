@@ -80,6 +80,19 @@ function formatMoney(value: number, digits = 2) {
 const BULLPEN_ACCOUNT_URL =
   "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
 
+
+type MissedTradeGroup = {
+  key: string;
+  missedAt: string;
+  marketId: string;
+  marketTitle: string;
+  side: PolymarketSourceTradeDecision["side"];
+  outcome: string;
+  status: string;
+  reason: string;
+  traders: PolymarketSourceTradeDecision[];
+};
+
 type CopiedEventGroup = {
   key: string;
   copiedAt: string;
@@ -100,6 +113,59 @@ function getTraderDisplayName(trade: PolymarketSourceTradeDecision) {
 function getCopiedEventKey(trade: PolymarketSourceTradeDecision) {
   return [trade.market_id, trade.market_title, trade.outcome, trade.side].join(
     "::",
+  );
+}
+
+
+function isInsufficientBalanceMiss(trade: PolymarketSourceTradeDecision) {
+  const text = `${trade.failure_reason || ""} ${trade.reason || ""}`.toLowerCase();
+  return (
+    trade.status === "failed" &&
+    (text.includes("insufficient") ||
+      text.includes("not enough") ||
+      text.includes("low balance") ||
+      text.includes("balance"))
+  );
+}
+
+function getMissedTradeKey(trade: PolymarketSourceTradeDecision) {
+  return [trade.market_id, trade.market_title, trade.side, trade.outcome].join("::");
+}
+
+function buildMissedTradeGroups(trades: PolymarketSourceTradeDecision[]) {
+  const groups = new Map<string, MissedTradeGroup>();
+
+  for (const trade of trades.filter(isInsufficientBalanceMiss)) {
+    const key = getMissedTradeKey(trade);
+    const missedAt = trade.executed_at || trade.updated_at || trade.proposed_at;
+    const reason = trade.failure_reason || trade.reason || "Insufficient balance";
+    const existing = groups.get(key);
+
+    if (!existing) {
+      groups.set(key, {
+        key,
+        missedAt,
+        marketId: trade.market_id,
+        marketTitle: trade.market_title,
+        side: trade.side,
+        outcome: trade.outcome,
+        status: trade.status,
+        reason,
+        traders: [trade],
+      });
+      continue;
+    }
+
+    existing.traders.push(trade);
+    if (new Date(missedAt).getTime() > new Date(existing.missedAt).getTime()) {
+      existing.missedAt = missedAt;
+      existing.reason = reason;
+      existing.status = trade.status;
+    }
+  }
+
+  return Array.from(groups.values()).sort(
+    (a, b) => new Date(b.missedAt).getTime() - new Date(a.missedAt).getTime(),
   );
 }
 
@@ -168,6 +234,8 @@ export default function PolymarketBotPage() {
   const [busyAccountId, setBusyAccountId] = useState<string | null>(null);
   const [selectedCopiedEvent, setSelectedCopiedEvent] =
     useState<CopiedEventGroup | null>(null);
+  const [selectedMissedTrade, setSelectedMissedTrade] =
+    useState<MissedTradeGroup | null>(null);
   const [copiedPositionsTab, setCopiedPositionsTab] = useState<
     "positions" | "history"
   >("positions");
@@ -361,6 +429,7 @@ export default function PolymarketBotPage() {
       : copiedHistoryTrades;
   const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades);
   const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
+  const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
 
   const visibleTrackedTraders = state.tracked_traders.filter(
     (trader) => trader.activity_source !== "handle",
@@ -874,6 +943,68 @@ export default function PolymarketBotPage() {
           <Card className="border border-slate-200 bg-white py-6">
             <CardHeader className="pb-0">
               <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                Missed Trades
+              </CardTitle>
+              <CardDescription>
+                Trades shortlisted for live copy execution but missed because
+                the Bullpen account did not have enough available balance.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Timestamp</th>
+                      <th className="px-4 py-3">Event Name</th>
+                      <th className="px-4 py-3">Side</th>
+                      <th className="px-4 py-3">Trader</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {missedTradeGroups.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={4}>
+                          No insufficient-balance missed trades found in recent decisions.
+                        </td>
+                      </tr>
+                    ) : missedTradeGroups.map((trade) => {
+                      const hasMultipleTraders = trade.traders.length > 1;
+                      return (
+                        <tr key={trade.key} className="align-top">
+                          <td className="px-4 py-3 text-slate-700">{formatTs(trade.missedAt)}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <button
+                              className="text-left font-medium text-slate-950 hover:text-sky-700"
+                              onClick={() => setSelectedMissedTrade(trade)}
+                            >
+                              {trade.marketTitle}
+                            </button>
+                            <div className="mt-1 text-xs text-slate-500">{trade.outcome}</div>
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{trade.side}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {hasMultipleTraders ? (
+                              <button
+                                className="font-medium text-sky-700 underline underline-offset-2"
+                                onClick={() => setSelectedMissedTrade(trade)}
+                              >
+                                multiple ({trade.traders.length})
+                              </button>
+                            ) : getTraderDisplayName(trade.traders[0])}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border border-slate-200 bg-white py-6">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
                 Top Tracked Traders
               </CardTitle>
               <CardDescription>
@@ -1118,6 +1249,55 @@ export default function PolymarketBotPage() {
       )}
 
 
+
+      {selectedMissedTrade ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">Missed trade traders</h2>
+                <p className="mt-1 text-sm text-slate-500">{selectedMissedTrade.marketTitle}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="rounded-full border-slate-300"
+                onClick={() => setSelectedMissedTrade(null)}
+              >
+                Close
+              </Button>
+            </div>
+            <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200">
+              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Trader</th>
+                    <th className="px-4 py-3">Timestamp</th>
+                    <th className="px-4 py-3">Side</th>
+                    <th className="px-4 py-3">Reason</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {selectedMissedTrade.traders.map((trade) => (
+                    <tr key={trade.id}>
+                      <td className="px-4 py-3 font-medium text-slate-950">{getTraderDisplayName(trade)}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {formatTs(trade.executed_at || trade.updated_at || trade.proposed_at)}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">{trade.side}</td>
+                      <td className="px-4 py-3 text-slate-700">{trade.failure_reason || selectedMissedTrade.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {selectedCopiedEvent ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
