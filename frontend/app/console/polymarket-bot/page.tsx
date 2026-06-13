@@ -701,6 +701,10 @@ export default function PolymarketBotPage() {
   const bullpenAccountValueUsd =
     state.live.balance.account_value_usd ??
     parseUsdFromBalanceMessage(state.live.balance.message);
+  const bullpenCashUsd = state.live.balance.available_balance_usd ?? 0;
+  const bullpenPnlUsd = state.live.balance.pnl_usd ?? state.metrics.total_pnl;
+  const bullpenUpnlUsd = state.live.balance.upnl_usd ?? null;
+  const bullpenValuesUpdatedAt = formatTs(state.live.balance.checked_at);
   const bullpenLoginRequired = isBullpenLoginRequired(
     state.live.balance.message,
     state.live.balance.status,
@@ -751,7 +755,6 @@ export default function PolymarketBotPage() {
   const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
   const redeemedTradeRows = buildRedeemedTradeRows(state);
   const copiedPositionsRefreshSeconds = 5;
-
   const trackedAccountByIdentity = new Map<string, (typeof state.tracked_accounts)[number]>();
   for (const account of state.tracked_accounts) {
     for (const key of [account.handle, account.target, account.address, account.proxy_wallet]) {
@@ -1108,6 +1111,9 @@ export default function PolymarketBotPage() {
 
       <Card className="overflow-hidden border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 py-0 text-white shadow-xl shadow-slate-950/10">
         <CardContent className="p-5 md:p-6">
+          <div className="mb-3 flex justify-end text-xs font-medium text-slate-300">
+            Last values update: {bullpenValuesUpdatedAt}
+          </div>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">
@@ -1118,13 +1124,34 @@ export default function PolymarketBotPage() {
                 {formatMoney(bullpenAccountValueUsd)} account value
               </h2>
               <p className="mt-1 text-sm text-slate-300">
+                Cash {formatMoney(bullpenCashUsd)} · PnL{" "}
+                {formatMoney(bullpenPnlUsd)}
+                {bullpenUpnlUsd == null
+                  ? ""
+                  : ` · uPnL ${formatMoney(bullpenUpnlUsd)}`}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
                 {state.live.balance.message || "Bullpen balance has not refreshed yet."}
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[560px] lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[700px] lg:grid-cols-4 xl:grid-cols-5">
+              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Cash</div>
+                <div className="mt-2 text-xl font-semibold">
+                  {formatMoney(bullpenCashUsd)}
+                </div>
+              </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">PnL</div>
-                <div className="mt-2 text-xl font-semibold">{formatMoney(state.metrics.total_pnl)}</div>
+                <div className="mt-2 text-xl font-semibold">
+                  {formatMoney(bullpenPnlUsd)}
+                </div>
+              </div>
+              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">uPnL</div>
+                <div className="mt-2 text-xl font-semibold">
+                  {bullpenUpnlUsd == null ? "—" : formatMoney(bullpenUpnlUsd)}
+                </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Active Trades</div>

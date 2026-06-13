@@ -588,7 +588,7 @@ class PolymarketPaperCopyBot:
     async def _balance_loop(self) -> None:
         try:
             while True:
-                await asyncio.sleep(5 * 60)
+                await asyncio.sleep(15)
                 await self._refresh_balance_background()
         except asyncio.CancelledError:
             return
@@ -1256,7 +1256,9 @@ class PolymarketPaperCopyBot:
 
     async def _auto_redeem_background(self) -> None:
         async with self._lock:
-            should_redeem = self.config.auto_redeem_live and self._wants_live_execution()
+            should_redeem = (
+                self.config.auto_redeem_live and self._wants_live_execution()
+            )
         if not should_redeem:
             return
         try:
@@ -2106,7 +2108,7 @@ class PolymarketPaperCopyBot:
     def _with_next_balance_refresh(
         self, state: PolymarketBalanceState
     ) -> PolymarketBalanceState:
-        next_refresh = datetime.now(timezone.utc).timestamp() + 5 * 60
+        next_refresh = datetime.now(timezone.utc).timestamp() + 15
         state.next_refresh_at = datetime.fromtimestamp(
             next_refresh, tz=timezone.utc
         ).isoformat()
