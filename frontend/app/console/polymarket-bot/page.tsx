@@ -623,7 +623,6 @@ export default function PolymarketBotPage() {
   const [liveTradeLimitDraft, setLiveTradeLimitDraft] = useState("");
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
-  const autoBalanceRefreshInFlight = useRef(false);
   useEffect(() => {
     let cancelled = false;
 
@@ -697,32 +696,12 @@ export default function PolymarketBotPage() {
     }
   }
 
-  useEffect(() => {
-    if (!state || pendingAction !== null || autoBalanceRefreshInFlight.current) {
-      return;
-    }
-    if (
-      !isBullpenBalanceUnrefreshed(
-        state.live.balance.message,
-        state.live.balance.status,
-      )
-    ) {
-      return;
-    }
+  const balanceRefreshDisabled = pendingAction !== null;
 
-    autoBalanceRefreshInFlight.current = true;
-    const timeout = window.setTimeout(() => {
-      void runAction("balance", () =>
-        apiService.polymarketLiveBalanceRefresh(),
-      ).finally(() => {
-        autoBalanceRefreshInFlight.current = false;
-      });
-    }, 0);
+  function handleBalanceRefresh() {
+    void runAction("balance", () => apiService.polymarketLiveBalanceRefresh());
+  }
 
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [pendingAction, state]);
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
     setState(nextState);
@@ -1287,12 +1266,8 @@ export default function PolymarketBotPage() {
                 size="sm"
                 variant="outline"
                 className="mt-4 rounded-full border-sky-300/50 bg-sky-300/10 px-5 text-sky-100 hover:border-sky-200 hover:bg-sky-300/20 hover:text-white disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-400"
-                disabled={pendingAction !== null}
-                onClick={() =>
-                  runAction("balance", () =>
-                    apiService.polymarketLiveBalanceRefresh(),
-                  )
-                }
+                disabled={balanceRefreshDisabled}
+                onClick={handleBalanceRefresh}
               >
                 {pendingAction === "balance" ? (
                   <Loader2 className="mr-2 size-3.5 animate-spin" aria-hidden="true" />
