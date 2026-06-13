@@ -302,6 +302,26 @@ function getActionStatusMessage(
   return "Bot is stopped. Press Start to begin polling tracked traders.";
 }
 
+function getSkippedBreakup(state: PolymarketBotState) {
+  const source = state.live.source_status;
+  const filters = source.skipped_by_filters_last_poll;
+  const limits = source.skipped_by_limits_last_poll;
+  const duplicates = source.skipped_duplicates_last_poll;
+  const knownSkipped = filters + limits + duplicates;
+  const found = source.source_trades_found_last_poll;
+  const processed = source.source_trades_after_filters_last_poll;
+  const impliedSkipped = Math.max(0, found - processed);
+  const others = Math.max(0, impliedSkipped - knownSkipped);
+
+  return {
+    filters,
+    limits,
+    duplicates,
+    others,
+    total: knownSkipped + others,
+  };
+}
+
 function getLiveParsingStatusMessage(state: PolymarketBotState) {
   const source = state.live.source_status;
   if (!state.running) return "Trade parsing is idle until the bot starts.";
@@ -314,10 +334,7 @@ function getLiveParsingStatusMessage(state: PolymarketBotState) {
   const afterFilters = source.source_trades_after_filters_last_poll;
   const found = source.source_trades_found_last_poll;
   const proposals = source.new_live_proposals_created_last_poll;
-  const skipped =
-    source.skipped_by_filters_last_poll +
-    source.skipped_by_limits_last_poll +
-    source.skipped_duplicates_last_poll;
+  const skipped = getSkippedBreakup(state).total;
   return `Reading trades continuously · last poll ${lastPoll} · found ${found}, processed ${afterFilters}, queued ${proposals}, skipped ${skipped}.`;
 }
 
@@ -701,6 +718,7 @@ export default function PolymarketBotPage() {
     useState("");
   const [copiedVisibleLimit, setCopiedVisibleLimit] = useState(TABLE_PAGE_SIZE);
   const [missedVisibleLimit, setMissedVisibleLimit] = useState(TABLE_PAGE_SIZE);
+  const [skippedBreakupOpen, setSkippedBreakupOpen] = useState(false);
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
   useEffect(() => {
@@ -916,6 +934,7 @@ export default function PolymarketBotPage() {
     : null;
   const actionStatusMessage = getActionStatusMessage(pendingAction, state);
   const liveParsingStatusMessage = getLiveParsingStatusMessage(state);
+  const skippedBreakup = getSkippedBreakup(state);
 
   const bullpenAccountValueUsd =
     state.live.balance.account_value_usd ??
@@ -1582,6 +1601,15 @@ export default function PolymarketBotPage() {
                   />
                 )}
                 <span>{liveParsingStatusMessage}</span>
+                <button
+                  type="button"
+                  className="inline-flex size-5 items-center justify-center rounded-full border border-sky-300 bg-white text-sky-700 transition hover:border-sky-500 hover:bg-sky-100 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  aria-label="Open skipped detail breakup"
+                  title="Skipped detail breakup"
+                  onClick={() => setSkippedBreakupOpen(true)}
+                >
+                  <Info className="size-3.5" aria-hidden="true" />
+                </button>
               </div>
             </div>
           </div>
@@ -2538,6 +2566,69 @@ export default function PolymarketBotPage() {
                     })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {skippedBreakupOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="skipped-breakup-title"
+          onClick={() => setSkippedBreakupOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-xl rounded-[28px] bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              aria-label="Close skipped detail breakup popup"
+              onClick={() => setSkippedBreakupOpen(false)}
+            >
+              <X className="size-5" />
+            </button>
+            <div className="pr-12">
+              <h2
+                id="skipped-breakup-title"
+                className="text-lg font-semibold text-slate-950"
+              >
+                Skipped detail breakup
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Last poll skipped {skippedBreakup.total} source trades across
+                filter, limit, duplicate, and uncategorized buckets.
+              </p>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {[
+                { label: "Skipped By Filters", value: skippedBreakup.filters },
+                { label: "Skipped By Limits", value: skippedBreakup.limits },
+                {
+                  label: "Skipped Duplicates",
+                  value: skippedBreakup.duplicates,
+                },
+                { label: "Others", value: skippedBreakup.others },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                >
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    {item.label}
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">
+                    {item.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+              Others captures any skipped source trades implied by the last poll
+              total that are not classified as filter, limit, or duplicate
+              skips.
             </div>
           </div>
         </div>
