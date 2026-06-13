@@ -66,7 +66,6 @@ export function TrackedTradersTable({ traders }: { traders: PolymarketTrader[] }
         <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
           <tr>
             <th className="px-4 py-3">Trader</th>
-            <th className="px-4 py-3">Activity Source</th>
             <th className="px-4 py-3">Source Reason</th>
             <th className="px-4 py-3">Trades 1h</th>
             <th className="px-4 py-3">Trades 6h</th>
@@ -78,7 +77,7 @@ export function TrackedTradersTable({ traders }: { traders: PolymarketTrader[] }
         </thead>
         <tbody className="divide-y divide-slate-100">
           {traders.length === 0 ? (
-            <EmptyState colSpan={9} message="Start the bot to load tracked traders." />
+            <EmptyState colSpan={8} message="Start the bot to load tracked traders." />
           ) : (
             traders.map((trader) => {
               const profileUrl = normalizePolymarketProfileUrl(trader);
@@ -100,7 +99,6 @@ export function TrackedTradersTable({ traders }: { traders: PolymarketTrader[] }
                     )}
                     <div className="mt-1 text-xs text-slate-500">{trader.address || trader.id}</div>
                   </td>
-                  <td className="px-4 py-3 text-slate-700">{trader.activity_source || '—'}</td>
                   <td className="px-4 py-3 text-xs leading-5 text-slate-600">{trader.source_reason}</td>
                   <td className="px-4 py-3 text-slate-700">{trader.trades_1h}</td>
                   <td className="px-4 py-3 text-slate-700">{trader.trades_6h}</td>

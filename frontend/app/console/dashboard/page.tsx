@@ -20,6 +20,7 @@ import type {
   IndMoneyUsPortfolioOverviewResponse,
   IndMoneyUsPortfolioSnapshotSummary,
   IndMoneyUsThreatAnalysis,
+  PolymarketBotState,
   ZerodhaPortfolioOverviewResponse,
   ZerodhaPortfolioSnapshotSummary,
   ZerodhaStatusResponse,
@@ -56,6 +57,7 @@ type DashboardState = {
   zerodhaThreat: ZerodhaThreatAnalysis | null;
   indmoneyOverview: IndMoneyUsPortfolioOverviewResponse | null;
   indmoneyThreat: IndMoneyUsThreatAnalysis | null;
+  polymarketState: PolymarketBotState | null;
 };
 
 const INITIAL_STATE: DashboardState = {
@@ -64,6 +66,7 @@ const INITIAL_STATE: DashboardState = {
   zerodhaThreat: null,
   indmoneyOverview: null,
   indmoneyThreat: null,
+  polymarketState: null,
 };
 
 function buildIndiaTopHoldings(
@@ -239,6 +242,7 @@ function PortfolioCommandSummary({
   indmoneyValue,
   indmoneyPortfolioValue,
   indmoneyFundsValue,
+  bullpenValue,
 }: {
   totalValue: number;
   zerodhaValue: number;
@@ -247,6 +251,7 @@ function PortfolioCommandSummary({
   indmoneyValue: number;
   indmoneyPortfolioValue: number | null | undefined;
   indmoneyFundsValue: number | null | undefined;
+  bullpenValue: number | null | undefined;
 }) {
   const [showInvestmentNumbers, setShowInvestmentNumbers] = useState(false);
   const formatPrivateInvestmentValue = (value: number | null | undefined) => {
@@ -294,7 +299,7 @@ function PortfolioCommandSummary({
           </div>
         </div>
 
-        <div className="grid flex-1 gap-3 sm:grid-cols-2">
+        <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
             <div className="text-xs font-semibold text-white">Zerodha</div>
             <div className="mt-1 text-sm font-bold text-white">
@@ -315,6 +320,16 @@ function PortfolioCommandSummary({
               {formatPrivateInvestmentValue(indmoneyPortfolioValue)} total
               portfolio + {formatPrivateInvestmentValue(indmoneyFundsValue)}{" "}
               available funds
+            </div>
+          </div>
+
+          <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
+            <div className="text-xs font-semibold text-white">Bullpen</div>
+            <div className="mt-1 text-sm font-bold text-white">
+              {formatPrivateInvestmentValue(bullpenValue)}
+            </div>
+            <div className="mt-3 text-xs leading-5 text-slate-200">
+              Polymarket account value included in total investments
             </div>
           </div>
         </div>
@@ -723,6 +738,14 @@ function buildUsTopHoldings(
   }));
 }
 
+
+function parseBullpenAccountValueUsd(message?: string | null) {
+  if (!message) return 0;
+  const match = message.match(/(-?\d[\d,]*(?:\.\d+)?)/);
+  if (!match) return 0;
+  return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
+}
+
 export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<DashboardState>(INITIAL_STATE);
   const [loading, setLoading] = useState(true);
@@ -743,6 +766,7 @@ export default function DashboardPage() {
       apiService.zerodhaThreatsLatest(),
       apiService.indmoneyUsPortfolioOverview(),
       apiService.indmoneyUsThreatsLatest(),
+      apiService.polymarketState(),
     ] as const);
 
     const nextErrors: string[] = [];
@@ -782,6 +806,12 @@ export default function DashboardPage() {
         nextState.indmoneyThreat = results[4].value.analysis;
       } else {
         nextErrors.push(`US threats: ${normalizeError(results[4].reason)}`);
+      }
+
+      if (results[5].status === "fulfilled") {
+        nextState.polymarketState = results[5].value;
+      } else {
+        nextErrors.push(`Bullpen account: ${normalizeError(results[5].reason)}`);
       }
 
       return nextState;
@@ -844,7 +874,12 @@ export default function DashboardPage() {
       : usSnapshot.wallet_balance * usdInrRate;
   const indmoneyCommandValue =
     (indmoneyPortfolioValueInr ?? 0) + (indmoneyAvailableFundsValueInr ?? 0);
-  const totalCommandValue = zerodhaCommandValue + indmoneyCommandValue;
+  const bullpenAccountValueUsd = parseBullpenAccountValueUsd(
+    dashboard.polymarketState?.live.balance.message,
+  );
+  const bullpenAccountValueInr = bullpenAccountValueUsd * usdInrRate;
+  const totalCommandValue =
+    zerodhaCommandValue + indmoneyCommandValue + bullpenAccountValueInr;
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
   const totalProfitLossValue =
     (indiaSnapshot?.holdings_pnl ?? 0) +
@@ -919,6 +954,7 @@ export default function DashboardPage() {
             indmoneyValue={indmoneyCommandValue}
             indmoneyPortfolioValue={indmoneyPortfolioValueInr}
             indmoneyFundsValue={indmoneyAvailableFundsValueInr}
+            bullpenValue={bullpenAccountValueInr}
           />
 
           <PortfolioCommandChart

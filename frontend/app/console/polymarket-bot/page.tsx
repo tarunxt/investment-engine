@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { Activity, ExternalLink, Loader2, TrendingUp, Wallet } from "lucide-react";
 
 import {
   Card,
@@ -61,6 +61,14 @@ function formatRuntime(from?: string | null, to?: string | null) {
   return `${seconds}s`;
 }
 
+
+function parseUsdFromBalanceMessage(message?: string | null) {
+  if (!message) return 0;
+  const match = message.match(/(-?\d[\d,]*(?:\.\d+)?)/);
+  if (!match) return 0;
+  return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
+}
+
 function formatMoney(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -75,7 +83,7 @@ const BULLPEN_ACCOUNT_URL =
 function bullpenMarketUrl(marketId?: string | null) {
   const slug = marketId?.trim();
   return slug
-    ? `https://app.bullpen.fi/prediction/polymarket/event/${encodeURIComponent(slug)}`
+    ? `https://app.bullpen.fi/predictions/polymarket/event/${encodeURIComponent(slug)}`
     : null;
 }
 
@@ -265,6 +273,15 @@ export default function PolymarketBotPage() {
   const startDisabled = state.running || isActionPending;
   const stopDisabled = !state.running || isActionPending;
 
+  const bullpenAccountValueUsd = parseUsdFromBalanceMessage(state.live.balance.message);
+  const executedLiveTrades = state.live.recent_decisions.filter((trade) =>
+    ["executed", "confirmed"].includes(trade.status),
+  );
+
+  const visibleTrackedTraders = state.tracked_traders.filter(
+    (trader) => trader.activity_source !== "handle",
+  );
+
   const botStatusItems: MetricItem[] = [
     {
       label: "Bot Status",
@@ -305,7 +322,7 @@ export default function PolymarketBotPage() {
       label: "Poll Interval",
       value: `${Math.round(state.config.poll_interval_ms / 1000)}s`,
     },
-    { label: "Tracked Traders Count", value: state.tracked_traders.length },
+    { label: "Tracked Traders Count", value: visibleTrackedTraders.length },
     {
       label: "Open Positions Count",
       value: state.open_positions.length,
@@ -417,7 +434,7 @@ export default function PolymarketBotPage() {
       label: "Last Discovery Error",
       value: state.live.source_status.last_discovery_error || "—",
     },
-    { label: "Tracked Traders Selected", value: state.tracked_traders.length },
+    { label: "Tracked Traders Selected", value: visibleTrackedTraders.length },
   ];
 
   const liveSourceItems: MetricItem[] = [
@@ -558,6 +575,49 @@ export default function PolymarketBotPage() {
         </div>
       ) : null}
 
+      <Card className="overflow-hidden border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 py-0 text-white shadow-xl shadow-slate-950/10">
+        <CardContent className="p-5 md:p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">
+                <Wallet className="size-3.5" />
+                Bullpen Summary
+              </div>
+              <h2 className="mt-3 text-2xl font-semibold tracking-tight">
+                {formatMoney(bullpenAccountValueUsd)} account value
+              </h2>
+              <p className="mt-1 text-sm text-slate-300">
+                {state.live.balance.message || "Bullpen balance has not refreshed yet."}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[560px] lg:grid-cols-4">
+              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">PnL</div>
+                <div className="mt-2 text-xl font-semibold">{formatMoney(state.metrics.total_pnl)}</div>
+              </div>
+              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Active Trades</div>
+                <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
+                  <Activity className="size-4 text-sky-300" />
+                  {state.open_positions.length}
+                </div>
+              </div>
+              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Live Trades Today</div>
+                <div className="mt-2 text-xl font-semibold">{state.live.live_trades_today}</div>
+              </div>
+              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Copied Trades</div>
+                <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
+                  <TrendingUp className="size-4 text-emerald-300" />
+                  {executedLiveTrades.length}
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {activeScreen === "main" ? (
         <>
           <div className="flex flex-wrap gap-2 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
@@ -605,23 +665,6 @@ export default function PolymarketBotPage() {
             </Button>
           </div>
 
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Bot Status
-              </CardTitle>
-              <CardDescription>
-                Current runtime and Bullpen polling state for the real-money
-                copy bot.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <MetricGrid
-                items={botStatusItems}
-                columns="md:grid-cols-2 xl:grid-cols-5"
-              />
-            </CardContent>
-          </Card>
 
           <Card
             id="open-positions"
@@ -812,11 +855,12 @@ export default function PolymarketBotPage() {
               </CardTitle>
               <CardDescription>
                 Tracked public trader identities selected for copy-read
-                monitoring.
+                monitoring. Legacy manually added handle-only rows are hidden
+                here; manage manual accounts from Settings.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
-              <TrackedTradersTable traders={state.tracked_traders} />
+              <TrackedTradersTable traders={visibleTrackedTraders} />
             </CardContent>
           </Card>
 
@@ -862,6 +906,23 @@ export default function PolymarketBotPage() {
         </>
       ) : (
         <>
+          <Card className="border border-slate-200 bg-white py-6">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                Bot Status
+              </CardTitle>
+              <CardDescription>
+                Current runtime and Bullpen polling state for the real-money
+                copy bot.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <MetricGrid
+                items={botStatusItems}
+                columns="md:grid-cols-2 xl:grid-cols-5"
+              />
+            </CardContent>
+          </Card>
           <Card className="border border-slate-200 bg-white py-6">
             <CardHeader className="pb-0">
               <CardTitle className="text-base tracking-[0.18em] text-slate-950">
