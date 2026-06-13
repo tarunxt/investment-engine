@@ -458,7 +458,7 @@ function getVisiblePortfolioCommandPoints(
   return points.slice(-Math.min(points.length, fallbackPointCount[range]));
 }
 
-function buildCommandChartPath(
+function buildCommandChartCoordinates(
   values: number[],
   width: number,
   height: number,
@@ -468,13 +468,21 @@ function buildCommandChartPath(
   const valueRange = maxValue - minValue || 1;
   const xStep = width / (values.length - 1 || 1);
 
-  return values
-    .map((value, index) => {
-      const x = index * xStep;
-      const y = height - ((value - minValue) / valueRange) * height;
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
+  return values.map((value, index) => ({
+    x: index * xStep,
+    y: height - ((value - minValue) / valueRange) * height,
+  }));
+}
+
+function formatCommandChartTooltipDate(timestamp: number) {
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+  }).format(new Date(timestamp));
 }
 
 function PortfolioCommandChart({
@@ -488,18 +496,27 @@ function PortfolioCommandChart({
 }) {
   const [selectedRange, setSelectedRange] =
     useState<PortfolioCommandRange>("1D");
+  const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(
+    null,
+  );
   const chartWidth = 420;
-  const chartHeight = 92;
+  const chartHeight = 80;
   const visibleTrendPoints = useMemo(
     () => getVisiblePortfolioCommandPoints(trendPoints, selectedRange),
     [selectedRange, trendPoints],
   );
   const visibleTrendValues = visibleTrendPoints.map((point) => point.value);
-  const linePath = buildCommandChartPath(
+  const chartCoordinates = buildCommandChartCoordinates(
     visibleTrendValues,
     chartWidth,
     chartHeight,
   );
+  const linePath = chartCoordinates
+    .map(
+      (point, index) =>
+        `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`,
+    )
+    .join(" ");
   const areaPath = `${linePath} L ${chartWidth} ${chartHeight} L 0 ${chartHeight} Z`;
   const isPositive = profitLossValue >= 0;
   const firstTrendValue = visibleTrendValues[0];
@@ -511,6 +528,37 @@ function PortfolioCommandChart({
   const displayedRangeChangeValue =
     selectedRange === "1D" ? dayChangeValue : selectedRangeChangeValue;
   const displayedRangeLabel = PORTFOLIO_COMMAND_RANGE_LABELS[selectedRange];
+  const hoveredPoint =
+    hoveredPointIndex == null ? null : visibleTrendPoints[hoveredPointIndex];
+  const hoveredCoordinates =
+    hoveredPointIndex == null ? null : chartCoordinates[hoveredPointIndex];
+  const hoveredPreviousValue =
+    hoveredPointIndex == null
+      ? null
+      : visibleTrendValues[Math.max(0, hoveredPointIndex - 1)];
+  const hoveredDayPnlValue =
+    hoveredPoint == null || hoveredPreviousValue == null
+      ? null
+      : hoveredPoint.value - hoveredPreviousValue;
+
+  const handleChartMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const relativeX = Math.min(
+      Math.max(event.clientX - bounds.left, 0),
+      bounds.width,
+    );
+    const chartX = (relativeX / bounds.width) * chartWidth;
+    const nearestPointIndex = chartCoordinates.reduce(
+      (nearestIndex, point, index) =>
+        Math.abs(point.x - chartX) <
+        Math.abs(chartCoordinates[nearestIndex].x - chartX)
+          ? index
+          : nearestIndex,
+      0,
+    );
+
+    setHoveredPointIndex(nearestPointIndex);
+  };
 
   return (
     <div className="rounded-[30px] border border-white/10 bg-slate-950/50 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur xl:min-w-[430px]">
@@ -568,18 +616,14 @@ function PortfolioCommandChart({
         </div>
       </div>
 
-      <div className="mt-2 flex items-center justify-end gap-3 text-xl font-semibold text-slate-500">
-        <span className="relative h-7 w-7 overflow-hidden" aria-hidden="true">
-          <span className="absolute inset-y-1 left-1 w-5 border-y-4 border-l-4 border-slate-500 [clip-path:polygon(0_0,100%_22%,100%_78%,0_100%)]" />
-        </span>
-        Portfolio
-      </div>
-
       <svg
         viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-        className="mt-2 h-20 w-full overflow-visible"
+        preserveAspectRatio="none"
+        className="mt-4 h-16 w-full cursor-crosshair overflow-visible"
         role="img"
         aria-label={`${displayedRangeLabel} portfolio profit and loss trend`}
+        onMouseMove={handleChartMouseMove}
+        onMouseLeave={() => setHoveredPointIndex(null)}
       >
         <defs>
           <linearGradient id="commandChartLine" x1="0" x2="1" y1="0" y2="0">
@@ -601,6 +645,54 @@ function PortfolioCommandChart({
           strokeLinejoin="round"
           strokeWidth="4"
         />
+        {hoveredCoordinates && hoveredPoint && hoveredDayPnlValue != null ? (
+          <g className="pointer-events-none">
+            <line
+              x1={hoveredCoordinates.x}
+              x2={hoveredCoordinates.x}
+              y1="0"
+              y2={chartHeight}
+              stroke="rgba(226,232,240,0.85)"
+              strokeWidth="1.5"
+            />
+            <circle
+              cx={hoveredCoordinates.x}
+              cy={hoveredCoordinates.y}
+              r="4"
+              fill="#3b82f6"
+              stroke="#bfdbfe"
+              strokeWidth="1.5"
+            />
+            <foreignObject
+              x={Math.min(
+                Math.max(hoveredCoordinates.x - 76, 4),
+                chartWidth - 156,
+              )}
+              y={
+                hoveredCoordinates.y > 38
+                  ? hoveredCoordinates.y - 36
+                  : hoveredCoordinates.y + 12
+              }
+              width="152"
+              height="34"
+            >
+              <div className="rounded-md border border-white/20 bg-slate-950/90 px-2 py-1 text-[10px] leading-tight text-white shadow-lg backdrop-blur">
+                <div
+                  className={
+                    hoveredDayPnlValue >= 0
+                      ? "text-emerald-300"
+                      : "text-rose-300"
+                  }
+                >
+                  Day P/L {formatInr(hoveredDayPnlValue)}
+                </div>
+                <div className="text-slate-400">
+                  {formatCommandChartTooltipDate(hoveredPoint.timestamp)}
+                </div>
+              </div>
+            </foreignObject>
+          </g>
+        ) : null}
       </svg>
     </div>
   );
@@ -798,12 +890,6 @@ export default function DashboardPage() {
             <h1 className="mt-4 max-w-3xl font-serif text-3xl tracking-tight text-white md:text-4xl">
               Portfolio Command Center
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-200/90">
-              The dashboard is centered on real portfolio intelligence: India
-              and INDmoney US portfolios up front, followed by the five final
-              actionable decision tables.
-            </p>
-
             <div className="mt-5 flex flex-wrap gap-3">
               <Button
                 onClick={() => {
