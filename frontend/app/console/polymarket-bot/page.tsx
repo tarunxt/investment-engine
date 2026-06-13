@@ -131,7 +131,7 @@ function formatMoney(value: number, digits = 2) {
 }
 
 const BULLPEN_ACCOUNT_URL =
-  "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
+  "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
 
 
 function formatRelativePollTime(iso?: string | null) {
