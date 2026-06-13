@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { apiService, APIError } from "@/services/api";
 import { parseApiTimestamp } from "@/lib/datetime";
 import type {
+  PolymarketBalanceState,
   PolymarketBotState,
   PolymarketPaperTrade,
   PolymarketSourceTradeDecision,
@@ -36,10 +37,45 @@ import {
   type TrackedAccountDraft,
 } from "./_components/TraderTables";
 
+function stringifyErrorDetail(detail: unknown): string | null {
+  if (!detail) return null;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => stringifyErrorDetail(item))
+      .filter(Boolean);
+    return parts.length > 0 ? parts.join("; ") : null;
+  }
+  if (typeof detail === "object") {
+    const record = detail as Record<string, unknown>;
+    const message =
+      stringifyErrorDetail(record.detail) ||
+      stringifyErrorDetail(record.message) ||
+      stringifyErrorDetail(record.error);
+    if (message) return message;
+
+    const entries = Object.entries(record)
+      .map(([key, value]) => {
+        const valueText = stringifyErrorDetail(value);
+        return valueText ? `${key}: ${valueText}` : null;
+      })
+      .filter(Boolean);
+    return entries.length > 0 ? entries.join("; ") : null;
+  }
+  return String(detail);
+}
+
 function normalizeError(error: unknown) {
-  if (error instanceof APIError) return error.message;
-  if (error instanceof Error) return error.message;
-  return "Something went wrong";
+  if (error instanceof APIError) {
+    const details = stringifyErrorDetail(error.details);
+    const statusText = `HTTP ${error.status}`;
+    const baseMessage = error.message || "API request failed";
+    return details && details !== baseMessage
+      ? `${statusText}: ${baseMessage}. Details: ${details}`
+      : `${statusText}: ${baseMessage}`;
+  }
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  return `Unexpected error: ${String(error)}`;
 }
 
 function formatTs(iso?: string | null) {
@@ -690,6 +726,8 @@ export default function PolymarketBotPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [activeScreen, setActiveScreen] = useState<"main" | "settings">("main");
+  const [lastSettledBalance, setLastSettledBalance] =
+    useState<PolymarketBalanceState | null>(null);
   const [accountDrafts, setAccountDrafts] = useState<
     Record<string, TrackedAccountDraft>
   >({});
@@ -737,6 +775,9 @@ export default function PolymarketBotPage() {
         )
           return;
         setState(nextState);
+        if (nextState.live.balance.status !== "loading") {
+          setLastSettledBalance(nextState.live.balance);
+        }
         setAccountDrafts((current) => ({
           ...Object.fromEntries(
             nextState.tracked_accounts.map((account) => [
@@ -792,6 +833,9 @@ export default function PolymarketBotPage() {
       const nextState = await action();
       lastMutationAt.current = Date.now();
       setState(nextState);
+      if (nextState.live.balance.status !== "loading") {
+        setLastSettledBalance(nextState.live.balance);
+      }
       setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
       setTraderInvestedThresholdDraft(
         String(nextState.config.trader_invested_threshold_usd),
@@ -812,6 +856,9 @@ export default function PolymarketBotPage() {
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
     setState(nextState);
+    if (nextState.live.balance.status !== "loading") {
+      setLastSettledBalance(nextState.live.balance);
+    }
     setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
     setTraderInvestedThresholdDraft(
       String(nextState.config.trader_invested_threshold_usd),
@@ -938,20 +985,38 @@ export default function PolymarketBotPage() {
   const liveParsingStatusMessage = getLiveParsingStatusMessage(state);
   const skippedBreakup = getSkippedBreakup(state);
 
+  const visibleBalance =
+    state.live.balance.status === "loading" && lastSettledBalance
+      ? lastSettledBalance
+      : state.live.balance;
+  const balanceStatusDetail = [
+    `Status: ${state.live.balance.status}`,
+    state.live.balance.checked_at
+      ? `Last checked: ${formatTs(state.live.balance.checked_at)}`
+      : null,
+    state.live.balance.next_refresh_at
+      ? `Next refresh: ${formatTs(state.live.balance.next_refresh_at)}`
+      : null,
+    state.live.balance.status === "loading" && lastSettledBalance
+      ? "Showing last settled Bullpen values while the backend refresh is in progress."
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const bullpenAccountValueUsd =
-    state.live.balance.account_value_usd ??
-    parseUsdFromBalanceMessage(state.live.balance.message);
-  const bullpenCashUsd = state.live.balance.available_balance_usd ?? 0;
-  const bullpenPnlUsd = state.live.balance.pnl_usd ?? state.metrics.total_pnl;
-  const bullpenUpnlUsd = state.live.balance.upnl_usd ?? null;
-  const bullpenValuesUpdatedAt = formatTs(state.live.balance.checked_at);
+    visibleBalance.account_value_usd ??
+    parseUsdFromBalanceMessage(visibleBalance.message);
+  const bullpenCashUsd = visibleBalance.available_balance_usd ?? 0;
+  const bullpenPnlUsd = visibleBalance.pnl_usd ?? state.metrics.total_pnl;
+  const bullpenUpnlUsd = visibleBalance.upnl_usd ?? null;
+  const bullpenValuesUpdatedAt = formatTs(visibleBalance.checked_at);
   const bullpenBalanceUnrefreshed = isBullpenBalanceUnrefreshed(
-    state.live.balance.message,
-    state.live.balance.status,
+    visibleBalance.message,
+    visibleBalance.status,
   );
   const bullpenLoginRequired = isBullpenLoginRequired(
-    state.live.balance.message,
-    state.live.balance.status,
+    visibleBalance.message,
+    visibleBalance.status,
   );
   const copiedActiveStatuses = new Set(["executed", "confirmed"]);
   const thresholdEligibleRecentDecisions = state.live.recent_decisions.filter(
@@ -1317,7 +1382,7 @@ export default function PolymarketBotPage() {
                 <p className="mt-2 max-w-3xl text-base font-semibold text-amber-900 md:text-lg">
                   The bot cannot refresh balance or place Bullpen-backed
                   real-money trades until the Bullpen session is restored.
-                  Current status: {state.live.balance.message}
+                  Current status: {visibleBalance.message}
                 </p>
               </div>
             </div>
@@ -1394,6 +1459,9 @@ export default function PolymarketBotPage() {
                   ? ""
                   : ` · uPnL ${formatMoney(bullpenUpnlUsd)}`}
               </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {balanceStatusDetail}
+              </p>
               {bullpenBalanceUnrefreshed ? (
                 <div className="mt-3 rounded-2xl border border-amber-300/40 bg-amber-400/10 px-4 py-3 text-xs leading-5 text-amber-100">
                   <p className="font-semibold text-amber-50">
@@ -1409,7 +1477,7 @@ export default function PolymarketBotPage() {
                 </div>
               ) : (
                 <p className="mt-1 text-xs text-slate-400">
-                  {state.live.balance.message ||
+                  {visibleBalance.message ||
                     "Bullpen balance has not refreshed yet."}
                 </p>
               )}
