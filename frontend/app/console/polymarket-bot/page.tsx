@@ -109,6 +109,15 @@ function parseUsdFromBalanceMessage(message?: string | null) {
   return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
 }
 
+function isBullpenBalanceUnrefreshed(message?: string | null, status?: string | null) {
+  const normalized = `${message || ""} ${status || ""}`.toLowerCase();
+  return (
+    normalized.includes("balance has not been refreshed") ||
+    normalized.includes("balance has not refreshed") ||
+    normalized.includes("not refreshed yet")
+  );
+}
+
 function isBullpenLoginRequired(message?: string | null, status?: string | null) {
   const normalized = `${message || ""} ${status || ""}`.toLowerCase();
   return (
@@ -705,6 +714,10 @@ export default function PolymarketBotPage() {
   const bullpenPnlUsd = state.live.balance.pnl_usd ?? state.metrics.total_pnl;
   const bullpenUpnlUsd = state.live.balance.upnl_usd ?? null;
   const bullpenValuesUpdatedAt = formatTs(state.live.balance.checked_at);
+  const bullpenBalanceUnrefreshed = isBullpenBalanceUnrefreshed(
+    state.live.balance.message,
+    state.live.balance.status,
+  );
   const bullpenLoginRequired = isBullpenLoginRequired(
     state.live.balance.message,
     state.live.balance.status,
@@ -1130,9 +1143,36 @@ export default function PolymarketBotPage() {
                   ? ""
                   : ` · uPnL ${formatMoney(bullpenUpnlUsd)}`}
               </p>
-              <p className="mt-1 text-xs text-slate-400">
-                {state.live.balance.message || "Bullpen balance has not refreshed yet."}
-              </p>
+              {bullpenBalanceUnrefreshed ? (
+                <div className="mt-3 rounded-2xl border border-amber-300/40 bg-amber-400/10 px-4 py-3 text-xs leading-5 text-amber-100">
+                  <p className="font-semibold text-amber-50">
+                    Balance has not been refreshed because the backend has not completed a successful Bullpen balance check for the current session.
+                  </p>
+                  <p className="mt-1 text-amber-100/90">
+                    Click Refresh Balance to ask the backend to refresh now. If the refresh still reports login required, open Bullpen/AWS EC2, run the Bullpen login, then refresh again.
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-slate-400">
+                  {state.live.balance.message || "Bullpen balance has not refreshed yet."}
+                </p>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-4 rounded-full border-sky-300/50 bg-sky-300/10 px-5 text-sky-100 hover:border-sky-200 hover:bg-sky-300/20 hover:text-white disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-400"
+                disabled={pendingAction !== null}
+                onClick={() =>
+                  runAction("balance", () =>
+                    apiService.polymarketLiveBalanceRefresh(),
+                  )
+                }
+              >
+                {pendingAction === "balance" ? (
+                  <Loader2 className="mr-2 size-3.5 animate-spin" aria-hidden="true" />
+                ) : null}
+                Refresh Balance
+              </Button>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[700px] lg:grid-cols-4 xl:grid-cols-5">
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
