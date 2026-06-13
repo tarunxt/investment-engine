@@ -1,11 +1,15 @@
-'use client';
+"use client";
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState } from "react";
 
-import type { PolymarketPaperTrade, PolymarketSourceTradeDecision, PolymarketTrader } from '@/types/api';
+import type {
+  PolymarketPaperTrade,
+  PolymarketSourceTradeDecision,
+  PolymarketTrader,
+} from "@/types/api";
 
 const TRACKED_TRADERS_PAGE_SIZE = 20;
-type LeaderboardTab = 'today' | 'weekly';
+type LeaderboardTab = "today" | "weekly";
 type TraderCopyStats = { tradesCopied: number; tradesCopiedAmount: number };
 
 function traderIdentityValues(trader: PolymarketTrader) {
@@ -21,7 +25,9 @@ function traderMatchesPeriod(trader: PolymarketTrader, period: LeaderboardTab) {
       ? [trader.leaderboard_period]
       : [];
   if (periods.map((item) => item.toLowerCase()).includes(period)) return true;
-  return trader.source_reason.toLowerCase().includes(`${period} profit leaderboard`);
+  return trader.source_reason
+    .toLowerCase()
+    .includes(`${period} profit leaderboard`);
 }
 
 function buildCopyStats(
@@ -35,14 +41,20 @@ function buildCopyStats(
     stats.set(trader.id, { tradesCopied: 0, tradesCopiedAmount: 0 });
   }
 
-  const addForTrader = (identity: string | undefined | null, amount: number) => {
+  const addForTrader = (
+    identity: string | undefined | null,
+    amount: number,
+  ) => {
     if (!identity) return;
     const normalized = identity.toLowerCase();
     const trader = traders.find((candidate) =>
       traderIdentityValues(candidate).includes(normalized),
     );
     if (!trader) return;
-    const current = stats.get(trader.id) || { tradesCopied: 0, tradesCopiedAmount: 0 };
+    const current = stats.get(trader.id) || {
+      tradesCopied: 0,
+      tradesCopiedAmount: 0,
+    };
     stats.set(trader.id, {
       tradesCopied: current.tradesCopied + 1,
       tradesCopiedAmount: current.tradesCopiedAmount + amount,
@@ -50,45 +62,54 @@ function buildCopyStats(
   };
 
   decisions
-    .filter((trade) => trade.status === 'executed' || trade.status === 'confirmed')
+    .filter(
+      (trade) => trade.status === "executed" || trade.status === "confirmed",
+    )
     .forEach((trade) =>
       addForTrader(
-        trade.trader_address || trade.trader_handle || trade.trader_id || trade.trader_name,
+        trade.trader_address ||
+          trade.trader_handle ||
+          trade.trader_id ||
+          trade.trader_name,
         trade.amount,
       ),
     );
 
   paperTrades
-    .filter((trade) => trade.status === 'executed')
-    .forEach((trade) => addForTrader(trade.trader_id || trade.trader_name, trade.copied_usd));
+    .filter((trade) => trade.status === "executed")
+    .forEach((trade) =>
+      addForTrader(trade.trader_id || trade.trader_name, trade.copied_usd),
+    );
 
   return stats;
 }
 
 function formatTs(iso?: string | null) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    dateStyle: 'medium',
-    timeStyle: 'short',
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    timeStyle: "short",
   });
 }
 
 function formatMoney(value: number, digits = 2) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
     maximumFractionDigits: digits,
   }).format(value || 0);
 }
 
-function netWorthBreakdown(account: import('@/types/api').PolymarketTrackedAccount) {
+function netWorthBreakdown(
+  account: import("@/types/api").PolymarketTrackedAccount,
+) {
   if (account.net_worth_error) {
     return `Auto fetch failed: ${account.net_worth_error}`;
   }
 
   if (!account.net_worth_source) {
-    return 'Auto net worth fetch pending';
+    return "Auto net worth fetch pending";
   }
 
   const parts = [
@@ -100,22 +121,31 @@ function netWorthBreakdown(account: import('@/types/api').PolymarketTrackedAccou
     parts.push(`redeemable ${formatMoney(account.redeemable_value_usd || 0)}`);
   }
 
-  return `Auto: ${parts.join(' + ')}`;
+  return `Auto: ${parts.join(" + ")}`;
 }
 
 function normalizePolymarketProfileUrl(trader: PolymarketTrader) {
   const handle = trader.handle || trader.profile_slug;
   if (handle) {
-    return `https://polymarket.com/@${handle.replace(/^@/, '')}`;
+    return `https://polymarket.com/@${handle.replace(/^@/, "")}`;
   }
 
   return trader.polymarket_profile_url || trader.profile_url;
 }
 
-function EmptyState({ colSpan, message }: { colSpan: number; message: string }) {
+function EmptyState({
+  colSpan,
+  message,
+}: {
+  colSpan: number;
+  message: string;
+}) {
   return (
     <tr>
-      <td colSpan={colSpan} className="px-4 py-8 text-center text-sm text-slate-500">
+      <td
+        colSpan={colSpan}
+        className="px-4 py-8 text-center text-sm text-slate-500"
+      >
         {message}
       </td>
     </tr>
@@ -131,47 +161,61 @@ export function TrackedTradersTable({
   decisions?: PolymarketSourceTradeDecision[];
   paperTrades?: PolymarketPaperTrade[];
 }) {
-  const [activeTab, setActiveTab] = useState<LeaderboardTab>('today');
-  const [pageByTab, setPageByTab] = useState<Record<LeaderboardTab, number>>({
-    today: 1,
-    weekly: 1,
+  const [activeTab, setActiveTab] = useState<LeaderboardTab>("today");
+  const [visibleLimitByTab, setVisibleLimitByTab] = useState<
+    Record<LeaderboardTab, number>
+  >({
+    today: TRACKED_TRADERS_PAGE_SIZE,
+    weekly: TRACKED_TRADERS_PAGE_SIZE,
   });
   const copyStats = useMemo(
     () => buildCopyStats(traders, decisions, paperTrades),
     [traders, decisions, paperTrades],
   );
-  const sortedTraders = useMemo(
-    () =>
-      traders
-        .filter((trader) => trader.activity_source !== 'handle' && traderMatchesPeriod(trader, activeTab))
-        .sort((a, b) => (b.profit_usd || 0) - (a.profit_usd || 0)),
-    [activeTab, traders],
-  );
-  const totalPages = Math.max(1, Math.ceil(sortedTraders.length / TRACKED_TRADERS_PAGE_SIZE));
-  const currentPage = Math.min(pageByTab[activeTab], totalPages);
-  const pagedTraders = sortedTraders.slice(
-    (currentPage - 1) * TRACKED_TRADERS_PAGE_SIZE,
-    currentPage * TRACKED_TRADERS_PAGE_SIZE,
-  );
+  const sortedTraders = useMemo(() => {
+    const periodMatches = traders.filter((trader) =>
+      traderMatchesPeriod(trader, activeTab),
+    );
+    const rows = periodMatches.length > 0 ? periodMatches : traders;
+    return [...rows].sort((a, b) => (b.profit_usd || 0) - (a.profit_usd || 0));
+  }, [activeTab, traders]);
+  const visibleLimit =
+    visibleLimitByTab[activeTab] || TRACKED_TRADERS_PAGE_SIZE;
+  const pagedTraders = sortedTraders.slice(0, visibleLimit);
 
   const selectTab = (tab: LeaderboardTab) => {
     setActiveTab(tab);
-    setPageByTab((current) => ({ ...current, [tab]: current[tab] || 1 }));
+    setVisibleLimitByTab((current) => ({
+      ...current,
+      [tab]: current[tab] || TRACKED_TRADERS_PAGE_SIZE,
+    }));
   };
-  const setPage = (page: number) =>
-    setPageByTab((current) => ({ ...current, [activeTab]: page }));
+  const showMore = () =>
+    setVisibleLimitByTab((current) => ({
+      ...current,
+      [activeTab]:
+        (current[activeTab] || TRACKED_TRADERS_PAGE_SIZE) +
+        TRACKED_TRADERS_PAGE_SIZE,
+    }));
+  const showFirstPage = () =>
+    setVisibleLimitByTab((current) => ({
+      ...current,
+      [activeTab]: TRACKED_TRADERS_PAGE_SIZE,
+    }));
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm font-medium text-slate-600">
-          {(['today', 'weekly'] as LeaderboardTab[]).map((tab) => (
+          {(["today", "weekly"] as LeaderboardTab[]).map((tab) => (
             <button
               key={tab}
               type="button"
               onClick={() => selectTab(tab)}
               className={`rounded-full px-4 py-2 capitalize transition ${
-                activeTab === tab ? 'bg-white text-slate-950 shadow-sm' : 'hover:text-slate-950'
+                activeTab === tab
+                  ? "bg-white text-slate-950 shadow-sm"
+                  : "hover:text-slate-950"
               }`}
             >
               {tab} profit
@@ -179,8 +223,8 @@ export function TrackedTradersTable({
           ))}
         </div>
         <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-          Showing {pagedTraders.length ? (currentPage - 1) * TRACKED_TRADERS_PAGE_SIZE + 1 : 0}-
-          {Math.min(currentPage * TRACKED_TRADERS_PAGE_SIZE, sortedTraders.length)} of{' '}
+          Showing {pagedTraders.length ? 1 : 0}-
+          {Math.min(visibleLimit, sortedTraders.length)} of{" "}
           {sortedTraders.length}
         </div>
       </div>
@@ -201,7 +245,10 @@ export function TrackedTradersTable({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {pagedTraders.length === 0 ? (
-              <EmptyState colSpan={9} message="Start the bot to load tracked traders." />
+              <EmptyState
+                colSpan={9}
+                message="No tracked traders match this view yet. Check Settings if tracked accounts are configured."
+              />
             ) : (
               pagedTraders.map((trader) => {
                 const profileUrl = normalizePolymarketProfileUrl(trader);
@@ -223,23 +270,41 @@ export function TrackedTradersTable({
                           {trader.name}
                         </a>
                       ) : (
-                        <div className="font-medium text-slate-950">{trader.name}</div>
+                        <div className="font-medium text-slate-950">
+                          {trader.name}
+                        </div>
                       )}
-                      <div className="mt-1 text-xs text-slate-500">{trader.address || trader.id}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {trader.address || trader.id}
+                      </div>
                       <div className="mt-1 text-xs font-medium text-emerald-700">
                         Profit {formatMoney(trader.profit_usd || 0)}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{stats.tradesCopied}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {stats.tradesCopied}
+                    </td>
                     <td className="px-4 py-3 text-slate-700">
                       {formatMoney(stats.tradesCopiedAmount)}
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{trader.trades_1h}</td>
-                    <td className="px-4 py-3 text-slate-700">{trader.trades_6h}</td>
-                    <td className="px-4 py-3 text-slate-700">{trader.trades_24h}</td>
-                    <td className="px-4 py-3 text-slate-700">{formatTs(trader.last_trade_at)}</td>
-                    <td className="px-4 py-3 text-slate-700">{trader.last_trade_age || '—'}</td>
-                    <td className="px-4 py-3 text-slate-700">{formatMoney(trader.volume_24h)}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {trader.trades_1h}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {trader.trades_6h}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {trader.trades_24h}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {formatTs(trader.last_trade_at)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {trader.last_trade_age || "—"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {formatMoney(trader.volume_24h)}
+                    </td>
                   </tr>
                 );
               })
@@ -247,32 +312,39 @@ export function TrackedTradersTable({
           </tbody>
         </table>
       </div>
-      <div className="flex items-center justify-end gap-2 text-sm">
-        <button
-          type="button"
-          disabled={currentPage <= 1}
-          onClick={() => setPage(currentPage - 1)}
-          className="rounded-full border border-slate-200 px-3 py-1.5 text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Previous
-        </button>
-        <span className="text-slate-500">
-          Page {currentPage} of {totalPages}
-        </span>
-        <button
-          type="button"
-          disabled={currentPage >= totalPages}
-          onClick={() => setPage(currentPage + 1)}
-          className="rounded-full border border-slate-200 px-3 py-1.5 text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Next
-        </button>
-      </div>
+      {sortedTraders.length > TRACKED_TRADERS_PAGE_SIZE ? (
+        <div className="flex items-center justify-end gap-3 text-sm text-slate-500">
+          <span>
+            Showing {pagedTraders.length} of {sortedTraders.length}
+          </span>
+          {pagedTraders.length < sortedTraders.length ? (
+            <button
+              type="button"
+              onClick={showMore}
+              className="rounded-full border border-slate-200 px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
+            >
+              See more
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={showFirstPage}
+              className="rounded-full border border-slate-200 px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Show first {TRACKED_TRADERS_PAGE_SIZE}
+            </button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-export function ManualWalletsTable({ wallets }: { wallets: PolymarketTrader[] }) {
+export function ManualWalletsTable({
+  wallets,
+}: {
+  wallets: PolymarketTrader[];
+}) {
   return (
     <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
       <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
@@ -288,19 +360,32 @@ export function ManualWalletsTable({ wallets }: { wallets: PolymarketTrader[] })
         </thead>
         <tbody className="divide-y divide-slate-100">
           {wallets.length === 0 ? (
-            <EmptyState colSpan={6} message="No manual tracked wallets configured." />
+            <EmptyState
+              colSpan={6}
+              message="No manual tracked wallets configured."
+            />
           ) : (
             wallets.map((wallet) => (
               <tr key={wallet.id} className="align-top">
                 <td className="px-4 py-3">
-                  <div className="font-medium text-slate-950">{wallet.address || wallet.id}</div>
-                  <div className="mt-1 text-xs text-slate-500">{wallet.name}</div>
+                  <div className="font-medium text-slate-950">
+                    {wallet.address || wallet.id}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {wallet.name}
+                  </div>
                 </td>
-                <td className="px-4 py-3 text-slate-700">{wallet.source_reason}</td>
-                <td className="px-4 py-3 text-slate-700">{formatTs(wallet.last_trade_at)}</td>
+                <td className="px-4 py-3 text-slate-700">
+                  {wallet.source_reason}
+                </td>
+                <td className="px-4 py-3 text-slate-700">
+                  {formatTs(wallet.last_trade_at)}
+                </td>
                 <td className="px-4 py-3 text-slate-700">{wallet.trades_1h}</td>
                 <td className="px-4 py-3 text-slate-700">{wallet.trades_6h}</td>
-                <td className="px-4 py-3 text-slate-700">{wallet.trades_24h}</td>
+                <td className="px-4 py-3 text-slate-700">
+                  {wallet.trades_24h}
+                </td>
               </tr>
             ))
           )}
@@ -329,7 +414,7 @@ export function TrackedAccountsTable({
   onSave,
   onDelete,
 }: {
-  accounts: import('@/types/api').PolymarketTrackedAccount[];
+  accounts: import("@/types/api").PolymarketTrackedAccount[];
   drafts: Record<string, TrackedAccountDraft>;
   newDraft: TrackedAccountDraft;
   busyId: string | null;
@@ -361,19 +446,30 @@ export function TrackedAccountsTable({
               copy_trade_usd: account.copy_trade_usd,
               enabled: account.enabled,
             };
-            const thresholdUsd = draft.net_worth_usd * (draft.threshold_percent / 100);
+            const thresholdUsd =
+              draft.net_worth_usd * (draft.threshold_percent / 100);
 
             return (
               <tr key={account.id} className="align-top">
                 <td className="px-4 py-3">
                   <input
                     value={draft.target}
-                    onChange={(event) => onDraftChange(account.id, { ...draft, target: event.target.value })}
+                    onChange={(event) =>
+                      onDraftChange(account.id, {
+                        ...draft,
+                        target: event.target.value,
+                      })
+                    }
                     className="h-9 w-64 rounded-full border border-slate-300 px-3 text-sm outline-none focus:border-sky-400"
                   />
                   <div className="mt-1 text-xs text-slate-500">
                     {account.profile_url ? (
-                      <a href={account.profile_url} target="_blank" rel="noreferrer" className="underline decoration-slate-300 underline-offset-4 hover:text-sky-700">
+                      <a
+                        href={account.profile_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline decoration-slate-300 underline-offset-4 hover:text-sky-700"
+                      >
                         {account.profile_url}
                       </a>
                     ) : (
@@ -385,7 +481,12 @@ export function TrackedAccountsTable({
                   <input
                     type="checkbox"
                     checked={draft.enabled}
-                    onChange={(event) => onDraftChange(account.id, { ...draft, enabled: event.target.checked })}
+                    onChange={(event) =>
+                      onDraftChange(account.id, {
+                        ...draft,
+                        enabled: event.target.checked,
+                      })
+                    }
                   />
                 </td>
                 <td className="px-4 py-3">
@@ -394,15 +495,25 @@ export function TrackedAccountsTable({
                     min="0"
                     step="1"
                     value={draft.net_worth_usd}
-                    onChange={(event) => onDraftChange(account.id, { ...draft, net_worth_usd: Number(event.target.value) })}
+                    onChange={(event) =>
+                      onDraftChange(account.id, {
+                        ...draft,
+                        net_worth_usd: Number(event.target.value),
+                      })
+                    }
                     className="h-9 w-28 rounded-full border border-slate-300 px-3 text-sm outline-none focus:border-sky-400"
                   />
                   <div className="mt-1 max-w-56 text-xs leading-5 text-slate-500">
                     {netWorthBreakdown(account)}
-                    {account.net_worth_checked_at ? ` · ${formatTs(account.net_worth_checked_at)}` : ''}
+                    {account.net_worth_checked_at
+                      ? ` · ${formatTs(account.net_worth_checked_at)}`
+                      : ""}
                   </div>
                   {account.proxy_wallet ? (
-                    <div className="mt-0.5 max-w-56 truncate text-[11px] text-slate-400" title={account.proxy_wallet}>
+                    <div
+                      className="mt-0.5 max-w-56 truncate text-[11px] text-slate-400"
+                      title={account.proxy_wallet}
+                    >
                       wallet {account.proxy_wallet}
                     </div>
                   ) : null}
@@ -415,10 +526,17 @@ export function TrackedAccountsTable({
                       max="100"
                       step="0.1"
                       value={draft.threshold_percent}
-                      onChange={(event) => onDraftChange(account.id, { ...draft, threshold_percent: Number(event.target.value) })}
+                      onChange={(event) =>
+                        onDraftChange(account.id, {
+                          ...draft,
+                          threshold_percent: Number(event.target.value),
+                        })
+                      }
                       className="h-9 w-24 rounded-full border border-slate-300 px-3 text-sm outline-none focus:border-sky-400"
                     />
-                    <span className="text-xs text-slate-500">% ≈ {formatMoney(thresholdUsd)}</span>
+                    <span className="text-xs text-slate-500">
+                      % ≈ {formatMoney(thresholdUsd)}
+                    </span>
                   </div>
                 </td>
                 <td className="px-4 py-3">
@@ -428,7 +546,12 @@ export function TrackedAccountsTable({
                     max="1"
                     step="0.01"
                     value={draft.copy_trade_usd}
-                    onChange={(event) => onDraftChange(account.id, { ...draft, copy_trade_usd: Number(event.target.value) })}
+                    onChange={(event) =>
+                      onDraftChange(account.id, {
+                        ...draft,
+                        copy_trade_usd: Number(event.target.value),
+                      })
+                    }
                     className="h-9 w-24 rounded-full border border-slate-300 px-3 text-sm outline-none focus:border-sky-400"
                   />
                 </td>
@@ -459,7 +582,9 @@ export function TrackedAccountsTable({
             <td className="px-4 py-3">
               <input
                 value={newDraft.target}
-                onChange={(event) => onNewDraftChange({ ...newDraft, target: event.target.value })}
+                onChange={(event) =>
+                  onNewDraftChange({ ...newDraft, target: event.target.value })
+                }
                 placeholder="https://polymarket.com/@handle or 0x..."
                 className="h-9 w-64 rounded-full border border-slate-300 px-3 text-sm outline-none focus:border-sky-400"
               />
@@ -468,7 +593,12 @@ export function TrackedAccountsTable({
               <input
                 type="checkbox"
                 checked={newDraft.enabled}
-                onChange={(event) => onNewDraftChange({ ...newDraft, enabled: event.target.checked })}
+                onChange={(event) =>
+                  onNewDraftChange({
+                    ...newDraft,
+                    enabled: event.target.checked,
+                  })
+                }
               />
             </td>
             <td className="px-4 py-3">
@@ -477,7 +607,12 @@ export function TrackedAccountsTable({
                 min="0"
                 step="1"
                 value={newDraft.net_worth_usd}
-                onChange={(event) => onNewDraftChange({ ...newDraft, net_worth_usd: Number(event.target.value) })}
+                onChange={(event) =>
+                  onNewDraftChange({
+                    ...newDraft,
+                    net_worth_usd: Number(event.target.value),
+                  })
+                }
                 className="h-9 w-28 rounded-full border border-slate-300 px-3 text-sm outline-none focus:border-sky-400"
               />
             </td>
@@ -488,7 +623,12 @@ export function TrackedAccountsTable({
                 max="100"
                 step="0.1"
                 value={newDraft.threshold_percent}
-                onChange={(event) => onNewDraftChange({ ...newDraft, threshold_percent: Number(event.target.value) })}
+                onChange={(event) =>
+                  onNewDraftChange({
+                    ...newDraft,
+                    threshold_percent: Number(event.target.value),
+                  })
+                }
                 className="h-9 w-24 rounded-full border border-slate-300 px-3 text-sm outline-none focus:border-sky-400"
               />
             </td>
@@ -499,14 +639,19 @@ export function TrackedAccountsTable({
                 max="1"
                 step="0.01"
                 value={newDraft.copy_trade_usd}
-                onChange={(event) => onNewDraftChange({ ...newDraft, copy_trade_usd: Number(event.target.value) })}
+                onChange={(event) =>
+                  onNewDraftChange({
+                    ...newDraft,
+                    copy_trade_usd: Number(event.target.value),
+                  })
+                }
                 className="h-9 w-24 rounded-full border border-slate-300 px-3 text-sm outline-none focus:border-sky-400"
               />
             </td>
             <td className="px-4 py-3">
               <button
                 type="button"
-                disabled={!newDraft.target.trim() || busyId === 'new'}
+                disabled={!newDraft.target.trim() || busyId === "new"}
                 onClick={onAdd}
                 className="rounded-full bg-sky-300 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-sky-200 disabled:bg-slate-200 disabled:text-slate-500"
               >

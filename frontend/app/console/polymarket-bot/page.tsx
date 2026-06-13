@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Activity, AlertTriangle, ExternalLink, Info, Loader2, TrendingUp, Wallet, X } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  ExternalLink,
+  Info,
+  Loader2,
+  TrendingUp,
+  Wallet,
+  X,
+} from "lucide-react";
 
 import {
   Card,
@@ -119,7 +128,6 @@ function formatRuntime(from?: string | null, to?: string | null) {
   return `${seconds}s`;
 }
 
-
 function parseUsdFromBalanceMessage(message?: string | null) {
   if (!message) return 0;
   const match = message.match(/(-?\d[\d,]*(?:\.\d+)?)/);
@@ -127,7 +135,10 @@ function parseUsdFromBalanceMessage(message?: string | null) {
   return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
 }
 
-function isBullpenBalanceUnrefreshed(message?: string | null, status?: string | null) {
+function isBullpenBalanceUnrefreshed(
+  message?: string | null,
+  status?: string | null,
+) {
   const normalized = `${message || ""} ${status || ""}`.toLowerCase();
   return (
     normalized.includes("balance has not been refreshed") ||
@@ -136,7 +147,10 @@ function isBullpenBalanceUnrefreshed(message?: string | null, status?: string | 
   );
 }
 
-function isBullpenLoginRequired(message?: string | null, status?: string | null) {
+function isBullpenLoginRequired(
+  message?: string | null,
+  status?: string | null,
+) {
   const normalized = `${message || ""} ${status || ""}`.toLowerCase();
   return (
     normalized.includes("bullpen login required") ||
@@ -184,7 +198,10 @@ function getNetWorthMissingReason(
   account?: PolymarketBotState["tracked_accounts"][number],
 ) {
   if (!account) return "No matching tracked account found";
-  if (account.net_worth_source === "pending_refresh" || !account.net_worth_checked_at) {
+  if (
+    account.net_worth_source === "pending_refresh" ||
+    !account.net_worth_checked_at
+  ) {
     return "Net worth refresh pending";
   }
   return trade.trader_net_worth_usd || account.net_worth_usd
@@ -196,7 +213,10 @@ function getPositionsValueMissingReason(
   account?: PolymarketBotState["tracked_accounts"][number],
 ) {
   if (!account) return "No matching tracked account found";
-  if (account.net_worth_source === "pending_refresh" || !account.net_worth_checked_at) {
+  if (
+    account.net_worth_source === "pending_refresh" ||
+    !account.net_worth_checked_at
+  ) {
     return "Positions refresh pending";
   }
   return account.positions_value_usd == null
@@ -212,7 +232,10 @@ function isBelowTrackedNetWorthThreshold(
   if (!account) return false;
   const netWorth = getTradeNetWorth(trade, account);
   if (netWorth <= 0) return true;
-  return (trade.trader_invested_usd || 0) < netWorth * (account.threshold_percent / 100);
+  return (
+    (trade.trader_invested_usd || 0) <
+    netWorth * (account.threshold_percent / 100)
+  );
 }
 
 function formatPercent(value: number) {
@@ -238,7 +261,7 @@ function formatCompactMoney(value: number) {
 
 const BULLPEN_ACCOUNT_URL =
   "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
-
+const TABLE_PAGE_SIZE = 20;
 
 function formatRelativePollTime(iso?: string | null) {
   if (!iso) return "waiting for first poll";
@@ -298,7 +321,6 @@ function getLiveParsingStatusMessage(state: PolymarketBotState) {
   return `Reading trades continuously · last poll ${lastPoll} · found ${found}, processed ${afterFilters}, queued ${proposals}, skipped ${skipped}.`;
 }
 
-
 type MissedTradeGroup = {
   key: string;
   missedAt: string;
@@ -356,7 +378,8 @@ type RedeemedTradeRow = {
 };
 
 function isRedeemedPaperTrade(trade: PolymarketPaperTrade) {
-  const searchable = `${trade.reason || ""} ${trade.status || ""}`.toLowerCase();
+  const searchable =
+    `${trade.reason || ""} ${trade.status || ""}`.toLowerCase();
   return (
     trade.status === "executed" &&
     (trade.side === "SELL" ||
@@ -411,7 +434,9 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       shares: Math.abs(trade.shares),
       price: trade.price,
       profitLoss:
-        trade.side === "SELL" ? trade.amount : trade.shares * trade.price - trade.amount,
+        trade.side === "SELL"
+          ? trade.amount
+          : trade.shares * trade.price - trade.amount,
       status: trade.status,
       source: trade.command === "sell" ? "Live sell/redeem" : "Live execution",
       detail: trade.reason || trade.command || "Redeemed live trade",
@@ -452,7 +477,6 @@ function getTradeStatusReason(trade: PolymarketSourceTradeDecision) {
   return trade.status;
 }
 
-
 function summarizeFailureReason(reason: string, maxLength = 72) {
   const cleaned = reason.replace(/\s+/g, " ").trim();
   if (!cleaned) return "No reason provided";
@@ -479,7 +503,8 @@ function getCopiedEventStatus(event: CopiedEventGroup) {
 }
 
 function isInsufficientBalanceMiss(trade: PolymarketSourceTradeDecision) {
-  const text = `${trade.failure_reason || ""} ${trade.reason || ""}`.toLowerCase();
+  const text =
+    `${trade.failure_reason || ""} ${trade.reason || ""}`.toLowerCase();
   return (
     trade.status === "failed" &&
     (text.includes("insufficient") ||
@@ -490,7 +515,9 @@ function isInsufficientBalanceMiss(trade: PolymarketSourceTradeDecision) {
 }
 
 function getMissedTradeKey(trade: PolymarketSourceTradeDecision) {
-  return [trade.market_id, trade.market_title, trade.side, trade.outcome].join("::");
+  return [trade.market_id, trade.market_title, trade.side, trade.outcome].join(
+    "::",
+  );
 }
 
 function buildMissedTradeGroups(trades: PolymarketSourceTradeDecision[]) {
@@ -499,7 +526,8 @@ function buildMissedTradeGroups(trades: PolymarketSourceTradeDecision[]) {
   for (const trade of trades.filter(isInsufficientBalanceMiss)) {
     const key = getMissedTradeKey(trade);
     const missedAt = trade.executed_at || trade.updated_at || trade.proposed_at;
-    const reason = trade.failure_reason || trade.reason || "Insufficient balance";
+    const reason =
+      trade.failure_reason || trade.reason || "Insufficient balance";
     const existing = groups.get(key);
 
     if (!existing) {
@@ -560,31 +588,79 @@ function buildCopiedEventGroups(trades: PolymarketSourceTradeDecision[]) {
 
     existing.amount += trade.amount;
     existing.traders.push(trade);
-    const tradeTimestamp = trade.executed_at || trade.updated_at || trade.proposed_at;
-    if (new Date(tradeTimestamp).getTime() > new Date(existing.copiedAt).getTime()) {
+    const tradeTimestamp =
+      trade.executed_at || trade.updated_at || trade.proposed_at;
+    if (
+      new Date(tradeTimestamp).getTime() > new Date(existing.copiedAt).getTime()
+    ) {
       existing.copiedAt = tradeTimestamp;
       existing.currentPrice = trade.price;
     }
     existing.eventEndAt = existing.eventEndAt || trade.event_end_at;
-    existing.status = existing.traders.some((item) => item.status === "executed")
+    existing.status = existing.traders.some(
+      (item) => item.status === "executed",
+    )
       ? "executed"
       : existing.status;
-    existing.averagePrice = existing.amount > 0
-      ? existing.traders.reduce(
-          (total, item) => total + item.amount * item.price,
-          0,
-        ) / existing.amount
-      : existing.averagePrice;
+    existing.averagePrice =
+      existing.amount > 0
+        ? existing.traders.reduce(
+            (total, item) => total + item.amount * item.price,
+            0,
+          ) / existing.amount
+        : existing.averagePrice;
     existing.currentPnl = existing.traders.reduce((total, item) => {
       const markValue = item.shares * existing.currentPrice;
-      return total + (
-        item.side === "BUY" ? markValue - item.amount : item.amount - markValue
+      return (
+        total +
+        (item.side === "BUY"
+          ? markValue - item.amount
+          : item.amount - markValue)
       );
     }, 0);
   }
 
   return Array.from(groups.values()).sort(
     (a, b) => new Date(b.copiedAt).getTime() - new Date(a.copiedAt).getTime(),
+  );
+}
+
+function ShowMoreRowsControl({
+  total,
+  visible,
+  onShowMore,
+  onShowLess,
+}: {
+  total: number;
+  visible: number;
+  onShowMore: () => void;
+  onShowLess: () => void;
+}) {
+  if (total <= TABLE_PAGE_SIZE) return null;
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-end gap-3 text-sm text-slate-500">
+      <span>
+        Showing {visible} of {total}
+      </span>
+      {visible < total ? (
+        <button
+          type="button"
+          className="rounded-full border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+          onClick={onShowMore}
+        >
+          See more
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="rounded-full border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+          onClick={onShowLess}
+        >
+          Show first {TABLE_PAGE_SIZE}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -623,6 +699,8 @@ export default function PolymarketBotPage() {
   const [liveTradeLimitDraft, setLiveTradeLimitDraft] = useState("");
   const [traderInvestedThresholdDraft, setTraderInvestedThresholdDraft] =
     useState("");
+  const [copiedVisibleLimit, setCopiedVisibleLimit] = useState(TABLE_PAGE_SIZE);
+  const [missedVisibleLimit, setMissedVisibleLimit] = useState(TABLE_PAGE_SIZE);
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
   useEffect(() => {
@@ -653,7 +731,9 @@ export default function PolymarketBotPage() {
             ]),
           ),
         }));
-        setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
+        setLiveTradeLimitDraft(
+          String(nextState.config.max_live_trades_per_day),
+        );
         setTraderInvestedThresholdDraft(
           String(nextState.config.trader_invested_threshold_usd),
         );
@@ -709,7 +789,6 @@ export default function PolymarketBotPage() {
   function handleBalanceRefresh() {
     void runAction("balance", () => apiService.polymarketLiveBalanceRefresh());
   }
-
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
     setState(nextState);
@@ -860,10 +939,11 @@ export default function PolymarketBotPage() {
   const executedLiveTrades = thresholdEligibleRecentDecisions.filter((trade) =>
     copiedActiveStatuses.has(trade.status),
   );
-  const copiedPositionTrades = thresholdEligibleRecentDecisions.filter((trade) =>
-    copiedPositionStatus === "active"
-      ? copiedActiveStatuses.has(trade.status)
-      : !copiedActiveStatuses.has(trade.status),
+  const copiedPositionTrades = thresholdEligibleRecentDecisions.filter(
+    (trade) =>
+      copiedPositionStatus === "active"
+        ? copiedActiveStatuses.has(trade.status)
+        : !copiedActiveStatuses.has(trade.status),
   );
   const copiedHistoryTrades = thresholdEligibleRecentDecisions;
   const copiedHistoryFilterOptions: {
@@ -898,13 +978,19 @@ export default function PolymarketBotPage() {
       ? copiedPositionTrades
       : copiedFilteredHistoryTrades;
   const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades);
+  const visibleCopiedEventGroups = copiedEventGroups.slice(
+    0,
+    copiedVisibleLimit,
+  );
   const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
   const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
+  const visibleMissedTradeGroups = missedTradeGroups.slice(
+    0,
+    missedVisibleLimit,
+  );
   const redeemedTradeRows = buildRedeemedTradeRows(state);
   const copiedPositionsRefreshSeconds = 5;
-  const visibleTrackedTraders = state.tracked_traders.filter(
-    (trader) => trader.activity_source !== "handle",
-  );
+  const visibleTrackedTraders = state.tracked_traders;
 
   const botStatusItems: MetricItem[] = [
     {
@@ -1208,8 +1294,9 @@ export default function PolymarketBotPage() {
                   Bullpen login is required
                 </h2>
                 <p className="mt-2 max-w-3xl text-base font-semibold text-amber-900 md:text-lg">
-                  The bot cannot refresh balance or place Bullpen-backed real-money
-                  trades until the Bullpen session is restored. Current status: {state.live.balance.message}
+                  The bot cannot refresh balance or place Bullpen-backed
+                  real-money trades until the Bullpen session is restored.
+                  Current status: {state.live.balance.message}
                 </p>
               </div>
             </div>
@@ -1226,24 +1313,40 @@ export default function PolymarketBotPage() {
           </div>
           <ol className="mt-5 grid gap-3 text-sm font-semibold text-amber-950 md:grid-cols-2 xl:grid-cols-5">
             <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">1</span>
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                1
+              </span>
               Open the AWS EC2 terminal for the bot server.
             </li>
             <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">2</span>
-              Run <code className="rounded bg-amber-100 px-1.5 py-0.5">sudo -u investor -H bullpen login</code>.
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                2
+              </span>
+              Run{" "}
+              <code className="rounded bg-amber-100 px-1.5 py-0.5">
+                sudo -u investor -H bullpen login
+              </code>
+              .
             </li>
             <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">3</span>
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                3
+              </span>
               Scan the QR code from your mobile device.
             </li>
             <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">4</span>
-              Sign in using <span className="break-all">tarunindian007@gmail.com</span>.
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                4
+              </span>
+              Sign in using{" "}
+              <span className="break-all">tarunindian007@gmail.com</span>.
             </li>
             <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">5</span>
-              After login succeeds, use Settings → Refresh balance to update the Bullpen login status.
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                5
+              </span>
+              After login succeeds, use Settings → Refresh balance to update the
+              Bullpen login status.
             </li>
           </ol>
         </div>
@@ -1273,15 +1376,20 @@ export default function PolymarketBotPage() {
               {bullpenBalanceUnrefreshed ? (
                 <div className="mt-3 rounded-2xl border border-amber-300/40 bg-amber-400/10 px-4 py-3 text-xs leading-5 text-amber-100">
                   <p className="font-semibold text-amber-50">
-                    Balance has not been refreshed because the backend has not completed a successful Bullpen balance check for the current session.
+                    Balance has not been refreshed because the backend has not
+                    completed a successful Bullpen balance check for the current
+                    session.
                   </p>
                   <p className="mt-1 text-amber-100/90">
-                    Click Refresh Balance to ask the backend to refresh now. If the refresh still reports login required, open Bullpen/AWS EC2, run the Bullpen login, then refresh again.
+                    Click Refresh Balance to ask the backend to refresh now. If
+                    the refresh still reports login required, open Bullpen/AWS
+                    EC2, run the Bullpen login, then refresh again.
                   </p>
                 </div>
               ) : (
                 <p className="mt-1 text-xs text-slate-400">
-                  {state.live.balance.message || "Bullpen balance has not refreshed yet."}
+                  {state.live.balance.message ||
+                    "Bullpen balance has not refreshed yet."}
                 </p>
               )}
               <Button
@@ -1292,43 +1400,60 @@ export default function PolymarketBotPage() {
                 onClick={handleBalanceRefresh}
               >
                 {pendingAction === "balance" ? (
-                  <Loader2 className="mr-2 size-3.5 animate-spin" aria-hidden="true" />
+                  <Loader2
+                    className="mr-2 size-3.5 animate-spin"
+                    aria-hidden="true"
+                  />
                 ) : null}
                 Refresh Balance
               </Button>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[700px] lg:grid-cols-4 xl:grid-cols-5">
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Cash</div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                  Cash
+                </div>
                 <div className="mt-2 text-xl font-semibold">
                   {formatMoney(bullpenCashUsd)}
                 </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">PnL</div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                  PnL
+                </div>
                 <div className="mt-2 text-xl font-semibold">
                   {formatMoney(bullpenPnlUsd)}
                 </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">uPnL</div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                  uPnL
+                </div>
                 <div className="mt-2 text-xl font-semibold">
                   {bullpenUpnlUsd == null ? "—" : formatMoney(bullpenUpnlUsd)}
                 </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Active Trades</div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                  Active Trades
+                </div>
                 <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
                   <Activity className="size-4 text-sky-300" />
                   {activeCopiedEventGroups.length}
                 </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Live Trades Today</div>
-                <div className="mt-2 text-xl font-semibold">{state.live.live_trades_today}</div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                  Live Trades Today
+                </div>
+                <div className="mt-2 text-xl font-semibold">
+                  {state.live.live_trades_today}
+                </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Copied Trades</div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                  Copied Trades
+                </div>
                 <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
                   <TrendingUp className="size-4 text-emerald-300" />
                   {executedLiveTrades.length}
@@ -1342,10 +1467,11 @@ export default function PolymarketBotPage() {
       {activeScreen === "main" ? (
         <>
           <div className="flex flex-wrap items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-
             <div className="flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
               <span className="font-medium">Max live trades/day:</span>
-              <span className="font-semibold text-slate-950">{state.config.max_live_trades_per_day}</span>
+              <span className="font-semibold text-slate-950">
+                {state.config.max_live_trades_per_day}
+              </span>
               <input
                 className="h-8 w-20 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
                 type="number"
@@ -1460,14 +1586,11 @@ export default function PolymarketBotPage() {
             </div>
           </div>
 
-
-
           {stoppedWarning ? (
             <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
               {stoppedWarning}
             </div>
           ) : null}
-
 
           <Card className="border border-slate-200 bg-white py-6">
             <CardHeader className="pb-0">
@@ -1564,7 +1687,8 @@ export default function PolymarketBotPage() {
                       <th className="px-4 py-3">Side</th>
                       <th className="px-4 py-3">Outcome</th>
                       <th className="px-4 py-3">Amount</th>
-                      {copiedPositionsTab === "positions" && copiedPositionStatus === "active" ? (
+                      {copiedPositionsTab === "positions" &&
+                      copiedPositionStatus === "active" ? (
                         <th className="px-4 py-3">
                           Current PnL
                           <span className="mt-1 block text-[10px] normal-case tracking-normal text-slate-400">
@@ -1591,93 +1715,128 @@ export default function PolymarketBotPage() {
                           No copied Bullpen rows for this tab yet.
                         </td>
                       </tr>
-                    ) : copiedEventGroups.map((event) => {
-                      const hasMultipleTraders = event.traders.length > 1;
-                      const failedTrades = getCopiedEventFailureTrades(event);
-                      const failureSummary = getCopiedEventFailureSummary(event);
-                      return (
-                        <tr key={event.key} className="align-top">
-                          <td className="px-4 py-3 text-slate-700">{formatTs(event.copiedAt)}</td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {hasMultipleTraders ? (
-                              <button
-                                className="font-medium text-sky-700 underline underline-offset-2"
-                                onClick={() => setSelectedCopiedEvent(event)}
-                              >
-                                multiple
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-900"
-                                onClick={() => setSelectedCopiedEvent(event)}
-                              >
-                                {getTraderDisplayName(event.traders[0])}
-                              </button>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            <div className="flex items-start gap-2">
-                              <div>
-                                <div className="font-medium text-slate-950">{event.marketTitle}</div>
-                                <div className="mt-1 text-xs text-slate-500">{event.marketId}</div>
-                              </div>
-                              <button
-                                className="mt-0.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                                aria-label={`Show copied traders for ${event.marketTitle}`}
-                                onClick={() => setSelectedCopiedEvent(event)}
-                              >
-                                <Info className="size-4" />
-                              </button>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatEventEnd(
-                              event.eventEndAt,
-                              `${event.marketId} ${event.marketTitle}`,
-                            )}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-slate-800">{event.side}</td>
-                          <td className="px-4 py-3 text-slate-700">{event.outcome}</td>
-                          <td className="px-4 py-3 text-slate-700">{formatMoney(event.amount)}</td>
-                          {copiedPositionsTab === "positions" && copiedPositionStatus === "active" ? (
-                            <td
-                              className={`px-4 py-3 font-semibold ${
-                                event.currentPnl >= 0
-                                  ? "text-emerald-600"
-                                  : "text-rose-600"
-                              }`}
-                            >
-                              {formatMoney(event.currentPnl)}
+                    ) : (
+                      visibleCopiedEventGroups.map((event) => {
+                        const hasMultipleTraders = event.traders.length > 1;
+                        const failedTrades = getCopiedEventFailureTrades(event);
+                        const failureSummary =
+                          getCopiedEventFailureSummary(event);
+                        return (
+                          <tr key={event.key} className="align-top">
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatTs(event.copiedAt)}
                             </td>
-                          ) : null}
-                          <td className="px-4 py-3 text-slate-700">{formatMoney(event.averagePrice, 4)}</td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {failureSummary ? (
-                              <div className="flex max-w-[18rem] items-start gap-2">
-                                <span className="leading-5 text-rose-700">failed ({failureSummary})</span>
+                            <td className="px-4 py-3 text-slate-700">
+                              {hasMultipleTraders ? (
+                                <button
+                                  className="font-medium text-sky-700 underline underline-offset-2"
+                                  onClick={() => setSelectedCopiedEvent(event)}
+                                >
+                                  multiple
+                                </button>
+                              ) : (
                                 <button
                                   type="button"
-                                  className="mt-0.5 rounded-full p-1 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
-                                  aria-label={`Show failure details for ${event.marketTitle}`}
-                                  onClick={() => setSelectedFailedCopiedEvent(event)}
+                                  className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-900"
+                                  onClick={() => setSelectedCopiedEvent(event)}
+                                >
+                                  {getTraderDisplayName(event.traders[0])}
+                                </button>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              <div className="flex items-start gap-2">
+                                <div>
+                                  <div className="font-medium text-slate-950">
+                                    {event.marketTitle}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {event.marketId}
+                                  </div>
+                                </div>
+                                <button
+                                  className="mt-0.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                  aria-label={`Show copied traders for ${event.marketTitle}`}
+                                  onClick={() => setSelectedCopiedEvent(event)}
                                 >
                                   <Info className="size-4" />
                                 </button>
-                                {failedTrades.length > 1 ? (
-                                  <span className="mt-0.5 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">
-                                    {failedTrades.length}
-                                  </span>
-                                ) : null}
                               </div>
-                            ) : copiedPositionsTab === "positions" && copiedPositionStatus === "closed" ? getCopiedEventStatus(event) : event.status}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatEventEnd(
+                                event.eventEndAt,
+                                `${event.marketId} ${event.marketTitle}`,
+                              )}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-slate-800">
+                              {event.side}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {event.outcome}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatMoney(event.amount)}
+                            </td>
+                            {copiedPositionsTab === "positions" &&
+                            copiedPositionStatus === "active" ? (
+                              <td
+                                className={`px-4 py-3 font-semibold ${
+                                  event.currentPnl >= 0
+                                    ? "text-emerald-600"
+                                    : "text-rose-600"
+                                }`}
+                              >
+                                {formatMoney(event.currentPnl)}
+                              </td>
+                            ) : null}
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatMoney(event.averagePrice, 4)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {failureSummary ? (
+                                <div className="flex max-w-[18rem] items-start gap-2">
+                                  <span className="leading-5 text-rose-700">
+                                    failed ({failureSummary})
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="mt-0.5 rounded-full p-1 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
+                                    aria-label={`Show failure details for ${event.marketTitle}`}
+                                    onClick={() =>
+                                      setSelectedFailedCopiedEvent(event)
+                                    }
+                                  >
+                                    <Info className="size-4" />
+                                  </button>
+                                  {failedTrades.length > 1 ? (
+                                    <span className="mt-0.5 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">
+                                      {failedTrades.length}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : copiedPositionsTab === "positions" &&
+                                copiedPositionStatus === "closed" ? (
+                                getCopiedEventStatus(event)
+                              ) : (
+                                event.status
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
+              <ShowMoreRowsControl
+                total={copiedEventGroups.length}
+                visible={visibleCopiedEventGroups.length}
+                onShowMore={() =>
+                  setCopiedVisibleLimit((current) => current + TABLE_PAGE_SIZE)
+                }
+                onShowLess={() => setCopiedVisibleLimit(TABLE_PAGE_SIZE)}
+              />
             </CardContent>
           </Card>
 
@@ -1687,7 +1846,8 @@ export default function PolymarketBotPage() {
                 Redeemed Trades
               </CardTitle>
               <CardDescription>
-                Closed or redeemed Bullpen trades for the current IST day with timestamp, profit and loss, execution price, and market details.
+                Closed or redeemed Bullpen trades for the current IST day with
+                timestamp, profit and loss, execution price, and market details.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -1710,38 +1870,66 @@ export default function PolymarketBotPage() {
                   <tbody className="divide-y divide-slate-100">
                     {redeemedTradeRows.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={10}>
-                          No redeemed trades have been recorded for today in IST yet.
-                        </td>
-                      </tr>
-                    ) : redeemedTradeRows.map((trade) => (
-                      <tr key={trade.key} className="align-top">
-                        <td className="px-4 py-3 text-slate-700">{formatTs(trade.timestamp)}</td>
-                        <td className="px-4 py-3 text-slate-700">
-                          <div className="font-medium text-slate-950">{trade.marketTitle}</div>
-                          <div className="mt-1 text-xs text-slate-500">{trade.marketId}</div>
-                        </td>
-                        <td className="px-4 py-3 text-slate-700">{trade.outcome}</td>
-                        <td className="px-4 py-3 font-semibold text-slate-800">{trade.side}</td>
-                        <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
-                        <td className="px-4 py-3 text-slate-700">{trade.shares.toFixed(4)}</td>
-                        <td className="px-4 py-3 text-slate-700">{formatMoney(trade.price, 4)}</td>
                         <td
-                          className={`px-4 py-3 font-semibold ${
-                            trade.profitLoss >= 0 ? "text-emerald-600" : "text-rose-600"
-                          }`}
+                          className="px-4 py-6 text-sm text-slate-500"
+                          colSpan={10}
                         >
-                          {formatMoney(trade.profitLoss)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700">{trade.status}</td>
-                        <td className="px-4 py-3 text-slate-700">
-                          <div className="max-w-[18rem]">
-                            <div>{trade.source}</div>
-                            <div className="mt-1 text-xs text-slate-500">{trade.detail}</div>
-                          </div>
+                          No redeemed trades have been recorded for today in IST
+                          yet.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      redeemedTradeRows.map((trade) => (
+                        <tr key={trade.key} className="align-top">
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatTs(trade.timestamp)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="font-medium text-slate-950">
+                              {trade.marketTitle}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {trade.marketId}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {trade.outcome}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">
+                            {trade.side}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatMoney(trade.amount)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {trade.shares.toFixed(4)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatMoney(trade.price, 4)}
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-semibold ${
+                              trade.profitLoss >= 0
+                                ? "text-emerald-600"
+                                : "text-rose-600"
+                            }`}
+                          >
+                            {formatMoney(trade.profitLoss)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {trade.status}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="max-w-[18rem]">
+                              <div>{trade.source}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {trade.detail}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1772,41 +1960,63 @@ export default function PolymarketBotPage() {
                   <tbody className="divide-y divide-slate-100">
                     {missedTradeGroups.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={4}>
-                          No insufficient-balance missed trades found in recent decisions.
+                        <td
+                          className="px-4 py-6 text-sm text-slate-500"
+                          colSpan={4}
+                        >
+                          No insufficient-balance missed trades found in recent
+                          decisions.
                         </td>
                       </tr>
-                    ) : missedTradeGroups.map((trade) => {
-                      const hasMultipleTraders = trade.traders.length > 1;
-                      return (
-                        <tr key={trade.key} className="align-top">
-                          <td className="px-4 py-3 text-slate-700">{formatTs(trade.missedAt)}</td>
-                          <td className="px-4 py-3 text-slate-700">
-                            <button
-                              className="text-left font-medium text-slate-950 hover:text-sky-700"
-                              onClick={() => setSelectedMissedTrade(trade)}
-                            >
-                              {trade.marketTitle}
-                            </button>
-                            <div className="mt-1 text-xs text-slate-500">{trade.outcome}</div>
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-slate-800">{trade.side}</td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {hasMultipleTraders ? (
+                    ) : (
+                      visibleMissedTradeGroups.map((trade) => {
+                        const hasMultipleTraders = trade.traders.length > 1;
+                        return (
+                          <tr key={trade.key} className="align-top">
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatTs(trade.missedAt)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
                               <button
-                                className="font-medium text-sky-700 underline underline-offset-2"
+                                className="text-left font-medium text-slate-950 hover:text-sky-700"
                                 onClick={() => setSelectedMissedTrade(trade)}
                               >
-                                multiple ({trade.traders.length})
+                                {trade.marketTitle}
                               </button>
-                            ) : getTraderDisplayName(trade.traders[0])}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                              <div className="mt-1 text-xs text-slate-500">
+                                {trade.outcome}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-slate-800">
+                              {trade.side}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {hasMultipleTraders ? (
+                                <button
+                                  className="font-medium text-sky-700 underline underline-offset-2"
+                                  onClick={() => setSelectedMissedTrade(trade)}
+                                >
+                                  multiple ({trade.traders.length})
+                                </button>
+                              ) : (
+                                getTraderDisplayName(trade.traders[0])
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
+              <ShowMoreRowsControl
+                total={missedTradeGroups.length}
+                visible={visibleMissedTradeGroups.length}
+                onShowMore={() =>
+                  setMissedVisibleLimit((current) => current + TABLE_PAGE_SIZE)
+                }
+                onShowLess={() => setMissedVisibleLimit(TABLE_PAGE_SIZE)}
+              />
             </CardContent>
           </Card>
 
@@ -2071,9 +2281,6 @@ export default function PolymarketBotPage() {
         </>
       )}
 
-
-
-
       {selectedFailedCopiedEvent ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
@@ -2094,28 +2301,58 @@ export default function PolymarketBotPage() {
               <X className="size-5" />
             </button>
             <div className="pr-12">
-              <h2 className="text-lg font-semibold text-slate-950">Failed copy details</h2>
-              <p className="mt-1 text-sm text-slate-500">{selectedFailedCopiedEvent.marketTitle}</p>
+              <h2 className="text-lg font-semibold text-slate-950">
+                Failed copy details
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {selectedFailedCopiedEvent.marketTitle}
+              </p>
             </div>
             <div className="mt-5 space-y-3">
-              {getCopiedEventFailureTrades(selectedFailedCopiedEvent).map((trade) => (
-                <div key={trade.id} className="rounded-[20px] border border-rose-100 bg-rose-50/60 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                    <span className="font-semibold text-slate-950">{getTraderDisplayName(trade)}</span>
-                    <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
-                      {formatTs(trade.executed_at || trade.updated_at || trade.proposed_at)}
-                    </span>
+              {getCopiedEventFailureTrades(selectedFailedCopiedEvent).map(
+                (trade) => (
+                  <div
+                    key={trade.id}
+                    className="rounded-[20px] border border-rose-100 bg-rose-50/60 p-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className="font-semibold text-slate-950">
+                        {getTraderDisplayName(trade)}
+                      </span>
+                      <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                        {formatTs(
+                          trade.executed_at ||
+                            trade.updated_at ||
+                            trade.proposed_at,
+                        )}
+                      </span>
+                    </div>
+                    <div className="mt-3 text-sm font-medium text-rose-800">
+                      {getTradeStatusReason(trade)}
+                    </div>
+                    <dl className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                      <div>
+                        <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                          Outcome
+                        </dt>
+                        <dd>{trade.outcome}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                          Side
+                        </dt>
+                        <dd>{trade.side}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                          Amount
+                        </dt>
+                        <dd>{formatMoney(trade.amount)}</dd>
+                      </div>
+                    </dl>
                   </div>
-                  <div className="mt-3 text-sm font-medium text-rose-800">
-                    {getTradeStatusReason(trade)}
-                  </div>
-                  <dl className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
-                    <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Outcome</dt><dd>{trade.outcome}</dd></div>
-                    <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Side</dt><dd>{trade.side}</dd></div>
-                    <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Amount</dt><dd>{formatMoney(trade.amount)}</dd></div>
-                  </dl>
-                </div>
-              ))}
+                ),
+              )}
             </div>
           </div>
         </div>
@@ -2141,8 +2378,12 @@ export default function PolymarketBotPage() {
             </button>
             <div className="flex items-start justify-between gap-4 pr-12">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950">Missed trade traders</h2>
-                <p className="mt-1 text-sm text-slate-500">{selectedMissedTrade.marketTitle}</p>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  Missed trade traders
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedMissedTrade.marketTitle}
+                </p>
               </div>
             </div>
             <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200">
@@ -2158,12 +2399,22 @@ export default function PolymarketBotPage() {
                 <tbody className="divide-y divide-slate-100">
                   {selectedMissedTrade.traders.map((trade) => (
                     <tr key={trade.id}>
-                      <td className="px-4 py-3 font-medium text-slate-950">{getTraderDisplayName(trade)}</td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {formatTs(trade.executed_at || trade.updated_at || trade.proposed_at)}
+                      <td className="px-4 py-3 font-medium text-slate-950">
+                        {getTraderDisplayName(trade)}
                       </td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">{trade.side}</td>
-                      <td className="px-4 py-3 text-slate-700">{trade.failure_reason || selectedMissedTrade.reason}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {formatTs(
+                          trade.executed_at ||
+                            trade.updated_at ||
+                            trade.proposed_at,
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">
+                        {trade.side}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {trade.failure_reason || selectedMissedTrade.reason}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -2193,8 +2444,12 @@ export default function PolymarketBotPage() {
             </button>
             <div className="flex items-start justify-between gap-4 pr-12">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950">Copied traders</h2>
-                <p className="mt-1 text-sm text-slate-500">{selectedCopiedEvent.marketTitle}</p>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  Copied traders
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedCopiedEvent.marketTitle}
+                </p>
               </div>
             </div>
             <div className="mt-5 overflow-x-auto rounded-[20px] border border-slate-200">
@@ -2211,53 +2466,76 @@ export default function PolymarketBotPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {selectedCopiedEvent.traders.map((trade) => {
-                    const traderInvested = trade.trader_invested_usd || 0;
-                    const traderAccount = getTrackedAccountForTrade(
-                      trade,
-                      state.tracked_accounts,
-                    );
-                    const netWorth = getTradeNetWorth(trade, traderAccount);
-                    const positionsValue = traderAccount?.positions_value_usd;
-                    const positionsValueMissingReason =
-                      getPositionsValueMissingReason(traderAccount);
-                    const missingReason = getNetWorthMissingReason(trade, traderAccount);
-                    const netWorthPercent =
-                      netWorth > 0 ? (traderInvested / netWorth) * 100 : null;
-                    const activityUrl = getTraderActivityUrl(trade);
-                    return (
-                      <tr key={trade.id}>
-                        <td className="px-4 py-3 font-medium text-slate-950">
-                          {activityUrl ? (
-                            <a
-                              className="text-sky-700 underline underline-offset-2 hover:text-sky-900"
-                              href={activityUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {getTraderDisplayName(trade)}
-                            </a>
-                          ) : getTraderDisplayName(trade)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {formatTs(trade.executed_at || trade.updated_at || trade.proposed_at)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
-                        <td className="px-4 py-3 text-slate-700">{formatMoney(traderInvested)}</td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {positionsValue == null
-                            ? positionsValueMissingReason
-                            : formatCompactMoney(positionsValue)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {netWorth > 0 ? formatMoney(netWorth) : missingReason}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {netWorthPercent === null ? missingReason : formatPercent(netWorthPercent)}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {selectedCopiedEvent.traders
+                    .filter(
+                      (trade) =>
+                        (trade.trader_invested_usd || 0) >=
+                        state.config.trader_invested_threshold_usd,
+                    )
+                    .map((trade) => {
+                      const traderInvested = trade.trader_invested_usd || 0;
+                      const traderAccount = getTrackedAccountForTrade(
+                        trade,
+                        state.tracked_accounts,
+                      );
+                      const netWorth = getTradeNetWorth(trade, traderAccount);
+                      const positionsValue = traderAccount?.positions_value_usd;
+                      const positionsValueMissingReason =
+                        getPositionsValueMissingReason(traderAccount);
+                      const missingReason = getNetWorthMissingReason(
+                        trade,
+                        traderAccount,
+                      );
+                      const netWorthPercent =
+                        netWorth > 0 ? (traderInvested / netWorth) * 100 : null;
+                      const activityUrl = getTraderActivityUrl(trade);
+                      return (
+                        <tr key={trade.id}>
+                          <td className="px-4 py-3 font-medium text-slate-950">
+                            {activityUrl ? (
+                              <a
+                                className="text-sky-700 underline underline-offset-2 hover:text-sky-900"
+                                href={activityUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {getTraderDisplayName(trade)}
+                              </a>
+                            ) : (
+                              getTraderDisplayName(trade)
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatTs(
+                              trade.executed_at ||
+                                trade.updated_at ||
+                                trade.proposed_at,
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatMoney(trade.amount)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatMoney(traderInvested)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {positionsValue == null
+                              ? positionsValueMissingReason
+                              : formatCompactMoney(positionsValue)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {netWorth > 0
+                              ? formatMoney(netWorth)
+                              : missingReason}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {netWorthPercent === null
+                              ? missingReason
+                              : formatPercent(netWorthPercent)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
