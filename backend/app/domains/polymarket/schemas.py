@@ -15,6 +15,9 @@ BalanceStatus = Literal["idle", "loading", "ready", "unavailable", "error"]
 ActivitySource = Literal["wallet", "handle", "feed", "fallback"]
 
 
+TrackingSource = Literal["manual", "leaderboard"]
+
+
 class PolymarketTrackedAccount(BaseModel):
     id: str
     target: str = Field(min_length=1, max_length=180)
@@ -28,6 +31,7 @@ class PolymarketTrackedAccount(BaseModel):
     positions_value_usd: float | None = Field(default=None, ge=0)
     cash_balance_usd: float | None = Field(default=None, ge=0)
     redeemable_value_usd: float | None = Field(default=None, ge=0)
+    tracking_source: TrackingSource = "manual"
     net_worth_source: str | None = None
     net_worth_checked_at: str | None = None
     net_worth_error: str | None = None

@@ -84,7 +84,7 @@ def load_polymarket_config() -> PolymarketBotConfig:
         min_source_trade_size_usd=_float_from_env("MIN_SOURCE_TRADE_SIZE_USD", 5),
         min_copy_price=_float_from_env("MIN_COPY_PRICE", 0.05),
         max_copy_price=_float_from_env("MAX_COPY_PRICE", 0.95),
-        max_tracked_traders=_int_from_env("MAX_TRACKED_TRADERS", 10),
+        max_tracked_traders=_int_from_env("MAX_TRACKED_TRADERS", 200),
         tracked_trader_mode=os.getenv("TRACKED_TRADER_MODE", "manual_or_top_active"),
         require_manual_tracked_wallets_for_live=_bool_from_env(
             "REQUIRE_MANUAL_TRACKED_WALLETS_FOR_LIVE", False
