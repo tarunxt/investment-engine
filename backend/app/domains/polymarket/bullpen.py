@@ -30,6 +30,7 @@ def is_redeem_metadata_lookup_warning(message: str) -> bool:
 
 
 BULLPEN_REDEEM_TIMEOUT_SECONDS = 180
+BULLPEN_BALANCE_TIMEOUT_SECONDS = 8
 DEFAULT_BULLPEN_BUY_MAX_PRICE_BUFFER = 0.05
 DEFAULT_BULLPEN_SELL_MIN_PRICE_BUFFER = 0.05
 MIN_POLYMARKET_LIMIT_PRICE = 0.01
@@ -303,7 +304,12 @@ class BullpenBalanceReader:
         try:
             parsed = await run_first_bullpen_json(
                 BALANCE_COMMAND_VARIANTS,
-                timeout_seconds=30,
+                timeout_seconds=int(
+                    _float_from_env(
+                        "BULLPEN_BALANCE_TIMEOUT_SECONDS",
+                        BULLPEN_BALANCE_TIMEOUT_SECONDS,
+                    )
+                ),
             )
             balance_values = _extract_balance_values(parsed)
             return PolymarketBalanceState(
