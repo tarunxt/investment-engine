@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Activity, ExternalLink, Info, Loader2, TrendingUp, Wallet } from "lucide-react";
+import { Activity, AlertTriangle, ExternalLink, Info, Loader2, TrendingUp, Wallet } from "lucide-react";
 
 import {
   Card,
@@ -96,6 +96,15 @@ function parseUsdFromBalanceMessage(message?: string | null) {
   const match = message.match(/(-?\d[\d,]*(?:\.\d+)?)/);
   if (!match) return 0;
   return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
+}
+
+function isBullpenLoginRequired(message?: string | null, status?: string | null) {
+  const normalized = `${message || ""} ${status || ""}`.toLowerCase();
+  return (
+    normalized.includes("bullpen login required") ||
+    normalized.includes("login required") ||
+    normalized.includes("run: bullpen login")
+  );
 }
 
 function formatPercent(value: number) {
@@ -578,6 +587,10 @@ export default function PolymarketBotPage() {
   const bullpenAccountValueUsd =
     state.live.balance.account_value_usd ??
     parseUsdFromBalanceMessage(state.live.balance.message);
+  const bullpenLoginRequired = isBullpenLoginRequired(
+    state.live.balance.message,
+    state.live.balance.status,
+  );
   const copiedActiveStatuses = new Set(["executed", "confirmed"]);
   const executedLiveTrades = state.live.recent_decisions.filter((trade) =>
     copiedActiveStatuses.has(trade.status),
@@ -916,6 +929,57 @@ export default function PolymarketBotPage() {
       {actionError ? (
         <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           {actionError}
+        </div>
+      ) : null}
+
+      {bullpenLoginRequired ? (
+        <div
+          className="rounded-[32px] border-2 border-amber-300 bg-amber-50 px-5 py-5 text-amber-950 shadow-lg shadow-amber-900/10 md:px-7 md:py-6"
+          role="alert"
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex gap-4">
+              <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-amber-200 text-amber-900">
+                <AlertTriangle className="size-8" aria-hidden="true" />
+              </div>
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-[0.24em] text-amber-700">
+                  Action required
+                </div>
+                <h2 className="mt-1 text-3xl font-black tracking-tight md:text-4xl">
+                  Bullpen login is required
+                </h2>
+                <p className="mt-2 max-w-3xl text-base font-semibold text-amber-900 md:text-lg">
+                  The bot cannot refresh balance or place Bullpen-backed real-money
+                  trades until the Bullpen session is restored. Current status: {state.live.balance.message}
+                </p>
+              </div>
+            </div>
+            <Button
+              asChild
+              size="sm"
+              className="rounded-full bg-amber-950 px-5 text-white hover:bg-amber-900"
+            >
+              <a href={BULLPEN_ACCOUNT_URL} target="_blank" rel="noreferrer">
+                Open Bullpen
+                <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
+              </a>
+            </Button>
+          </div>
+          <ol className="mt-5 grid gap-3 text-sm font-semibold text-amber-950 md:grid-cols-3">
+            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">1</span>
+              Open Bullpen and sign in to the trading account used by this bot.
+            </li>
+            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">2</span>
+              If operating the backend session, run <code className="rounded bg-amber-100 px-1.5 py-0.5">bullpen login</code> and complete the prompt.
+            </li>
+            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">3</span>
+              Return here, use Settings → Refresh balance, then restart or resume the bot if needed.
+            </li>
+          </ol>
         </div>
       ) : null}
 
