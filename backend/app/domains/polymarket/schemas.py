@@ -135,6 +135,9 @@ class PolymarketTrader(BaseModel):
     trades_24h: int = 0
     last_trade_at: str | None = None
     last_trade_age: str | None = None
+    profit_usd: float = 0
+    leaderboard_period: str | None = None
+    leaderboard_periods: list[str] = Field(default_factory=list)
     source_reason: str
     source: TradeSource
 

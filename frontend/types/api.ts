@@ -1094,6 +1094,9 @@ export interface PolymarketTrader {
   trades_24h: number;
   last_trade_at?: string | null;
   last_trade_age?: string | null;
+  profit_usd: number;
+  leaderboard_period?: string | null;
+  leaderboard_periods: string[];
   source_reason: string;
   source: 'mock' | 'live-read' | 'live-market-read';
 }

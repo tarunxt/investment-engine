@@ -1822,7 +1822,11 @@ export default function PolymarketBotPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
-              <TrackedTradersTable traders={visibleTrackedTraders} />
+              <TrackedTradersTable
+                traders={visibleTrackedTraders}
+                decisions={state.live.recent_decisions}
+                paperTrades={state.trade_history}
+              />
             </CardContent>
           </Card>
 
