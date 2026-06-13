@@ -120,7 +120,7 @@ function formatMoney(value: number, digits = 2) {
 }
 
 const BULLPEN_ACCOUNT_URL =
-  "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
+  "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
 
 
 function formatRelativePollTime(iso?: string | null) {
@@ -961,23 +961,31 @@ export default function PolymarketBotPage() {
               className="rounded-full bg-amber-950 px-5 text-white hover:bg-amber-900"
             >
               <a href={BULLPEN_ACCOUNT_URL} target="_blank" rel="noreferrer">
-                Open Bullpen
+                Open AWS EC2 Terminal
                 <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
               </a>
             </Button>
           </div>
-          <ol className="mt-5 grid gap-3 text-sm font-semibold text-amber-950 md:grid-cols-3">
+          <ol className="mt-5 grid gap-3 text-sm font-semibold text-amber-950 md:grid-cols-2 xl:grid-cols-5">
             <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
               <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">1</span>
-              Open Bullpen and sign in to the trading account used by this bot.
+              Open the AWS EC2 terminal for the bot server.
             </li>
             <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
               <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">2</span>
-              If operating the backend session, run <code className="rounded bg-amber-100 px-1.5 py-0.5">bullpen login</code> and complete the prompt.
+              Run <code className="rounded bg-amber-100 px-1.5 py-0.5">sudo -u investor -H bullpen login</code>.
             </li>
             <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
               <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">3</span>
-              Return here, use Settings → Refresh balance, then restart or resume the bot if needed.
+              Scan the QR code from your mobile device.
+            </li>
+            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">4</span>
+              Sign in using <span className="break-all">tarunindian007@gmail.com</span>.
+            </li>
+            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">5</span>
+              After login succeeds, use Settings → Refresh balance to update the Bullpen login status.
             </li>
           </ol>
         </div>
