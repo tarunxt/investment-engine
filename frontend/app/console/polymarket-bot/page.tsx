@@ -1307,14 +1307,13 @@ export default function PolymarketBotPage() {
                                 multiple
                               </button>
                             ) : (
-                              <a
+                              <button
+                                type="button"
                                 className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-900"
-                                href={getTraderActivityUrl(event.traders[0]) || "#"}
-                                target="_blank"
-                                rel="noreferrer"
+                                onClick={() => setSelectedCopiedEvent(event)}
                               >
                                 {getTraderDisplayName(event.traders[0])}
-                              </a>
+                              </button>
                             )}
                           </td>
                           <td className="px-4 py-3 text-slate-700">
