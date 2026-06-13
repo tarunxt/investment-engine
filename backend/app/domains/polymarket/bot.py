@@ -52,7 +52,6 @@ from app.domains.polymarket.schemas import (
 )
 from app.domains.polymarket.storage import JsonModelStore, JsonObjectStore
 
-
 BALANCE_REFRESH_INTERVAL_SECONDS = max(
     5, int(float(os.getenv("POLYMARKET_BALANCE_REFRESH_INTERVAL_SECONDS", "5")))
 )
@@ -124,7 +123,6 @@ class PolymarketPaperCopyBot:
             trending_market_activity_enabled=config.use_trending_market_activity,
         )
         self.live_guard = LiveTradeGuard(config)
-        self.proposal_cooldown_by_trader: dict[str, float] = {}
 
         self._poll_task: asyncio.Task[None] | None = None
         self._balance_task: asyncio.Task[None] | None = None
@@ -1090,27 +1088,20 @@ class PolymarketPaperCopyBot:
             or source_trade.trader_id
         )
         proposal_stats["per_trader_created"][trader_key] += 1
-        self.proposal_cooldown_by_trader[trader_key] = datetime.now(
-            timezone.utc
-        ).timestamp()
         self._add_activity(
-            f"Live trade proposed from {source_trade.source}: {decision.side} {decision.market_id} {decision.outcome} for ${decision.amount:.2f}."
+            f"Live trade auto-approved from {source_trade.source}: {decision.side} {decision.market_id} {decision.outcome} for ${decision.amount:.2f}."
         )
-        if (
-            self.config.auto_execute_live
-            and not self.config.require_manual_confirmation
-        ):
-            try:
-                await self._execute_live_trade_unlocked(
-                    decision, "automatic copy trading enabled"
-                )
-            except Exception as exc:
-                proposal_stats["skipped_by_limits"] = (
-                    int(proposal_stats["skipped_by_limits"]) + 1
-                )
-                self._add_activity(
-                    f"Automatic live execution failed and bot kept looping: {redact_secrets(str(exc))}"
-                )
+        try:
+            await self._execute_live_trade_unlocked(
+                decision, "automatic live-read approval"
+            )
+        except Exception as exc:
+            proposal_stats["skipped_by_limits"] = (
+                int(proposal_stats["skipped_by_limits"]) + 1
+            )
+            self._add_activity(
+                f"Automatic live execution failed and bot kept looping: {redact_secrets(str(exc))}"
+            )
 
     async def _execute_live_trade_unlocked(
         self,
@@ -1358,9 +1349,9 @@ class PolymarketPaperCopyBot:
         self, source_trade: PolymarketSourceTrade
     ) -> PolymarketLiveTradeDecision:
         reason = (
-            "Detected live-market-read trade from trending market activity; requires manual confirmation."
+            "Detected live-market-read trade from trending market activity; auto-approved for execution."
             if source_trade.source == "live-market-read"
-            else "Detected live-read trade from active trader; requires manual confirmation."
+            else "Detected live-read trade from active trader; auto-approved for execution."
         )
         account = self._matched_tracked_account(source_trade)
         copy_trade_usd = (
@@ -1600,38 +1591,6 @@ class PolymarketPaperCopyBot:
             or source_trade.price > self.config.max_copy_price
         ):
             return {"kind": "filter", "reason": "Price outside allowed range"}
-        if len(self._pending_live_trades()) >= self.config.max_pending_confirmations:
-            return {"kind": "limit", "reason": "Max pending confirmations reached"}
-        if (
-            int(proposal_stats["created"])
-            >= self.config.max_new_live_proposals_per_poll
-        ):
-            return {"kind": "limit", "reason": "Max proposals per poll reached"}
-        if (
-            proposal_stats["per_trader_created"][trader_key]
-            >= self.config.max_new_live_proposals_per_trader_per_poll
-        ):
-            return {"kind": "limit", "reason": "Max proposals per trader reached"}
-        if (
-            len(
-                [
-                    trade
-                    for trade in self._pending_live_trades()
-                    if identity_key(
-                        trade.trader_address or trade.trader_handle or trade.trader_id
-                    )
-                    == trader_key
-                ]
-            )
-            >= self.config.max_pending_per_trader
-        ):
-            return {"kind": "limit", "reason": "Max pending confirmations reached"}
-        last_proposal_at = self.proposal_cooldown_by_trader.get(trader_key, 0)
-        if (
-            datetime.now(timezone.utc).timestamp() - last_proposal_at
-            < self.config.proposal_cooldown_seconds_per_trader
-        ):
-            return {"kind": "limit", "reason": "Trader cooldown active"}
         return None
 
     def _apply_provider_discovery_status_unlocked(self) -> None:
@@ -2136,8 +2095,7 @@ class PolymarketPaperCopyBot:
         self, state: PolymarketBalanceState
     ) -> PolymarketBalanceState:
         next_refresh = (
-            datetime.now(timezone.utc).timestamp()
-            + BALANCE_REFRESH_INTERVAL_SECONDS
+            datetime.now(timezone.utc).timestamp() + BALANCE_REFRESH_INTERVAL_SECONDS
         )
         state.next_refresh_at = datetime.fromtimestamp(
             next_refresh, tz=timezone.utc

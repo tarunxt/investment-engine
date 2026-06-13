@@ -230,7 +230,7 @@ async def test_live_start_refreshes_doctor_even_when_recent_failure_exists(tmp_p
             PolymarketDoctorStatus(
                 checked_at="2026-06-11T10:00:00+00:00",
                 ok=True,
-                message="Bullpen status, preflight, and approval checks passed.",
+                message="Bullpen status and preflight checks passed.",
             )
         ]
     )
@@ -710,6 +710,68 @@ class ReadyBalanceReader:
         return PolymarketBalanceState(
             status="ready", message="Bullpen account value: 114.07 USD"
         )
+
+
+@pytest.mark.anyio
+async def test_live_read_trades_auto_approve_without_pending_confirmation_caps(
+    tmp_path,
+):
+    from app.domains.polymarket.schemas import (
+        PolymarketDoctorStatus,
+        PolymarketSourceTrade,
+    )
+
+    executor = RedeemTrackingExecutor()
+    bot = await build_live_bot(tmp_path, executor)
+    bot.config.max_pending_confirmations = 0
+    bot.config.max_new_live_proposals_per_poll = 0
+    bot.config.max_new_live_proposals_per_trader_per_poll = 0
+    bot.config.max_pending_per_trader = 0
+    bot.config.proposal_cooldown_seconds_per_trader = 999999
+    bot.config.trader_invested_threshold_usd = 0
+    bot.running = True
+    bot.active_mode = "live-trading"
+    bot.live_unlocked = True
+    bot.doctor_status = PolymarketDoctorStatus(ok=True, message="ok")
+
+    stats = {
+        "created": 0,
+        "after_filters": 0,
+        "skipped_by_filters": 0,
+        "skipped_by_limits": 0,
+        "skipped_duplicates": 0,
+        "per_trader_created": defaultdict(int),
+    }
+
+    for trade_id in ("trade-1", "trade-2"):
+        await bot._handle_live_source_trade_unlocked(
+            PolymarketSourceTrade(
+                id=trade_id,
+                source_trade_key=f"live-read:wallet:{trade_id}",
+                trader_id="wallet",
+                trader_name="wallet",
+                trader_address="0xabc",
+                clean_trader_identity="0xabc",
+                market_id=f"market-{trade_id}",
+                market_title="Tennis Match",
+                outcome="Player A",
+                side="BUY",
+                price=0.50,
+                size_usd=100,
+                timestamp="2026-06-12T10:00:00+00:00",
+                source="live-read",
+            ),
+            stats,
+        )
+
+    assert stats["created"] == 2
+    assert stats["skipped_by_limits"] == 0
+    assert [trade.status for trade in bot.live_trade_history] == [
+        "executed",
+        "executed",
+    ]
+    assert bot._pending_live_trades() == []
+    assert all("auto-approved" in trade.reason for trade in bot.live_trade_history)
 
 
 @pytest.mark.anyio
