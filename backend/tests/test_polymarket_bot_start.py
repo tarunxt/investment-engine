@@ -23,6 +23,18 @@ from app.domains.polymarket.schemas import (
 from app.domains.polymarket.storage import JsonModelStore
 
 
+def test_auto_redeem_live_defaults_on(monkeypatch):
+    monkeypatch.delenv("AUTO_REDEEM_LIVE", raising=False)
+
+    assert load_polymarket_config().auto_redeem_live is True
+
+
+def test_auto_redeem_live_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("AUTO_REDEEM_LIVE", "false")
+
+    assert load_polymarket_config().auto_redeem_live is False
+
+
 class SlowProvider:
     async def get_top_traders(self):
         await asyncio.sleep(30)

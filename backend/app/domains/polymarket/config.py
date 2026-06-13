@@ -63,7 +63,7 @@ def load_polymarket_config() -> PolymarketBotConfig:
         max_live_trades_per_day=_int_from_env("MAX_LIVE_TRADES_PER_DAY", 5),
         max_live_daily_loss=_float_from_env("MAX_LIVE_DAILY_LOSS", 10),
         max_live_exposure_per_market=_float_from_env("MAX_LIVE_EXPOSURE_PER_MARKET", 5),
-        auto_redeem_live=_bool_from_env("AUTO_REDEEM_LIVE", False),
+        auto_redeem_live=_bool_from_env("AUTO_REDEEM_LIVE", True),
         jurisdiction_confirmation=_bool_from_env("JURISDICTION_CONFIRMATION", True),
         manual_tracked_wallets=os.getenv("MANUAL_TRACKED_WALLETS", ""),
         use_trending_market_activity=_bool_from_env(
