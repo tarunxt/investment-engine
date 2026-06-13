@@ -98,6 +98,7 @@ type CopiedEventGroup = {
   copiedAt: string;
   marketId: string;
   marketTitle: string;
+  eventEndAt?: string | null;
   outcome: string;
   side: PolymarketSourceTradeDecision["side"];
   amount: number;
@@ -116,6 +117,21 @@ function getCopiedEventKey(trade: PolymarketSourceTradeDecision) {
   );
 }
 
+function getTradeStatusReason(trade: PolymarketSourceTradeDecision) {
+  if (trade.failure_reason) return trade.failure_reason;
+  if (trade.status === "failed" || trade.status === "skipped") {
+    return trade.reason || "No reason provided";
+  }
+  return trade.status;
+}
+
+function getCopiedEventStatus(event: CopiedEventGroup) {
+  const problemTrade = event.traders.find((trade) =>
+    ["failed", "skipped", "rejected"].includes(trade.status),
+  );
+  if (!problemTrade) return event.status;
+  return `${problemTrade.status}: ${getTradeStatusReason(problemTrade)}`;
+}
 
 function isInsufficientBalanceMiss(trade: PolymarketSourceTradeDecision) {
   const text = `${trade.failure_reason || ""} ${trade.reason || ""}`.toLowerCase();
@@ -181,6 +197,7 @@ function buildCopiedEventGroups(trades: PolymarketSourceTradeDecision[]) {
         copiedAt: trade.executed_at || trade.updated_at || trade.proposed_at,
         marketId: trade.market_id,
         marketTitle: trade.market_title,
+        eventEndAt: trade.event_end_at,
         outcome: trade.outcome,
         side: trade.side,
         amount: trade.amount,
@@ -193,6 +210,7 @@ function buildCopiedEventGroups(trades: PolymarketSourceTradeDecision[]) {
 
     existing.amount += trade.amount;
     existing.traders.push(trade);
+    existing.eventEndAt = existing.eventEndAt || trade.event_end_at;
     existing.copiedAt =
       new Date(trade.executed_at || trade.updated_at || trade.proposed_at).getTime() >
       new Date(existing.copiedAt).getTime()
@@ -893,6 +911,7 @@ export default function PolymarketBotPage() {
                       <th className="px-4 py-3">Copied At</th>
                       <th className="px-4 py-3">Trader</th>
                       <th className="px-4 py-3">Event</th>
+                      <th className="px-4 py-3">Event Ends</th>
                       <th className="px-4 py-3">Side</th>
                       <th className="px-4 py-3">Outcome</th>
                       <th className="px-4 py-3">Amount</th>
@@ -903,7 +922,7 @@ export default function PolymarketBotPage() {
                   <tbody className="divide-y divide-slate-100">
                     {copiedEventGroups.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={8}>
+                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={9}>
                           No copied Bullpen rows for this tab yet.
                         </td>
                       </tr>
@@ -937,11 +956,12 @@ export default function PolymarketBotPage() {
                               </button>
                             </div>
                           </td>
+                          <td className="px-4 py-3 text-slate-700">{formatTs(event.eventEndAt)}</td>
                           <td className="px-4 py-3 font-semibold text-slate-800">{event.side}</td>
                           <td className="px-4 py-3 text-slate-700">{event.outcome}</td>
                           <td className="px-4 py-3 text-slate-700">{formatMoney(event.amount)}</td>
                           <td className="px-4 py-3 text-slate-700">{formatMoney(event.averagePrice, 4)}</td>
-                          <td className="px-4 py-3 text-slate-700">{event.status}</td>
+                          <td className="px-4 py-3 text-slate-700">{copiedPositionsTab === "positions" && copiedPositionStatus === "closed" ? getCopiedEventStatus(event) : event.status}</td>
                         </tr>
                       );
                     })}

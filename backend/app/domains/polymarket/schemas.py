@@ -140,6 +140,7 @@ class PolymarketSourceTrade(BaseModel):
     clean_trader_identity: str
     market_id: str
     market_title: str
+    event_end_at: str | None = None
     outcome: str
     side: TradeSide
     price: float
@@ -156,6 +157,7 @@ class PolymarketPaperTrade(BaseModel):
     trader_name: str
     market_id: str
     market_title: str
+    event_end_at: str | None = None
     outcome: str
     side: TradeSide
     price: float
@@ -178,6 +180,7 @@ class PolymarketLiveTradeDecision(BaseModel):
     trader_handle: str | None = None
     market_id: str
     market_title: str
+    event_end_at: str | None = None
     outcome: str
     side: TradeSide
     amount: float
