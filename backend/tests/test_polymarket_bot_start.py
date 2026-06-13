@@ -19,6 +19,7 @@ from app.domains.polymarket.bullpen import (
     BullpenLiveExecutor,
     buy_max_price_for_execution,
     extract_bullpen_insufficient_collateral_amount,
+    is_claim_command_unavailable_warning,
     is_redeem_metadata_lookup_warning,
     sell_min_price_for_execution,
 )
@@ -686,6 +687,7 @@ async def test_live_limit_update_persists_for_recreated_user_bot(tmp_path, monke
 class RedeemTrackingExecutor:
     def __init__(self, redeem_error: Exception | None = None):
         self.redeem_calls = 0
+        self.claim_calls = 0
         self.redeem_error = redeem_error
 
     async def doctor(self):
@@ -697,6 +699,10 @@ class RedeemTrackingExecutor:
         self.redeem_calls += 1
         if self.redeem_error:
             raise self.redeem_error
+        return "{}"
+
+    async def claim(self, *, dry_run: bool):
+        self.claim_calls += 1
         return "{}"
 
     async def execute(self, decision):
@@ -1136,6 +1142,7 @@ async def test_manual_live_redeem_treats_gamma_condition_miss_as_non_fatal(tmp_p
     await bot.redeem_live_positions()
 
     assert executor.redeem_calls == 1
+    assert executor.claim_calls == 1
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
     assert bot.recent_activity[0].message == (
         "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
@@ -1171,6 +1178,7 @@ async def test_startup_balance_refresh_runs_auto_redeem(tmp_path):
     await bot._refresh_startup_balance_background()
 
     assert executor.redeem_calls == 1
+    assert executor.claim_calls == 1
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
 
 
@@ -1203,7 +1211,47 @@ async def test_manual_live_redeem_submits_and_refreshes_balance(tmp_path):
     await bot.redeem_live_positions()
 
     assert executor.redeem_calls == 1
+    assert executor.claim_calls == 1
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
     assert bot.recent_activity[0].message == (
-        "Manual Bullpen redeem submitted for all resolved positions."
+        "Manual Bullpen redeem/claim submitted for all resolved positions."
+    )
+
+
+def test_claim_command_unavailable_warning_detects_missing_claim_command():
+    assert is_claim_command_unavailable_warning("unknown command: claim for polymarket")
+
+
+@pytest.mark.anyio
+async def test_forced_redeem_claim_runs_even_when_auto_redeem_disabled(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": False,
+            "live_trading": True,
+            "use_live_reads": True,
+            "auto_redeem_live": False,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = EmptyProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    executor = RedeemTrackingExecutor()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=executor,
+        balance_reader=ReadyBalanceReader(),
+        logger=logger,
+    )
+
+    await bot._force_redeem_claim_background()
+
+    assert executor.redeem_calls == 1
+    assert executor.claim_calls == 1
+    assert bot.recent_activity[0].message == (
+        "Forced redeem/claim checked completed Bullpen positions."
     )
