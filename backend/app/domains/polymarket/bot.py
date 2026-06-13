@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
+
 
 from app.domains.polymarket.bullpen import (
     BullpenBalanceReader,
@@ -49,6 +51,11 @@ from app.domains.polymarket.schemas import (
     PolymarketTrader,
 )
 from app.domains.polymarket.storage import JsonModelStore, JsonObjectStore
+
+
+BALANCE_REFRESH_INTERVAL_SECONDS = max(
+    5, int(float(os.getenv("POLYMARKET_BALANCE_REFRESH_INTERVAL_SECONDS", "5")))
+)
 
 
 class PolymarketPaperCopyBot:
@@ -588,7 +595,7 @@ class PolymarketPaperCopyBot:
     async def _balance_loop(self) -> None:
         try:
             while True:
-                await asyncio.sleep(15)
+                await asyncio.sleep(BALANCE_REFRESH_INTERVAL_SECONDS)
                 await self._refresh_balance_background()
         except asyncio.CancelledError:
             return
@@ -2112,7 +2119,10 @@ class PolymarketPaperCopyBot:
     def _with_next_balance_refresh(
         self, state: PolymarketBalanceState
     ) -> PolymarketBalanceState:
-        next_refresh = datetime.now(timezone.utc).timestamp() + 15
+        next_refresh = (
+            datetime.now(timezone.utc).timestamp()
+            + BALANCE_REFRESH_INTERVAL_SECONDS
+        )
         state.next_refresh_at = datetime.fromtimestamp(
             next_refresh, tz=timezone.utc
         ).isoformat()

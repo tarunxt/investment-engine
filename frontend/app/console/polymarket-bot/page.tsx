@@ -580,7 +580,7 @@ export default function PolymarketBotPage() {
   const [liveTradeLimitDraft, setLiveTradeLimitDraft] = useState("");
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
-
+  const autoBalanceRefreshInFlight = useRef(false);
   useEffect(() => {
     let cancelled = false;
 
@@ -625,7 +625,7 @@ export default function PolymarketBotPage() {
 
     const interval = window.setInterval(() => {
       void load();
-    }, 5000);
+    }, 2000);
 
     return () => {
       cancelled = true;
@@ -653,6 +653,33 @@ export default function PolymarketBotPage() {
       setPendingAction(null);
     }
   }
+
+  useEffect(() => {
+    if (!state || pendingAction !== null || autoBalanceRefreshInFlight.current) {
+      return;
+    }
+    if (
+      !isBullpenBalanceUnrefreshed(
+        state.live.balance.message,
+        state.live.balance.status,
+      )
+    ) {
+      return;
+    }
+
+    autoBalanceRefreshInFlight.current = true;
+    const timeout = window.setTimeout(() => {
+      void runAction("balance", () =>
+        apiService.polymarketLiveBalanceRefresh(),
+      ).finally(() => {
+        autoBalanceRefreshInFlight.current = false;
+      });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [pendingAction, state]);
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
     setState(nextState);
