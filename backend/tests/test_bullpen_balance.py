@@ -89,6 +89,20 @@ def test_format_balance_message_prefers_bullpen_account_value_over_cash():
     )
 
 
+def test_format_balance_message_treats_total_balance_as_account_value():
+    parsed = {
+        "account": "Bullpen",
+        "totalBalance": "$8.03",
+        "cash": "0.61",
+        "currency": "USD",
+    }
+
+    assert (
+        bullpen._format_balance_message(parsed)
+        == "Bullpen account value: 8.03 USD"
+    )
+
+
 def test_bullpen_executable_uses_runtime_tools_when_env_path_missing(monkeypatch, tmp_path):
     runtime_tools = tmp_path / ".runtime-tools"
     runtime_tools.mkdir()
