@@ -12,8 +12,9 @@ from app.domains.polymarket.schemas import (
     PolymarketLiveTradeDecision,
     PolymarketPaperTrade,
     PolymarketTrackedAccount,
+    PolymarketUserConfigOverride,
 )
-from app.domains.polymarket.storage import JsonModelStore
+from app.domains.polymarket.storage import JsonModelStore, JsonObjectStore
 
 
 class PolymarketBotManager:
@@ -29,9 +30,15 @@ class PolymarketBotManager:
 
             base_config = load_polymarket_config()
             user_data_dir = Path(base_config.data_dir) / f"user-{user_id}"
-            user_config = base_config.model_copy(
-                update={"data_dir": str(user_data_dir)}
+            config_store = JsonObjectStore(
+                user_data_dir / "polymarket-config.json",
+                PolymarketUserConfigOverride,
             )
+            persisted_config = await config_store.load()
+            config_update = {"data_dir": str(user_data_dir)}
+            if persisted_config:
+                config_update.update(persisted_config.model_dump())
+            user_config = base_config.model_copy(update=config_update)
             mock_provider = MockProvider()
             read_provider = (
                 BullpenReadOnlyProvider(user_config)
@@ -53,6 +60,7 @@ class PolymarketBotManager:
                     user_data_dir / "polymarket-tracked-accounts.json",
                     PolymarketTrackedAccount,
                 ),
+                config_store=config_store,
                 live_executor=BullpenLiveExecutor(),
                 balance_reader=BullpenBalanceReader(),
                 logger=PolymarketFileLogger(

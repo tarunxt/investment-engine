@@ -41,11 +41,12 @@ from app.domains.polymarket.schemas import (
     PolymarketSourceTrade,
     PolymarketTrackedAccount,
     PolymarketLiveLimitUpdate,
+    PolymarketUserConfigOverride,
     PolymarketTrackedAccountCreate,
     PolymarketTrackedAccountUpdate,
     PolymarketTrader,
 )
-from app.domains.polymarket.storage import JsonModelStore
+from app.domains.polymarket.storage import JsonModelStore, JsonObjectStore
 
 
 class PolymarketPaperCopyBot:
@@ -60,6 +61,7 @@ class PolymarketPaperCopyBot:
         balance_reader: BullpenBalanceReader,
         logger: PolymarketFileLogger,
         tracked_account_store: JsonModelStore[PolymarketTrackedAccount] | None = None,
+        config_store: JsonObjectStore[PolymarketUserConfigOverride] | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
@@ -69,6 +71,10 @@ class PolymarketPaperCopyBot:
         self.tracked_account_store = tracked_account_store or JsonModelStore(
             Path(config.data_dir) / "polymarket-tracked-accounts.json",
             PolymarketTrackedAccount,
+        )
+        self.config_store = config_store or JsonObjectStore(
+            Path(config.data_dir) / "polymarket-config.json",
+            PolymarketUserConfigOverride,
         )
         self.live_executor = live_executor
         self.balance_reader = balance_reader
@@ -313,6 +319,11 @@ class PolymarketPaperCopyBot:
     async def update_live_limits(self, request: PolymarketLiveLimitUpdate) -> None:
         async with self._lock:
             self.config.max_live_trades_per_day = request.max_live_trades_per_day
+            await self.config_store.save(
+                PolymarketUserConfigOverride(
+                    max_live_trades_per_day=request.max_live_trades_per_day
+                )
+            )
             await self.logger.info(
                 f"Updated max live trades per day to {request.max_live_trades_per_day}."
             )

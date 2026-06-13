@@ -70,6 +70,10 @@ class PolymarketTrackedAccountUpdate(BaseModel):
         return value.strip() if value is not None else value
 
 
+class PolymarketUserConfigOverride(BaseModel):
+    max_live_trades_per_day: int = Field(ge=1, le=1000)
+
+
 class PolymarketBotConfig(BaseModel):
     paper_trading: bool
     live_trading: bool

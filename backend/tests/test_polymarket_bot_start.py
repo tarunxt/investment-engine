@@ -616,3 +616,25 @@ async def test_leaderboard_sync_tracks_dynamic_accounts_and_waits_for_net_worth(
 
     bot._net_worth_refresh_task.cancel()
     await asyncio.gather(bot._net_worth_refresh_task, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_live_limit_update_persists_for_recreated_user_bot(tmp_path, monkeypatch):
+    from app.domains.polymarket.schemas import PolymarketLiveLimitUpdate
+    from app.domains.polymarket.service import PolymarketBotManager
+
+    monkeypatch.setenv("POLYMARKET_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("POLYMARKET_AUTO_START", "false")
+
+    manager = PolymarketBotManager()
+    bot = await manager.get_bot(42)
+    await bot.update_live_limits(PolymarketLiveLimitUpdate(max_live_trades_per_day=15))
+    await manager.shutdown()
+
+    recreated_manager = PolymarketBotManager()
+    recreated_bot = await recreated_manager.get_bot(42)
+
+    assert recreated_bot.config.max_live_trades_per_day == 15
+    assert (tmp_path / "user-42" / "polymarket-config.json").exists()
+
+    await recreated_manager.shutdown()
