@@ -750,9 +750,24 @@ class PolymarketPaperCopyBot:
     def _refresh_tracked_trader_activity_unlocked(
         self, source_trades: list[PolymarketSourceTrade]
     ) -> None:
+        self._annotate_trader_invested_usd(source_trades)
         self.tracked_traders = self._traders_with_recent_activity(
             self.tracked_traders, source_trades
         )
+
+    def _annotate_trader_invested_usd(
+        self, source_trades: list[PolymarketSourceTrade]
+    ) -> None:
+        invested_by_position: dict[tuple[str, str, str], float] = defaultdict(float)
+        for trade in source_trades:
+            identity = identity_key(trade.clean_trader_identity)
+            position_key = (identity, trade.market_id, trade.outcome)
+            invested_by_position[position_key] += max(0, trade.size_usd)
+
+        for trade in source_trades:
+            identity = identity_key(trade.clean_trader_identity)
+            position_key = (identity, trade.market_id, trade.outcome)
+            trade.trader_invested_usd = invested_by_position[position_key]
 
     def _traders_with_recent_activity(
         self,
@@ -1141,6 +1156,7 @@ class PolymarketPaperCopyBot:
                 side=trade.side,
                 price=trade.price,
                 size_usd=trade.amount,
+                trader_invested_usd=trade.trader_invested_usd,
                 timestamp=trade.proposed_at,
                 source=trade.source,
             ),
@@ -1420,7 +1436,11 @@ class PolymarketPaperCopyBot:
             price=source_trade.price,
             shares=shares,
             max_loss=amount if source_trade.side == "BUY" else 0,
-            trader_invested_usd=source_trade.size_usd,
+            trader_invested_usd=(
+                source_trade.trader_invested_usd
+                if source_trade.trader_invested_usd is not None
+                else source_trade.size_usd
+            ),
             trader_net_worth_usd=trader_net_worth_usd,
             reason=reason,
             status=status,
@@ -1576,11 +1596,16 @@ class PolymarketPaperCopyBot:
                     "reason": "Tracked account net worth refresh pending.",
                 }
             threshold_usd = account.net_worth_usd * (account.threshold_percent / 100)
-            if source_trade.size_usd < threshold_usd:
+            trader_invested_usd = (
+                source_trade.trader_invested_usd
+                if source_trade.trader_invested_usd is not None
+                else source_trade.size_usd
+            )
+            if trader_invested_usd < threshold_usd:
                 return {
                     "kind": "filter",
                     "reason": (
-                        f"Source trade ${source_trade.size_usd:.2f} below "
+                        f"Trader invested ${trader_invested_usd:.2f} below "
                         f"{account.threshold_percent:.2f}% net-worth threshold (${threshold_usd:.2f})."
                     ),
                 }

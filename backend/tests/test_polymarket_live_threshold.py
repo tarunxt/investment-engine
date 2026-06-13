@@ -17,7 +17,9 @@ def _guard(threshold: float = 500) -> LiveTradeGuard:
     )
 
 
-def _source_trade(size_usd: float) -> PolymarketSourceTrade:
+def _source_trade(
+    size_usd: float, trader_invested_usd: float | None = None
+) -> PolymarketSourceTrade:
     return PolymarketSourceTrade(
         id=f"trade-{size_usd}",
         source_trade_key=f"source-{size_usd}",
@@ -31,6 +33,7 @@ def _source_trade(size_usd: float) -> PolymarketSourceTrade:
         side="BUY",
         price=0.5,
         size_usd=size_usd,
+        trader_invested_usd=trader_invested_usd,
         timestamp="2026-06-13T00:00:00Z",
         source="live-market-read",
     )
@@ -49,3 +52,18 @@ def test_live_guard_rejects_trades_at_or_below_trader_invested_threshold():
 
 def test_live_guard_allows_trades_above_trader_invested_threshold():
     assert _guard().trade_block_reason(_source_trade(500.01), [], []) is None
+
+
+def test_live_guard_uses_aggregate_trader_invested_when_available():
+    assert (
+        _guard(threshold=100).trade_block_reason(
+            _source_trade(1, trader_invested_usd=270.28), [], []
+        )
+        is None
+    )
+    assert (
+        _guard(threshold=100).trade_block_reason(
+            _source_trade(270.28, trader_invested_usd=1), [], []
+        )
+        == "Below $100 threshold"
+    )

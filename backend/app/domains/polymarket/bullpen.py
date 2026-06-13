@@ -459,7 +459,12 @@ class LiveTradeGuard:
     ) -> str | None:
         if self.live_trades_today(live_trades) >= self.config.max_live_trades_per_day:
             return "Max live trades per day reached."
-        if source_trade.size_usd <= self.config.trader_invested_threshold_usd:
+        trader_invested_usd = (
+            source_trade.trader_invested_usd
+            if source_trade.trader_invested_usd is not None
+            else source_trade.size_usd
+        )
+        if trader_invested_usd <= self.config.trader_invested_threshold_usd:
             return f"Below ${self.config.trader_invested_threshold_usd:g} threshold"
         if self.realized_live_pnl(live_trades) <= -self.config.max_live_daily_loss:
             return "Max live daily loss reached."

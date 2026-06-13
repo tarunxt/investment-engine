@@ -159,6 +159,7 @@ class PolymarketSourceTrade(BaseModel):
     side: TradeSide
     price: float
     size_usd: float
+    trader_invested_usd: float | None = None
     timestamp: str
     source: TradeSource
 
