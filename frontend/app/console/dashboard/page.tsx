@@ -874,9 +874,9 @@ export default function DashboardPage() {
       : usSnapshot.wallet_balance * usdInrRate;
   const indmoneyCommandValue =
     (indmoneyPortfolioValueInr ?? 0) + (indmoneyAvailableFundsValueInr ?? 0);
-  const bullpenAccountValueUsd = parseBullpenAccountValueUsd(
-    dashboard.polymarketState?.live.balance.message,
-  );
+  const bullpenAccountValueUsd =
+    dashboard.polymarketState?.live.balance.account_value_usd ??
+    parseBullpenAccountValueUsd(dashboard.polymarketState?.live.balance.message);
   const bullpenAccountValueInr = bullpenAccountValueUsd * usdInrRate;
   const totalCommandValue =
     zerodhaCommandValue + indmoneyCommandValue + bullpenAccountValueInr;

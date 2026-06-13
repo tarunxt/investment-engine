@@ -209,6 +209,8 @@ class PolymarketBalanceState(BaseModel):
     message: str
     checked_at: str | None = None
     next_refresh_at: str | None = None
+    account_value_usd: float | None = Field(default=None, ge=0)
+    available_balance_usd: float | None = Field(default=None, ge=0)
 
 
 class PolymarketLiveSourceStatus(BaseModel):

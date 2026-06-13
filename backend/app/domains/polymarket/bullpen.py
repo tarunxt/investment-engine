@@ -252,10 +252,13 @@ class BullpenBalanceReader:
                 BALANCE_COMMAND_VARIANTS,
                 timeout_seconds=30,
             )
+            balance_values = _extract_balance_values(parsed)
             return PolymarketBalanceState(
                 status="ready",
                 checked_at=checked_at,
                 message=_format_balance_message(parsed),
+                account_value_usd=balance_values["account_value_usd"],
+                available_balance_usd=balance_values["available_balance_usd"],
             )
         except Exception as exc:
             message = redact_secrets(str(exc))
@@ -416,8 +419,21 @@ def _is_missing_balance_command(message: str) -> bool:
     return any(marker in lowered for marker in missing_command_markers)
 
 
-def _format_balance_message(parsed: object) -> str:
+def _extract_balance_values(parsed: object) -> dict[str, float | None]:
     candidates = _collect_balance_candidates(parsed)
+    account_value = _select_account_value_candidate(candidates)
+    available_balance = _select_available_balance_candidate(candidates)
+    return {
+        "account_value_usd": float(account_value["amount"]) if account_value else None,
+        "available_balance_usd": (
+            float(available_balance["amount"]) if available_balance else None
+        ),
+    }
+
+
+def _select_account_value_candidate(
+    candidates: list[dict[str, object]],
+) -> dict[str, object] | None:
     preferred_account_value = next(
         (
             item
@@ -427,10 +443,15 @@ def _format_balance_message(parsed: object) -> str:
         ),
         None,
     )
-    account_value = preferred_account_value or next(
+    return preferred_account_value or next(
         (item for item in candidates if _is_account_value_candidate(item)),
         None,
     )
+
+
+def _select_available_balance_candidate(
+    candidates: list[dict[str, object]],
+) -> dict[str, object] | None:
     preferred_cash_balance = next(
         (
             item
@@ -440,12 +461,20 @@ def _format_balance_message(parsed: object) -> str:
         ),
         None,
     )
-    fallback = next(
+    return preferred_cash_balance or next(
         (item for item in candidates if _is_cash_balance_candidate(item)),
         None,
-    ) or (candidates[0] if candidates else None)
+    )
 
-    balance = account_value or preferred_cash_balance or fallback
+
+def _format_balance_message(parsed: object) -> str:
+    candidates = _collect_balance_candidates(parsed)
+    account_value = _select_account_value_candidate(candidates)
+    fallback = _select_available_balance_candidate(candidates) or (
+        candidates[0] if candidates else None
+    )
+
+    balance = account_value or fallback
     if not balance:
         return "Balance unavailable: Bullpen CLI returned no balance rows"
 

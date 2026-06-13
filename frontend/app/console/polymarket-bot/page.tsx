@@ -185,6 +185,15 @@ type MissedTradeGroup = {
   traders: PolymarketSourceTradeDecision[];
 };
 
+type CopiedHistoryFilter =
+  | "all"
+  | "buy"
+  | "sell"
+  | "redeem"
+  | "rewards"
+  | "deposits"
+  | "withdrawals";
+
 type CopiedEventGroup = {
   key: string;
   copiedAt: string;
@@ -371,6 +380,8 @@ export default function PolymarketBotPage() {
   const [copiedPositionStatus, setCopiedPositionStatus] = useState<
     "active" | "closed"
   >("active");
+  const [copiedHistoryFilter, setCopiedHistoryFilter] =
+    useState<CopiedHistoryFilter>("all");
   const [liveTradeLimitDraft, setLiveTradeLimitDraft] = useState("");
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
@@ -561,9 +572,9 @@ export default function PolymarketBotPage() {
   const actionStatusMessage = getActionStatusMessage(pendingAction, state);
   const liveParsingStatusMessage = getLiveParsingStatusMessage(state);
 
-  const bullpenAccountValueUsd = parseUsdFromBalanceMessage(
-    state.live.balance.message,
-  );
+  const bullpenAccountValueUsd =
+    state.live.balance.account_value_usd ??
+    parseUsdFromBalanceMessage(state.live.balance.message);
   const copiedActiveStatuses = new Set(["executed", "confirmed"]);
   const executedLiveTrades = state.live.recent_decisions.filter((trade) =>
     copiedActiveStatuses.has(trade.status),
@@ -574,10 +585,31 @@ export default function PolymarketBotPage() {
       : !copiedActiveStatuses.has(trade.status),
   );
   const copiedHistoryTrades = state.live.recent_decisions;
+  const copiedHistoryFilterOptions: {
+    key: CopiedHistoryFilter;
+    label: string;
+  }[] = [
+    { key: "all", label: "All" },
+    { key: "buy", label: "Buy" },
+    { key: "sell", label: "Sell" },
+    { key: "redeem", label: "Redeem" },
+    { key: "rewards", label: "Rewards" },
+    { key: "deposits", label: "Deposits" },
+    { key: "withdrawals", label: "Withdrawals" },
+  ];
+  const copiedFilteredHistoryTrades = copiedHistoryTrades.filter((trade) => {
+    if (copiedHistoryFilter === "all") return true;
+    if (copiedHistoryFilter === "buy" || copiedHistoryFilter === "sell") {
+      return trade.side.toLowerCase() === copiedHistoryFilter;
+    }
+    const searchable =
+      `${trade.command || ""} ${trade.reason || ""} ${trade.status || ""}`.toLowerCase();
+    return searchable.includes(copiedHistoryFilter);
+  });
   const copiedVisibleTrades =
     copiedPositionsTab === "positions"
       ? copiedPositionTrades
-      : copiedHistoryTrades;
+      : copiedFilteredHistoryTrades;
   const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades);
   const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
   const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
@@ -1100,6 +1132,25 @@ export default function PolymarketBotPage() {
                   </div>
                 ) : null}
               </div>
+
+              {copiedPositionsTab === "history" ? (
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {copiedHistoryFilterOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${
+                        copiedHistoryFilter === option.key
+                          ? "border-slate-950 bg-slate-950 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950"
+                      }`}
+                      onClick={() => setCopiedHistoryFilter(option.key)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
                 <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
