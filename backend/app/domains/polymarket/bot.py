@@ -128,9 +128,11 @@ class PolymarketPaperCopyBot:
 
         self._poll_task: asyncio.Task[None] | None = None
         self._balance_task: asyncio.Task[None] | None = None
+        self._manual_balance_refresh_task: asyncio.Task[None] | None = None
         self._startup_warmup_task: asyncio.Task[None] | None = None
         self._net_worth_refresh_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
+        self._balance_refresh_lock = asyncio.Lock()
 
     async def init(self) -> None:
         async with self._lock:
@@ -164,6 +166,8 @@ class PolymarketPaperCopyBot:
             self._poll_task = None
             await self._cancel_task(self._balance_task)
             self._balance_task = None
+            await self._cancel_task(self._manual_balance_refresh_task)
+            self._manual_balance_refresh_task = None
             await self._cancel_task(self._startup_warmup_task)
             self._startup_warmup_task = None
             await self._cancel_task(self._net_worth_refresh_task)
@@ -275,8 +279,15 @@ class PolymarketPaperCopyBot:
             await self._refresh_doctor_unlocked()
 
     async def refresh_balance(self) -> None:
-        async with self._lock:
-            await self._refresh_balance_unlocked()
+        if (
+            self._manual_balance_refresh_task
+            and not self._manual_balance_refresh_task.done()
+        ):
+            return
+        self.balance_state = self._loading_balance_state()
+        self._manual_balance_refresh_task = asyncio.create_task(
+            self._refresh_balance_background()
+        )
 
     async def redeem_live_positions(self) -> None:
         async with self._lock:
@@ -427,6 +438,9 @@ class PolymarketPaperCopyBot:
     async def get_state(self) -> PolymarketBotState:
         async with self._lock:
             return self._build_state_unlocked()
+
+    def get_state_snapshot(self) -> PolymarketBotState:
+        return self._build_state_unlocked()
 
     def _build_state_unlocked(self) -> PolymarketBotState:
         if self.running and (self._poll_task is None or self._poll_task.done()):
@@ -1297,21 +1311,15 @@ class PolymarketPaperCopyBot:
         )
 
     async def _refresh_balance_background(self) -> None:
-        await self._auto_redeem_background()
-        async with self._lock:
-            self.balance_state = self._loading_balance_state()
-        balance_state = self._with_next_balance_refresh(
-            await self.balance_reader.refresh()
-        )
-        async with self._lock:
-            self.balance_state = balance_state
-
-    async def _refresh_balance_unlocked(self) -> None:
-        await self._auto_redeem_unlocked()
-        self.balance_state = self._loading_balance_state()
-        self.balance_state = self._with_next_balance_refresh(
-            await self.balance_reader.refresh()
-        )
+        async with self._balance_refresh_lock:
+            await self._auto_redeem_background()
+            async with self._lock:
+                self.balance_state = self._loading_balance_state()
+            balance_state = self._with_next_balance_refresh(
+                await self.balance_reader.refresh()
+            )
+            async with self._lock:
+                self.balance_state = balance_state
 
     async def _try_auto_unlock_live_unlocked(self, reason: str) -> None:
         if (

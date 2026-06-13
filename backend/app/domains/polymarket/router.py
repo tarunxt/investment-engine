@@ -86,7 +86,7 @@ async def refresh_polymarket_doctor(current_user: User = Depends(get_current_use
 async def refresh_polymarket_balance(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
     await bot.refresh_balance()
-    return await bot.get_state()
+    return bot.get_state_snapshot()
 
 
 @router.post("/live/redeem", response_model=PolymarketBotState)
