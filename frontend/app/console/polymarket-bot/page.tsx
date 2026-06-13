@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { apiService, APIError } from "@/services/api";
+import { parseApiTimestamp } from "@/lib/datetime";
 import type {
   PolymarketBotState,
   PolymarketPaperTrade,
@@ -33,8 +34,10 @@ function normalizeError(error: unknown) {
 }
 
 function formatTs(iso?: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-IN", {
+  const date = parseApiTimestamp(iso);
+  if (!date) return iso || "—";
+
+  return date.toLocaleString("en-IN", {
     timeZone: "Asia/Kolkata",
     dateStyle: "medium",
     timeStyle: "short",
