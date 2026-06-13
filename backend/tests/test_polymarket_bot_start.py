@@ -210,7 +210,7 @@ async def test_live_start_refreshes_doctor_even_when_recent_failure_exists(tmp_p
 
 
 @pytest.mark.anyio
-async def test_live_start_error_includes_latest_doctor_result(tmp_path):
+async def test_live_start_falls_back_to_read_only_when_doctor_fails(tmp_path):
     from app.domains.polymarket.schemas import PolymarketDoctorStatus
 
     executor = StaticDoctorExecutor(
@@ -224,15 +224,23 @@ async def test_live_start_error_includes_latest_doctor_result(tmp_path):
     )
     bot = await build_live_bot(tmp_path, executor)
 
-    with pytest.raises(RuntimeError) as exc_info:
-        await bot.start()
+    await bot.start()
 
     assert executor.calls == 1
-    assert bot.running is False
-    assert "Live mode locked: Bullpen doctor must pass." in str(exc_info.value)
-    assert "Last doctor result: Bullpen doctor failed after status passed" in str(
-        exc_info.value
+    assert bot.running is True
+    assert bot.live_unlocked is False
+    assert bot.active_mode == "live-read"
+    assert bot.live_source_status.source_mode == "live-read"
+    assert any(
+        "Live trading remains locked; starting read-only poller instead"
+        in activity.message
+        and "Last doctor result: Bullpen doctor failed after status passed"
+        in activity.message
+        for activity in bot.recent_activity
     )
+
+    bot._poll_task.cancel()
+    await asyncio.gather(bot._poll_task, return_exceptions=True)
 
 
 class ActivityProvider:

@@ -169,9 +169,26 @@ class PolymarketPaperCopyBot:
                 )
                 if block_reason:
                     message = self._startup_block_message(block_reason)
-                    self._add_activity(f"Live mode refused to start: {message}")
-                    raise RuntimeError(f"Live mode locked: {message}")
-                self.active_mode = "live-trading"
+                    self.active_provider = (
+                        self.provider
+                        if self.config.use_live_reads
+                        else self.fallback_provider
+                    )
+                    self.active_mode = (
+                        "live-read" if self.config.use_live_reads else "mock"
+                    )
+                    self.live_source_status.source_mode = self.active_mode
+                    self._add_activity(
+                        "Live trading remains locked; starting read-only poller instead: "
+                        f"{message}"
+                    )
+                    await self.logger.warn(
+                        "Live trading remains locked; starting read-only poller instead: "
+                        f"{message}"
+                    )
+                else:
+                    self.active_mode = "live-trading"
+                    self.live_source_status.source_mode = self.active_mode
             self.running = True
             started_at = utc_now()
             self.session_started_at = started_at
