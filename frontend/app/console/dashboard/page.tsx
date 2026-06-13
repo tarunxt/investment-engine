@@ -242,7 +242,8 @@ function PortfolioCommandSummary({
   indmoneyValue,
   indmoneyPortfolioValue,
   indmoneyFundsValue,
-  bullpenValue,
+  bullpenValueUsd,
+  usdInrRate,
 }: {
   totalValue: number;
   zerodhaValue: number;
@@ -251,7 +252,8 @@ function PortfolioCommandSummary({
   indmoneyValue: number;
   indmoneyPortfolioValue: number | null | undefined;
   indmoneyFundsValue: number | null | undefined;
-  bullpenValue: number | null | undefined;
+  bullpenValueUsd: number | null | undefined;
+  usdInrRate: number;
 }) {
   const [showInvestmentNumbers, setShowInvestmentNumbers] = useState(false);
   const formatPrivateInvestmentValue = (value: number | null | undefined) => {
@@ -260,12 +262,23 @@ function PortfolioCommandSummary({
       ? formattedValue
       : maskInvestmentValue(formattedValue);
   };
+  const formatPrivateBullpenValue = (value: number | null | undefined) => {
+    const formattedValue = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 2,
+    }).format(value ?? 0);
+    return showInvestmentNumbers
+      ? formattedValue
+      : maskInvestmentValue(formattedValue);
+  };
+  const bullpenValueInr = (bullpenValueUsd ?? 0) * usdInrRate;
   const VisibilityIcon = showInvestmentNumbers ? EyeOff : Eye;
 
   return (
     <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 shadow-2xl shadow-slate-950/15 backdrop-blur">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
-        <div className="min-w-[210px] flex-1">
+      <div className="flex flex-col gap-5">
+        <div>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">
               <Target className="size-3.5" />
@@ -299,7 +312,7 @@ function PortfolioCommandSummary({
           </div>
         </div>
 
-        <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
             <div className="text-xs font-semibold text-white">Zerodha</div>
             <div className="mt-1 text-sm font-bold text-white">
@@ -326,10 +339,10 @@ function PortfolioCommandSummary({
           <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
             <div className="text-xs font-semibold text-white">Bullpen</div>
             <div className="mt-1 text-sm font-bold text-white">
-              {formatPrivateInvestmentValue(bullpenValue)}
+              {formatPrivateBullpenValue(bullpenValueUsd)}
             </div>
             <div className="mt-3 text-xs leading-5 text-slate-200">
-              Polymarket account value included in total investments
+              {formatPrivateInvestmentValue(bullpenValueInr)} INR equivalent included in total investments
             </div>
           </div>
         </div>
@@ -954,7 +967,8 @@ export default function DashboardPage() {
             indmoneyValue={indmoneyCommandValue}
             indmoneyPortfolioValue={indmoneyPortfolioValueInr}
             indmoneyFundsValue={indmoneyAvailableFundsValueInr}
-            bullpenValue={bullpenAccountValueInr}
+            bullpenValueUsd={bullpenAccountValueUsd}
+            usdInrRate={usdInrRate}
           />
 
           <PortfolioCommandChart

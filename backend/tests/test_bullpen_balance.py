@@ -75,6 +75,20 @@ def test_format_balance_message_prefers_polymarket_available_pusd():
     )
 
 
+def test_format_balance_message_prefers_bullpen_account_value_over_cash():
+    parsed = {
+        "account": "Bullpen",
+        "account_value": "$8.03",
+        "cash": "0.61",
+        "currency": "USD",
+    }
+
+    assert (
+        bullpen._format_balance_message(parsed)
+        == "Bullpen account value: 8.03 USD"
+    )
+
+
 def test_bullpen_executable_uses_runtime_tools_when_env_path_missing(monkeypatch, tmp_path):
     runtime_tools = tmp_path / ".runtime-tools"
     runtime_tools.mkdir()
