@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Activity, ExternalLink, Loader2, TrendingUp, Wallet } from "lucide-react";
+import { Activity, ExternalLink, Info, Loader2, TrendingUp, Wallet } from "lucide-react";
 
 import {
   Card,
@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { apiService, APIError } from "@/services/api";
-import type { PolymarketBotState } from "@/types/api";
+import type { PolymarketBotState, PolymarketSourceTradeDecision } from "@/types/api";
 
 import { MetricGrid, type MetricItem } from "./_components/MetricGrid";
 import {
@@ -80,6 +80,74 @@ function formatMoney(value: number, digits = 2) {
 const BULLPEN_ACCOUNT_URL =
   "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
 
+type CopiedEventGroup = {
+  key: string;
+  copiedAt: string;
+  marketId: string;
+  marketTitle: string;
+  outcome: string;
+  side: PolymarketSourceTradeDecision["side"];
+  amount: number;
+  averagePrice: number;
+  status: string;
+  traders: PolymarketSourceTradeDecision[];
+};
+
+function getTraderDisplayName(trade: PolymarketSourceTradeDecision) {
+  return trade.trader_handle ? `@${trade.trader_handle}` : trade.trader_name;
+}
+
+function getCopiedEventKey(trade: PolymarketSourceTradeDecision) {
+  return [trade.market_id, trade.market_title, trade.outcome, trade.side].join(
+    "::",
+  );
+}
+
+function buildCopiedEventGroups(trades: PolymarketSourceTradeDecision[]) {
+  const groups = new Map<string, CopiedEventGroup>();
+
+  for (const trade of trades) {
+    const key = getCopiedEventKey(trade);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        key,
+        copiedAt: trade.executed_at || trade.updated_at || trade.proposed_at,
+        marketId: trade.market_id,
+        marketTitle: trade.market_title,
+        outcome: trade.outcome,
+        side: trade.side,
+        amount: trade.amount,
+        averagePrice: trade.price,
+        status: trade.status,
+        traders: [trade],
+      });
+      continue;
+    }
+
+    existing.amount += trade.amount;
+    existing.traders.push(trade);
+    existing.copiedAt =
+      new Date(trade.executed_at || trade.updated_at || trade.proposed_at).getTime() >
+      new Date(existing.copiedAt).getTime()
+        ? trade.executed_at || trade.updated_at || trade.proposed_at
+        : existing.copiedAt;
+    existing.status = existing.traders.some((item) => item.status === "executed")
+      ? "executed"
+      : existing.status;
+    existing.averagePrice = existing.amount > 0
+      ? existing.traders.reduce(
+          (total, item) => total + item.amount * item.price,
+          0,
+        ) / existing.amount
+      : existing.averagePrice;
+  }
+
+  return Array.from(groups.values()).sort(
+    (a, b) => new Date(b.copiedAt).getTime() - new Date(a.copiedAt).getTime(),
+  );
+}
+
 export default function PolymarketBotPage() {
   const [state, setState] = useState<PolymarketBotState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,6 +166,8 @@ export default function PolymarketBotPage() {
     enabled: true,
   });
   const [busyAccountId, setBusyAccountId] = useState<string | null>(null);
+  const [selectedCopiedEvent, setSelectedCopiedEvent] =
+    useState<CopiedEventGroup | null>(null);
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
 
@@ -266,10 +336,13 @@ export default function PolymarketBotPage() {
   const startDisabled = state.running || isActionPending;
   const stopDisabled = !state.running || isActionPending;
 
-  const bullpenAccountValueUsd = parseUsdFromBalanceMessage(state.live.balance.message);
+  const bullpenAccountValueUsd = parseUsdFromBalanceMessage(
+    state.live.balance.message,
+  );
   const executedLiveTrades = state.live.recent_decisions.filter((trade) =>
     ["executed", "confirmed"].includes(trade.status),
   );
+  const copiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
 
   const visibleTrackedTraders = state.tracked_traders.filter(
     (trader) => trader.activity_source !== "handle",
@@ -583,7 +656,7 @@ export default function PolymarketBotPage() {
                 <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Active Trades</div>
                 <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
                   <Activity className="size-4 text-sky-300" />
-                  {state.open_positions.length}
+                  {copiedEventGroups.length}
                 </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
@@ -650,6 +723,82 @@ export default function PolymarketBotPage() {
           </div>
 
 
+
+          <Card className="border border-slate-200 bg-white py-6">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                Copied Bullpen Positions
+              </CardTitle>
+              <CardDescription>
+                Aggregated by exact Event, outcome, and side so repeated $1
+                copies from multiple traders display as one Bullpen exposure.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Copied At</th>
+                      <th className="px-4 py-3">Trader</th>
+                      <th className="px-4 py-3">Event</th>
+                      <th className="px-4 py-3">Side</th>
+                      <th className="px-4 py-3">Outcome</th>
+                      <th className="px-4 py-3">Amount</th>
+                      <th className="px-4 py-3">Price</th>
+                      <th className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {copiedEventGroups.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={8}>
+                          No copied Bullpen positions yet.
+                        </td>
+                      </tr>
+                    ) : copiedEventGroups.map((event) => {
+                      const hasMultipleTraders = event.traders.length > 1;
+                      return (
+                        <tr key={event.key} className="align-top">
+                          <td className="px-4 py-3 text-slate-700">{formatTs(event.copiedAt)}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {hasMultipleTraders ? (
+                              <button
+                                className="font-medium text-sky-700 underline underline-offset-2"
+                                onClick={() => setSelectedCopiedEvent(event)}
+                              >
+                                multiple
+                              </button>
+                            ) : getTraderDisplayName(event.traders[0])}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="flex items-start gap-2">
+                              <div>
+                                <div className="font-medium text-slate-950">{event.marketTitle}</div>
+                                <div className="mt-1 text-xs text-slate-500">{event.marketId}</div>
+                              </div>
+                              <button
+                                className="mt-0.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                aria-label={`Show copied traders for ${event.marketTitle}`}
+                                onClick={() => setSelectedCopiedEvent(event)}
+                              >
+                                <Info className="size-4" />
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{event.side}</td>
+                          <td className="px-4 py-3 text-slate-700">{event.outcome}</td>
+                          <td className="px-4 py-3 text-slate-700">{formatMoney(event.amount)}</td>
+                          <td className="px-4 py-3 text-slate-700">{formatMoney(event.averagePrice, 4)}</td>
+                          <td className="px-4 py-3 text-slate-700">{event.status}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
           <Card className="border border-slate-200 bg-white py-6">
             <CardHeader className="pb-0">
               <CardTitle className="text-base tracking-[0.18em] text-slate-950">
@@ -896,6 +1045,53 @@ export default function PolymarketBotPage() {
         </>
       )}
 
+
+      {selectedCopiedEvent ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">Copied traders</h2>
+                <p className="mt-1 text-sm text-slate-500">{selectedCopiedEvent.marketTitle}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="rounded-full border-slate-300"
+                onClick={() => setSelectedCopiedEvent(null)}
+              >
+                Close
+              </Button>
+            </div>
+            <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200">
+              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Trader</th>
+                    <th className="px-4 py-3">Timestamp</th>
+                    <th className="px-4 py-3">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {selectedCopiedEvent.traders.map((trade) => (
+                    <tr key={trade.id}>
+                      <td className="px-4 py-3 font-medium text-slate-950">{getTraderDisplayName(trade)}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {formatTs(trade.executed_at || trade.updated_at || trade.proposed_at)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {pendingAction ? (
         <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-slate-500">
           <Loader2 className="size-3.5 animate-spin" />
