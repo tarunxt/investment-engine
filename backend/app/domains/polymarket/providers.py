@@ -309,7 +309,11 @@ class BullpenReadOnlyProvider:
                 trader.source_reason = (
                     f"{label.title()} profit leaderboard trader discovered via Bullpen"
                 )
-            selected = traders[:limit]
+                trader.leaderboard_period = label
+                trader.leaderboard_periods = [label]
+            selected = sorted(
+                traders, key=lambda trader: trader.profit_usd, reverse=True
+            )[:limit]
             return {
                 "traders": selected,
                 "rows_considered": len(rows),
@@ -1155,6 +1159,19 @@ def normalize_fallback_trader_row(row: dict[str, Any]) -> PolymarketTrader | Non
         ),
         volume_24h=volume_24h,
         trades_24h=trades_24h,
+        profit_usd=(
+            number_value(
+                row.get("profit")
+                or row.get("pnl")
+                or row.get("profitUsd")
+                or row.get("profit_usd")
+                or row.get("realizedPnl")
+                or row.get("realized_pnl")
+                or row.get("totalPnl")
+                or row.get("total_pnl")
+            )
+            or 0
+        ),
         last_trade_at=parse_timestamp(
             row.get("lastTradeAt")
             or row.get("last_trade_at")
@@ -1440,19 +1457,46 @@ def merge_traders(traders: list[PolymarketTrader]) -> list[PolymarketTrader]:
                     if existing.trades_24h >= trader.trades_24h
                     else trader.activity_source
                 ),
+                "profit_usd": max(existing.profit_usd, trader.profit_usd),
+                "leaderboard_period": existing.leaderboard_period
+                or trader.leaderboard_period,
+                "leaderboard_periods": sorted(
+                    {
+                        *(
+                            existing.leaderboard_periods
+                            or (
+                                [existing.leaderboard_period]
+                                if existing.leaderboard_period
+                                else []
+                            )
+                        ),
+                        *(
+                            trader.leaderboard_periods
+                            or (
+                                [trader.leaderboard_period]
+                                if trader.leaderboard_period
+                                else []
+                            )
+                        ),
+                    }
+                ),
                 "source_reason": (
                     "Manual tracked wallet"
                     if "Manual" in existing.source_reason
                     or "Manual" in trader.source_reason
-                    else existing.source_reason
+                    else (
+                        existing.source_reason
+                        if existing.source_reason == trader.source_reason
+                        else f"{existing.source_reason}; {trader.source_reason}"
+                    )
                 ),
             }
         )
     return list(merged.values())
 
 
-def compare_trader_key(trader: PolymarketTrader) -> tuple[int, int, float]:
-    return (activity_bucket(trader), trader.trades_24h, trader.volume_24h)
+def compare_trader_key(trader: PolymarketTrader) -> tuple[float, int, int, float]:
+    return (trader.profit_usd, activity_bucket(trader), trader.trades_24h, trader.volume_24h)
 
 
 def activity_bucket(trader: PolymarketTrader) -> int:

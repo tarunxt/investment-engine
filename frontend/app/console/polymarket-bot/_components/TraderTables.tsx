@@ -1,6 +1,69 @@
 'use client';
 
-import type { PolymarketTrader } from '@/types/api';
+import { useMemo, useState } from 'react';
+
+import type { PolymarketPaperTrade, PolymarketSourceTradeDecision, PolymarketTrader } from '@/types/api';
+
+const TRACKED_TRADERS_PAGE_SIZE = 20;
+type LeaderboardTab = 'today' | 'weekly';
+type TraderCopyStats = { tradesCopied: number; tradesCopiedAmount: number };
+
+function traderIdentityValues(trader: PolymarketTrader) {
+  return [trader.id, trader.address, trader.handle, trader.name]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+}
+
+function traderMatchesPeriod(trader: PolymarketTrader, period: LeaderboardTab) {
+  const periods = trader.leaderboard_periods?.length
+    ? trader.leaderboard_periods
+    : trader.leaderboard_period
+      ? [trader.leaderboard_period]
+      : [];
+  if (periods.map((item) => item.toLowerCase()).includes(period)) return true;
+  return trader.source_reason.toLowerCase().includes(`${period} profit leaderboard`);
+}
+
+function buildCopyStats(
+  traders: PolymarketTrader[],
+  decisions: PolymarketSourceTradeDecision[],
+  paperTrades: PolymarketPaperTrade[],
+) {
+  const stats = new Map<string, TraderCopyStats>();
+
+  for (const trader of traders) {
+    stats.set(trader.id, { tradesCopied: 0, tradesCopiedAmount: 0 });
+  }
+
+  const addForTrader = (identity: string | undefined | null, amount: number) => {
+    if (!identity) return;
+    const normalized = identity.toLowerCase();
+    const trader = traders.find((candidate) =>
+      traderIdentityValues(candidate).includes(normalized),
+    );
+    if (!trader) return;
+    const current = stats.get(trader.id) || { tradesCopied: 0, tradesCopiedAmount: 0 };
+    stats.set(trader.id, {
+      tradesCopied: current.tradesCopied + 1,
+      tradesCopiedAmount: current.tradesCopiedAmount + amount,
+    });
+  };
+
+  decisions
+    .filter((trade) => trade.status === 'executed' || trade.status === 'confirmed')
+    .forEach((trade) =>
+      addForTrader(
+        trade.trader_address || trade.trader_handle || trade.trader_id || trade.trader_name,
+        trade.amount,
+      ),
+    );
+
+  paperTrades
+    .filter((trade) => trade.status === 'executed')
+    .forEach((trade) => addForTrader(trade.trader_id || trade.trader_name, trade.copied_usd));
+
+  return stats;
+}
 
 function formatTs(iso?: string | null) {
   if (!iso) return '—';
@@ -59,59 +122,152 @@ function EmptyState({ colSpan, message }: { colSpan: number; message: string }) 
   );
 }
 
-export function TrackedTradersTable({ traders }: { traders: PolymarketTrader[] }) {
-  return (
-    <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
-      <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-        <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          <tr>
-            <th className="px-4 py-3">Trader</th>
-            <th className="px-4 py-3">Source Reason</th>
-            <th className="px-4 py-3">Trades 1h</th>
-            <th className="px-4 py-3">Trades 6h</th>
-            <th className="px-4 py-3">Trades 24h</th>
-            <th className="px-4 py-3">Last Trade Time</th>
-            <th className="px-4 py-3">Last Trade Age</th>
-            <th className="px-4 py-3">Volume 24h</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {traders.length === 0 ? (
-            <EmptyState colSpan={8} message="Start the bot to load tracked traders." />
-          ) : (
-            traders.map((trader) => {
-              const profileUrl = normalizePolymarketProfileUrl(trader);
+export function TrackedTradersTable({
+  traders,
+  decisions = [],
+  paperTrades = [],
+}: {
+  traders: PolymarketTrader[];
+  decisions?: PolymarketSourceTradeDecision[];
+  paperTrades?: PolymarketPaperTrade[];
+}) {
+  const [activeTab, setActiveTab] = useState<LeaderboardTab>('today');
+  const [pageByTab, setPageByTab] = useState<Record<LeaderboardTab, number>>({
+    today: 1,
+    weekly: 1,
+  });
+  const copyStats = useMemo(
+    () => buildCopyStats(traders, decisions, paperTrades),
+    [traders, decisions, paperTrades],
+  );
+  const sortedTraders = useMemo(
+    () =>
+      traders
+        .filter((trader) => trader.activity_source !== 'handle' && traderMatchesPeriod(trader, activeTab))
+        .sort((a, b) => (b.profit_usd || 0) - (a.profit_usd || 0)),
+    [activeTab, traders],
+  );
+  const totalPages = Math.max(1, Math.ceil(sortedTraders.length / TRACKED_TRADERS_PAGE_SIZE));
+  const currentPage = Math.min(pageByTab[activeTab], totalPages);
+  const pagedTraders = sortedTraders.slice(
+    (currentPage - 1) * TRACKED_TRADERS_PAGE_SIZE,
+    currentPage * TRACKED_TRADERS_PAGE_SIZE,
+  );
 
-              return (
-                <tr key={trader.id} className="align-top">
-                  <td className="px-4 py-3">
-                    {profileUrl ? (
-                      <a
-                        href={profileUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-medium text-slate-950 underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700 hover:decoration-sky-700"
-                      >
-                        {trader.name}
-                      </a>
-                    ) : (
-                      <div className="font-medium text-slate-950">{trader.name}</div>
-                    )}
-                    <div className="mt-1 text-xs text-slate-500">{trader.address || trader.id}</div>
-                  </td>
-                  <td className="px-4 py-3 text-xs leading-5 text-slate-600">{trader.source_reason}</td>
-                  <td className="px-4 py-3 text-slate-700">{trader.trades_1h}</td>
-                  <td className="px-4 py-3 text-slate-700">{trader.trades_6h}</td>
-                  <td className="px-4 py-3 text-slate-700">{trader.trades_24h}</td>
-                  <td className="px-4 py-3 text-slate-700">{formatTs(trader.last_trade_at)}</td>
-                  <td className="px-4 py-3 text-slate-700">{trader.last_trade_age || '—'}</td>
-                  <td className="px-4 py-3 text-slate-700">{formatMoney(trader.volume_24h)}</td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+  const selectTab = (tab: LeaderboardTab) => {
+    setActiveTab(tab);
+    setPageByTab((current) => ({ ...current, [tab]: current[tab] || 1 }));
+  };
+  const setPage = (page: number) =>
+    setPageByTab((current) => ({ ...current, [activeTab]: page }));
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm font-medium text-slate-600">
+          {(['today', 'weekly'] as LeaderboardTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => selectTab(tab)}
+              className={`rounded-full px-4 py-2 capitalize transition ${
+                activeTab === tab ? 'bg-white text-slate-950 shadow-sm' : 'hover:text-slate-950'
+              }`}
+            >
+              {tab} profit
+            </button>
+          ))}
+        </div>
+        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+          Showing {pagedTraders.length ? (currentPage - 1) * TRACKED_TRADERS_PAGE_SIZE + 1 : 0}-
+          {Math.min(currentPage * TRACKED_TRADERS_PAGE_SIZE, sortedTraders.length)} of{' '}
+          {sortedTraders.length}
+        </div>
+      </div>
+      <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+          <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <tr>
+              <th className="px-4 py-3">Trader</th>
+              <th className="px-4 py-3">Trades copied</th>
+              <th className="px-4 py-3">Trades copied amount</th>
+              <th className="px-4 py-3">Trader Trades 1h</th>
+              <th className="px-4 py-3">Trader Trades 6h</th>
+              <th className="px-4 py-3">Trader Trades 24h</th>
+              <th className="px-4 py-3">Trader Last Trade Time</th>
+              <th className="px-4 py-3">Trader Last Trade Age</th>
+              <th className="px-4 py-3">Trader Volume 24h</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {pagedTraders.length === 0 ? (
+              <EmptyState colSpan={9} message="Start the bot to load tracked traders." />
+            ) : (
+              pagedTraders.map((trader) => {
+                const profileUrl = normalizePolymarketProfileUrl(trader);
+                const stats = copyStats.get(trader.id) || {
+                  tradesCopied: 0,
+                  tradesCopiedAmount: 0,
+                };
+
+                return (
+                  <tr key={`${activeTab}-${trader.id}`} className="align-top">
+                    <td className="px-4 py-3">
+                      {profileUrl ? (
+                        <a
+                          href={profileUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-slate-950 underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700 hover:decoration-sky-700"
+                        >
+                          {trader.name}
+                        </a>
+                      ) : (
+                        <div className="font-medium text-slate-950">{trader.name}</div>
+                      )}
+                      <div className="mt-1 text-xs text-slate-500">{trader.address || trader.id}</div>
+                      <div className="mt-1 text-xs font-medium text-emerald-700">
+                        Profit {formatMoney(trader.profit_usd || 0)}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{stats.tradesCopied}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {formatMoney(stats.tradesCopiedAmount)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{trader.trades_1h}</td>
+                    <td className="px-4 py-3 text-slate-700">{trader.trades_6h}</td>
+                    <td className="px-4 py-3 text-slate-700">{trader.trades_24h}</td>
+                    <td className="px-4 py-3 text-slate-700">{formatTs(trader.last_trade_at)}</td>
+                    <td className="px-4 py-3 text-slate-700">{trader.last_trade_age || '—'}</td>
+                    <td className="px-4 py-3 text-slate-700">{formatMoney(trader.volume_24h)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center justify-end gap-2 text-sm">
+        <button
+          type="button"
+          disabled={currentPage <= 1}
+          onClick={() => setPage(currentPage - 1)}
+          className="rounded-full border border-slate-200 px-3 py-1.5 text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Previous
+        </button>
+        <span className="text-slate-500">
+          Page {currentPage} of {totalPages}
+        </span>
+        <button
+          type="button"
+          disabled={currentPage >= totalPages}
+          onClick={() => setPage(currentPage + 1)}
+          className="rounded-full border border-slate-200 px-3 py-1.5 text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
     </div>
   );
 }
