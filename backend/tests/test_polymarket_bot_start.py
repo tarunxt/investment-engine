@@ -101,6 +101,41 @@ class SlowBalanceReader:
 
 
 @pytest.mark.anyio
+async def test_get_state_returns_while_startup_balance_is_refreshing(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": True,
+            "live_trading": False,
+            "use_live_reads": False,
+            "poll_interval_ms": 1000,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = SlowProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=SlowDoctorExecutor(),
+        balance_reader=SlowBalanceReader(),
+        logger=logger,
+    )
+
+    await bot.init()
+    await asyncio.sleep(0)
+
+    state = await asyncio.wait_for(bot.get_state(), timeout=0.5)
+
+    assert state.live.balance.status in {"idle", "loading"}
+
+    await bot.shutdown()
+
+
+@pytest.mark.anyio
 async def test_init_returns_before_startup_warmup_finishes(tmp_path):
     config = load_polymarket_config().model_copy(
         update={

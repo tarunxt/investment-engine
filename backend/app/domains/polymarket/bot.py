@@ -501,8 +501,7 @@ class PolymarketPaperCopyBot:
             await self._try_auto_unlock_live_unlocked("server initialization")
 
     async def _refresh_startup_balance_background(self) -> None:
-        async with self._lock:
-            await self._refresh_balance_unlocked()
+        await self._refresh_balance_background()
 
     async def _perform_startup_live_baseline_background(self) -> None:
         if not self.config.use_live_reads or self.active_mode == "mock":
@@ -590,8 +589,7 @@ class PolymarketPaperCopyBot:
         try:
             while True:
                 await asyncio.sleep(5 * 60)
-                async with self._lock:
-                    await self._refresh_balance_unlocked()
+                await self._refresh_balance_background()
         except asyncio.CancelledError:
             return
 
@@ -1255,6 +1253,43 @@ class PolymarketPaperCopyBot:
         self.balance_state = self._with_next_balance_refresh(
             await self.balance_reader.refresh()
         )
+
+    async def _auto_redeem_background(self) -> None:
+        async with self._lock:
+            should_redeem = self.config.auto_redeem_live and self._wants_live_execution()
+        if not should_redeem:
+            return
+        try:
+            await self.live_executor.redeem(dry_run=False)
+        except BullpenCommandError as exc:
+            message = redact_secrets(str(exc))
+            if not is_redeem_metadata_lookup_warning(message):
+                raise
+            await self.logger.warn(
+                "Bullpen redeem skipped a resolved market missing Gamma metadata: "
+                f"{message}"
+            )
+            async with self._lock:
+                self._add_activity(
+                    "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
+                )
+        else:
+            async with self._lock:
+                self._add_activity(
+                    "Auto-redeem checked and submitted any Bullpen redeemable positions."
+                )
+
+    async def _refresh_balance_background(self) -> None:
+        await self._auto_redeem_background()
+        async with self._lock:
+            self.balance_state = PolymarketBalanceState(
+                status="loading", message="Refreshing Bullpen balance..."
+            )
+        balance_state = self._with_next_balance_refresh(
+            await self.balance_reader.refresh()
+        )
+        async with self._lock:
+            self.balance_state = balance_state
 
     async def _refresh_balance_unlocked(self) -> None:
         await self._auto_redeem_unlocked()
