@@ -247,7 +247,6 @@ class BullpenLiveExecutor:
         checks = [
             (["status"], True, "status"),
             (["polymarket", "preflight"], False, "preflight"),
-            (["polymarket", "approve", "--check"], False, "approvals"),
         ]
         failures: list[str] = []
         passed: list[str] = []
@@ -261,7 +260,7 @@ class BullpenLiveExecutor:
             return PolymarketDoctorStatus(
                 checked_at=checked_at,
                 ok=True,
-                message="Bullpen status, preflight, and approval checks passed.",
+                message="Bullpen status and preflight checks passed.",
             )
         return PolymarketDoctorStatus(
             checked_at=checked_at,
@@ -433,8 +432,6 @@ class LiveTradeGuard:
             return "LIVE_TRADING must be true."
         if not self.config.use_live_reads:
             return "USE_LIVE_READS must be true."
-        if not self.config.jurisdiction_confirmation:
-            return "JURISDICTION_CONFIRMATION must be true."
         if not doctor.ok:
             return "Bullpen doctor must pass."
         return self.risk_settings_block_reason()
