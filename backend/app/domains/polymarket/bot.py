@@ -606,6 +606,8 @@ class PolymarketPaperCopyBot:
                 self.tracked_traders
             )
             self._refresh_tracked_trader_activity_unlocked(source_trades)
+            if self.active_mode == "live-trading":
+                await self._auto_exit_favorable_live_positions_unlocked(source_trades)
             live_proposals_before = len(self._pending_live_trades())
 
             if self.config.paused:
@@ -810,6 +812,107 @@ class PolymarketPaperCopyBot:
             )
         return updated
 
+    async def _auto_exit_favorable_live_positions_unlocked(
+        self, source_trades: list[PolymarketSourceTrade]
+    ) -> None:
+        """Sell live positions when observed prices imply a near-certain win."""
+        if not self.config.auto_redeem_live or not self._wants_live_execution():
+            return
+
+        block_reason = self.live_guard.startup_block_reason(
+            self.doctor_status,
+            self.live_unlocked,
+            self.emergency_stopped,
+            self.live_manually_locked,
+        )
+        if block_reason:
+            return
+
+        latest_prices = self._latest_live_prices_by_market_outcome(source_trades)
+        if not latest_prices:
+            return
+
+        for position in list(self._live_positions()):
+            trigger_price = self._favorable_exit_price(position, latest_prices)
+            if trigger_price is None:
+                continue
+            decision = self._auto_exit_decision(position, trigger_price)
+            await self._record_live_trade_unlocked(decision)
+            try:
+                await self._execute_live_trade_unlocked(
+                    decision,
+                    "automatic favorable-price exit threshold reached",
+                    bypass_trade_risk=True,
+                )
+                await self.live_executor.redeem(dry_run=False)
+                self._add_activity(
+                    f"Auto-exited and redeemed favorable live position: {position.market_title} "
+                    f"{position.outcome} at {trigger_price * 100:.1f}¢."
+                )
+            except Exception as exc:
+                self._add_activity(
+                    f"Auto-exit failed and bot kept looping: {redact_secrets(str(exc))}"
+                )
+
+    def _latest_live_prices_by_market_outcome(
+        self, source_trades: list[PolymarketSourceTrade]
+    ) -> dict[tuple[str, str], float]:
+        prices: dict[tuple[str, str], float] = {}
+        for trade in sorted(source_trades, key=lambda item: item.timestamp):
+            if trade.source not in ("live-read", "live-market-read"):
+                continue
+            prices[(trade.market_id, trade.outcome)] = trade.price
+        return prices
+
+    def _favorable_exit_price(
+        self,
+        position: PolymarketPosition,
+        latest_prices: dict[tuple[str, str], float],
+    ) -> float | None:
+        held_price = latest_prices.get((position.market_id, position.outcome))
+        if held_price is not None and held_price >= 0.999:
+            return held_price
+
+        opposite_prices = [
+            price
+            for (market_id, outcome), price in latest_prices.items()
+            if market_id == position.market_id and outcome != position.outcome
+        ]
+        if any(price <= 0.001 for price in opposite_prices):
+            return 0.999
+        return None
+
+    def _auto_exit_decision(
+        self, position: PolymarketPosition, price: float
+    ) -> PolymarketLiveTradeDecision:
+        now = utc_now()
+        source_id = f"auto-exit:{position.key}:{now}"
+        return PolymarketLiveTradeDecision(
+            id=str(uuid4()),
+            source_trade_id=source_id,
+            source_trade_key=source_id,
+            proposed_at=now,
+            updated_at=now,
+            trader_id="auto-exit",
+            trader_name="Favorable price auto-exit",
+            trader_address="",
+            market_id=position.market_id,
+            market_title=position.market_title,
+            outcome=position.outcome,
+            side="SELL",
+            amount=position.shares * price,
+            price=price,
+            shares=position.shares,
+            max_loss=0,
+            reason=(
+                "Current live price reached a favorable auto-exit threshold "
+                "(99.9¢ on the held outcome or 0.1¢ on the opposite outcome)."
+            ),
+            status="proposed",
+            command="sell",
+            source="live-read",
+        )
+
     async def _handle_source_trade_unlocked(
         self,
         source_trade: PolymarketSourceTrade,
@@ -984,7 +1087,11 @@ class PolymarketPaperCopyBot:
                 )
 
     async def _execute_live_trade_unlocked(
-        self, trade: PolymarketLiveTradeDecision, confirmation_reason: str
+        self,
+        trade: PolymarketLiveTradeDecision,
+        confirmation_reason: str,
+        *,
+        bypass_trade_risk: bool = False,
     ) -> None:
         await self._refresh_doctor_unlocked()
         block_reason = self.live_guard.startup_block_reason(
@@ -1023,6 +1130,9 @@ class PolymarketPaperCopyBot:
             self.live_trade_history,
             self._live_positions(),
         )
+        if bypass_trade_risk:
+            risk_reason = None
+
         if risk_reason:
             trade.status = "skipped"
             trade.reason = f"{trade.reason} {risk_reason}"
