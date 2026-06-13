@@ -61,16 +61,19 @@ class PolymarketBotManager:
                 ),
             )
             await bot.init()
-            if user_config.auto_start:
-                try:
-                    await bot.start()
-                except Exception as exc:
-                    sanitized_error = redact_secrets(str(exc))
-                    bot.last_error = f"Auto-start failed: {sanitized_error}"
-                    await bot.logger.error("Polymarket bot auto-start failed", exc)
-                    bot.add_activity(f"Auto-start failed: {sanitized_error}.")
             self._bots[user_id] = bot
+            if user_config.auto_start:
+                asyncio.create_task(self._auto_start_bot(bot))
             return bot
+
+    async def _auto_start_bot(self, bot: PolymarketPaperCopyBot) -> None:
+        try:
+            await bot.start()
+        except Exception as exc:
+            sanitized_error = redact_secrets(str(exc))
+            bot.last_error = f"Auto-start failed: {sanitized_error}"
+            await bot.logger.error("Polymarket bot auto-start failed", exc)
+            bot.add_activity(f"Auto-start failed: {sanitized_error}.")
 
     async def shutdown(self) -> None:
         async with self._lock:
