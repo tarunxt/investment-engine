@@ -621,6 +621,8 @@ export default function PolymarketBotPage() {
   const [copiedHistoryFilter, setCopiedHistoryFilter] =
     useState<CopiedHistoryFilter>("all");
   const [liveTradeLimitDraft, setLiveTradeLimitDraft] = useState("");
+  const [traderInvestedThresholdDraft, setTraderInvestedThresholdDraft] =
+    useState("");
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
   useEffect(() => {
@@ -652,6 +654,9 @@ export default function PolymarketBotPage() {
           ),
         }));
         setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
+        setTraderInvestedThresholdDraft(
+          String(nextState.config.trader_invested_threshold_usd),
+        );
         setError(null);
       } catch (loadError) {
         if (cancelled) return;
@@ -688,6 +693,9 @@ export default function PolymarketBotPage() {
       lastMutationAt.current = Date.now();
       setState(nextState);
       setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
+      setTraderInvestedThresholdDraft(
+        String(nextState.config.trader_invested_threshold_usd),
+      );
     } catch (runError) {
       setActionError(normalizeError(runError));
     } finally {
@@ -706,6 +714,9 @@ export default function PolymarketBotPage() {
   function applyTrackedAccountState(nextState: PolymarketBotState) {
     setState(nextState);
     setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
+    setTraderInvestedThresholdDraft(
+      String(nextState.config.trader_invested_threshold_usd),
+    );
     setAccountDrafts(
       Object.fromEntries(
         nextState.tracked_accounts.map((account) => [
@@ -724,13 +735,24 @@ export default function PolymarketBotPage() {
 
   async function saveLiveTradeLimit() {
     const nextLimit = Number.parseInt(liveTradeLimitDraft, 10);
+    const nextTraderInvestedThreshold = Number.parseFloat(
+      traderInvestedThresholdDraft,
+    );
     if (!Number.isFinite(nextLimit) || nextLimit < 1) {
       setActionError("Max live trades per day must be at least 1.");
+      return;
+    }
+    if (
+      !Number.isFinite(nextTraderInvestedThreshold) ||
+      nextTraderInvestedThreshold < 0
+    ) {
+      setActionError("Trader invested threshold must be at least $0.");
       return;
     }
     await runAction("update-live-limit", () =>
       apiService.polymarketUpdateLiveLimits({
         max_live_trades_per_day: nextLimit,
+        trader_invested_threshold_usd: nextTraderInvestedThreshold,
       }),
     );
   }
@@ -1331,6 +1353,21 @@ export default function PolymarketBotPage() {
                 value={liveTradeLimitDraft}
                 onChange={(event) => setLiveTradeLimitDraft(event.target.value)}
                 aria-label="Max live trades per day"
+              />
+              <span className="font-medium">Trader Invested Threshold:</span>
+              <span className="font-semibold text-slate-950">
+                {formatMoney(state.config.trader_invested_threshold_usd)}
+              </span>
+              <input
+                className="h-8 w-24 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
+                type="number"
+                min={0}
+                step="0.01"
+                value={traderInvestedThresholdDraft}
+                onChange={(event) =>
+                  setTraderInvestedThresholdDraft(event.target.value)
+                }
+                aria-label="Trader invested threshold"
               />
               <Button
                 size="sm"

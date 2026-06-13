@@ -1008,6 +1008,7 @@ export interface PolymarketBotConfig {
   max_daily_loss: number;
   max_live_trade_size: number;
   max_live_trades_per_day: number;
+  trader_invested_threshold_usd: number;
   max_live_daily_loss: number;
   max_live_exposure_per_market: number;
   auto_redeem_live: boolean;
@@ -1065,6 +1066,7 @@ export interface PolymarketTrackedAccountCreate {
 
 export interface PolymarketLiveLimitUpdate {
   max_live_trades_per_day: number;
+  trader_invested_threshold_usd: number;
 }
 
 export interface PolymarketTrackedAccountUpdate {

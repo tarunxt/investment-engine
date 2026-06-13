@@ -55,6 +55,7 @@ class PolymarketTrackedAccountCreate(BaseModel):
 
 class PolymarketLiveLimitUpdate(BaseModel):
     max_live_trades_per_day: int = Field(ge=1, le=1000)
+    trader_invested_threshold_usd: float = Field(default=500, ge=0)
 
 
 class PolymarketTrackedAccountUpdate(BaseModel):
@@ -72,6 +73,7 @@ class PolymarketTrackedAccountUpdate(BaseModel):
 
 class PolymarketUserConfigOverride(BaseModel):
     max_live_trades_per_day: int = Field(ge=1, le=1000)
+    trader_invested_threshold_usd: float = Field(default=500, ge=0)
 
 
 class PolymarketBotConfig(BaseModel):
@@ -90,6 +92,7 @@ class PolymarketBotConfig(BaseModel):
     max_daily_loss: float
     max_live_trade_size: float
     max_live_trades_per_day: int
+    trader_invested_threshold_usd: float
     max_live_daily_loss: float
     max_live_exposure_per_market: float
     auto_redeem_live: bool
