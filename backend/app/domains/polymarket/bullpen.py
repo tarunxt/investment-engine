@@ -418,7 +418,20 @@ def _is_missing_balance_command(message: str) -> bool:
 
 def _format_balance_message(parsed: object) -> str:
     candidates = _collect_balance_candidates(parsed)
-    preferred = next(
+    preferred_account_value = next(
+        (
+            item
+            for item in candidates
+            if "polymarket" in item["context"].lower()
+            and _is_account_value_candidate(item)
+        ),
+        None,
+    )
+    account_value = preferred_account_value or next(
+        (item for item in candidates if _is_account_value_candidate(item)),
+        None,
+    )
+    preferred_cash_balance = next(
         (
             item
             for item in candidates
@@ -432,13 +445,30 @@ def _format_balance_message(parsed: object) -> str:
         None,
     ) or (candidates[0] if candidates else None)
 
-    balance = preferred or fallback
+    balance = account_value or preferred_cash_balance or fallback
     if not balance:
         return "Balance unavailable: Bullpen CLI returned no balance rows"
 
     prefix = "Polymarket" if "polymarket" in balance["context"].lower() else "Bullpen"
     currency = f" {balance['currency']}" if balance.get("currency") else ""
-    return f"{prefix} available balance: {_format_amount(balance['amount'])}{currency}"
+    label = "account value" if _is_account_value_candidate(balance) else "available balance"
+    return f"{prefix} {label}: {_format_amount(balance['amount'])}{currency}"
+
+
+def _is_account_value_candidate(item: dict[str, object]) -> bool:
+    label = str(item.get("label") or "").lower()
+    normalized = label.replace("_", "").replace("-", "").replace(" ", "")
+    return any(
+        token in normalized
+        for token in (
+            "accountvalue",
+            "portfoliovalue",
+            "totalvalue",
+            "valueusd",
+            "equity",
+            "netliquidation",
+        )
+    )
 
 
 def _is_cash_balance_candidate(item: dict[str, object]) -> bool:
@@ -485,9 +515,23 @@ def _collect_balance_candidates(
         if isinstance(raw, dict) or isinstance(raw, list):
             rows.extend(_collect_balance_candidates(raw, next_context, key))
             continue
+        normalized_key = key.lower().replace("_", "").replace("-", "").replace(" ", "")
         if not any(
-            token in key.lower()
-            for token in ("available", "balance", "cash", "pusd", "usdc", "collateral")
+            token in normalized_key
+            for token in (
+                "accountvalue",
+                "available",
+                "balance",
+                "cash",
+                "collateral",
+                "equity",
+                "netliquidation",
+                "portfoliovalue",
+                "pusd",
+                "totalvalue",
+                "usdc",
+                "valueusd",
+            )
         ):
             continue
         amount = _number_value(raw)

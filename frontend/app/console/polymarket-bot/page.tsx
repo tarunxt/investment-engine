@@ -168,6 +168,12 @@ export default function PolymarketBotPage() {
   const [busyAccountId, setBusyAccountId] = useState<string | null>(null);
   const [selectedCopiedEvent, setSelectedCopiedEvent] =
     useState<CopiedEventGroup | null>(null);
+  const [copiedPositionsTab, setCopiedPositionsTab] = useState<
+    "positions" | "history"
+  >("positions");
+  const [copiedPositionStatus, setCopiedPositionStatus] = useState<
+    "active" | "closed"
+  >("active");
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
 
@@ -339,10 +345,22 @@ export default function PolymarketBotPage() {
   const bullpenAccountValueUsd = parseUsdFromBalanceMessage(
     state.live.balance.message,
   );
+  const copiedActiveStatuses = new Set(["executed", "confirmed"]);
   const executedLiveTrades = state.live.recent_decisions.filter((trade) =>
-    ["executed", "confirmed"].includes(trade.status),
+    copiedActiveStatuses.has(trade.status),
   );
-  const copiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
+  const copiedPositionTrades = state.live.recent_decisions.filter((trade) =>
+    copiedPositionStatus === "active"
+      ? copiedActiveStatuses.has(trade.status)
+      : !copiedActiveStatuses.has(trade.status),
+  );
+  const copiedHistoryTrades = state.live.recent_decisions;
+  const copiedVisibleTrades =
+    copiedPositionsTab === "positions"
+      ? copiedPositionTrades
+      : copiedHistoryTrades;
+  const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades);
+  const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
 
   const visibleTrackedTraders = state.tracked_traders.filter(
     (trader) => trader.activity_source !== "handle",
@@ -656,7 +674,7 @@ export default function PolymarketBotPage() {
                 <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Active Trades</div>
                 <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
                   <Activity className="size-4 text-sky-300" />
-                  {copiedEventGroups.length}
+                  {activeCopiedEventGroups.length}
                 </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
@@ -735,6 +753,60 @@ export default function PolymarketBotPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
+              <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="inline-flex w-full rounded-2xl border border-slate-200 bg-slate-50 p-1 sm:w-auto">
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                      copiedPositionsTab === "positions"
+                        ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+                        : "text-slate-500 hover:text-slate-900"
+                    }`}
+                    onClick={() => setCopiedPositionsTab("positions")}
+                  >
+                    Positions ({copiedPositionTrades.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                      copiedPositionsTab === "history"
+                        ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+                        : "text-slate-500 hover:text-slate-900"
+                    }`}
+                    onClick={() => setCopiedPositionsTab("history")}
+                  >
+                    History ({copiedHistoryTrades.length})
+                  </button>
+                </div>
+
+                {copiedPositionsTab === "positions" ? (
+                  <div className="inline-flex w-full rounded-2xl border border-slate-200 bg-white p-1 sm:w-auto">
+                    <button
+                      type="button"
+                      className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                        copiedPositionStatus === "active"
+                          ? "bg-slate-950 text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-900"
+                      }`}
+                      onClick={() => setCopiedPositionStatus("active")}
+                    >
+                      Active
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                        copiedPositionStatus === "closed"
+                          ? "bg-slate-950 text-white shadow-sm"
+                          : "text-slate-500 hover:text-slate-900"
+                      }`}
+                      onClick={() => setCopiedPositionStatus("closed")}
+                    >
+                      Closed
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
               <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
                 <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
                   <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -753,7 +825,7 @@ export default function PolymarketBotPage() {
                     {copiedEventGroups.length === 0 ? (
                       <tr>
                         <td className="px-4 py-6 text-sm text-slate-500" colSpan={8}>
-                          No copied Bullpen positions yet.
+                          No copied Bullpen rows for this tab yet.
                         </td>
                       </tr>
                     ) : copiedEventGroups.map((event) => {
