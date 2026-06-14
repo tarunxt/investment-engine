@@ -137,6 +137,7 @@ class PolymarketTrader(BaseModel):
     last_trade_at: str | None = None
     last_trade_age: str | None = None
     profit_usd: float = 0
+    leaderboard_profit_usd: dict[str, float] = Field(default_factory=dict)
     leaderboard_period: str | None = None
     leaderboard_periods: list[str] = Field(default_factory=list)
     source_reason: str
