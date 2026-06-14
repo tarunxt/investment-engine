@@ -29,6 +29,7 @@ import type {
   PolymarketBalanceState,
   PolymarketBotState,
   PolymarketPaperTrade,
+  PolymarketPosition,
   PolymarketSourceTradeDecision,
 } from "@/types/api";
 
@@ -487,6 +488,8 @@ type CopiedSortState = {
   direction: "asc" | "desc";
 };
 
+type CopiedPositionPnlFilter = "all" | "winning" | "losing";
+
 type CopiedHistoryFilter =
   | "all"
   | "executed"
@@ -801,6 +804,14 @@ function getCopiedEventKey(trade: PolymarketSourceTradeDecision) {
   );
 }
 
+function getBullpenPositionKey(position: PolymarketPosition) {
+  return [position.market_id, position.outcome].join("::");
+}
+
+function getCopiedTradePositionKey(trade: PolymarketSourceTradeDecision) {
+  return [trade.market_id, trade.outcome].join("::");
+}
+
 function getTradeStatusReason(trade: PolymarketSourceTradeDecision) {
   if (trade.failure_reason) return trade.failure_reason;
   if (trade.status === "failed" || trade.status === "skipped") {
@@ -1095,6 +1106,8 @@ export default function PolymarketBotPage() {
   const [copiedPositionStatus, setCopiedPositionStatus] = useState<
     "active" | "closed"
   >("active");
+  const [copiedPositionPnlFilter, setCopiedPositionPnlFilter] =
+    useState<CopiedPositionPnlFilter>("all");
   const [copiedHistoryFilter, setCopiedHistoryFilter] =
     useState<CopiedHistoryFilter>("all");
   const [redeemedTradesTab, setRedeemedTradesTab] = useState<
@@ -1472,13 +1485,19 @@ export default function PolymarketBotPage() {
   const thresholdEligibleRecentDecisions = state.live.recent_decisions.filter(
     (trade) => !isBelowTrackedNetWorthThreshold(trade, state.tracked_accounts),
   );
-  const executedLiveTrades = thresholdEligibleRecentDecisions.filter((trade) =>
-    copiedActiveStatuses.has(trade.status),
+  const bullpenOpenPositionKeys = new Set(
+    state.open_positions.map(getBullpenPositionKey),
+  );
+  const executedLiveTrades = thresholdEligibleRecentDecisions.filter(
+    (trade) =>
+      copiedActiveStatuses.has(trade.status) &&
+      bullpenOpenPositionKeys.has(getCopiedTradePositionKey(trade)),
   );
   const copiedPositionTrades = thresholdEligibleRecentDecisions.filter(
     (trade) =>
       copiedPositionStatus === "active"
-        ? copiedActiveStatuses.has(trade.status)
+        ? copiedActiveStatuses.has(trade.status) &&
+          bullpenOpenPositionKeys.has(getCopiedTradePositionKey(trade))
         : !copiedActiveStatuses.has(trade.status),
   );
   const copiedHistoryTrades = thresholdEligibleRecentDecisions;
@@ -1513,9 +1532,28 @@ export default function PolymarketBotPage() {
     copiedPositionsTab === "positions"
       ? copiedPositionTrades
       : copiedFilteredHistoryTrades;
-  const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades).sort(
-    (left, right) => compareCopiedEventGroups(left, right, copiedSort),
-  );
+  const copiedPositionPnlFilterOptions: {
+    key: CopiedPositionPnlFilter;
+    label: string;
+  }[] = [
+    { key: "all", label: "All" },
+    { key: "winning", label: "Winning" },
+    { key: "losing", label: "Losing" },
+  ];
+  const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades)
+    .filter((event) => {
+      if (
+        copiedPositionsTab !== "positions" ||
+        copiedPositionStatus !== "active" ||
+        copiedPositionPnlFilter === "all"
+      ) {
+        return true;
+      }
+      return copiedPositionPnlFilter === "winning"
+        ? event.currentPnl > 0
+        : event.currentPnl < 0;
+    })
+    .sort((left, right) => compareCopiedEventGroups(left, right, copiedSort));
   const visibleCopiedEventGroups = copiedEventGroups.slice(
     0,
     copiedVisibleLimit,
@@ -2308,6 +2346,35 @@ export default function PolymarketBotPage() {
                   </div>
                 ) : null}
               </div>
+
+              {copiedPositionsTab === "positions" &&
+              copiedPositionStatus === "active" ? (
+                <div
+                  className="mb-4 flex flex-wrap gap-2"
+                  role="tablist"
+                  aria-label="Active copied positions profit and loss filters"
+                >
+                  {copiedPositionPnlFilterOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={copiedPositionPnlFilter === option.key}
+                      className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${
+                        copiedPositionPnlFilter === option.key
+                          ? "border-slate-950 bg-slate-950 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950"
+                      }`}
+                      onClick={() => {
+                        setCopiedPositionPnlFilter(option.key);
+                        setCopiedVisibleLimit(TABLE_PAGE_SIZE);
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
               {copiedPositionsTab === "history" ? (
                 <div className="mb-4 flex flex-wrap gap-2">
