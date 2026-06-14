@@ -981,10 +981,25 @@ export default function PolymarketBotPage() {
     COMPACT_TABLE_PAGE_SIZE,
   );
   const [skippedBreakupOpen, setSkippedBreakupOpen] = useState(false);
+  const [pendingActionElapsedSeconds, setPendingActionElapsedSeconds] =
+    useState(0);
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
   const doctorAutoRefreshInFlight = useRef(false);
   const lastDoctorAutoRefreshAt = useRef(0);
+  useEffect(() => {
+    if (!pendingAction) return;
+
+    const startedAt = Date.now();
+    const interval = window.setInterval(() => {
+      setPendingActionElapsedSeconds(
+        Math.floor((Date.now() - startedAt) / 1000),
+      );
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [pendingAction]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1084,6 +1099,7 @@ export default function PolymarketBotPage() {
     actionInFlight.current = true;
     lastMutationAt.current = Date.now();
     setPendingAction(label);
+    setPendingActionElapsedSeconds(0);
     setActionError(null);
     try {
       let nextState = await action();
@@ -1107,6 +1123,7 @@ export default function PolymarketBotPage() {
     } finally {
       actionInFlight.current = false;
       setPendingAction(null);
+      setPendingActionElapsedSeconds(0);
     }
   }
 
@@ -1381,6 +1398,20 @@ export default function PolymarketBotPage() {
     missedVisibleLimit,
   );
   const redeemedTradeRows = buildRedeemedTradeRows(state);
+  const claimableRedeemedCount = redeemedTradeRows.filter(
+    (row) => row.status === "claimable",
+  ).length;
+  const redeemStatusMessage =
+    pendingAction === "redeem"
+      ? getRedeemStatusMessage(
+          pendingActionElapsedSeconds,
+          claimableRedeemedCount,
+        )
+      : claimableRedeemedCount > 0
+        ? `${claimableRedeemedCount} resolved winning ${
+            claimableRedeemedCount === 1 ? "position is" : "positions are"
+          } ready to claim.`
+        : "No resolved winning positions are currently waiting to be claimed.";
   const copiedPositionsRefreshSeconds = 5;
   const visibleTrackedTraders = state.tracked_traders;
   const copiedSortHeader = (
@@ -2349,8 +2380,11 @@ export default function PolymarketBotPage() {
                   >
                     {pendingAction === "redeem" ? "Claiming…" : "Claim Now"}
                   </Button>
-                  {pendingAction === "redeem" ? (
-                    <div className="flex items-start gap-2 text-left text-xs leading-5 text-slate-500 sm:text-right">
+                  <div
+                    className="flex items-start gap-2 text-left text-xs leading-5 text-slate-500 sm:text-right"
+                    aria-live="polite"
+                  >
+                    {pendingAction === "redeem" ? (
                       <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-emerald-600 sm:hidden" />
                       <span>
                         {pendingActionDetail} The Redeemed Trades table will
