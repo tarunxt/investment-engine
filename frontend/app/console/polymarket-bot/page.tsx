@@ -200,7 +200,8 @@ function isBullpenLoginRequired(
 
 function getLiveCriticalBanner(state: PolymarketBotState) {
   const issues: string[] = [];
-  const doctorMessage = state.live.doctor.message || "No doctor details returned.";
+  const doctorMessage =
+    state.live.doctor.message || "No doctor details returned.";
   const doctorNeedsLogin = isBullpenLoginRequired(doctorMessage, null);
 
   if (!state.live.doctor.ok) {
@@ -347,31 +348,21 @@ function formatRelativePollTime(iso?: string | null) {
   return `${hours}h ago`;
 }
 
-function getRedeemStatusMessage(elapsedSeconds: number, claimableCount: number) {
-  const claimText =
-    claimableCount === 1
-      ? "1 resolved winning position"
-      : `${claimableCount} resolved winning positions`;
-  const waitingMessages = [
-    `Submitting the claim for ${claimText} to Bullpen…`,
-    "Bullpen accepted the request; waiting for claim settlement to post…",
-    "Checking whether the resolved positions closed after the claim request…",
-    "Refreshing live state so the Redeemed Trades table can update…",
-    "Still waiting on Bullpen. This can take a few minutes; keeping the claim request open…",
-    "No completion signal yet. Continuing to poll every few seconds so you are not left guessing…",
-  ];
-
-  if (elapsedSeconds >= 120) {
-    const stuckMessages = [
-      "Claim is still running after 2+ minutes. Bullpen may be slow; do not refresh yet.",
-      "Still waiting for Bullpen to finish. The table will refresh as soon as the backend returns.",
-      "No final response yet. Keeping controls locked to avoid duplicate claim submissions.",
-      "Claim remains in progress. If this lasts much longer, check Bullpen/backend health after it returns.",
-    ];
-    return stuckMessages[Math.floor(elapsedSeconds / 5) % stuckMessages.length];
-  }
-
-  return waitingMessages[Math.floor(elapsedSeconds / 5) % waitingMessages.length];
+function getActionLabel(pendingAction: string | null) {
+  const labels: Record<string, string> = {
+    "toggle-live": "live lock change",
+    doctor: "doctor refresh",
+    balance: "balance refresh",
+    redeem: "redeem resolved",
+    "emergency-stop": "emergency stop",
+    "emergency-reset": "emergency stop reset",
+    start: "bot start",
+    stop: "bot stop",
+    pause: "bot pause",
+    resume: "bot resume",
+    "update-live-limit": "live trade limit update",
+  };
+  return pendingAction ? labels[pendingAction] || pendingAction : null;
 }
 
 function getPendingActionDetail(pendingAction: string | null) {
@@ -551,8 +542,9 @@ function isRedeemedLiveDecision(trade: PolymarketSourceTradeDecision) {
 
 function getLiveDecisionTimeMs(trade: PolymarketSourceTradeDecision) {
   return (
-    parseApiTimestamp(trade.executed_at || trade.updated_at || trade.proposed_at)
-      ?.getTime() ?? 0
+    parseApiTimestamp(
+      trade.executed_at || trade.updated_at || trade.proposed_at,
+    )?.getTime() ?? 0
   );
 }
 
@@ -576,14 +568,20 @@ function buildClaimableLiveRows(
 
     const key = `${trade.market_id}::${trade.outcome}`;
     const existing = latestByPosition.get(key);
-    if (!existing || getLiveDecisionTimeMs(trade) > getLiveDecisionTimeMs(existing)) {
+    if (
+      !existing ||
+      getLiveDecisionTimeMs(trade) > getLiveDecisionTimeMs(existing)
+    ) {
       latestByPosition.set(key, trade);
     }
   }
 
   return Array.from(latestByPosition.values())
     .filter((trade) => {
-      if (trade.side !== "BUY" || redeemedKeys.has(`${trade.market_id}::${trade.outcome}`)) {
+      if (
+        trade.side !== "BUY" ||
+        redeemedKeys.has(`${trade.market_id}::${trade.outcome}`)
+      ) {
         return false;
       }
       const eventEndMs = getEventEndTimeMs(trade);
@@ -602,7 +600,8 @@ function buildClaimableLiveRows(
       profitLoss: trade.shares - trade.amount,
       status: "claimable",
       source: "Available to claim",
-      detail: "Resolved winning position still held in Bullpen; redeem/claim has not posted as a sell decision yet.",
+      detail:
+        "Resolved winning position still held in Bullpen; redeem/claim has not posted as a sell decision yet.",
     }));
 }
 
@@ -941,6 +940,7 @@ export default function PolymarketBotPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [autoDoctorRefreshing, setAutoDoctorRefreshing] = useState(false);
   const [activeScreen, setActiveScreen] = useState<"main" | "settings">("main");
   const [lastSettledBalance, setLastSettledBalance] =
     useState<PolymarketBalanceState | null>(null);
@@ -985,6 +985,8 @@ export default function PolymarketBotPage() {
     useState(0);
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
+  const doctorAutoRefreshInFlight = useRef(false);
+  const lastDoctorAutoRefreshAt = useRef(0);
   useEffect(() => {
     if (!pendingAction) return;
 
@@ -1057,6 +1059,38 @@ export default function PolymarketBotPage() {
       window.clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    if (!state) return;
+    if (pendingAction !== null || actionInFlight.current) return;
+    if (state.live.doctor.ok) return;
+    if (!isBullpenLoginRequired(state.live.doctor.message, null)) return;
+
+    const now = Date.now();
+    if (doctorAutoRefreshInFlight.current) return;
+    if (now - lastDoctorAutoRefreshAt.current < 5000) return;
+
+    doctorAutoRefreshInFlight.current = true;
+    lastDoctorAutoRefreshAt.current = now;
+    setAutoDoctorRefreshing(true);
+
+    apiService
+      .polymarketLiveDoctor()
+      .then((nextState) => {
+        lastMutationAt.current = Date.now();
+        setState(nextState);
+        if (nextState.live.balance.status !== "loading") {
+          setLastSettledBalance(nextState.live.balance);
+        }
+      })
+      .catch((doctorError) => {
+        setActionError(normalizeError(doctorError));
+      })
+      .finally(() => {
+        doctorAutoRefreshInFlight.current = false;
+        setAutoDoctorRefreshing(false);
+      });
+  }, [pendingAction, state]);
 
   async function runAction(
     label: string,
@@ -1265,6 +1299,11 @@ export default function PolymarketBotPage() {
   const liveParsingStatusMessage = getLiveParsingStatusMessage(state);
   const skippedBreakup = getSkippedBreakup(state);
   const liveCriticalBanner = getLiveCriticalBanner(state);
+  const doctorLoginRequired = isBullpenLoginRequired(
+    state.live.doctor.message,
+    null,
+  );
+  const pendingActionLabel = getActionLabel(pendingAction);
 
   const visibleBalance =
     state.live.balance.status === "loading" && lastSettledBalance
@@ -1295,10 +1334,9 @@ export default function PolymarketBotPage() {
     visibleBalance.message,
     visibleBalance.status,
   );
-  const bullpenLoginRequired = isBullpenLoginRequired(
-    visibleBalance.message,
-    visibleBalance.status,
-  );
+  const bullpenLoginRequired =
+    isBullpenLoginRequired(visibleBalance.message, visibleBalance.status) ||
+    doctorLoginRequired;
   const copiedActiveStatuses = new Set(["executed", "confirmed"]);
   const thresholdEligibleRecentDecisions = state.live.recent_decisions.filter(
     (trade) => !isBelowTrackedNetWorthThreshold(trade, state.tracked_accounts),
@@ -1640,7 +1678,10 @@ export default function PolymarketBotPage() {
                 title={liveCriticalBanner}
                 role="alert"
               >
-                <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+                <AlertTriangle
+                  className="size-3.5 shrink-0"
+                  aria-hidden="true"
+                />
                 <span className="truncate">{liveCriticalBanner}</span>
               </div>
             ) : null}
@@ -1717,20 +1758,40 @@ export default function PolymarketBotPage() {
                 <p className="mt-2 max-w-3xl text-base font-semibold text-amber-900 md:text-lg">
                   The bot cannot refresh balance or place Bullpen-backed
                   real-money trades until the Bullpen session is restored.
-                  Current status: {visibleBalance.message}
+                  Current status:{" "}
+                  {state.live.doctor.message || visibleBalance.message}
                 </p>
               </div>
             </div>
-            <Button
-              asChild
-              size="sm"
-              className="rounded-full bg-amber-950 px-5 text-white hover:bg-amber-900"
-            >
-              <a href={AWS_EC2_TERMINAL_URL} target="_blank" rel="noreferrer">
-                Open AWS EC2 Terminal
-                <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
-              </a>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                asChild
+                size="sm"
+                className="rounded-full bg-amber-950 px-5 text-white hover:bg-amber-900"
+              >
+                <a href={AWS_EC2_TERMINAL_URL} target="_blank" rel="noreferrer">
+                  Open AWS EC2 Terminal
+                  <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
+                </a>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="rounded-full border-amber-400 bg-white px-5 text-amber-950 hover:bg-amber-100"
+                disabled={pendingAction !== null || autoDoctorRefreshing}
+                onClick={() =>
+                  runAction("doctor", () => apiService.polymarketLiveDoctor())
+                }
+              >
+                {pendingAction === "doctor" || autoDoctorRefreshing ? (
+                  <Loader2
+                    className="mr-2 size-3.5 animate-spin"
+                    aria-hidden="true"
+                  />
+                ) : null}
+                Refresh Doctor
+              </Button>
+            </div>
           </div>
           <ol className="mt-5 grid gap-3 text-sm font-semibold text-amber-950 md:grid-cols-2 xl:grid-cols-5">
             <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
@@ -1766,8 +1827,8 @@ export default function PolymarketBotPage() {
               <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
                 5
               </span>
-              After login succeeds, use Settings → Refresh balance to update the
-              Bullpen login status.
+              After login succeeds, wait for auto-refresh or click Refresh
+              Doctor to update the Bullpen login status.
             </li>
           </ol>
         </div>
@@ -2300,9 +2361,9 @@ export default function PolymarketBotPage() {
                     Redeemed Trades
                   </CardTitle>
                   <CardDescription className="mt-2">
-                    Bullpen trades completed through redeem today plus resolved winning
-                    positions still available to claim, with timestamp, profit and
-                    loss, execution price, and market details.
+                    Bullpen trades completed through redeem today plus resolved
+                    winning positions still available to claim, with timestamp,
+                    profit and loss, execution price, and market details.
                   </CardDescription>
                 </div>
                 <div className="flex max-w-sm flex-col items-start gap-2 sm:items-end">
@@ -2312,7 +2373,9 @@ export default function PolymarketBotPage() {
                     disabled={pendingAction !== null}
                     aria-label="Claim all available Bullpen positions now"
                     onClick={() =>
-                      runAction("redeem", () => apiService.polymarketLiveRedeem())
+                      runAction("redeem", () =>
+                        apiService.polymarketLiveRedeem(),
+                      )
                     }
                   >
                     {pendingAction === "redeem" ? "Claiming…" : "Claim Now"}
@@ -2323,14 +2386,12 @@ export default function PolymarketBotPage() {
                   >
                     {pendingAction === "redeem" ? (
                       <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-emerald-600 sm:hidden" />
-                    ) : null}
-                    <span>
-                      {redeemStatusMessage}
-                      {pendingAction === "redeem"
-                        ? " The Redeemed Trades table will refresh automatically when the claim finishes."
-                        : null}
-                    </span>
-                  </div>
+                      <span>
+                        {pendingActionDetail} The Redeemed Trades table will
+                        refresh automatically when the claim finishes.
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </CardHeader>
@@ -2358,7 +2419,8 @@ export default function PolymarketBotPage() {
                           className="px-4 py-6 text-sm text-slate-500"
                           colSpan={10}
                         >
-                          No completed redeems or claimable wins are visible yet.
+                          No completed redeems or claimable wins are visible
+                          yet.
                         </td>
                       </tr>
                     ) : (
@@ -2630,7 +2692,15 @@ export default function PolymarketBotPage() {
                     runAction("doctor", () => apiService.polymarketLiveDoctor())
                   }
                 >
-                  Refresh doctor
+                  {pendingAction === "doctor" ? (
+                    <Loader2
+                      className="mr-2 size-3.5 animate-spin"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  {pendingAction === "doctor"
+                    ? "Refreshing doctor…"
+                    : "Refresh doctor"}
                 </Button>
                 <Button
                   size="sm"
@@ -2682,6 +2752,40 @@ export default function PolymarketBotPage() {
                 >
                   Reset emergency stop
                 </Button>
+              </div>
+
+              <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                {pendingAction ? (
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2 font-semibold text-slate-950">
+                      <Loader2
+                        className="size-4 animate-spin text-sky-600"
+                        aria-hidden="true"
+                      />
+                      Processing {pendingActionLabel}…
+                    </div>
+                    <p>{pendingActionDetail}</p>
+                    <p className="text-xs text-slate-500">
+                      Controls are temporarily disabled to prevent duplicate
+                      live-trading actions. They will re-enable when the backend
+                      responds.
+                    </p>
+                  </div>
+                ) : autoDoctorRefreshing ? (
+                  <div className="flex items-center gap-2 font-semibold text-slate-950">
+                    <Loader2
+                      className="size-4 animate-spin text-sky-600"
+                      aria-hidden="true"
+                    />
+                    Auto-refreshing Bullpen doctor after login-required status…
+                  </div>
+                ) : (
+                  <p>
+                    No control action is running. If you just completed Bullpen
+                    login, the page now automatically retries the doctor check;
+                    you can also click Refresh Doctor manually.
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -3099,7 +3203,7 @@ export default function PolymarketBotPage() {
         <div className="flex flex-col gap-1 text-xs text-slate-500">
           <div className="flex items-center gap-2 uppercase tracking-[0.18em]">
             <Loader2 className="size-3.5 animate-spin" />
-            Processing {pendingAction}
+            Processing {pendingActionLabel}
           </div>
           {pendingActionDetail ? (
             <div className="pl-5 normal-case tracking-normal">
