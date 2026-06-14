@@ -13,6 +13,7 @@ from app.domains.polymarket.bullpen import (
     BullpenBalanceReader,
     BullpenCommandError,
     BullpenLiveExecutor,
+    BullpenRedeemedTradesReader,
     LiveTradeGuard,
     is_claim_command_unavailable_warning,
     is_redeem_metadata_lookup_warning,
@@ -39,6 +40,7 @@ from app.domains.polymarket.schemas import (
     PolymarketDoctorStatus,
     PolymarketLiveControlState,
     PolymarketLiveSourceStatus,
+    PolymarketBullpenRedeemedTrade,
     PolymarketLiveTradeDecision,
     PolymarketMetrics,
     PolymarketPaperTrade,
@@ -60,10 +62,12 @@ FORCED_REDEEM_CLAIM_INTERVAL_SECONDS = max(
     60, int(float(os.getenv("POLYMARKET_FORCED_REDEEM_CLAIM_INTERVAL_SECONDS", "300")))
 )
 NET_WORTH_DAILY_REFRESH_HOUR_UTC = min(
-    23, max(0, int(float(os.getenv("POLYMARKET_NET_WORTH_DAILY_REFRESH_HOUR_UTC", "5"))))
+    23,
+    max(0, int(float(os.getenv("POLYMARKET_NET_WORTH_DAILY_REFRESH_HOUR_UTC", "5")))),
 )
 NET_WORTH_DAILY_REFRESH_MINUTE_UTC = min(
-    59, max(0, int(float(os.getenv("POLYMARKET_NET_WORTH_DAILY_REFRESH_MINUTE_UTC", "0"))))
+    59,
+    max(0, int(float(os.getenv("POLYMARKET_NET_WORTH_DAILY_REFRESH_MINUTE_UTC", "0")))),
 )
 
 
@@ -78,6 +82,7 @@ class PolymarketPaperCopyBot:
         live_executor: BullpenLiveExecutor,
         balance_reader: BullpenBalanceReader,
         logger: PolymarketFileLogger,
+        redeemed_trades_reader: BullpenRedeemedTradesReader | None = None,
         tracked_account_store: JsonModelStore[PolymarketTrackedAccount] | None = None,
         config_store: JsonObjectStore[PolymarketUserConfigOverride] | None = None,
     ) -> None:
@@ -96,6 +101,9 @@ class PolymarketPaperCopyBot:
         )
         self.live_executor = live_executor
         self.balance_reader = balance_reader
+        self.redeemed_trades_reader = (
+            redeemed_trades_reader or BullpenRedeemedTradesReader()
+        )
         self.logger = logger
 
         self.running = False
@@ -110,6 +118,7 @@ class PolymarketPaperCopyBot:
         self.seen_source_trades: set[str] = set()
         self.trade_history: list[PolymarketPaperTrade] = []
         self.live_trade_history: list[PolymarketLiveTradeDecision] = []
+        self.bullpen_redeemed_trades: list[PolymarketBullpenRedeemedTrade] = []
         self.recent_activity: list[PolymarketActivity] = []
         self.active_provider: MarketDataProvider = (
             provider if config.use_live_reads else fallback_provider
@@ -1434,8 +1443,17 @@ class PolymarketPaperCopyBot:
             balance_state = self._with_next_balance_refresh(
                 await self.balance_reader.refresh()
             )
+            try:
+                redeemed_trades = await self.redeemed_trades_reader.refresh()
+            except Exception as exc:
+                await self.logger.error(
+                    "Bullpen redeemed trade history refresh failed", exc
+                )
+                redeemed_trades = None
             async with self._lock:
                 self.balance_state = balance_state
+                if redeemed_trades is not None:
+                    self.bullpen_redeemed_trades = redeemed_trades
 
     async def _try_auto_unlock_live_unlocked(self, reason: str) -> None:
         if (
@@ -1579,6 +1597,7 @@ class PolymarketPaperCopyBot:
             emergency_stopped=self.emergency_stopped,
             doctor=self.doctor_status,
             balance=self.balance_state,
+            redeemed_trades=self.bullpen_redeemed_trades,
             source_status=self.live_source_status,
             max_live_trade_size=self.config.max_live_trade_size,
             live_trades_today=self.live_guard.live_trades_today(

@@ -1134,6 +1134,21 @@ export interface PolymarketSourceTradeDecision {
   source: 'mock' | 'live-read' | 'live-market-read';
 }
 
+export interface PolymarketBullpenRedeemedTrade {
+  id: string;
+  timestamp: string;
+  market_id: string;
+  market_title: string;
+  outcome: string;
+  side: 'BUY' | 'SELL' | string;
+  amount: number;
+  shares: number;
+  price: number;
+  profit_loss: number;
+  status: string;
+  detail: string;
+}
+
 export interface PolymarketBalanceState {
   status: 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
   message: string;
@@ -1224,6 +1239,7 @@ export interface PolymarketLiveControlState {
   live_trades_today: number;
   pending_confirmations: PolymarketSourceTradeDecision[];
   recent_decisions: PolymarketSourceTradeDecision[];
+  redeemed_trades: PolymarketBullpenRedeemedTrade[];
 }
 
 export interface PolymarketPaperTrade {

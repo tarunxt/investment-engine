@@ -12,6 +12,7 @@ from collections.abc import Iterable
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.schemas import (
     PolymarketBalanceState,
+    PolymarketBullpenRedeemedTrade,
     PolymarketBotConfig,
     PolymarketDoctorStatus,
     PolymarketLiveTradeDecision,
@@ -554,6 +555,168 @@ BALANCE_COMMAND_VARIANTS = [
         "json",
     ],
 ]
+
+
+def _collect_bullpen_rows(value: object) -> list[dict[str, object]]:
+    if isinstance(value, list):
+        return [row for item in value for row in _collect_bullpen_rows(item)]
+    if isinstance(value, dict):
+        nested_keys = (
+            "rows",
+            "data",
+            "items",
+            "activities",
+            "activity",
+            "history",
+            "transactions",
+            "trades",
+            "redemptions",
+        )
+        rows: list[dict[str, object]] = []
+        for key in nested_keys:
+            nested = value.get(key)
+            if isinstance(nested, (list, dict)):
+                rows.extend(_collect_bullpen_rows(nested))
+        return rows or [value]
+    return []
+
+
+def _string_from_row(
+    row: dict[str, object], keys: tuple[str, ...], default: str = ""
+) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return default
+
+
+def _float_from_row(
+    row: dict[str, object], keys: tuple[str, ...], default: float = 0
+) -> float:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = value.replace("$", "").replace(",", "").strip()
+            try:
+                return float(cleaned)
+            except ValueError:
+                continue
+    return default
+
+
+def _is_redeem_row(row: dict[str, object]) -> bool:
+    text = " ".join(str(value) for value in row.values() if value is not None).lower()
+    return "redeem" in text or "redemption" in text
+
+
+def _normalized_redeemed_trade(
+    row: dict[str, object], index: int
+) -> PolymarketBullpenRedeemedTrade | None:
+    if not _is_redeem_row(row):
+        return None
+    timestamp = _string_from_row(
+        row,
+        (
+            "timestamp",
+            "createdAt",
+            "created_at",
+            "time",
+            "date",
+            "redeemedAt",
+            "redeemed_at",
+        ),
+    )
+    title = _string_from_row(
+        row, ("marketTitle", "market_title", "title", "market", "event", "question")
+    )
+    if not timestamp or not title:
+        return None
+    amount = _float_from_row(
+        row, ("amount", "value", "usd", "proceeds", "payout", "collateral", "total")
+    )
+    shares = abs(_float_from_row(row, ("shares", "size", "quantity", "qty"), amount))
+    return PolymarketBullpenRedeemedTrade(
+        id=_string_from_row(
+            row,
+            ("id", "transactionHash", "txHash", "hash"),
+            f"bullpen-redeem-{index}-{timestamp}-{title}",
+        ),
+        timestamp=timestamp,
+        market_id=_string_from_row(
+            row, ("marketId", "market_id", "conditionId", "condition_id", "slug")
+        ),
+        market_title=title,
+        outcome=_string_from_row(
+            row, ("outcome", "outcomeName", "asset", "selection"), "—"
+        ),
+        side=_string_from_row(row, ("side", "action", "type"), "REDEEM").upper(),
+        amount=amount,
+        shares=shares,
+        price=_float_from_row(row, ("price", "avgPrice", "average_price"), 1),
+        profit_loss=_float_from_row(
+            row,
+            ("profitLoss", "profit_loss", "pnl", "realizedPnl", "realized_pnl"),
+            amount,
+        ),
+        status=_string_from_row(row, ("status",), "redeemed"),
+        detail=_string_from_row(
+            row, ("detail", "description", "reason"), "Bullpen wallet redeem history"
+        ),
+    )
+
+
+BULLPEN_REDEEMED_HISTORY_COMMAND_VARIANTS = [
+    [
+        "wallet",
+        "predictions",
+        "--history",
+        "--read-only",
+        "--non-interactive",
+        "--output",
+        "json",
+    ],
+    ["portfolio", "history", "--read-only", "--non-interactive", "--output", "json"],
+    [
+        "activity",
+        "--type",
+        "redeem",
+        "--limit",
+        "100",
+        "--read-only",
+        "--non-interactive",
+        "--output",
+        "json",
+    ],
+]
+
+
+class BullpenRedeemedTradesReader:
+    async def refresh(self) -> list[PolymarketBullpenRedeemedTrade]:
+        parsed = await run_first_bullpen_json(
+            BULLPEN_REDEEMED_HISTORY_COMMAND_VARIANTS, timeout_seconds=10
+        )
+        rows = _collect_bullpen_rows(parsed)
+        redeemed = [
+            trade
+            for index, row in enumerate(rows)
+            if (trade := _normalized_redeemed_trade(row, index)) is not None
+        ]
+        deduped: dict[str, PolymarketBullpenRedeemedTrade] = {}
+        for trade in redeemed:
+            key = "::".join(
+                [
+                    trade.timestamp,
+                    trade.market_id,
+                    trade.market_title,
+                    trade.outcome,
+                    str(trade.amount),
+                ]
+            )
+            deduped.setdefault(key, trade)
+        return list(deduped.values())
 
 
 class BullpenBalanceReader:

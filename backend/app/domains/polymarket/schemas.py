@@ -216,6 +216,21 @@ class PolymarketLiveTradeDecision(BaseModel):
     source: TradeSource
 
 
+class PolymarketBullpenRedeemedTrade(BaseModel):
+    id: str
+    timestamp: str
+    market_id: str = ""
+    market_title: str
+    outcome: str = "—"
+    side: TradeSide | str = "REDEEM"
+    amount: float = 0
+    shares: float = 0
+    price: float = 1
+    profit_loss: float = 0
+    status: str = "redeemed"
+    detail: str = "Bullpen wallet history"
+
+
 class PolymarketBalanceState(BaseModel):
     status: BalanceStatus
     message: str
@@ -308,6 +323,7 @@ class PolymarketLiveControlState(BaseModel):
         default_factory=list
     )
     recent_decisions: list[PolymarketLiveTradeDecision] = Field(default_factory=list)
+    redeemed_trades: list[PolymarketBullpenRedeemedTrade] = Field(default_factory=list)
 
 
 class PolymarketBotState(BaseModel):
