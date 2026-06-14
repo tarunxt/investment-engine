@@ -13,6 +13,7 @@ from app.domains.polymarket_direct.direct_polymarket import (
     DirectPolymarketBalanceReader,
     DirectPolymarketCommandError,
     DirectPolymarketLiveExecutor,
+    DirectPolymarketRedeemedTradesReader,
     LiveTradeGuard,
     is_claim_command_unavailable_warning,
     is_redeem_metadata_lookup_warning,
@@ -39,6 +40,7 @@ from app.domains.polymarket_direct.schemas import (
     PolymarketDoctorStatus,
     PolymarketLiveControlState,
     PolymarketLiveSourceStatus,
+    PolymarketBullpenRedeemedTrade,
     PolymarketLiveTradeDecision,
     PolymarketMetrics,
     PolymarketPaperTrade,
@@ -77,6 +79,7 @@ class PolymarketPaperCopyBot:
         live_store: JsonModelStore[PolymarketLiveTradeDecision],
         live_executor: DirectPolymarketLiveExecutor,
         balance_reader: DirectPolymarketBalanceReader,
+        redeemed_trades_reader: DirectPolymarketRedeemedTradesReader,
         logger: PolymarketFileLogger,
         tracked_account_store: JsonModelStore[PolymarketTrackedAccount] | None = None,
         config_store: JsonObjectStore[PolymarketUserConfigOverride] | None = None,
@@ -96,6 +99,7 @@ class PolymarketPaperCopyBot:
         )
         self.live_executor = live_executor
         self.balance_reader = balance_reader
+        self.redeemed_trades_reader = redeemed_trades_reader
         self.logger = logger
 
         self.running = False
@@ -110,6 +114,7 @@ class PolymarketPaperCopyBot:
         self.seen_source_trades: set[str] = set()
         self.trade_history: list[PolymarketPaperTrade] = []
         self.live_trade_history: list[PolymarketLiveTradeDecision] = []
+        self.direct_redeemed_trades: list[PolymarketBullpenRedeemedTrade] = []
         self.recent_activity: list[PolymarketActivity] = []
         self.active_provider: MarketDataProvider = (
             provider if config.use_live_reads else fallback_provider
@@ -149,6 +154,7 @@ class PolymarketPaperCopyBot:
             await self.logger.init()
             self.trade_history = await self.store.load()
             self.live_trade_history = await self.live_store.load()
+            self.direct_redeemed_trades = await self.redeemed_trades_reader.refresh()
             self.tracked_accounts = await self._load_or_seed_tracked_accounts_unlocked()
             self._apply_tracked_accounts_to_provider_unlocked()
             for trade in self.live_trade_history:
@@ -1432,8 +1438,17 @@ class PolymarketPaperCopyBot:
             balance_state = self._with_next_balance_refresh(
                 await self.balance_reader.refresh()
             )
+            try:
+                redeemed_trades = await self.redeemed_trades_reader.refresh()
+            except Exception as exc:
+                await self.logger.error(
+                    "Direct Polymarket redeemed trade history refresh failed", exc
+                )
+                redeemed_trades = None
             async with self._lock:
                 self.balance_state = balance_state
+                if redeemed_trades is not None:
+                    self.direct_redeemed_trades = redeemed_trades
 
     async def _try_auto_unlock_live_unlocked(self, reason: str) -> None:
         if (
@@ -1584,6 +1599,7 @@ class PolymarketPaperCopyBot:
             ),
             pending_confirmations=self._pending_live_trades(),
             recent_decisions=list(reversed(self.live_trade_history)),
+            redeemed_trades=self.direct_redeemed_trades,
         )
 
     def _finish_poll_unlocked(

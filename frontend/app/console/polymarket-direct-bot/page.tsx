@@ -29,6 +29,7 @@ import { parseApiTimestamp } from "@/lib/datetime";
 import type {
   PolymarketBalanceState,
   PolymarketBotState,
+  PolymarketBullpenRedeemedTrade,
   PolymarketPaperTrade,
   PolymarketPosition,
   PolymarketTrackedAccount,
@@ -515,7 +516,10 @@ type RedeemedTradeRow = {
   marketId: string;
   marketTitle: string;
   outcome: string;
-  side: PolymarketPaperTrade["side"] | PolymarketSourceTradeDecision["side"];
+  side:
+    | PolymarketPaperTrade["side"]
+    | PolymarketSourceTradeDecision["side"]
+    | PolymarketBullpenRedeemedTrade["side"];
   amount: number;
   shares: number;
   price: number;
@@ -794,11 +798,29 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       detail: trade.reason || trade.command || "Redeemed live trade",
     }));
 
+  const directRows: RedeemedTradeRow[] = state.live.redeemed_trades.map((trade) => ({
+    key: `direct-${trade.id}`,
+    timestamp: trade.timestamp,
+    marketId: trade.market_id,
+    marketTitle: trade.market_title,
+    outcome: trade.outcome,
+    side: trade.side,
+    amount: trade.amount,
+    shares: Math.abs(trade.shares),
+    price: trade.price,
+    profitLoss: trade.profit_loss,
+    status: trade.status,
+    source: "Direct Polymarket wallet history",
+    detail: trade.detail,
+  }));
+
   const redeemedKeys = new Set(
-    [...liveRows, ...paperRows].map((row) => `${row.marketId}::${row.outcome}`),
+    [...directRows, ...liveRows, ...paperRows].map(
+      (row) => `${row.marketId}::${row.outcome}`,
+    ),
   );
   const claimableRows = buildClaimableLiveRows(state, redeemedKeys);
-  const rows = [...claimableRows, ...liveRows, ...paperRows];
+  const rows = [...claimableRows, ...directRows, ...liveRows, ...paperRows];
 
   return rows
     .filter((row) => isApiTimestampTodayIst(row.timestamp))
