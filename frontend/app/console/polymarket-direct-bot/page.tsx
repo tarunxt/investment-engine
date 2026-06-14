@@ -329,8 +329,7 @@ function formatCompactMoney(value: number) {
   }).format(value || 0);
 }
 
-const BULLPEN_ACCOUNT_URL =
-  "https://polymarket.com";
+const BULLPEN_ACCOUNT_URL = "https://polymarket.com";
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
 const TABLE_PAGE_SIZE = 10;
@@ -559,6 +558,7 @@ type AnalysisTradeRow = {
 type CopiedTraderAnalysisRow = {
   key: string;
   traderName: string;
+  accountId?: string;
   copiedTrades: number;
   tradesWon: number;
   totalWinnings: number;
@@ -651,6 +651,9 @@ function buildCopiedTraderAnalysisRows(
       } satisfies CopiedTraderAnalysisRow);
 
     const account = getTrackedAccountForAnalysisRow(trade, accounts);
+    if (account) {
+      existing.accountId = account.id;
+    }
     existing.netWorth =
       account?.net_worth_usd || trade.traderNetWorth || existing.netWorth;
     existing.copiedTrades += 1;
@@ -1226,6 +1229,9 @@ export default function PolymarketBotPage() {
     enabled: true,
   });
   const [busyAccountId, setBusyAccountId] = useState<string | null>(null);
+  const [manualNetWorthDrafts, setManualNetWorthDrafts] = useState<
+    Record<string, string>
+  >({});
   const [selectedCopiedEvent, setSelectedCopiedEvent] =
     useState<CopiedEventGroup | null>(null);
   const [selectedMissedTrade, setSelectedMissedTrade] =
@@ -1312,6 +1318,17 @@ export default function PolymarketBotPage() {
             ]),
           ),
         }));
+        setManualNetWorthDrafts((current) => ({
+          ...Object.fromEntries(
+            nextState.tracked_accounts.map((account) => [
+              account.id,
+              current[account.id] ??
+                (account.net_worth_usd > 0
+                  ? String(account.net_worth_usd)
+                  : ""),
+            ]),
+          ),
+        }));
         setLiveTradeLimitDraft(
           String(nextState.config.max_live_trades_per_day),
         );
@@ -1345,7 +1362,8 @@ export default function PolymarketBotPage() {
     if (!state) return;
     if (pendingAction !== null || actionInFlight.current) return;
     if (state.live.doctor.ok) return;
-    if (!isDirectPolymarketLoginRequired(state.live.doctor.message, null)) return;
+    if (!isDirectPolymarketLoginRequired(state.live.doctor.message, null))
+      return;
 
     const now = Date.now();
     if (doctorAutoRefreshInFlight.current) return;
@@ -1411,7 +1429,9 @@ export default function PolymarketBotPage() {
   const balanceRefreshDisabled = pendingAction !== null;
 
   function handleBalanceRefresh() {
-    void runAction("balance", () => apiService.polymarketDirectLiveBalanceRefresh());
+    void runAction("balance", () =>
+      apiService.polymarketDirectLiveBalanceRefresh(),
+    );
   }
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
@@ -1434,6 +1454,14 @@ export default function PolymarketBotPage() {
             copy_trade_usd: account.copy_trade_usd,
             enabled: account.enabled,
           },
+        ]),
+      ),
+    );
+    setManualNetWorthDrafts(
+      Object.fromEntries(
+        nextState.tracked_accounts.map((account) => [
+          account.id,
+          account.net_worth_usd > 0 ? String(account.net_worth_usd) : "",
         ]),
       ),
     );
@@ -1476,6 +1504,29 @@ export default function PolymarketBotPage() {
           },
     );
     setCopiedPage(1);
+  }
+
+  async function saveManualNetWorth(trader: CopiedTraderAnalysisRow) {
+    if (!trader.accountId) return;
+    const draft = manualNetWorthDrafts[trader.accountId] ?? "";
+    const netWorth = Number.parseFloat(draft);
+    if (!Number.isFinite(netWorth) || netWorth < 0) {
+      setActionError("Manual net worth must be a valid amount of at least $0.");
+      return;
+    }
+    setBusyAccountId(`net-worth-${trader.accountId}`);
+    setActionError(null);
+    try {
+      const nextState = await apiService.polymarketDirectUpdateTrackedAccount(
+        trader.accountId,
+        { net_worth_usd: netWorth },
+      );
+      applyTrackedAccountState(nextState);
+    } catch (accountError) {
+      setActionError(normalizeError(accountError));
+    } finally {
+      setBusyAccountId(null);
+    }
   }
 
   async function addTrackedAccount() {
@@ -1616,8 +1667,10 @@ export default function PolymarketBotPage() {
     visibleBalance.status,
   );
   const directExecutionUnavailable =
-    isDirectPolymarketLoginRequired(visibleBalance.message, visibleBalance.status) ||
-    doctorLoginRequired;
+    isDirectPolymarketLoginRequired(
+      visibleBalance.message,
+      visibleBalance.status,
+    ) || doctorLoginRequired;
   const copiedActiveStatuses = new Set(["executed", "confirmed"]);
   const thresholdEligibleRecentDecisions = state.live.recent_decisions.filter(
     (trade) => !isBelowTrackedNetWorthThreshold(trade, state.tracked_accounts),
@@ -2115,7 +2168,9 @@ export default function PolymarketBotPage() {
 
       {activeCopyTradingTab === "polymarket" ? (
         <div className="rounded-[28px] border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-950">Direct Polymarket</h2>
+          <h2 className="text-xl font-semibold text-slate-950">
+            Direct Polymarket
+          </h2>
           <p className="mt-2 text-sm text-slate-500">
             This tab is intentionally empty and ready for a future Polymarket
             copy-trading workflow.
@@ -2124,817 +2179,1925 @@ export default function PolymarketBotPage() {
       ) : (
         <>
           {error ? (
-        <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-          {error}
-        </div>
-      ) : null}
-      {actionError ? (
-        <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-          {actionError}
-        </div>
-      ) : null}
-
-      {directExecutionUnavailable ? (
-        <div
-          className="rounded-[32px] border-2 border-amber-300 bg-amber-50 px-5 py-5 text-amber-950 shadow-lg shadow-amber-900/10 md:px-7 md:py-6"
-          role="alert"
-        >
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex gap-4">
-              <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-amber-200 text-amber-900">
-                <AlertTriangle className="size-8" aria-hidden="true" />
-              </div>
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-[0.24em] text-amber-700">
-                  Action required
-                </div>
-                <h2 className="mt-1 text-3xl font-black tracking-tight md:text-4xl">
-                  Direct Polymarket execution is not configured
-                </h2>
-                <p className="mt-2 max-w-3xl text-base font-semibold text-amber-900 md:text-lg">
-                  The bot cannot refresh wallet balance or place Direct Polymarket
-                  real-money trades until direct execution credentials are configured.
-                  Current status:{" "}
-                  {state.live.doctor.message || visibleBalance.message}
-                </p>
-              </div>
+            <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              {error}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                asChild
-                size="sm"
-                className="rounded-full bg-amber-950 px-5 text-white hover:bg-amber-900"
-              >
-                <a href={AWS_EC2_TERMINAL_URL} target="_blank" rel="noreferrer">
-                  Open AWS EC2 Terminal
-                  <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
-                </a>
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="rounded-full border-amber-400 bg-white px-5 text-amber-950 hover:bg-amber-100"
-                disabled={pendingAction !== null || autoDoctorRefreshing}
-                onClick={() =>
-                  runAction("doctor", () => apiService.polymarketDirectLiveDoctor())
-                }
-              >
-                {pendingAction === "doctor" || autoDoctorRefreshing ? (
-                  <Loader2
-                    className="mr-2 size-3.5 animate-spin"
-                    aria-hidden="true"
-                  />
-                ) : null}
-                Refresh Doctor
-              </Button>
-            </div>
-          </div>
-          <ol className="mt-5 grid gap-3 text-sm font-semibold text-amber-950 md:grid-cols-2 xl:grid-cols-5">
-            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
-                1
-              </span>
-              Open the AWS EC2 terminal for the bot server.
-            </li>
-            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
-                2
-              </span>
-              Run{" "}
-              <code className="rounded bg-amber-100 px-1.5 py-0.5">
-                Configure POLYMARKET_DIRECT_* credentials and restart the backend.
-              </code>
-              .
-            </li>
-            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
-                3
-              </span>
-              Scan the QR code from your mobile device.
-            </li>
-            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
-                4
-              </span>
-              Sign in using{" "}
-              <span className="break-all">tarunindian007@gmail.com</span>.
-            </li>
-            <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
-              <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
-                5
-              </span>
-              After login succeeds, wait for auto-refresh or click Refresh
-              Doctor to update the Direct Polymarket execution configuration status.
-            </li>
-          </ol>
-        </div>
-      ) : null}
-
-      <Card className="overflow-hidden border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 py-0 text-white shadow-xl shadow-slate-950/10">
-        <CardContent className="p-5 md:p-6">
-          <div className="mb-3 flex justify-end text-xs font-medium text-slate-300">
-            Last values update: {directValuesUpdatedAt}
-          </div>
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">
-                <Wallet className="size-3.5" />
-                Direct Polymarket Summary
-              </div>
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight">
-                {formatMoney(directAccountValueUsd)} account value
-              </h2>
-              <p className="mt-1 text-sm text-slate-300">
-                Cash {formatMoney(directCashUsd)} · PnL{" "}
-                {formatMoney(directPnlUsd)}
-                {directUpnlUsd == null
-                  ? ""
-                  : ` · uPnL ${formatMoney(directUpnlUsd)}`}
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                {balanceStatusDetail}
-              </p>
-              {directBalanceUnrefreshed ? (
-                <div className="mt-3 rounded-2xl border border-amber-300/40 bg-amber-400/10 px-4 py-3 text-xs leading-5 text-amber-100">
-                  <p className="font-semibold text-amber-50">
-                    Balance has not been refreshed because the backend has not
-                    completed a successful Direct Polymarket balance check for the current
-                    session.
-                  </p>
-                  <p className="mt-1 text-amber-100/90">
-                    Click Refresh Balance to ask the backend to refresh now. If
-                    the refresh still reports login required, open Direct Polymarket/AWS
-                    EC2, run the Direct Polymarket login, then refresh again.
-                  </p>
-                </div>
-              ) : (
-                <p className="mt-1 text-xs text-slate-400">
-                  {visibleBalance.message ||
-                    "Direct Polymarket balance has not refreshed yet."}
-                </p>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-4 rounded-full border-sky-300/50 bg-sky-300/10 px-5 text-sky-100 hover:border-sky-200 hover:bg-sky-300/20 hover:text-white disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-400"
-                disabled={balanceRefreshDisabled}
-                onClick={handleBalanceRefresh}
-              >
-                {pendingAction === "balance" ? (
-                  <Loader2
-                    className="mr-2 size-3.5 animate-spin"
-                    aria-hidden="true"
-                  />
-                ) : null}
-                Refresh Balance
-              </Button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[700px] lg:grid-cols-4 xl:grid-cols-5">
-              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
-                  Cash
-                </div>
-                <div className="mt-2 text-xl font-semibold">
-                  {formatMoney(directCashUsd)}
-                </div>
-              </div>
-              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
-                  PnL
-                </div>
-                <div className="mt-2 text-xl font-semibold">
-                  {formatMoney(directPnlUsd)}
-                </div>
-              </div>
-              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
-                  uPnL
-                </div>
-                <div className="mt-2 text-xl font-semibold">
-                  {directUpnlUsd == null ? "—" : formatMoney(directUpnlUsd)}
-                </div>
-              </div>
-              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
-                  Active Trades
-                </div>
-                <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
-                  <Activity className="size-4 text-sky-300" />
-                  {activeCopiedEventGroups.length}
-                </div>
-              </div>
-              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
-                  Live Trades Today
-                </div>
-                <div className="mt-2 text-xl font-semibold">
-                  {state.live.live_trades_today}
-                </div>
-              </div>
-              <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
-                  Copied Trades
-                </div>
-                <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
-                  <TrendingUp className="size-4 text-emerald-300" />
-                  {executedLiveTrades.length}
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {activeScreen === "main" ? (
-        <>
-          <div className="flex flex-wrap items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-            <div className="flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              <span className="font-medium">Max live trades/day:</span>
-              <span className="font-semibold text-slate-950">
-                {state.config.max_live_trades_per_day}
-              </span>
-              <input
-                className="h-8 w-20 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
-                type="number"
-                min={1}
-                value={liveTradeLimitDraft}
-                onChange={(event) => setLiveTradeLimitDraft(event.target.value)}
-                aria-label="Max live trades per day"
-              />
-              <span className="font-medium">Trader Invested Threshold:</span>
-              <span className="font-semibold text-slate-950">
-                {formatMoney(state.config.trader_invested_threshold_usd)}
-              </span>
-              <input
-                className="h-8 w-24 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
-                type="number"
-                min={0}
-                step="0.01"
-                value={traderInvestedThresholdDraft}
-                onChange={(event) =>
-                  setTraderInvestedThresholdDraft(event.target.value)
-                }
-                aria-label="Trader invested threshold"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                className="rounded-full border-slate-300"
-                disabled={pendingAction !== null}
-                onClick={() => void saveLiveTradeLimit()}
-              >
-                Change limit
-              </Button>
-            </div>
-            <Button
-              size="sm"
-              className="rounded-full bg-sky-300 px-5 text-slate-950 hover:bg-sky-200 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100"
-              disabled={startDisabled}
-              aria-disabled={startDisabled}
-              onClick={() =>
-                runAction("start", () => apiService.polymarketDirectStart())
-              }
-            >
-              Start
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className={
-                state.running
-                  ? "rounded-full border-rose-600 bg-rose-600 px-5 text-white hover:border-rose-700 hover:bg-rose-700 hover:text-white disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100"
-                  : "rounded-full border-slate-300 px-5 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100"
-              }
-              disabled={stopDisabled}
-              aria-disabled={stopDisabled}
-              onClick={() =>
-                runAction("stop", () => apiService.polymarketDirectStop())
-              }
-            >
-              Stop Bot
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="rounded-full border-slate-300 px-5"
-              disabled={pendingAction !== null}
-              onClick={() =>
-                runAction(state.paused ? "resume" : "pause", () =>
-                  state.paused
-                    ? apiService.polymarketDirectResume()
-                    : apiService.polymarketDirectPause(),
-                )
-              }
-            >
-              {state.paused ? "Resume proposals" : "Pause proposals"}
-            </Button>
-            <div
-              className="flex min-w-[280px] flex-1 flex-col gap-2 text-sm text-slate-600 lg:ml-2"
-              aria-live="polite"
-            >
-              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-700">
-                {isActionPending ? (
-                  <Loader2
-                    className="size-4 animate-spin text-sky-600"
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <span
-                    className={
-                      state.running
-                        ? "size-2 rounded-full bg-emerald-500"
-                        : "size-2 rounded-full bg-slate-400"
-                    }
-                    aria-hidden="true"
-                  />
-                )}
-                {actionStatusMessage}
-              </div>
-              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-2 font-medium text-sky-900">
-                {state.running ? (
-                  <Loader2
-                    className="size-4 animate-spin text-sky-600"
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <Activity
-                    className="size-4 text-slate-500"
-                    aria-hidden="true"
-                  />
-                )}
-                <span>{liveParsingStatusMessage}</span>
-                <button
-                  type="button"
-                  className="inline-flex size-5 items-center justify-center rounded-full border border-sky-300 bg-white text-sky-700 transition hover:border-sky-500 hover:bg-sky-100 focus:outline-none focus:ring-2 focus:ring-sky-400"
-                  aria-label="Open skipped detail breakup"
-                  title="Skipped detail breakup"
-                  onClick={() => setSkippedBreakupOpen(true)}
-                >
-                  <Info className="size-3.5" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {stoppedWarning ? (
-            <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
-              {stoppedWarning}
+          ) : null}
+          {actionError ? (
+            <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              {actionError}
             </div>
           ) : null}
 
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Copied Direct Polymarket Positions
-              </CardTitle>
-              <CardDescription>
-                Aggregated by exact Event, outcome, and side so repeated $1
-                copies from multiple traders display as one Direct Polymarket exposure.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="inline-flex w-full rounded-2xl border border-slate-200 bg-slate-50 p-1 sm:w-auto">
-                  <button
-                    type="button"
-                    className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
-                      copiedPositionsTab === "positions"
-                        ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
-                        : "text-slate-500 hover:text-slate-900"
-                    }`}
-                    onClick={() => {
-                      setCopiedPositionsTab("positions");
-                      setCopiedPage(1);
-                    }}
-                  >
-                    Positions ({copiedPositionEventCount})
-                  </button>
-                  <button
-                    type="button"
-                    className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
-                      copiedPositionsTab === "history"
-                        ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
-                        : "text-slate-500 hover:text-slate-900"
-                    }`}
-                    onClick={() => {
-                      setCopiedPositionsTab("history");
-                      setCopiedPage(1);
-                    }}
-                  >
-                    History ({copiedHistoryTrades.length})
-                  </button>
+          {directExecutionUnavailable ? (
+            <div
+              className="rounded-[32px] border-2 border-amber-300 bg-amber-50 px-5 py-5 text-amber-950 shadow-lg shadow-amber-900/10 md:px-7 md:py-6"
+              role="alert"
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex gap-4">
+                  <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-amber-200 text-amber-900">
+                    <AlertTriangle className="size-8" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-black uppercase tracking-[0.24em] text-amber-700">
+                      Action required
+                    </div>
+                    <h2 className="mt-1 text-3xl font-black tracking-tight md:text-4xl">
+                      Direct Polymarket execution is not configured
+                    </h2>
+                    <p className="mt-2 max-w-3xl text-base font-semibold text-amber-900 md:text-lg">
+                      The bot cannot refresh wallet balance or place Direct
+                      Polymarket real-money trades until direct execution
+                      credentials are configured. Current status:{" "}
+                      {state.live.doctor.message || visibleBalance.message}
+                    </p>
+                  </div>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    asChild
+                    size="sm"
+                    className="rounded-full bg-amber-950 px-5 text-white hover:bg-amber-900"
+                  >
+                    <a
+                      href={AWS_EC2_TERMINAL_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open AWS EC2 Terminal
+                      <ExternalLink
+                        className="ml-2 size-3.5"
+                        aria-hidden="true"
+                      />
+                    </a>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-full border-amber-400 bg-white px-5 text-amber-950 hover:bg-amber-100"
+                    disabled={pendingAction !== null || autoDoctorRefreshing}
+                    onClick={() =>
+                      runAction("doctor", () =>
+                        apiService.polymarketDirectLiveDoctor(),
+                      )
+                    }
+                  >
+                    {pendingAction === "doctor" || autoDoctorRefreshing ? (
+                      <Loader2
+                        className="mr-2 size-3.5 animate-spin"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    Refresh Doctor
+                  </Button>
+                </div>
+              </div>
+              <ol className="mt-5 grid gap-3 text-sm font-semibold text-amber-950 md:grid-cols-2 xl:grid-cols-5">
+                <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+                  <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                    1
+                  </span>
+                  Open the AWS EC2 terminal for the bot server.
+                </li>
+                <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+                  <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                    2
+                  </span>
+                  Run{" "}
+                  <code className="rounded bg-amber-100 px-1.5 py-0.5">
+                    Configure POLYMARKET_DIRECT_* credentials and restart the
+                    backend.
+                  </code>
+                  .
+                </li>
+                <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+                  <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                    3
+                  </span>
+                  Scan the QR code from your mobile device.
+                </li>
+                <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+                  <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                    4
+                  </span>
+                  Sign in using{" "}
+                  <span className="break-all">tarunindian007@gmail.com</span>.
+                </li>
+                <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
+                  <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
+                    5
+                  </span>
+                  After login succeeds, wait for auto-refresh or click Refresh
+                  Doctor to update the Direct Polymarket execution configuration
+                  status.
+                </li>
+              </ol>
+            </div>
+          ) : null}
 
-                {copiedPositionsTab === "positions" ? (
-                  <div className="inline-flex w-full rounded-2xl border border-slate-200 bg-white p-1 sm:w-auto">
+          <Card className="overflow-hidden border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 py-0 text-white shadow-xl shadow-slate-950/10">
+            <CardContent className="p-5 md:p-6">
+              <div className="mb-3 flex justify-end text-xs font-medium text-slate-300">
+                Last values update: {directValuesUpdatedAt}
+              </div>
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">
+                    <Wallet className="size-3.5" />
+                    Direct Polymarket Summary
+                  </div>
+                  <h2 className="mt-3 text-2xl font-semibold tracking-tight">
+                    {formatMoney(directAccountValueUsd)} account value
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-300">
+                    Cash {formatMoney(directCashUsd)} · PnL{" "}
+                    {formatMoney(directPnlUsd)}
+                    {directUpnlUsd == null
+                      ? ""
+                      : ` · uPnL ${formatMoney(directUpnlUsd)}`}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {balanceStatusDetail}
+                  </p>
+                  {directBalanceUnrefreshed ? (
+                    <div className="mt-3 rounded-2xl border border-amber-300/40 bg-amber-400/10 px-4 py-3 text-xs leading-5 text-amber-100">
+                      <p className="font-semibold text-amber-50">
+                        Balance has not been refreshed because the backend has
+                        not completed a successful Direct Polymarket balance
+                        check for the current session.
+                      </p>
+                      <p className="mt-1 text-amber-100/90">
+                        Click Refresh Balance to ask the backend to refresh now.
+                        If the refresh still reports login required, open Direct
+                        Polymarket/AWS EC2, run the Direct Polymarket login,
+                        then refresh again.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-400">
+                      {visibleBalance.message ||
+                        "Direct Polymarket balance has not refreshed yet."}
+                    </p>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-4 rounded-full border-sky-300/50 bg-sky-300/10 px-5 text-sky-100 hover:border-sky-200 hover:bg-sky-300/20 hover:text-white disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-400"
+                    disabled={balanceRefreshDisabled}
+                    onClick={handleBalanceRefresh}
+                  >
+                    {pendingAction === "balance" ? (
+                      <Loader2
+                        className="mr-2 size-3.5 animate-spin"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    Refresh Balance
+                  </Button>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[700px] lg:grid-cols-4 xl:grid-cols-5">
+                  <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                      Cash
+                    </div>
+                    <div className="mt-2 text-xl font-semibold">
+                      {formatMoney(directCashUsd)}
+                    </div>
+                  </div>
+                  <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                      PnL
+                    </div>
+                    <div className="mt-2 text-xl font-semibold">
+                      {formatMoney(directPnlUsd)}
+                    </div>
+                  </div>
+                  <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                      uPnL
+                    </div>
+                    <div className="mt-2 text-xl font-semibold">
+                      {directUpnlUsd == null ? "—" : formatMoney(directUpnlUsd)}
+                    </div>
+                  </div>
+                  <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                      Active Trades
+                    </div>
+                    <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
+                      <Activity className="size-4 text-sky-300" />
+                      {activeCopiedEventGroups.length}
+                    </div>
+                  </div>
+                  <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                      Live Trades Today
+                    </div>
+                    <div className="mt-2 text-xl font-semibold">
+                      {state.live.live_trades_today}
+                    </div>
+                  </div>
+                  <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                      Copied Trades
+                    </div>
+                    <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
+                      <TrendingUp className="size-4 text-emerald-300" />
+                      {executedLiveTrades.length}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {activeScreen === "main" ? (
+            <>
+              <div className="flex flex-wrap items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                <div className="flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  <span className="font-medium">Max live trades/day:</span>
+                  <span className="font-semibold text-slate-950">
+                    {state.config.max_live_trades_per_day}
+                  </span>
+                  <input
+                    className="h-8 w-20 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
+                    type="number"
+                    min={1}
+                    value={liveTradeLimitDraft}
+                    onChange={(event) =>
+                      setLiveTradeLimitDraft(event.target.value)
+                    }
+                    aria-label="Max live trades per day"
+                  />
+                  <span className="font-medium">
+                    Trader Invested Threshold:
+                  </span>
+                  <span className="font-semibold text-slate-950">
+                    {formatMoney(state.config.trader_invested_threshold_usd)}
+                  </span>
+                  <input
+                    className="h-8 w-24 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={traderInvestedThresholdDraft}
+                    onChange={(event) =>
+                      setTraderInvestedThresholdDraft(event.target.value)
+                    }
+                    aria-label="Trader invested threshold"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-full border-slate-300"
+                    disabled={pendingAction !== null}
+                    onClick={() => void saveLiveTradeLimit()}
+                  >
+                    Change limit
+                  </Button>
+                </div>
+                <Button
+                  size="sm"
+                  className="rounded-full bg-sky-300 px-5 text-slate-950 hover:bg-sky-200 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100"
+                  disabled={startDisabled}
+                  aria-disabled={startDisabled}
+                  onClick={() =>
+                    runAction("start", () => apiService.polymarketDirectStart())
+                  }
+                >
+                  Start
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className={
+                    state.running
+                      ? "rounded-full border-rose-600 bg-rose-600 px-5 text-white hover:border-rose-700 hover:bg-rose-700 hover:text-white disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100"
+                      : "rounded-full border-slate-300 px-5 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 disabled:opacity-100"
+                  }
+                  disabled={stopDisabled}
+                  aria-disabled={stopDisabled}
+                  onClick={() =>
+                    runAction("stop", () => apiService.polymarketDirectStop())
+                  }
+                >
+                  Stop Bot
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="rounded-full border-slate-300 px-5"
+                  disabled={pendingAction !== null}
+                  onClick={() =>
+                    runAction(state.paused ? "resume" : "pause", () =>
+                      state.paused
+                        ? apiService.polymarketDirectResume()
+                        : apiService.polymarketDirectPause(),
+                    )
+                  }
+                >
+                  {state.paused ? "Resume proposals" : "Pause proposals"}
+                </Button>
+                <div
+                  className="flex min-w-[280px] flex-1 flex-col gap-2 text-sm text-slate-600 lg:ml-2"
+                  aria-live="polite"
+                >
+                  <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-700">
+                    {isActionPending ? (
+                      <Loader2
+                        className="size-4 animate-spin text-sky-600"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <span
+                        className={
+                          state.running
+                            ? "size-2 rounded-full bg-emerald-500"
+                            : "size-2 rounded-full bg-slate-400"
+                        }
+                        aria-hidden="true"
+                      />
+                    )}
+                    {actionStatusMessage}
+                  </div>
+                  <div className="inline-flex w-fit items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-2 font-medium text-sky-900">
+                    {state.running ? (
+                      <Loader2
+                        className="size-4 animate-spin text-sky-600"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <Activity
+                        className="size-4 text-slate-500"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span>{liveParsingStatusMessage}</span>
                     <button
                       type="button"
-                      className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
-                        copiedPositionStatus === "active"
-                          ? "bg-slate-950 text-white shadow-sm"
-                          : "text-slate-500 hover:text-slate-900"
-                      }`}
-                      onClick={() => {
-                        setCopiedPositionStatus("active");
-                        setCopiedPage(1);
-                      }}
+                      className="inline-flex size-5 items-center justify-center rounded-full border border-sky-300 bg-white text-sky-700 transition hover:border-sky-500 hover:bg-sky-100 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      aria-label="Open skipped detail breakup"
+                      title="Skipped detail breakup"
+                      onClick={() => setSkippedBreakupOpen(true)}
                     >
-                      Active
-                    </button>
-                    <button
-                      type="button"
-                      className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
-                        copiedPositionStatus === "closed"
-                          ? "bg-slate-950 text-white shadow-sm"
-                          : "text-slate-500 hover:text-slate-900"
-                      }`}
-                      onClick={() => {
-                        setCopiedPositionStatus("closed");
-                        setCopiedPage(1);
-                      }}
-                    >
-                      Closed
+                      <Info className="size-3.5" aria-hidden="true" />
                     </button>
                   </div>
-                ) : null}
+                </div>
               </div>
 
-              {copiedPositionsTab === "positions" &&
-              copiedPositionStatus === "active" ? (
-                <div
-                  className="mb-4 flex flex-wrap gap-2"
-                  role="tablist"
-                  aria-label="Active copied positions profit and loss filters"
-                >
-                  {copiedPositionPnlFilterOptions.map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      role="tab"
-                      aria-selected={copiedPositionPnlFilter === option.key}
-                      className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${
-                        copiedPositionPnlFilter === option.key
-                          ? "border-slate-950 bg-slate-950 text-white shadow-sm"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950"
-                      }`}
-                      onClick={() => {
-                        setCopiedPositionPnlFilter(option.key);
-                        setCopiedPage(1);
-                      }}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+              {stoppedWarning ? (
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                  {stoppedWarning}
                 </div>
               ) : null}
 
-              {copiedPositionsTab === "history" ? (
-                <div className="mb-4 flex flex-wrap gap-2">
-                  {copiedHistoryFilterOptions.map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${
-                        copiedHistoryFilter === option.key
-                          ? "border-slate-950 bg-slate-950 text-white shadow-sm"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950"
-                      }`}
-                      onClick={() => {
-                        setCopiedHistoryFilter(option.key);
-                        setCopiedPage(1);
-                      }}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Copied Direct Polymarket Positions
+                  </CardTitle>
+                  <CardDescription>
+                    Aggregated by exact Event, outcome, and side so repeated $1
+                    copies from multiple traders display as one Direct
+                    Polymarket exposure.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="inline-flex w-full rounded-2xl border border-slate-200 bg-slate-50 p-1 sm:w-auto">
+                      <button
+                        type="button"
+                        className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                          copiedPositionsTab === "positions"
+                            ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+                            : "text-slate-500 hover:text-slate-900"
+                        }`}
+                        onClick={() => {
+                          setCopiedPositionsTab("positions");
+                          setCopiedPage(1);
+                        }}
+                      >
+                        Positions ({copiedPositionEventCount})
+                      </button>
+                      <button
+                        type="button"
+                        className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                          copiedPositionsTab === "history"
+                            ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+                            : "text-slate-500 hover:text-slate-900"
+                        }`}
+                        onClick={() => {
+                          setCopiedPositionsTab("history");
+                          setCopiedPage(1);
+                        }}
+                      >
+                        History ({copiedHistoryTrades.length})
+                      </button>
+                    </div>
 
-              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
-                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("copiedAt", "Copied At")}
-                      </th>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("trader", "Trader")}
-                      </th>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("event", "Event")}
-                      </th>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("eventEnd", "Event Ends")}
-                      </th>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("side", "Side")}
-                      </th>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("outcome", "Outcome")}
-                      </th>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("amount", "Amount")}
-                      </th>
-                      {copiedPositionsTab === "positions" &&
-                      copiedPositionStatus === "active" ? (
-                        <th className="px-4 py-3">
-                          {copiedSortHeader(
-                            "currentPnl",
-                            "Current PnL",
-                            `refreshes every ${copiedPositionsRefreshSeconds}s`,
-                          )}
-                        </th>
-                      ) : null}
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("price", "Price bought")}
-                      </th>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("latestPrice", "Latest price")}
-                      </th>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("pnl", "PnL")}
-                      </th>
-                      <th className="px-4 py-3">
-                        {copiedSortHeader("status", "Status")}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {copiedEventGroups.length === 0 ? (
-                      <tr>
-                        <td
-                          className="px-4 py-6 text-sm text-slate-500"
-                          colSpan={
-                            copiedPositionsTab === "positions" &&
+                    {copiedPositionsTab === "positions" ? (
+                      <div className="inline-flex w-full rounded-2xl border border-slate-200 bg-white p-1 sm:w-auto">
+                        <button
+                          type="button"
+                          className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
                             copiedPositionStatus === "active"
-                              ? 12
-                              : 11
-                          }
+                              ? "bg-slate-950 text-white shadow-sm"
+                              : "text-slate-500 hover:text-slate-900"
+                          }`}
+                          onClick={() => {
+                            setCopiedPositionStatus("active");
+                            setCopiedPage(1);
+                          }}
                         >
-                          No copied Direct Polymarket rows for this tab yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      visibleCopiedEventGroups.map((event) => {
-                        const hasMultipleTraders = event.traders.length > 1;
-                        const failedTrades = getCopiedEventFailureTrades(event);
-                        const failureSummary =
-                          getCopiedEventFailureSummary(event);
-                        return (
-                          <tr key={event.key} className="align-top">
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatTs(event.copiedAt)}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {hasMultipleTraders ? (
-                                <button
-                                  className="font-medium text-sky-700 underline underline-offset-2"
-                                  onClick={() => setSelectedCopiedEvent(event)}
-                                >
-                                  multiple
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-900"
-                                  onClick={() => setSelectedCopiedEvent(event)}
-                                >
-                                  {getTraderDisplayName(event.traders[0])}
-                                </button>
+                          Active
+                        </button>
+                        <button
+                          type="button"
+                          className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                            copiedPositionStatus === "closed"
+                              ? "bg-slate-950 text-white shadow-sm"
+                              : "text-slate-500 hover:text-slate-900"
+                          }`}
+                          onClick={() => {
+                            setCopiedPositionStatus("closed");
+                            setCopiedPage(1);
+                          }}
+                        >
+                          Closed
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {copiedPositionsTab === "positions" &&
+                  copiedPositionStatus === "active" ? (
+                    <div
+                      className="mb-4 flex flex-wrap gap-2"
+                      role="tablist"
+                      aria-label="Active copied positions profit and loss filters"
+                    >
+                      {copiedPositionPnlFilterOptions.map((option) => (
+                        <button
+                          key={option.key}
+                          type="button"
+                          role="tab"
+                          aria-selected={copiedPositionPnlFilter === option.key}
+                          className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${
+                            copiedPositionPnlFilter === option.key
+                              ? "border-slate-950 bg-slate-950 text-white shadow-sm"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950"
+                          }`}
+                          onClick={() => {
+                            setCopiedPositionPnlFilter(option.key);
+                            setCopiedPage(1);
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {copiedPositionsTab === "history" ? (
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      {copiedHistoryFilterOptions.map((option) => (
+                        <button
+                          key={option.key}
+                          type="button"
+                          className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${
+                            copiedHistoryFilter === option.key
+                              ? "border-slate-950 bg-slate-950 text-white shadow-sm"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950"
+                          }`}
+                          onClick={() => {
+                            setCopiedHistoryFilter(option.key);
+                            setCopiedPage(1);
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                      <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("copiedAt", "Copied At")}
+                          </th>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("trader", "Trader")}
+                          </th>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("event", "Event")}
+                          </th>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("eventEnd", "Event Ends")}
+                          </th>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("side", "Side")}
+                          </th>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("outcome", "Outcome")}
+                          </th>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("amount", "Amount")}
+                          </th>
+                          {copiedPositionsTab === "positions" &&
+                          copiedPositionStatus === "active" ? (
+                            <th className="px-4 py-3">
+                              {copiedSortHeader(
+                                "currentPnl",
+                                "Current PnL",
+                                `refreshes every ${copiedPositionsRefreshSeconds}s`,
                               )}
+                            </th>
+                          ) : null}
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("price", "Price bought")}
+                          </th>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("latestPrice", "Latest price")}
+                          </th>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("pnl", "PnL")}
+                          </th>
+                          <th className="px-4 py-3">
+                            {copiedSortHeader("status", "Status")}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {copiedEventGroups.length === 0 ? (
+                          <tr>
+                            <td
+                              className="px-4 py-6 text-sm text-slate-500"
+                              colSpan={
+                                copiedPositionsTab === "positions" &&
+                                copiedPositionStatus === "active"
+                                  ? 12
+                                  : 11
+                              }
+                            >
+                              No copied Direct Polymarket rows for this tab yet.
                             </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              <div className="flex items-start gap-2">
-                                <div>
-                                  <div className="font-medium text-slate-950">
-                                    {event.marketTitle}
+                          </tr>
+                        ) : (
+                          visibleCopiedEventGroups.map((event) => {
+                            const hasMultipleTraders = event.traders.length > 1;
+                            const failedTrades =
+                              getCopiedEventFailureTrades(event);
+                            const failureSummary =
+                              getCopiedEventFailureSummary(event);
+                            return (
+                              <tr key={event.key} className="align-top">
+                                <td className="px-4 py-3 text-slate-700">
+                                  {formatTs(event.copiedAt)}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  {hasMultipleTraders ? (
+                                    <button
+                                      className="font-medium text-sky-700 underline underline-offset-2"
+                                      onClick={() =>
+                                        setSelectedCopiedEvent(event)
+                                      }
+                                    >
+                                      multiple
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-900"
+                                      onClick={() =>
+                                        setSelectedCopiedEvent(event)
+                                      }
+                                    >
+                                      {getTraderDisplayName(event.traders[0])}
+                                    </button>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  <div className="flex items-start gap-2">
+                                    <div>
+                                      <div className="font-medium text-slate-950">
+                                        {event.marketTitle}
+                                      </div>
+                                      <div className="mt-1 text-xs text-slate-500">
+                                        {event.marketId}
+                                      </div>
+                                    </div>
+                                    <button
+                                      className="mt-0.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                      aria-label={`Show copied traders for ${event.marketTitle}`}
+                                      onClick={() =>
+                                        setSelectedCopiedEvent(event)
+                                      }
+                                    >
+                                      <Info className="size-4" />
+                                    </button>
                                   </div>
-                                  <div className="mt-1 text-xs text-slate-500">
-                                    {event.marketId}
-                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  {formatEventEnd(
+                                    event.eventEndAt,
+                                    `${event.marketId} ${event.marketTitle}`,
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 font-semibold text-slate-800">
+                                  {event.side}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  {event.outcome}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  {formatMoney(event.amount)}
+                                </td>
+                                {copiedPositionsTab === "positions" &&
+                                copiedPositionStatus === "active" ? (
+                                  <td
+                                    className={`px-4 py-3 font-semibold ${
+                                      event.currentPnl >= 0
+                                        ? "text-emerald-600"
+                                        : "text-rose-600"
+                                    }`}
+                                  >
+                                    {formatMoney(event.currentPnl)}
+                                  </td>
+                                ) : null}
+                                <td className="px-4 py-3 text-slate-700">
+                                  {formatMoney(event.averagePrice, 4)}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  {formatMoney(event.currentPrice, 4)}
+                                </td>
+                                <td
+                                  className={`px-4 py-3 font-semibold ${
+                                    event.currentPrice - event.averagePrice >= 0
+                                      ? "text-emerald-600"
+                                      : "text-rose-600"
+                                  }`}
+                                >
+                                  {formatMoney(
+                                    event.currentPrice - event.averagePrice,
+                                    4,
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  {failureSummary ? (
+                                    <div className="flex max-w-[18rem] items-start gap-2">
+                                      <span className="leading-5 text-rose-700">
+                                        failed ({failureSummary})
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="mt-0.5 rounded-full p-1 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
+                                        aria-label={`Show failure details for ${event.marketTitle}`}
+                                        onClick={() =>
+                                          setSelectedFailedCopiedEvent(event)
+                                        }
+                                      >
+                                        <Info className="size-4" />
+                                      </button>
+                                      {failedTrades.length > 1 ? (
+                                        <span className="mt-0.5 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">
+                                          {failedTrades.length}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  ) : copiedPositionsTab === "positions" &&
+                                    copiedPositionStatus === "closed" ? (
+                                    getCopiedEventStatus(event)
+                                  ) : (
+                                    event.status
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <TablePaginationControl
+                    total={copiedEventGroups.length}
+                    page={safeCopiedPage}
+                    onPageChange={setCopiedPage}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                        Redeemed Trades
+                      </CardTitle>
+                      <CardDescription className="mt-2">
+                        Direct Polymarket trades completed through redeem today
+                        plus resolved winning positions still available to
+                        claim, with timestamp, profit and loss, execution price,
+                        and market details.
+                      </CardDescription>
+                    </div>
+                    <div className="flex max-w-sm flex-col items-start gap-2 sm:items-end">
+                      <Button
+                        size="sm"
+                        className="self-start rounded-full bg-emerald-600 px-4 text-white hover:bg-emerald-700 sm:self-end"
+                        disabled={pendingAction !== null}
+                        aria-label="Claim all available Direct Polymarket positions now"
+                        onClick={() =>
+                          runAction("redeem", () =>
+                            apiService.polymarketDirectLiveRedeem(),
+                          )
+                        }
+                      >
+                        {pendingAction === "redeem" ? "Claiming…" : "Claim Now"}
+                      </Button>
+                      <div
+                        className="flex items-start gap-2 text-left text-xs leading-5 text-slate-500 sm:text-right"
+                        aria-live="polite"
+                      >
+                        {pendingAction === "redeem" ? (
+                          <>
+                            <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-emerald-600 sm:hidden" />
+                            <span>
+                              {redeemStatusMessage} The Redeemed Trades table
+                              will refresh automatically when the claim
+                              finishes.
+                            </span>
+                          </>
+                        ) : (
+                          <span>{redeemStatusMessage}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div
+                    className="mb-4 flex flex-wrap gap-2"
+                    role="tablist"
+                    aria-label="Redeemed trades views"
+                  >
+                    {[
+                      {
+                        key: "claim-pending" as const,
+                        label: "Claim Pending",
+                        count: claimPendingTradeRows.length,
+                      },
+                      {
+                        key: "redeemed" as const,
+                        label: "Redeemed",
+                        count: previouslyRedeemedTradeRows.length,
+                      },
+                    ].map((tab) => {
+                      const isActive = redeemedTradesTab === tab.key;
+                      return (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          role="tab"
+                          aria-selected={isActive}
+                          className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                            isActive
+                              ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          }`}
+                          onClick={() => setRedeemedTradesTab(tab.key)}
+                        >
+                          {tab.label}
+                          <span
+                            className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                              isActive
+                                ? "bg-white/20 text-white"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {tab.count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                      <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3">
+                            {redeemedTradesTab === "claim-pending"
+                              ? "Claimable At"
+                              : "Redeemed At"}
+                          </th>
+                          <th className="px-4 py-3">Event</th>
+                          <th className="px-4 py-3">Outcome</th>
+                          <th className="px-4 py-3">Side</th>
+                          <th className="px-4 py-3">Amount</th>
+                          <th className="px-4 py-3">Shares</th>
+                          <th className="px-4 py-3">Price</th>
+                          <th className="px-4 py-3">Profit / Loss</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {visibleRedeemedTradeRows.length === 0 ? (
+                          <tr>
+                            <td
+                              className="px-4 py-6 text-sm text-slate-500"
+                              colSpan={10}
+                            >
+                              {redeemedTradesTab === "claim-pending"
+                                ? "No resolved winning positions are currently available to claim."
+                                : "No previously redeemed trades are visible yet."}
+                            </td>
+                          </tr>
+                        ) : (
+                          visibleRedeemedTradeRows.map((trade) => (
+                            <tr key={trade.key} className="align-top">
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatTs(trade.timestamp)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                <div className="font-medium text-slate-950">
+                                  {trade.marketTitle}
                                 </div>
-                                <button
-                                  className="mt-0.5 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                                  aria-label={`Show copied traders for ${event.marketTitle}`}
-                                  onClick={() => setSelectedCopiedEvent(event)}
-                                >
-                                  <Info className="size-4" />
-                                </button>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatEventEnd(
-                                event.eventEndAt,
-                                `${event.marketId} ${event.marketTitle}`,
-                              )}
-                            </td>
-                            <td className="px-4 py-3 font-semibold text-slate-800">
-                              {event.side}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {event.outcome}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatMoney(event.amount)}
-                            </td>
-                            {copiedPositionsTab === "positions" &&
-                            copiedPositionStatus === "active" ? (
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {trade.marketId}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {trade.outcome}
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-slate-800">
+                                {trade.side}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatMoney(trade.amount)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {trade.shares.toFixed(4)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatMoney(trade.price, 4)}
+                              </td>
                               <td
                                 className={`px-4 py-3 font-semibold ${
-                                  event.currentPnl >= 0
+                                  trade.profitLoss >= 0
                                     ? "text-emerald-600"
                                     : "text-rose-600"
                                 }`}
                               >
-                                {formatMoney(event.currentPnl)}
+                                {formatMoney(trade.profitLoss)}
                               </td>
-                            ) : null}
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatMoney(event.averagePrice, 4)}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatMoney(event.currentPrice, 4)}
-                            </td>
-                            <td
-                              className={`px-4 py-3 font-semibold ${
-                                event.currentPrice - event.averagePrice >= 0
-                                  ? "text-emerald-600"
-                                  : "text-rose-600"
-                              }`}
-                            >
-                              {formatMoney(event.currentPrice - event.averagePrice, 4)}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {failureSummary ? (
-                                <div className="flex max-w-[18rem] items-start gap-2">
-                                  <span className="leading-5 text-rose-700">
-                                    failed ({failureSummary})
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className="mt-0.5 rounded-full p-1 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300"
-                                    aria-label={`Show failure details for ${event.marketTitle}`}
-                                    onClick={() =>
-                                      setSelectedFailedCopiedEvent(event)
-                                    }
-                                  >
-                                    <Info className="size-4" />
-                                  </button>
-                                  {failedTrades.length > 1 ? (
-                                    <span className="mt-0.5 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">
-                                      {failedTrades.length}
-                                    </span>
-                                  ) : null}
+                              <td className="px-4 py-3 text-slate-700">
+                                <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                                  {trade.status}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                <div className="max-w-[18rem]">
+                                  <div>{trade.source}</div>
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {trade.detail}
+                                  </div>
                                 </div>
-                              ) : copiedPositionsTab === "positions" &&
-                                copiedPositionStatus === "closed" ? (
-                                getCopiedEventStatus(event)
-                              ) : (
-                                event.status
-                              )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Missed Trades
+                  </CardTitle>
+                  <CardDescription>
+                    Trades shortlisted for live copy execution but missed
+                    because the Direct Polymarket account/wallet did not have
+                    enough available balance.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                      <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3">Timestamp</th>
+                          <th className="px-4 py-3">Event Name</th>
+                          <th className="px-4 py-3">Side</th>
+                          <th className="px-4 py-3">Trader</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {missedTradeGroups.length === 0 ? (
+                          <tr>
+                            <td
+                              className="px-4 py-6 text-sm text-slate-500"
+                              colSpan={4}
+                            >
+                              No insufficient-balance missed trades found in
+                              recent decisions.
                             </td>
                           </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <TablePaginationControl
-                total={copiedEventGroups.length}
-                page={safeCopiedPage}
-                onPageChange={setCopiedPage}
-              />
-            </CardContent>
-          </Card>
-
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                    Redeemed Trades
-                  </CardTitle>
-                  <CardDescription className="mt-2">
-                    Direct Polymarket trades completed through redeem today plus resolved
-                    winning positions still available to claim, with timestamp,
-                    profit and loss, execution price, and market details.
-                  </CardDescription>
-                </div>
-                <div className="flex max-w-sm flex-col items-start gap-2 sm:items-end">
-                  <Button
-                    size="sm"
-                    className="self-start rounded-full bg-emerald-600 px-4 text-white hover:bg-emerald-700 sm:self-end"
-                    disabled={pendingAction !== null}
-                    aria-label="Claim all available Direct Polymarket positions now"
-                    onClick={() =>
-                      runAction("redeem", () =>
-                        apiService.polymarketDirectLiveRedeem(),
+                        ) : (
+                          visibleMissedTradeGroups.map((trade) => {
+                            const hasMultipleTraders = trade.traders.length > 1;
+                            return (
+                              <tr key={trade.key} className="align-top">
+                                <td className="px-4 py-3 text-slate-700">
+                                  {formatTs(trade.missedAt)}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  <button
+                                    className="text-left font-medium text-slate-950 hover:text-sky-700"
+                                    onClick={() =>
+                                      setSelectedMissedTrade(trade)
+                                    }
+                                  >
+                                    {trade.marketTitle}
+                                  </button>
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {trade.outcome}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 font-semibold text-slate-800">
+                                  {trade.side}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  {hasMultipleTraders ? (
+                                    <button
+                                      className="font-medium text-sky-700 underline underline-offset-2"
+                                      onClick={() =>
+                                        setSelectedMissedTrade(trade)
+                                      }
+                                    >
+                                      multiple ({trade.traders.length})
+                                    </button>
+                                  ) : (
+                                    getTraderDisplayName(trade.traders[0])
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ShowMoreRowsControl
+                    total={missedTradeGroups.length}
+                    visible={visibleMissedTradeGroups.length}
+                    onShowMore={() =>
+                      setMissedVisibleLimit(
+                        (current) => current + COMPACT_TABLE_PAGE_SIZE,
                       )
                     }
-                  >
-                    {pendingAction === "redeem" ? "Claiming…" : "Claim Now"}
-                  </Button>
-                  <div
-                    className="flex items-start gap-2 text-left text-xs leading-5 text-slate-500 sm:text-right"
-                    aria-live="polite"
-                  >
-                    {pendingAction === "redeem" ? (
-                      <>
-                        <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-emerald-600 sm:hidden" />
-                        <span>
-                          {redeemStatusMessage} The Redeemed Trades table will
-                          refresh automatically when the claim finishes.
-                        </span>
-                      </>
+                    onShowLess={() =>
+                      setMissedVisibleLimit(COMPACT_TABLE_PAGE_SIZE)
+                    }
+                    pageSize={COMPACT_TABLE_PAGE_SIZE}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Top Tracked Traders
+                  </CardTitle>
+                  <CardDescription>
+                    Tracked public trader identities selected for copy-read
+                    monitoring. Legacy manually added handle-only rows are
+                    hidden here; manage manual accounts from Settings.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <TrackedTradersTable
+                    traders={visibleTrackedTraders}
+                    decisions={state.live.recent_decisions}
+                    paperTrades={state.trade_history}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Recent Direct Polymarket Activity
+                  </CardTitle>
+                  <CardDescription>
+                    Live-read, guard, balance, and execution events from the
+                    Direct Polymarket bot.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Event Log
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      {state.recent_activity.length === 0 ? (
+                        <div className="text-sm text-slate-500">
+                          No Direct Polymarket activity yet.
+                        </div>
+                      ) : (
+                        state.recent_activity.map((entry, index) => (
+                          <div
+                            key={`${entry.timestamp}-${index}-${entry.message}`}
+                            className="rounded-[18px] bg-white px-3 py-3 shadow-sm ring-1 ring-slate-200"
+                          >
+                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                              {formatTs(entry.timestamp)}
+                            </div>
+                            <div className="mt-1 text-sm text-slate-700">
+                              {entry.message}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : activeScreen === "analysis" ? (
+            <>
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Past Trades
+                  </CardTitle>
+                  <CardDescription>
+                    Closed copied trades split by winning and losing outcomes.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div className="mb-4 inline-flex w-full rounded-2xl border border-slate-200 bg-slate-50 p-1 sm:w-auto">
+                    <button
+                      type="button"
+                      className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                        pastTradesTab === "won"
+                          ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+                          : "text-slate-500 hover:text-slate-900"
+                      }`}
+                      onClick={() => {
+                        setPastTradesTab("won");
+                        setWonPastTradesPage(1);
+                      }}
+                    >
+                      Won ({wonAnalysisTrades.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                        pastTradesTab === "lost"
+                          ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+                          : "text-slate-500 hover:text-slate-900"
+                      }`}
+                      onClick={() => {
+                        setPastTradesTab("lost");
+                        setLostPastTradesPage(1);
+                      }}
+                    >
+                      Lost ({lostAnalysisTrades.length})
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                      <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3">Timestamp</th>
+                          <th className="px-4 py-3">Trader</th>
+                          <th className="px-4 py-3">Event</th>
+                          <th className="px-4 py-3">Outcome</th>
+                          <th className="px-4 py-3">Side</th>
+                          <th className="px-4 py-3">Amount</th>
+                          <th className="px-4 py-3">Price</th>
+                          <th className="px-4 py-3">PnL</th>
+                          <th className="px-4 py-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {visiblePastAnalysisTrades.length === 0 ? (
+                          <tr>
+                            <td
+                              className="px-4 py-6 text-sm text-slate-500"
+                              colSpan={9}
+                            >
+                              No {pastTradesTab} copied trades are available
+                              yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          visiblePastAnalysisTrades.map((trade) => (
+                            <tr key={trade.id} className="align-top">
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatTs(trade.timestamp)}
+                              </td>
+                              <td className="px-4 py-3 font-medium text-slate-950">
+                                {trade.traderName}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                <div className="font-medium text-slate-950">
+                                  {trade.marketTitle}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {trade.marketId}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {trade.outcome}
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-slate-800">
+                                {trade.side}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatMoney(trade.amount)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatMoney(trade.price, 4)}
+                              </td>
+                              <td
+                                className={`px-4 py-3 font-semibold ${trade.pnl >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                              >
+                                {formatMoney(trade.pnl)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {trade.status}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <PaginationRowsControl
+                    total={pastAnalysisTrades.length}
+                    page={normalizedPastTradesPage}
+                    pageSize={PAST_TRADES_PAGE_SIZE}
+                    onPageChange={setPastTradesPage}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Copied Traders
+                  </CardTitle>
+                  <CardDescription>
+                    Traders successfully copied so far, sorted by copied trades
+                    in decreasing order. Click any row for a full trade breakup.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                      <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3">Trader Name</th>
+                          <th className="px-4 py-3">Net worth</th>
+                          <th className="px-4 py-3">Copied Trades</th>
+                          <th className="px-4 py-3">Trades Won</th>
+                          <th className="px-4 py-3">Total Winnings</th>
+                          <th className="px-4 py-3">Trades Lost</th>
+                          <th className="px-4 py-3">Total Losses</th>
+                          <th className="px-4 py-3">Total PnL</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {copiedTraderAnalysisRows.length === 0 ? (
+                          <tr>
+                            <td
+                              className="px-4 py-6 text-sm text-slate-500"
+                              colSpan={8}
+                            >
+                              No copied trader analysis is available yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          copiedTraderAnalysisRows.map((trader) => (
+                            <tr
+                              key={trader.key}
+                              className="cursor-pointer align-top transition hover:bg-slate-50"
+                              onClick={() => setSelectedAnalyzedTrader(trader)}
+                            >
+                              <td className="px-4 py-3 font-medium text-sky-700 underline underline-offset-2">
+                                {trader.traderName}
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-slate-700">
+                                <div
+                                  className="flex min-w-56 flex-col gap-2"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  <span className="font-semibold text-slate-700">
+                                    {trader.netWorth > 0
+                                      ? formatMoney(trader.netWorth)
+                                      : "—"}
+                                  </span>
+                                  {trader.accountId ? (
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        className="w-28 rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                                        aria-label={`Manual net worth for ${trader.traderName}`}
+                                        placeholder="Net worth"
+                                        value={
+                                          manualNetWorthDrafts[
+                                            trader.accountId
+                                          ] ??
+                                          (trader.netWorth > 0
+                                            ? String(trader.netWorth)
+                                            : "")
+                                        }
+                                        disabled={
+                                          busyAccountId ===
+                                          `net-worth-${trader.accountId}`
+                                        }
+                                        onChange={(event) =>
+                                          setManualNetWorthDrafts(
+                                            (current) => ({
+                                              ...current,
+                                              [trader.accountId!]:
+                                                event.target.value,
+                                            }),
+                                          )
+                                        }
+                                      />
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 rounded-full px-3 text-[11px]"
+                                        disabled={
+                                          busyAccountId ===
+                                          `net-worth-${trader.accountId}`
+                                        }
+                                        onClick={() =>
+                                          void saveManualNetWorth(trader)
+                                        }
+                                      >
+                                        {busyAccountId ===
+                                        `net-worth-${trader.accountId}` ? (
+                                          <Loader2 className="mr-1 size-3 animate-spin" />
+                                        ) : null}
+                                        Save
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs font-normal text-slate-400">
+                                      Add as a tracked account to edit.
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {trader.copiedTrades}
+                              </td>
+                              <td className="px-4 py-3 text-emerald-700">
+                                {trader.tradesWon}
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-emerald-700">
+                                {formatMoney(trader.totalWinnings)}
+                              </td>
+                              <td className="px-4 py-3 text-rose-700">
+                                {trader.tradesLost}
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-rose-700">
+                                {formatMoney(trader.totalLosses)}
+                              </td>
+                              <td
+                                className={`px-4 py-3 font-semibold ${trader.totalPnl >= 0 ? "text-emerald-700" : "text-rose-700"}`}
+                              >
+                                {formatMoney(trader.totalPnl)}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <>
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Bot Status
+                  </CardTitle>
+                  <CardDescription>
+                    Current runtime and Direct Polymarket polling state for the
+                    real-money copy bot.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <MetricGrid
+                    items={botStatusItems}
+                    columns="md:grid-cols-2 xl:grid-cols-5"
+                  />
+                </CardContent>
+              </Card>
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Live Trading Control
+                  </CardTitle>
+                  <CardDescription>
+                    Sandbox execution is disabled. Real Polymarket orders route
+                    through Direct Polymarket after live guards pass.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-4">
+                  <MetricGrid
+                    items={liveControlItems}
+                    columns="md:grid-cols-2 xl:grid-cols-4"
+                  />
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full border-slate-300"
+                      disabled={pendingAction !== null}
+                      onClick={() =>
+                        runAction("toggle-live", () =>
+                          state.live.unlocked
+                            ? apiService.polymarketDirectLiveLock()
+                            : apiService.polymarketDirectLiveUnlock(),
+                        )
+                      }
+                    >
+                      {state.live.unlocked ? "Lock live" : "Unlock live"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full border-slate-300"
+                      disabled={pendingAction !== null}
+                      onClick={() =>
+                        runAction("doctor", () =>
+                          apiService.polymarketDirectLiveDoctor(),
+                        )
+                      }
+                    >
+                      {pendingAction === "doctor" ? (
+                        <Loader2
+                          className="mr-2 size-3.5 animate-spin"
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      {pendingAction === "doctor"
+                        ? "Refreshing doctor…"
+                        : "Refresh doctor"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full border-slate-300"
+                      disabled={pendingAction !== null}
+                      onClick={() =>
+                        runAction("balance", () =>
+                          apiService.polymarketDirectLiveBalanceRefresh(),
+                        )
+                      }
+                    >
+                      Refresh balance
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                      disabled={pendingAction !== null}
+                      onClick={() =>
+                        runAction("redeem", () =>
+                          apiService.polymarketDirectLiveRedeem(),
+                        )
+                      }
+                    >
+                      Redeem resolved
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="rounded-full"
+                      disabled={pendingAction !== null}
+                      onClick={() =>
+                        runAction("emergency-stop", () =>
+                          apiService.polymarketDirectLiveEmergencyStop(),
+                        )
+                      }
+                    >
+                      Emergency stop
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full border-slate-300"
+                      disabled={pendingAction !== null}
+                      onClick={() =>
+                        runAction("emergency-reset", () =>
+                          apiService.polymarketDirectLiveResetEmergencyStop(),
+                        )
+                      }
+                    >
+                      Reset emergency stop
+                    </Button>
+                  </div>
+
+                  <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    {pendingAction ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2 font-semibold text-slate-950">
+                          <Loader2
+                            className="size-4 animate-spin text-sky-600"
+                            aria-hidden="true"
+                          />
+                          Processing {pendingActionLabel}…
+                        </div>
+                        <p>{pendingActionDetail}</p>
+                        <p className="text-xs text-slate-500">
+                          Controls are temporarily disabled to prevent duplicate
+                          live-trading actions. They will re-enable when the
+                          backend responds.
+                        </p>
+                      </div>
+                    ) : autoDoctorRefreshing ? (
+                      <div className="flex items-center gap-2 font-semibold text-slate-950">
+                        <Loader2
+                          className="size-4 animate-spin text-sky-600"
+                          aria-hidden="true"
+                        />
+                        Auto-refreshing Direct Polymarket doctor after
+                        not-configured status…
+                      </div>
                     ) : (
-                      <span>{redeemStatusMessage}</span>
+                      <p>
+                        No control action is running. If you just completed
+                        Direct Polymarket login, the page now automatically
+                        retries the doctor check; you can also click Refresh
+                        Doctor manually.
+                      </p>
                     )}
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Trader Discovery Logic
+                  </CardTitle>
+                  <CardDescription>
+                    Detection can be broad, but proposal creation is selective.
+                    Tracked does not mean a trade will be copied.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-4">
+                  <MetricGrid
+                    items={discoveryItems}
+                    columns="md:grid-cols-2 xl:grid-cols-4"
+                  />
+                  <div className="rounded-[20px] border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                    New proposals appear only after a live-read trade is
+                    detected after startup baseline. If manual wallets are
+                    configured, they are preferred over auto-discovered traders.
+                  </div>
+                  {manualInvalid.length > 0 ? (
+                    <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                      Invalid manual wallet entries were ignored:{" "}
+                      {manualInvalid.join(", ")}
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Live Source Status
+                  </CardTitle>
+                  <CardDescription>
+                    Poll-level diagnostics for the live-read source, baseline
+                    tracking, and proposal-control filters.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <MetricGrid
+                    items={liveSourceItems}
+                    columns="md:grid-cols-2 xl:grid-cols-4"
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="border border-slate-200 bg-white py-6">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Manual Tracked Wallets
+                  </CardTitle>
+                  <CardDescription>
+                    Add, delete, enable, and tune manual Polymarket accounts.
+                    Environment-configured `MANUAL_TRACKED_WALLETS` entries
+                    remain tracked even if not discovered by the active-trader
+                    scan.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 pt-4">
+                  <TrackedAccountsTable
+                    accounts={state.tracked_accounts}
+                    drafts={accountDrafts}
+                    newDraft={newAccountDraft}
+                    busyId={busyAccountId}
+                    onDraftChange={(id, draft) =>
+                      setAccountDrafts((current) => ({
+                        ...current,
+                        [id]: draft,
+                      }))
+                    }
+                    onNewDraftChange={setNewAccountDraft}
+                    onAdd={() => void addTrackedAccount()}
+                    onSave={(accountId) => void saveTrackedAccount(accountId)}
+                    onDelete={(accountId) =>
+                      void deleteTrackedAccount(accountId)
+                    }
+                  />
+                  <div>
+                    <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Environment wallets
+                    </div>
+                    <ManualWalletsTable
+                      wallets={state.live.source_status.manual_tracked_wallets}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
+
+          {selectedFailedCopiedEvent ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setSelectedFailedCopiedEvent(null)}
+            >
+              <div
+                className="relative w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  aria-label="Close failure details popup"
+                  onClick={() => setSelectedFailedCopiedEvent(null)}
+                >
+                  <X className="size-5" />
+                </button>
+                <div className="pr-12">
+                  <h2 className="text-lg font-semibold text-slate-950">
+                    Failed copy details
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {selectedFailedCopiedEvent.marketTitle}
+                  </p>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {getCopiedEventFailureTrades(selectedFailedCopiedEvent).map(
+                    (trade) => (
+                      <div
+                        key={trade.id}
+                        className="rounded-[20px] border border-rose-100 bg-rose-50/60 p-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                          <span className="font-semibold text-slate-950">
+                            {getTraderDisplayName(trade)}
+                          </span>
+                          <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                            {formatTs(
+                              trade.executed_at ||
+                                trade.updated_at ||
+                                trade.proposed_at,
+                            )}
+                          </span>
+                        </div>
+                        <div className="mt-3 text-sm font-medium text-rose-800">
+                          {getTradeStatusReason(trade)}
+                        </div>
+                        <dl className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                          <div>
+                            <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                              Outcome
+                            </dt>
+                            <dd>{trade.outcome}</dd>
+                          </div>
+                          <div>
+                            <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                              Side
+                            </dt>
+                            <dd>{trade.side}</dd>
+                          </div>
+                          <div>
+                            <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                              Amount
+                            </dt>
+                            <dd>{formatMoney(trade.amount)}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                    ),
+                  )}
                 </div>
               </div>
-            </CardHeader>
-            <CardContent className="pt-4">
+            </div>
+          ) : null}
+          {selectedMissedTrade ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setSelectedMissedTrade(null)}
+            >
               <div
-                className="mb-4 flex flex-wrap gap-2"
-                role="tablist"
-                aria-label="Redeemed trades views"
+                className="relative w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
               >
-                {[
-                  {
-                    key: "claim-pending" as const,
-                    label: "Claim Pending",
-                    count: claimPendingTradeRows.length,
-                  },
-                  {
-                    key: "redeemed" as const,
-                    label: "Redeemed",
-                    count: previouslyRedeemedTradeRows.length,
-                  },
-                ].map((tab) => {
-                  const isActive = redeemedTradesTab === tab.key;
-                  return (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      role="tab"
-                      aria-selected={isActive}
-                      className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                        isActive
-                          ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                      }`}
-                      onClick={() => setRedeemedTradesTab(tab.key)}
-                    >
-                      {tab.label}
-                      <span
-                        className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
-                          isActive
-                            ? "bg-white/20 text-white"
-                            : "bg-slate-100 text-slate-500"
-                        }`}
-                      >
-                        {tab.count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
-                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">
-                        {redeemedTradesTab === "claim-pending"
-                          ? "Claimable At"
-                          : "Redeemed At"}
-                      </th>
-                      <th className="px-4 py-3">Event</th>
-                      <th className="px-4 py-3">Outcome</th>
-                      <th className="px-4 py-3">Side</th>
-                      <th className="px-4 py-3">Amount</th>
-                      <th className="px-4 py-3">Shares</th>
-                      <th className="px-4 py-3">Price</th>
-                      <th className="px-4 py-3">Profit / Loss</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Details</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {visibleRedeemedTradeRows.length === 0 ? (
+                <button
+                  type="button"
+                  className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  aria-label="Close missed trade traders popup"
+                  onClick={() => setSelectedMissedTrade(null)}
+                >
+                  <X className="size-5" />
+                </button>
+                <div className="flex items-start justify-between gap-4 pr-12">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-950">
+                      Missed trade traders
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {selectedMissedTrade.marketTitle}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                       <tr>
-                        <td
-                          className="px-4 py-6 text-sm text-slate-500"
-                          colSpan={10}
-                        >
-                          {redeemedTradesTab === "claim-pending"
-                            ? "No resolved winning positions are currently available to claim."
-                            : "No previously redeemed trades are visible yet."}
-                        </td>
+                        <th className="px-4 py-3">Trader</th>
+                        <th className="px-4 py-3">Timestamp</th>
+                        <th className="px-4 py-3">Side</th>
+                        <th className="px-4 py-3">Reason</th>
                       </tr>
-                    ) : (
-                      visibleRedeemedTradeRows.map((trade) => (
-                        <tr key={trade.key} className="align-top">
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedMissedTrade.traders.map((trade) => (
+                        <tr key={trade.id}>
+                          <td className="px-4 py-3 font-medium text-slate-950">
+                            {getTraderDisplayName(trade)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatTs(
+                              trade.executed_at ||
+                                trade.updated_at ||
+                                trade.proposed_at,
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">
+                            {trade.side}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {trade.failure_reason || selectedMissedTrade.reason}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {selectedCopiedEvent ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setSelectedCopiedEvent(null)}
+            >
+              <div
+                className="relative w-full max-w-6xl rounded-[28px] bg-white p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  aria-label="Close copied traders popup"
+                  onClick={() => setSelectedCopiedEvent(null)}
+                >
+                  <X className="size-5" />
+                </button>
+                <div className="flex items-start justify-between gap-4 pr-12">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-950">
+                      Copied traders
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {selectedCopiedEvent.marketTitle}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-5 overflow-x-auto rounded-[20px] border border-slate-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Trader</th>
+                        <th className="px-4 py-3">Timestamp</th>
+                        <th className="px-4 py-3">Amount</th>
+                        <th className="px-4 py-3">Trader invested</th>
+                        <th className="px-4 py-3">Positions Value</th>
+                        <th className="px-4 py-3">Net worth</th>
+                        <th className="px-4 py-3">% of Net Worth</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedCopiedEvent.traders
+                        .filter(
+                          (trade) =>
+                            (trade.trader_invested_usd || 0) >=
+                            state.config.trader_invested_threshold_usd,
+                        )
+                        .map((trade) => {
+                          const traderInvested = trade.trader_invested_usd || 0;
+                          const traderAccount = getTrackedAccountForTrade(
+                            trade,
+                            state.tracked_accounts,
+                          );
+                          const netWorth = getTradeNetWorth(
+                            trade,
+                            traderAccount,
+                          );
+                          const positionsValue =
+                            traderAccount?.positions_value_usd;
+                          const positionsValueMissingReason =
+                            getPositionsValueMissingReason(traderAccount);
+                          const missingReason = getNetWorthMissingReason(
+                            trade,
+                            traderAccount,
+                          );
+                          const netWorthPercent =
+                            netWorth > 0
+                              ? (traderInvested / netWorth) * 100
+                              : null;
+                          const activityUrl = getTraderActivityUrl(trade);
+                          return (
+                            <tr key={trade.id}>
+                              <td className="px-4 py-3 font-medium text-slate-950">
+                                {activityUrl ? (
+                                  <a
+                                    className="text-sky-700 underline underline-offset-2 hover:text-sky-900"
+                                    href={activityUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    {getTraderDisplayName(trade)}
+                                  </a>
+                                ) : (
+                                  getTraderDisplayName(trade)
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatTs(
+                                  trade.executed_at ||
+                                    trade.updated_at ||
+                                    trade.proposed_at,
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatMoney(trade.amount)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {formatMoney(traderInvested)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {positionsValue == null
+                                  ? positionsValueMissingReason
+                                  : formatCompactMoney(positionsValue)}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {netWorth > 0
+                                  ? formatMoney(netWorth)
+                                  : missingReason}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {netWorthPercent === null
+                                  ? missingReason
+                                  : formatPercent(netWorthPercent)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {selectedAnalyzedTrader ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setSelectedAnalyzedTrader(null)}
+            >
+              <div
+                className="relative max-h-[85vh] w-full max-w-6xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  aria-label="Close copied trader analysis popup"
+                  onClick={() => setSelectedAnalyzedTrader(null)}
+                >
+                  <X className="size-5" />
+                </button>
+                <div className="flex flex-col gap-4 pr-12">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-950">
+                      {selectedAnalyzedTrader.traderName} trade breakup
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {selectedAnalyzedTrader.copiedTrades} copied trades ·{" "}
+                      {selectedAnalyzedTrader.tradesWon} won ·{" "}
+                      {selectedAnalyzedTrader.tradesLost} lost · Total PnL{" "}
+                      {formatMoney(selectedAnalyzedTrader.totalPnl)}
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Total Winnings
+                      </div>
+                      <div className="mt-2 text-lg font-semibold text-emerald-700">
+                        {formatMoney(selectedAnalyzedTrader.totalWinnings)}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Total Losses
+                      </div>
+                      <div className="mt-2 text-lg font-semibold text-rose-700">
+                        {formatMoney(selectedAnalyzedTrader.totalLosses)}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Trades Won
+                      </div>
+                      <div className="mt-2 text-lg font-semibold text-slate-950">
+                        {selectedAnalyzedTrader.tradesWon}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Trades Lost
+                      </div>
+                      <div className="mt-2 text-lg font-semibold text-slate-950">
+                        {selectedAnalyzedTrader.tradesLost}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-5 overflow-x-auto rounded-[20px] border border-slate-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Timestamp</th>
+                        <th className="px-4 py-3">Event</th>
+                        <th className="px-4 py-3">Outcome</th>
+                        <th className="px-4 py-3">Side</th>
+                        <th className="px-4 py-3">Amount</th>
+                        <th className="px-4 py-3">Shares</th>
+                        <th className="px-4 py-3">Price</th>
+                        <th className="px-4 py-3">PnL</th>
+                        <th className="px-4 py-3">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedAnalyzedTrader.trades.map((trade) => (
+                        <tr key={trade.id} className="align-top">
                           <td className="px-4 py-3 text-slate-700">
                             {formatTs(trade.timestamp)}
                           </td>
@@ -2963,1088 +4126,106 @@ export default function PolymarketBotPage() {
                           </td>
                           <td
                             className={`px-4 py-3 font-semibold ${
-                              trade.profitLoss >= 0
+                              trade.pnl >= 0
                                 ? "text-emerald-600"
                                 : "text-rose-600"
                             }`}
                           >
-                            {formatMoney(trade.profitLoss)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
-                              {trade.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            <div className="max-w-[18rem]">
-                              <div>{trade.source}</div>
-                              <div className="mt-1 text-xs text-slate-500">
-                                {trade.detail}
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Missed Trades
-              </CardTitle>
-              <CardDescription>
-                Trades shortlisted for live copy execution but missed because
-                the Direct Polymarket account/wallet did not have enough available balance.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
-                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">Timestamp</th>
-                      <th className="px-4 py-3">Event Name</th>
-                      <th className="px-4 py-3">Side</th>
-                      <th className="px-4 py-3">Trader</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {missedTradeGroups.length === 0 ? (
-                      <tr>
-                        <td
-                          className="px-4 py-6 text-sm text-slate-500"
-                          colSpan={4}
-                        >
-                          No insufficient-balance missed trades found in recent
-                          decisions.
-                        </td>
-                      </tr>
-                    ) : (
-                      visibleMissedTradeGroups.map((trade) => {
-                        const hasMultipleTraders = trade.traders.length > 1;
-                        return (
-                          <tr key={trade.key} className="align-top">
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatTs(trade.missedAt)}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              <button
-                                className="text-left font-medium text-slate-950 hover:text-sky-700"
-                                onClick={() => setSelectedMissedTrade(trade)}
-                              >
-                                {trade.marketTitle}
-                              </button>
-                              <div className="mt-1 text-xs text-slate-500">
-                                {trade.outcome}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 font-semibold text-slate-800">
-                              {trade.side}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {hasMultipleTraders ? (
-                                <button
-                                  className="font-medium text-sky-700 underline underline-offset-2"
-                                  onClick={() => setSelectedMissedTrade(trade)}
-                                >
-                                  multiple ({trade.traders.length})
-                                </button>
-                              ) : (
-                                getTraderDisplayName(trade.traders[0])
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <ShowMoreRowsControl
-                total={missedTradeGroups.length}
-                visible={visibleMissedTradeGroups.length}
-                onShowMore={() =>
-                  setMissedVisibleLimit(
-                    (current) => current + COMPACT_TABLE_PAGE_SIZE,
-                  )
-                }
-                onShowLess={() =>
-                  setMissedVisibleLimit(COMPACT_TABLE_PAGE_SIZE)
-                }
-                pageSize={COMPACT_TABLE_PAGE_SIZE}
-              />
-            </CardContent>
-          </Card>
-
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Top Tracked Traders
-              </CardTitle>
-              <CardDescription>
-                Tracked public trader identities selected for copy-read
-                monitoring. Legacy manually added handle-only rows are hidden
-                here; manage manual accounts from Settings.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <TrackedTradersTable
-                traders={visibleTrackedTraders}
-                decisions={state.live.recent_decisions}
-                paperTrades={state.trade_history}
-              />
-            </CardContent>
-          </Card>
-
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Recent Direct Polymarket Activity
-              </CardTitle>
-              <CardDescription>
-                Live-read, guard, balance, and execution events from the
-                Direct Polymarket bot.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  Event Log
-                </div>
-                <div className="mt-3 space-y-3">
-                  {state.recent_activity.length === 0 ? (
-                    <div className="text-sm text-slate-500">
-                      No Direct Polymarket activity yet.
-                    </div>
-                  ) : (
-                    state.recent_activity.map((entry, index) => (
-                      <div
-                        key={`${entry.timestamp}-${index}-${entry.message}`}
-                        className="rounded-[18px] bg-white px-3 py-3 shadow-sm ring-1 ring-slate-200"
-                      >
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                          {formatTs(entry.timestamp)}
-                        </div>
-                        <div className="mt-1 text-sm text-slate-700">
-                          {entry.message}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      ) : activeScreen === "analysis" ? (
-        <>
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Past Trades
-              </CardTitle>
-              <CardDescription>
-                Closed copied trades split by winning and losing outcomes.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="mb-4 inline-flex w-full rounded-2xl border border-slate-200 bg-slate-50 p-1 sm:w-auto">
-                <button
-                  type="button"
-                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
-                    pastTradesTab === "won"
-                      ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
-                      : "text-slate-500 hover:text-slate-900"
-                  }`}
-                  onClick={() => {
-                    setPastTradesTab("won");
-                    setWonPastTradesPage(1);
-                  }}
-                >
-                  Won ({wonAnalysisTrades.length})
-                </button>
-                <button
-                  type="button"
-                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
-                    pastTradesTab === "lost"
-                      ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
-                      : "text-slate-500 hover:text-slate-900"
-                  }`}
-                  onClick={() => {
-                    setPastTradesTab("lost");
-                    setLostPastTradesPage(1);
-                  }}
-                >
-                  Lost ({lostAnalysisTrades.length})
-                </button>
-              </div>
-              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
-                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">Timestamp</th>
-                      <th className="px-4 py-3">Trader</th>
-                      <th className="px-4 py-3">Event</th>
-                      <th className="px-4 py-3">Outcome</th>
-                      <th className="px-4 py-3">Side</th>
-                      <th className="px-4 py-3">Amount</th>
-                      <th className="px-4 py-3">Price</th>
-                      <th className="px-4 py-3">PnL</th>
-                      <th className="px-4 py-3">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {visiblePastAnalysisTrades.length === 0 ? (
-                      <tr>
-                        <td
-                          className="px-4 py-6 text-sm text-slate-500"
-                          colSpan={9}
-                        >
-                          No {pastTradesTab} copied trades are available yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      visiblePastAnalysisTrades.map((trade) => (
-                        <tr key={trade.id} className="align-top">
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatTs(trade.timestamp)}
-                          </td>
-                          <td className="px-4 py-3 font-medium text-slate-950">
-                            {trade.traderName}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            <div className="font-medium text-slate-950">
-                              {trade.marketTitle}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {trade.marketId}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {trade.outcome}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-slate-800">
-                            {trade.side}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatMoney(trade.amount)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatMoney(trade.price, 4)}
-                          </td>
-                          <td
-                            className={`px-4 py-3 font-semibold ${trade.pnl >= 0 ? "text-emerald-600" : "text-rose-600"}`}
-                          >
                             {formatMoney(trade.pnl)}
                           </td>
                           <td className="px-4 py-3 text-slate-700">
-                            {trade.status}
+                            {trade.reason}
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <PaginationRowsControl
-                total={pastAnalysisTrades.length}
-                page={normalizedPastTradesPage}
-                pageSize={PAST_TRADES_PAGE_SIZE}
-                onPageChange={setPastTradesPage}
-              />
-            </CardContent>
-          </Card>
-
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Copied Traders
-              </CardTitle>
-              <CardDescription>
-                Traders successfully copied so far, sorted by copied trades in
-                decreasing order. Click any row for a full trade breakup.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
-                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">Trader Name</th>
-                      <th className="px-4 py-3">Net worth</th>
-                      <th className="px-4 py-3">Copied Trades</th>
-                      <th className="px-4 py-3">Trades Won</th>
-                      <th className="px-4 py-3">Total Winnings</th>
-                      <th className="px-4 py-3">Trades Lost</th>
-                      <th className="px-4 py-3">Total Losses</th>
-                      <th className="px-4 py-3">Total PnL</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {copiedTraderAnalysisRows.length === 0 ? (
-                      <tr>
-                        <td
-                          className="px-4 py-6 text-sm text-slate-500"
-                          colSpan={8}
-                        >
-                          No copied trader analysis is available yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      copiedTraderAnalysisRows.map((trader) => (
-                        <tr
-                          key={trader.key}
-                          className="cursor-pointer align-top transition hover:bg-slate-50"
-                          onClick={() => setSelectedAnalyzedTrader(trader)}
-                        >
-                          <td className="px-4 py-3 font-medium text-sky-700 underline underline-offset-2">
-                            {trader.traderName}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-slate-700">
-                            {trader.netWorth > 0 ? formatMoney(trader.netWorth) : "—"}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {trader.copiedTrades}
-                          </td>
-                          <td className="px-4 py-3 text-emerald-700">
-                            {trader.tradesWon}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-emerald-700">
-                            {formatMoney(trader.totalWinnings)}
-                          </td>
-                          <td className="px-4 py-3 text-rose-700">
-                            {trader.tradesLost}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-rose-700">
-                            {formatMoney(trader.totalLosses)}
-                          </td>
-                          <td
-                            className={`px-4 py-3 font-semibold ${trader.totalPnl >= 0 ? "text-emerald-700" : "text-rose-700"}`}
-                          >
-                            {formatMoney(trader.totalPnl)}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      ) : (
-        <>
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Bot Status
-              </CardTitle>
-              <CardDescription>
-                Current runtime and Direct Polymarket polling state for the real-money
-                copy bot.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <MetricGrid
-                items={botStatusItems}
-                columns="md:grid-cols-2 xl:grid-cols-5"
-              />
-            </CardContent>
-          </Card>
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Live Trading Control
-              </CardTitle>
-              <CardDescription>
-                Sandbox execution is disabled. Real Polymarket orders route
-                through Direct Polymarket after live guards pass.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-4">
-              <MetricGrid
-                items={liveControlItems}
-                columns="md:grid-cols-2 xl:grid-cols-4"
-              />
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="rounded-full border-slate-300"
-                  disabled={pendingAction !== null}
-                  onClick={() =>
-                    runAction("toggle-live", () =>
-                      state.live.unlocked
-                        ? apiService.polymarketDirectLiveLock()
-                        : apiService.polymarketDirectLiveUnlock(),
-                    )
-                  }
-                >
-                  {state.live.unlocked ? "Lock live" : "Unlock live"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="rounded-full border-slate-300"
-                  disabled={pendingAction !== null}
-                  onClick={() =>
-                    runAction("doctor", () => apiService.polymarketDirectLiveDoctor())
-                  }
-                >
-                  {pendingAction === "doctor" ? (
-                    <Loader2
-                      className="mr-2 size-3.5 animate-spin"
-                      aria-hidden="true"
-                    />
-                  ) : null}
-                  {pendingAction === "doctor"
-                    ? "Refreshing doctor…"
-                    : "Refresh doctor"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="rounded-full border-slate-300"
-                  disabled={pendingAction !== null}
-                  onClick={() =>
-                    runAction("balance", () =>
-                      apiService.polymarketDirectLiveBalanceRefresh(),
-                    )
-                  }
-                >
-                  Refresh balance
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="rounded-full border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                  disabled={pendingAction !== null}
-                  onClick={() =>
-                    runAction("redeem", () => apiService.polymarketDirectLiveRedeem())
-                  }
-                >
-                  Redeem resolved
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="rounded-full"
-                  disabled={pendingAction !== null}
-                  onClick={() =>
-                    runAction("emergency-stop", () =>
-                      apiService.polymarketDirectLiveEmergencyStop(),
-                    )
-                  }
-                >
-                  Emergency stop
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="rounded-full border-slate-300"
-                  disabled={pendingAction !== null}
-                  onClick={() =>
-                    runAction("emergency-reset", () =>
-                      apiService.polymarketDirectLiveResetEmergencyStop(),
-                    )
-                  }
-                >
-                  Reset emergency stop
-                </Button>
-              </div>
-
-              <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                {pendingAction ? (
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2 font-semibold text-slate-950">
-                      <Loader2
-                        className="size-4 animate-spin text-sky-600"
-                        aria-hidden="true"
-                      />
-                      Processing {pendingActionLabel}…
-                    </div>
-                    <p>{pendingActionDetail}</p>
-                    <p className="text-xs text-slate-500">
-                      Controls are temporarily disabled to prevent duplicate
-                      live-trading actions. They will re-enable when the backend
-                      responds.
-                    </p>
-                  </div>
-                ) : autoDoctorRefreshing ? (
-                  <div className="flex items-center gap-2 font-semibold text-slate-950">
-                    <Loader2
-                      className="size-4 animate-spin text-sky-600"
-                      aria-hidden="true"
-                    />
-                    Auto-refreshing Direct Polymarket doctor after not-configured status…
-                  </div>
-                ) : (
-                  <p>
-                    No control action is running. If you just completed Direct Polymarket
-                    login, the page now automatically retries the doctor check;
-                    you can also click Refresh Doctor manually.
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Trader Discovery Logic
-              </CardTitle>
-              <CardDescription>
-                Detection can be broad, but proposal creation is selective.
-                Tracked does not mean a trade will be copied.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-4">
-              <MetricGrid
-                items={discoveryItems}
-                columns="md:grid-cols-2 xl:grid-cols-4"
-              />
-              <div className="rounded-[20px] border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                New proposals appear only after a live-read trade is detected
-                after startup baseline. If manual wallets are configured, they
-                are preferred over auto-discovered traders.
-              </div>
-              {manualInvalid.length > 0 ? (
-                <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                  Invalid manual wallet entries were ignored:{" "}
-                  {manualInvalid.join(", ")}
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Live Source Status
-              </CardTitle>
-              <CardDescription>
-                Poll-level diagnostics for the live-read source, baseline
-                tracking, and proposal-control filters.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <MetricGrid
-                items={liveSourceItems}
-                columns="md:grid-cols-2 xl:grid-cols-4"
-              />
-            </CardContent>
-          </Card>
-
-          <Card className="border border-slate-200 bg-white py-6">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Manual Tracked Wallets
-              </CardTitle>
-              <CardDescription>
-                Add, delete, enable, and tune manual Polymarket accounts.
-                Environment-configured `MANUAL_TRACKED_WALLETS` entries remain
-                tracked even if not discovered by the active-trader scan.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6 pt-4">
-              <TrackedAccountsTable
-                accounts={state.tracked_accounts}
-                drafts={accountDrafts}
-                newDraft={newAccountDraft}
-                busyId={busyAccountId}
-                onDraftChange={(id, draft) =>
-                  setAccountDrafts((current) => ({ ...current, [id]: draft }))
-                }
-                onNewDraftChange={setNewAccountDraft}
-                onAdd={() => void addTrackedAccount()}
-                onSave={(accountId) => void saveTrackedAccount(accountId)}
-                onDelete={(accountId) => void deleteTrackedAccount(accountId)}
-              />
-              <div>
-                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  Environment wallets
-                </div>
-                <ManualWalletsTable
-                  wallets={state.live.source_status.manual_tracked_wallets}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
-
-      {selectedFailedCopiedEvent ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setSelectedFailedCopiedEvent(null)}
-        >
-          <div
-            className="relative w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              aria-label="Close failure details popup"
-              onClick={() => setSelectedFailedCopiedEvent(null)}
-            >
-              <X className="size-5" />
-            </button>
-            <div className="pr-12">
-              <h2 className="text-lg font-semibold text-slate-950">
-                Failed copy details
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {selectedFailedCopiedEvent.marketTitle}
-              </p>
-            </div>
-            <div className="mt-5 space-y-3">
-              {getCopiedEventFailureTrades(selectedFailedCopiedEvent).map(
-                (trade) => (
-                  <div
-                    key={trade.id}
-                    className="rounded-[20px] border border-rose-100 bg-rose-50/60 p-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                      <span className="font-semibold text-slate-950">
-                        {getTraderDisplayName(trade)}
-                      </span>
-                      <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
-                        {formatTs(
-                          trade.executed_at ||
-                            trade.updated_at ||
-                            trade.proposed_at,
-                        )}
-                      </span>
-                    </div>
-                    <div className="mt-3 text-sm font-medium text-rose-800">
-                      {getTradeStatusReason(trade)}
-                    </div>
-                    <dl className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
-                      <div>
-                        <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">
-                          Outcome
-                        </dt>
-                        <dd>{trade.outcome}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">
-                          Side
-                        </dt>
-                        <dd>{trade.side}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">
-                          Amount
-                        </dt>
-                        <dd>{formatMoney(trade.amount)}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                ),
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {selectedMissedTrade ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setSelectedMissedTrade(null)}
-        >
-          <div
-            className="relative w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              aria-label="Close missed trade traders popup"
-              onClick={() => setSelectedMissedTrade(null)}
-            >
-              <X className="size-5" />
-            </button>
-            <div className="flex items-start justify-between gap-4 pr-12">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">
-                  Missed trade traders
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {selectedMissedTrade.marketTitle}
-                </p>
-              </div>
-            </div>
-            <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Trader</th>
-                    <th className="px-4 py-3">Timestamp</th>
-                    <th className="px-4 py-3">Side</th>
-                    <th className="px-4 py-3">Reason</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {selectedMissedTrade.traders.map((trade) => (
-                    <tr key={trade.id}>
-                      <td className="px-4 py-3 font-medium text-slate-950">
-                        {getTraderDisplayName(trade)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {formatTs(
-                          trade.executed_at ||
-                            trade.updated_at ||
-                            trade.proposed_at,
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">
-                        {trade.side}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {trade.failure_reason || selectedMissedTrade.reason}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {selectedCopiedEvent ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setSelectedCopiedEvent(null)}
-        >
-          <div
-            className="relative w-full max-w-6xl rounded-[28px] bg-white p-6 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              aria-label="Close copied traders popup"
-              onClick={() => setSelectedCopiedEvent(null)}
-            >
-              <X className="size-5" />
-            </button>
-            <div className="flex items-start justify-between gap-4 pr-12">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">
-                  Copied traders
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {selectedCopiedEvent.marketTitle}
-                </p>
-              </div>
-            </div>
-            <div className="mt-5 overflow-x-auto rounded-[20px] border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Trader</th>
-                    <th className="px-4 py-3">Timestamp</th>
-                    <th className="px-4 py-3">Amount</th>
-                    <th className="px-4 py-3">Trader invested</th>
-                    <th className="px-4 py-3">Positions Value</th>
-                    <th className="px-4 py-3">Net worth</th>
-                    <th className="px-4 py-3">% of Net Worth</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {selectedCopiedEvent.traders
-                    .filter(
-                      (trade) =>
-                        (trade.trader_invested_usd || 0) >=
-                        state.config.trader_invested_threshold_usd,
-                    )
-                    .map((trade) => {
-                      const traderInvested = trade.trader_invested_usd || 0;
-                      const traderAccount = getTrackedAccountForTrade(
-                        trade,
-                        state.tracked_accounts,
-                      );
-                      const netWorth = getTradeNetWorth(trade, traderAccount);
-                      const positionsValue = traderAccount?.positions_value_usd;
-                      const positionsValueMissingReason =
-                        getPositionsValueMissingReason(traderAccount);
-                      const missingReason = getNetWorthMissingReason(
-                        trade,
-                        traderAccount,
-                      );
-                      const netWorthPercent =
-                        netWorth > 0 ? (traderInvested / netWorth) * 100 : null;
-                      const activityUrl = getTraderActivityUrl(trade);
-                      return (
-                        <tr key={trade.id}>
-                          <td className="px-4 py-3 font-medium text-slate-950">
-                            {activityUrl ? (
-                              <a
-                                className="text-sky-700 underline underline-offset-2 hover:text-sky-900"
-                                href={activityUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                {getTraderDisplayName(trade)}
-                              </a>
-                            ) : (
-                              getTraderDisplayName(trade)
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatTs(
-                              trade.executed_at ||
-                                trade.updated_at ||
-                                trade.proposed_at,
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatMoney(trade.amount)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatMoney(traderInvested)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {positionsValue == null
-                              ? positionsValueMissingReason
-                              : formatCompactMoney(positionsValue)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {netWorth > 0
-                              ? formatMoney(netWorth)
-                              : missingReason}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {netWorthPercent === null
-                              ? missingReason
-                              : formatPercent(netWorthPercent)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {selectedAnalyzedTrader ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setSelectedAnalyzedTrader(null)}
-        >
-          <div
-            className="relative max-h-[85vh] w-full max-w-6xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              aria-label="Close copied trader analysis popup"
-              onClick={() => setSelectedAnalyzedTrader(null)}
-            >
-              <X className="size-5" />
-            </button>
-            <div className="flex flex-col gap-4 pr-12">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">
-                  {selectedAnalyzedTrader.traderName} trade breakup
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {selectedAnalyzedTrader.copiedTrades} copied trades ·{" "}
-                  {selectedAnalyzedTrader.tradesWon} won ·{" "}
-                  {selectedAnalyzedTrader.tradesLost} lost · Total PnL{" "}
-                  {formatMoney(selectedAnalyzedTrader.totalPnl)}
-                </p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Total Winnings
-                  </div>
-                  <div className="mt-2 text-lg font-semibold text-emerald-700">
-                    {formatMoney(selectedAnalyzedTrader.totalWinnings)}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Total Losses
-                  </div>
-                  <div className="mt-2 text-lg font-semibold text-rose-700">
-                    {formatMoney(selectedAnalyzedTrader.totalLosses)}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Trades Won
-                  </div>
-                  <div className="mt-2 text-lg font-semibold text-slate-950">
-                    {selectedAnalyzedTrader.tradesWon}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Trades Lost
-                  </div>
-                  <div className="mt-2 text-lg font-semibold text-slate-950">
-                    {selectedAnalyzedTrader.tradesLost}
-                  </div>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            </div>
-            <div className="mt-5 overflow-x-auto rounded-[20px] border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Timestamp</th>
-                    <th className="px-4 py-3">Event</th>
-                    <th className="px-4 py-3">Outcome</th>
-                    <th className="px-4 py-3">Side</th>
-                    <th className="px-4 py-3">Amount</th>
-                    <th className="px-4 py-3">Shares</th>
-                    <th className="px-4 py-3">Price</th>
-                    <th className="px-4 py-3">PnL</th>
-                    <th className="px-4 py-3">Reason</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {selectedAnalyzedTrader.trades.map((trade) => (
-                    <tr key={trade.id} className="align-top">
-                      <td className="px-4 py-3 text-slate-700">
-                        {formatTs(trade.timestamp)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        <div className="font-medium text-slate-950">
-                          {trade.marketTitle}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          {trade.marketId}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {trade.outcome}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">
-                        {trade.side}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {formatMoney(trade.amount)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {trade.shares.toFixed(4)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {formatMoney(trade.price, 4)}
-                      </td>
-                      <td
-                        className={`px-4 py-3 font-semibold ${
-                          trade.pnl >= 0 ? "text-emerald-600" : "text-rose-600"
-                        }`}
-                      >
-                        {formatMoney(trade.pnl)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {trade.reason}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {skippedBreakupOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="skipped-breakup-title"
-          onClick={() => setSkippedBreakupOpen(false)}
-        >
-          <div
-            className="relative w-full max-w-xl rounded-[28px] bg-white p-6 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              aria-label="Close skipped detail breakup popup"
-              onClick={() => setSkippedBreakupOpen(false)}
-            >
-              <X className="size-5" />
-            </button>
-            <div className="pr-12">
-              <h2
-                id="skipped-breakup-title"
-                className="text-lg font-semibold text-slate-950"
-              >
-                Skipped detail breakup
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Last poll skipped {skippedBreakup.total} source trades across
-                filter, limit, duplicate, and uncategorized buckets.
-              </p>
-            </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              {[
-                { label: "Skipped By Filters", value: skippedBreakup.filters },
-                { label: "Skipped By Limits", value: skippedBreakup.limits },
-                {
-                  label: "Skipped Duplicates",
-                  value: skippedBreakup.duplicates,
-                },
-                { label: "Others", value: skippedBreakup.others },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-                >
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {item.label}
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">
-                    {item.value}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-              Others captures any skipped source trades implied by the last poll
-              total that are not classified as filter, limit, or duplicate
-              skips.
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {pendingAction ? (
-        <div className="flex flex-col gap-1 text-xs text-slate-500">
-          <div className="flex items-center gap-2 uppercase tracking-[0.18em]">
-            <Loader2 className="size-3.5 animate-spin" />
-            Processing {pendingActionLabel}
-          </div>
-          {pendingActionDetail ? (
-            <div className="pl-5 normal-case tracking-normal">
-              {pendingActionDetail}
             </div>
           ) : null}
-        </div>
-      ) : null}
+          {skippedBreakupOpen ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="skipped-breakup-title"
+              onClick={() => setSkippedBreakupOpen(false)}
+            >
+              <div
+                className="relative w-full max-w-xl rounded-[28px] bg-white p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  aria-label="Close skipped detail breakup popup"
+                  onClick={() => setSkippedBreakupOpen(false)}
+                >
+                  <X className="size-5" />
+                </button>
+                <div className="pr-12">
+                  <h2
+                    id="skipped-breakup-title"
+                    className="text-lg font-semibold text-slate-950"
+                  >
+                    Skipped detail breakup
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Last poll skipped {skippedBreakup.total} source trades
+                    across filter, limit, duplicate, and uncategorized buckets.
+                  </p>
+                </div>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  {[
+                    {
+                      label: "Skipped By Filters",
+                      value: skippedBreakup.filters,
+                    },
+                    {
+                      label: "Skipped By Limits",
+                      value: skippedBreakup.limits,
+                    },
+                    {
+                      label: "Skipped Duplicates",
+                      value: skippedBreakup.duplicates,
+                    },
+                    { label: "Others", value: skippedBreakup.others },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                    >
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        {item.label}
+                      </div>
+                      <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">
+                        {item.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                  Others captures any skipped source trades implied by the last
+                  poll total that are not classified as filter, limit, or
+                  duplicate skips.
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {pendingAction ? (
+            <div className="flex flex-col gap-1 text-xs text-slate-500">
+              <div className="flex items-center gap-2 uppercase tracking-[0.18em]">
+                <Loader2 className="size-3.5 animate-spin" />
+                Processing {pendingActionLabel}
+              </div>
+              {pendingActionDetail ? (
+                <div className="pl-5 normal-case tracking-normal">
+                  {pendingActionDetail}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </>
       )}
     </div>
