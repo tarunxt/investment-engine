@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
@@ -41,6 +41,10 @@ POLYMARKET_POLYGON_RPC_FALLBACK_URLS = [
 POLYMARKET_PUSD_TOKEN_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 POLYMARKET_PUSD_DECIMALS = 1_000_000
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-polymarket-bot/1.0"}
+LEADERBOARD_PERIOD_MAX_AGE = {
+    "today": timedelta(days=1),
+    "weekly": timedelta(days=7),
+}
 logger = logging.getLogger(__name__)
 
 
@@ -304,7 +308,11 @@ class BullpenReadOnlyProvider:
             parsed = await run_first_bullpen_json(commands)
             rows = collect_rows(parsed)
             normalized = [normalize_fallback_trader_row(row) for row in rows]
-            traders = [trader for trader in normalized if trader]
+            traders = [
+                trader
+                for trader in normalized
+                if trader and trader_matches_leaderboard_period(trader, label)
+            ]
             for trader in traders:
                 trader.source_reason = (
                     f"{label.title()} profit leaderboard trader discovered via Bullpen"
@@ -1181,6 +1189,34 @@ def normalize_fallback_trader_row(row: dict[str, Any]) -> PolymarketTrader | Non
         source_reason="Fallback tracked wallet; no recent trade detected yet",
         source="live-read",
     )
+
+
+def trader_matches_leaderboard_period(
+    trader: PolymarketTrader, label: str, *, now: datetime | None = None
+) -> bool:
+    """Reject known-stale leaderboard rows for time-bounded leaderboards.
+
+    Bullpen can return high-PnL accounts for a requested daily/weekly leaderboard
+    even when the row's own last trade timestamp is months old. Keep rows that do
+    not expose a last-trade timestamp so discovery remains compatible with older
+    Bullpen output, but reject rows that prove they are outside the requested
+    leaderboard window.
+    """
+
+    max_age = LEADERBOARD_PERIOD_MAX_AGE.get(label.lower())
+    if not max_age or not trader.last_trade_at:
+        return True
+    try:
+        last_trade_at = datetime.fromisoformat(trader.last_trade_at)
+    except ValueError:
+        return False
+    if last_trade_at.tzinfo is None:
+        last_trade_at = last_trade_at.replace(tzinfo=timezone.utc)
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    age = current_time - last_trade_at.astimezone(timezone.utc)
+    return timedelta(0) <= age <= max_age
 
 
 def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:

@@ -2,7 +2,7 @@ import asyncio
 import os
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -30,6 +30,10 @@ from app.domains.polymarket.schemas import (
     PolymarketPaperTrade,
 )
 from app.domains.polymarket.storage import JsonModelStore
+from app.domains.polymarket.providers import (
+    normalize_fallback_trader_row,
+    trader_matches_leaderboard_period,
+)
 
 
 def test_auto_redeem_live_defaults_on(monkeypatch):
@@ -42,6 +46,47 @@ def test_auto_redeem_live_can_be_disabled(monkeypatch):
     monkeypatch.setenv("AUTO_REDEEM_LIVE", "false")
 
     assert load_polymarket_config().auto_redeem_live is False
+
+
+def test_leaderboard_period_filter_rejects_stale_daily_and_weekly_rows():
+    now = datetime(2026, 6, 14, tzinfo=timezone.utc)
+    stale = normalize_fallback_trader_row(
+        {
+            "address": "0x56687BF447DB6fFA42FFE2204a05EDAA20f55839",
+            "username": "Theo4",
+            "profit": 22_053_933.75,
+            "lastTradeAt": "2024-11-13T09:16:00Z",
+        }
+    )
+    assert stale is not None
+
+    assert trader_matches_leaderboard_period(stale, "today", now=now) is False
+    assert trader_matches_leaderboard_period(stale, "weekly", now=now) is False
+
+
+def test_leaderboard_period_filter_keeps_current_and_unknown_timestamp_rows():
+    now = datetime(2026, 6, 14, 12, tzinfo=timezone.utc)
+    current = normalize_fallback_trader_row(
+        {
+            "address": "0x6A72f61820b26b1fe4d956E17B6DC2A1Ea3033EE",
+            "username": "kch123",
+            "profit": 11_550_170.62,
+            "lastTradeAt": "2026-06-14T04:22:00Z",
+        }
+    )
+    unknown = normalize_fallback_trader_row(
+        {
+            "address": "0x78B9ac44a6D7D7A076c14e0AD518b301b63c6B76",
+            "username": "Len9311238",
+            "profit": 8_709_972.99,
+        }
+    )
+    assert current is not None
+    assert unknown is not None
+
+    assert trader_matches_leaderboard_period(current, "today", now=now) is True
+    assert trader_matches_leaderboard_period(current, "weekly", now=now) is True
+    assert trader_matches_leaderboard_period(unknown, "today", now=now) is True
 
 
 class SlowProvider:
