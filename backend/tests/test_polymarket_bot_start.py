@@ -28,6 +28,7 @@ from app.domains.polymarket.logger import PolymarketFileLogger
 from app.domains.polymarket.schemas import (
     PolymarketLiveTradeDecision,
     PolymarketPaperTrade,
+    PolymarketSourceTrade,
 )
 from app.domains.polymarket.storage import JsonModelStore
 from app.domains.polymarket.providers import (
@@ -332,6 +333,59 @@ async def build_live_bot(tmp_path, live_executor):
         logger=logger,
     )
 
+
+@pytest.mark.anyio
+async def test_live_sell_decision_captures_amount_and_realized_pnl(tmp_path):
+    bot = await build_live_bot(tmp_path, StaticDoctorExecutor([]))
+    bot.live_trade_history = [
+        PolymarketLiveTradeDecision(
+            id="buy-decision-1",
+            source_trade_id="source-buy-1",
+            source_trade_key="source-buy-key-1",
+            proposed_at="2026-06-13T00:00:00Z",
+            updated_at="2026-06-13T00:00:00Z",
+            trader_id="trader-1",
+            trader_name="Trader 1",
+            trader_address="0xabc",
+            market_id="market-1",
+            market_title="Market 1",
+            outcome="Yes",
+            side="BUY",
+            amount=40,
+            price=0.4,
+            shares=100,
+            max_loss=40,
+            reason="seed buy",
+            status="executed",
+            command="buy",
+            executed_at="2026-06-13T00:00:01Z",
+            source="live-read",
+        )
+    ]
+
+    decision = bot._live_decision_from_source(
+        PolymarketSourceTrade(
+            id="source-sell-1",
+            source_trade_key="source-sell-key-1",
+            trader_id="trader-1",
+            trader_name="Trader 1",
+            trader_address="0xabc",
+            clean_trader_identity="0xabc",
+            market_id="market-1",
+            market_title="Market 1",
+            outcome="Yes",
+            side="SELL",
+            price=0.7,
+            size_usd=70,
+            timestamp="2026-06-13T00:05:00Z",
+            source="live-read",
+        )
+    )
+
+    assert decision.amount == pytest.approx(1)
+    assert decision.shares == pytest.approx(1 / 0.7)
+    assert decision.cost_basis_usd == pytest.approx((1 / 0.7) * 0.4)
+    assert decision.realized_pnl == pytest.approx(1 - ((1 / 0.7) * 0.4))
 
 @pytest.mark.anyio
 async def test_live_start_refreshes_doctor_even_when_recent_failure_exists(tmp_path):

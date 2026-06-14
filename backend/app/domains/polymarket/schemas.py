@@ -204,6 +204,8 @@ class PolymarketLiveTradeDecision(BaseModel):
     price: float
     shares: float
     max_loss: float
+    cost_basis_usd: float = 0
+    realized_pnl: float = 0
     trader_invested_usd: float = 0
     trader_net_worth_usd: float = 0
     reason: str

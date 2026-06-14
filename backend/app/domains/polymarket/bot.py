@@ -980,6 +980,8 @@ class PolymarketPaperCopyBot:
             price=price,
             shares=position.shares,
             max_loss=0,
+            cost_basis_usd=position.shares * position.average_price,
+            realized_pnl=position.shares * (price - position.average_price),
             reason=(
                 "Current live price reached a favorable auto-exit threshold "
                 "(99.9¢ on the held outcome or 0.1¢ on the opposite outcome)."
@@ -1485,8 +1487,17 @@ class PolymarketPaperCopyBot:
             self.config.max_live_trade_size,
             shares * source_trade.price,
         )
+        copied_shares = amount / source_trade.price if source_trade.price > 0 else 0
+        cost_basis_usd = copied_shares * (position.average_price if position else 0)
+        realized_pnl = amount - cost_basis_usd
         return self._live_decision(
-            source_trade, "proposed", amount, amount / source_trade.price, reason
+            source_trade,
+            "proposed",
+            amount,
+            copied_shares,
+            reason,
+            cost_basis_usd=cost_basis_usd,
+            realized_pnl=realized_pnl,
         )
 
     def _live_decision(
@@ -1496,6 +1507,9 @@ class PolymarketPaperCopyBot:
         amount: float,
         shares: float,
         reason: str,
+        *,
+        cost_basis_usd: float = 0,
+        realized_pnl: float = 0,
     ) -> PolymarketLiveTradeDecision:
         now = utc_now()
         account = self._matched_tracked_account(source_trade)
@@ -1519,6 +1533,8 @@ class PolymarketPaperCopyBot:
             price=source_trade.price,
             shares=shares,
             max_loss=amount if source_trade.side == "BUY" else 0,
+            cost_basis_usd=cost_basis_usd,
+            realized_pnl=realized_pnl,
             trader_invested_usd=(
                 source_trade.trader_invested_usd
                 if source_trade.trader_invested_usd is not None

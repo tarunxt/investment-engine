@@ -1122,6 +1122,8 @@ export interface PolymarketSourceTradeDecision {
   price: number;
   shares: number;
   max_loss: number;
+  cost_basis_usd?: number;
+  realized_pnl?: number;
   trader_invested_usd?: number;
   trader_net_worth_usd?: number;
   reason: string;
