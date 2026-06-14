@@ -92,6 +92,12 @@ const PORTFOLIO_CHILDREN: NavigationItem[] = [
         href: URLs.routes.console.polymarketBot(),
         icon: HiOutlineTrendingUp,
     },
+    {
+        id: 'portfolio-polymarket-direct-bot',
+        name: 'Direct Polymarket Bot',
+        href: URLs.routes.console.polymarketDirectBot(),
+        icon: HiOutlineTrendingUp,
+    },
 ];
 
 const DEFAULT_NAVIGATION: NavigationEntry[] = [

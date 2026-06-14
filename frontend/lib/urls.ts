@@ -283,6 +283,29 @@ export const URLs = {
     discoveryDebug: () => `${resolveApiBaseUrl()}/polymarket/live/discovery/debug`,
   },
 
+  // Direct Polymarket endpoints
+  polymarketDirect: {
+    state: () => `${resolveApiBaseUrl()}/polymarket-direct/state`,
+    start: () => `${resolveApiBaseUrl()}/polymarket-direct/start`,
+    stop: () => `${resolveApiBaseUrl()}/polymarket-direct/stop`,
+    pause: () => `${resolveApiBaseUrl()}/polymarket-direct/pause`,
+    resume: () => `${resolveApiBaseUrl()}/polymarket-direct/resume`,
+    liveUnlock: () => `${resolveApiBaseUrl()}/polymarket-direct/live/unlock`,
+    liveLock: () => `${resolveApiBaseUrl()}/polymarket-direct/live/lock`,
+    liveDoctor: () => `${resolveApiBaseUrl()}/polymarket-direct/live/doctor`,
+    liveBalanceRefresh: () => `${resolveApiBaseUrl()}/polymarket-direct/live/balance/refresh`,
+    liveRedeem: () => `${resolveApiBaseUrl()}/polymarket-direct/live/redeem`,
+    liveEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket-direct/live/emergency-stop`,
+    liveResetEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket-direct/live/reset-emergency-stop`,
+    liveLimits: () => `${resolveApiBaseUrl()}/polymarket-direct/live/limits`,
+    liveTradeConfirm: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket-direct/live/trades/${tradeId}/confirm`,
+    liveTradeReject: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket-direct/live/trades/${tradeId}/reject`,
+    liveRejectAll: () => `${resolveApiBaseUrl()}/polymarket-direct/live/trades/reject-all`,
+    trackedAccounts: () => `${resolveApiBaseUrl()}/polymarket-direct/tracked-accounts`,
+    trackedAccount: (accountId: string) => `${resolveApiBaseUrl()}/polymarket-direct/tracked-accounts/${accountId}`,
+    discoveryDebug: () => `${resolveApiBaseUrl()}/polymarket-direct/live/discovery/debug`,
+  },
+
   // Google Sheets endpoints
   googleSheets: {
     authUrl: () => `${resolveApiBaseUrl()}/google-sheets/auth-url`,
@@ -372,6 +395,7 @@ export const URLs = {
       zerodhaThreats: () => "/console/zerodha/threats",
       indmoneyUsThreats: () => "/console/indmoney-us/threats",
       polymarketBot: () => "/console/polymarket-bot",
+      polymarketDirectBot: () => "/console/polymarket-direct-bot",
       googleSheets: () => "/console/google-sheets",
       apis: () => "/console/apis",
       llms: () => "/console/llms",
