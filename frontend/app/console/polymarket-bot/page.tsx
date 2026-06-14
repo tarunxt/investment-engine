@@ -2159,9 +2159,9 @@ export default function PolymarketBotPage() {
                       No Bullpen activity yet.
                     </div>
                   ) : (
-                    state.recent_activity.map((entry) => (
+                    state.recent_activity.map((entry, index) => (
                       <div
-                        key={`${entry.timestamp}-${entry.message}`}
+                        key={`${entry.timestamp}-${index}-${entry.message}`}
                         className="rounded-[18px] bg-white px-3 py-3 shadow-sm ring-1 ring-slate-200"
                       >
                         <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
