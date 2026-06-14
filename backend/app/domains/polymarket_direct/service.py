@@ -4,7 +4,11 @@ import asyncio
 from pathlib import Path
 
 from app.domains.polymarket_direct.bot import PolymarketPaperCopyBot
-from app.domains.polymarket_direct.direct_polymarket import DirectPolymarketBalanceReader, DirectPolymarketLiveExecutor
+from app.domains.polymarket_direct.direct_polymarket import (
+    DirectPolymarketBalanceReader,
+    DirectPolymarketLiveExecutor,
+    DirectPolymarketRedeemedTradesReader,
+)
 from app.domains.polymarket_direct.config import load_polymarket_config
 from app.domains.polymarket_direct.logger import PolymarketFileLogger, redact_secrets
 from app.domains.polymarket_direct.providers import DirectPolymarketReadOnlyProvider, MockProvider
@@ -63,6 +67,7 @@ class PolymarketDirectBotManager:
                 config_store=config_store,
                 live_executor=DirectPolymarketLiveExecutor(),
                 balance_reader=DirectPolymarketBalanceReader(),
+                redeemed_trades_reader=DirectPolymarketRedeemedTradesReader(),
                 logger=PolymarketFileLogger(
                     user_data_dir / "polymarket-bot.log",
                     user_data_dir / "polymarket-errors.log",
