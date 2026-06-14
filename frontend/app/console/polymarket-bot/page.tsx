@@ -7,12 +7,15 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Copy,
+  Edit3,
   ExternalLink,
   Info,
   Loader2,
   Menu,
   Plus,
   Search,
+  Trash2,
   TrendingUp,
   Wallet,
   X,
@@ -1288,6 +1291,8 @@ export default function PolymarketBotPage() {
   const [ec2CommandMenuOpen, setEc2CommandMenuOpen] = useState(false);
   const [ec2Commands, setEc2Commands] = useState(DEFAULT_EC2_COMMANDS);
   const [newEc2Command, setNewEc2Command] = useState("");
+  const [editingEc2CommandIndex, setEditingEc2CommandIndex] = useState<number | null>(null);
+  const [editingEc2Command, setEditingEc2Command] = useState("");
   const [lastSettledBalance, setLastSettledBalance] =
     useState<PolymarketBalanceState | null>(null);
   const [lastDoctorPassAt, setLastDoctorPassAt] = useState<number | null>(null);
@@ -2261,14 +2266,106 @@ export default function PolymarketBotPage() {
                     </p>
                   </div>
                   <div className="space-y-2">
-                    {ec2Commands.map((command) => (
-                      <code
-                        key={command}
-                        className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-800"
-                      >
-                        {command}
-                      </code>
-                    ))}
+                    {ec2Commands.map((command, index) => {
+                      const isEditing = editingEc2CommandIndex === index;
+
+                      return (
+                        <div
+                          key={`${command}-${index}`}
+                          className="rounded-xl border border-slate-200 bg-slate-50 p-2"
+                        >
+                          {isEditing ? (
+                            <form
+                              className="flex gap-2"
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                const updatedCommand = editingEc2Command.trim();
+                                if (!updatedCommand) return;
+                                setEc2Commands((commands) =>
+                                  commands.map((item, itemIndex) =>
+                                    itemIndex === index ? updatedCommand : item,
+                                  ),
+                                );
+                                setEditingEc2CommandIndex(null);
+                                setEditingEc2Command("");
+                              }}
+                            >
+                              <input
+                                type="text"
+                                value={editingEc2Command}
+                                onChange={(event) =>
+                                  setEditingEc2Command(event.target.value)
+                                }
+                                aria-label="Edit EC2 command"
+                                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-900 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                              />
+                              <button
+                                type="submit"
+                                className="rounded-lg bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+                                onClick={() => {
+                                  setEditingEc2CommandIndex(null);
+                                  setEditingEc2Command("");
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </form>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <code className="min-w-0 flex-1 break-words text-xs font-semibold text-slate-800">
+                                {command}
+                              </code>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <button
+                                  type="button"
+                                  className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-950"
+                                  aria-label={`Copy command: ${command}`}
+                                  title="Copy command"
+                                  onClick={() => void navigator.clipboard.writeText(command)}
+                                >
+                                  <Copy className="size-3.5" aria-hidden="true" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-950"
+                                  aria-label={`Edit command: ${command}`}
+                                  title="Edit command"
+                                  onClick={() => {
+                                    setEditingEc2CommandIndex(index);
+                                    setEditingEc2Command(command);
+                                  }}
+                                >
+                                  <Edit3 className="size-3.5" aria-hidden="true" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-lg p-1.5 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600"
+                                  aria-label={`Delete command: ${command}`}
+                                  title="Delete command"
+                                  onClick={() => {
+                                    setEc2Commands((commands) =>
+                                      commands.filter((_, itemIndex) => itemIndex !== index),
+                                    );
+                                    if (editingEc2CommandIndex === index) {
+                                      setEditingEc2CommandIndex(null);
+                                      setEditingEc2Command("");
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="size-3.5" aria-hidden="true" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <form
                     className="mt-3 flex gap-2"
