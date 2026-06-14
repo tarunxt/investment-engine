@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Info,
   Loader2,
+  Search,
   TrendingUp,
   Wallet,
   X,
@@ -1249,6 +1250,7 @@ export default function PolymarketBotPage() {
   const [traderInvestedThresholdDraft, setTraderInvestedThresholdDraft] =
     useState("");
   const [copiedPage, setCopiedPage] = useState(1);
+  const [copiedSearchQuery, setCopiedSearchQuery] = useState("");
   const [missedVisibleLimit, setMissedVisibleLimit] = useState(
     COMPACT_TABLE_PAGE_SIZE,
   );
@@ -1695,7 +1697,14 @@ export default function PolymarketBotPage() {
     { key: "winning", label: "Winning" },
     { key: "losing", label: "Losing" },
   ];
+  const normalizedCopiedSearchQuery = copiedSearchQuery.trim().toLowerCase();
   const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades)
+    .filter((event) => {
+      if (!normalizedCopiedSearchQuery) return true;
+      return `${event.marketTitle} ${event.outcome}`
+        .toLowerCase()
+        .includes(normalizedCopiedSearchQuery);
+    })
     .filter((event) => {
       if (
         copiedPositionsTab !== "positions" ||
@@ -2541,6 +2550,24 @@ export default function PolymarketBotPage() {
                   </button>
                 </div>
 
+                <label className="relative w-full sm:max-w-sm lg:ml-auto">
+                  <span className="sr-only">Search copied positions by event or outcome</span>
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
+                    aria-hidden="true"
+                  />
+                  <input
+                    type="search"
+                    value={copiedSearchQuery}
+                    onChange={(event) => {
+                      setCopiedSearchQuery(event.target.value);
+                      setCopiedPage(1);
+                    }}
+                    placeholder="Search event or outcome"
+                    className="h-11 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  />
+                </label>
+
                 {copiedPositionsTab === "positions" ? (
                   <div className="inline-flex w-full rounded-2xl border border-slate-200 bg-white p-1 sm:w-auto">
                     <button
@@ -2687,7 +2714,9 @@ export default function PolymarketBotPage() {
                               : 11
                           }
                         >
-                          No copied Bullpen rows for this tab yet.
+                          {normalizedCopiedSearchQuery
+                            ? "No copied Bullpen rows match this search."
+                            : "No copied Bullpen rows for this tab yet."}
                         </td>
                       </tr>
                     ) : (
