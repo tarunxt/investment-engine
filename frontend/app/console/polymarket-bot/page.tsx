@@ -564,8 +564,12 @@ type CopiedTraderAnalysisRow = {
 };
 
 function getAnalysisTradePnl(trade: PolymarketSourceTradeDecision) {
+  if (typeof trade.realized_pnl === "number") return trade.realized_pnl;
+  if (trade.side === "SELL" && typeof trade.cost_basis_usd === "number") {
+    return trade.amount - trade.cost_basis_usd;
+  }
   if (trade.side === "SELL") return trade.amount;
-  return trade.shares * trade.price - trade.amount;
+  return 0;
 }
 
 function buildAnalysisTradeRows(
