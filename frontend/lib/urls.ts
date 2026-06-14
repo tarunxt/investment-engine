@@ -280,6 +280,7 @@ export const URLs = {
     liveRejectAll: () => `${resolveApiBaseUrl()}/polymarket/live/trades/reject-all`,
     trackedAccounts: () => `${resolveApiBaseUrl()}/polymarket/tracked-accounts`,
     trackedAccount: (accountId: string) => `${resolveApiBaseUrl()}/polymarket/tracked-accounts/${accountId}`,
+    trackedAccountNetWorthRefresh: (accountId: string) => `${resolveApiBaseUrl()}/polymarket/tracked-accounts/${accountId}/net-worth/refresh`,
     discoveryDebug: () => `${resolveApiBaseUrl()}/polymarket/live/discovery/debug`,
   },
 

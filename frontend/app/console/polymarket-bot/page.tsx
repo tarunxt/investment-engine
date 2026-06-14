@@ -349,6 +349,16 @@ function formatCompactMoney(value: number) {
   }).format(value || 0);
 }
 
+function copiedTraderNetWorthBreakdown(trader: CopiedTraderAnalysisRow) {
+  if (trader.netWorthError) return `Auto fetch failed: ${trader.netWorthError}`;
+  if (!trader.netWorthSource || trader.netWorthSource === "pending_refresh") {
+    return "Auto refresh pending; $100 is the safe default until Polymarket balances are fetched.";
+  }
+  return `Active positions ${formatMoney(trader.positionsValueUsd || 0)} + Cash balance ${formatMoney(
+    trader.cashBalanceUsd || 0,
+  )} + Claimable/redeemable ${formatMoney(trader.redeemableValueUsd || 0)}`;
+}
+
 const BULLPEN_ACCOUNT_URL =
   "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
 const AWS_EC2_TERMINAL_URL =
@@ -579,6 +589,13 @@ type AnalysisTradeRow = {
 type CopiedTraderAnalysisRow = {
   key: string;
   traderName: string;
+  accountId?: string;
+  netWorthCheckedAt?: string | null;
+  positionsValueUsd?: number | null;
+  cashBalanceUsd?: number | null;
+  redeemableValueUsd?: number | null;
+  netWorthSource?: string | null;
+  netWorthError?: string | null;
   copiedTrades: number;
   tradesWon: number;
   totalWinnings: number;
@@ -671,6 +688,15 @@ function buildCopiedTraderAnalysisRows(
       } satisfies CopiedTraderAnalysisRow);
 
     const account = getTrackedAccountForAnalysisRow(trade, accounts);
+    if (account) {
+      existing.accountId = account.id;
+      existing.netWorthCheckedAt = account.net_worth_checked_at;
+      existing.positionsValueUsd = account.positions_value_usd;
+      existing.cashBalanceUsd = account.cash_balance_usd;
+      existing.redeemableValueUsd = account.redeemable_value_usd;
+      existing.netWorthSource = account.net_worth_source;
+      existing.netWorthError = account.net_worth_error;
+    }
     existing.netWorth =
       account?.net_worth_usd || trade.traderNetWorth || existing.netWorth;
     existing.copiedTrades += 1;
@@ -1258,6 +1284,8 @@ export default function PolymarketBotPage() {
     useState<CopiedEventGroup | null>(null);
   const [selectedAnalyzedTrader, setSelectedAnalyzedTrader] =
     useState<CopiedTraderAnalysisRow | null>(null);
+  const [selectedNetWorthTrader, setSelectedNetWorthTrader] =
+    useState<CopiedTraderAnalysisRow | null>(null);
   const [pastTradesTab, setPastTradesTab] = useState<"won" | "lost">("won");
   const [wonPastTradesPage, setWonPastTradesPage] = useState(1);
   const [lostPastTradesPage, setLostPastTradesPage] = useState(1);
@@ -1446,6 +1474,14 @@ export default function PolymarketBotPage() {
       setPendingAction(null);
       setPendingActionElapsedSeconds(0);
     }
+  }
+
+
+  function handleNetWorthRefresh(trader: CopiedTraderAnalysisRow) {
+    if (!trader.accountId) return;
+    void runAction(`net-worth-${trader.accountId}`, () =>
+      apiService.polymarketRefreshTrackedAccountNetWorth(trader.accountId!),
+    ).then(() => setSelectedNetWorthTrader(null));
   }
 
   const balanceRefreshDisabled = pendingAction !== null;
@@ -3398,7 +3434,17 @@ export default function PolymarketBotPage() {
                             {trader.traderName}
                           </td>
                           <td className="px-4 py-3 font-semibold text-slate-700">
-                            {trader.netWorth > 0 ? formatMoney(trader.netWorth) : "—"}
+                            <button
+                              type="button"
+                              className="rounded-full px-2 py-1 text-left font-semibold text-slate-700 transition hover:bg-sky-50 hover:text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setSelectedNetWorthTrader(trader);
+                              }}
+                              title={copiedTraderNetWorthBreakdown(trader)}
+                            >
+                              {trader.netWorth > 0 ? formatMoney(trader.netWorth) : "—"}
+                            </button>
                           </td>
                           <td className="px-4 py-3 text-slate-700">
                             {trader.copiedTrades}
@@ -3930,6 +3976,75 @@ export default function PolymarketBotPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedNetWorthTrader ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSelectedNetWorthTrader(null)}
+        >
+          <div
+            className="relative w-full max-w-xl rounded-[28px] bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              aria-label="Close net worth popup"
+              onClick={() => setSelectedNetWorthTrader(null)}
+            >
+              <X className="size-5" />
+            </button>
+            <div className="pr-10">
+              <h2 className="text-lg font-semibold text-slate-950">
+                {selectedNetWorthTrader.traderName} net worth
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Polymarket net worth ≈ Active positions value + Cash balance + Claimable/redeemable winnings.
+              </p>
+            </div>
+            <div className="mt-5 space-y-3 text-sm">
+              <div className="flex justify-between gap-4 rounded-2xl bg-slate-50 px-4 py-3">
+                <span className="text-slate-500">Last refreshed</span>
+                <span className="font-medium text-slate-900">{formatTs(selectedNetWorthTrader.netWorthCheckedAt)}</span>
+              </div>
+              <div className="flex justify-between gap-4 rounded-2xl bg-slate-50 px-4 py-3">
+                <span className="text-slate-500">Active positions value</span>
+                <span className="font-semibold text-slate-900">{formatOptionalMoney(selectedNetWorthTrader.positionsValueUsd)}</span>
+              </div>
+              <div className="flex justify-between gap-4 rounded-2xl bg-slate-50 px-4 py-3">
+                <span className="text-slate-500">Cash balance</span>
+                <span className="font-semibold text-slate-900">{formatOptionalMoney(selectedNetWorthTrader.cashBalanceUsd)}</span>
+              </div>
+              <div className="flex justify-between gap-4 rounded-2xl bg-slate-50 px-4 py-3">
+                <span className="text-slate-500">Claimable/redeemable winnings</span>
+                <span className="font-semibold text-slate-900">{formatOptionalMoney(selectedNetWorthTrader.redeemableValueUsd)}</span>
+              </div>
+              <div className="flex justify-between gap-4 rounded-2xl border border-slate-200 px-4 py-3">
+                <span className="font-semibold text-slate-700">Displayed net worth</span>
+                <span className="font-bold text-slate-950">{formatMoney(selectedNetWorthTrader.netWorth)}</span>
+              </div>
+            </div>
+            <p className="mt-4 text-xs leading-5 text-slate-500">
+              {copiedTraderNetWorthBreakdown(selectedNetWorthTrader)}
+            </p>
+            {selectedNetWorthTrader.accountId ? (
+              <Button
+                type="button"
+                className="mt-5 rounded-full"
+                disabled={pendingAction !== null}
+                onClick={() => handleNetWorthRefresh(selectedNetWorthTrader)}
+              >
+                {pendingAction === `net-worth-${selectedNetWorthTrader.accountId}` ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : null}
+                Refresh & recalculate
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : null}

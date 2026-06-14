@@ -868,6 +868,10 @@ class apiServiceClass implements IApiService {
     return this.patch<PolymarketBotState>(URLs.polymarket.trackedAccount(accountId), data);
   }
 
+  polymarketRefreshTrackedAccountNetWorth(accountId: string): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarket.trackedAccountNetWorthRefresh(accountId));
+  }
+
   polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState> {
     return this.delete<PolymarketBotState>(URLs.polymarket.trackedAccount(accountId));
   }
