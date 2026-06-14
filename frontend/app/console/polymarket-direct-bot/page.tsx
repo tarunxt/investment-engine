@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Info,
   Loader2,
+  RefreshCw,
   TrendingUp,
   Wallet,
   X,
@@ -1317,6 +1318,10 @@ export default function PolymarketBotPage() {
     void runAction("balance", () =>
       apiService.polymarketDirectLiveBalanceRefresh(),
     );
+  }
+
+  function handleRedeemedTradesRefresh() {
+    void runAction("redeem-refresh", () => apiService.polymarketDirectState());
   }
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
@@ -2793,19 +2798,42 @@ export default function PolymarketBotPage() {
                       </CardDescription>
                     </div>
                     <div className="flex max-w-sm flex-col items-start gap-2 sm:items-end">
-                      <Button
-                        size="sm"
-                        className="self-start rounded-full bg-emerald-600 px-4 text-white hover:bg-emerald-700 sm:self-end"
-                        disabled={pendingAction !== null}
-                        aria-label="Claim all available Direct Polymarket positions now"
-                        onClick={() =>
-                          runAction("redeem", () =>
-                            apiService.polymarketDirectLiveRedeem(),
-                          )
-                        }
-                      >
-                        {pendingAction === "redeem" ? "Claiming…" : "Claim Now"}
-                      </Button>
+                      <div className="flex items-center gap-2 self-start sm:self-end">
+                        <Button
+                          size="sm"
+                          className="rounded-full bg-emerald-600 px-4 text-white hover:bg-emerald-700"
+                          disabled={pendingAction !== null}
+                          aria-label="Claim all available Direct Polymarket positions now"
+                          onClick={() =>
+                            runAction("redeem", () =>
+                              apiService.polymarketDirectLiveRedeem(),
+                            )
+                          }
+                        >
+                          {pendingAction === "redeem"
+                            ? "Claiming…"
+                            : "Claim Now"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          className="size-9 rounded-full border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                          disabled={pendingAction !== null}
+                          aria-label="Refresh current Direct Polymarket claim and redeem status"
+                          title="Refresh claim/redeem status"
+                          onClick={handleRedeemedTradesRefresh}
+                        >
+                          <RefreshCw
+                            className={`size-4 ${
+                              pendingAction === "redeem-refresh"
+                                ? "animate-spin"
+                                : ""
+                            }`}
+                            aria-hidden="true"
+                          />
+                        </Button>
+                      </div>
                       <div
                         className="flex items-start gap-2 text-left text-xs leading-5 text-slate-500 sm:text-right"
                         aria-live="polite"
