@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import type {
   PolymarketPaperTrade,
@@ -8,9 +9,21 @@ import type {
   PolymarketTrader,
 } from "@/types/api";
 
-const TRACKED_TRADERS_PAGE_SIZE = 20;
+const TRACKED_TRADERS_PAGE_SIZE = 5;
 type LeaderboardTab = "today" | "weekly";
 type TraderCopyStats = { tradesCopied: number; tradesCopiedAmount: number };
+type SortDirection = "asc" | "desc";
+type TraderSortColumn =
+  | "trader"
+  | "tradesCopied"
+  | "tradesCopiedAmount"
+  | "trades1h"
+  | "trades6h"
+  | "trades24h"
+  | "lastTradeTime"
+  | "lastTradeAge"
+  | "volume24h";
+type TraderSortState = { column: TraderSortColumn; direction: SortDirection };
 
 function traderIdentityValues(trader: PolymarketTrader) {
   return [trader.id, trader.address, trader.handle, trader.name]
@@ -35,7 +48,9 @@ function traderProfitForPeriod(
   period: LeaderboardTab,
 ) {
   const periodProfit = trader.leaderboard_profit_usd?.[period];
-  return typeof periodProfit === "number" ? periodProfit : trader.profit_usd || 0;
+  return typeof periodProfit === "number"
+    ? periodProfit
+    : trader.profit_usd || 0;
 }
 
 function buildCopyStats(
@@ -141,6 +156,23 @@ function normalizePolymarketProfileUrl(trader: PolymarketTrader) {
   return trader.polymarket_profile_url || trader.profile_url;
 }
 
+function SortIcon({ direction }: { direction: SortDirection | null }) {
+  if (direction === "asc") return <ArrowUp className="size-3.5 shrink-0" />;
+  if (direction === "desc") return <ArrowDown className="size-3.5 shrink-0" />;
+  return <ArrowUpDown className="size-3.5 shrink-0 opacity-60" />;
+}
+
+function compareValues(left: number | string, right: number | string) {
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right;
+  }
+
+  return String(left).localeCompare(String(right), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
 function EmptyState({
   colSpan,
   message,
@@ -176,6 +208,10 @@ export function TrackedTradersTable({
     today: TRACKED_TRADERS_PAGE_SIZE,
     weekly: TRACKED_TRADERS_PAGE_SIZE,
   });
+  const [sortState, setSortState] = useState<TraderSortState>({
+    column: "tradesCopied",
+    direction: "desc",
+  });
   const copyStats = useMemo(
     () => buildCopyStats(traders, decisions, paperTrades),
     [traders, decisions, paperTrades],
@@ -185,11 +221,47 @@ export function TrackedTradersTable({
       traderMatchesPeriod(trader, activeTab),
     );
     const rows = periodMatches.length > 0 ? periodMatches : traders;
-    return [...rows].sort(
-      (a, b) =>
-        traderProfitForPeriod(b, activeTab) - traderProfitForPeriod(a, activeTab),
-    );
-  }, [activeTab, traders]);
+    const getSortValue = (trader: PolymarketTrader): number | string => {
+      const stats = copyStats.get(trader.id) || {
+        tradesCopied: 0,
+        tradesCopiedAmount: 0,
+      };
+
+      switch (sortState.column) {
+        case "trader":
+          return trader.name || trader.handle || trader.address || trader.id;
+        case "tradesCopied":
+          return stats.tradesCopied;
+        case "tradesCopiedAmount":
+          return stats.tradesCopiedAmount;
+        case "trades1h":
+          return trader.trades_1h || 0;
+        case "trades6h":
+          return trader.trades_6h || 0;
+        case "trades24h":
+          return trader.trades_24h || 0;
+        case "lastTradeTime":
+          return trader.last_trade_at
+            ? new Date(trader.last_trade_at).getTime()
+            : 0;
+        case "lastTradeAge":
+          return trader.last_trade_age || "";
+        case "volume24h":
+          return trader.volume_24h || 0;
+      }
+    };
+
+    return [...rows].sort((a, b) => {
+      const comparison = compareValues(getSortValue(a), getSortValue(b));
+      if (comparison !== 0) {
+        return sortState.direction === "asc" ? comparison : -comparison;
+      }
+      return (
+        traderProfitForPeriod(b, activeTab) -
+        traderProfitForPeriod(a, activeTab)
+      );
+    });
+  }, [activeTab, copyStats, sortState, traders]);
   const visibleLimit =
     visibleLimitByTab[activeTab] || TRACKED_TRADERS_PAGE_SIZE;
   const pagedTraders = sortedTraders.slice(0, visibleLimit);
@@ -213,6 +285,38 @@ export function TrackedTradersTable({
       ...current,
       [activeTab]: TRACKED_TRADERS_PAGE_SIZE,
     }));
+  const toggleSort = (column: TraderSortColumn) => {
+    setSortState((current) => ({
+      column,
+      direction:
+        current.column === column && current.direction === "desc"
+          ? "asc"
+          : "desc",
+    }));
+  };
+  const sortHeader = (column: TraderSortColumn, label: string) => (
+    <th
+      className="px-4 py-3"
+      aria-sort={
+        sortState.column === column
+          ? sortState.direction === "asc"
+            ? "ascending"
+            : "descending"
+          : "none"
+      }
+    >
+      <button
+        type="button"
+        onClick={() => toggleSort(column)}
+        className="inline-flex items-center gap-1.5 text-left transition hover:text-slate-700"
+      >
+        <span>{label}</span>
+        <SortIcon
+          direction={sortState.column === column ? sortState.direction : null}
+        />
+      </button>
+    </th>
+  );
 
   return (
     <div className="space-y-3">
@@ -243,15 +347,15 @@ export function TrackedTradersTable({
         <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
           <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
             <tr>
-              <th className="px-4 py-3">Trader</th>
-              <th className="px-4 py-3">Trades copied</th>
-              <th className="px-4 py-3">Trades copied amount</th>
-              <th className="px-4 py-3">Trader Trades 1h</th>
-              <th className="px-4 py-3">Trader Trades 6h</th>
-              <th className="px-4 py-3">Trader Trades 24h</th>
-              <th className="px-4 py-3">Trader Last Trade Time</th>
-              <th className="px-4 py-3">Trader Last Trade Age</th>
-              <th className="px-4 py-3">Trader Volume 24h</th>
+              {sortHeader("trader", "Trader")}
+              {sortHeader("tradesCopied", "Trades copied")}
+              {sortHeader("tradesCopiedAmount", "Trades copied amount")}
+              {sortHeader("trades1h", "Trader Trades 1h")}
+              {sortHeader("trades6h", "Trader Trades 6h")}
+              {sortHeader("trades24h", "Trader Trades 24h")}
+              {sortHeader("lastTradeTime", "Trader Last Trade Time")}
+              {sortHeader("lastTradeAge", "Trader Last Trade Age")}
+              {sortHeader("volume24h", "Trader Volume 24h")}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -289,7 +393,8 @@ export function TrackedTradersTable({
                         {trader.address || trader.id}
                       </div>
                       <div className="mt-1 text-xs font-medium text-emerald-700">
-                        Profit {formatMoney(traderProfitForPeriod(trader, activeTab))}
+                        Profit{" "}
+                        {formatMoney(traderProfitForPeriod(trader, activeTab))}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
