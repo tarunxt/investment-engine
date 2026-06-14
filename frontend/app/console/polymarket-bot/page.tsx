@@ -450,6 +450,7 @@ type RedeemedTradeRow = {
   status: string;
   source: string;
   detail: string;
+  redeemState: "completed" | "waiting";
 };
 
 function isRedeemedPaperTrade(trade: PolymarketPaperTrade) {
@@ -494,6 +495,7 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       status: trade.status,
       source: "Trade history",
       detail: trade.reason || "Closed or redeemed trade",
+      redeemState: "completed",
     }));
 
   const liveRows: RedeemedTradeRow[] = state.live.recent_decisions
@@ -515,12 +517,64 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       status: trade.status,
       source: trade.command === "sell" ? "Live sell/redeem" : "Live execution",
       detail: trade.reason || trade.command || "Redeemed live trade",
+      redeemState: "completed",
     }));
 
-  const rows = liveRows.length > 0 ? liveRows : paperRows;
+  const redeemedKeys = new Set(
+    liveRows.map((row) => `${row.marketId}:${row.outcome}`),
+  );
+
+  const waitingRows: RedeemedTradeRow[] = state.open_positions
+    .filter(
+      (position) => !redeemedKeys.has(`${position.market_id}:${position.outcome}`),
+    )
+    .map((position) => {
+      const matchingTrades = state.live.recent_decisions.filter(
+        (trade) =>
+          trade.status === "executed" &&
+          trade.market_id === position.market_id &&
+          trade.outcome === position.outcome,
+      );
+      const latestTrade = matchingTrades
+        .slice()
+        .sort(
+          (a, b) =>
+            (parseApiTimestamp(b.executed_at || b.updated_at || b.proposed_at)
+              ?.getTime() ?? 0) -
+            (parseApiTimestamp(a.executed_at || a.updated_at || a.proposed_at)
+              ?.getTime() ?? 0),
+        )[0];
+
+      return {
+        key: `waiting-${position.key}`,
+        timestamp:
+          latestTrade?.executed_at ||
+          latestTrade?.updated_at ||
+          latestTrade?.proposed_at ||
+          state.server_now,
+        marketId: position.market_id,
+        marketTitle: position.market_title,
+        outcome: position.outcome,
+        side: latestTrade?.side || "BUY",
+        amount: position.cost_basis,
+        shares: Math.abs(position.shares),
+        price: latestTrade?.price || position.average_price,
+        profitLoss: position.shares - position.cost_basis,
+        status: "waiting for redeem",
+        source: "Open Bullpen position",
+        detail:
+          "Position is still held in Bullpen. It will not appear in Bullpen redeem history until the claim/redeem action completes.",
+        redeemState: "waiting",
+      };
+    });
+
+  const rows = [...liveRows, ...paperRows, ...waitingRows];
 
   return rows
-    .filter((row) => isApiTimestampTodayIst(row.timestamp))
+    .filter(
+      (row) =>
+        row.redeemState === "waiting" || isApiTimestampTodayIst(row.timestamp),
+    )
     .sort(
       (a, b) =>
         (parseApiTimestamp(b.timestamp)?.getTime() ?? 0) -
@@ -2110,8 +2164,9 @@ export default function PolymarketBotPage() {
                 Redeemed Trades
               </CardTitle>
               <CardDescription>
-                Closed or redeemed Bullpen trades for the current IST day with
-                timestamp, profit and loss, execution price, and market details.
+                Bullpen trades completed through redeem today plus copied positions
+                still waiting for redeem, with timestamp, profit and loss,
+                execution price, and market details.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -2138,8 +2193,8 @@ export default function PolymarketBotPage() {
                           className="px-4 py-6 text-sm text-slate-500"
                           colSpan={10}
                         >
-                          No redeemed trades have been recorded for today in IST
-                          yet.
+                          No completed redeems or copied positions waiting for
+                          redeem are visible yet.
                         </td>
                       </tr>
                     ) : (
@@ -2181,7 +2236,15 @@ export default function PolymarketBotPage() {
                             {formatMoney(trade.profitLoss)}
                           </td>
                           <td className="px-4 py-3 text-slate-700">
-                            {trade.status}
+                            <span
+                              className={
+                                trade.redeemState === "waiting"
+                                  ? "rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-700"
+                                  : "rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700"
+                              }
+                            >
+                              {trade.status}
+                            </span>
                           </td>
                           <td className="px-4 py-3 text-slate-700">
                             <div className="max-w-[18rem]">
