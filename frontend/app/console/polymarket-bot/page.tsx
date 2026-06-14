@@ -1539,6 +1539,13 @@ export default function PolymarketBotPage() {
     redeemedTradesTab === "claim-pending"
       ? claimPendingTradeRows
       : previouslyRedeemedTradeRows;
+  const analysisTradeRows = buildAnalysisTradeRows(state.live.recent_decisions);
+  const wonAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl >= 0);
+  const lostAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl < 0);
+  const visiblePastAnalysisTrades =
+    pastTradesTab === "won" ? wonAnalysisTrades : lostAnalysisTrades;
+  const copiedTraderAnalysisRows =
+    buildCopiedTraderAnalysisRows(analysisTradeRows);
   const claimableRedeemedCount = claimPendingTradeRows.length;
   const redeemStatusMessage =
     pendingAction === "redeem"
