@@ -334,6 +334,7 @@ const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
 const TABLE_PAGE_SIZE = 10;
 const COMPACT_TABLE_PAGE_SIZE = 5;
+const PAST_TRADES_PAGE_SIZE = 10;
 
 function formatRelativePollTime(iso?: string | null) {
   if (!iso) return "waiting for first poll";
@@ -642,7 +643,8 @@ function buildCopiedTraderAnalysisRows(
   }
 
   return Array.from(rows.values()).sort((a, b) => {
-    if (b.copiedTrades !== a.copiedTrades) return b.copiedTrades - a.copiedTrades;
+    if (b.copiedTrades !== a.copiedTrades)
+      return b.copiedTrades - a.copiedTrades;
     return b.totalPnl - a.totalPnl;
   });
 }
@@ -1122,6 +1124,54 @@ function ShowMoreRowsControl({
   );
 }
 
+function PaginationRowsControl({
+  total,
+  page,
+  pageSize,
+  onPageChange,
+}: {
+  total: number;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (total <= pageSize) return null;
+
+  const pageCount = Math.ceil(total / pageSize);
+  const currentPage = Math.min(Math.max(page, 1), pageCount);
+  const firstVisible = (currentPage - 1) * pageSize + 1;
+  const lastVisible = Math.min(currentPage * pageSize, total);
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500">
+      <span>
+        Showing {firstVisible}-{lastVisible} of {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="rounded-full border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+        >
+          Previous
+        </button>
+        <span className="font-medium text-slate-600">
+          Page {currentPage} of {pageCount}
+        </span>
+        <button
+          type="button"
+          className="rounded-full border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === pageCount}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function PolymarketBotPage() {
   const [state, setState] = useState<PolymarketBotState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1129,7 +1179,9 @@ export default function PolymarketBotPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [autoDoctorRefreshing, setAutoDoctorRefreshing] = useState(false);
-  const [activeScreen, setActiveScreen] = useState<"main" | "analysis" | "settings">("main");
+  const [activeScreen, setActiveScreen] = useState<
+    "main" | "analysis" | "settings"
+  >("main");
   const [lastSettledBalance, setLastSettledBalance] =
     useState<PolymarketBalanceState | null>(null);
   const [accountDrafts, setAccountDrafts] = useState<
@@ -1152,6 +1204,8 @@ export default function PolymarketBotPage() {
   const [selectedAnalyzedTrader, setSelectedAnalyzedTrader] =
     useState<CopiedTraderAnalysisRow | null>(null);
   const [pastTradesTab, setPastTradesTab] = useState<"won" | "lost">("won");
+  const [wonPastTradesPage, setWonPastTradesPage] = useState(1);
+  const [lostPastTradesPage, setLostPastTradesPage] = useState(1);
   const [copiedPositionsTab, setCopiedPositionsTab] = useState<
     "positions" | "history"
   >("positions");
@@ -1637,8 +1691,26 @@ export default function PolymarketBotPage() {
   const analysisTradeRows = buildAnalysisTradeRows(state.live.recent_decisions);
   const wonAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl >= 0);
   const lostAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl < 0);
-  const visiblePastAnalysisTrades =
+  const pastAnalysisTrades =
     pastTradesTab === "won" ? wonAnalysisTrades : lostAnalysisTrades;
+  const pastTradesPage =
+    pastTradesTab === "won" ? wonPastTradesPage : lostPastTradesPage;
+  const pastTradesPageCount = Math.max(
+    1,
+    Math.ceil(pastAnalysisTrades.length / PAST_TRADES_PAGE_SIZE),
+  );
+  const normalizedPastTradesPage = Math.min(
+    pastTradesPage,
+    pastTradesPageCount,
+  );
+  const pastTradesPageStart =
+    (normalizedPastTradesPage - 1) * PAST_TRADES_PAGE_SIZE;
+  const visiblePastAnalysisTrades = pastAnalysisTrades.slice(
+    pastTradesPageStart,
+    pastTradesPageStart + PAST_TRADES_PAGE_SIZE,
+  );
+  const setPastTradesPage =
+    pastTradesTab === "won" ? setWonPastTradesPage : setLostPastTradesPage;
   const copiedTraderAnalysisRows =
     buildCopiedTraderAnalysisRows(analysisTradeRows);
   const claimableRedeemedCount = claimPendingTradeRows.length;
@@ -3000,7 +3072,10 @@ export default function PolymarketBotPage() {
                       ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
                       : "text-slate-500 hover:text-slate-900"
                   }`}
-                  onClick={() => setPastTradesTab("won")}
+                  onClick={() => {
+                    setPastTradesTab("won");
+                    setWonPastTradesPage(1);
+                  }}
                 >
                   Won ({wonAnalysisTrades.length})
                 </button>
@@ -3011,7 +3086,10 @@ export default function PolymarketBotPage() {
                       ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
                       : "text-slate-500 hover:text-slate-900"
                   }`}
-                  onClick={() => setPastTradesTab("lost")}
+                  onClick={() => {
+                    setPastTradesTab("lost");
+                    setLostPastTradesPage(1);
+                  }}
                 >
                   Lost ({lostAnalysisTrades.length})
                 </button>
@@ -3034,31 +3112,62 @@ export default function PolymarketBotPage() {
                   <tbody className="divide-y divide-slate-100">
                     {visiblePastAnalysisTrades.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={9}>
+                        <td
+                          className="px-4 py-6 text-sm text-slate-500"
+                          colSpan={9}
+                        >
                           No {pastTradesTab} copied trades are available yet.
                         </td>
                       </tr>
                     ) : (
                       visiblePastAnalysisTrades.map((trade) => (
                         <tr key={trade.id} className="align-top">
-                          <td className="px-4 py-3 text-slate-700">{formatTs(trade.timestamp)}</td>
-                          <td className="px-4 py-3 font-medium text-slate-950">{trade.traderName}</td>
                           <td className="px-4 py-3 text-slate-700">
-                            <div className="font-medium text-slate-950">{trade.marketTitle}</div>
-                            <div className="mt-1 text-xs text-slate-500">{trade.marketId}</div>
+                            {formatTs(trade.timestamp)}
                           </td>
-                          <td className="px-4 py-3 text-slate-700">{trade.outcome}</td>
-                          <td className="px-4 py-3 font-semibold text-slate-800">{trade.side}</td>
-                          <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
-                          <td className="px-4 py-3 text-slate-700">{formatMoney(trade.price, 4)}</td>
-                          <td className={`px-4 py-3 font-semibold ${trade.pnl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{formatMoney(trade.pnl)}</td>
-                          <td className="px-4 py-3 text-slate-700">{trade.status}</td>
+                          <td className="px-4 py-3 font-medium text-slate-950">
+                            {trade.traderName}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="font-medium text-slate-950">
+                              {trade.marketTitle}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {trade.marketId}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {trade.outcome}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">
+                            {trade.side}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatMoney(trade.amount)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatMoney(trade.price, 4)}
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-semibold ${trade.pnl >= 0 ? "text-emerald-600" : "text-rose-600"}`}
+                          >
+                            {formatMoney(trade.pnl)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {trade.status}
+                          </td>
                         </tr>
                       ))
                     )}
                   </tbody>
                 </table>
               </div>
+              <PaginationRowsControl
+                total={pastAnalysisTrades.length}
+                page={normalizedPastTradesPage}
+                pageSize={PAST_TRADES_PAGE_SIZE}
+                onPageChange={setPastTradesPage}
+              />
             </CardContent>
           </Card>
 
@@ -3068,7 +3177,8 @@ export default function PolymarketBotPage() {
                 Copied Traders
               </CardTitle>
               <CardDescription>
-                Traders successfully copied so far, sorted by copied trades in decreasing order. Click any row for a full trade breakup.
+                Traders successfully copied so far, sorted by copied trades in
+                decreasing order. Click any row for a full trade breakup.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -3087,17 +3197,44 @@ export default function PolymarketBotPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {copiedTraderAnalysisRows.length === 0 ? (
-                      <tr><td className="px-4 py-6 text-sm text-slate-500" colSpan={7}>No copied trader analysis is available yet.</td></tr>
+                      <tr>
+                        <td
+                          className="px-4 py-6 text-sm text-slate-500"
+                          colSpan={7}
+                        >
+                          No copied trader analysis is available yet.
+                        </td>
+                      </tr>
                     ) : (
                       copiedTraderAnalysisRows.map((trader) => (
-                        <tr key={trader.key} className="cursor-pointer align-top transition hover:bg-slate-50" onClick={() => setSelectedAnalyzedTrader(trader)}>
-                          <td className="px-4 py-3 font-medium text-sky-700 underline underline-offset-2">{trader.traderName}</td>
-                          <td className="px-4 py-3 text-slate-700">{trader.copiedTrades}</td>
-                          <td className="px-4 py-3 text-emerald-700">{trader.tradesWon}</td>
-                          <td className="px-4 py-3 font-semibold text-emerald-700">{formatMoney(trader.totalWinnings)}</td>
-                          <td className="px-4 py-3 text-rose-700">{trader.tradesLost}</td>
-                          <td className="px-4 py-3 font-semibold text-rose-700">{formatMoney(trader.totalLosses)}</td>
-                          <td className={`px-4 py-3 font-semibold ${trader.totalPnl >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{formatMoney(trader.totalPnl)}</td>
+                        <tr
+                          key={trader.key}
+                          className="cursor-pointer align-top transition hover:bg-slate-50"
+                          onClick={() => setSelectedAnalyzedTrader(trader)}
+                        >
+                          <td className="px-4 py-3 font-medium text-sky-700 underline underline-offset-2">
+                            {trader.traderName}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {trader.copiedTrades}
+                          </td>
+                          <td className="px-4 py-3 text-emerald-700">
+                            {trader.tradesWon}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-emerald-700">
+                            {formatMoney(trader.totalWinnings)}
+                          </td>
+                          <td className="px-4 py-3 text-rose-700">
+                            {trader.tradesLost}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-rose-700">
+                            {formatMoney(trader.totalLosses)}
+                          </td>
+                          <td
+                            className={`px-4 py-3 font-semibold ${trader.totalPnl >= 0 ? "text-emerald-700" : "text-rose-700"}`}
+                          >
+                            {formatMoney(trader.totalPnl)}
+                          </td>
                         </tr>
                       ))
                     )}
