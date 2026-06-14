@@ -88,7 +88,7 @@ const PORTFOLIO_CHILDREN: NavigationItem[] = [
     },
     {
         id: 'portfolio-polymarket-bot',
-        name: 'Polymarket Bot',
+        name: 'Copy trading Bots',
         href: URLs.routes.console.polymarketBot(),
         icon: HiOutlineTrendingUp,
     },
