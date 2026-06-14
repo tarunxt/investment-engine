@@ -319,6 +319,22 @@ function formatRelativePollTime(iso?: string | null) {
   return `${hours}h ago`;
 }
 
+function getPendingActionDetail(pendingAction: string | null) {
+  if (pendingAction === "redeem") {
+    return "Submitting the claim to Bullpen, waiting for resolved positions to close, then refreshing this table with the latest redeemed trades.";
+  }
+  if (pendingAction === "balance") {
+    return "Requesting a fresh Bullpen balance snapshot from the backend.";
+  }
+  if (pendingAction === "doctor") {
+    return "Running backend health checks for the live Bullpen integration.";
+  }
+  if (pendingAction) {
+    return "Waiting for the backend action to finish before re-enabling controls.";
+  }
+  return null;
+}
+
 function getActionStatusMessage(
   pendingAction: string | null,
   state: PolymarketBotState,
@@ -981,7 +997,13 @@ export default function PolymarketBotPage() {
     setPendingAction(label);
     setActionError(null);
     try {
-      const nextState = await action();
+      let nextState = await action();
+
+      if (label === "redeem") {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        nextState = await apiService.polymarketState();
+      }
+
       lastMutationAt.current = Date.now();
       setState(nextState);
       if (nextState.live.balance.status !== "loading") {
@@ -1167,6 +1189,7 @@ export default function PolymarketBotPage() {
     ? "Warning: Bot is Stopped. It will only stay active after Start succeeds; press Start now if you did not intentionally stop it. If it stops while showing Running, the backend watchdog automatically restarts the poller and logs a warning in Recent Bullpen Activity."
     : null;
   const actionStatusMessage = getActionStatusMessage(pendingAction, state);
+  const pendingActionDetail = getPendingActionDetail(pendingAction);
   const liveParsingStatusMessage = getLiveParsingStatusMessage(state);
   const skippedBreakup = getSkippedBreakup(state);
 
@@ -2183,17 +2206,27 @@ export default function PolymarketBotPage() {
                     loss, execution price, and market details.
                   </CardDescription>
                 </div>
-                <Button
-                  size="sm"
-                  className="self-start rounded-full bg-emerald-600 px-4 text-white hover:bg-emerald-700"
-                  disabled={pendingAction !== null}
-                  aria-label="Claim all available Bullpen positions now"
-                  onClick={() =>
-                    runAction("redeem", () => apiService.polymarketLiveRedeem())
-                  }
-                >
-                  {pendingAction === "redeem" ? "Claiming…" : "Claim Now"}
-                </Button>
+                <div className="flex max-w-sm flex-col items-start gap-2 sm:items-end">
+                  <Button
+                    size="sm"
+                    className="self-start rounded-full bg-emerald-600 px-4 text-white hover:bg-emerald-700 sm:self-end"
+                    disabled={pendingAction !== null}
+                    aria-label="Claim all available Bullpen positions now"
+                    onClick={() =>
+                      runAction("redeem", () => apiService.polymarketLiveRedeem())
+                    }
+                  >
+                    {pendingAction === "redeem" ? "Claiming…" : "Claim Now"}
+                  </Button>
+                  {pendingAction === "redeem" ? (
+                    <div className="flex items-start gap-2 text-left text-xs leading-5 text-slate-500 sm:text-right">
+                      <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-emerald-600 sm:hidden" />
+                      <span>
+                        {pendingActionDetail} The Redeemed Trades table will refresh automatically when the claim finishes.
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="pt-4">
@@ -2958,9 +2991,16 @@ export default function PolymarketBotPage() {
         </div>
       ) : null}
       {pendingAction ? (
-        <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-slate-500">
-          <Loader2 className="size-3.5 animate-spin" />
-          Processing {pendingAction}
+        <div className="flex flex-col gap-1 text-xs text-slate-500">
+          <div className="flex items-center gap-2 uppercase tracking-[0.18em]">
+            <Loader2 className="size-3.5 animate-spin" />
+            Processing {pendingAction}
+          </div>
+          {pendingActionDetail ? (
+            <div className="pl-5 normal-case tracking-normal">
+              {pendingActionDetail}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
