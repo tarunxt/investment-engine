@@ -477,6 +477,63 @@ function isRedeemedLiveDecision(trade: PolymarketSourceTradeDecision) {
   );
 }
 
+function getLiveDecisionTimeMs(trade: PolymarketSourceTradeDecision) {
+  return (
+    parseApiTimestamp(trade.executed_at || trade.updated_at || trade.proposed_at)
+      ?.getTime() ?? 0
+  );
+}
+
+function getEventEndTimeMs(trade: PolymarketSourceTradeDecision) {
+  const explicitEnd = parseApiTimestamp(trade.event_end_at)?.getTime();
+  if (explicitEnd) return explicitEnd;
+
+  const titleDate = trade.market_title.match(/20\d{2}-\d{2}-\d{2}/)?.[0];
+  return parseApiTimestamp(titleDate)?.getTime() ?? null;
+}
+
+function buildClaimableLiveRows(
+  state: PolymarketBotState,
+  redeemedKeys: Set<string>,
+): RedeemedTradeRow[] {
+  const nowMs = parseApiTimestamp(state.server_now)?.getTime() ?? Date.now();
+  const latestByPosition = new Map<string, PolymarketSourceTradeDecision>();
+
+  for (const trade of state.live.recent_decisions) {
+    if (trade.status !== "executed") continue;
+
+    const key = `${trade.market_id}::${trade.outcome}`;
+    const existing = latestByPosition.get(key);
+    if (!existing || getLiveDecisionTimeMs(trade) > getLiveDecisionTimeMs(existing)) {
+      latestByPosition.set(key, trade);
+    }
+  }
+
+  return Array.from(latestByPosition.values())
+    .filter((trade) => {
+      if (trade.side !== "BUY" || redeemedKeys.has(`${trade.market_id}::${trade.outcome}`)) {
+        return false;
+      }
+      const eventEndMs = getEventEndTimeMs(trade);
+      return eventEndMs !== null && eventEndMs <= nowMs;
+    })
+    .map((trade) => ({
+      key: `claimable-${trade.id}`,
+      timestamp: trade.executed_at || trade.updated_at || trade.proposed_at,
+      marketId: trade.market_id,
+      marketTitle: trade.market_title,
+      outcome: trade.outcome,
+      side: trade.side,
+      amount: trade.shares,
+      shares: Math.abs(trade.shares),
+      price: 1,
+      profitLoss: trade.shares - trade.amount,
+      status: "claimable",
+      source: "Available to claim",
+      detail: "Resolved winning position still held in Bullpen; redeem/claim has not posted as a sell decision yet.",
+    }));
+}
+
 function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
   const paperRows: RedeemedTradeRow[] = state.trade_history
     .filter(isRedeemedPaperTrade)
@@ -517,7 +574,11 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       detail: trade.reason || trade.command || "Redeemed live trade",
     }));
 
-  const rows = [...liveRows, ...paperRows];
+  const redeemedKeys = new Set(
+    [...liveRows, ...paperRows].map((row) => `${row.marketId}::${row.outcome}`),
+  );
+  const claimableRows = buildClaimableLiveRows(state, redeemedKeys);
+  const rows = [...claimableRows, ...liveRows, ...paperRows];
 
   return rows
     .filter((row) => isApiTimestampTodayIst(row.timestamp))
@@ -2110,8 +2171,9 @@ export default function PolymarketBotPage() {
                 Redeemed Trades
               </CardTitle>
               <CardDescription>
-                Bullpen trades completed through redeem today, with timestamp,
-                profit and loss, execution price, and market details.
+                Bullpen trades completed through redeem today plus resolved winning
+                positions still available to claim, with timestamp, profit and
+                loss, execution price, and market details.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
@@ -2138,7 +2200,7 @@ export default function PolymarketBotPage() {
                           className="px-4 py-6 text-sm text-slate-500"
                           colSpan={10}
                         >
-                          No completed redeems are visible yet.
+                          No completed redeems or claimable wins are visible yet.
                         </td>
                       </tr>
                     ) : (
