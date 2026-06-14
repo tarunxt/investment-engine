@@ -334,6 +334,7 @@ class BullpenReadOnlyProvider:
                 )
                 trader.leaderboard_period = label
                 trader.leaderboard_periods = [label]
+                trader.leaderboard_profit_usd = {label: trader.profit_usd}
             selected = sorted(
                 traders, key=lambda trader: trader.profit_usd, reverse=True
             )[:limit]
@@ -394,6 +395,7 @@ class BullpenReadOnlyProvider:
             )
             trader.leaderboard_period = label
             trader.leaderboard_periods = [label]
+            trader.leaderboard_profit_usd = {label: trader.profit_usd}
         selected = traders[:limit]
         return {
             "traders": selected,
@@ -1561,6 +1563,24 @@ def merge_traders(traders: list[PolymarketTrader]) -> list[PolymarketTrader]:
                     else trader.activity_source
                 ),
                 "profit_usd": max(existing.profit_usd, trader.profit_usd),
+                "leaderboard_profit_usd": {
+                    **(
+                        existing.leaderboard_profit_usd
+                        or (
+                            {existing.leaderboard_period: existing.profit_usd}
+                            if existing.leaderboard_period
+                            else {}
+                        )
+                    ),
+                    **(
+                        trader.leaderboard_profit_usd
+                        or (
+                            {trader.leaderboard_period: trader.profit_usd}
+                            if trader.leaderboard_period
+                            else {}
+                        )
+                    ),
+                },
                 "leaderboard_period": existing.leaderboard_period
                 or trader.leaderboard_period,
                 "leaderboard_periods": sorted(

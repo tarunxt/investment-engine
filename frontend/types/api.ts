@@ -1096,6 +1096,7 @@ export interface PolymarketTrader {
   last_trade_at?: string | null;
   last_trade_age?: string | null;
   profit_usd: number;
+  leaderboard_profit_usd: Record<string, number>;
   leaderboard_period?: string | null;
   leaderboard_periods: string[];
   source_reason: string;

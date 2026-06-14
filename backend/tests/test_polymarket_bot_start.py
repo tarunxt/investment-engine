@@ -106,6 +106,7 @@ def test_data_api_leaderboard_rows_normalize_polymarket_fields():
     assert trader.handle == "swisstony"
     assert trader.profit_usd == 788_156
     assert trader.volume_24h == 4_017_869
+    assert trader.leaderboard_profit_usd == {}
 
 
 @pytest.mark.anyio
@@ -148,6 +149,7 @@ async def test_data_api_leaderboard_uses_exact_period_order_and_paginates(
     assert result["rows_considered"] == 60
     assert result["rows_rejected"] == 0
     assert result["traders"][0].leaderboard_periods == ["today"]
+    assert result["traders"][0].leaderboard_profit_usd == {"today": 1000}
     assert "timePeriod=DAY" in requested_urls[0]
     assert "orderBy=PNL" in requested_urls[0]
     assert "offset=50" in requested_urls[1]
@@ -713,6 +715,41 @@ def test_select_tracked_traders_keeps_manual_and_fills_with_leaderboard():
     selected = select_tracked_traders([*leaderboard, *manual], manual, 3)
 
     assert [trader.name for trader in selected] == ["Manual", "Leader 0", "Leader 1"]
+
+
+def test_merge_traders_preserves_period_specific_leaderboard_profit():
+    from app.domains.polymarket.providers import merge_traders
+    from app.domains.polymarket.schemas import PolymarketTrader
+
+    today = PolymarketTrader(
+        id="latina",
+        name="Latina",
+        address="0x26437896ed9dfeb2f69765edcafe8fdceaab39ae",
+        profit_usd=1_444_122,
+        leaderboard_period="today",
+        leaderboard_periods=["today"],
+        leaderboard_profit_usd={"today": 1_444_122},
+        source_reason="Today profit leaderboard trader discovered via Polymarket Data API",
+        source="live-read",
+    )
+    weekly = today.model_copy(
+        update={
+            "profit_usd": 3_269_782.56,
+            "leaderboard_period": "weekly",
+            "leaderboard_periods": ["weekly"],
+            "leaderboard_profit_usd": {"weekly": 3_269_782.56},
+            "source_reason": "Weekly profit leaderboard trader discovered via Polymarket Data API",
+        }
+    )
+
+    [merged] = merge_traders([weekly, today])
+
+    assert merged.profit_usd == 3_269_782.56
+    assert merged.leaderboard_profit_usd == {
+        "weekly": 3_269_782.56,
+        "today": 1_444_122,
+    }
+    assert merged.leaderboard_periods == ["today", "weekly"]
 
 
 @pytest.mark.anyio

@@ -30,6 +30,14 @@ function traderMatchesPeriod(trader: PolymarketTrader, period: LeaderboardTab) {
     .includes(`${period} profit leaderboard`);
 }
 
+function traderProfitForPeriod(
+  trader: PolymarketTrader,
+  period: LeaderboardTab,
+) {
+  const periodProfit = trader.leaderboard_profit_usd?.[period];
+  return typeof periodProfit === "number" ? periodProfit : trader.profit_usd || 0;
+}
+
 function buildCopyStats(
   traders: PolymarketTrader[],
   decisions: PolymarketSourceTradeDecision[],
@@ -177,7 +185,10 @@ export function TrackedTradersTable({
       traderMatchesPeriod(trader, activeTab),
     );
     const rows = periodMatches.length > 0 ? periodMatches : traders;
-    return [...rows].sort((a, b) => (b.profit_usd || 0) - (a.profit_usd || 0));
+    return [...rows].sort(
+      (a, b) =>
+        traderProfitForPeriod(b, activeTab) - traderProfitForPeriod(a, activeTab),
+    );
   }, [activeTab, traders]);
   const visibleLimit =
     visibleLimitByTab[activeTab] || TRACKED_TRADERS_PAGE_SIZE;
@@ -278,7 +289,7 @@ export function TrackedTradersTable({
                         {trader.address || trader.id}
                       </div>
                       <div className="mt-1 text-xs font-medium text-emerald-700">
-                        Profit {formatMoney(trader.profit_usd || 0)}
+                        Profit {formatMoney(traderProfitForPeriod(trader, activeTab))}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
