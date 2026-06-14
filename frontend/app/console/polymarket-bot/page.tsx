@@ -199,13 +199,18 @@ function isBullpenLoginRequired(
   );
 }
 
-function getLiveCriticalBanner(state: PolymarketBotState) {
+const DOCTOR_PASS_STICKY_MS = 2 * 60 * 1000;
+
+function getLiveCriticalBanner(
+  state: PolymarketBotState,
+  options?: { suppressStaleDoctorLogin?: boolean },
+) {
   const issues: string[] = [];
   const doctorMessage =
     state.live.doctor.message || "No doctor details returned.";
   const doctorNeedsLogin = isBullpenLoginRequired(doctorMessage, null);
 
-  if (!state.live.doctor.ok) {
+  if (!state.live.doctor.ok && !options?.suppressStaleDoctorLogin) {
     issues.push(
       doctorNeedsLogin
         ? "Doctor failed: Bullpen session expired. Run bullpen login."
@@ -214,9 +219,13 @@ function getLiveCriticalBanner(state: PolymarketBotState) {
   }
 
   if (!state.live.unlocked) {
-    issues.push(
-      `Live mode locked: ${state.live.locked_reason || "unlock required"}`,
-    );
+    const lockedReason = state.live.locked_reason || "unlock required";
+    const isStaleDoctorLock =
+      options?.suppressStaleDoctorLogin &&
+      lockedReason.toLowerCase().includes("doctor must pass");
+    if (!isStaleDoctorLock) {
+      issues.push(`Live mode locked: ${lockedReason}`);
+    }
   }
 
   if (state.live.emergency_stopped) {
@@ -1193,6 +1202,10 @@ export default function PolymarketBotPage() {
   >("main");
   const [lastSettledBalance, setLastSettledBalance] =
     useState<PolymarketBalanceState | null>(null);
+  const [lastDoctorPassAt, setLastDoctorPassAt] = useState<number | null>(null);
+  const [lastStateRefreshAt, setLastStateRefreshAt] = useState<number>(() =>
+    Date.now(),
+  );
   const [accountDrafts, setAccountDrafts] = useState<
     Record<string, TrackedAccountDraft>
   >({});
@@ -1272,7 +1285,12 @@ export default function PolymarketBotPage() {
           requestedAt < lastMutationAt.current
         )
           return;
+        const receivedAt = Date.now();
         setState(nextState);
+        setLastStateRefreshAt(receivedAt);
+        if (nextState.live.doctor.ok) {
+          setLastDoctorPassAt(receivedAt);
+        }
         if (nextState.live.balance.status !== "loading") {
           setLastSettledBalance(nextState.live.balance);
         }
@@ -1337,7 +1355,12 @@ export default function PolymarketBotPage() {
       .polymarketLiveDoctor()
       .then((nextState) => {
         lastMutationAt.current = Date.now();
+        const receivedAt = Date.now();
         setState(nextState);
+        setLastStateRefreshAt(receivedAt);
+        if (nextState.live.doctor.ok) {
+          setLastDoctorPassAt(receivedAt);
+        }
         if (nextState.live.balance.status !== "loading") {
           setLastSettledBalance(nextState.live.balance);
         }
@@ -1369,7 +1392,12 @@ export default function PolymarketBotPage() {
       }
 
       lastMutationAt.current = Date.now();
+      const receivedAt = Date.now();
       setState(nextState);
+      setLastStateRefreshAt(receivedAt);
+      if (nextState.live.doctor.ok) {
+        setLastDoctorPassAt(receivedAt);
+      }
       if (nextState.live.balance.status !== "loading") {
         setLastSettledBalance(nextState.live.balance);
       }
@@ -1393,7 +1421,12 @@ export default function PolymarketBotPage() {
   }
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
+    const receivedAt = Date.now();
     setState(nextState);
+    setLastStateRefreshAt(receivedAt);
+    if (nextState.live.doctor.ok) {
+      setLastDoctorPassAt(receivedAt);
+    }
     if (nextState.live.balance.status !== "loading") {
       setLastSettledBalance(nextState.live.balance);
     }
@@ -1557,11 +1590,18 @@ export default function PolymarketBotPage() {
   const pendingActionDetail = getPendingActionDetail(pendingAction);
   const liveParsingStatusMessage = getLiveParsingStatusMessage(state);
   const skippedBreakup = getSkippedBreakup(state);
-  const liveCriticalBanner = getLiveCriticalBanner(state);
-  const doctorLoginRequired = isBullpenLoginRequired(
+  const hasRecentDoctorPass =
+    lastDoctorPassAt !== null &&
+    lastStateRefreshAt - lastDoctorPassAt < DOCTOR_PASS_STICKY_MS;
+  const rawDoctorLoginRequired = isBullpenLoginRequired(
     state.live.doctor.message,
     null,
   );
+  const suppressStaleDoctorLogin = hasRecentDoctorPass && rawDoctorLoginRequired;
+  const liveCriticalBanner = getLiveCriticalBanner(state, {
+    suppressStaleDoctorLogin,
+  });
+  const doctorLoginRequired = rawDoctorLoginRequired && !suppressStaleDoctorLogin;
   const pendingActionLabel = getActionLabel(pendingAction);
 
   const visibleBalance =
