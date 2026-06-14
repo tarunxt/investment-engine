@@ -1581,20 +1581,28 @@ export default function PolymarketBotPage() {
   }
 
   async function saveManualNetWorth(trader: CopiedTraderAnalysisRow) {
-    if (!trader.accountId) return;
-    const draft = manualNetWorthDrafts[trader.accountId] ?? "";
+    const draftKey = trader.accountId ?? trader.key;
+    const draft = manualNetWorthDrafts[draftKey] ?? "";
     const netWorth = Number.parseFloat(draft);
     if (!Number.isFinite(netWorth) || netWorth < 0) {
       setActionError("Manual net worth must be a valid amount of at least $0.");
       return;
     }
-    setBusyAccountId(`net-worth-${trader.accountId}`);
+    const busyKey = `net-worth-${draftKey}`;
+    setBusyAccountId(busyKey);
     setActionError(null);
     try {
-      const nextState = await apiService.polymarketUpdateTrackedAccount(
-        trader.accountId,
-        { net_worth_usd: netWorth },
-      );
+      const nextState = trader.accountId
+        ? await apiService.polymarketUpdateTrackedAccount(trader.accountId, {
+            net_worth_usd: netWorth,
+          })
+        : await apiService.polymarketAddTrackedAccount({
+            target: trader.traderName || trader.key,
+            threshold_percent: 5,
+            net_worth_usd: netWorth,
+            copy_trade_usd: 1,
+            enabled: true,
+          });
       applyTrackedAccountState(nextState);
     } catch (accountError) {
       setActionError(normalizeError(accountError));
@@ -3534,8 +3542,12 @@ export default function PolymarketBotPage() {
                                       ? formatMoney(trader.netWorth)
                                       : "—"}
                                   </button>
-                                  {trader.accountId ? (
-                                    <div className="flex items-center gap-2">
+                                  {(() => {
+                                    const manualDraftKey =
+                                      trader.accountId ?? trader.key;
+                                    const manualBusyKey = `net-worth-${manualDraftKey}`;
+                                    return (
+                                      <div className="flex items-center gap-2">
                                       <input
                                         type="number"
                                         min="0"
@@ -3544,23 +3556,19 @@ export default function PolymarketBotPage() {
                                         aria-label={`Manual net worth for ${trader.traderName}`}
                                         placeholder="Net worth"
                                         value={
-                                          manualNetWorthDrafts[
-                                            trader.accountId
-                                          ] ??
+                                          manualNetWorthDrafts[manualDraftKey] ??
                                           (trader.netWorth > 0
                                             ? String(trader.netWorth)
                                             : "")
                                         }
                                         disabled={
-                                          busyAccountId ===
-                                          `net-worth-${trader.accountId}`
+                                          busyAccountId === manualBusyKey
                                         }
                                         onChange={(event) =>
                                           setManualNetWorthDrafts(
                                             (current) => ({
                                               ...current,
-                                              [trader.accountId!]:
-                                                event.target.value,
+                                              [manualDraftKey]: event.target.value,
                                             }),
                                           )
                                         }
@@ -3571,25 +3579,20 @@ export default function PolymarketBotPage() {
                                         size="sm"
                                         className="h-7 rounded-full px-3 text-[11px]"
                                         disabled={
-                                          busyAccountId ===
-                                          `net-worth-${trader.accountId}`
+                                          busyAccountId === manualBusyKey
                                         }
                                         onClick={() =>
                                           void saveManualNetWorth(trader)
                                         }
                                       >
-                                        {busyAccountId ===
-                                        `net-worth-${trader.accountId}` ? (
+                                        {busyAccountId === manualBusyKey ? (
                                           <Loader2 className="mr-1 size-3 animate-spin" />
                                         ) : null}
                                         Save
                                       </Button>
-                                    </div>
-                                  ) : (
-                                    <span className="text-xs font-normal text-slate-400">
-                                      Add as a tracked account to edit.
-                                    </span>
-                                  )}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-slate-700">

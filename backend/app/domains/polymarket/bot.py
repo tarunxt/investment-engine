@@ -391,10 +391,15 @@ class PolymarketPaperCopyBot:
             if existing:
                 self.tracked_accounts.remove(existing)
             self.tracked_accounts.append(account)
+            if request.net_worth_usd > 0:
+                account.net_worth_source = "manual"
+                account.net_worth_error = None
             await self._save_tracked_accounts_unlocked()
             self._apply_tracked_accounts_to_provider_unlocked()
             self.live_source_status.live_baseline_completed_at = None
             self._add_activity(f"Tracked account added: {account.target}.")
+        if request.net_worth_usd > 0:
+            return account
         return await self.refresh_tracked_account_net_worth(account.id)
 
     async def update_tracked_account(
@@ -427,6 +432,9 @@ class PolymarketPaperCopyBot:
             ):
                 if field in update:
                     setattr(account, field, update[field])
+            if "net_worth_usd" in update:
+                account.net_worth_source = "manual"
+                account.net_worth_error = None
             account.updated_at = utc_now()
             await self._save_tracked_accounts_unlocked()
             self._apply_tracked_accounts_to_provider_unlocked()
