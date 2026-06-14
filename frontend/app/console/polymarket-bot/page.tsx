@@ -172,11 +172,31 @@ function formatRuntime(from?: string | null, to?: string | null) {
   return `${seconds}s`;
 }
 
-function parseUsdFromBalanceMessage(message?: string | null) {
-  if (!message) return 0;
+function parseAccountValueUsdFromBalanceMessage(message?: string | null) {
+  if (!message || !/account\s+value/i.test(message)) return null;
   const match = message.match(/(-?\d[\d,]*(?:\.\d+)?)/);
-  if (!match) return 0;
-  return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
+  if (!match) return null;
+  const value = Number.parseFloat(match[1].replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+function mergeBullpenBalanceSnapshot(
+  previous: PolymarketBalanceState | null,
+  next: PolymarketBalanceState,
+) {
+  if (next.account_value_usd !== null && next.account_value_usd !== undefined) {
+    return next;
+  }
+
+  const previousAccountValueUsd = previous?.account_value_usd;
+  if (previousAccountValueUsd === null || previousAccountValueUsd === undefined) {
+    return next;
+  }
+
+  return {
+    ...next,
+    account_value_usd: previousAccountValueUsd,
+  };
 }
 
 function isUsableBullpenBalance(balance?: PolymarketBalanceState | null) {
@@ -1366,7 +1386,9 @@ export default function PolymarketBotPage() {
           setLastDoctorPassAt(receivedAt);
         }
         if (isUsableBullpenBalance(nextState.live.balance)) {
-          setLastSettledBalance(nextState.live.balance);
+          setLastSettledBalance((previous) =>
+            mergeBullpenBalanceSnapshot(previous, nextState.live.balance),
+          );
         }
         setAccountDrafts((current) => ({
           ...Object.fromEntries(
@@ -1447,7 +1469,9 @@ export default function PolymarketBotPage() {
           setLastDoctorPassAt(receivedAt);
         }
         if (isUsableBullpenBalance(nextState.live.balance)) {
-          setLastSettledBalance(nextState.live.balance);
+          setLastSettledBalance((previous) =>
+            mergeBullpenBalanceSnapshot(previous, nextState.live.balance),
+          );
         }
       })
       .catch((doctorError) => {
@@ -1484,7 +1508,9 @@ export default function PolymarketBotPage() {
         setLastDoctorPassAt(receivedAt);
       }
       if (isUsableBullpenBalance(nextState.live.balance)) {
-        setLastSettledBalance(nextState.live.balance);
+        setLastSettledBalance((previous) =>
+          mergeBullpenBalanceSnapshot(previous, nextState.live.balance),
+        );
       }
       setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
       setTraderInvestedThresholdDraft(
@@ -1513,6 +1539,7 @@ export default function PolymarketBotPage() {
   }
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
+    // eslint-disable-next-line react-hooks/purity -- event callback records when the API mutation completed.
     const receivedAt = Date.now();
     setState(nextState);
     setLastStateRefreshAt(receivedAt);
@@ -1520,7 +1547,9 @@ export default function PolymarketBotPage() {
       setLastDoctorPassAt(receivedAt);
     }
     if (isUsableBullpenBalance(nextState.live.balance)) {
-      setLastSettledBalance(nextState.live.balance);
+      setLastSettledBalance((previous) =>
+        mergeBullpenBalanceSnapshot(previous, nextState.live.balance),
+      );
     }
     setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
     setTraderInvestedThresholdDraft(
@@ -1740,7 +1769,7 @@ export default function PolymarketBotPage() {
   const visibleBalance =
     state.live.balance.status === "loading" && lastSettledBalance
       ? lastSettledBalance
-      : state.live.balance;
+      : mergeBullpenBalanceSnapshot(lastSettledBalance, state.live.balance);
   const hasUsableVisibleBalance = isUsableBullpenBalance(visibleBalance);
   const balanceStatusDetail = [
     `Status: ${state.live.balance.status}`,
@@ -1758,7 +1787,7 @@ export default function PolymarketBotPage() {
     .join(" · ");
   const bullpenAccountValueUsd = hasUsableVisibleBalance
     ? (visibleBalance.account_value_usd ??
-      parseUsdFromBalanceMessage(visibleBalance.message))
+      parseAccountValueUsdFromBalanceMessage(visibleBalance.message))
     : null;
   const bullpenCashUsd = hasUsableVisibleBalance
     ? (visibleBalance.available_balance_usd ?? null)
