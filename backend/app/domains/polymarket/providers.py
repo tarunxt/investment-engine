@@ -264,6 +264,21 @@ class BullpenReadOnlyProvider:
     async def _read_leaderboard_traders(
         self, *, label: str, period_values: tuple[str, ...], limit: int
     ) -> dict[str, Any]:
+        data_api_time_period = {"today": "DAY", "weekly": "WEEK"}.get(label.lower())
+        if data_api_time_period:
+            try:
+                return await self._read_data_api_leaderboard_traders(
+                    label=label,
+                    time_period=data_api_time_period,
+                    limit=limit,
+                )
+            except Exception as exc:
+                data_api_error = redact_secrets(str(exc))
+            else:
+                data_api_error = None
+        else:
+            data_api_error = None
+
         commands: list[list[str]] = []
         for period in period_values:
             commands.extend(
@@ -332,13 +347,63 @@ class BullpenReadOnlyProvider:
                 "error": None,
             }
         except Exception as exc:
+            errors = [redact_secrets(str(exc))]
+            if data_api_error:
+                errors.insert(0, f"Data API: {data_api_error}")
             return {
                 "traders": [],
                 "rows_considered": 0,
                 "wallets_extracted": 0,
                 "rows_rejected": 0,
-                "error": f"{label.title()} leaderboard unavailable: {redact_secrets(str(exc))}",
+                "error": f"{label.title()} leaderboard unavailable: {'; '.join(errors)}",
             }
+
+    async def _read_data_api_leaderboard_traders(
+        self, *, label: str, time_period: str, limit: int
+    ) -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        page_size = min(50, max(1, limit))
+        async with httpx.AsyncClient(
+            timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+            headers=POLYMARKET_HTTP_HEADERS,
+        ) as client:
+            for offset in range(0, limit, page_size):
+                query = urlencode(
+                    {
+                        "category": "OVERALL",
+                        "timePeriod": time_period,
+                        "orderBy": "PNL",
+                        "limit": str(min(page_size, limit - offset)),
+                        "offset": str(offset),
+                    }
+                )
+                response = await client.get(
+                    f"{POLYMARKET_DATA_API_BASE_URL}/v1/leaderboard?{query}"
+                )
+                response.raise_for_status()
+                page_rows = collect_rows(response.json())
+                rows.extend(page_rows)
+                if len(page_rows) < page_size:
+                    break
+
+        normalized = [normalize_fallback_trader_row(row) for row in rows]
+        traders = [trader for trader in normalized if trader]
+        for trader in traders:
+            trader.source_reason = (
+                f"{label.title()} profit leaderboard trader discovered via Polymarket Data API"
+            )
+            trader.leaderboard_period = label
+            trader.leaderboard_periods = [label]
+        selected = traders[:limit]
+        return {
+            "traders": selected,
+            "rows_considered": len(rows),
+            "wallets_extracted": len(
+                {trader.address.lower() for trader in selected if trader.address}
+            ),
+            "rows_rejected": len(rows) - len(traders),
+            "error": None,
+        }
 
     async def _discover_active_traders(self) -> dict[str, Any]:
         try:
@@ -1116,6 +1181,7 @@ def normalize_fallback_trader_row(row: dict[str, Any]) -> PolymarketTrader | Non
         number_value(
             row.get("volume24h")
             or row.get("volume_24h")
+            or row.get("vol")
             or row.get("volume")
             or row.get("totalVolume")
             or row.get("weeklyVolume")
@@ -1134,6 +1200,7 @@ def normalize_fallback_trader_row(row: dict[str, Any]) -> PolymarketTrader | Non
     name = string_value(
         row.get("name")
         or row.get("username")
+        or row.get("userName")
         or row.get("user_name")
         or row.get("displayName")
         or row.get("traderName")
@@ -1703,6 +1770,7 @@ def extract_handle(row: dict[str, Any]) -> str | None:
         or row.get("profileSlug")
         or row.get("profile_slug")
         or row.get("username")
+        or row.get("userName")
         or row.get("user_name")
         or row.get("name")
         or row.get("pseudonym")

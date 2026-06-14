@@ -31,6 +31,7 @@ from app.domains.polymarket.schemas import (
 )
 from app.domains.polymarket.storage import JsonModelStore
 from app.domains.polymarket.providers import (
+    BullpenReadOnlyProvider,
     normalize_fallback_trader_row,
     trader_matches_leaderboard_period,
 )
@@ -87,6 +88,69 @@ def test_leaderboard_period_filter_keeps_current_and_unknown_timestamp_rows():
     assert trader_matches_leaderboard_period(current, "today", now=now) is True
     assert trader_matches_leaderboard_period(current, "weekly", now=now) is True
     assert trader_matches_leaderboard_period(unknown, "today", now=now) is True
+
+
+def test_data_api_leaderboard_rows_normalize_polymarket_fields():
+    trader = normalize_fallback_trader_row(
+        {
+            "proxyWallet": "0x204f72f35326db932158CBA6AdfF0B9A1DA95e14",
+            "userName": "swisstony",
+            "pnl": 788_156,
+            "vol": 4_017_869,
+        }
+    )
+
+    assert trader is not None
+    assert trader.address == "0x204f72f35326db932158CBA6AdfF0B9A1DA95e14"
+    assert trader.name == "swisstony"
+    assert trader.handle == "swisstony"
+    assert trader.profit_usd == 788_156
+    assert trader.volume_24h == 4_017_869
+
+
+@pytest.mark.anyio
+async def test_data_api_leaderboard_uses_exact_period_order_and_paginates(
+    monkeypatch,
+):
+    import httpx
+
+    requested_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
+        offset = int(request.url.params["offset"])
+        rows = [
+            {
+                "proxyWallet": f"0x{offset + index + 1:040x}",
+                "userName": f"Trader {offset + index + 1}",
+                "pnl": 1000 - offset - index,
+                "vol": 2000 + offset + index,
+            }
+            for index in range(50 if offset == 0 else 10)
+        ]
+        return httpx.Response(200, json={"leaderboard": rows})
+
+    transport = httpx.MockTransport(handler)
+    original_async_client = httpx.AsyncClient
+
+    def mock_async_client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return original_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", mock_async_client)
+    provider = BullpenReadOnlyProvider(load_polymarket_config())
+
+    result = await provider._read_data_api_leaderboard_traders(
+        label="today", time_period="DAY", limit=60
+    )
+
+    assert len(result["traders"]) == 60
+    assert result["rows_considered"] == 60
+    assert result["rows_rejected"] == 0
+    assert result["traders"][0].leaderboard_periods == ["today"]
+    assert "timePeriod=DAY" in requested_urls[0]
+    assert "orderBy=PNL" in requested_urls[0]
+    assert "offset=50" in requested_urls[1]
 
 
 class SlowProvider:
