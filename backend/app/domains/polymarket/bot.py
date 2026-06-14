@@ -451,8 +451,18 @@ class PolymarketPaperCopyBot:
         return await provider.debug_discovery(target)
 
     async def get_state(self) -> PolymarketBotState:
-        async with self._lock:
+        try:
+            await asyncio.wait_for(self._lock.acquire(), timeout=0.25)
+        except TimeoutError:
+            await self.logger.warn(
+                "State request returned a non-blocking snapshot because a background Polymarket operation is still running."
+            )
+            return self.get_state_snapshot()
+
+        try:
             return self._build_state_unlocked()
+        finally:
+            self._lock.release()
 
     def get_state_snapshot(self) -> PolymarketBotState:
         return self._build_state_unlocked()
