@@ -39,6 +39,7 @@ import type {
   PolymarketPosition,
   PolymarketTrackedAccount,
   PolymarketSourceTradeDecision,
+  PolymarketBullpenRedeemedTrade,
 } from "@/types/api";
 
 import { MetricGrid, type MetricItem } from "./_components/MetricGrid";
@@ -583,7 +584,7 @@ type RedeemedTradeRow = {
   marketId: string;
   marketTitle: string;
   outcome: string;
-  side: PolymarketPaperTrade["side"] | PolymarketSourceTradeDecision["side"];
+  side: PolymarketPaperTrade["side"] | PolymarketSourceTradeDecision["side"] | PolymarketBullpenRedeemedTrade["side"];
   amount: number;
   shares: number;
   price: number;
@@ -874,11 +875,27 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       detail: trade.reason || trade.command || "Redeemed live trade",
     }));
 
+  const bullpenRows: RedeemedTradeRow[] = state.live.redeemed_trades.map((trade) => ({
+    key: `bullpen-${trade.id}`,
+    timestamp: trade.timestamp,
+    marketId: trade.market_id,
+    marketTitle: trade.market_title,
+    outcome: trade.outcome,
+    side: trade.side,
+    amount: trade.amount,
+    shares: Math.abs(trade.shares),
+    price: trade.price,
+    profitLoss: trade.profit_loss,
+    status: trade.status,
+    source: "Bullpen wallet history",
+    detail: trade.detail,
+  }));
+
   const redeemedKeys = new Set(
-    [...liveRows, ...paperRows].map((row) => `${row.marketId}::${row.outcome}`),
+    [...bullpenRows, ...liveRows, ...paperRows].map((row) => `${row.marketId}::${row.outcome}`),
   );
   const claimableRows = buildClaimableLiveRows(state, redeemedKeys);
-  const rows = [...claimableRows, ...liveRows, ...paperRows];
+  const rows = [...claimableRows, ...bullpenRows, ...liveRows, ...paperRows];
 
   return rows
     .filter((row) => isApiTimestampTodayIst(row.timestamp))
