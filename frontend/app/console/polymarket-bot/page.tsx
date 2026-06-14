@@ -381,6 +381,22 @@ function getPendingActionDetail(pendingAction: string | null) {
   return null;
 }
 
+function getRedeemStatusMessage(
+  elapsedSeconds: number,
+  claimableRedeemedCount: number,
+) {
+  const elapsedLabel =
+    elapsedSeconds > 0 ? ` Claim has been running for ${elapsedSeconds}s.` : "";
+  const claimableLabel =
+    claimableRedeemedCount > 0
+      ? `${claimableRedeemedCount} resolved winning ${
+          claimableRedeemedCount === 1 ? "position is" : "positions are"
+        } being claimed.`
+      : "Checking for resolved winning positions to claim.";
+
+  return `${claimableLabel}${elapsedLabel}`;
+}
+
 function getActionStatusMessage(
   pendingAction: string | null,
   state: PolymarketBotState,
@@ -2385,13 +2401,17 @@ export default function PolymarketBotPage() {
                     aria-live="polite"
                   >
                     {pendingAction === "redeem" ? (
-                      <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-emerald-600 sm:hidden" />
-                      <span>
-                        {pendingActionDetail} The Redeemed Trades table will
-                        refresh automatically when the claim finishes.
-                      </span>
-                    </div>
-                  ) : null}
+                      <>
+                        <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-emerald-600 sm:hidden" />
+                        <span>
+                          {redeemStatusMessage} The Redeemed Trades table will
+                          refresh automatically when the claim finishes.
+                        </span>
+                      </>
+                    ) : (
+                      <span>{redeemStatusMessage}</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </CardHeader>
