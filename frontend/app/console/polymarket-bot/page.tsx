@@ -202,7 +202,10 @@ function mergeBullpenBalanceSnapshot(
   }
 
   const previousAccountValueUsd = previous?.account_value_usd;
-  if (previousAccountValueUsd === null || previousAccountValueUsd === undefined) {
+  if (
+    previousAccountValueUsd === null ||
+    previousAccountValueUsd === undefined
+  ) {
     return next;
   }
 
@@ -584,7 +587,10 @@ type RedeemedTradeRow = {
   marketId: string;
   marketTitle: string;
   outcome: string;
-  side: PolymarketPaperTrade["side"] | PolymarketSourceTradeDecision["side"] | PolymarketBullpenRedeemedTrade["side"];
+  side:
+    | PolymarketPaperTrade["side"]
+    | PolymarketSourceTradeDecision["side"]
+    | PolymarketBullpenRedeemedTrade["side"];
   amount: number;
   shares: number;
   price: number;
@@ -791,6 +797,11 @@ function buildClaimableLiveRows(
   redeemedKeys: Set<string>,
 ): RedeemedTradeRow[] {
   const nowMs = parseApiTimestamp(state.server_now)?.getTime() ?? Date.now();
+  const openPositionKeys = new Set(
+    state.open_positions
+      .filter((position) => position.shares > 0)
+      .map((position) => `${position.market_id}::${position.outcome}`),
+  );
   const latestByPosition = new Map<string, PolymarketSourceTradeDecision>();
 
   for (const trade of state.live.recent_decisions) {
@@ -808,9 +819,11 @@ function buildClaimableLiveRows(
 
   return Array.from(latestByPosition.values())
     .filter((trade) => {
+      const positionKey = `${trade.market_id}::${trade.outcome}`;
       if (
         trade.side !== "BUY" ||
-        redeemedKeys.has(`${trade.market_id}::${trade.outcome}`)
+        redeemedKeys.has(positionKey) ||
+        !openPositionKeys.has(positionKey)
       ) {
         return false;
       }
@@ -875,24 +888,28 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       detail: trade.reason || trade.command || "Redeemed live trade",
     }));
 
-  const bullpenRows: RedeemedTradeRow[] = state.live.redeemed_trades.map((trade) => ({
-    key: `bullpen-${trade.id}`,
-    timestamp: trade.timestamp,
-    marketId: trade.market_id,
-    marketTitle: trade.market_title,
-    outcome: trade.outcome,
-    side: trade.side,
-    amount: trade.amount,
-    shares: Math.abs(trade.shares),
-    price: trade.price,
-    profitLoss: trade.profit_loss,
-    status: trade.status,
-    source: "Bullpen wallet history",
-    detail: trade.detail,
-  }));
+  const bullpenRows: RedeemedTradeRow[] = state.live.redeemed_trades.map(
+    (trade) => ({
+      key: `bullpen-${trade.id}`,
+      timestamp: trade.timestamp,
+      marketId: trade.market_id,
+      marketTitle: trade.market_title,
+      outcome: trade.outcome,
+      side: trade.side,
+      amount: trade.amount,
+      shares: Math.abs(trade.shares),
+      price: trade.price,
+      profitLoss: trade.profit_loss,
+      status: trade.status,
+      source: "Bullpen wallet history",
+      detail: trade.detail,
+    }),
+  );
 
   const redeemedKeys = new Set(
-    [...bullpenRows, ...liveRows, ...paperRows].map((row) => `${row.marketId}::${row.outcome}`),
+    [...bullpenRows, ...liveRows, ...paperRows].map(
+      (row) => `${row.marketId}::${row.outcome}`,
+    ),
   );
   const claimableRows = buildClaimableLiveRows(state, redeemedKeys);
   const rows = [...claimableRows, ...bullpenRows, ...liveRows, ...paperRows];
@@ -1207,7 +1224,9 @@ export default function PolymarketBotPage() {
   const [ec2CommandMenuOpen, setEc2CommandMenuOpen] = useState(false);
   const [ec2Commands, setEc2Commands] = useState(DEFAULT_EC2_COMMANDS);
   const [newEc2Command, setNewEc2Command] = useState("");
-  const [editingEc2CommandIndex, setEditingEc2CommandIndex] = useState<number | null>(null);
+  const [editingEc2CommandIndex, setEditingEc2CommandIndex] = useState<
+    number | null
+  >(null);
   const [editingEc2Command, setEditingEc2Command] = useState("");
   const [lastSettledBalance, setLastSettledBalance] =
     useState<PolymarketBalanceState | null>(null);
@@ -1455,7 +1474,9 @@ export default function PolymarketBotPage() {
   }
 
   function handleRedeemedTradesRefresh() {
-    void runAction("redeem-refresh", () => apiService.polymarketState());
+    void runAction("redeem-refresh", () =>
+      apiService.polymarketLiveBalanceRefresh(),
+    );
   }
 
   function applyTrackedAccountState(nextState: PolymarketBotState) {
@@ -1874,11 +1895,13 @@ export default function PolymarketBotPage() {
           pendingActionElapsedSeconds,
           claimableRedeemedCount,
         )
-      : claimableRedeemedCount > 0
-        ? `${claimableRedeemedCount} resolved winning ${
-            claimableRedeemedCount === 1 ? "position is" : "positions are"
-          } ready to claim.`
-        : "No resolved winning positions are currently waiting to be claimed.";
+      : pendingAction === "redeem-refresh"
+        ? `Refreshing Bullpen balance, open positions, and claim/redeem history (${pendingActionElapsedSeconds}s elapsed). The list updates after Bullpen returns the latest wallet data.`
+        : claimableRedeemedCount > 0
+          ? `${claimableRedeemedCount} resolved winning ${
+              claimableRedeemedCount === 1 ? "position is" : "positions are"
+            } ready to claim. If you expected fewer, click refresh to fetch Bullpen balance and open positions; closed positions are hidden once the latest fetch is visible.`
+          : "No resolved winning positions are currently waiting to be claimed. If the latest fetch is not visible, refresh will show whether Bullpen balance, positions, or history are still loading or unavailable.";
   const copiedPositionsRefreshSeconds = 5;
   const visibleTrackedTraders = state.tracked_traders;
   const copiedSortHeader = (
@@ -2248,9 +2271,14 @@ export default function PolymarketBotPage() {
                                   className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-950"
                                   aria-label={`Copy command: ${command}`}
                                   title="Copy command"
-                                  onClick={() => void navigator.clipboard.writeText(command)}
+                                  onClick={() =>
+                                    void navigator.clipboard.writeText(command)
+                                  }
                                 >
-                                  <Copy className="size-3.5" aria-hidden="true" />
+                                  <Copy
+                                    className="size-3.5"
+                                    aria-hidden="true"
+                                  />
                                 </button>
                                 <button
                                   type="button"
@@ -2262,7 +2290,10 @@ export default function PolymarketBotPage() {
                                     setEditingEc2Command(command);
                                   }}
                                 >
-                                  <Edit3 className="size-3.5" aria-hidden="true" />
+                                  <Edit3
+                                    className="size-3.5"
+                                    aria-hidden="true"
+                                  />
                                 </button>
                                 <button
                                   type="button"
@@ -2271,7 +2302,9 @@ export default function PolymarketBotPage() {
                                   title="Delete command"
                                   onClick={() => {
                                     setEc2Commands((commands) =>
-                                      commands.filter((_, itemIndex) => itemIndex !== index),
+                                      commands.filter(
+                                        (_, itemIndex) => itemIndex !== index,
+                                      ),
                                     );
                                     if (editingEc2CommandIndex === index) {
                                       setEditingEc2CommandIndex(null);
@@ -2279,7 +2312,10 @@ export default function PolymarketBotPage() {
                                     }
                                   }}
                                 >
-                                  <Trash2 className="size-3.5" aria-hidden="true" />
+                                  <Trash2
+                                    className="size-3.5"
+                                    aria-hidden="true"
+                                  />
                                 </button>
                               </div>
                             </div>
@@ -2422,16 +2458,21 @@ export default function PolymarketBotPage() {
                   : "rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-950 shadow-sm"
               }
             >
-              Bullpen session time remaining: {formatDuration(bullpenSessionSecondsRemaining)}
+              Bullpen session time remaining:{" "}
+              {formatDuration(bullpenSessionSecondsRemaining)}
               {bullpenSessionObservedAt ? (
                 <>
                   {" "}
-                  since the last login observed at {new Date(bullpenSessionObservedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
+                  since the last login observed at{" "}
+                  {new Date(bullpenSessionObservedAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                  .
                 </>
               ) : (
                 "."
-              )}
-              {" "}
+              )}{" "}
               Re-login is expected when the 15-minute JWT window expires.
             </div>
           ) : null}
@@ -3226,6 +3267,11 @@ export default function PolymarketBotPage() {
                               finishes.
                             </span>
                           </>
+                        ) : pendingAction === "redeem-refresh" ? (
+                          <>
+                            <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-emerald-600 sm:hidden" />
+                            <span>{redeemStatusMessage}</span>
+                          </>
                         ) : (
                           <span>{redeemStatusMessage}</span>
                         )}
@@ -3622,48 +3668,51 @@ export default function PolymarketBotPage() {
                                     const manualBusyKey = `net-worth-${manualDraftKey}`;
                                     return (
                                       <div className="flex items-center gap-2">
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        className="w-28 rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                                        aria-label={`Manual net worth for ${trader.traderName}`}
-                                        placeholder="Net worth"
-                                        value={
-                                          manualNetWorthDrafts[manualDraftKey] ??
-                                          (trader.netWorth > 0
-                                            ? String(trader.netWorth)
-                                            : "")
-                                        }
-                                        disabled={
-                                          busyAccountId === manualBusyKey
-                                        }
-                                        onChange={(event) =>
-                                          setManualNetWorthDrafts(
-                                            (current) => ({
-                                              ...current,
-                                              [manualDraftKey]: event.target.value,
-                                            }),
-                                          )
-                                        }
-                                      />
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 rounded-full px-3 text-[11px]"
-                                        disabled={
-                                          busyAccountId === manualBusyKey
-                                        }
-                                        onClick={() =>
-                                          void saveManualNetWorth(trader)
-                                        }
-                                      >
-                                        {busyAccountId === manualBusyKey ? (
-                                          <Loader2 className="mr-1 size-3 animate-spin" />
-                                        ) : null}
-                                        Save
-                                      </Button>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          className="w-28 rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                                          aria-label={`Manual net worth for ${trader.traderName}`}
+                                          placeholder="Net worth"
+                                          value={
+                                            manualNetWorthDrafts[
+                                              manualDraftKey
+                                            ] ??
+                                            (trader.netWorth > 0
+                                              ? String(trader.netWorth)
+                                              : "")
+                                          }
+                                          disabled={
+                                            busyAccountId === manualBusyKey
+                                          }
+                                          onChange={(event) =>
+                                            setManualNetWorthDrafts(
+                                              (current) => ({
+                                                ...current,
+                                                [manualDraftKey]:
+                                                  event.target.value,
+                                              }),
+                                            )
+                                          }
+                                        />
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 rounded-full px-3 text-[11px]"
+                                          disabled={
+                                            busyAccountId === manualBusyKey
+                                          }
+                                          onClick={() =>
+                                            void saveManualNetWorth(trader)
+                                          }
+                                        >
+                                          {busyAccountId === manualBusyKey ? (
+                                            <Loader2 className="mr-1 size-3 animate-spin" />
+                                          ) : null}
+                                          Save
+                                        </Button>
                                       </div>
                                     );
                                   })()}
