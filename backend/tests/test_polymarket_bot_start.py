@@ -942,8 +942,43 @@ class ReadyBalanceReader:
         from app.domains.polymarket.schemas import PolymarketBalanceState
 
         return PolymarketBalanceState(
-            status="ready", message="Bullpen account value: 114.07 USD"
+            status="ready",
+            message="Bullpen account value: 114.07 USD",
+            account_value_usd=114.07,
+            available_balance_usd=97.48,
         )
+
+
+@pytest.mark.anyio
+async def test_manual_balance_refresh_waits_for_values(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": True,
+            "live_trading": False,
+            "use_live_reads": False,
+            "auto_redeem_live": False,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = SlowProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=BullpenLiveExecutor(),
+        balance_reader=ReadyBalanceReader(),
+        logger=logger,
+    )
+
+    await bot.refresh_balance()
+
+    assert bot.balance_state.status == "ready"
+    assert bot.balance_state.account_value_usd == 114.07
+    assert bot.balance_state.available_balance_usd == 97.48
 
 
 @pytest.mark.anyio
