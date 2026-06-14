@@ -2513,18 +2513,24 @@ export default function PolymarketBotPage() {
           ) : null}
 
           {state.live.doctor.ok && bullpenSessionSecondsRemaining != null ? (
-            <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-950 shadow-sm">
-              Bullpen session active for {formatDuration(bullpenSessionSecondsRemaining)}
+            <div
+              className={
+                bullpenSessionSecondsRemaining <= 0
+                  ? "rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm font-semibold text-rose-950 shadow-sm"
+                  : "rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-950 shadow-sm"
+              }
+            >
+              Bullpen session time remaining: {formatDuration(bullpenSessionSecondsRemaining)}
               {bullpenSessionObservedAt ? (
                 <>
                   {" "}
-                  from last login observed at {new Date(bullpenSessionObservedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
+                  since the last login observed at {new Date(bullpenSessionObservedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
                 </>
               ) : (
                 "."
               )}
               {" "}
-              Re-login is expected after the 15 minute JWT window ends.
+              Re-login is expected when the 15-minute JWT window expires.
             </div>
           ) : null}
 
