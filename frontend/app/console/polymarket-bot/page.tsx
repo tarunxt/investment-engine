@@ -2167,14 +2167,29 @@ export default function PolymarketBotPage() {
 
           <Card className="border border-slate-200 bg-white py-6">
             <CardHeader className="pb-0">
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Redeemed Trades
-              </CardTitle>
-              <CardDescription>
-                Bullpen trades completed through redeem today plus resolved winning
-                positions still available to claim, with timestamp, profit and
-                loss, execution price, and market details.
-              </CardDescription>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                    Redeemed Trades
+                  </CardTitle>
+                  <CardDescription className="mt-2">
+                    Bullpen trades completed through redeem today plus resolved winning
+                    positions still available to claim, with timestamp, profit and
+                    loss, execution price, and market details.
+                  </CardDescription>
+                </div>
+                <Button
+                  size="sm"
+                  className="self-start rounded-full bg-emerald-600 px-4 text-white hover:bg-emerald-700"
+                  disabled={pendingAction !== null}
+                  aria-label="Claim all available Bullpen positions now"
+                  onClick={() =>
+                    runAction("redeem", () => apiService.polymarketLiveRedeem())
+                  }
+                >
+                  {pendingAction === "redeem" ? "Claiming…" : "Claim Now"}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="pt-4">
               <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
