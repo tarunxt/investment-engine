@@ -332,7 +332,7 @@ const BULLPEN_ACCOUNT_URL =
   "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
-const TABLE_PAGE_SIZE = 20;
+const TABLE_PAGE_SIZE = 10;
 const COMPACT_TABLE_PAGE_SIZE = 5;
 
 function formatRelativePollTime(iso?: string | null) {
@@ -1033,6 +1033,54 @@ function SortIcon({ direction }: { direction: "asc" | "desc" | null }) {
   return <ArrowUpDown className="size-3.5 shrink-0 opacity-60" />;
 }
 
+function TablePaginationControl({
+  total,
+  page,
+  pageSize = TABLE_PAGE_SIZE,
+  onPageChange,
+}: {
+  total: number;
+  page: number;
+  pageSize?: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (total <= pageSize) return null;
+
+  const pageCount = Math.ceil(total / pageSize);
+  const safePage = Math.min(Math.max(page, 1), pageCount);
+  const startRow = (safePage - 1) * pageSize + 1;
+  const endRow = Math.min(safePage * pageSize, total);
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-end gap-3 text-sm text-slate-500">
+      <span>
+        Showing {startRow}-{endRow} of {total}
+      </span>
+      <div className="inline-flex items-center gap-2">
+        <button
+          type="button"
+          className="rounded-full border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={safePage === 1}
+          onClick={() => onPageChange(safePage - 1)}
+        >
+          Previous
+        </button>
+        <span className="rounded-full border border-slate-200 px-3 py-2 font-medium text-slate-600">
+          Page {safePage} of {pageCount}
+        </span>
+        <button
+          type="button"
+          className="rounded-full border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={safePage === pageCount}
+          onClick={() => onPageChange(safePage + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ShowMoreRowsControl({
   total,
   visible,
@@ -1124,7 +1172,7 @@ export default function PolymarketBotPage() {
   const [liveTradeLimitDraft, setLiveTradeLimitDraft] = useState("");
   const [traderInvestedThresholdDraft, setTraderInvestedThresholdDraft] =
     useState("");
-  const [copiedVisibleLimit, setCopiedVisibleLimit] = useState(TABLE_PAGE_SIZE);
+  const [copiedPage, setCopiedPage] = useState(1);
   const [missedVisibleLimit, setMissedVisibleLimit] = useState(
     COMPACT_TABLE_PAGE_SIZE,
   );
@@ -1342,7 +1390,7 @@ export default function PolymarketBotPage() {
             direction: column === "copiedAt" ? "desc" : "asc",
           },
     );
-    setCopiedVisibleLimit(TABLE_PAGE_SIZE);
+    setCopiedPage(1);
   }
 
   async function addTrackedAccount() {
@@ -1558,9 +1606,14 @@ export default function PolymarketBotPage() {
         : event.currentPnl < 0;
     })
     .sort((left, right) => compareCopiedEventGroups(left, right, copiedSort));
+  const copiedPageCount = Math.max(
+    1,
+    Math.ceil(copiedEventGroups.length / TABLE_PAGE_SIZE),
+  );
+  const safeCopiedPage = Math.min(copiedPage, copiedPageCount);
   const visibleCopiedEventGroups = copiedEventGroups.slice(
-    0,
-    copiedVisibleLimit,
+    (safeCopiedPage - 1) * TABLE_PAGE_SIZE,
+    safeCopiedPage * TABLE_PAGE_SIZE,
   );
   const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
   const copiedPositionEventCount =
@@ -2306,7 +2359,10 @@ export default function PolymarketBotPage() {
                         ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
                         : "text-slate-500 hover:text-slate-900"
                     }`}
-                    onClick={() => setCopiedPositionsTab("positions")}
+                    onClick={() => {
+                      setCopiedPositionsTab("positions");
+                      setCopiedPage(1);
+                    }}
                   >
                     Positions ({copiedPositionEventCount})
                   </button>
@@ -2317,7 +2373,10 @@ export default function PolymarketBotPage() {
                         ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
                         : "text-slate-500 hover:text-slate-900"
                     }`}
-                    onClick={() => setCopiedPositionsTab("history")}
+                    onClick={() => {
+                      setCopiedPositionsTab("history");
+                      setCopiedPage(1);
+                    }}
                   >
                     History ({copiedHistoryTrades.length})
                   </button>
@@ -2332,7 +2391,10 @@ export default function PolymarketBotPage() {
                           ? "bg-slate-950 text-white shadow-sm"
                           : "text-slate-500 hover:text-slate-900"
                       }`}
-                      onClick={() => setCopiedPositionStatus("active")}
+                      onClick={() => {
+                        setCopiedPositionStatus("active");
+                        setCopiedPage(1);
+                      }}
                     >
                       Active
                     </button>
@@ -2343,7 +2405,10 @@ export default function PolymarketBotPage() {
                           ? "bg-slate-950 text-white shadow-sm"
                           : "text-slate-500 hover:text-slate-900"
                       }`}
-                      onClick={() => setCopiedPositionStatus("closed")}
+                      onClick={() => {
+                        setCopiedPositionStatus("closed");
+                        setCopiedPage(1);
+                      }}
                     >
                       Closed
                     </button>
@@ -2371,7 +2436,7 @@ export default function PolymarketBotPage() {
                       }`}
                       onClick={() => {
                         setCopiedPositionPnlFilter(option.key);
-                        setCopiedVisibleLimit(TABLE_PAGE_SIZE);
+                        setCopiedPage(1);
                       }}
                     >
                       {option.label}
@@ -2391,7 +2456,10 @@ export default function PolymarketBotPage() {
                           ? "border-slate-950 bg-slate-950 text-white shadow-sm"
                           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950"
                       }`}
-                      onClick={() => setCopiedHistoryFilter(option.key)}
+                      onClick={() => {
+                        setCopiedHistoryFilter(option.key);
+                        setCopiedPage(1);
+                      }}
                     >
                       {option.label}
                     </button>
@@ -2571,13 +2639,10 @@ export default function PolymarketBotPage() {
                   </tbody>
                 </table>
               </div>
-              <ShowMoreRowsControl
+              <TablePaginationControl
                 total={copiedEventGroups.length}
-                visible={visibleCopiedEventGroups.length}
-                onShowMore={() =>
-                  setCopiedVisibleLimit((current) => current + TABLE_PAGE_SIZE)
-                }
-                onShowLess={() => setCopiedVisibleLimit(TABLE_PAGE_SIZE)}
+                page={safeCopiedPage}
+                onPageChange={setCopiedPage}
               />
             </CardContent>
           </Card>
