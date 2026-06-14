@@ -878,6 +878,91 @@ class apiServiceClass implements IApiService {
     return this.post<PolymarketDiscoveryDebugReport>(URLs.polymarket.discoveryDebug(), data);
   }
 
+  polymarketDirectState(): Promise<PolymarketBotState> {
+    return this.get<PolymarketBotState>(URLs.polymarketDirect.state());
+  }
+
+  polymarketDirectStart(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.start());
+  }
+
+  polymarketDirectStop(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.stop());
+  }
+
+  polymarketDirectPause(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.pause());
+  }
+
+  polymarketDirectResume(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.resume());
+  }
+
+  polymarketDirectLiveUnlock(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveUnlock());
+  }
+
+  polymarketDirectLiveLock(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveLock());
+  }
+
+  polymarketDirectLiveDoctor(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveDoctor());
+  }
+
+  polymarketDirectLiveBalanceRefresh(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveBalanceRefresh());
+  }
+
+  polymarketDirectLiveRedeem(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveRedeem());
+  }
+
+  polymarketDirectLiveEmergencyStop(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveEmergencyStop());
+  }
+
+  polymarketDirectLiveResetEmergencyStop(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveResetEmergencyStop());
+  }
+
+  polymarketDirectUpdateLiveLimits(data: PolymarketLiveLimitUpdate): Promise<PolymarketBotState> {
+    return this.patch<PolymarketBotState>(URLs.polymarketDirect.liveLimits(), data);
+  }
+
+  polymarketDirectLiveTradeConfirm(tradeId: string): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveTradeConfirm(tradeId));
+  }
+
+  polymarketDirectLiveTradeReject(tradeId: string): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveTradeReject(tradeId));
+  }
+
+  polymarketDirectLiveRejectAll(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveRejectAll());
+  }
+
+  polymarketDirectAddTrackedAccount(data: PolymarketTrackedAccountCreate): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.trackedAccounts(), data);
+  }
+
+  polymarketDirectUpdateTrackedAccount(
+    accountId: string,
+    data: PolymarketTrackedAccountUpdate,
+  ): Promise<PolymarketBotState> {
+    return this.patch<PolymarketBotState>(URLs.polymarketDirect.trackedAccount(accountId), data);
+  }
+
+  polymarketDirectDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState> {
+    return this.delete<PolymarketBotState>(URLs.polymarketDirect.trackedAccount(accountId));
+  }
+
+  polymarketDirectDiscoveryDebug(
+    data: PolymarketDiscoveryDebugRequest,
+  ): Promise<PolymarketDiscoveryDebugReport> {
+    return this.post<PolymarketDiscoveryDebugReport>(URLs.polymarketDirect.discoveryDebug(), data);
+  }
+
   googleSheetsAuthUrl(): Promise<GoogleSheetsAuthUrlResponse> {
     return this.get<GoogleSheetsAuthUrlResponse>(URLs.googleSheets.authUrl());
   }
