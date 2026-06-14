@@ -2329,6 +2329,11 @@ export default function PolymarketBotPage() {
                     session.
                   </p>
                   <p className="mt-1 text-amber-100/90">
+                    Backend reason:{" "}
+                    {visibleBalance.message ||
+                      "No balance check result has been returned yet."}
+                  </p>
+                  <p className="mt-1 text-amber-100/90">
                     Click Refresh Balance to ask the backend to refresh now. If
                     the refresh still reports login required, open Bullpen/AWS
                     EC2, run the Bullpen login, then refresh again.

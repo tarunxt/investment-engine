@@ -296,11 +296,13 @@ class PolymarketPaperCopyBot:
             self._manual_balance_refresh_task
             and not self._manual_balance_refresh_task.done()
         ):
+            await self._manual_balance_refresh_task
             return
         self.balance_state = self._loading_balance_state()
         self._manual_balance_refresh_task = asyncio.create_task(
             self._refresh_balance_background()
         )
+        await self._manual_balance_refresh_task
 
     async def redeem_live_positions(self) -> None:
         async with self._lock:
