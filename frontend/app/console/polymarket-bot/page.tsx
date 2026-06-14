@@ -401,7 +401,6 @@ const DEFAULT_EC2_COMMANDS = [
   "bullpen status",
 ];
 const TABLE_PAGE_SIZE = 10;
-const COMPACT_TABLE_PAGE_SIZE = 5;
 const PAST_TRADES_PAGE_SIZE = 10;
 
 function formatRelativePollTime(iso?: string | null) {
@@ -527,18 +526,6 @@ function getLiveParsingStatusMessage(state: PolymarketBotState) {
   const skipped = getSkippedBreakup(state).total;
   return `Reading trades continuously · last poll ${lastPoll} · found ${found}, processed ${afterFilters}, queued ${proposals}, skipped ${skipped}.`;
 }
-
-type MissedTradeGroup = {
-  key: string;
-  missedAt: string;
-  marketId: string;
-  marketTitle: string;
-  side: PolymarketSourceTradeDecision["side"];
-  outcome: string;
-  status: string;
-  reason: string;
-  traders: PolymarketSourceTradeDecision[];
-};
 
 type CopiedSortColumn =
   | "copiedAt"
@@ -958,62 +945,6 @@ function getCopiedEventStatus(event: CopiedEventGroup) {
   return `${problemTrade.status}: ${getTradeStatusReason(problemTrade)}`;
 }
 
-function isInsufficientBalanceMiss(trade: PolymarketSourceTradeDecision) {
-  const text =
-    `${trade.failure_reason || ""} ${trade.reason || ""}`.toLowerCase();
-  return (
-    trade.status === "failed" &&
-    (text.includes("insufficient") ||
-      text.includes("not enough") ||
-      text.includes("low balance") ||
-      text.includes("balance"))
-  );
-}
-
-function getMissedTradeKey(trade: PolymarketSourceTradeDecision) {
-  return [trade.market_id, trade.market_title, trade.side, trade.outcome].join(
-    "::",
-  );
-}
-
-function buildMissedTradeGroups(trades: PolymarketSourceTradeDecision[]) {
-  const groups = new Map<string, MissedTradeGroup>();
-
-  for (const trade of trades.filter(isInsufficientBalanceMiss)) {
-    const key = getMissedTradeKey(trade);
-    const missedAt = trade.executed_at || trade.updated_at || trade.proposed_at;
-    const reason =
-      trade.failure_reason || trade.reason || "Insufficient balance";
-    const existing = groups.get(key);
-
-    if (!existing) {
-      groups.set(key, {
-        key,
-        missedAt,
-        marketId: trade.market_id,
-        marketTitle: trade.market_title,
-        side: trade.side,
-        outcome: trade.outcome,
-        status: trade.status,
-        reason,
-        traders: [trade],
-      });
-      continue;
-    }
-
-    existing.traders.push(trade);
-    if (new Date(missedAt).getTime() > new Date(existing.missedAt).getTime()) {
-      existing.missedAt = missedAt;
-      existing.reason = reason;
-      existing.status = trade.status;
-    }
-  }
-
-  return Array.from(groups.values()).sort(
-    (a, b) => new Date(b.missedAt).getTime() - new Date(a.missedAt).getTime(),
-  );
-}
-
 function buildCopiedEventGroups(trades: PolymarketSourceTradeDecision[]) {
   const groups = new Map<string, CopiedEventGroup>();
 
@@ -1194,47 +1125,6 @@ function TablePaginationControl({
   );
 }
 
-function ShowMoreRowsControl({
-  total,
-  visible,
-  onShowMore,
-  onShowLess,
-  pageSize = TABLE_PAGE_SIZE,
-}: {
-  total: number;
-  visible: number;
-  onShowMore: () => void;
-  onShowLess: () => void;
-  pageSize?: number;
-}) {
-  if (total <= pageSize) return null;
-
-  return (
-    <div className="mt-4 flex flex-wrap items-center justify-end gap-3 text-sm text-slate-500">
-      <span>
-        Showing {visible} of {total}
-      </span>
-      {visible < total ? (
-        <button
-          type="button"
-          className="rounded-full border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-          onClick={onShowMore}
-        >
-          See more
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="rounded-full border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-          onClick={onShowLess}
-        >
-          Show first {pageSize}
-        </button>
-      )}
-    </div>
-  );
-}
-
 function PaginationRowsControl({
   total,
   page,
@@ -1323,8 +1213,6 @@ export default function PolymarketBotPage() {
   >({});
   const [selectedCopiedEvent, setSelectedCopiedEvent] =
     useState<CopiedEventGroup | null>(null);
-  const [selectedMissedTrade, setSelectedMissedTrade] =
-    useState<MissedTradeGroup | null>(null);
   const [selectedFailedCopiedEvent, setSelectedFailedCopiedEvent] =
     useState<CopiedEventGroup | null>(null);
   const [selectedAnalyzedTrader, setSelectedAnalyzedTrader] =
@@ -1356,9 +1244,6 @@ export default function PolymarketBotPage() {
     useState("");
   const [copiedPage, setCopiedPage] = useState(1);
   const [copiedSearchQuery, setCopiedSearchQuery] = useState("");
-  const [missedVisibleLimit, setMissedVisibleLimit] = useState(
-    COMPACT_TABLE_PAGE_SIZE,
-  );
   const [skippedBreakupOpen, setSkippedBreakupOpen] = useState(false);
   const [pendingActionElapsedSeconds, setPendingActionElapsedSeconds] =
     useState(0);
@@ -1922,11 +1807,6 @@ export default function PolymarketBotPage() {
   const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
   const copiedPositionEventCount =
     buildCopiedEventGroups(copiedPositionTrades).length;
-  const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
-  const visibleMissedTradeGroups = missedTradeGroups.slice(
-    0,
-    missedVisibleLimit,
-  );
   const redeemedTradeRows = buildRedeemedTradeRows(state);
   const claimPendingTradeRows = redeemedTradeRows.filter(
     (row) => row.status === "claimable",
@@ -3449,100 +3329,6 @@ export default function PolymarketBotPage() {
               <Card className="border border-slate-200 bg-white py-6">
                 <CardHeader className="pb-0">
                   <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                    Missed Trades
-                  </CardTitle>
-                  <CardDescription>
-                    Trades shortlisted for live copy execution but missed
-                    because the Bullpen account did not have enough available
-                    balance.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
-                    <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                      <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                        <tr>
-                          <th className="px-4 py-3">Timestamp</th>
-                          <th className="px-4 py-3">Event Name</th>
-                          <th className="px-4 py-3">Side</th>
-                          <th className="px-4 py-3">Trader</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {missedTradeGroups.length === 0 ? (
-                          <tr>
-                            <td
-                              className="px-4 py-6 text-sm text-slate-500"
-                              colSpan={4}
-                            >
-                              No insufficient-balance missed trades found in
-                              recent decisions.
-                            </td>
-                          </tr>
-                        ) : (
-                          visibleMissedTradeGroups.map((trade) => {
-                            const hasMultipleTraders = trade.traders.length > 1;
-                            return (
-                              <tr key={trade.key} className="align-top">
-                                <td className="px-4 py-3 text-slate-700">
-                                  {formatTs(trade.missedAt)}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700">
-                                  <button
-                                    className="text-left font-medium text-slate-950 hover:text-sky-700"
-                                    onClick={() =>
-                                      setSelectedMissedTrade(trade)
-                                    }
-                                  >
-                                    {trade.marketTitle}
-                                  </button>
-                                  <div className="mt-1 text-xs text-slate-500">
-                                    {trade.outcome}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 font-semibold text-slate-800">
-                                  {trade.side}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700">
-                                  {hasMultipleTraders ? (
-                                    <button
-                                      className="font-medium text-sky-700 underline underline-offset-2"
-                                      onClick={() =>
-                                        setSelectedMissedTrade(trade)
-                                      }
-                                    >
-                                      multiple ({trade.traders.length})
-                                    </button>
-                                  ) : (
-                                    getTraderDisplayName(trade.traders[0])
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  <ShowMoreRowsControl
-                    total={missedTradeGroups.length}
-                    visible={visibleMissedTradeGroups.length}
-                    onShowMore={() =>
-                      setMissedVisibleLimit(
-                        (current) => current + COMPACT_TABLE_PAGE_SIZE,
-                      )
-                    }
-                    onShowLess={() =>
-                      setMissedVisibleLimit(COMPACT_TABLE_PAGE_SIZE)
-                    }
-                    pageSize={COMPACT_TABLE_PAGE_SIZE}
-                  />
-                </CardContent>
-              </Card>
-
-              <Card className="border border-slate-200 bg-white py-6">
-                <CardHeader className="pb-0">
-                  <CardTitle className="text-base tracking-[0.18em] text-slate-950">
                     Top Tracked Traders
                   </CardTitle>
                   <CardDescription>
@@ -4194,72 +3980,6 @@ export default function PolymarketBotPage() {
                       </div>
                     ),
                   )}
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {selectedMissedTrade ? (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
-              role="dialog"
-              aria-modal="true"
-              onClick={() => setSelectedMissedTrade(null)}
-            >
-              <div
-                className="relative w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <button
-                  type="button"
-                  className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                  aria-label="Close missed trade traders popup"
-                  onClick={() => setSelectedMissedTrade(null)}
-                >
-                  <X className="size-5" />
-                </button>
-                <div className="flex items-start justify-between gap-4 pr-12">
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-950">
-                      Missed trade traders
-                    </h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {selectedMissedTrade.marketTitle}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-5 overflow-hidden rounded-[20px] border border-slate-200">
-                  <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      <tr>
-                        <th className="px-4 py-3">Trader</th>
-                        <th className="px-4 py-3">Timestamp</th>
-                        <th className="px-4 py-3">Side</th>
-                        <th className="px-4 py-3">Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {selectedMissedTrade.traders.map((trade) => (
-                        <tr key={trade.id}>
-                          <td className="px-4 py-3 font-medium text-slate-950">
-                            {getTraderDisplayName(trade)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatTs(
-                              trade.executed_at ||
-                                trade.updated_at ||
-                                trade.proposed_at,
-                            )}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-slate-800">
-                            {trade.side}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {trade.failure_reason || selectedMissedTrade.reason}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
                 </div>
               </div>
             </div>
