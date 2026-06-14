@@ -190,6 +190,21 @@ async def update_polymarket_tracked_account(
     return await bot.get_state()
 
 
+@router.post(
+    "/tracked-accounts/{account_id}/net-worth/refresh",
+    response_model=PolymarketBotState,
+)
+async def refresh_polymarket_tracked_account_net_worth(
+    account_id: str, current_user: User = Depends(get_current_user)
+):
+    bot = await _get_bot(current_user)
+    try:
+        await bot.refresh_tracked_account_net_worth(account_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await bot.get_state()
+
+
 @router.delete("/tracked-accounts/{account_id}", response_model=PolymarketBotState)
 async def delete_polymarket_tracked_account(
     account_id: str, current_user: User = Depends(get_current_user)
