@@ -31,6 +31,7 @@ import type {
   PolymarketBotState,
   PolymarketPaperTrade,
   PolymarketPosition,
+  PolymarketTrackedAccount,
   PolymarketSourceTradeDecision,
 } from "@/types/api";
 
@@ -572,6 +573,7 @@ type AnalysisTradeRow = {
   status: PolymarketSourceTradeDecision["status"];
   pnl: number;
   reason: string;
+  traderNetWorth: number;
 };
 
 type CopiedTraderAnalysisRow = {
@@ -583,6 +585,7 @@ type CopiedTraderAnalysisRow = {
   tradesLost: number;
   totalLosses: number;
   totalPnl: number;
+  netWorth: number;
   trades: AnalysisTradeRow[];
 };
 
@@ -622,6 +625,7 @@ function buildAnalysisTradeRows(
         status: trade.status,
         pnl: getAnalysisTradePnl(trade),
         reason: trade.reason || trade.command || "Copied trade",
+        traderNetWorth: trade.trader_net_worth_usd || 0,
       };
     })
     .sort(
@@ -631,8 +635,22 @@ function buildAnalysisTradeRows(
     );
 }
 
+function getTrackedAccountForAnalysisRow(
+  trade: AnalysisTradeRow,
+  accounts: PolymarketTrackedAccount[],
+) {
+  const tradeKey = trackedAccountKey(trade.traderKey);
+  const tradeName = trackedAccountKey(trade.traderName);
+  return accounts.find((account) =>
+    [account.handle, account.target, account.address, account.proxy_wallet]
+      .map(trackedAccountKey)
+      .some((key) => key && (key === tradeKey || key === tradeName)),
+  );
+}
+
 function buildCopiedTraderAnalysisRows(
   trades: AnalysisTradeRow[],
+  accounts: PolymarketTrackedAccount[],
 ): CopiedTraderAnalysisRow[] {
   const rows = new Map<string, CopiedTraderAnalysisRow>();
 
@@ -648,9 +666,13 @@ function buildCopiedTraderAnalysisRows(
         tradesLost: 0,
         totalLosses: 0,
         totalPnl: 0,
+        netWorth: 0,
         trades: [],
       } satisfies CopiedTraderAnalysisRow);
 
+    const account = getTrackedAccountForAnalysisRow(trade, accounts);
+    existing.netWorth =
+      account?.net_worth_usd || trade.traderNetWorth || existing.netWorth;
     existing.copiedTrades += 1;
     existing.trades.push(trade);
     if (trade.pnl >= 0) {
@@ -1787,8 +1809,10 @@ export default function PolymarketBotPage() {
   );
   const setPastTradesPage =
     pastTradesTab === "won" ? setWonPastTradesPage : setLostPastTradesPage;
-  const copiedTraderAnalysisRows =
-    buildCopiedTraderAnalysisRows(analysisTradeRows);
+  const copiedTraderAnalysisRows = buildCopiedTraderAnalysisRows(
+    analysisTradeRows,
+    state.tracked_accounts,
+  );
   const claimableRedeemedCount = claimPendingTradeRows.length;
   const redeemStatusMessage =
     pendingAction === "redeem"
@@ -3339,6 +3363,7 @@ export default function PolymarketBotPage() {
                   <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                     <tr>
                       <th className="px-4 py-3">Trader Name</th>
+                      <th className="px-4 py-3">Net worth</th>
                       <th className="px-4 py-3">Copied Trades</th>
                       <th className="px-4 py-3">Trades Won</th>
                       <th className="px-4 py-3">Total Winnings</th>
@@ -3352,7 +3377,7 @@ export default function PolymarketBotPage() {
                       <tr>
                         <td
                           className="px-4 py-6 text-sm text-slate-500"
-                          colSpan={7}
+                          colSpan={8}
                         >
                           No copied trader analysis is available yet.
                         </td>
@@ -3366,6 +3391,9 @@ export default function PolymarketBotPage() {
                         >
                           <td className="px-4 py-3 font-medium text-sky-700 underline underline-offset-2">
                             {trader.traderName}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-700">
+                            {trader.netWorth > 0 ? formatMoney(trader.netWorth) : "—"}
                           </td>
                           <td className="px-4 py-3 text-slate-700">
                             {trader.copiedTrades}

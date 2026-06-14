@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -58,6 +58,12 @@ BALANCE_REFRESH_INTERVAL_SECONDS = max(
 )
 FORCED_REDEEM_CLAIM_INTERVAL_SECONDS = max(
     60, int(float(os.getenv("POLYMARKET_FORCED_REDEEM_CLAIM_INTERVAL_SECONDS", "300")))
+)
+NET_WORTH_DAILY_REFRESH_HOUR_UTC = min(
+    23, max(0, int(float(os.getenv("POLYMARKET_NET_WORTH_DAILY_REFRESH_HOUR_UTC", "5"))))
+)
+NET_WORTH_DAILY_REFRESH_MINUTE_UTC = min(
+    59, max(0, int(float(os.getenv("POLYMARKET_NET_WORTH_DAILY_REFRESH_MINUTE_UTC", "0"))))
 )
 
 
@@ -1765,12 +1771,35 @@ class PolymarketPaperCopyBot:
         if self._net_worth_refresh_task and not self._net_worth_refresh_task.done():
             return
         self._net_worth_refresh_task = asyncio.create_task(
-            self._refresh_all_tracked_account_net_worths()
+            self._run_daily_net_worth_refresh_loop()
         )
+
+    async def _run_daily_net_worth_refresh_loop(self) -> None:
+        while True:
+            sleep_seconds = self._seconds_until_next_net_worth_refresh()
+            await asyncio.sleep(sleep_seconds)
+            await self._refresh_all_tracked_account_net_worths()
+
+    def _seconds_until_next_net_worth_refresh(self) -> float:
+        now = datetime.now(timezone.utc)
+        next_run = now.replace(
+            hour=NET_WORTH_DAILY_REFRESH_HOUR_UTC,
+            minute=NET_WORTH_DAILY_REFRESH_MINUTE_UTC,
+            second=0,
+            microsecond=0,
+        )
+        if next_run <= now:
+            next_run += timedelta(days=1)
+        return max(1.0, (next_run - now).total_seconds())
 
     async def _refresh_all_tracked_account_net_worths(self) -> None:
         async with self._lock:
             account_ids = [account.id for account in self.tracked_accounts]
+        if not account_ids:
+            return
+        self._add_activity(
+            "Daily 5:00 AM UTC net worth refresh started for tracked Polymarket handles."
+        )
         for account_id in account_ids:
             try:
                 await self.refresh_tracked_account_net_worth(account_id)
