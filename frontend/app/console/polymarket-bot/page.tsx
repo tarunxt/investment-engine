@@ -347,6 +347,33 @@ function formatRelativePollTime(iso?: string | null) {
   return `${hours}h ago`;
 }
 
+function getRedeemStatusMessage(elapsedSeconds: number, claimableCount: number) {
+  const claimText =
+    claimableCount === 1
+      ? "1 resolved winning position"
+      : `${claimableCount} resolved winning positions`;
+  const waitingMessages = [
+    `Submitting the claim for ${claimText} to Bullpen…`,
+    "Bullpen accepted the request; waiting for claim settlement to post…",
+    "Checking whether the resolved positions closed after the claim request…",
+    "Refreshing live state so the Redeemed Trades table can update…",
+    "Still waiting on Bullpen. This can take a few minutes; keeping the claim request open…",
+    "No completion signal yet. Continuing to poll every few seconds so you are not left guessing…",
+  ];
+
+  if (elapsedSeconds >= 120) {
+    const stuckMessages = [
+      "Claim is still running after 2+ minutes. Bullpen may be slow; do not refresh yet.",
+      "Still waiting for Bullpen to finish. The table will refresh as soon as the backend returns.",
+      "No final response yet. Keeping controls locked to avoid duplicate claim submissions.",
+      "Claim remains in progress. If this lasts much longer, check Bullpen/backend health after it returns.",
+    ];
+    return stuckMessages[Math.floor(elapsedSeconds / 5) % stuckMessages.length];
+  }
+
+  return waitingMessages[Math.floor(elapsedSeconds / 5) % waitingMessages.length];
+}
+
 function getPendingActionDetail(pendingAction: string | null) {
   if (pendingAction === "redeem") {
     return "Submitting the claim to Bullpen, waiting for resolved positions to close, then refreshing this table with the latest redeemed trades.";
@@ -954,8 +981,23 @@ export default function PolymarketBotPage() {
     COMPACT_TABLE_PAGE_SIZE,
   );
   const [skippedBreakupOpen, setSkippedBreakupOpen] = useState(false);
+  const [pendingActionElapsedSeconds, setPendingActionElapsedSeconds] =
+    useState(0);
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
+  useEffect(() => {
+    if (!pendingAction) return;
+
+    const startedAt = Date.now();
+    const interval = window.setInterval(() => {
+      setPendingActionElapsedSeconds(
+        Math.floor((Date.now() - startedAt) / 1000),
+      );
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [pendingAction]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1023,6 +1065,7 @@ export default function PolymarketBotPage() {
     actionInFlight.current = true;
     lastMutationAt.current = Date.now();
     setPendingAction(label);
+    setPendingActionElapsedSeconds(0);
     setActionError(null);
     try {
       let nextState = await action();
@@ -1046,6 +1089,7 @@ export default function PolymarketBotPage() {
     } finally {
       actionInFlight.current = false;
       setPendingAction(null);
+      setPendingActionElapsedSeconds(0);
     }
   }
 
@@ -1316,6 +1360,20 @@ export default function PolymarketBotPage() {
     missedVisibleLimit,
   );
   const redeemedTradeRows = buildRedeemedTradeRows(state);
+  const claimableRedeemedCount = redeemedTradeRows.filter(
+    (row) => row.status === "claimable",
+  ).length;
+  const redeemStatusMessage =
+    pendingAction === "redeem"
+      ? getRedeemStatusMessage(
+          pendingActionElapsedSeconds,
+          claimableRedeemedCount,
+        )
+      : claimableRedeemedCount > 0
+        ? `${claimableRedeemedCount} resolved winning ${
+            claimableRedeemedCount === 1 ? "position is" : "positions are"
+          } ready to claim.`
+        : "No resolved winning positions are currently waiting to be claimed.";
   const copiedPositionsRefreshSeconds = 5;
   const visibleTrackedTraders = state.tracked_traders;
   const copiedSortHeader = (
@@ -2259,14 +2317,20 @@ export default function PolymarketBotPage() {
                   >
                     {pendingAction === "redeem" ? "Claiming…" : "Claim Now"}
                   </Button>
-                  {pendingAction === "redeem" ? (
-                    <div className="flex items-start gap-2 text-left text-xs leading-5 text-slate-500 sm:text-right">
+                  <div
+                    className="flex items-start gap-2 text-left text-xs leading-5 text-slate-500 sm:text-right"
+                    aria-live="polite"
+                  >
+                    {pendingAction === "redeem" ? (
                       <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-emerald-600 sm:hidden" />
-                      <span>
-                        {pendingActionDetail} The Redeemed Trades table will refresh automatically when the claim finishes.
-                      </span>
-                    </div>
-                  ) : null}
+                    ) : null}
+                    <span>
+                      {redeemStatusMessage}
+                      {pendingAction === "redeem"
+                        ? " The Redeemed Trades table will refresh automatically when the claim finishes."
+                        : null}
+                    </span>
+                  </div>
                 </div>
               </div>
             </CardHeader>
