@@ -1179,6 +1179,9 @@ export default function PolymarketBotPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [autoDoctorRefreshing, setAutoDoctorRefreshing] = useState(false);
+  const [activeCopyTradingTab, setActiveCopyTradingTab] = useState<
+    "bullpen" | "polymarket"
+  >("bullpen");
   const [activeScreen, setActiveScreen] = useState<
     "main" | "analysis" | "settings"
   >("main");
@@ -1983,7 +1986,7 @@ export default function PolymarketBotPage() {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-lg font-semibold tracking-tight text-slate-950">
-              Polymarket Copy Bot
+              Copy trading Bots
             </h1>
             {liveCriticalBanner ? (
               <div
@@ -2001,58 +2004,96 @@ export default function PolymarketBotPage() {
           </div>
           <p className="text-sm text-slate-500">{subtitle}</p>
         </div>
-        <div className="flex flex-wrap gap-2 xl:justify-end">
-          <Button
-            asChild
-            size="sm"
-            variant="outline"
-            className="rounded-full border-emerald-300 bg-emerald-50 px-5 text-emerald-800 hover:border-emerald-400 hover:bg-emerald-100 hover:text-emerald-900"
-          >
-            <a href={BULLPEN_ACCOUNT_URL} target="_blank" rel="noreferrer">
-              Open Bullpen Account
-              <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
-            </a>
-          </Button>
-          <Button
-            size="sm"
-            variant={activeScreen === "main" ? "default" : "outline"}
-            className={
-              activeScreen === "main"
-                ? "rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
-                : "rounded-full border-slate-300 px-5"
-            }
-            onClick={() => setActiveScreen("main")}
-          >
-            Main
-          </Button>
-          <Button
-            size="sm"
-            variant={activeScreen === "analysis" ? "default" : "outline"}
-            className={
-              activeScreen === "analysis"
-                ? "rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
-                : "rounded-full border-slate-300 px-5"
-            }
-            onClick={() => setActiveScreen("analysis")}
-          >
-            Analysis
-          </Button>
-          <Button
-            size="sm"
-            variant={activeScreen === "settings" ? "default" : "outline"}
-            className={
-              activeScreen === "settings"
-                ? "rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
-                : "rounded-full border-slate-300 px-5"
-            }
-            onClick={() => setActiveScreen("settings")}
-          >
-            Settings
-          </Button>
-        </div>
+        {activeCopyTradingTab === "bullpen" ? (
+          <div className="flex flex-wrap gap-2 xl:justify-end">
+            <Button
+              asChild
+              size="sm"
+              variant="outline"
+              className="rounded-full border-emerald-300 bg-emerald-50 px-5 text-emerald-800 hover:border-emerald-400 hover:bg-emerald-100 hover:text-emerald-900"
+            >
+              <a href={BULLPEN_ACCOUNT_URL} target="_blank" rel="noreferrer">
+                Open Bullpen Account
+                <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
+              </a>
+            </Button>
+            <Button
+              size="sm"
+              variant={activeScreen === "main" ? "default" : "outline"}
+              className={
+                activeScreen === "main"
+                  ? "rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
+                  : "rounded-full border-slate-300 px-5"
+              }
+              onClick={() => setActiveScreen("main")}
+            >
+              Main
+            </Button>
+            <Button
+              size="sm"
+              variant={activeScreen === "analysis" ? "default" : "outline"}
+              className={
+                activeScreen === "analysis"
+                  ? "rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
+                  : "rounded-full border-slate-300 px-5"
+              }
+              onClick={() => setActiveScreen("analysis")}
+            >
+              Analysis
+            </Button>
+            <Button
+              size="sm"
+              variant={activeScreen === "settings" ? "default" : "outline"}
+              className={
+                activeScreen === "settings"
+                  ? "rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
+                  : "rounded-full border-slate-300 px-5"
+              }
+              onClick={() => setActiveScreen("settings")}
+            >
+              Settings
+            </Button>
+          </div>
+        ) : null}
       </div>
 
-      {error ? (
+      <div className="flex flex-wrap gap-2 rounded-[24px] border border-slate-200 bg-white p-1 shadow-sm">
+        {[
+          { id: "bullpen", label: "Bullpen" },
+          { id: "polymarket", label: "Polymarket" },
+        ].map((tab) => {
+          const isActive = activeCopyTradingTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className={
+                isActive
+                  ? "rounded-[18px] bg-slate-950 px-5 py-2 text-sm font-semibold text-white shadow-sm"
+                  : "rounded-[18px] px-5 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-950"
+              }
+              onClick={() =>
+                setActiveCopyTradingTab(tab.id as "bullpen" | "polymarket")
+              }
+              aria-pressed={isActive}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeCopyTradingTab === "polymarket" ? (
+        <div className="rounded-[28px] border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-950">Polymarket</h2>
+          <p className="mt-2 text-sm text-slate-500">
+            This tab is intentionally empty and ready for a future Polymarket
+            copy-trading workflow.
+          </p>
+        </div>
+      ) : (
+        <>
+          {error ? (
         <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           {error}
         </div>
@@ -3952,6 +3993,8 @@ export default function PolymarketBotPage() {
           ) : null}
         </div>
       ) : null}
+        </>
+      )}
     </div>
   );
 }
