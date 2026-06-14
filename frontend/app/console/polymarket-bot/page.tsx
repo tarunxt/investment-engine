@@ -531,6 +531,115 @@ type RedeemedTradeRow = {
   detail: string;
 };
 
+type AnalysisTradeRow = {
+  id: string;
+  timestamp: string;
+  traderKey: string;
+  traderName: string;
+  marketId: string;
+  marketTitle: string;
+  outcome: string;
+  side: PolymarketSourceTradeDecision["side"];
+  amount: number;
+  price: number;
+  shares: number;
+  status: PolymarketSourceTradeDecision["status"];
+  pnl: number;
+  reason: string;
+};
+
+type CopiedTraderAnalysisRow = {
+  key: string;
+  traderName: string;
+  copiedTrades: number;
+  tradesWon: number;
+  totalWinnings: number;
+  tradesLost: number;
+  totalLosses: number;
+  totalPnl: number;
+  trades: AnalysisTradeRow[];
+};
+
+function getAnalysisTradePnl(trade: PolymarketSourceTradeDecision) {
+  if (trade.side === "SELL") return trade.amount;
+  return trade.shares * trade.price - trade.amount;
+}
+
+function buildAnalysisTradeRows(
+  trades: PolymarketSourceTradeDecision[],
+): AnalysisTradeRow[] {
+  return trades
+    .filter((trade) => trade.status === "executed")
+    .map((trade) => {
+      const traderName = getTraderDisplayName(trade);
+      const traderKey =
+        trade.trader_id ||
+        trade.trader_address ||
+        trade.trader_handle ||
+        trade.trader_name;
+      return {
+        id: trade.id,
+        timestamp: trade.executed_at || trade.updated_at || trade.proposed_at,
+        traderKey,
+        traderName,
+        marketId: trade.market_id,
+        marketTitle: trade.market_title,
+        outcome: trade.outcome,
+        side: trade.side,
+        amount: trade.amount,
+        price: trade.price,
+        shares: trade.shares,
+        status: trade.status,
+        pnl: getAnalysisTradePnl(trade),
+        reason: trade.reason || trade.command || "Copied trade",
+      };
+    })
+    .sort(
+      (a, b) =>
+        (parseApiTimestamp(b.timestamp)?.getTime() ?? 0) -
+        (parseApiTimestamp(a.timestamp)?.getTime() ?? 0),
+    );
+}
+
+function buildCopiedTraderAnalysisRows(
+  trades: AnalysisTradeRow[],
+): CopiedTraderAnalysisRow[] {
+  const rows = new Map<string, CopiedTraderAnalysisRow>();
+
+  for (const trade of trades) {
+    const existing =
+      rows.get(trade.traderKey) ||
+      ({
+        key: trade.traderKey,
+        traderName: trade.traderName,
+        copiedTrades: 0,
+        tradesWon: 0,
+        totalWinnings: 0,
+        tradesLost: 0,
+        totalLosses: 0,
+        totalPnl: 0,
+        trades: [],
+      } satisfies CopiedTraderAnalysisRow);
+
+    existing.copiedTrades += 1;
+    existing.trades.push(trade);
+    if (trade.pnl >= 0) {
+      existing.tradesWon += 1;
+      existing.totalWinnings += trade.pnl;
+    } else {
+      existing.tradesLost += 1;
+      existing.totalLosses += Math.abs(trade.pnl);
+    }
+    existing.totalPnl = existing.totalWinnings - existing.totalLosses;
+    rows.set(trade.traderKey, existing);
+  }
+
+  return Array.from(rows.values()).sort((a, b) => {
+    if (b.copiedTrades !== a.copiedTrades) return b.copiedTrades - a.copiedTrades;
+    return b.totalPnl - a.totalPnl;
+  });
+}
+
 function isRedeemedPaperTrade(trade: PolymarketPaperTrade) {
   const searchable =
     `${trade.reason || ""} ${trade.status || ""}`.toLowerCase();
@@ -957,7 +1066,7 @@ export default function PolymarketBotPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [autoDoctorRefreshing, setAutoDoctorRefreshing] = useState(false);
-  const [activeScreen, setActiveScreen] = useState<"main" | "settings">("main");
+  const [activeScreen, setActiveScreen] = useState<"main" | "analysis" | "settings">("main");
   const [lastSettledBalance, setLastSettledBalance] =
     useState<PolymarketBalanceState | null>(null);
   const [accountDrafts, setAccountDrafts] = useState<
@@ -977,6 +1086,9 @@ export default function PolymarketBotPage() {
     useState<MissedTradeGroup | null>(null);
   const [selectedFailedCopiedEvent, setSelectedFailedCopiedEvent] =
     useState<CopiedEventGroup | null>(null);
+  const [selectedAnalyzedTrader, setSelectedAnalyzedTrader] =
+    useState<CopiedTraderAnalysisRow | null>(null);
+  const [pastTradesTab, setPastTradesTab] = useState<"won" | "lost">("won");
   const [copiedPositionsTab, setCopiedPositionsTab] = useState<
     "positions" | "history"
   >("positions");
@@ -1738,6 +1850,18 @@ export default function PolymarketBotPage() {
             onClick={() => setActiveScreen("main")}
           >
             Main
+          </Button>
+          <Button
+            size="sm"
+            variant={activeScreen === "analysis" ? "default" : "outline"}
+            className={
+              activeScreen === "analysis"
+                ? "rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
+                : "rounded-full border-slate-300 px-5"
+            }
+            onClick={() => setActiveScreen("analysis")}
+          >
+            Analysis
           </Button>
           <Button
             size="sm"
@@ -2713,6 +2837,133 @@ export default function PolymarketBotPage() {
             </CardContent>
           </Card>
         </>
+      ) : activeScreen === "analysis" ? (
+        <>
+          <Card className="border border-slate-200 bg-white py-6">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                Past Trades
+              </CardTitle>
+              <CardDescription>
+                Closed copied trades split by winning and losing outcomes.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="mb-4 inline-flex w-full rounded-2xl border border-slate-200 bg-slate-50 p-1 sm:w-auto">
+                <button
+                  type="button"
+                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                    pastTradesTab === "won"
+                      ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                  onClick={() => setPastTradesTab("won")}
+                >
+                  Won ({wonAnalysisTrades.length})
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition sm:flex-none ${
+                    pastTradesTab === "lost"
+                      ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+                      : "text-slate-500 hover:text-slate-900"
+                  }`}
+                  onClick={() => setPastTradesTab("lost")}
+                >
+                  Lost ({lostAnalysisTrades.length})
+                </button>
+              </div>
+              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Timestamp</th>
+                      <th className="px-4 py-3">Trader</th>
+                      <th className="px-4 py-3">Event</th>
+                      <th className="px-4 py-3">Outcome</th>
+                      <th className="px-4 py-3">Side</th>
+                      <th className="px-4 py-3">Amount</th>
+                      <th className="px-4 py-3">Price</th>
+                      <th className="px-4 py-3">PnL</th>
+                      <th className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {visiblePastAnalysisTrades.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-6 text-sm text-slate-500" colSpan={9}>
+                          No {pastTradesTab} copied trades are available yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      visiblePastAnalysisTrades.map((trade) => (
+                        <tr key={trade.id} className="align-top">
+                          <td className="px-4 py-3 text-slate-700">{formatTs(trade.timestamp)}</td>
+                          <td className="px-4 py-3 font-medium text-slate-950">{trade.traderName}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="font-medium text-slate-950">{trade.marketTitle}</div>
+                            <div className="mt-1 text-xs text-slate-500">{trade.marketId}</div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">{trade.outcome}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{trade.side}</td>
+                          <td className="px-4 py-3 text-slate-700">{formatMoney(trade.amount)}</td>
+                          <td className="px-4 py-3 text-slate-700">{formatMoney(trade.price, 4)}</td>
+                          <td className={`px-4 py-3 font-semibold ${trade.pnl >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{formatMoney(trade.pnl)}</td>
+                          <td className="px-4 py-3 text-slate-700">{trade.status}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border border-slate-200 bg-white py-6">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
+                Copied Traders
+              </CardTitle>
+              <CardDescription>
+                Traders successfully copied so far, sorted by copied trades in decreasing order. Click any row for a full trade breakup.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                  <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Trader Name</th>
+                      <th className="px-4 py-3">Copied Trades</th>
+                      <th className="px-4 py-3">Trades Won</th>
+                      <th className="px-4 py-3">Total Winnings</th>
+                      <th className="px-4 py-3">Trades Lost</th>
+                      <th className="px-4 py-3">Total Losses</th>
+                      <th className="px-4 py-3">Total PnL</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {copiedTraderAnalysisRows.length === 0 ? (
+                      <tr><td className="px-4 py-6 text-sm text-slate-500" colSpan={7}>No copied trader analysis is available yet.</td></tr>
+                    ) : (
+                      copiedTraderAnalysisRows.map((trader) => (
+                        <tr key={trader.key} className="cursor-pointer align-top transition hover:bg-slate-50" onClick={() => setSelectedAnalyzedTrader(trader)}>
+                          <td className="px-4 py-3 font-medium text-sky-700 underline underline-offset-2">{trader.traderName}</td>
+                          <td className="px-4 py-3 text-slate-700">{trader.copiedTrades}</td>
+                          <td className="px-4 py-3 text-emerald-700">{trader.tradesWon}</td>
+                          <td className="px-4 py-3 font-semibold text-emerald-700">{formatMoney(trader.totalWinnings)}</td>
+                          <td className="px-4 py-3 text-rose-700">{trader.tradesLost}</td>
+                          <td className="px-4 py-3 font-semibold text-rose-700">{formatMoney(trader.totalLosses)}</td>
+                          <td className={`px-4 py-3 font-semibold ${trader.totalPnl >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{formatMoney(trader.totalPnl)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
       ) : (
         <>
           <Card className="border border-slate-200 bg-white py-6">
@@ -3211,6 +3462,134 @@ export default function PolymarketBotPage() {
                         </tr>
                       );
                     })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {selectedAnalyzedTrader ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSelectedAnalyzedTrader(null)}
+        >
+          <div
+            className="relative max-h-[85vh] w-full max-w-6xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              aria-label="Close copied trader analysis popup"
+              onClick={() => setSelectedAnalyzedTrader(null)}
+            >
+              <X className="size-5" />
+            </button>
+            <div className="flex flex-col gap-4 pr-12">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  {selectedAnalyzedTrader.traderName} trade breakup
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedAnalyzedTrader.copiedTrades} copied trades ·{" "}
+                  {selectedAnalyzedTrader.tradesWon} won ·{" "}
+                  {selectedAnalyzedTrader.tradesLost} lost · Total PnL{" "}
+                  {formatMoney(selectedAnalyzedTrader.totalPnl)}
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Total Winnings
+                  </div>
+                  <div className="mt-2 text-lg font-semibold text-emerald-700">
+                    {formatMoney(selectedAnalyzedTrader.totalWinnings)}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Total Losses
+                  </div>
+                  <div className="mt-2 text-lg font-semibold text-rose-700">
+                    {formatMoney(selectedAnalyzedTrader.totalLosses)}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Trades Won
+                  </div>
+                  <div className="mt-2 text-lg font-semibold text-slate-950">
+                    {selectedAnalyzedTrader.tradesWon}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Trades Lost
+                  </div>
+                  <div className="mt-2 text-lg font-semibold text-slate-950">
+                    {selectedAnalyzedTrader.tradesLost}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-5 overflow-x-auto rounded-[20px] border border-slate-200">
+              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Timestamp</th>
+                    <th className="px-4 py-3">Event</th>
+                    <th className="px-4 py-3">Outcome</th>
+                    <th className="px-4 py-3">Side</th>
+                    <th className="px-4 py-3">Amount</th>
+                    <th className="px-4 py-3">Shares</th>
+                    <th className="px-4 py-3">Price</th>
+                    <th className="px-4 py-3">PnL</th>
+                    <th className="px-4 py-3">Reason</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {selectedAnalyzedTrader.trades.map((trade) => (
+                    <tr key={trade.id} className="align-top">
+                      <td className="px-4 py-3 text-slate-700">
+                        {formatTs(trade.timestamp)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        <div className="font-medium text-slate-950">
+                          {trade.marketTitle}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {trade.marketId}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {trade.outcome}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">
+                        {trade.side}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {formatMoney(trade.amount)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {trade.shares.toFixed(4)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {formatMoney(trade.price, 4)}
+                      </td>
+                      <td
+                        className={`px-4 py-3 font-semibold ${
+                          trade.pnl >= 0 ? "text-emerald-600" : "text-rose-600"
+                        }`}
+                      >
+                        {formatMoney(trade.pnl)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {trade.reason}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
