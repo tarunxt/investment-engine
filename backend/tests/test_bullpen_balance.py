@@ -181,3 +181,32 @@ def test_balance_reader_returns_exact_bullpen_wallet_values():
     assert values["available_balance_usd"] == 17.04
     assert values["pnl_usd"] == 5.57
     assert values["upnl_usd"] == -2.87
+
+
+def test_bullpen_process_env_uses_service_home_when_home_is_root(monkeypatch):
+    monkeypatch.setenv("HOME", "/root")
+    monkeypatch.delenv("BULLPEN_HOME", raising=False)
+    monkeypatch.delenv("BULLPEN_CREDENTIALS_HOME", raising=False)
+    monkeypatch.setattr(bullpen.os, "getuid", lambda: 1234)
+
+    class UserInfo:
+        pw_dir = "/home/investor"
+
+    monkeypatch.setattr(bullpen.pwd, "getpwuid", lambda uid: UserInfo())
+
+    env = bullpen.bullpen_process_env(read_only=True)
+
+    assert env["HOME"] == "/home/investor"
+    assert env["BULLPEN_READ_ONLY"] == "true"
+    assert env["BULLPEN_NON_INTERACTIVE"] == "true"
+
+
+def test_bullpen_process_env_allows_explicit_credentials_home(monkeypatch):
+    monkeypatch.setenv("HOME", "/root")
+    monkeypatch.setenv("BULLPEN_CREDENTIALS_HOME", "/srv/bullpen")
+
+    env = bullpen.bullpen_process_env(read_only=False)
+
+    assert env["HOME"] == "/srv/bullpen"
+    assert "BULLPEN_READ_ONLY" not in env
+    assert "BULLPEN_NON_INTERACTIVE" not in env

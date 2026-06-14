@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import pwd
 import re
 import shutil
 from collections.abc import Iterable
@@ -194,6 +195,34 @@ def bullpen_candidate_paths() -> list[str]:
     )
 
 
+def _configured_bullpen_home() -> str | None:
+    configured_home = os.getenv("BULLPEN_HOME") or os.getenv("BULLPEN_CREDENTIALS_HOME")
+    if configured_home:
+        return os.path.expanduser(configured_home)
+    return None
+
+
+def _service_user_home() -> str | None:
+    try:
+        return pwd.getpwuid(os.getuid()).pw_dir
+    except (KeyError, OSError):
+        return None
+
+
+def bullpen_process_env(*, read_only: bool) -> dict[str, str]:
+    env = os.environ.copy()
+    configured_home = _configured_bullpen_home()
+    service_home = _service_user_home()
+    if configured_home:
+        env["HOME"] = configured_home
+    elif service_home and (not env.get("HOME") or env.get("HOME") == "/root"):
+        env["HOME"] = service_home
+    if read_only:
+        env["BULLPEN_READ_ONLY"] = "true"
+        env["BULLPEN_NON_INTERACTIVE"] = "true"
+    return env
+
+
 def _bullpen_install_hint() -> str:
     attempted = ", ".join(bullpen_candidate_paths())
     return (
@@ -218,10 +247,7 @@ async def run_bullpen(
     timeout_seconds: int,
     read_only: bool,
 ) -> str:
-    env = os.environ.copy()
-    if read_only:
-        env["BULLPEN_READ_ONLY"] = "true"
-        env["BULLPEN_NON_INTERACTIVE"] = "true"
+    env = bullpen_process_env(read_only=read_only)
 
     try:
         process = await asyncio.create_subprocess_exec(
