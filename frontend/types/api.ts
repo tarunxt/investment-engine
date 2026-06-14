@@ -1205,6 +1205,9 @@ export interface PolymarketDoctorStatus {
   checked_at?: string | null;
   ok: boolean;
   message: string;
+  bullpen_login_observed_at?: string | null;
+  bullpen_jwt_expires_at?: string | null;
+  bullpen_jwt_seconds_remaining?: number | null;
 }
 
 export interface PolymarketLiveControlState {

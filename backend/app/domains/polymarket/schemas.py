@@ -287,6 +287,9 @@ class PolymarketDoctorStatus(BaseModel):
     checked_at: str | None = None
     ok: bool
     message: str
+    bullpen_login_observed_at: str | None = None
+    bullpen_jwt_expires_at: str | None = None
+    bullpen_jwt_seconds_remaining: int | None = None
 
 
 class PolymarketLiveControlState(BaseModel):

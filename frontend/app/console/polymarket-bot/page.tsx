@@ -157,7 +157,15 @@ function formatCountdown(iso?: string | null) {
     0,
     Math.ceil((new Date(iso).getTime() - Date.now()) / 1000),
   );
-  return `${diff}s`;
+  return formatDuration(diff);
+}
+
+function formatDuration(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
 }
 
 function formatRuntime(from?: string | null, to?: string | null) {
@@ -1762,6 +1770,17 @@ export default function PolymarketBotPage() {
     state.live.doctor.message,
     null,
   );
+  const bullpenSessionExpiresAt = state.live.doctor.bullpen_jwt_expires_at;
+  const bullpenSessionSecondsRemaining = bullpenSessionExpiresAt
+    ? Math.max(
+        0,
+        Math.ceil(
+          (new Date(bullpenSessionExpiresAt).getTime() - lastStateRefreshAt) /
+            1000,
+        ),
+      )
+    : state.live.doctor.bullpen_jwt_seconds_remaining;
+  const bullpenSessionObservedAt = state.live.doctor.bullpen_login_observed_at;
   const suppressStaleDoctorLogin =
     hasRecentDoctorPass && rawDoctorLoginRequired;
   const liveCriticalBanner = getLiveCriticalBanner(state, {
@@ -2490,6 +2509,22 @@ export default function PolymarketBotPage() {
           {actionError ? (
             <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
               {actionError}
+            </div>
+          ) : null}
+
+          {state.live.doctor.ok && bullpenSessionSecondsRemaining != null ? (
+            <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-950 shadow-sm">
+              Bullpen session active for {formatDuration(bullpenSessionSecondsRemaining)}
+              {bullpenSessionObservedAt ? (
+                <>
+                  {" "}
+                  from last login observed at {new Date(bullpenSessionObservedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
+                </>
+              ) : (
+                "."
+              )}
+              {" "}
+              Re-login is expected after the 15 minute JWT window ends.
             </div>
           ) : null}
 
