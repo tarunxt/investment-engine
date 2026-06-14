@@ -943,13 +943,32 @@ export default function PolymarketBotPage() {
   }
 
   async function deleteTrackedAccount(accountId: string) {
+    const previousState = state;
+    const previousDrafts = accountDrafts;
     setBusyAccountId(accountId);
     setActionError(null);
+    setState((current) =>
+      current
+        ? {
+            ...current,
+            tracked_accounts: current.tracked_accounts.filter(
+              (account) => account.id !== accountId,
+            ),
+          }
+        : current,
+    );
+    setAccountDrafts((current) => {
+      const next = { ...current };
+      delete next[accountId];
+      return next;
+    });
     try {
       const nextState =
         await apiService.polymarketDeleteTrackedAccount(accountId);
       applyTrackedAccountState(nextState);
     } catch (accountError) {
+      if (previousState) setState(previousState);
+      setAccountDrafts(previousDrafts);
       setActionError(normalizeError(accountError));
     } finally {
       setBusyAccountId(null);
