@@ -175,6 +175,10 @@ function parseUsdFromBalanceMessage(message?: string | null) {
   return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
 }
 
+function isUsableBullpenBalance(balance?: PolymarketBalanceState | null) {
+  return balance?.status === "ready";
+}
+
 function isBullpenBalanceUnrefreshed(
   message?: string | null,
   status?: string | null,
@@ -326,6 +330,12 @@ function formatMoney(value: number, digits = 2) {
     currency: "USD",
     maximumFractionDigits: digits,
   }).format(value || 0);
+}
+
+function formatOptionalMoney(value?: number | null, digits = 2) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? formatMoney(value, digits)
+    : "—";
 }
 
 function formatCompactMoney(value: number) {
@@ -1291,7 +1301,7 @@ export default function PolymarketBotPage() {
         if (nextState.live.doctor.ok) {
           setLastDoctorPassAt(receivedAt);
         }
-        if (nextState.live.balance.status !== "loading") {
+        if (isUsableBullpenBalance(nextState.live.balance)) {
           setLastSettledBalance(nextState.live.balance);
         }
         setAccountDrafts((current) => ({
@@ -1361,7 +1371,7 @@ export default function PolymarketBotPage() {
         if (nextState.live.doctor.ok) {
           setLastDoctorPassAt(receivedAt);
         }
-        if (nextState.live.balance.status !== "loading") {
+        if (isUsableBullpenBalance(nextState.live.balance)) {
           setLastSettledBalance(nextState.live.balance);
         }
       })
@@ -1398,7 +1408,7 @@ export default function PolymarketBotPage() {
       if (nextState.live.doctor.ok) {
         setLastDoctorPassAt(receivedAt);
       }
-      if (nextState.live.balance.status !== "loading") {
+      if (isUsableBullpenBalance(nextState.live.balance)) {
         setLastSettledBalance(nextState.live.balance);
       }
       setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
@@ -1427,7 +1437,7 @@ export default function PolymarketBotPage() {
     if (nextState.live.doctor.ok) {
       setLastDoctorPassAt(receivedAt);
     }
-    if (nextState.live.balance.status !== "loading") {
+    if (isUsableBullpenBalance(nextState.live.balance)) {
       setLastSettledBalance(nextState.live.balance);
     }
     setLiveTradeLimitDraft(String(nextState.config.max_live_trades_per_day));
@@ -1608,6 +1618,7 @@ export default function PolymarketBotPage() {
     state.live.balance.status === "loading" && lastSettledBalance
       ? lastSettledBalance
       : state.live.balance;
+  const hasUsableVisibleBalance = isUsableBullpenBalance(visibleBalance);
   const balanceStatusDetail = [
     `Status: ${state.live.balance.status}`,
     state.live.balance.checked_at
@@ -1622,12 +1633,19 @@ export default function PolymarketBotPage() {
   ]
     .filter(Boolean)
     .join(" · ");
-  const bullpenAccountValueUsd =
-    visibleBalance.account_value_usd ??
-    parseUsdFromBalanceMessage(visibleBalance.message);
-  const bullpenCashUsd = visibleBalance.available_balance_usd ?? 0;
-  const bullpenPnlUsd = visibleBalance.pnl_usd ?? state.metrics.total_pnl;
-  const bullpenUpnlUsd = visibleBalance.upnl_usd ?? null;
+  const bullpenAccountValueUsd = hasUsableVisibleBalance
+    ? (visibleBalance.account_value_usd ??
+      parseUsdFromBalanceMessage(visibleBalance.message))
+    : null;
+  const bullpenCashUsd = hasUsableVisibleBalance
+    ? (visibleBalance.available_balance_usd ?? null)
+    : null;
+  const bullpenPnlUsd = hasUsableVisibleBalance
+    ? (visibleBalance.pnl_usd ?? null)
+    : null;
+  const bullpenUpnlUsd = hasUsableVisibleBalance
+    ? (visibleBalance.upnl_usd ?? null)
+    : null;
   const bullpenValuesUpdatedAt = formatTs(visibleBalance.checked_at);
   const bullpenBalanceUnrefreshed = isBullpenBalanceUnrefreshed(
     visibleBalance.message,
@@ -2258,11 +2276,11 @@ export default function PolymarketBotPage() {
                 Bullpen Summary
               </div>
               <h2 className="mt-3 text-2xl font-semibold tracking-tight">
-                {formatMoney(bullpenAccountValueUsd)} account value
+                {formatOptionalMoney(bullpenAccountValueUsd)} account value
               </h2>
               <p className="mt-1 text-sm text-slate-300">
-                Cash {formatMoney(bullpenCashUsd)} · PnL{" "}
-                {formatMoney(bullpenPnlUsd)}
+                Cash {formatOptionalMoney(bullpenCashUsd)} · PnL{" "}
+                {formatOptionalMoney(bullpenPnlUsd)}
                 {bullpenUpnlUsd == null
                   ? ""
                   : ` · uPnL ${formatMoney(bullpenUpnlUsd)}`}
@@ -2311,7 +2329,7 @@ export default function PolymarketBotPage() {
                   Cash
                 </div>
                 <div className="mt-2 text-xl font-semibold">
-                  {formatMoney(bullpenCashUsd)}
+                  {formatOptionalMoney(bullpenCashUsd)}
                 </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
@@ -2319,7 +2337,7 @@ export default function PolymarketBotPage() {
                   PnL
                 </div>
                 <div className="mt-2 text-xl font-semibold">
-                  {formatMoney(bullpenPnlUsd)}
+                  {formatOptionalMoney(bullpenPnlUsd)}
                 </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
@@ -2327,7 +2345,7 @@ export default function PolymarketBotPage() {
                   uPnL
                 </div>
                 <div className="mt-2 text-xl font-semibold">
-                  {bullpenUpnlUsd == null ? "—" : formatMoney(bullpenUpnlUsd)}
+                  {formatOptionalMoney(bullpenUpnlUsd)}
                 </div>
               </div>
               <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
