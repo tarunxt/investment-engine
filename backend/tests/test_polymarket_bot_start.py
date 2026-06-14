@@ -652,6 +652,34 @@ def test_select_tracked_traders_keeps_manual_and_fills_with_leaderboard():
 
 
 @pytest.mark.anyio
+async def test_deleted_leaderboard_tracked_account_stays_hidden(tmp_path):
+    from app.domains.polymarket.schemas import PolymarketTrader
+
+    bot = await build_live_bot(tmp_path, StaticDoctorExecutor([]))
+    trader = PolymarketTrader(
+        id="0x3000000000000000000000000000000000000000",
+        name="Deleted Leader",
+        address="0x3000000000000000000000000000000000000000",
+        source_reason="Today profit leaderboard trader discovered via Bullpen",
+        source="live-read",
+    )
+
+    await bot._sync_leaderboard_tracked_accounts_unlocked([trader])
+    account_id = bot.tracked_accounts[-1].id
+    await bot.delete_tracked_account(account_id)
+    await bot._sync_leaderboard_tracked_accounts_unlocked([trader])
+    state = await bot.get_state()
+
+    assert all(account.id != account_id for account in state.tracked_accounts)
+    deleted_account = next(
+        account for account in bot.tracked_accounts if account.id == account_id
+    )
+    assert deleted_account.deleted_at
+
+    await bot.shutdown()
+
+
+@pytest.mark.anyio
 async def test_leaderboard_sync_tracks_dynamic_accounts_and_waits_for_net_worth(
     tmp_path,
 ):

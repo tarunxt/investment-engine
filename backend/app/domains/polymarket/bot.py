@@ -375,8 +375,13 @@ class PolymarketPaperCopyBot:
     ) -> PolymarketTrackedAccount:
         async with self._lock:
             account = self._tracked_account_from_request(request)
-            if any(existing.id == account.id for existing in self.tracked_accounts):
+            existing = next(
+                (item for item in self.tracked_accounts if item.id == account.id), None
+            )
+            if existing and not existing.deleted_at:
                 raise RuntimeError("Tracked account already exists.")
+            if existing:
+                self.tracked_accounts.remove(existing)
             self.tracked_accounts.append(account)
             await self._save_tracked_accounts_unlocked()
             self._apply_tracked_accounts_to_provider_unlocked()
@@ -427,16 +432,14 @@ class PolymarketPaperCopyBot:
 
     async def delete_tracked_account(self, account_id: str) -> None:
         async with self._lock:
-            before = len(self.tracked_accounts)
-            self.tracked_accounts = [
-                item for item in self.tracked_accounts if item.id != account_id
-            ]
-            if len(self.tracked_accounts) == before:
-                raise RuntimeError("Tracked account not found.")
+            account = self._find_tracked_account(account_id)
+            account.enabled = False
+            account.deleted_at = utc_now()
+            account.updated_at = account.deleted_at
             await self._save_tracked_accounts_unlocked()
             self._apply_tracked_accounts_to_provider_unlocked()
             self.live_source_status.live_baseline_completed_at = None
-            self._add_activity("Tracked account deleted.")
+            self._add_activity(f"Tracked account deleted: {account.target}.")
 
     async def debug_discovery(self, target: str) -> object:
         provider = (
@@ -491,7 +494,7 @@ class PolymarketPaperCopyBot:
             next_poll_at=self.next_poll_at,
             seconds_until_next_poll=self._seconds_until_next_poll(now),
             last_error=self.last_error,
-            tracked_accounts=self.tracked_accounts,
+            tracked_accounts=self._active_tracked_accounts(),
             tracked_traders=self.tracked_traders,
             open_positions=open_positions,
             trade_history=list(reversed(self.trade_history)),
@@ -1868,7 +1871,14 @@ class PolymarketPaperCopyBot:
             for trader in leaderboard_traders
             if trader.address or trader.handle or trader.name or trader.id
         }
-        existing_by_id = {account.id: account for account in self.tracked_accounts}
+        deleted_ids = {
+            account.id for account in self.tracked_accounts if account.deleted_at
+        }
+        existing_by_id = {
+            account.id: account
+            for account in self.tracked_accounts
+            if not account.deleted_at
+        }
         changed = False
 
         for trader in leaderboard_traders:
@@ -1878,6 +1888,8 @@ class PolymarketPaperCopyBot:
             if not target:
                 continue
             account_id = tracked_account_id(target)
+            if account_id in deleted_ids:
+                continue
             existing = existing_by_id.get(account_id)
             if existing:
                 existing.target = target
@@ -1929,7 +1941,9 @@ class PolymarketPaperCopyBot:
         kept_accounts = [
             account
             for account in self.tracked_accounts
-            if account.tracking_source == "manual" or account.id in leaderboard_ids
+            if account.deleted_at
+            or account.tracking_source == "manual"
+            or account.id in leaderboard_ids
         ]
         if len(kept_accounts) != len(self.tracked_accounts):
             self.tracked_accounts = kept_accounts
@@ -1964,9 +1978,17 @@ class PolymarketPaperCopyBot:
             updated_at=now,
         )
 
+    def _active_tracked_accounts(self) -> list[PolymarketTrackedAccount]:
+        return [account for account in self.tracked_accounts if not account.deleted_at]
+
     def _find_tracked_account(self, account_id: str) -> PolymarketTrackedAccount:
         account = next(
-            (item for item in self.tracked_accounts if item.id == account_id), None
+            (
+                item
+                for item in self.tracked_accounts
+                if item.id == account_id and not item.deleted_at
+            ),
+            None,
         )
         if not account:
             raise RuntimeError("Tracked account not found.")
@@ -1977,7 +1999,9 @@ class PolymarketPaperCopyBot:
 
     def _apply_tracked_accounts_to_provider_unlocked(self) -> None:
         targets = ",".join(
-            account.target for account in self.tracked_accounts if account.enabled
+            account.target
+            for account in self._active_tracked_accounts()
+            if account.enabled
         )
         self.config.manual_tracked_wallets = targets
         if hasattr(self.provider, "update_manual_targets"):

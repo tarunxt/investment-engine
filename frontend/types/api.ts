@@ -1054,6 +1054,7 @@ export interface PolymarketTrackedAccount {
   copy_trade_usd: number;
   created_at: string;
   updated_at: string;
+  deleted_at?: string | null;
 }
 
 export interface PolymarketTrackedAccountCreate {

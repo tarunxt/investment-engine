@@ -38,6 +38,7 @@ class PolymarketTrackedAccount(BaseModel):
     copy_trade_usd: float = Field(default=1, ge=0.01, le=1)
     created_at: str
     updated_at: str
+    deleted_at: str | None = None
 
 
 class PolymarketTrackedAccountCreate(BaseModel):
