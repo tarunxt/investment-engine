@@ -350,6 +350,20 @@ async def run_first_bullpen_json(
     )
 
 
+def _has_active_bullpen_session(session: dict[str, object]) -> bool:
+    seconds_remaining = session.get("bullpen_jwt_seconds_remaining")
+    return isinstance(seconds_remaining, int) and seconds_remaining > 0
+
+
+def _is_refresh_token_rejected_error(message: str) -> bool:
+    lowered = message.lower()
+    return (
+        "refresh token rejected" in lowered
+        or "invalid refresh token" in lowered
+        or "session expired" in lowered
+    )
+
+
 class BullpenLiveExecutor:
     async def doctor(self) -> PolymarketDoctorStatus:
         checked_at = utc_now()
@@ -377,10 +391,27 @@ class BullpenLiveExecutor:
                 message="Bullpen status and preflight checks passed.",
                 **session,
             )
+        failure_message = "; ".join(failures)
+        if (
+            "status" in passed
+            and _has_active_bullpen_session(session)
+            and _is_refresh_token_rejected_error(failure_message)
+        ):
+            return PolymarketDoctorStatus(
+                checked_at=checked_at,
+                ok=True,
+                message=(
+                    "Bullpen status passed with an active JWT; preflight reported a "
+                    "stale refresh-token error after login, so status is being "
+                    "used as the auth source of truth. Preflight detail: "
+                    f"{failure_message}"
+                ),
+                **session,
+            )
         return PolymarketDoctorStatus(
             checked_at=checked_at,
             ok=False,
-            message=f"Bullpen doctor failed after {', '.join(passed) or 'no'} passed checks: {'; '.join(failures)}",
+            message=f"Bullpen doctor failed after {', '.join(passed) or 'no'} passed checks: {failure_message}",
             **session,
         )
 

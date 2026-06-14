@@ -1,4 +1,7 @@
 import os
+from datetime import datetime, timezone
+
+import pytest
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -231,3 +234,83 @@ Account
         "bullpen_jwt_expires_at": "2026-06-14T16:53:20+00:00",
         "bullpen_jwt_seconds_remaining": 897,
     }
+
+
+@pytest.mark.anyio
+async def test_bullpen_doctor_accepts_active_status_when_preflight_has_stale_refresh_token(monkeypatch):
+    status_output = """
+Account
+  Status:           Logged in
+  JWT expires:      2026-06-14 17:39:06 UTC (in 13m 48s)
+  JWT observed:     2026-06-14 17:24:08 UTC; client expires in 14m 58s
+"""
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        if args == ["status"]:
+            return status_output
+        if args == ["polymarket", "preflight"]:
+            raise bullpen.BullpenCommandError(
+                "Session expired. Run: bullpen login Caused by: Refresh token rejected "
+                "(Unauthenticated: Unauthenticated: Invalid refresh token)."
+            )
+        raise AssertionError(f"unexpected args: {args}")
+
+    monkeypatch.setattr(bullpen, "run_bullpen", fake_run_bullpen)
+    monkeypatch.setattr(
+        bullpen,
+        "datetime",
+        type(
+            "FrozenDateTime",
+            (),
+            {
+                "now": staticmethod(
+                    lambda tz=None: datetime(2026, 6, 14, 17, 25, 0, tzinfo=timezone.utc)
+                ),
+                "strptime": staticmethod(datetime.strptime),
+            },
+        ),
+    )
+
+    doctor = await bullpen.BullpenLiveExecutor().doctor()
+
+    assert doctor.ok is True
+    assert "active JWT" in doctor.message
+    assert doctor.bullpen_jwt_seconds_remaining == 846
+
+
+@pytest.mark.anyio
+async def test_bullpen_doctor_still_fails_stale_refresh_token_without_active_jwt(monkeypatch):
+    status_output = """
+Account
+  Status:           Logged in
+  JWT expires:      2026-06-14 17:20:00 UTC (in 0s)
+  JWT observed:     2026-06-14 17:05:00 UTC; client expires in 0s
+"""
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        if args == ["status"]:
+            return status_output
+        if args == ["polymarket", "preflight"]:
+            raise bullpen.BullpenCommandError("Refresh token rejected: Invalid refresh token")
+        raise AssertionError(f"unexpected args: {args}")
+
+    monkeypatch.setattr(bullpen, "run_bullpen", fake_run_bullpen)
+    monkeypatch.setattr(
+        bullpen,
+        "datetime",
+        type(
+            "FrozenDateTime",
+            (),
+            {
+                "now": staticmethod(
+                    lambda tz=None: datetime(2026, 6, 14, 17, 25, 0, tzinfo=timezone.utc)
+                ),
+                "strptime": staticmethod(datetime.strptime),
+            },
+        ),
+    )
+
+    doctor = await bullpen.BullpenLiveExecutor().doctor()
+
+    assert doctor.ok is False
+    assert "Bullpen doctor failed" in doctor.message
