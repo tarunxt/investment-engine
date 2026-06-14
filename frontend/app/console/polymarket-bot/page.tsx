@@ -1097,6 +1097,9 @@ export default function PolymarketBotPage() {
   >("active");
   const [copiedHistoryFilter, setCopiedHistoryFilter] =
     useState<CopiedHistoryFilter>("all");
+  const [redeemedTradesTab, setRedeemedTradesTab] = useState<
+    "claim-pending" | "redeemed"
+  >("claim-pending");
   const [copiedSort, setCopiedSort] = useState<CopiedSortState>({
     column: "copiedAt",
     direction: "desc",
@@ -1526,16 +1529,17 @@ export default function PolymarketBotPage() {
     missedVisibleLimit,
   );
   const redeemedTradeRows = buildRedeemedTradeRows(state);
-  const analysisTradeRows = buildAnalysisTradeRows(executedLiveTrades);
-  const wonAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl >= 0);
-  const lostAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl < 0);
-  const visiblePastAnalysisTrades =
-    pastTradesTab === "won" ? wonAnalysisTrades : lostAnalysisTrades;
-  const copiedTraderAnalysisRows =
-    buildCopiedTraderAnalysisRows(analysisTradeRows);
-  const claimableRedeemedCount = redeemedTradeRows.filter(
+  const claimPendingTradeRows = redeemedTradeRows.filter(
     (row) => row.status === "claimable",
-  ).length;
+  );
+  const previouslyRedeemedTradeRows = redeemedTradeRows.filter(
+    (row) => row.status !== "claimable",
+  );
+  const visibleRedeemedTradeRows =
+    redeemedTradesTab === "claim-pending"
+      ? claimPendingTradeRows
+      : previouslyRedeemedTradeRows;
+  const claimableRedeemedCount = claimPendingTradeRows.length;
   const redeemStatusMessage =
     pendingAction === "redeem"
       ? getRedeemStatusMessage(
@@ -2547,11 +2551,60 @@ export default function PolymarketBotPage() {
               </div>
             </CardHeader>
             <CardContent className="pt-4">
+              <div
+                className="mb-4 flex flex-wrap gap-2"
+                role="tablist"
+                aria-label="Redeemed trades views"
+              >
+                {[
+                  {
+                    key: "claim-pending" as const,
+                    label: "Claim Pending",
+                    count: claimPendingTradeRows.length,
+                  },
+                  {
+                    key: "redeemed" as const,
+                    label: "Redeemed",
+                    count: previouslyRedeemedTradeRows.length,
+                  },
+                ].map((tab) => {
+                  const isActive = redeemedTradesTab === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                        isActive
+                          ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                      onClick={() => setRedeemedTradesTab(tab.key)}
+                    >
+                      {tab.label}
+                      <span
+                        className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                          isActive
+                            ? "bg-white/20 text-white"
+                            : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
               <div className="overflow-x-auto rounded-[24px] border border-slate-200 bg-white shadow-sm">
                 <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
                   <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                     <tr>
-                      <th className="px-4 py-3">Redeemed At</th>
+                      <th className="px-4 py-3">
+                        {redeemedTradesTab === "claim-pending"
+                          ? "Claimable At"
+                          : "Redeemed At"}
+                      </th>
                       <th className="px-4 py-3">Event</th>
                       <th className="px-4 py-3">Outcome</th>
                       <th className="px-4 py-3">Side</th>
@@ -2564,18 +2617,19 @@ export default function PolymarketBotPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {redeemedTradeRows.length === 0 ? (
+                    {visibleRedeemedTradeRows.length === 0 ? (
                       <tr>
                         <td
                           className="px-4 py-6 text-sm text-slate-500"
                           colSpan={10}
                         >
-                          No completed redeems or claimable wins are visible
-                          yet.
+                          {redeemedTradesTab === "claim-pending"
+                            ? "No resolved winning positions are currently available to claim."
+                            : "No previously redeemed trades are visible yet."}
                         </td>
                       </tr>
                     ) : (
-                      redeemedTradeRows.map((trade) => (
+                      visibleRedeemedTradeRows.map((trade) => (
                         <tr key={trade.key} className="align-top">
                           <td className="px-4 py-3 text-slate-700">
                             {formatTs(trade.timestamp)}
