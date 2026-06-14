@@ -10,6 +10,8 @@ import {
   ExternalLink,
   Info,
   Loader2,
+  Menu,
+  Plus,
   Search,
   TrendingUp,
   Wallet,
@@ -363,6 +365,10 @@ const BULLPEN_ACCOUNT_URL =
   "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
+const DEFAULT_EC2_COMMANDS = [
+  "sudo -u investor -H bullpen login",
+  "bullpen status",
+];
 const TABLE_PAGE_SIZE = 10;
 const COMPACT_TABLE_PAGE_SIZE = 5;
 const PAST_TRADES_PAGE_SIZE = 10;
@@ -1259,6 +1265,9 @@ export default function PolymarketBotPage() {
   const [activeScreen, setActiveScreen] = useState<
     "main" | "analysis" | "settings"
   >("main");
+  const [ec2CommandMenuOpen, setEc2CommandMenuOpen] = useState(false);
+  const [ec2Commands, setEc2Commands] = useState(DEFAULT_EC2_COMMANDS);
+  const [newEc2Command, setNewEc2Command] = useState("");
   const [lastSettledBalance, setLastSettledBalance] =
     useState<PolymarketBalanceState | null>(null);
   const [lastDoctorPassAt, setLastDoctorPassAt] = useState<number | null>(null);
@@ -2185,6 +2194,73 @@ export default function PolymarketBotPage() {
         </div>
         {activeCopyTradingTab === "bullpen" ? (
           <div className="flex flex-wrap gap-2 xl:justify-end">
+            <div className="relative inline-flex rounded-full border border-amber-300 bg-amber-50 text-amber-900 shadow-sm transition hover:border-amber-400 hover:bg-amber-100">
+              <a
+                href={AWS_EC2_TERMINAL_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center rounded-l-full px-5 py-2 text-sm font-semibold"
+              >
+                Open AWS EC2
+                <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
+              </a>
+              <button
+                type="button"
+                className="inline-flex items-center rounded-r-full border-l border-amber-300 px-3 py-2 transition hover:bg-amber-200/60"
+                aria-label="Show AWS EC2 commands"
+                aria-expanded={ec2CommandMenuOpen}
+                onClick={() => setEc2CommandMenuOpen((open) => !open)}
+              >
+                <Menu className="size-4" aria-hidden="true" />
+              </button>
+              {ec2CommandMenuOpen ? (
+                <div className="absolute right-0 top-full z-30 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-4 text-left text-slate-950 shadow-xl">
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      EC2 commands
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Most-used commands to run after opening the EC2 shell.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {ec2Commands.map((command) => (
+                      <code
+                        key={command}
+                        className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-800"
+                      >
+                        {command}
+                      </code>
+                    ))}
+                  </div>
+                  <form
+                    className="mt-3 flex gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const command = newEc2Command.trim();
+                      if (!command) return;
+                      setEc2Commands((commands) => [...commands, command]);
+                      setNewEc2Command("");
+                    }}
+                  >
+                    <input
+                      type="text"
+                      value={newEc2Command}
+                      onChange={(event) => setNewEc2Command(event.target.value)}
+                      placeholder="Add another command"
+                      className="min-w-0 flex-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-slate-900 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                    />
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                    >
+                      <Plus className="size-3.5" aria-hidden="true" />
+                      Add
+                    </button>
+                  </form>
+                </div>
+              ) : null}
+            </div>
             <Button
               asChild
               size="sm"
