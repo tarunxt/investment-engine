@@ -198,6 +198,34 @@ function isBullpenLoginRequired(
   );
 }
 
+function getLiveCriticalBanner(state: PolymarketBotState) {
+  const issues: string[] = [];
+  const doctorMessage = state.live.doctor.message || "No doctor details returned.";
+  const doctorNeedsLogin = isBullpenLoginRequired(doctorMessage, null);
+
+  if (!state.live.doctor.ok) {
+    issues.push(
+      doctorNeedsLogin
+        ? "Doctor failed: Bullpen session expired. Run bullpen login."
+        : `Doctor failed: ${doctorMessage}`,
+    );
+  }
+
+  if (!state.live.unlocked) {
+    issues.push(
+      `Live mode locked: ${state.live.locked_reason || "unlock required"}`,
+    );
+  }
+
+  if (state.live.emergency_stopped) {
+    issues.push("Emergency stop is active.");
+  }
+
+  if (issues.length === 0) return null;
+
+  return issues.join(" ");
+}
+
 function trackedAccountKey(value?: string | null) {
   return (value || "").toLowerCase().replace(/^@/, "").trim();
 }
@@ -1192,6 +1220,7 @@ export default function PolymarketBotPage() {
   const pendingActionDetail = getPendingActionDetail(pendingAction);
   const liveParsingStatusMessage = getLiveParsingStatusMessage(state);
   const skippedBreakup = getSkippedBreakup(state);
+  const liveCriticalBanner = getLiveCriticalBanner(state);
 
   const visibleBalance =
     state.live.balance.status === "loading" && lastSettledBalance
@@ -1542,10 +1571,22 @@ export default function PolymarketBotPage() {
   return (
     <div className="mx-auto flex flex-col gap-6 pb-8">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight text-slate-950">
-            Polymarket Copy Bot
-          </h1>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-lg font-semibold tracking-tight text-slate-950">
+              Polymarket Copy Bot
+            </h1>
+            {liveCriticalBanner ? (
+              <div
+                className="inline-flex max-w-full items-center gap-2 rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-rose-700 shadow-sm"
+                title={liveCriticalBanner}
+                role="alert"
+              >
+                <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+                <span className="truncate">{liveCriticalBanner}</span>
+              </div>
+            ) : null}
+          </div>
           <p className="text-sm text-slate-500">{subtitle}</p>
         </div>
         <div className="flex flex-wrap gap-2 xl:justify-end">
