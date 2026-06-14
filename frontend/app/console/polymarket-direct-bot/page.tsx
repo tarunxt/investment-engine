@@ -482,6 +482,8 @@ type CopiedSortColumn =
   | "amount"
   | "currentPnl"
   | "price"
+  | "latestPrice"
+  | "pnl"
   | "status";
 
 type CopiedSortState = {
@@ -999,6 +1001,10 @@ function getCopiedEventSortValue(
       return event.currentPnl;
     case "price":
       return event.averagePrice;
+    case "latestPrice":
+      return event.currentPrice;
+    case "pnl":
+      return event.currentPrice - event.averagePrice;
     case "status":
       return getCopiedEventStatus(event);
   }
@@ -2616,7 +2622,13 @@ export default function PolymarketBotPage() {
                         </th>
                       ) : null}
                       <th className="px-4 py-3">
-                        {copiedSortHeader("price", "Price")}
+                        {copiedSortHeader("price", "Price bought")}
+                      </th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("latestPrice", "Latest price")}
+                      </th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("pnl", "PnL")}
                       </th>
                       <th className="px-4 py-3">
                         {copiedSortHeader("status", "Status")}
@@ -2631,8 +2643,8 @@ export default function PolymarketBotPage() {
                           colSpan={
                             copiedPositionsTab === "positions" &&
                             copiedPositionStatus === "active"
-                              ? 10
-                              : 9
+                              ? 12
+                              : 11
                           }
                         >
                           No copied Direct Polymarket rows for this tab yet.
@@ -2715,6 +2727,18 @@ export default function PolymarketBotPage() {
                             ) : null}
                             <td className="px-4 py-3 text-slate-700">
                               {formatMoney(event.averagePrice, 4)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatMoney(event.currentPrice, 4)}
+                            </td>
+                            <td
+                              className={`px-4 py-3 font-semibold ${
+                                event.currentPrice - event.averagePrice >= 0
+                                  ? "text-emerald-600"
+                                  : "text-rose-600"
+                              }`}
+                            >
+                              {formatMoney(event.currentPrice - event.averagePrice, 4)}
                             </td>
                             <td className="px-4 py-3 text-slate-700">
                               {failureSummary ? (
