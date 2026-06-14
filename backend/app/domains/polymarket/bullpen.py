@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from datetime import datetime, timezone
 import pwd
 import re
 import shutil
@@ -64,6 +65,48 @@ BULLPEN_INSUFFICIENT_COLLATERAL_PATTERN = re.compile(
     r"Insufficient collateral to place this order \(?(?P<needed>\d+(?:\.\d+)?)\s*pUSD needed",
     re.IGNORECASE,
 )
+
+BULLPEN_JWT_EXPIRES_PATTERN = re.compile(
+    r"JWT expires:\s*(?P<expires>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC",
+    re.IGNORECASE,
+)
+BULLPEN_JWT_OBSERVED_PATTERN = re.compile(
+    r"JWT observed:\s*(?P<observed>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC",
+    re.IGNORECASE,
+)
+
+
+def _parse_bullpen_utc(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return None
+
+
+def parse_bullpen_session(
+    stdout: str, *, now: datetime | None = None
+) -> dict[str, object]:
+    now = now or datetime.now(timezone.utc)
+    expires_match = BULLPEN_JWT_EXPIRES_PATTERN.search(stdout)
+    observed_match = BULLPEN_JWT_OBSERVED_PATTERN.search(stdout)
+    expires_at = _parse_bullpen_utc(
+        expires_match.group("expires") if expires_match else None
+    )
+    observed_at = _parse_bullpen_utc(
+        observed_match.group("observed") if observed_match else None
+    )
+    seconds_remaining = (
+        max(0, int((expires_at - now).total_seconds())) if expires_at else None
+    )
+    return {
+        "bullpen_login_observed_at": observed_at.isoformat() if observed_at else None,
+        "bullpen_jwt_expires_at": expires_at.isoformat() if expires_at else None,
+        "bullpen_jwt_seconds_remaining": seconds_remaining,
+    }
 
 
 BULLPEN_RUNTIME_RELATIVE_PATHS = (
@@ -314,11 +357,16 @@ class BullpenLiveExecutor:
             (["status"], True, "status"),
             (["polymarket", "preflight"], False, "preflight"),
         ]
+        session: dict[str, object] = {}
         failures: list[str] = []
         passed: list[str] = []
         for args, read_only, label in checks:
             try:
-                await run_bullpen(args, timeout_seconds=45, read_only=read_only)
+                stdout = await run_bullpen(
+                    args, timeout_seconds=45, read_only=read_only
+                )
+                if label == "status":
+                    session = parse_bullpen_session(stdout)
                 passed.append(label)
             except Exception as exc:
                 failures.append(f"{label}: {redact_secrets(str(exc))}")
@@ -327,11 +375,13 @@ class BullpenLiveExecutor:
                 checked_at=checked_at,
                 ok=True,
                 message="Bullpen status and preflight checks passed.",
+                **session,
             )
         return PolymarketDoctorStatus(
             checked_at=checked_at,
             ok=False,
             message=f"Bullpen doctor failed after {', '.join(passed) or 'no'} passed checks: {'; '.join(failures)}",
+            **session,
         )
 
     async def redeem(self, *, dry_run: bool) -> str:
@@ -621,8 +671,6 @@ def live_position_key(market_id: str, outcome: str) -> str:
 
 
 def utc_now() -> str:
-    from datetime import datetime, timezone
-
     return datetime.now(timezone.utc).isoformat()
 
 

@@ -210,3 +210,24 @@ def test_bullpen_process_env_allows_explicit_credentials_home(monkeypatch):
     assert env["HOME"] == "/srv/bullpen"
     assert "BULLPEN_READ_ONLY" not in env
     assert "BULLPEN_NON_INTERACTIVE" not in env
+
+
+def test_parse_bullpen_session_extracts_15_minute_jwt_window():
+    from datetime import datetime, timezone
+
+    status_output = """
+Account
+  Status:           Logged in
+  JWT expires:      2026-06-14 16:53:20 UTC (in 13m 45s)
+  JWT observed:     2026-06-14 16:38:23 UTC; client expires in 14m 57s
+"""
+
+    session = bullpen.parse_bullpen_session(
+        status_output, now=datetime(2026, 6, 14, 16, 38, 23, tzinfo=timezone.utc)
+    )
+
+    assert session == {
+        "bullpen_login_observed_at": "2026-06-14T16:38:23+00:00",
+        "bullpen_jwt_expires_at": "2026-06-14T16:53:20+00:00",
+        "bullpen_jwt_seconds_remaining": 897,
+    }
