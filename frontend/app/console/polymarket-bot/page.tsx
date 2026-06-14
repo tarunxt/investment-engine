@@ -303,6 +303,7 @@ const BULLPEN_ACCOUNT_URL =
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
 const TABLE_PAGE_SIZE = 20;
+const COMPACT_TABLE_PAGE_SIZE = 5;
 
 function formatRelativePollTime(iso?: string | null) {
   if (!iso) return "waiting for first poll";
@@ -827,13 +828,15 @@ function ShowMoreRowsControl({
   visible,
   onShowMore,
   onShowLess,
+  pageSize = TABLE_PAGE_SIZE,
 }: {
   total: number;
   visible: number;
   onShowMore: () => void;
   onShowLess: () => void;
+  pageSize?: number;
 }) {
-  if (total <= TABLE_PAGE_SIZE) return null;
+  if (total <= pageSize) return null;
 
   return (
     <div className="mt-4 flex flex-wrap items-center justify-end gap-3 text-sm text-slate-500">
@@ -854,7 +857,7 @@ function ShowMoreRowsControl({
           className="rounded-full border border-slate-200 px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
           onClick={onShowLess}
         >
-          Show first {TABLE_PAGE_SIZE}
+          Show first {pageSize}
         </button>
       )}
     </div>
@@ -903,7 +906,9 @@ export default function PolymarketBotPage() {
   const [traderInvestedThresholdDraft, setTraderInvestedThresholdDraft] =
     useState("");
   const [copiedVisibleLimit, setCopiedVisibleLimit] = useState(TABLE_PAGE_SIZE);
-  const [missedVisibleLimit, setMissedVisibleLimit] = useState(TABLE_PAGE_SIZE);
+  const [missedVisibleLimit, setMissedVisibleLimit] = useState(
+    COMPACT_TABLE_PAGE_SIZE,
+  );
   const [skippedBreakupOpen, setSkippedBreakupOpen] = useState(false);
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
@@ -2340,9 +2345,14 @@ export default function PolymarketBotPage() {
                 total={missedTradeGroups.length}
                 visible={visibleMissedTradeGroups.length}
                 onShowMore={() =>
-                  setMissedVisibleLimit((current) => current + TABLE_PAGE_SIZE)
+                  setMissedVisibleLimit(
+                    (current) => current + COMPACT_TABLE_PAGE_SIZE,
+                  )
                 }
-                onShowLess={() => setMissedVisibleLimit(TABLE_PAGE_SIZE)}
+                onShowLess={() =>
+                  setMissedVisibleLimit(COMPACT_TABLE_PAGE_SIZE)
+                }
+                pageSize={COMPACT_TABLE_PAGE_SIZE}
               />
             </CardContent>
           </Card>
