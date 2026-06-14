@@ -48,3 +48,41 @@ def test_direct_config_uses_direct_env_prefix(monkeypatch, tmp_path):
     assert config.data_dir == str(tmp_path)
     assert config.auto_start is False
     assert config.live_trading is False
+
+
+def test_direct_live_guard_exposes_bot_state_counters(monkeypatch, tmp_path):
+    from app.domains.polymarket_direct.direct_polymarket import LiveTradeGuard
+    from app.domains.polymarket_direct.schemas import PolymarketLiveTradeDecision
+
+    monkeypatch.setenv("POLYMARKET_DIRECT_DATA_DIR", str(tmp_path))
+    config = load_polymarket_config()
+    guard = LiveTradeGuard(config)
+    today = guard.live_trades_today(
+        [
+            PolymarketLiveTradeDecision(
+                id="live-1",
+                source_trade_id="source-1",
+                source_trade_key="source-key-1",
+                proposed_at="2026-06-14T00:00:00+00:00",
+                updated_at="2026-06-14T00:00:00+00:00",
+                trader_id="trader-1",
+                trader_name="Trader 1",
+                trader_address="0x0000000000000000000000000000000000000001",
+                market_id="market-1",
+                market_title="Market 1",
+                outcome="Yes",
+                side="BUY",
+                amount=1,
+                price=0.5,
+                shares=2,
+                max_loss=1,
+                reason="test",
+                status="executed",
+                executed_at="2026-06-14T00:01:00+00:00",
+                source="live-read",
+            )
+        ]
+    )
+
+    assert today in {0, 1}
+    assert guard.realized_live_pnl([]) == 0

@@ -8,6 +8,8 @@ from app.domains.polymarket_direct.schemas import (
     PolymarketBotConfig,
     PolymarketDoctorStatus,
     PolymarketLiveTradeDecision,
+    PolymarketPosition,
+    PolymarketSourceTrade,
 )
 
 DIRECT_EXECUTION_NOT_CONFIGURED = (
@@ -88,7 +90,7 @@ class LiveTradeGuard:
             return "Direct Polymarket live trading is disabled by configuration."
         if not doctor.ok:
             return "Direct Polymarket doctor must pass."
-        return None
+        return self.risk_settings_block_reason()
 
     def startup_block_reason(
         self,
@@ -97,30 +99,88 @@ class LiveTradeGuard:
         emergency_stopped: bool,
         manually_locked: bool,
     ) -> str | None:
+        if emergency_stopped:
+            return "Emergency stop is active."
         hard_block = self.hard_block_reason(doctor)
         if hard_block:
             return hard_block
-        if emergency_stopped:
-            return "Emergency stop is active."
         if manually_locked:
             return "Live trading is manually locked."
         if not live_unlocked:
             return "Live trading is locked."
         return None
 
+    def risk_settings_block_reason(self) -> str | None:
+        if self.config.max_live_trade_size <= 0:
+            return "MAX_LIVE_TRADE_SIZE must be greater than 0."
+        if self.config.max_live_trade_size > self.config.fixed_copy_trade_size:
+            return "MAX_LIVE_TRADE_SIZE cannot exceed FIXED_COPY_TRADE_SIZE."
+        if self.config.max_live_trades_per_day <= 0:
+            return "MAX_LIVE_TRADES_PER_DAY must be greater than 0."
+        if self.config.max_live_daily_loss <= 0:
+            return "MAX_LIVE_DAILY_LOSS must be greater than 0."
+        if self.config.max_live_exposure_per_market <= 0:
+            return "MAX_LIVE_EXPOSURE_PER_MARKET must be greater than 0."
+        if self.config.max_live_trade_size > self.config.max_live_exposure_per_market:
+            return "MAX_LIVE_TRADE_SIZE cannot exceed MAX_LIVE_EXPOSURE_PER_MARKET."
+        return None
+
     def trade_block_reason(
         self,
-        doctor: PolymarketDoctorStatus,
-        live_unlocked: bool,
-        emergency_stopped: bool,
-        manually_locked: bool,
-        live_trades_today: int,
+        source_trade: PolymarketSourceTrade,
+        live_trades: list[PolymarketLiveTradeDecision],
+        positions: list[PolymarketPosition],
     ) -> str | None:
-        startup = self.startup_block_reason(
-            doctor, live_unlocked, emergency_stopped, manually_locked
-        )
-        if startup:
-            return startup
-        if live_trades_today >= self.config.max_live_trades_per_day:
+        if self.live_trades_today(live_trades) >= self.config.max_live_trades_per_day:
             return "Daily live trade limit reached."
+        trader_invested_usd = (
+            source_trade.trader_invested_usd
+            if source_trade.trader_invested_usd is not None
+            else source_trade.size_usd
+        )
+        if trader_invested_usd <= self.config.trader_invested_threshold_usd:
+            return f"Below ${self.config.trader_invested_threshold_usd:g} threshold"
+        if self.realized_live_pnl(live_trades) <= -self.config.max_live_daily_loss:
+            return "Max live daily loss reached."
+
+        position = next(
+            (
+                item
+                for item in positions
+                if item.key
+                == live_position_key(source_trade.market_id, source_trade.outcome)
+            ),
+            None,
+        )
+        if source_trade.side == "SELL" and (not position or position.shares <= 0):
+            return "No matching live-tracked position to sell."
+
+        if source_trade.side == "BUY":
+            current_exposure = position.cost_basis if position else 0
+            next_exposure = current_exposure + min(
+                self.config.fixed_copy_trade_size,
+                self.config.max_live_trade_size,
+                source_trade.size_usd,
+            )
+            if next_exposure > self.config.max_live_exposure_per_market:
+                return "Max live exposure per market reached."
         return None
+
+    def live_trades_today(self, live_trades: list[PolymarketLiveTradeDecision]) -> int:
+        today = utc_now()[:10]
+        return sum(
+            1
+            for trade in live_trades
+            if trade.executed_at
+            and trade.executed_at.startswith(today)
+            and trade.status == "executed"
+        )
+
+    def realized_live_pnl(
+        self, live_trades: list[PolymarketLiveTradeDecision]
+    ) -> float:
+        return sum(
+            max(-trade.max_loss, 0)
+            for trade in live_trades
+            if trade.status == "executed" and trade.side == "SELL"
+        )
