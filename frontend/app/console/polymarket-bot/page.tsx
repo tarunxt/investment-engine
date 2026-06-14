@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ExternalLink,
   Info,
   Loader2,
@@ -388,6 +391,23 @@ type MissedTradeGroup = {
   traders: PolymarketSourceTradeDecision[];
 };
 
+type CopiedSortColumn =
+  | "copiedAt"
+  | "trader"
+  | "event"
+  | "eventEnd"
+  | "side"
+  | "outcome"
+  | "amount"
+  | "currentPnl"
+  | "price"
+  | "status";
+
+type CopiedSortState = {
+  column: CopiedSortColumn;
+  direction: "asc" | "desc";
+};
+
 type CopiedHistoryFilter =
   | "all"
   | "executed"
@@ -680,6 +700,67 @@ function buildCopiedEventGroups(trades: PolymarketSourceTradeDecision[]) {
   );
 }
 
+function getCopiedEventSortValue(
+  event: CopiedEventGroup,
+  column: CopiedSortColumn,
+) {
+  switch (column) {
+    case "copiedAt":
+      return parseApiTimestamp(event.copiedAt)?.getTime() ?? 0;
+    case "trader":
+      return event.traders.length > 1
+        ? "multiple"
+        : getTraderDisplayName(event.traders[0]);
+    case "event":
+      return event.marketTitle;
+    case "eventEnd":
+      return event.eventEndAt ? new Date(event.eventEndAt).getTime() : 0;
+    case "side":
+      return event.side;
+    case "outcome":
+      return event.outcome;
+    case "amount":
+      return event.amount;
+    case "currentPnl":
+      return event.currentPnl;
+    case "price":
+      return event.averagePrice;
+    case "status":
+      return getCopiedEventStatus(event);
+  }
+}
+
+function compareCopiedEventGroups(
+  left: CopiedEventGroup,
+  right: CopiedEventGroup,
+  sortState: CopiedSortState,
+) {
+  const leftValue = getCopiedEventSortValue(left, sortState.column);
+  const rightValue = getCopiedEventSortValue(right, sortState.column);
+  const comparison =
+    typeof leftValue === "number" && typeof rightValue === "number"
+      ? leftValue - rightValue
+      : String(leftValue).localeCompare(String(rightValue), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+
+  if (comparison !== 0) {
+    return sortState.direction === "asc" ? comparison : -comparison;
+  }
+
+  return (
+    (parseApiTimestamp(right.copiedAt)?.getTime() ?? 0) -
+    (parseApiTimestamp(left.copiedAt)?.getTime() ?? 0)
+  );
+}
+
+function SortIcon({ direction }: { direction: "asc" | "desc" | null }) {
+  if (direction === "asc") return <ArrowUp className="size-3.5 shrink-0" />;
+  if (direction === "desc") return <ArrowDown className="size-3.5 shrink-0" />;
+  return <ArrowUpDown className="size-3.5 shrink-0 opacity-60" />;
+}
+
 function ShowMoreRowsControl({
   total,
   visible,
@@ -753,6 +834,10 @@ export default function PolymarketBotPage() {
   >("active");
   const [copiedHistoryFilter, setCopiedHistoryFilter] =
     useState<CopiedHistoryFilter>("all");
+  const [copiedSort, setCopiedSort] = useState<CopiedSortState>({
+    column: "copiedAt",
+    direction: "desc",
+  });
   const [liveTradeLimitDraft, setLiveTradeLimitDraft] = useState("");
   const [traderInvestedThresholdDraft, setTraderInvestedThresholdDraft] =
     useState("");
@@ -901,6 +986,21 @@ export default function PolymarketBotPage() {
         trader_invested_threshold_usd: nextTraderInvestedThreshold,
       }),
     );
+  }
+
+  function toggleCopiedSort(column: CopiedSortColumn) {
+    setCopiedSort((current) =>
+      current.column === column
+        ? {
+            column,
+            direction: current.direction === "asc" ? "desc" : "asc",
+          }
+        : {
+            column,
+            direction: column === "copiedAt" ? "desc" : "asc",
+          },
+    );
+    setCopiedVisibleLimit(TABLE_PAGE_SIZE);
   }
 
   async function addTrackedAccount() {
@@ -1082,12 +1182,16 @@ export default function PolymarketBotPage() {
     copiedPositionsTab === "positions"
       ? copiedPositionTrades
       : copiedFilteredHistoryTrades;
-  const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades);
+  const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades).sort(
+    (left, right) => compareCopiedEventGroups(left, right, copiedSort),
+  );
   const visibleCopiedEventGroups = copiedEventGroups.slice(
     0,
     copiedVisibleLimit,
   );
   const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
+  const copiedPositionEventCount =
+    buildCopiedEventGroups(copiedPositionTrades).length;
   const missedTradeGroups = buildMissedTradeGroups(state.live.recent_decisions);
   const visibleMissedTradeGroups = missedTradeGroups.slice(
     0,
@@ -1096,6 +1200,30 @@ export default function PolymarketBotPage() {
   const redeemedTradeRows = buildRedeemedTradeRows(state);
   const copiedPositionsRefreshSeconds = 5;
   const visibleTrackedTraders = state.tracked_traders;
+  const copiedSortHeader = (
+    column: CopiedSortColumn,
+    label: string,
+    description?: string,
+  ) => (
+    <button
+      type="button"
+      className="inline-flex items-start gap-1.5 text-left transition hover:text-slate-800"
+      onClick={() => toggleCopiedSort(column)}
+      aria-label={`Sort copied Bullpen rows by ${label}`}
+    >
+      <span>
+        {label}
+        {description ? (
+          <span className="mt-1 block text-[10px] normal-case tracking-normal text-slate-400">
+            {description}
+          </span>
+        ) : null}
+      </span>
+      <SortIcon
+        direction={copiedSort.column === column ? copiedSort.direction : null}
+      />
+    </button>
+  );
 
   const botStatusItems: MetricItem[] = [
     {
@@ -1731,7 +1859,7 @@ export default function PolymarketBotPage() {
                     }`}
                     onClick={() => setCopiedPositionsTab("positions")}
                   >
-                    Positions ({copiedPositionTrades.length})
+                    Positions ({copiedPositionEventCount})
                   </button>
                   <button
                     type="button"
@@ -1797,24 +1925,43 @@ export default function PolymarketBotPage() {
                 <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
                   <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                     <tr>
-                      <th className="px-4 py-3">Copied At</th>
-                      <th className="px-4 py-3">Trader</th>
-                      <th className="px-4 py-3">Event</th>
-                      <th className="px-4 py-3">Event Ends</th>
-                      <th className="px-4 py-3">Side</th>
-                      <th className="px-4 py-3">Outcome</th>
-                      <th className="px-4 py-3">Amount</th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("copiedAt", "Copied At")}
+                      </th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("trader", "Trader")}
+                      </th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("event", "Event")}
+                      </th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("eventEnd", "Event Ends")}
+                      </th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("side", "Side")}
+                      </th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("outcome", "Outcome")}
+                      </th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("amount", "Amount")}
+                      </th>
                       {copiedPositionsTab === "positions" &&
                       copiedPositionStatus === "active" ? (
                         <th className="px-4 py-3">
-                          Current PnL
-                          <span className="mt-1 block text-[10px] normal-case tracking-normal text-slate-400">
-                            refreshes every {copiedPositionsRefreshSeconds}s
-                          </span>
+                          {copiedSortHeader(
+                            "currentPnl",
+                            "Current PnL",
+                            `refreshes every ${copiedPositionsRefreshSeconds}s`,
+                          )}
                         </th>
                       ) : null}
-                      <th className="px-4 py-3">Price</th>
-                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("price", "Price")}
+                      </th>
+                      <th className="px-4 py-3">
+                        {copiedSortHeader("status", "Status")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
