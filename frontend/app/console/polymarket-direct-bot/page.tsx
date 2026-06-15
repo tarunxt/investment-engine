@@ -562,11 +562,24 @@ type CopiedTraderAnalysisRow = {
 };
 
 function getAnalysisTradePnl(trade: PolymarketSourceTradeDecision) {
-  if (typeof trade.realized_pnl === "number") return trade.realized_pnl;
+  if (typeof trade.realized_pnl === "number" && trade.realized_pnl !== 0) {
+    return trade.realized_pnl;
+  }
   if (trade.side === "SELL" && typeof trade.cost_basis_usd === "number") {
     return trade.amount - trade.cost_basis_usd;
   }
   if (trade.side === "SELL") return trade.amount;
+
+  const eventEndMs = getEventEndTimeMs(trade);
+  if (eventEndMs !== null) {
+    const executedMs = getLiveDecisionTimeMs(trade);
+    const nowMs = Date.now();
+    const hasSettled = eventEndMs <= Math.max(executedMs, nowMs);
+    if (hasSettled) {
+      return Math.abs(trade.shares) - trade.amount;
+    }
+  }
+
   return 0;
 }
 
