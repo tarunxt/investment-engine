@@ -1301,6 +1301,7 @@ function buildDetailedRationaleScoreRows(
   const meanModeActionScore = meanModeAction
     ? config.actionScores[meanModeAction]
     : null;
+  const effectiveTechnicalConfidenceMultiplier = technicalScan ? technicalConfidenceMultiplier : 0;
 
   return [
     {
@@ -1342,21 +1343,21 @@ function buildDetailedRationaleScoreRows(
     {
       id: "technical-scan-confidence",
       parameter: "Technical Scan Confidence Score",
-      score: technicalConfidenceScore,
-      multiplier: technicalConfidenceMultiplier,
-      denominatorWeight: technicalConfidenceMultiplier === 0 ? 0 : 2,
+      score: technicalScan ? technicalConfidenceScore : null,
+      multiplier: effectiveTechnicalConfidenceMultiplier,
+      denominatorWeight: effectiveTechnicalConfidenceMultiplier === 0 ? 0 : 2,
     },
     {
       id: "premarket-trend",
       parameter: "Technical Scan Premarket trend",
-      score: getTechnicalTrendScore(technicalScan?.premarketTrend || stock.representative["Premarket trend"]),
-      multiplier: config.detailedRationaleMultipliers["premarket-trend"],
+      score: technicalScan ? getTechnicalTrendScore(technicalScan.premarketTrend) : null,
+      multiplier: technicalScan ? config.detailedRationaleMultipliers["premarket-trend"] : 0,
     },
     {
       id: "last-5-candles-trend",
       parameter: "Technical Scan Last 5 candles trend",
-      score: getTechnicalTrendScore(technicalScan?.last5CandlesTrend || stock.representative["Last 5 candles trend"]),
-      multiplier: config.detailedRationaleMultipliers["last-5-candles-trend"],
+      score: technicalScan ? getTechnicalTrendScore(technicalScan.last5CandlesTrend) : null,
+      multiplier: technicalScan ? config.detailedRationaleMultipliers["last-5-candles-trend"] : 0,
     },
     {
       id: "mean-mode-action",
@@ -1810,7 +1811,9 @@ function getRepresentativeConsensusRow(rows: LlmBreakupRow[]) {
 }
 
 function getStockIdentityKey(exchange: string, symbol: string) {
-  return `${(exchange || "UNKNOWN").trim().toUpperCase()}:${(symbol || "UNKNOWN").trim().toUpperCase()}`;
+  const normalizedExchange = normalizeScanKey(exchange) || "UNKNOWN";
+  const normalizedSymbol = normalizeScanKey(symbol) || "UNKNOWN";
+  return `${normalizedExchange}:${normalizedSymbol}`;
 }
 
 function stripMarkdownLinks(value: string) {
@@ -2223,8 +2226,16 @@ function getFallbackTechnicalConfidence(row?: CanonicalRow | null) {
   );
 }
 
+function formatTechnicalScanConfidenceValue(value?: string | null) {
+  const normalized = normalizeEmptyTechnicalValue(value);
+  if (!normalized) return "";
+  const parsed = parseNumericCell(normalized);
+  if (parsed === null) return normalized;
+  return Number.isInteger(parsed) ? parsed.toFixed(0) : String(parsed);
+}
+
 function getTechnicalScanConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
-  return normalizeEmptyTechnicalValue(scan?.confidenceScore) || getFallbackTechnicalConfidence(row);
+  return formatTechnicalScanConfidenceValue(scan?.confidenceScore) || formatTechnicalScanConfidenceValue(getFallbackTechnicalConfidence(row));
 }
 
 function formatTechnicalSetup(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
