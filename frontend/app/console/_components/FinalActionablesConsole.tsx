@@ -490,6 +490,8 @@ const CONSOLIDATED_DISPLAY_HEADERS = [
   "Units to Sell/Buy",
   "Amount",
   "Technical Setup",
+  "Premarket trend",
+  "Last 5 candles trend",
   "Confidence Score",
   ...REBALANCE_HEADER_ORDER.filter(
     (header) =>
@@ -579,6 +581,8 @@ const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
     "fundamentals-short": 3,
     "fundamentals-medium-long": 1,
     "technical-scan-confidence": 1,
+    "premarket-trend": 5,
+    "last-5-candles-trend": 5,
     "mean-mode-action": 4,
   },
   detailedRationaleDenominator: null,
@@ -1280,6 +1284,18 @@ function buildDetailedRationaleScoreRows(
       score: technicalConfidenceScore,
       multiplier: technicalConfidenceMultiplier,
       denominatorWeight: technicalConfidenceMultiplier === 0 ? 0 : 2,
+    },
+    {
+      id: "premarket-trend",
+      parameter: "Technical Scan Premarket trend",
+      score: getTechnicalTrendScore(technicalScan?.premarketTrend),
+      multiplier: config.detailedRationaleMultipliers["premarket-trend"],
+    },
+    {
+      id: "last-5-candles-trend",
+      parameter: "Technical Scan Last 5 candles trend",
+      score: getTechnicalTrendScore(technicalScan?.last5CandlesTrend),
+      multiplier: config.detailedRationaleMultipliers["last-5-candles-trend"],
     },
     {
       id: "mean-mode-action",
@@ -2160,6 +2176,27 @@ function getDisplayedSetupNameForStock(
 function formatTechnicalConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
   const approvedSetup = resolveApprovedTechnicalSetup(scan, row);
   return approvedSetup ? approvedSetup.confidence.toFixed(1) : getFallbackTechnicalConfidence(row);
+}
+
+function formatTechnicalTrendValue(value?: string | null) {
+  const normalized = normalizeEmptyTechnicalValue(value);
+  if (!normalized) return "";
+  const parsed = parseNumericCell(normalized);
+  if (parsed === null) return normalized;
+  return String(Math.max(-3, Math.min(3, parsed)));
+}
+
+function getTechnicalTrendScore(value?: string | null) {
+  const parsed = parseNumericCell(formatTechnicalTrendValue(value));
+  return parsed === null ? null : Math.max(-3, Math.min(3, parsed));
+}
+
+function formatTechnicalPremarketTrend(scan: TechnicalScanResult | null) {
+  return formatTechnicalTrendValue(scan?.premarketTrend);
+}
+
+function formatTechnicalLast5CandlesTrend(scan: TechnicalScanResult | null) {
+  return formatTechnicalTrendValue(scan?.last5CandlesTrend);
 }
 
 function getSortableConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
@@ -3266,6 +3303,12 @@ function RebalanceCell({
       </span>
     );
   }
+  if (header === "Premarket trend") {
+    return formatTechnicalPremarketTrend(technicalScan || null);
+  }
+  if (header === "Last 5 candles trend") {
+    return formatTechnicalLast5CandlesTrend(technicalScan || null);
+  }
   if (header === "Confidence Score") {
     return (
       <span className={cn("font-semibold", getTechnicalScanClass(technicalScan || null, row))}>
@@ -4196,6 +4239,8 @@ const ACTIONABLES_CALCULATION_HEADERS = [
     (header) => !["Exchange Symbol", "Stock Symbol", "Stock Name"].includes(header),
   ),
   "Technical Setup",
+  "Premarket trend",
+  "Last 5 candles trend",
   "Confidence Score",
 ] as const;
 
@@ -4298,7 +4343,9 @@ function getDetailedRationaleCalculationHeader(row: DetailedRationaleScoreRow): 
     "fundamentals-short": "Score Rationale - Fundamentals Short Term",
     "fundamentals-medium-long": "Score Rationale - Fundamentals Medium/Long Term",
     "technical-scan-confidence": "Confidence Score",
-    "action-mean-mode": ACTION_HEADER,
+    "premarket-trend": "Premarket trend",
+    "last-5-candles-trend": "Last 5 candles trend",
+    "mean-mode-action": ACTION_HEADER,
   };
 
   return rowHeaderMap[row.id] ?? null;
@@ -4489,6 +4536,18 @@ function buildActionablesCalculationRows(
             </span>
           );
           sortValues[header] = setup;
+          return;
+        }
+        if (header === "Premarket trend") {
+          const premarketTrend = formatTechnicalPremarketTrend(technicalScan);
+          values[header] = premarketTrend;
+          sortValues[header] = parseNumericCell(premarketTrend) ?? premarketTrend;
+          return;
+        }
+        if (header === "Last 5 candles trend") {
+          const last5CandlesTrend = formatTechnicalLast5CandlesTrend(technicalScan);
+          values[header] = last5CandlesTrend;
+          sortValues[header] = parseNumericCell(last5CandlesTrend) ?? last5CandlesTrend;
           return;
         }
         if (header === "Confidence Score") {
@@ -4696,7 +4755,7 @@ function ActionablesFormulaModal({
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>Consolidated (Mean and Mode) uses the mode action across LLM rows and averages numeric sizing/rationale columns.</li>
               <li>Consolidated (Formula) uses the weighted Calculated Score and the Calculated Score matrix to set Action and Units Change.</li>
-              <li>Technical Setup and Confidence Score are appended from the latest Technical Scan for the stock.</li>
+              <li>Technical Setup, Premarket trend, Last 5 candles trend, and Confidence Score are appended from the latest Technical Scan for the stock.</li>
               <li>Rows with no stocks for Sell All, Add More, Buy New, Trim, or Hold are hidden.</li>
             </ul>
           </div>
