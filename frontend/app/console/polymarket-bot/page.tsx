@@ -450,6 +450,7 @@ const DEFAULT_EC2_COMMANDS = [
   "bullpen status",
 ];
 const TABLE_PAGE_SIZE = 10;
+const COPIED_TRADERS_ANALYSIS_PAGE_SIZE = 10;
 const PAST_TRADES_PAGE_SIZE = 10;
 
 function formatRelativePollTime(iso?: string | null) {
@@ -1387,6 +1388,7 @@ export default function PolymarketBotPage() {
   const [traderInvestedThresholdDraft, setTraderInvestedThresholdDraft] =
     useState("");
   const [copiedPage, setCopiedPage] = useState(1);
+  const [copiedTraderAnalysisPage, setCopiedTraderAnalysisPage] = useState(1);
   const [copiedSearchQuery, setCopiedSearchQuery] = useState("");
   const [skippedBreakupOpen, setSkippedBreakupOpen] = useState(false);
   const [pendingActionElapsedSeconds, setPendingActionElapsedSeconds] =
@@ -1999,7 +2001,10 @@ export default function PolymarketBotPage() {
     redeemedTradesTab === "claim-pending"
       ? claimPendingTradeRows
       : previouslyRedeemedTradeRows;
-  const analysisTradeRows = buildAnalysisTradeRows(state.live.recent_decisions);
+  const analysisTradeRows =
+    activeScreen === "analysis"
+      ? buildAnalysisTradeRows(state.live.recent_decisions)
+      : [];
   const wonAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl >= 0);
   const lostAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl < 0);
   const pastAnalysisTrades =
@@ -2022,9 +2027,23 @@ export default function PolymarketBotPage() {
   );
   const setPastTradesPage =
     pastTradesTab === "won" ? setWonPastTradesPage : setLostPastTradesPage;
-  const copiedTraderAnalysisRows = buildCopiedTraderAnalysisRows(
-    analysisTradeRows,
-    state.tracked_accounts,
+  const copiedTraderAnalysisRows =
+    activeScreen === "analysis"
+      ? buildCopiedTraderAnalysisRows(analysisTradeRows, state.tracked_accounts)
+      : [];
+  const copiedTraderAnalysisPageCount = Math.max(
+    1,
+    Math.ceil(
+      copiedTraderAnalysisRows.length / COPIED_TRADERS_ANALYSIS_PAGE_SIZE,
+    ),
+  );
+  const safeCopiedTraderAnalysisPage = Math.min(
+    copiedTraderAnalysisPage,
+    copiedTraderAnalysisPageCount,
+  );
+  const visibleCopiedTraderAnalysisRows = copiedTraderAnalysisRows.slice(
+    (safeCopiedTraderAnalysisPage - 1) * COPIED_TRADERS_ANALYSIS_PAGE_SIZE,
+    safeCopiedTraderAnalysisPage * COPIED_TRADERS_ANALYSIS_PAGE_SIZE,
   );
   const claimableRedeemedCount = claimPendingTradeRows.length;
   const redeemStatusMessage =
@@ -3774,7 +3793,7 @@ export default function PolymarketBotPage() {
                             </td>
                           </tr>
                         ) : (
-                          copiedTraderAnalysisRows.map((trader) => (
+                          visibleCopiedTraderAnalysisRows.map((trader) => (
                             <tr
                               key={trader.key}
                               className="cursor-pointer align-top transition hover:bg-slate-50"
@@ -3884,6 +3903,12 @@ export default function PolymarketBotPage() {
                         )}
                       </tbody>
                     </table>
+                    <PaginationRowsControl
+                      total={copiedTraderAnalysisRows.length}
+                      page={safeCopiedTraderAnalysisPage}
+                      pageSize={COPIED_TRADERS_ANALYSIS_PAGE_SIZE}
+                      onPageChange={setCopiedTraderAnalysisPage}
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -4470,7 +4495,8 @@ export default function PolymarketBotPage() {
                             <span className="inline-flex items-center gap-2">
                               <PolymarketIcon className="size-5 text-blue-600" />
                               <span>
-                                {selectedAnalyzedTrader.traderName} trade breakup
+                                {selectedAnalyzedTrader.traderName} trade
+                                breakup
                               </span>
                             </span>
                           );
