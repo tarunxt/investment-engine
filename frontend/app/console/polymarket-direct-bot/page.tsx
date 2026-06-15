@@ -381,9 +381,18 @@ const BULLPEN_ACCOUNT_URL = "https://polymarket.com";
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
 const TABLE_PAGE_SIZE = 10;
-const STATE_REFRESH_INTERVAL_MS = 10_000;
+const STATE_REFRESH_INTERVAL_MS = 60_000;
 const COPIED_TRADERS_ANALYSIS_PAGE_SIZE = 10;
 const PAST_TRADES_PAGE_SIZE = 10;
+
+function formatRefreshInterval(ms: number) {
+  const seconds = Math.round(ms / 1000);
+  if (seconds >= 60 && seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    return `${minutes} min`;
+  }
+  return `${seconds}s`;
+}
 
 function formatRelativePollTime(iso?: string | null) {
   if (!iso) return "waiting for first poll";
@@ -1346,7 +1355,7 @@ export default function PolymarketBotPage() {
 
     const now = Date.now();
     if (doctorAutoRefreshInFlight.current) return;
-    if (now - lastDoctorAutoRefreshAt.current < 5000) return;
+    if (now - lastDoctorAutoRefreshAt.current < STATE_REFRESH_INTERVAL_MS) return;
 
     doctorAutoRefreshInFlight.current = true;
     lastDoctorAutoRefreshAt.current = now;
@@ -1851,7 +1860,9 @@ export default function PolymarketBotPage() {
             claimableRedeemedCount === 1 ? "position is" : "positions are"
           } ready to claim.`
         : "No resolved winning positions are currently waiting to be claimed.";
-  const copiedPositionsRefreshSeconds = 5;
+  const copiedPositionsRefreshLabel = formatRefreshInterval(
+    STATE_REFRESH_INTERVAL_MS,
+  );
   const visibleTrackedTraders = state.tracked_traders;
   const copiedSortHeader = (
     column: CopiedSortColumn,
@@ -2783,7 +2794,7 @@ export default function PolymarketBotPage() {
                               {copiedSortHeader(
                                 "currentPnl",
                                 "Current PnL",
-                                `refreshes every ${copiedPositionsRefreshSeconds}s`,
+                                `refreshes every ${copiedPositionsRefreshLabel}`,
                               )}
                             </th>
                           ) : null}

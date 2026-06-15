@@ -462,9 +462,18 @@ const DEFAULT_EC2_COMMANDS = [
   "bullpen status",
 ];
 const TABLE_PAGE_SIZE = 10;
-const STATE_REFRESH_INTERVAL_MS = 10_000;
+const STATE_REFRESH_INTERVAL_MS = 60_000;
 const COPIED_TRADERS_ANALYSIS_PAGE_SIZE = 10;
 const PAST_TRADES_PAGE_SIZE = 10;
+
+function formatRefreshInterval(ms: number) {
+  const seconds = Math.round(ms / 1000);
+  if (seconds >= 60 && seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    return `${minutes} min`;
+  }
+  return `${seconds}s`;
+}
 
 function formatRelativePollTime(iso?: string | null) {
   if (!iso) return "waiting for first poll";
@@ -1518,7 +1527,7 @@ export default function PolymarketBotPage() {
 
     const now = Date.now();
     if (doctorAutoRefreshInFlight.current) return;
-    if (now - lastDoctorAutoRefreshAt.current < 5000) return;
+    if (now - lastDoctorAutoRefreshAt.current < STATE_REFRESH_INTERVAL_MS) return;
 
     doctorAutoRefreshInFlight.current = true;
     lastDoctorAutoRefreshAt.current = now;
@@ -1576,7 +1585,7 @@ export default function PolymarketBotPage() {
 
     const now = Date.now();
     if (balanceAutoRefreshInFlight.current) return;
-    if (now - lastBalanceAutoRefreshAt.current < 30000) return;
+    if (now - lastBalanceAutoRefreshAt.current < STATE_REFRESH_INTERVAL_MS) return;
 
     balanceAutoRefreshInFlight.current = true;
     actionInFlight.current = true;
@@ -2153,7 +2162,9 @@ export default function PolymarketBotPage() {
               claimableRedeemedCount === 1 ? "position is" : "positions are"
             } ready to claim. If you expected fewer, click refresh to fetch Bullpen balance and open positions; closed positions are hidden once the latest fetch is visible.`
           : "No resolved winning positions are currently waiting to be claimed. If the latest fetch is not visible, refresh will show whether Bullpen balance, positions, or history are still loading or unavailable.";
-  const copiedPositionsRefreshSeconds = 5;
+  const copiedPositionsRefreshLabel = formatRefreshInterval(
+    STATE_REFRESH_INTERVAL_MS,
+  );
   const visibleTrackedTraders = state.tracked_traders;
   const copiedSortHeader = (
     column: CopiedSortColumn,
@@ -3308,7 +3319,7 @@ export default function PolymarketBotPage() {
                               {copiedSortHeader(
                                 "currentPnl",
                                 "Current PnL",
-                                `refreshes every ${copiedPositionsRefreshSeconds}s`,
+                                `refreshes every ${copiedPositionsRefreshLabel}`,
                               )}
                             </th>
                           ) : null}
