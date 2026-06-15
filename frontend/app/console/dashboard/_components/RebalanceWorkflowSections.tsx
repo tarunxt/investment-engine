@@ -2180,8 +2180,8 @@ function StandardLlmOutputRenderer({ content }: { content: string }) {
         />
       ) : null}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="max-h-[62vh] w-full overflow-auto">
-          <table className="w-max min-w-full border-separate border-spacing-0 text-left text-xs text-slate-700">
+        <div className="max-h-[62vh] w-full max-w-full overflow-auto overscroll-contain">
+          <table className="min-w-max border-separate border-spacing-0 text-left text-xs text-slate-700">
             <thead className="sticky top-0 z-10 bg-slate-900 text-[11px] uppercase tracking-[0.08em] text-white">
               <tr>
                 {parsed.headers.map((header, index) => (
@@ -2244,7 +2244,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
   };
 
   return (
-    <div className="space-y-4 bg-white p-5 text-slate-900">
+    <div className="max-w-full space-y-4 overflow-x-hidden bg-white p-5 text-slate-900">
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -2357,7 +2357,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
               </div>
             ) : null}
             {job.response?.trim() ? (
-              <div className="m-5 rounded-2xl bg-slate-50 p-5">
+              <div className="m-5 max-w-full overflow-x-auto rounded-2xl bg-slate-50 p-5">
                 <StandardLlmOutputRenderer content={job.response.trim()} />
               </div>
             ) : (
@@ -7102,7 +7102,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
 
       {promptDialog ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={() => setPromptDialog(null)}>
-          <div className="max-h-[85vh] w-full max-w-[80vw] overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="max-h-[85vh] w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl bg-white shadow-2xl xl:max-w-[95vw]" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
               <div>
                 <h3 className="text-lg font-semibold text-slate-950">
@@ -7130,7 +7130,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
 
       {outputDialog ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onClick={() => setOutputDialog(null)}>
-          <div className="max-h-[85vh] w-full max-w-[80vw] overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="max-h-[85vh] w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl bg-white shadow-2xl xl:max-w-[95vw]" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
               <div>
                 <h3 className="text-lg font-semibold text-slate-950">
