@@ -576,10 +576,10 @@ function PortfolioCommandChart({
   };
 
   return (
-    <div className="rounded-[30px] border border-white/10 bg-slate-950/50 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur xl:min-w-[430px]">
+    <div className="rounded-[30px] border border-white/15 bg-slate-950/70 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur xl:min-w-[430px]">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3 text-lg font-semibold text-slate-400">
+          <div className="flex items-center gap-3 text-lg font-semibold text-slate-200">
             <span
               className={`h-4 w-5 rounded-full ${
                 isPositive ? "bg-emerald-400" : "bg-rose-400"
@@ -620,8 +620,8 @@ function PortfolioCommandChart({
                 onClick={() => setSelectedRange(range)}
                 className={
                   selected
-                    ? "rounded-2xl bg-blue-500/20 px-3 py-2.5 text-blue-400 transition hover:bg-blue-500/30"
-                    : "rounded-2xl px-2 py-2.5 transition hover:bg-white/10 hover:text-white"
+                    ? "rounded-2xl border border-white/60 bg-blue-500/35 px-3 py-2.5 text-white shadow-sm shadow-blue-950/30 transition hover:bg-blue-500/45"
+                    : "rounded-2xl px-2 py-2.5 text-slate-300 transition hover:bg-white/10 hover:text-white"
                 }
               >
                 {range}
@@ -634,7 +634,7 @@ function PortfolioCommandChart({
       <svg
         viewBox={`0 0 ${chartWidth} ${chartHeight}`}
         preserveAspectRatio="none"
-        className="mt-4 h-16 w-full cursor-crosshair overflow-visible"
+        className="mt-4 h-20 w-full cursor-crosshair overflow-visible"
         role="img"
         aria-label={`${displayedRangeLabel} portfolio profit and loss trend`}
         onMouseMove={handleChartMouseMove}
@@ -667,8 +667,8 @@ function PortfolioCommandChart({
               x2={hoveredCoordinates.x}
               y1="0"
               y2={chartHeight}
-              stroke="rgba(226,232,240,0.85)"
-              strokeWidth="1.5"
+              stroke="rgba(248,250,252,0.95)"
+              strokeWidth="2"
             />
             <circle
               cx={hoveredCoordinates.x}
@@ -680,18 +680,18 @@ function PortfolioCommandChart({
             />
             <foreignObject
               x={Math.min(
-                Math.max(hoveredCoordinates.x - 76, 4),
-                chartWidth - 156,
+                Math.max(hoveredCoordinates.x - 92, 4),
+                chartWidth - 188,
               )}
               y={
                 hoveredCoordinates.y > 38
-                  ? hoveredCoordinates.y - 36
-                  : hoveredCoordinates.y + 12
+                  ? hoveredCoordinates.y - 48
+                  : hoveredCoordinates.y + 14
               }
-              width="152"
-              height="34"
+              width="184"
+              height="44"
             >
-              <div className="rounded-md border border-white/20 bg-slate-950/90 px-2 py-1 text-[10px] leading-tight text-white shadow-lg backdrop-blur">
+              <div className="rounded-lg border border-white/30 bg-slate-950/95 px-3 py-2 text-xs font-semibold leading-tight text-white shadow-2xl shadow-black/40 backdrop-blur">
                 <div
                   className={
                     hoveredDayPnlValue >= 0
@@ -701,7 +701,7 @@ function PortfolioCommandChart({
                 >
                   Day P/L {formatInr(hoveredDayPnlValue)}
                 </div>
-                <div className="text-slate-400">
+                <div className="mt-1 text-slate-200">
                   {formatCommandChartTooltipDate(hoveredPoint.timestamp)}
                 </div>
               </div>
