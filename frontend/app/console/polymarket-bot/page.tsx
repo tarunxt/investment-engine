@@ -450,6 +450,8 @@ const DEFAULT_EC2_COMMANDS = [
   "bullpen status",
 ];
 const TABLE_PAGE_SIZE = 10;
+const STATE_REFRESH_INTERVAL_MS = 10_000;
+const COPIED_TRADERS_ANALYSIS_PAGE_SIZE = 10;
 const PAST_TRADES_PAGE_SIZE = 10;
 
 function formatRelativePollTime(iso?: string | null) {
@@ -1387,6 +1389,7 @@ export default function PolymarketBotPage() {
   const [traderInvestedThresholdDraft, setTraderInvestedThresholdDraft] =
     useState("");
   const [copiedPage, setCopiedPage] = useState(1);
+  const [copiedTraderAnalysisPage, setCopiedTraderAnalysisPage] = useState(1);
   const [copiedSearchQuery, setCopiedSearchQuery] = useState("");
   const [skippedBreakupOpen, setSkippedBreakupOpen] = useState(false);
   const [pendingActionElapsedSeconds, setPendingActionElapsedSeconds] =
@@ -1432,31 +1435,33 @@ export default function PolymarketBotPage() {
             mergeBullpenBalanceSnapshot(previous, nextState.live.balance),
           );
         }
-        setAccountDrafts((current) => ({
-          ...Object.fromEntries(
-            nextState.tracked_accounts.map((account) => [
-              account.id,
-              current[account.id] || {
-                target: account.target,
-                threshold_percent: account.threshold_percent,
-                net_worth_usd: account.net_worth_usd,
-                copy_trade_usd: account.copy_trade_usd,
-                enabled: account.enabled,
-              },
-            ]),
-          ),
-        }));
-        setManualNetWorthDrafts((current) => ({
-          ...Object.fromEntries(
-            nextState.tracked_accounts.map((account) => [
-              account.id,
-              current[account.id] ??
-                (account.net_worth_usd > 0
-                  ? String(account.net_worth_usd)
-                  : ""),
-            ]),
-          ),
-        }));
+        setAccountDrafts((current) => {
+          let changed = false;
+          const next = { ...current };
+          for (const account of nextState.tracked_accounts) {
+            if (next[account.id]) continue;
+            changed = true;
+            next[account.id] = {
+              target: account.target,
+              threshold_percent: account.threshold_percent,
+              net_worth_usd: account.net_worth_usd,
+              copy_trade_usd: account.copy_trade_usd,
+              enabled: account.enabled,
+            };
+          }
+          return changed ? next : current;
+        });
+        setManualNetWorthDrafts((current) => {
+          let changed = false;
+          const next = { ...current };
+          for (const account of nextState.tracked_accounts) {
+            if (next[account.id] !== undefined) continue;
+            changed = true;
+            next[account.id] =
+              account.net_worth_usd > 0 ? String(account.net_worth_usd) : "";
+          }
+          return changed ? next : current;
+        });
         setLiveTradeLimitDraft(
           String(nextState.config.max_live_trades_per_day),
         );
@@ -1477,8 +1482,9 @@ export default function PolymarketBotPage() {
     void load();
 
     const interval = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
       void load();
-    }, 2000);
+    }, STATE_REFRESH_INTERVAL_MS);
 
     return () => {
       cancelled = true;
@@ -1999,7 +2005,10 @@ export default function PolymarketBotPage() {
     redeemedTradesTab === "claim-pending"
       ? claimPendingTradeRows
       : previouslyRedeemedTradeRows;
-  const analysisTradeRows = buildAnalysisTradeRows(state.live.recent_decisions);
+  const analysisTradeRows =
+    activeScreen === "analysis"
+      ? buildAnalysisTradeRows(state.live.recent_decisions)
+      : [];
   const wonAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl >= 0);
   const lostAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl < 0);
   const pastAnalysisTrades =
@@ -2022,9 +2031,23 @@ export default function PolymarketBotPage() {
   );
   const setPastTradesPage =
     pastTradesTab === "won" ? setWonPastTradesPage : setLostPastTradesPage;
-  const copiedTraderAnalysisRows = buildCopiedTraderAnalysisRows(
-    analysisTradeRows,
-    state.tracked_accounts,
+  const copiedTraderAnalysisRows =
+    activeScreen === "analysis"
+      ? buildCopiedTraderAnalysisRows(analysisTradeRows, state.tracked_accounts)
+      : [];
+  const copiedTraderAnalysisPageCount = Math.max(
+    1,
+    Math.ceil(
+      copiedTraderAnalysisRows.length / COPIED_TRADERS_ANALYSIS_PAGE_SIZE,
+    ),
+  );
+  const safeCopiedTraderAnalysisPage = Math.min(
+    copiedTraderAnalysisPage,
+    copiedTraderAnalysisPageCount,
+  );
+  const visibleCopiedTraderAnalysisRows = copiedTraderAnalysisRows.slice(
+    (safeCopiedTraderAnalysisPage - 1) * COPIED_TRADERS_ANALYSIS_PAGE_SIZE,
+    safeCopiedTraderAnalysisPage * COPIED_TRADERS_ANALYSIS_PAGE_SIZE,
   );
   const claimableRedeemedCount = claimPendingTradeRows.length;
   const redeemStatusMessage =
@@ -3774,7 +3797,7 @@ export default function PolymarketBotPage() {
                             </td>
                           </tr>
                         ) : (
-                          copiedTraderAnalysisRows.map((trader) => (
+                          visibleCopiedTraderAnalysisRows.map((trader) => (
                             <tr
                               key={trader.key}
                               className="cursor-pointer align-top transition hover:bg-slate-50"
@@ -3884,6 +3907,12 @@ export default function PolymarketBotPage() {
                         )}
                       </tbody>
                     </table>
+                    <PaginationRowsControl
+                      total={copiedTraderAnalysisRows.length}
+                      page={safeCopiedTraderAnalysisPage}
+                      pageSize={COPIED_TRADERS_ANALYSIS_PAGE_SIZE}
+                      onPageChange={setCopiedTraderAnalysisPage}
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -4470,7 +4499,8 @@ export default function PolymarketBotPage() {
                             <span className="inline-flex items-center gap-2">
                               <PolymarketIcon className="size-5 text-blue-600" />
                               <span>
-                                {selectedAnalyzedTrader.traderName} trade breakup
+                                {selectedAnalyzedTrader.traderName} trade
+                                breakup
                               </span>
                             </span>
                           );
