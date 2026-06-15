@@ -510,7 +510,7 @@ function PortfolioCommandChart({
   trendPoints: PortfolioCommandPoint[];
 }) {
   const [selectedRange, setSelectedRange] =
-    useState<PortfolioCommandRange>("1D");
+    useState<PortfolioCommandRange>("ALL");
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(
     null,
   );
@@ -606,7 +606,7 @@ function PortfolioCommandChart({
         </div>
 
         <div
-          className="flex items-center gap-1 text-sm font-semibold text-slate-400"
+          className="flex max-w-[17rem] flex-wrap items-center justify-end gap-1 text-sm font-semibold text-slate-400 sm:max-w-none"
           aria-label="Portfolio chart time range"
         >
           {PORTFOLIO_COMMAND_RANGES.map((range) => {
@@ -620,8 +620,8 @@ function PortfolioCommandChart({
                 onClick={() => setSelectedRange(range)}
                 className={
                   selected
-                    ? "rounded-2xl border border-white/60 bg-blue-500/35 px-3 py-2.5 text-white shadow-sm shadow-blue-950/30 transition hover:bg-blue-500/45"
-                    : "rounded-2xl px-2 py-2.5 text-slate-300 transition hover:bg-white/10 hover:text-white"
+                    ? "rounded-2xl border border-white/60 bg-blue-500/35 px-2.5 py-2 text-white shadow-sm shadow-blue-950/30 transition hover:bg-blue-500/45 sm:px-3 sm:py-2.5"
+                    : "rounded-2xl px-2 py-2 text-slate-300 transition hover:bg-white/10 hover:text-white sm:py-2.5"
                 }
               >
                 {range}
