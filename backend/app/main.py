@@ -137,6 +137,38 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # ── Middleware ────────────────────────────────────────────────────────────────
 
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+}
+PRODUCTION_ENVIRONMENTS = {"production", "prod"}
+
+
+def _request_is_https(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    return request.url.scheme == "https" or forwarded_proto.split(",", 1)[0].strip() == "https"
+
+
+def _add_security_headers(request: Request, response):
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+
+    if settings.environment.lower() in PRODUCTION_ENVIRONMENTS and _request_is_https(request):
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=63072000; includeSubDomains; preload",
+        )
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    _add_security_headers(request, response)
+    return response
+
+
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
     corr_id = request.headers.get("X-Correlation-ID", str(uuid4()))
