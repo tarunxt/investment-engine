@@ -3466,14 +3466,69 @@ function DetailedRationaleScoreSection({
     onFocusCalculation?.({ stockKey: detail.stockKey, header });
   };
 
-  return (
+  const rebalanceRows = detail.detailedRationaleRows.filter((row) =>
+    [
+      "cruxx",
+      "technical-short",
+      "technical-medium",
+      "technical-long",
+      "fundamentals-short",
+      "fundamentals-medium-long",
+    ].includes(row.id),
+  );
+  const technicalScanRows = detail.detailedRationaleRows.filter((row) =>
+    ["technical-scan-confidence", "premarket-trend", "last-5-candles-trend"].includes(row.id),
+  );
+  const remainingRows = detail.detailedRationaleRows.filter(
+    (row) => !rebalanceRows.includes(row) && !technicalScanRows.includes(row),
+  );
+
+  const renderRow = (row: DetailedRationaleScoreRow) => (
+    <tr key={row.id}>
+      <td className="min-w-[24rem] px-4 py-2 text-slate-900">
+        {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
+          <button
+            type="button"
+            className="cursor-pointer rounded px-1 py-0.5 text-left underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onClick={() => openCalculationColumn(row)}
+            title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
+          >
+            {row.parameter}
+          </button>
+        ) : row.parameter}
+      </td>
+      <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
+        {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
+          <button
+            type="button"
+            className="cursor-pointer rounded px-1.5 py-0.5 font-semibold underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onClick={() => openCalculationColumn(row)}
+            title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
+          >
+            {formatScoreValue(row.score)}
+          </button>
+        ) : formatScoreValue(row.score)}
+      </td>
+      <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
+        {onMultiplierChange ? (
+          <input
+            type="number"
+            step="0.1"
+            value={multiplierDrafts?.[row.id] ?? String(row.multiplier)}
+            onChange={(event) => onMultiplierChange(row.id, event.target.value)}
+            className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            aria-label={`Multiplier for ${row.parameter}`}
+          />
+        ) : row.multiplier}
+      </td>
+    </tr>
+  );
+
+  const renderGroup = (title: string, description: string, rows: DetailedRationaleScoreRow[]) => rows.length ? (
     <section className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
-        <h3 className="font-semibold text-slate-950">Detailed Calculated Rationale Score</h3>
-        <p className="mt-1 text-xs text-slate-500">
-          Weighted score-rationale averages, technical scan confidence, and the Mean and Mode final action score.
-          {onMultiplierChange ? " Multiplier and denominator cells are editable for what-if formula recalculation." : ""}
-        </p>
+        <h3 className="font-semibold text-slate-950">{title}</h3>
+        <p className="mt-1 text-xs text-slate-500">{description}</p>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full text-xs sm:text-sm">
@@ -3484,74 +3539,51 @@ function DetailedRationaleScoreSection({
               <th className="whitespace-nowrap px-4 py-2 text-right font-semibold">Multiplier</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
-            {detail.detailedRationaleRows.map((row) => (
-              <tr key={row.id}>
-                <td className="min-w-[24rem] px-4 py-2 text-slate-900">
-                  {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
-                    <button
-                      type="button"
-                      className="cursor-pointer rounded px-1 py-0.5 text-left underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      onClick={() => openCalculationColumn(row)}
-                      title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
-                    >
-                      {row.parameter}
-                    </button>
-                  ) : row.parameter}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
-                  {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
-                    <button
-                      type="button"
-                      className="cursor-pointer rounded px-1.5 py-0.5 font-semibold underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      onClick={() => openCalculationColumn(row)}
-                      title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
-                    >
-                      {formatScoreValue(row.score)}
-                    </button>
-                  ) : formatScoreValue(row.score)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
-                  {onMultiplierChange ? (
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={multiplierDrafts?.[row.id] ?? String(row.multiplier)}
-                      onChange={(event) => onMultiplierChange(row.id, event.target.value)}
-                      className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                      aria-label={`Multiplier for ${row.parameter}`}
-                    />
-                  ) : row.multiplier}
-                </td>
-              </tr>
-            ))}
-            <tr className="bg-slate-50 font-semibold text-slate-950">
-              <td className="px-4 py-3 text-right">Final score</td>
-              <td className="whitespace-nowrap px-4 py-3 text-right">
-                {formatActionScore(detail.detailedRationaleFinalScore)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-right">
-                {onDenominatorChange ? (
-                  <div className="inline-flex items-center justify-end gap-1">
-                    <span>/</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={denominatorDraft ?? String(detail.detailedRationaleDenominator)}
-                      onChange={(event) => onDenominatorChange(event.target.value)}
-                      className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                      aria-label="Detailed rationale score denominator"
-                    />
-                  </div>
-                ) : (
-                  `/ ${detail.detailedRationaleDenominator || "—"}`
-                )}
-              </td>
-            </tr>
-          </tbody>
+          <tbody className="divide-y divide-slate-100">{rows.map(renderRow)}</tbody>
         </table>
       </div>
     </section>
+  ) : null;
+
+  return (
+    <div className="space-y-4">
+      {renderGroup(
+        "Rebalance",
+        `Values drawn from the Rebalance Scan for ${detail.stockSymbol}. Click a parameter or score to open the Actionables Calculations Excel layout at this stock and column.`,
+        rebalanceRows,
+      )}
+      {renderGroup(
+        "Technical Scan",
+        `Values drawn from the Technical Scan for ${detail.stockSymbol}. Click a parameter or score to open the technical scan columns at this stock.`,
+        technicalScanRows,
+      )}
+      {renderGroup(
+        "Consolidated action",
+        "Final consolidated action score used by the weighted formula.",
+        remainingRows,
+      )}
+      <section className="rounded-xl border border-slate-200 bg-slate-50">
+        <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-4 py-3 text-sm font-semibold text-slate-950">
+          <div className="text-right">Final score</div>
+          <div className="whitespace-nowrap text-right">{formatActionScore(detail.detailedRationaleFinalScore)}</div>
+          <div className="whitespace-nowrap text-right">
+            {onDenominatorChange ? (
+              <div className="inline-flex items-center justify-end gap-1">
+                <span>/</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={denominatorDraft ?? String(detail.detailedRationaleDenominator)}
+                  onChange={(event) => onDenominatorChange(event.target.value)}
+                  className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  aria-label="Detailed rationale score denominator"
+                />
+              </div>
+            ) : (`/ ${detail.detailedRationaleDenominator || "—"}`)}
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
