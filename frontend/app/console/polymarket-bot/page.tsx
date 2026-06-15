@@ -1434,31 +1434,33 @@ export default function PolymarketBotPage() {
             mergeBullpenBalanceSnapshot(previous, nextState.live.balance),
           );
         }
-        setAccountDrafts((current) => ({
-          ...Object.fromEntries(
-            nextState.tracked_accounts.map((account) => [
-              account.id,
-              current[account.id] || {
-                target: account.target,
-                threshold_percent: account.threshold_percent,
-                net_worth_usd: account.net_worth_usd,
-                copy_trade_usd: account.copy_trade_usd,
-                enabled: account.enabled,
-              },
-            ]),
-          ),
-        }));
-        setManualNetWorthDrafts((current) => ({
-          ...Object.fromEntries(
-            nextState.tracked_accounts.map((account) => [
-              account.id,
-              current[account.id] ??
-                (account.net_worth_usd > 0
-                  ? String(account.net_worth_usd)
-                  : ""),
-            ]),
-          ),
-        }));
+        setAccountDrafts((current) => {
+          let changed = false;
+          const next = { ...current };
+          for (const account of nextState.tracked_accounts) {
+            if (next[account.id]) continue;
+            changed = true;
+            next[account.id] = {
+              target: account.target,
+              threshold_percent: account.threshold_percent,
+              net_worth_usd: account.net_worth_usd,
+              copy_trade_usd: account.copy_trade_usd,
+              enabled: account.enabled,
+            };
+          }
+          return changed ? next : current;
+        });
+        setManualNetWorthDrafts((current) => {
+          let changed = false;
+          const next = { ...current };
+          for (const account of nextState.tracked_accounts) {
+            if (next[account.id] !== undefined) continue;
+            changed = true;
+            next[account.id] =
+              account.net_worth_usd > 0 ? String(account.net_worth_usd) : "";
+          }
+          return changed ? next : current;
+        });
         setLiveTradeLimitDraft(
           String(nextState.config.max_live_trades_per_day),
         );
@@ -1479,8 +1481,9 @@ export default function PolymarketBotPage() {
     void load();
 
     const interval = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
       void load();
-    }, 2000);
+    }, STATE_REFRESH_INTERVAL_MS);
 
     return () => {
       cancelled = true;

@@ -60,9 +60,13 @@ function buildCopyStats(
   paperTrades: PolymarketPaperTrade[],
 ) {
   const stats = new Map<string, TraderCopyStats>();
+  const traderIdByIdentity = new Map<string, string>();
 
   for (const trader of traders) {
     stats.set(trader.id, { tradesCopied: 0, tradesCopiedAmount: 0 });
+    for (const identity of traderIdentityValues(trader)) {
+      traderIdByIdentity.set(identity, trader.id);
+    }
   }
 
   const addForTrader = (
@@ -70,16 +74,13 @@ function buildCopyStats(
     amount: number,
   ) => {
     if (!identity) return;
-    const normalized = identity.toLowerCase();
-    const trader = traders.find((candidate) =>
-      traderIdentityValues(candidate).includes(normalized),
-    );
-    if (!trader) return;
-    const current = stats.get(trader.id) || {
+    const traderId = traderIdByIdentity.get(identity.toLowerCase());
+    if (!traderId) return;
+    const current = stats.get(traderId) || {
       tradesCopied: 0,
       tradesCopiedAmount: 0,
     };
-    stats.set(trader.id, {
+    stats.set(traderId, {
       tradesCopied: current.tradesCopied + 1,
       tradesCopiedAmount: current.tradesCopiedAmount + amount,
     });
