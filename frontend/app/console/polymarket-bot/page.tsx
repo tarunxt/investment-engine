@@ -35,6 +35,7 @@ import { parseApiTimestamp } from "@/lib/datetime";
 import type {
   PolymarketBalanceState,
   PolymarketBotState,
+  PolymarketDoctorStatus,
   PolymarketPaperTrade,
   PolymarketPosition,
   PolymarketTrackedAccount,
@@ -244,6 +245,15 @@ function isBullpenLoginRequired(
 }
 
 const DOCTOR_PASS_STICKY_MS = 2 * 60 * 1000;
+
+function hasActiveBullpenDoctorSession(
+  doctor?: PolymarketDoctorStatus | null,
+  secondsRemaining?: number | null,
+) {
+  return Boolean(
+    doctor?.ok && (secondsRemaining == null || secondsRemaining > 0),
+  );
+}
 
 function getLiveCriticalBanner(
   state: PolymarketBotState,
@@ -1793,6 +1803,10 @@ export default function PolymarketBotPage() {
   });
   const doctorLoginRequired =
     rawDoctorLoginRequired && !suppressStaleDoctorLogin;
+  const bullpenDoctorSessionActive = hasActiveBullpenDoctorSession(
+    state.live.doctor,
+    bullpenSessionSecondsRemaining,
+  );
   const pendingActionLabel = getActionLabel(pendingAction);
 
   const visibleBalance =
@@ -1832,9 +1846,15 @@ export default function PolymarketBotPage() {
     visibleBalance.message,
     visibleBalance.status,
   );
+  const balanceLoginRequired = isBullpenLoginRequired(
+    visibleBalance.message,
+    visibleBalance.status,
+  );
   const bullpenLoginRequired =
-    isBullpenLoginRequired(visibleBalance.message, visibleBalance.status) ||
-    doctorLoginRequired;
+    doctorLoginRequired ||
+    (balanceLoginRequired && !bullpenDoctorSessionActive);
+  const balanceLoginMessageSuperseded =
+    balanceLoginRequired && bullpenDoctorSessionActive;
   const copiedActiveStatuses = new Set(["executed", "confirmed"]);
   const thresholdEligibleRecentDecisions = state.live.recent_decisions.filter(
     (trade) => !isBelowTrackedNetWorthThreshold(trade, state.tracked_accounts),
@@ -2691,15 +2711,18 @@ export default function PolymarketBotPage() {
                         current session.
                       </p>
                       <p className="mt-1 text-amber-100/90">
-                        Backend reason:{" "}
-                        {visibleBalance.message ||
-                          "No balance check result has been returned yet."}
+                        {balanceLoginMessageSuperseded
+                          ? "Balance refresh is pending or stale, but the latest Bullpen doctor check shows an active login session. Click Refresh Balance to retry without re-login."
+                          : `Backend reason: ${
+                              visibleBalance.message ||
+                              "No balance check result has been returned yet."
+                            }`}
                       </p>
                       <p className="mt-1 text-amber-100/90">
                         Click Refresh Balance to ask the backend to refresh now.
-                        If the refresh still reports login required, open
-                        Bullpen/AWS EC2, run the Bullpen login, then refresh
-                        again.
+                        {balanceLoginMessageSuperseded
+                          ? " Re-login is only needed if the doctor check also reports that the Bullpen session expired."
+                          : " If the refresh still reports login required, open Bullpen/AWS EC2, run the Bullpen login, then refresh again."}
                       </p>
                     </div>
                   ) : (
