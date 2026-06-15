@@ -575,8 +575,8 @@ export default function PromptsPage() {
 
       {/* Create / Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-2xl bg-white shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeModal}>
+          <div className="w-full max-w-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-950">
                 {editTarget ? 'Prompt Details' : isFork ? 'Edit My Version' : 'New Prompt'}
@@ -720,8 +720,8 @@ export default function PromptsPage() {
 
       {/* Stock Parameters Modal */}
       {showStockParametersModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="flex max-h-[85vh] w-full max-w-5xl flex-col bg-white shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowStockParametersModal(false)}>
+          <div className="flex max-h-[85vh] w-full max-w-5xl flex-col bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-950">Stock Parameters</h2>
@@ -799,8 +799,8 @@ export default function PromptsPage() {
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm bg-white shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeleteTarget(null)}>
+          <div className="w-full max-w-sm bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="px-6 py-5">
               <h2 className="text-sm font-semibold text-gray-950">Delete Prompt</h2>
               <p className="mt-2 text-sm text-gray-600">

@@ -393,8 +393,8 @@ function LlmCostHistoryModal({
   const timezone = history?.timezone ?? API_TIMEZONE;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden border border-gray-200 bg-white shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden border border-gray-200 bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between border-b border-gray-200 px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-950">LLM Cost History</h2>
