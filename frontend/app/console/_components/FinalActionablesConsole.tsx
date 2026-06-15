@@ -4999,8 +4999,8 @@ function ActionablesInputSelectionDialog({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-6">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
           <div>
             <h3 className="text-2xl font-extrabold tracking-tight text-slate-950">Select Actionables inputs</h3>
             <p className="mt-2 text-base text-slate-500">
@@ -5020,7 +5020,7 @@ function ActionablesInputSelectionDialog({
             <X className="size-5" />
           </button>
         </div>
-        <div className="mx-6 mb-4 flex items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
+        <div className="mx-6 mb-4 flex shrink-0 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
           <span>{selectedCount} output{selectedCount === 1 ? "" : "s"} selected.</span>
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.18em] text-blue-950">
@@ -5042,7 +5042,7 @@ function ActionablesInputSelectionDialog({
             </button>
           </div>
         </div>
-        <div className="mx-6 max-h-[58vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+        <div className="mx-6 min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
           {candidates.length === 0 ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
               No eligible Rebalance Scan or Technical Scan outputs are available yet.
@@ -5159,7 +5159,7 @@ function ActionablesInputSelectionDialog({
             </div>
           )}
         </div>
-        <div className="flex justify-end px-6 py-5">
+        <div className="flex shrink-0 justify-end px-6 py-5">
           <Button
             type="button"
             onClick={onClose}
