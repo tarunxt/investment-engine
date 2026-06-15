@@ -324,11 +324,23 @@ const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 
 
 const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 1;
+const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 1;
+const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investor:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
 
 type CachedFinalActionablesRuns = {
   version: number;
   cachedAt: number;
   runs: RunResponse[];
+};
+
+type CachedDashboardFinalActionables = {
+  version: number;
+  cachedAt: number;
+  runs: RunResponse[];
+  portfolioSnapshots: {
+    india: ZerodhaPortfolioSnapshotDetail | null;
+    us: IndMoneyUsPortfolioSnapshotDetail | null;
+  };
 };
 
 function buildFinalActionablesCacheKey(portfolio: RebalancePortfolioKey, market: SwingTradeMarket) {
@@ -392,6 +404,55 @@ function selectCacheableFinalActionablesRuns(runs: RunResponse[], market: SwingT
 
 function cacheFinalActionablesRuns(cacheKey: string, runs: RunResponse[], market: SwingTradeMarket) {
   writeFinalActionablesRunCache(cacheKey, selectCacheableFinalActionablesRuns(runs, market));
+}
+
+
+function readDashboardFinalActionablesCache() {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<CachedDashboardFinalActionables>;
+    if (parsed.version !== DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION || !Array.isArray(parsed.runs) || !parsed.portfolioSnapshots) {
+      return null;
+    }
+
+    return {
+      runs: parsed.runs,
+      portfolioSnapshots: {
+        india: parsed.portfolioSnapshots.india ?? null,
+        us: parsed.portfolioSnapshots.us ?? null,
+      },
+    };
+  } catch (error) {
+    console.warn("Failed to restore cached dashboard final actionables:", error);
+    return null;
+  }
+}
+
+function writeDashboardFinalActionablesCache(
+  runs: RunResponse[],
+  portfolioSnapshots: CachedDashboardFinalActionables["portfolioSnapshots"],
+) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const cacheableRuns = new Map<number, RunResponse>();
+    selectCacheableFinalActionablesRuns(runs, "india").forEach((run) => cacheableRuns.set(run.id, run));
+    selectCacheableFinalActionablesRuns(runs, "us").forEach((run) => cacheableRuns.set(run.id, run));
+
+    const payload: CachedDashboardFinalActionables = {
+      version: DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION,
+      cachedAt: Date.now(),
+      runs: Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id),
+      portfolioSnapshots,
+    };
+    window.localStorage.setItem(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Failed to cache dashboard final actionables:", error);
+  }
 }
 
 function getTechnicalSetupsHref(setup?: string | null) {
@@ -5741,12 +5802,16 @@ function getLatestMatchingRuns(runs: RunResponse[], market: SwingTradeMarket) {
 }
 
 export function DashboardFinalActionablesTables() {
-  const [runs, setRuns] = useState<RunResponse[]>([]);
+  const cachedDashboardFinalActionablesOnFirstRender = useMemo(
+    () => readDashboardFinalActionablesCache(),
+    [],
+  );
+  const [runs, setRuns] = useState<RunResponse[]>(() => cachedDashboardFinalActionablesOnFirstRender?.runs ?? []);
   const [portfolioSnapshots, setPortfolioSnapshots] = useState<{
     india: ZerodhaPortfolioSnapshotDetail | null;
     us: IndMoneyUsPortfolioSnapshotDetail | null;
-  }>({ india: null, us: null });
-  const [loading, setLoading] = useState(true);
+  }>(() => cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots ?? { india: null, us: null });
+  const [loading, setLoading] = useState(() => !cachedDashboardFinalActionablesOnFirstRender);
   const [error, setError] = useState<string | null>(null);
   const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
   const [finalActionableLayout, setFinalActionableLayout] = useState<FinalActionableColumnLayout>(() => loadFinalActionableLayout());
@@ -5756,10 +5821,10 @@ export function DashboardFinalActionablesTables() {
   const [calculationFocusTarget, setCalculationFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
-  const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
-    india: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
-    us: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
-  });
+  const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>(() => ({
+    india: { portfolioSnapshot: cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots.india ?? null, eventsAnalysis: null, threatsAnalysis: null, error: null },
+    us: { portfolioSnapshot: cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots.us ?? null, eventsAnalysis: null, threatsAnalysis: null, error: null },
+  }));
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -5770,11 +5835,13 @@ export function DashboardFinalActionablesTables() {
         apiService.zerodhaPortfolioOverview(),
         apiService.indmoneyUsPortfolioOverview(),
       ]);
-      setRuns(allRuns);
-      setPortfolioSnapshots({
+      const nextPortfolioSnapshots = {
         india: zerodhaOverview.latest,
         us: indmoneyOverview.latest,
-      });
+      };
+      setRuns(allRuns);
+      setPortfolioSnapshots(nextPortfolioSnapshots);
+      writeDashboardFinalActionablesCache(allRuns, nextPortfolioSnapshots);
       setDetailsDataByMarket((current) => ({
         india: { ...current.india, portfolioSnapshot: zerodhaOverview.latest },
         us: { ...current.us, portfolioSnapshot: indmoneyOverview.latest },
