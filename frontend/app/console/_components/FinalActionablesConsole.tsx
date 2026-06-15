@@ -6031,6 +6031,7 @@ export function DashboardFinalActionablesTables() {
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
     const detailsData = detailsDataByMarket[market];
+    const lastUpdatedAt = getLatestMatchingRuns(runs, market)[0]?.created_at ?? null;
 
     return (
       <div id={market === "us" ? "final-actionable-us" : "final-actionable-zerodha"} className="scroll-mt-24 rounded-[28px] border border-slate-200 bg-white/80 p-4 shadow-sm">
@@ -6039,7 +6040,12 @@ export function DashboardFinalActionablesTables() {
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               {market === "us" ? "US" : "Zerodha India"}
             </div>
-            <h3 className="mt-1 font-serif text-xl tracking-tight text-slate-950">{title}</h3>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h3 className="font-serif text-xl tracking-tight text-slate-950">{title}</h3>
+              <span className="text-xs font-medium text-slate-500">
+                Last updated: {lastUpdatedAt ? formatDateTime(lastUpdatedAt) : "—"}
+              </span>
+            </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
           </div>
           <button
