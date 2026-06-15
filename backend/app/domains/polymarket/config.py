@@ -60,9 +60,9 @@ def load_polymarket_config() -> PolymarketBotConfig:
         max_exposure_per_market=_float_from_env("MAX_EXPOSURE_PER_MARKET", 25),
         max_daily_loss=_float_from_env("MAX_DAILY_LOSS", 50),
         max_live_trade_size=_float_from_env("MAX_LIVE_TRADE_SIZE", 1),
-        max_live_trades_per_day=_int_from_env("MAX_LIVE_TRADES_PER_DAY", 5),
+        max_live_trades_per_day=_int_from_env("MAX_LIVE_TRADES_PER_DAY", 150),
         trader_invested_threshold_usd=_float_from_env(
-            "TRADER_INVESTED_THRESHOLD_USD", 500
+            "TRADER_INVESTED_THRESHOLD_USD", 100
         ),
         max_live_daily_loss=_float_from_env("MAX_LIVE_DAILY_LOSS", 10),
         max_live_exposure_per_market=_float_from_env("MAX_LIVE_EXPOSURE_PER_MARKET", 5),

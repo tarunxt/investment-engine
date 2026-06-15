@@ -365,21 +365,27 @@ class PolymarketPaperCopyBot:
             self.config.trader_invested_threshold_usd = (
                 request.trader_invested_threshold_usd
             )
+            self.config.max_live_exposure_per_market = (
+                request.max_live_exposure_per_market
+            )
             await self.config_store.save(
                 PolymarketUserConfigOverride(
                     max_live_trades_per_day=request.max_live_trades_per_day,
                     trader_invested_threshold_usd=request.trader_invested_threshold_usd,
+                    max_live_exposure_per_market=request.max_live_exposure_per_market,
                 )
             )
             await self.logger.info(
                 "Updated live limits: "
                 f"max trades/day {request.max_live_trades_per_day}, "
-                f"trader invested threshold ${request.trader_invested_threshold_usd:.2f}."
+                f"trader invested threshold ${request.trader_invested_threshold_usd:.2f}, "
+                f"max exposure/event ${request.max_live_exposure_per_market:.2f}."
             )
             self._add_activity(
                 "Updated live limits: "
                 f"max trades/day {request.max_live_trades_per_day}, "
-                f"trader invested threshold ${request.trader_invested_threshold_usd:.2f}."
+                f"trader invested threshold ${request.trader_invested_threshold_usd:.2f}, "
+                f"max exposure/event ${request.max_live_exposure_per_market:.2f}."
             )
 
     async def add_tracked_account(
