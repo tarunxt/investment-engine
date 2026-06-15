@@ -292,6 +292,7 @@ export type TechnicalScanResult = {
   provider: string;
   model: string;
   createdAt: string;
+  runLabel: string;
 };
 
 export type TechnicalScanMap = Record<string, TechnicalScanResult>;
@@ -1284,15 +1285,34 @@ function getTechnicalScanScoreMultiplier(
   return 0;
 }
 
+function formatTechnicalScanSourceLabel(scan: Pick<TechnicalScanResult, "runLabel" | "createdAt">) {
+  const runLabel = scan.runLabel || "Selected run";
+  const technicalLabel = /technical scan/i.test(runLabel) ? runLabel : `${runLabel} (Technical Scan)`;
+  return `${technicalLabel} · ${formatDateTime(scan.createdAt)}`;
+}
+
+function getLatestTechnicalScanSourceLabel(scanMap: TechnicalScanMap) {
+  const latestScan = Object.values(scanMap)
+    .filter((scan, index, scans) => scans.findIndex((candidate) => candidate.runId === scan.runId && candidate.jobId === scan.jobId) === index)
+    .sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt))[0];
+  return latestScan ? formatTechnicalScanSourceLabel(latestScan) : null;
+}
+
+function buildMissingTechnicalScanReason(stock: StockConsensus, technicalScanSourceLabel?: string | null) {
+  const sourceClause = technicalScanSourceLabel ? ` (${technicalScanSourceLabel})` : "";
+  return `Not updated: No matching Technical Scan${sourceClause} row was found for ${stock.exchange || "UNKNOWN"}/${stock.symbol}. Check that the selected Technical Scan output contains this ticker and that its Stock Symbol matches the rebalance/actionables ticker.`;
+}
+
 function buildDetailedRationaleScoreRows(
   stock: StockConsensus,
   technicalScan: TechnicalScanResult | null,
   meanModeAction: ActionCategory | null,
   config: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+  technicalScanSourceLabel?: string | null,
 ): DetailedRationaleScoreRow[] {
   const missingTechnicalScanReason = technicalScan
     ? null
-    : `No matching Technical Scan row was found for ${stock.exchange || "UNKNOWN"}/${stock.symbol}. Check that the selected Technical Scan output contains this ticker and that its Stock Symbol matches the rebalance/actionables ticker.`;
+    : buildMissingTechnicalScanReason(stock, technicalScanSourceLabel);
   const technicalConfidenceValue = getTechnicalScanConfidence(technicalScan, stock.representative);
   const technicalConfidenceScore = parseNumericCell(technicalConfidenceValue);
   const technicalConfidenceMultiplier = getTechnicalScanScoreMultiplier(
@@ -1555,6 +1575,7 @@ function buildScoreMatrixDetail(
   stock: StockConsensus,
   technicalScan: TechnicalScanResult | null = null,
   formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+  technicalScanSourceLabel?: string | null,
 ): ScoreMatrixDetail {
   const entries: ScoreMatrixEntry[] = stock.rows.map((row) => {
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
@@ -2036,7 +2057,7 @@ function isMarkdownSeparator(cells: string[]) {
 
 function parseTechnicalScanResponse(
   response: string,
-  meta: Pick<TechnicalScanResult, "runId" | "jobId" | "provider" | "model" | "createdAt">,
+  meta: Pick<TechnicalScanResult, "runId" | "jobId" | "provider" | "model" | "createdAt" | "runLabel">,
 ): TechnicalScanResult[] {
   const lines = response.split(/\r?\n/);
   const results: TechnicalScanResult[] = [];
@@ -2129,6 +2150,7 @@ export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
           provider: job.provider,
           model: job.model,
           createdAt: job.created_at,
+          runLabel: getAutoRebalanceRunDisplayLabel(run),
         });
       }),
     )
@@ -4553,9 +4575,11 @@ function buildActionablesCalculationRows(
   onSetupClick?: (group: SetupStockGroup) => void,
   onMatrixOpen?: (detail: ScoreMatrixDetail) => void,
 ): ActionablesCalculationRow[] {
+  const technicalScanSourceLabel = getLatestTechnicalScanSourceLabel(technicalScans);
+
   return stocks.flatMap((stock) => {
     const technicalScan = getTechnicalScanForStock(technicalScans, stock);
-    const detail = buildScoreMatrixDetail(stock, technicalScan, formulaConfig);
+    const detail = buildScoreMatrixDetail(stock, technicalScan, formulaConfig, technicalScanSourceLabel);
     const meanModeCells = buildSummaryRowCells(stock, detail, detail.meanModeAction, detail.meanModeUnitsChange);
     const formulaCells = buildSummaryRowCells(stock, detail, detail.calculatedAction, detail.calculatedUnitsChange);
     const stockLabel = `${stock.exchange || "—"} · ${stock.symbol} · ${stock.representative["Stock Name"] || stock.symbol}`;
@@ -5708,7 +5732,7 @@ export function buildDashboardActionRows(
   formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ): DashboardActionRow[] {
   return stocks.map((stock) => {
-    const detail = buildScoreMatrixDetail(stock, getTechnicalScanForStock(technicalScans, stock), formulaConfig);
+    const detail = buildScoreMatrixDetail(stock, getTechnicalScanForStock(technicalScans, stock), formulaConfig, getLatestTechnicalScanSourceLabel(technicalScans));
     const formulaAction = detail.calculatedAction;
     return {
       id: getDashboardActionRowId(market, stock),
@@ -6048,7 +6072,18 @@ export function DashboardFinalActionablesTables() {
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
     const detailsData = detailsDataByMarket[market];
-    const lastUpdatedAt = getLatestMatchingRuns(runs, market)[0]?.created_at ?? null;
+    const latestRebalanceAt = getLatestMatchingRuns(runs, market)[0]?.created_at ?? null;
+    const latestTechnicalAt = Object.values(technicalScans)
+      .filter((scan, index, scans) => scans.findIndex((candidate) => candidate.runId === scan.runId && candidate.jobId === scan.jobId) === index)
+      .filter((scan) => {
+        const run = runs.find((candidate) => candidate.id === scan.runId);
+        return run ? isCompletedTechnicalScanRun(run, market) : false;
+      })
+      .map((scan) => scan.createdAt)
+      .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null;
+    const lastUpdatedAt = [latestRebalanceAt, latestTechnicalAt]
+      .filter(Boolean)
+      .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null;
 
     return (
       <div id={market === "us" ? "final-actionable-us" : "final-actionable-zerodha"} className="scroll-mt-24 rounded-[28px] border border-slate-200 bg-white/80 p-4 shadow-sm">
