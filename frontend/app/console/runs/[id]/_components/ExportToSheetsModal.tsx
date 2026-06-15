@@ -97,8 +97,8 @@ export default function ExportToSheetsModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="mx-4 max-w-md rounded-lg border border-gray-200 bg-white shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setIsOpen(false)}>
+      <div className="mx-4 max-w-md rounded-lg border border-gray-200 bg-white shadow-lg" onClick={(event) => event.stopPropagation()}>
         <div className="border-b border-gray-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-gray-900">Export to Google Sheets</h2>
         </div>
