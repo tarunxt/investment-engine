@@ -2180,8 +2180,8 @@ function StandardLlmOutputRenderer({ content }: { content: string }) {
         />
       ) : null}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="max-h-[62vh] overflow-auto">
-          <table className="min-w-full border-separate border-spacing-0 text-left text-xs text-slate-700">
+        <div className="max-h-[62vh] w-full overflow-auto">
+          <table className="w-max min-w-full border-separate border-spacing-0 text-left text-xs text-slate-700">
             <thead className="sticky top-0 z-10 bg-slate-900 text-[11px] uppercase tracking-[0.08em] text-white">
               <tr>
                 {parsed.headers.map((header, index) => (
@@ -7102,7 +7102,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
 
       {promptDialog ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={() => setPromptDialog(null)}>
-          <div className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="max-h-[85vh] w-full max-w-[80vw] overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
               <div>
                 <h3 className="text-lg font-semibold text-slate-950">
@@ -7130,7 +7130,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
 
       {outputDialog ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onClick={() => setOutputDialog(null)}>
-          <div className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="max-h-[85vh] w-full max-w-[80vw] overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
               <div>
                 <h3 className="text-lg font-semibold text-slate-950">
