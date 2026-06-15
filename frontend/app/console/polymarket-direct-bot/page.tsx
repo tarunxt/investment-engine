@@ -7,6 +7,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Check,
   ExternalLink,
   Info,
   Loader2,
@@ -266,6 +267,17 @@ function findTrackedAccountForCopiedTrader(
     [account.handle, account.target, account.address, account.proxy_wallet]
       .map(trackedAccountKey)
       .some((key) => key && traderKeys.includes(key)),
+  );
+}
+
+function isPersistedNetWorthValue(
+  account: PolymarketTrackedAccount | undefined,
+  netWorth: number,
+) {
+  return (
+    Boolean(account) &&
+    Number.isFinite(netWorth) &&
+    Math.abs((account?.net_worth_usd ?? Number.NaN) - netWorth) < 0.005
   );
 }
 
@@ -3360,13 +3372,32 @@ export default function PolymarketBotPage() {
                                     )
                                       ? manualDraftNetWorth
                                       : trader.netWorth;
+                                    const matchingNetWorthAccount = state
+                                      ? findTrackedAccountForCopiedTrader(
+                                          trader,
+                                          state.tracked_accounts,
+                                        )
+                                      : undefined;
+                                    const hasPersistedNetWorth =
+                                      isPersistedNetWorthValue(
+                                        matchingNetWorthAccount,
+                                        displayedNetWorth,
+                                      );
                                     const manualBusyKey = `net-worth-${manualDraftKey}`;
                                     return (
                                       <>
-                                        <span className="font-semibold text-slate-700">
-                                          {displayedNetWorth > 0
-                                            ? formatMoney(displayedNetWorth)
-                                            : "—"}
+                                        <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
+                                          <span>
+                                            {displayedNetWorth > 0
+                                              ? formatMoney(displayedNetWorth)
+                                              : "—"}
+                                          </span>
+                                          {hasPersistedNetWorth ? (
+                                            <Check
+                                              className="size-4 text-emerald-500"
+                                              aria-label="Net worth saved in memory"
+                                            />
+                                          ) : null}
                                         </span>
                                       <div className="flex items-center gap-2">
                                         <input
