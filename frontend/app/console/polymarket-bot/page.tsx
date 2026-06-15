@@ -1388,6 +1388,7 @@ export default function PolymarketBotPage() {
   const [liveTradeLimitDraft, setLiveTradeLimitDraft] = useState("");
   const [traderInvestedThresholdDraft, setTraderInvestedThresholdDraft] =
     useState("");
+  const [maxLiveExposureDraft, setMaxLiveExposureDraft] = useState("");
   const [copiedPage, setCopiedPage] = useState(1);
   const [copiedTraderAnalysisPage, setCopiedTraderAnalysisPage] = useState(1);
   const [copiedSearchQuery, setCopiedSearchQuery] = useState("");
@@ -1469,6 +1470,9 @@ export default function PolymarketBotPage() {
         );
         setTraderInvestedThresholdDraft(
           String(nextState.config.trader_invested_threshold_usd),
+        );
+        setMaxLiveExposureDraft(
+          String(nextState.config.max_live_exposure_per_market),
         );
         setError(null);
       } catch (loadError) {
@@ -1625,6 +1629,7 @@ export default function PolymarketBotPage() {
       setTraderInvestedThresholdDraft(
         String(nextState.config.trader_invested_threshold_usd),
       );
+      setMaxLiveExposureDraft(String(nextState.config.max_live_exposure_per_market));
     } catch (runError) {
       setActionError(normalizeError(runError));
     } finally {
@@ -1670,6 +1675,7 @@ export default function PolymarketBotPage() {
     setTraderInvestedThresholdDraft(
       String(nextState.config.trader_invested_threshold_usd),
     );
+    setMaxLiveExposureDraft(String(nextState.config.max_live_exposure_per_market));
     setAccountDrafts(
       Object.fromEntries(
         nextState.tracked_accounts.map((account) => [
@@ -1699,6 +1705,7 @@ export default function PolymarketBotPage() {
     const nextTraderInvestedThreshold = Number.parseFloat(
       traderInvestedThresholdDraft,
     );
+    const nextMaxLiveExposure = Number.parseFloat(maxLiveExposureDraft);
     if (!Number.isFinite(nextLimit) || nextLimit < 1) {
       setActionError("Max live trades per day must be at least 1.");
       return;
@@ -1710,10 +1717,15 @@ export default function PolymarketBotPage() {
       setActionError("Trader invested threshold must be at least $0.");
       return;
     }
+    if (!Number.isFinite(nextMaxLiveExposure) || nextMaxLiveExposure <= 0) {
+      setActionError("Maximum exposure per event must be greater than $0.");
+      return;
+    }
     await runAction("update-live-limit", () =>
       apiService.polymarketUpdateLiveLimits({
         max_live_trades_per_day: nextLimit,
         trader_invested_threshold_usd: nextTraderInvestedThreshold,
+        max_live_exposure_per_market: nextMaxLiveExposure,
       }),
     );
   }
@@ -2935,43 +2947,73 @@ export default function PolymarketBotPage() {
 
           {activeScreen === "main" ? (
             <>
-              <div className="flex flex-wrap items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                <div className="flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                  <span className="font-medium">Max live trades/day:</span>
-                  <span className="font-semibold text-slate-950">
-                    {state.config.max_live_trades_per_day}
-                  </span>
-                  <input
-                    className="h-8 w-20 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
-                    type="number"
-                    min={1}
-                    value={liveTradeLimitDraft}
-                    onChange={(event) =>
-                      setLiveTradeLimitDraft(event.target.value)
-                    }
-                    aria-label="Max live trades per day"
-                  />
-                  <span className="font-medium">
-                    Trader Invested Threshold:
-                  </span>
-                  <span className="font-semibold text-slate-950">
-                    {formatMoney(state.config.trader_invested_threshold_usd)}
-                  </span>
-                  <input
-                    className="h-8 w-24 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={traderInvestedThresholdDraft}
-                    onChange={(event) =>
-                      setTraderInvestedThresholdDraft(event.target.value)
-                    }
-                    aria-label="Trader invested threshold"
-                  />
+              <div className="flex flex-wrap items-start gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                <div className="w-full max-w-md rounded-[22px] border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 shadow-sm">
+                  <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Risk guardrails
+                  </div>
+                  <div className="space-y-3">
+                    <label className="grid gap-1 sm:grid-cols-[1fr_8rem] sm:items-center sm:gap-3">
+                      <span>
+                        <span className="font-medium">Max live trades/day:</span>{" "}
+                        <span className="font-semibold text-slate-950">
+                          {state.config.max_live_trades_per_day}
+                        </span>
+                      </span>
+                      <input
+                        className="h-9 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
+                        type="number"
+                        min={1}
+                        value={liveTradeLimitDraft}
+                        onChange={(event) =>
+                          setLiveTradeLimitDraft(event.target.value)
+                        }
+                        aria-label="Max live trades per day"
+                      />
+                    </label>
+                    <label className="grid gap-1 sm:grid-cols-[1fr_8rem] sm:items-center sm:gap-3">
+                      <span>
+                        <span className="font-medium">Trader Invested Threshold:</span>{" "}
+                        <span className="font-semibold text-slate-950">
+                          {formatMoney(state.config.trader_invested_threshold_usd)}
+                        </span>
+                      </span>
+                      <input
+                        className="h-9 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={traderInvestedThresholdDraft}
+                        onChange={(event) =>
+                          setTraderInvestedThresholdDraft(event.target.value)
+                        }
+                        aria-label="Trader invested threshold"
+                      />
+                    </label>
+                    <label className="grid gap-1 sm:grid-cols-[1fr_8rem] sm:items-center sm:gap-3">
+                      <span>
+                        <span className="font-medium">Maximum exposure per Event:</span>{" "}
+                        <span className="font-semibold text-slate-950">
+                          {formatMoney(state.config.max_live_exposure_per_market)}
+                        </span>
+                      </span>
+                      <input
+                        className="h-9 rounded-full border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none focus:border-sky-500"
+                        type="number"
+                        min={0.01}
+                        step="0.01"
+                        value={maxLiveExposureDraft}
+                        onChange={(event) =>
+                          setMaxLiveExposureDraft(event.target.value)
+                        }
+                        aria-label="Maximum exposure per event"
+                      />
+                    </label>
+                  </div>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="rounded-full border-slate-300"
+                    className="mt-4 rounded-full border-slate-300"
                     disabled={pendingAction !== null}
                     onClick={() => void saveLiveTradeLimit()}
                   >
