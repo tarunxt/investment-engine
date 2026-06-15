@@ -1397,6 +1397,8 @@ export default function PolymarketBotPage() {
   const actionInFlight = useRef(false);
   const doctorAutoRefreshInFlight = useRef(false);
   const lastDoctorAutoRefreshAt = useRef(0);
+  const balanceAutoRefreshInFlight = useRef(false);
+  const lastBalanceAutoRefreshAt = useRef(0);
   useEffect(() => {
     if (!pendingAction) return;
 
@@ -1527,6 +1529,65 @@ export default function PolymarketBotPage() {
       .finally(() => {
         doctorAutoRefreshInFlight.current = false;
         setAutoDoctorRefreshing(false);
+      });
+  }, [pendingAction, state]);
+
+  useEffect(() => {
+    if (!state) return;
+    if (pendingAction !== null || actionInFlight.current) return;
+    if (isUsableBullpenBalance(state.live.balance)) return;
+    if (
+      !isBullpenBalanceUnrefreshed(
+        state.live.balance.message,
+        state.live.balance.status,
+      )
+    ) {
+      return;
+    }
+    if (
+      isBullpenLoginRequired(
+        state.live.balance.message,
+        state.live.balance.status,
+      ) &&
+      !hasActiveBullpenDoctorSession(
+        state.live.doctor,
+        state.live.doctor.bullpen_jwt_seconds_remaining,
+      )
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    if (balanceAutoRefreshInFlight.current) return;
+    if (now - lastBalanceAutoRefreshAt.current < 30000) return;
+
+    balanceAutoRefreshInFlight.current = true;
+    actionInFlight.current = true;
+    lastBalanceAutoRefreshAt.current = now;
+    lastMutationAt.current = now;
+
+    apiService
+      .polymarketLiveBalanceRefresh()
+      .then((nextState) => {
+        lastMutationAt.current = Date.now();
+        const receivedAt = Date.now();
+        setState(nextState);
+        setLastStateRefreshAt(receivedAt);
+        if (nextState.live.doctor.ok) {
+          setLastDoctorPassAt(receivedAt);
+        }
+        if (isUsableBullpenBalance(nextState.live.balance)) {
+          setLastSettledBalance((previous) =>
+            mergeBullpenBalanceSnapshot(previous, nextState.live.balance),
+          );
+        }
+      })
+      .catch((balanceError) => {
+        setActionError(normalizeError(balanceError));
+      })
+      .finally(() => {
+        balanceAutoRefreshInFlight.current = false;
+        actionInFlight.current = false;
       });
   }, [pendingAction, state]);
 
