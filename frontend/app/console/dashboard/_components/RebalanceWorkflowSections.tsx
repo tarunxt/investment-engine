@@ -3344,7 +3344,7 @@ function InputSelectionDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-6">
           <div>
             <h3 className="text-2xl font-extrabold tracking-tight text-slate-950">
@@ -3392,7 +3392,7 @@ function InputSelectionDialog({
             </button>
           </div>
         </div>
-        <div className="mx-6 max-h-[58vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+        <div className="mx-6 min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
           {loading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> Loading eligible
@@ -3526,7 +3526,7 @@ function InputSelectionDialog({
             </div>
           )}
         </div>
-        <div className="flex justify-end px-6 py-5">
+        <div className="flex shrink-0 justify-end px-6 py-5">
           <Button
             type="button"
             onClick={onClose}
