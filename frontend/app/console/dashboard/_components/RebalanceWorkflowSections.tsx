@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, History, Loader2, Play, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, History, Loader2, Pause, Play, X } from "lucide-react";
 
 import {
   buildConsensusRows,
@@ -2100,6 +2100,129 @@ function getRunOutputStatusLabel(status: RunOutputJobStatus) {
   return "Other";
 }
 
+type ParsedLlmTable = {
+  intro: string;
+  headers: string[];
+  rows: string[][];
+  outro: string;
+};
+
+function splitPipeTableRow(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function isPipeTableDivider(line: string) {
+  return /^\|?[\s:-|]+\|?$/.test(line.trim());
+}
+
+function parseLlmPipeTable(content: string): ParsedLlmTable | null {
+  const lines = content.split(/\r?\n/);
+  const tableStart = lines.findIndex((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("|") || splitPipeTableRow(trimmed).length < 3) return false;
+    const nextLine = lines[index + 1]?.trim() ?? "";
+    return isPipeTableDivider(nextLine) || nextLine.startsWith("|");
+  });
+
+  if (tableStart < 0) return null;
+
+  const headers = splitPipeTableRow(lines[tableStart]);
+  let rowStart = tableStart + 1;
+  if (isPipeTableDivider(lines[rowStart] ?? "")) rowStart += 1;
+
+  const rows: string[][] = [];
+  let tableEnd = rowStart;
+  while (tableEnd < lines.length && lines[tableEnd].trim().startsWith("|")) {
+    const cells = splitPipeTableRow(lines[tableEnd]);
+    if (cells.length >= 2 && !isPipeTableDivider(lines[tableEnd])) {
+      rows.push(headers.map((_, index) => cells[index] ?? ""));
+    }
+    tableEnd += 1;
+  }
+
+  if (rows.length === 0) return null;
+  return {
+    intro: lines.slice(0, tableStart).join("\n").trim(),
+    headers,
+    rows,
+    outro: lines.slice(tableEnd).join("\n").trim(),
+  };
+}
+
+function StandardLlmOutputRenderer({ content }: { content: string }) {
+  const parsed = parseLlmPipeTable(content);
+
+  if (!parsed) {
+    return (
+      <MarkdownRenderer
+        content={content}
+        enableValidation={false}
+        className="text-xs leading-6 text-slate-700 [&_.prose]:max-w-none [&_table]:min-w-max [&_td]:align-top [&_td]:text-xs [&_th]:whitespace-nowrap [&_th]:text-[11px]"
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
+        Detected pipe-delimited markdown table output and converted it to the standard readable LLM table format.
+      </div>
+      {parsed.intro ? (
+        <MarkdownRenderer
+          content={parsed.intro}
+          enableValidation={false}
+          className="text-sm leading-6 text-slate-700 [&_.prose]:max-w-none"
+        />
+      ) : null}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="max-h-[62vh] overflow-auto">
+          <table className="min-w-full border-separate border-spacing-0 text-left text-xs text-slate-700">
+            <thead className="sticky top-0 z-10 bg-slate-900 text-[11px] uppercase tracking-[0.08em] text-white">
+              <tr>
+                {parsed.headers.map((header, index) => (
+                  <th
+                    key={`${header}-${index}`}
+                    scope="col"
+                    className="max-w-[18rem] border-r border-slate-700 px-3 py-3 align-top font-bold last:border-r-0"
+                  >
+                    {header || `Column ${index + 1}`}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {parsed.rows.map((row, rowIndex) => (
+                <tr key={`llm-row-${rowIndex}`} className="odd:bg-white even:bg-slate-50 hover:bg-blue-50/70">
+                  {row.map((cell, cellIndex) => (
+                    <td
+                      key={`llm-cell-${rowIndex}-${cellIndex}`}
+                      className="min-w-36 max-w-[22rem] border-r border-t border-slate-100 px-3 py-3 align-top leading-5 last:border-r-0"
+                    >
+                      {cell || "—"}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {parsed.outro ? (
+        <MarkdownRenderer
+          content={parsed.outro}
+          enableValidation={false}
+          className="text-sm leading-6 text-slate-700 [&_.prose]:max-w-none"
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function RunOutputDetails({ run }: { run: RunResponse }) {
   const usdInrRate = useUsdInrRate();
   const [highlightedJobId, setHighlightedJobId] = useState<number | null>(null);
@@ -2150,27 +2273,49 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
         {costUsd > 0 ? (
           <p className="mt-2 text-sm font-semibold text-slate-600">Cumulative cost: {formatInrCostFromUsd(costUsd, usdInrRate)}</p>
         ) : null}
-        <div className="mt-4 flex flex-wrap gap-2">
-          {jobs.map((job) => {
-            const state = classifyRunOutputJob(job);
-            const jobDuration = getJobDuration(job);
-            return (
-              <button
-                key={`summary-job-${job.id}`}
-                type="button"
-                onClick={() => scrollToJob(job.id)}
-                className={`rounded-full border px-3 py-1.5 text-left text-xs font-semibold transition hover:shadow-sm ${getRunOutputStatusClass(state)}`}
-                title={`Jump to ${job.provider}/${job.model}`}
-              >
-                <span className="capitalize">{job.provider}</span>{" "}
-                <span className="font-medium">{job.model}</span>
-                <span className="font-bold"> · {getRunOutputStatusLabel(state)}</span>
-                <span className="ml-1 text-[11px] opacity-80">
-                  {jobDuration ? ` · ${jobDuration}` : ""} · {formatInrCostFromUsd(job.estimated_cost, usdInrRate)}
-                </span>
-              </button>
-            );
-          })}
+        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-slate-50 text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 font-bold">Provider</th>
+                  <th className="px-4 py-3 font-bold">Model</th>
+                  <th className="px-4 py-3 font-bold">Status</th>
+                  <th className="px-4 py-3 font-bold">Runtime</th>
+                  <th className="px-4 py-3 font-bold">Cost</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {jobs.map((job) => {
+                  const state = classifyRunOutputJob(job);
+                  const jobDuration = getJobDuration(job);
+                  return (
+                    <tr
+                      key={`summary-job-${job.id}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => scrollToJob(job.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") scrollToJob(job.id);
+                      }}
+                      className="cursor-pointer bg-white transition hover:bg-slate-50"
+                      title={`Jump to ${job.provider}/${job.model}`}
+                    >
+                      <td className="px-4 py-3 font-bold capitalize text-slate-900">{job.provider}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700">{job.model}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${getRunOutputStatusClass(state)}`}>
+                          {getRunOutputStatusLabel(state)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-600">{jobDuration ?? "n/a"}</td>
+                      <td className="px-4 py-3 font-bold text-slate-700">{formatInrCostFromUsd(job.estimated_cost, usdInrRate)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
         <p className="mt-4 text-xs text-slate-500">
           Malformed table outputs with any stored LLM table response are counted as Partial.
@@ -2213,11 +2358,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
             ) : null}
             {job.response?.trim() ? (
               <div className="m-5 rounded-2xl bg-slate-50 p-5">
-                <MarkdownRenderer
-                  content={job.response.trim()}
-                  enableValidation={false}
-                  className="text-xs leading-6 text-slate-700 [&_.prose]:max-w-none [&_table]:min-w-max [&_td]:align-top [&_td]:text-xs [&_th]:whitespace-nowrap [&_th]:text-[11px]"
-                />
+                <StandardLlmOutputRenderer content={job.response.trim()} />
               </div>
             ) : (
               <div className="m-5 rounded-2xl bg-slate-50 p-5 text-xs leading-6 text-slate-700">
@@ -6698,8 +6839,18 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
                       pauseRequestedRef.current = !pauseRequestedRef.current;
                       setWorkflowPaused(pauseRequestedRef.current);
                     }}
-                    className="h-auto w-full shrink-0 justify-center whitespace-normal rounded-full bg-orange-500 px-6 py-2 text-center leading-5 text-white hover:bg-orange-600"
+                    className={cn(
+                      "h-auto w-full shrink-0 justify-center whitespace-normal rounded-full px-6 py-2 text-center leading-5 text-white shadow-sm transition",
+                      workflowPaused
+                        ? "bg-emerald-600 hover:bg-emerald-700"
+                        : "bg-orange-500 hover:bg-orange-600",
+                    )}
                   >
+                    {workflowPaused ? (
+                      <Play className="mr-2 size-4 fill-current" />
+                    ) : (
+                      <Pause className="mr-2 size-4 fill-current" />
+                    )}
                     {workflowPaused ? "Resume" : "Pause"}
                   </Button>
                   <Button
