@@ -138,6 +138,7 @@ type DetailedRationaleScoreRow = {
   score: number | null;
   multiplier: number;
   denominatorWeight?: number;
+  missingReason?: string;
 };
 
 type TechnicalScanMultiplierKey = "bullish" | "bearish";
@@ -1289,9 +1290,11 @@ function buildDetailedRationaleScoreRows(
   meanModeAction: ActionCategory | null,
   config: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ): DetailedRationaleScoreRow[] {
-  const technicalConfidenceScore = parseNumericCell(
-    getTechnicalScanConfidence(technicalScan, stock.representative),
-  );
+  const missingTechnicalScanReason = technicalScan
+    ? null
+    : `No matching Technical Scan row was found for ${stock.exchange || "UNKNOWN"}/${stock.symbol}. Check that the selected Technical Scan output contains this ticker and that its Stock Symbol matches the rebalance/actionables ticker.`;
+  const technicalConfidenceValue = getTechnicalScanConfidence(technicalScan, stock.representative);
+  const technicalConfidenceScore = parseNumericCell(technicalConfidenceValue);
   const technicalConfidenceMultiplier = getTechnicalScanScoreMultiplier(
     technicalScan,
     stock.representative,
@@ -1346,18 +1349,21 @@ function buildDetailedRationaleScoreRows(
       score: technicalScan ? technicalConfidenceScore : null,
       multiplier: effectiveTechnicalConfidenceMultiplier,
       denominatorWeight: effectiveTechnicalConfidenceMultiplier === 0 ? 0 : 2,
+      missingReason: missingTechnicalScanReason || (technicalConfidenceScore === null ? `Technical Scan row was matched, but Confidence Score was empty or non-numeric: ${technicalConfidenceValue || "blank"}.` : undefined),
     },
     {
       id: "premarket-trend",
       parameter: "Technical Scan Premarket trend",
       score: technicalScan ? getTechnicalTrendScore(technicalScan.premarketTrend) : null,
       multiplier: technicalScan ? config.detailedRationaleMultipliers["premarket-trend"] : 0,
+      missingReason: missingTechnicalScanReason || (technicalScan && getTechnicalTrendScore(technicalScan.premarketTrend) === null ? `Technical Scan row was matched, but Premarket trend was empty or non-numeric: ${technicalScan.premarketTrend || "blank"}.` : undefined),
     },
     {
       id: "last-5-candles-trend",
       parameter: "Technical Scan Last 5 candles trend",
       score: technicalScan ? getTechnicalTrendScore(technicalScan.last5CandlesTrend) : null,
       multiplier: technicalScan ? config.detailedRationaleMultipliers["last-5-candles-trend"] : 0,
+      missingReason: missingTechnicalScanReason || (technicalScan && getTechnicalTrendScore(technicalScan.last5CandlesTrend) === null ? `Technical Scan row was matched, but Last 5 candles trend was empty or non-numeric: ${technicalScan.last5CandlesTrend || "blank"}.` : undefined),
     },
     {
       id: "mean-mode-action",
@@ -1993,6 +1999,12 @@ function getScanSymbolCandidates(...values: Array<string | null | undefined>) {
     if (!cleaned) return;
 
     const pieces = [cleaned];
+    const whitespaceParts = cleaned.split(/\s+/).filter(Boolean);
+    if (whitespaceParts.length > 1) {
+      whitespaceParts.forEach((part) => pieces.push(part));
+      const uniqueParts = Array.from(new Set(whitespaceParts.map((part) => normalizeScanKey(part))));
+      if (uniqueParts.length === 1) pieces.push(whitespaceParts[0]);
+    }
     const colonPart = cleaned.split(":").pop();
     if (colonPart && colonPart !== cleaned) pieces.push(colonPart);
     const slashPart = cleaned.split("/").pop();
@@ -3568,6 +3580,11 @@ function DetailedRationaleScoreSection({
             {row.parameter}
           </button>
         ) : row.parameter}
+        {row.missingReason ? (
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-amber-700">
+            Not updated: {row.missingReason}
+          </p>
+        ) : null}
       </td>
       <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
         {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
