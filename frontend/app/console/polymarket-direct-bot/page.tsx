@@ -232,7 +232,41 @@ function getLiveCriticalBanner(state: PolymarketBotState) {
 }
 
 function trackedAccountKey(value?: string | null) {
-  return (value || "").toLowerCase().replace(/^@/, "").trim();
+  return normalizeTrackedAccountTarget(value).toLowerCase();
+}
+
+function normalizeTrackedAccountTarget(value?: string | null) {
+  const raw = (value || "").trim().replace(/\?+$/, "");
+  if (!raw) return "";
+
+  try {
+    const parsed = new URL(raw);
+    const segment = parsed.pathname.replace(/\/+$/, "").split("/").pop();
+    if (segment) {
+      return segment.replace(/^@/, "").replace(/\/+$/, "").trim();
+    }
+  } catch {
+    // Not a URL; continue with plain Polymarket handle/address cleanup.
+  }
+
+  return raw.replace(/^@/, "").replace(/\/+$/, "").split("?", 1)[0].trim();
+}
+
+function findTrackedAccountForCopiedTrader(
+  trader: CopiedTraderAnalysisRow,
+  accounts: PolymarketTrackedAccount[],
+) {
+  if (trader.accountId) {
+    const account = accounts.find((item) => item.id === trader.accountId);
+    if (account) return account;
+  }
+
+  const traderKeys = [trader.traderName, trader.key].map(trackedAccountKey);
+  return accounts.find((account) =>
+    [account.handle, account.target, account.address, account.proxy_wallet]
+      .map(trackedAccountKey)
+      .some((key) => key && traderKeys.includes(key)),
+  );
 }
 
 function getTradeIdentityKeys(trade: PolymarketSourceTradeDecision) {
@@ -811,21 +845,23 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       detail: trade.reason || trade.command || "Redeemed live trade",
     }));
 
-  const directRows: RedeemedTradeRow[] = state.live.redeemed_trades.map((trade) => ({
-    key: `direct-${trade.id}`,
-    timestamp: trade.timestamp,
-    marketId: trade.market_id,
-    marketTitle: trade.market_title,
-    outcome: trade.outcome,
-    side: trade.side,
-    amount: trade.amount,
-    shares: Math.abs(trade.shares),
-    price: trade.price,
-    profitLoss: trade.profit_loss,
-    status: trade.status,
-    source: "Direct Polymarket wallet history",
-    detail: trade.detail,
-  }));
+  const directRows: RedeemedTradeRow[] = state.live.redeemed_trades.map(
+    (trade) => ({
+      key: `direct-${trade.id}`,
+      timestamp: trade.timestamp,
+      marketId: trade.market_id,
+      marketTitle: trade.market_title,
+      outcome: trade.outcome,
+      side: trade.side,
+      amount: trade.amount,
+      shares: Math.abs(trade.shares),
+      price: trade.price,
+      profitLoss: trade.profit_loss,
+      status: trade.status,
+      source: "Direct Polymarket wallet history",
+      detail: trade.detail,
+    }),
+  );
 
   const redeemedKeys = new Set(
     [...directRows, ...liveRows, ...paperRows].map(
@@ -1432,29 +1468,53 @@ export default function PolymarketBotPage() {
   }
 
   async function saveManualNetWorth(trader: CopiedTraderAnalysisRow) {
-    const draftKey = trader.accountId ?? trader.key;
-    const draft = manualNetWorthDrafts[draftKey] ?? "";
+    const matchingAccount = state
+      ? findTrackedAccountForCopiedTrader(trader, state.tracked_accounts)
+      : null;
+    const draftKey = matchingAccount?.id ?? trader.accountId ?? trader.key;
+    const fallbackDraftKey = trader.accountId ?? trader.key;
+    const draft =
+      manualNetWorthDrafts[draftKey] ??
+      manualNetWorthDrafts[fallbackDraftKey] ??
+      "";
     const netWorth = Number.parseFloat(draft);
     if (!Number.isFinite(netWorth) || netWorth < 0) {
       setActionError("Manual net worth must be a valid amount of at least $0.");
+      return;
+    }
+    const target = normalizeTrackedAccountTarget(
+      trader.traderName || trader.key,
+    );
+    if (!target) {
+      setActionError(
+        "Manual net worth needs a trader handle or wallet address.",
+      );
       return;
     }
     const busyKey = `net-worth-${draftKey}`;
     setBusyAccountId(busyKey);
     setActionError(null);
     try {
-      const nextState = trader.accountId
-        ? await apiService.polymarketDirectUpdateTrackedAccount(trader.accountId, {
-            net_worth_usd: netWorth,
-          })
+      const nextState = matchingAccount
+        ? await apiService.polymarketDirectUpdateTrackedAccount(
+            matchingAccount.id,
+            {
+              net_worth_usd: netWorth,
+            },
+          )
         : await apiService.polymarketDirectAddTrackedAccount({
-            target: trader.traderName || trader.key,
+            target,
             threshold_percent: 5,
             net_worth_usd: netWorth,
             copy_trade_usd: 1,
             enabled: true,
           });
       applyTrackedAccountState(nextState);
+      setManualNetWorthDrafts((current) => ({
+        ...current,
+        [draftKey]: String(netWorth),
+        [fallbackDraftKey]: String(netWorth),
+      }));
     } catch (accountError) {
       setActionError(normalizeError(accountError));
     } finally {
@@ -3268,48 +3328,51 @@ export default function PolymarketBotPage() {
                                     const manualBusyKey = `net-worth-${manualDraftKey}`;
                                     return (
                                       <div className="flex items-center gap-2">
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        className="w-28 rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                                        aria-label={`Manual net worth for ${trader.traderName}`}
-                                        placeholder="Net worth"
-                                        value={
-                                          manualNetWorthDrafts[manualDraftKey] ??
-                                          (trader.netWorth > 0
-                                            ? String(trader.netWorth)
-                                            : "")
-                                        }
-                                        disabled={
-                                          busyAccountId === manualBusyKey
-                                        }
-                                        onChange={(event) =>
-                                          setManualNetWorthDrafts(
-                                            (current) => ({
-                                              ...current,
-                                              [manualDraftKey]: event.target.value,
-                                            }),
-                                          )
-                                        }
-                                      />
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 rounded-full px-3 text-[11px]"
-                                        disabled={
-                                          busyAccountId === manualBusyKey
-                                        }
-                                        onClick={() =>
-                                          void saveManualNetWorth(trader)
-                                        }
-                                      >
-                                        {busyAccountId === manualBusyKey ? (
-                                          <Loader2 className="mr-1 size-3 animate-spin" />
-                                        ) : null}
-                                        Save
-                                      </Button>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          className="w-28 rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                                          aria-label={`Manual net worth for ${trader.traderName}`}
+                                          placeholder="Net worth"
+                                          value={
+                                            manualNetWorthDrafts[
+                                              manualDraftKey
+                                            ] ??
+                                            (trader.netWorth > 0
+                                              ? String(trader.netWorth)
+                                              : "")
+                                          }
+                                          disabled={
+                                            busyAccountId === manualBusyKey
+                                          }
+                                          onChange={(event) =>
+                                            setManualNetWorthDrafts(
+                                              (current) => ({
+                                                ...current,
+                                                [manualDraftKey]:
+                                                  event.target.value,
+                                              }),
+                                            )
+                                          }
+                                        />
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 rounded-full px-3 text-[11px]"
+                                          disabled={
+                                            busyAccountId === manualBusyKey
+                                          }
+                                          onClick={() =>
+                                            void saveManualNetWorth(trader)
+                                          }
+                                        >
+                                          {busyAccountId === manualBusyKey ? (
+                                            <Loader2 className="mr-1 size-3 animate-spin" />
+                                          ) : null}
+                                          Save
+                                        </Button>
                                       </div>
                                     );
                                   })()}

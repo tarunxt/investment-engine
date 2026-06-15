@@ -282,7 +282,41 @@ function getLiveCriticalBanner(
 }
 
 function trackedAccountKey(value?: string | null) {
-  return (value || "").toLowerCase().replace(/^@/, "").trim();
+  return normalizeTrackedAccountTarget(value).toLowerCase();
+}
+
+function normalizeTrackedAccountTarget(value?: string | null) {
+  const raw = (value || "").trim().replace(/\?+$/, "");
+  if (!raw) return "";
+
+  try {
+    const parsed = new URL(raw);
+    const segment = parsed.pathname.replace(/\/+$/, "").split("/").pop();
+    if (segment) {
+      return segment.replace(/^@/, "").replace(/\/+$/, "").trim();
+    }
+  } catch {
+    // Not a URL; continue with plain Polymarket handle/address cleanup.
+  }
+
+  return raw.replace(/^@/, "").replace(/\/+$/, "").split("?", 1)[0].trim();
+}
+
+function findTrackedAccountForCopiedTrader(
+  trader: CopiedTraderAnalysisRow,
+  accounts: PolymarketTrackedAccount[],
+) {
+  if (trader.accountId) {
+    const account = accounts.find((item) => item.id === trader.accountId);
+    if (account) return account;
+  }
+
+  const traderKeys = [trader.traderName, trader.key].map(trackedAccountKey);
+  return accounts.find((account) =>
+    [account.handle, account.target, account.address, account.proxy_wallet]
+      .map(trackedAccountKey)
+      .some((key) => key && traderKeys.includes(key)),
+  );
 }
 
 function getTradeIdentityKeys(trade: PolymarketSourceTradeDecision) {
@@ -1090,18 +1124,20 @@ function compareCopiedEventTieBreakers(
     (parseApiTimestamp(left.copiedAt)?.getTime() ?? 0);
   if (copiedAtComparison !== 0) return copiedAtComparison;
 
-  return [
-    left.marketTitle.localeCompare(right.marketTitle, undefined, {
-      numeric: true,
-      sensitivity: "base",
-    }),
-    left.outcome.localeCompare(right.outcome, undefined, {
-      numeric: true,
-      sensitivity: "base",
-    }),
-    left.side.localeCompare(right.side),
-    left.key.localeCompare(right.key),
-  ].find((comparison) => comparison !== 0) ?? 0;
+  return (
+    [
+      left.marketTitle.localeCompare(right.marketTitle, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }),
+      left.outcome.localeCompare(right.outcome, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }),
+      left.side.localeCompare(right.side),
+      left.key.localeCompare(right.key),
+    ].find((comparison) => comparison !== 0) ?? 0
+  );
 }
 
 function compareCopiedEventGroups(
@@ -1580,29 +1616,50 @@ export default function PolymarketBotPage() {
   }
 
   async function saveManualNetWorth(trader: CopiedTraderAnalysisRow) {
-    const draftKey = trader.accountId ?? trader.key;
-    const draft = manualNetWorthDrafts[draftKey] ?? "";
+    const matchingAccount = state
+      ? findTrackedAccountForCopiedTrader(trader, state.tracked_accounts)
+      : null;
+    const draftKey = matchingAccount?.id ?? trader.accountId ?? trader.key;
+    const fallbackDraftKey = trader.accountId ?? trader.key;
+    const draft =
+      manualNetWorthDrafts[draftKey] ??
+      manualNetWorthDrafts[fallbackDraftKey] ??
+      "";
     const netWorth = Number.parseFloat(draft);
     if (!Number.isFinite(netWorth) || netWorth < 0) {
       setActionError("Manual net worth must be a valid amount of at least $0.");
+      return;
+    }
+    const target = normalizeTrackedAccountTarget(
+      trader.traderName || trader.key,
+    );
+    if (!target) {
+      setActionError(
+        "Manual net worth needs a trader handle or wallet address.",
+      );
       return;
     }
     const busyKey = `net-worth-${draftKey}`;
     setBusyAccountId(busyKey);
     setActionError(null);
     try {
-      const nextState = trader.accountId
-        ? await apiService.polymarketUpdateTrackedAccount(trader.accountId, {
+      const nextState = matchingAccount
+        ? await apiService.polymarketUpdateTrackedAccount(matchingAccount.id, {
             net_worth_usd: netWorth,
           })
         : await apiService.polymarketAddTrackedAccount({
-            target: trader.traderName || trader.key,
+            target,
             threshold_percent: 5,
             net_worth_usd: netWorth,
             copy_trade_usd: 1,
             enabled: true,
           });
       applyTrackedAccountState(nextState);
+      setManualNetWorthDrafts((current) => ({
+        ...current,
+        [draftKey]: String(netWorth),
+        [fallbackDraftKey]: String(netWorth),
+      }));
     } catch (accountError) {
       setActionError(normalizeError(accountError));
     } finally {
