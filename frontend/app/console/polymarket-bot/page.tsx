@@ -971,10 +971,51 @@ function getTraderDisplayName(trade: PolymarketSourceTradeDecision) {
   return trade.trader_handle ? `@${trade.trader_handle}` : trade.trader_name;
 }
 
+function getPolymarketProfileUrlFromHandle(handle: string) {
+  const normalizedHandle = handle.replace(/^@/, "").trim().toLowerCase();
+  if (!normalizedHandle) return null;
+  return `https://polymarket.com/@${encodeURIComponent(normalizedHandle)}`;
+}
+
 function getTraderActivityUrl(trade: PolymarketSourceTradeDecision) {
   const handle = trade.trader_handle || trade.trader_name.replace(/^@/, "");
-  if (!handle) return null;
-  return `https://polymarket.com/@${encodeURIComponent(handle)}?tab=activity`;
+  const profileUrl = getPolymarketProfileUrlFromHandle(handle);
+  return profileUrl ? `${profileUrl}?tab=activity` : null;
+}
+
+function getCopiedTraderProfileUrl(trader: CopiedTraderAnalysisRow) {
+  return getPolymarketProfileUrlFromHandle(trader.traderName);
+}
+
+function PolymarketIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M14 14L50 6V58L14 50V14Z"
+        stroke="currentColor"
+        strokeWidth="5"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M16 16L50 32L16 48"
+        stroke="currentColor"
+        strokeWidth="5"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M18 32H50"
+        stroke="currentColor"
+        strokeWidth="5"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 function getCopiedEventKey(trade: PolymarketSourceTradeDecision) {
@@ -4420,7 +4461,35 @@ export default function PolymarketBotPage() {
                 <div className="flex flex-col gap-4 pr-12">
                   <div>
                     <h2 className="text-lg font-semibold text-slate-950">
-                      {selectedAnalyzedTrader.traderName} trade breakup
+                      {(() => {
+                        const profileUrl = getCopiedTraderProfileUrl(
+                          selectedAnalyzedTrader,
+                        );
+                        if (!profileUrl) {
+                          return (
+                            <span className="inline-flex items-center gap-2">
+                              <PolymarketIcon className="size-5 text-blue-600" />
+                              <span>
+                                {selectedAnalyzedTrader.traderName} trade breakup
+                              </span>
+                            </span>
+                          );
+                        }
+                        return (
+                          <a
+                            href={profileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-2 rounded-md text-slate-950 transition hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                            aria-label={`Open ${selectedAnalyzedTrader.traderName} Polymarket profile`}
+                          >
+                            <PolymarketIcon className="size-5 text-blue-600" />
+                            <span>
+                              {selectedAnalyzedTrader.traderName} trade breakup
+                            </span>
+                          </a>
+                        );
+                      })()}
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">
                       {selectedAnalyzedTrader.copiedTrades} copied trades ·{" "}
