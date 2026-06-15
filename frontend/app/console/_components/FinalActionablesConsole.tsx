@@ -1229,7 +1229,7 @@ function buildDetailedRationaleScoreRows(
   config: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ): DetailedRationaleScoreRow[] {
   const technicalConfidenceScore = parseNumericCell(
-    formatTechnicalConfidence(technicalScan, stock.representative),
+    getTechnicalScanConfidence(technicalScan, stock.representative),
   );
   const technicalConfidenceMultiplier = getTechnicalScanScoreMultiplier(
     technicalScan,
@@ -1288,13 +1288,13 @@ function buildDetailedRationaleScoreRows(
     {
       id: "premarket-trend",
       parameter: "Technical Scan Premarket trend",
-      score: getTechnicalTrendScore(technicalScan?.premarketTrend),
+      score: getTechnicalTrendScore(technicalScan?.premarketTrend || stock.representative["Premarket trend"]),
       multiplier: config.detailedRationaleMultipliers["premarket-trend"],
     },
     {
       id: "last-5-candles-trend",
       parameter: "Technical Scan Last 5 candles trend",
-      score: getTechnicalTrendScore(technicalScan?.last5CandlesTrend),
+      score: getTechnicalTrendScore(technicalScan?.last5CandlesTrend || stock.representative["Last 5 candles trend"]),
       multiplier: config.detailedRationaleMultipliers["last-5-candles-trend"],
     },
     {
@@ -2162,6 +2162,10 @@ function getFallbackTechnicalConfidence(row?: CanonicalRow | null) {
   );
 }
 
+function getTechnicalScanConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  return normalizeEmptyTechnicalValue(scan?.confidenceScore) || getFallbackTechnicalConfidence(row);
+}
+
 function formatTechnicalSetup(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
   return resolveApprovedTechnicalSetup(scan, row)?.setup || getFallbackTechnicalSetup(row);
 }
@@ -2174,8 +2178,7 @@ function getDisplayedSetupNameForStock(
 }
 
 function formatTechnicalConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
-  const approvedSetup = resolveApprovedTechnicalSetup(scan, row);
-  return approvedSetup ? approvedSetup.confidence.toFixed(1) : getFallbackTechnicalConfidence(row);
+  return getTechnicalScanConfidence(scan, row);
 }
 
 function formatTechnicalTrendValue(value?: string | null) {
@@ -2191,12 +2194,12 @@ function getTechnicalTrendScore(value?: string | null) {
   return parsed === null ? null : Math.max(-3, Math.min(3, parsed));
 }
 
-function formatTechnicalPremarketTrend(scan: TechnicalScanResult | null) {
-  return formatTechnicalTrendValue(scan?.premarketTrend);
+function formatTechnicalPremarketTrend(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  return formatTechnicalTrendValue(scan?.premarketTrend || row?.["Premarket trend"]);
 }
 
-function formatTechnicalLast5CandlesTrend(scan: TechnicalScanResult | null) {
-  return formatTechnicalTrendValue(scan?.last5CandlesTrend);
+function formatTechnicalLast5CandlesTrend(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  return formatTechnicalTrendValue(scan?.last5CandlesTrend || row?.["Last 5 candles trend"]);
 }
 
 function getSortableConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
@@ -3304,10 +3307,10 @@ function RebalanceCell({
     );
   }
   if (header === "Premarket trend") {
-    return formatTechnicalPremarketTrend(technicalScan || null);
+    return formatTechnicalPremarketTrend(technicalScan || null, row);
   }
   if (header === "Last 5 candles trend") {
-    return formatTechnicalLast5CandlesTrend(technicalScan || null);
+    return formatTechnicalLast5CandlesTrend(technicalScan || null, row);
   }
   if (header === "Confidence Score") {
     return (
@@ -4539,13 +4542,13 @@ function buildActionablesCalculationRows(
           return;
         }
         if (header === "Premarket trend") {
-          const premarketTrend = formatTechnicalPremarketTrend(technicalScan);
+          const premarketTrend = formatTechnicalPremarketTrend(technicalScan, stock.representative);
           values[header] = premarketTrend;
           sortValues[header] = parseNumericCell(premarketTrend) ?? premarketTrend;
           return;
         }
         if (header === "Last 5 candles trend") {
-          const last5CandlesTrend = formatTechnicalLast5CandlesTrend(technicalScan);
+          const last5CandlesTrend = formatTechnicalLast5CandlesTrend(technicalScan, stock.representative);
           values[header] = last5CandlesTrend;
           sortValues[header] = parseNumericCell(last5CandlesTrend) ?? last5CandlesTrend;
           return;
