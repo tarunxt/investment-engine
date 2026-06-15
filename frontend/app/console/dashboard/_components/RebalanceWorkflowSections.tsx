@@ -1639,7 +1639,12 @@ ${job?.response || ""}`.toLowerCase();
   return "other";
 }
 
+function getRunOutputDisplayLabel(run: RunResponse) {
+  return getAutoRebalanceRunDisplayLabel(run);
+}
+
 function getRunOutputSummary(run: RunResponse) {
+  const runLabel = getRunOutputDisplayLabel(run);
   const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
   const classifications = jobs.map(classifyRunOutputJob);
   const completed = classifications.filter((state) => state === "completed").length;
@@ -1651,7 +1656,7 @@ function getRunOutputSummary(run: RunResponse) {
   );
   const duration = getRunDuration(run);
   return [
-    `Run #${run.id} · ${formatTimestamp(run.created_at)} · LLMs used: ${jobs.length}`,
+    `${runLabel} · ${formatTimestamp(run.created_at)} · LLMs used: ${jobs.length}`,
     `Completed: ${completed} · Partial: ${partial} · Failed: ${failed}`,
     duration ? `Time taken: ${duration}` : null,
     costUsd > 0 ? `Cost incurred: $${costUsd.toFixed(4)}` : null,
@@ -2233,6 +2238,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
   const failed = classifications.filter((state) => state === "failed").length;
   const duration = getRunDuration(run);
   const costUsd = getRunCostUsd(run);
+  const runLabel = getRunOutputDisplayLabel(run);
 
   const scrollToJob = (jobId: number) => {
     setHighlightedJobId(jobId);
@@ -2252,7 +2258,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
               Last Run Summary
             </p>
             <h4 className="mt-2 text-lg font-extrabold text-slate-950">
-              Run #{run.id} · {formatTimestamp(run.created_at)}
+              {runLabel} · {formatTimestamp(run.created_at)}
               <span className="block text-sm font-semibold text-slate-600 sm:ml-2 sm:inline">
                 LLMs used: {jobs.length}{duration ? ` · Time taken: ${duration}` : ""}
               </span>
@@ -5907,7 +5913,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
                 jobs
                   .map(
                     (job) =>
-                      `# Run ${selectedRun?.id} / Job ${job?.id} · ${job?.provider ?? "LLM"}/${job?.model ?? "model"}\n\n${job?.response?.trim() || job?.error_message || "No response text saved."}`,
+                      `# ${selectedRun ? getRunOutputDisplayLabel(selectedRun) : "Run"} / Job ${job?.id} · ${job?.provider ?? "LLM"}/${job?.model ?? "model"}\n\n${job?.response?.trim() || job?.error_message || "No response text saved."}`,
                   )
                   .join("\n\n---\n\n"),
               ].join("\n\n---\n\n")

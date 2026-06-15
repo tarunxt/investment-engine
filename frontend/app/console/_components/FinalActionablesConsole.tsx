@@ -1492,7 +1492,7 @@ function buildScoreMatrixDetail(
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
     return {
       id: `${row.meta.runId}-${row.meta.jobId}-matrix`,
-      source: `Run #${row.meta.runId}`,
+      source: row.meta.runLabel,
       action,
       actionScore: action ? ACTION_SCORE_BY_CATEGORY[action] : null,
       unitsChange: getSignedUnitsChange(row.cells, action),
@@ -3030,7 +3030,7 @@ export function StockDetailsButton({
                       {stock.rows.map((row) => (
                         <tr key={`${row.meta.runId}-${row.meta.jobId}-details`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top">
-                            Run #{row.meta.runId}<br />{row.meta.provider} {row.meta.model}<br />
+                            {row.meta.runLabel}<br />{row.meta.provider} {row.meta.model}<br />
                             <span className="text-gray-400">{formatDateTime(row.meta.createdAt)}</span>
                           </td>
                           <td className="px-3 py-2 align-top">
@@ -6906,7 +6906,7 @@ function FragmentRows({
                         <tr key={`${row.meta.runId}-${row.meta.jobId}`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                             <div className="font-semibold">
-                              Run #{row.meta.runId}
+                              {row.meta.runLabel}
                             </div>
                             <div>
                               {row.meta.provider} {row.meta.model}
