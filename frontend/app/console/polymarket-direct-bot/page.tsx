@@ -236,6 +236,30 @@ function trackedAccountKey(value?: string | null) {
   return normalizeTrackedAccountTarget(value).toLowerCase();
 }
 
+const COPIED_TRADER_DEFAULT_NET_WORTH_USD: Record<string, number> = {
+  rn1: 400_000,
+  "0x29b52d98ac9ef9414b04164246c95bc63d7": 70_000,
+  "0x6db5...e279": 1_000_000,
+  swisstony: 2_700_000,
+  zzzz87: 500_000,
+  tradecraft: 40_000,
+  rainbowlilies: 50_000,
+  mooseborzoi: 150_000,
+};
+
+function getCopiedTraderDefaultNetWorth(
+  ...values: Array<string | null | undefined>
+) {
+  for (const value of values) {
+    const key = trackedAccountKey(value);
+    if (key && COPIED_TRADER_DEFAULT_NET_WORTH_USD[key] !== undefined) {
+      return COPIED_TRADER_DEFAULT_NET_WORTH_USD[key];
+    }
+  }
+
+  return 0;
+}
+
 function normalizeTrackedAccountTarget(value?: string | null) {
   const raw = (value || "").trim().replace(/\?+$/, "");
   if (!raw) return "";
@@ -717,7 +741,10 @@ function buildCopiedTraderAnalysisRows(
       existing.accountId = account.id;
     }
     existing.netWorth =
-      account?.net_worth_usd || trade.traderNetWorth || existing.netWorth;
+      account?.net_worth_usd ||
+      trade.traderNetWorth ||
+      existing.netWorth ||
+      getCopiedTraderDefaultNetWorth(trade.traderName, trade.traderKey);
     existing.copiedTrades += 1;
     existing.trades.push(trade);
     if (trade.pnl >= 0) {
