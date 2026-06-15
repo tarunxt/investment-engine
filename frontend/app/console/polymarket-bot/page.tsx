@@ -1081,6 +1081,29 @@ function getCopiedEventSortValue(
   }
 }
 
+function compareCopiedEventTieBreakers(
+  left: CopiedEventGroup,
+  right: CopiedEventGroup,
+) {
+  const copiedAtComparison =
+    (parseApiTimestamp(right.copiedAt)?.getTime() ?? 0) -
+    (parseApiTimestamp(left.copiedAt)?.getTime() ?? 0);
+  if (copiedAtComparison !== 0) return copiedAtComparison;
+
+  return [
+    left.marketTitle.localeCompare(right.marketTitle, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+    left.outcome.localeCompare(right.outcome, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+    left.side.localeCompare(right.side),
+    left.key.localeCompare(right.key),
+  ].find((comparison) => comparison !== 0) ?? 0;
+}
+
 function compareCopiedEventGroups(
   left: CopiedEventGroup,
   right: CopiedEventGroup,
@@ -1100,10 +1123,7 @@ function compareCopiedEventGroups(
     return sortState.direction === "asc" ? comparison : -comparison;
   }
 
-  return (
-    (parseApiTimestamp(right.copiedAt)?.getTime() ?? 0) -
-    (parseApiTimestamp(left.copiedAt)?.getTime() ?? 0)
-  );
+  return compareCopiedEventTieBreakers(left, right);
 }
 
 function SortIcon({ direction }: { direction: "asc" | "desc" | null }) {
