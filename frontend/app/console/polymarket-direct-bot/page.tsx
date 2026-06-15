@@ -1498,6 +1498,11 @@ export default function PolymarketBotPage() {
       return;
     }
     const busyKey = `net-worth-${draftKey}`;
+    setManualNetWorthDrafts((current) => ({
+      ...current,
+      [draftKey]: String(netWorth),
+      [fallbackDraftKey]: String(netWorth),
+    }));
     setBusyAccountId(busyKey);
     setActionError(null);
     try {
@@ -3340,16 +3345,29 @@ export default function PolymarketBotPage() {
                                   className="flex min-w-56 flex-col gap-2"
                                   onClick={(event) => event.stopPropagation()}
                                 >
-                                  <span className="font-semibold text-slate-700">
-                                    {trader.netWorth > 0
-                                      ? formatMoney(trader.netWorth)
-                                      : "—"}
-                                  </span>
                                   {(() => {
                                     const manualDraftKey =
                                       trader.accountId ?? trader.key;
+                                    const rawManualDraft =
+                                      manualNetWorthDrafts[manualDraftKey];
+                                    const manualDraftNetWorth =
+                                      rawManualDraft === undefined ||
+                                      rawManualDraft.trim() === ""
+                                        ? Number.NaN
+                                        : Number.parseFloat(rawManualDraft);
+                                    const displayedNetWorth = Number.isFinite(
+                                      manualDraftNetWorth,
+                                    )
+                                      ? manualDraftNetWorth
+                                      : trader.netWorth;
                                     const manualBusyKey = `net-worth-${manualDraftKey}`;
                                     return (
+                                      <>
+                                        <span className="font-semibold text-slate-700">
+                                          {displayedNetWorth > 0
+                                            ? formatMoney(displayedNetWorth)
+                                            : "—"}
+                                        </span>
                                       <div className="flex items-center gap-2">
                                         <input
                                           type="number"
@@ -3397,6 +3415,7 @@ export default function PolymarketBotPage() {
                                           Save
                                         </Button>
                                       </div>
+                                      </>
                                     );
                                   })()}
                                 </div>

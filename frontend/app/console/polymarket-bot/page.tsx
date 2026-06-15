@@ -1758,6 +1758,11 @@ export default function PolymarketBotPage() {
       return;
     }
     const busyKey = `net-worth-${draftKey}`;
+    setManualNetWorthDrafts((current) => ({
+      ...current,
+      [draftKey]: String(netWorth),
+      [fallbackDraftKey]: String(netWorth),
+    }));
     setBusyAccountId(busyKey);
     setActionError(null);
     try {
@@ -3872,73 +3877,87 @@ export default function PolymarketBotPage() {
                                   className="flex min-w-56 flex-col gap-2"
                                   onClick={(event) => event.stopPropagation()}
                                 >
-                                  <button
-                                    type="button"
-                                    className="rounded-full px-2 py-1 text-left font-semibold text-slate-700 transition hover:bg-sky-50 hover:text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-400"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setSelectedNetWorthTrader(trader);
-                                    }}
-                                    title={copiedTraderNetWorthBreakdown(
-                                      trader,
-                                    )}
-                                  >
-                                    {trader.netWorth > 0
-                                      ? formatMoney(trader.netWorth)
-                                      : "—"}
-                                  </button>
                                   {(() => {
                                     const manualDraftKey =
                                       trader.accountId ?? trader.key;
+                                    const rawManualDraft =
+                                      manualNetWorthDrafts[manualDraftKey];
+                                    const manualDraftNetWorth =
+                                      rawManualDraft === undefined ||
+                                      rawManualDraft.trim() === ""
+                                        ? Number.NaN
+                                        : Number.parseFloat(rawManualDraft);
+                                    const displayedNetWorth = Number.isFinite(
+                                      manualDraftNetWorth,
+                                    )
+                                      ? manualDraftNetWorth
+                                      : trader.netWorth;
                                     const manualBusyKey = `net-worth-${manualDraftKey}`;
                                     return (
-                                      <div className="flex items-center gap-2">
-                                        <input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          className="w-28 rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                                          aria-label={`Manual net worth for ${trader.traderName}`}
-                                          placeholder="Net worth"
-                                          value={
-                                            manualNetWorthDrafts[
-                                              manualDraftKey
-                                            ] ??
-                                            (trader.netWorth > 0
-                                              ? String(trader.netWorth)
-                                              : "")
-                                          }
-                                          disabled={
-                                            busyAccountId === manualBusyKey
-                                          }
-                                          onChange={(event) =>
-                                            setManualNetWorthDrafts(
-                                              (current) => ({
-                                                ...current,
-                                                [manualDraftKey]:
-                                                  event.target.value,
-                                              }),
-                                            )
-                                          }
-                                        />
-                                        <Button
+                                      <>
+                                        <button
                                           type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-7 rounded-full px-3 text-[11px]"
-                                          disabled={
-                                            busyAccountId === manualBusyKey
-                                          }
-                                          onClick={() =>
-                                            void saveManualNetWorth(trader)
-                                          }
+                                          className="rounded-full px-2 py-1 text-left font-semibold text-slate-700 transition hover:bg-sky-50 hover:text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setSelectedNetWorthTrader(trader);
+                                          }}
+                                          title={copiedTraderNetWorthBreakdown(
+                                            trader,
+                                          )}
                                         >
-                                          {busyAccountId === manualBusyKey ? (
-                                            <Loader2 className="mr-1 size-3 animate-spin" />
-                                          ) : null}
-                                          Save
-                                        </Button>
-                                      </div>
+                                          {displayedNetWorth > 0
+                                            ? formatMoney(displayedNetWorth)
+                                            : "—"}
+                                        </button>
+                                        <div className="flex items-center gap-2">
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            className="w-28 rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                                            aria-label={`Manual net worth for ${trader.traderName}`}
+                                            placeholder="Net worth"
+                                            value={
+                                              manualNetWorthDrafts[
+                                                manualDraftKey
+                                              ] ??
+                                              (trader.netWorth > 0
+                                                ? String(trader.netWorth)
+                                                : "")
+                                            }
+                                            disabled={
+                                              busyAccountId === manualBusyKey
+                                            }
+                                            onChange={(event) =>
+                                              setManualNetWorthDrafts(
+                                                (current) => ({
+                                                  ...current,
+                                                  [manualDraftKey]:
+                                                    event.target.value,
+                                                }),
+                                              )
+                                            }
+                                          />
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 rounded-full px-3 text-[11px]"
+                                            disabled={
+                                              busyAccountId === manualBusyKey
+                                            }
+                                            onClick={() =>
+                                              void saveManualNetWorth(trader)
+                                            }
+                                          >
+                                            {busyAccountId === manualBusyKey ? (
+                                              <Loader2 className="mr-1 size-3 animate-spin" />
+                                            ) : null}
+                                            Save
+                                          </Button>
+                                        </div>
+                                      </>
                                     );
                                   })()}
                                 </div>
