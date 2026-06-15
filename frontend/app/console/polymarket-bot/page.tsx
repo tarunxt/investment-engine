@@ -1191,7 +1191,7 @@ function getCopiedEventSortValue(
       return parseApiTimestamp(event.copiedAt)?.getTime() ?? 0;
     case "trader":
       return event.traders.length > 1
-        ? "multiple"
+        ? `multiple (${event.traders.length})`
         : getTraderDisplayName(event.traders[0]);
     case "event":
       return event.marketTitle;
@@ -3401,7 +3401,7 @@ export default function PolymarketBotPage() {
                                         setSelectedCopiedEvent(event)
                                       }
                                     >
-                                      multiple
+                                      multiple ({event.traders.length})
                                     </button>
                                   ) : (
                                     <button
