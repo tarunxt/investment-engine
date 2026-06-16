@@ -3698,13 +3698,23 @@ function DetailedRationaleScoreSection({
     </tr>
   );
 
-  const renderSourceTag = (label: string | null, runId: number | null) => {
+  const renderSourceTag = (label: string | null, runId: number | null, stage: "rebalance" | "technical") => {
     if (!label) return null;
     const className = "inline-flex max-w-full items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500";
     return runId ? (
-      <Link href={URLs.routes.console.runDetail(runId)} className={className} title={`Open ${label}`}>
+      <button
+        type="button"
+        className={className}
+        title={`Open ${label} output`}
+        onClick={() => {
+          const portfolio = detail.stockExchange.toUpperCase().includes("NSE") || detail.stockExchange.toUpperCase().includes("BSE") ? "zerodha" : "indmoneyUs";
+          window.dispatchEvent(new CustomEvent("final-actionables:open-stage-output", {
+            detail: { runId, stage, portfolio },
+          }));
+        }}
+      >
         <span className="truncate">{label}</span>
-      </Link>
+      </button>
     ) : (
       <span className={cn(className, "text-slate-600")} title={label}>
         <span className="truncate">{label}</span>
@@ -3712,12 +3722,12 @@ function DetailedRationaleScoreSection({
     );
   };
 
-  const renderGroup = (title: string, description: string, rows: DetailedRationaleScoreRow[], sourceLabel?: string | null, sourceRunId?: number | null) => rows.length ? (
+  const renderGroup = (title: string, description: string, rows: DetailedRationaleScoreRow[], sourceLabel?: string | null, sourceRunId?: number | null, sourceStage?: "rebalance" | "technical") => rows.length ? (
     <section className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-semibold text-slate-950">{title}</h3>
-          {renderSourceTag(sourceLabel ?? null, sourceRunId ?? null)}
+          {sourceStage ? renderSourceTag(sourceLabel ?? null, sourceRunId ?? null, sourceStage) : null}
         </div>
         <p className="mt-1 text-xs text-slate-500">{description}</p>
       </div>
@@ -3744,6 +3754,7 @@ function DetailedRationaleScoreSection({
         rebalanceRows,
         detail.rebalanceSourceLabel,
         detail.rebalanceSourceRunId,
+        "rebalance",
       )}
       {renderGroup(
         "Technical Scan",
@@ -3751,6 +3762,7 @@ function DetailedRationaleScoreSection({
         technicalScanRows,
         detail.technicalScanSourceLabel,
         detail.technicalScanSourceRunId,
+        "technical",
       )}
       {renderGroup(
         "Consolidated action",

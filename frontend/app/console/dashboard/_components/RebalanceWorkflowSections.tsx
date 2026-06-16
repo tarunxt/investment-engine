@@ -5852,6 +5852,54 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
     }
   }, [usdInrRate]);
 
+  useEffect(() => {
+    const handleOpenStageOutput = (event: Event) => {
+      const payload = (event as CustomEvent<{ runId?: number; stage?: WorkflowStageKey; portfolio?: WorkflowPortfolio }>).detail;
+      if (!payload?.runId || !payload.stage || !payload.portfolio) return;
+      if (payload.stage !== "rebalance" && payload.stage !== "technical") return;
+      const title = `${payload.portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[payload.stage].idle} Output`;
+      setOutputDialog({
+        portfolio: payload.portfolio,
+        stage: payload.stage,
+        title,
+        body: "",
+        loading: true,
+        error: null,
+        routeUrl: null,
+        run: null,
+      });
+      void fetchAllFullRuns()
+        .then((runs) => {
+          const selectedRun = runs.find((run) => run.id === payload.runId) ?? null;
+          setOutputDialog({
+            portfolio: payload.portfolio as WorkflowPortfolio,
+            stage: payload.stage as WorkflowStageKey,
+            title,
+            body: selectedRun ? "" : `No saved run output was found for run #${payload.runId}.`,
+            loading: false,
+            error: null,
+            routeUrl: null,
+            run: selectedRun,
+          });
+        })
+        .catch((error) => {
+          setOutputDialog({
+            portfolio: payload.portfolio as WorkflowPortfolio,
+            stage: payload.stage as WorkflowStageKey,
+            title,
+            body: "",
+            loading: false,
+            error: normalizeError(error),
+            routeUrl: null,
+            run: null,
+          });
+        });
+    };
+
+    window.addEventListener("final-actionables:open-stage-output", handleOpenStageOutput);
+    return () => window.removeEventListener("final-actionables:open-stage-output", handleOpenStageOutput);
+  }, []);
+
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
       const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle} Output`;
