@@ -658,6 +658,38 @@ const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
 
 const SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY = "investor:final-actionables:score-matrix-formula-config:v1";
 
+const DASHBOARD_WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
+
+type DashboardActionablesRefreshDetail = {
+  market?: SwingTradeMarket;
+  completedAt?: string | null;
+};
+
+function readDashboardActionablesCompletedAt(market: SwingTradeMarket) {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_WORKFLOW_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      states?: Partial<Record<"zerodha" | "indmoneyUs", {
+        actionables?: { completedAt?: string | null; endedAt?: string | null };
+      }>>;
+    };
+    const portfolio = market === "us" ? "indmoneyUs" : "zerodha";
+    const actionables = parsed.states?.[portfolio]?.actionables;
+    return actionables?.completedAt ?? actionables?.endedAt ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readDashboardActionablesCompletedAtByMarket() {
+  return {
+    india: readDashboardActionablesCompletedAt("india"),
+    us: readDashboardActionablesCompletedAt("us"),
+  } satisfies Record<SwingTradeMarket, string | null>;
+}
+
 function normalizeScoreMatrixFormulaConfig(
   config?: Partial<ScoreMatrixFormulaConfig> | null,
 ): ScoreMatrixFormulaConfig {
@@ -5877,6 +5909,9 @@ export function DashboardFinalActionablesTables() {
     india: { portfolioSnapshot: cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots.india ?? null, eventsAnalysis: null, threatsAnalysis: null, error: null },
     us: { portfolioSnapshot: cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots.us ?? null, eventsAnalysis: null, threatsAnalysis: null, error: null },
   }));
+  const [actionablesCompletedAtByMarket, setActionablesCompletedAtByMarket] = useState<Record<SwingTradeMarket, string | null>>(
+    () => readDashboardActionablesCompletedAtByMarket(),
+  );
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -5914,7 +5949,16 @@ export function DashboardFinalActionablesTables() {
   }, [loadRuns]);
 
   useEffect(() => {
-    const handler = () => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<DashboardActionablesRefreshDetail>).detail;
+      if (detail?.market === "india" || detail?.market === "us") {
+        setActionablesCompletedAtByMarket((current) => ({
+          ...current,
+          [detail.market as SwingTradeMarket]: detail.completedAt ?? new Date().toISOString(),
+        }));
+      } else {
+        setActionablesCompletedAtByMarket(readDashboardActionablesCompletedAtByMarket());
+      }
       void loadRuns();
     };
     window.addEventListener("final-actionables-refresh", handler);
@@ -6081,7 +6125,8 @@ export function DashboardFinalActionablesTables() {
       })
       .map((scan) => scan.createdAt)
       .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null;
-    const lastUpdatedAt = [latestRebalanceAt, latestTechnicalAt]
+    const latestActionablesCompletedAt = actionablesCompletedAtByMarket[market];
+    const lastUpdatedAt = [latestRebalanceAt, latestTechnicalAt, latestActionablesCompletedAt]
       .filter(Boolean)
       .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null;
 

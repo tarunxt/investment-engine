@@ -6540,12 +6540,19 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
             recommendedStocks: actionableStockCount,
           });
           await onDashboardRefresh();
+          const actionablesCompletedAt = new Date().toISOString();
           markCompleted(portfolio, "actionables", {
+            completedAt: actionablesCompletedAt,
             runStatus: "fresh data loaded",
             rebalanceInputs: rebalanceInputCount || null,
             recommendedStocks: actionableStockCount,
           });
-          window.dispatchEvent(new CustomEvent("final-actionables-refresh"));
+          window.dispatchEvent(new CustomEvent("final-actionables-refresh", {
+            detail: {
+              market,
+              completedAt: actionablesCompletedAt,
+            },
+          }));
         } else {
           completeSkippedStage(
             portfolio,
