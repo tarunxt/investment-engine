@@ -697,6 +697,8 @@ type AnalysisTradeRow = {
   timestamp: string;
   traderKey: string;
   traderName: string;
+  traderHandle?: string | null;
+  traderAddress?: string | null;
   marketId: string;
   marketTitle: string;
   outcome: string;
@@ -739,23 +741,31 @@ function getAnalysisTradePnl(trade: PolymarketSourceTradeDecision) {
   return 0;
 }
 
-function buildAnalysisTradeRows(
-  trades: PolymarketSourceTradeDecision[],
-): AnalysisTradeRow[] {
-  return trades
+function getLiveAnalysisTraderKey(trade: PolymarketSourceTradeDecision) {
+  return trackedAccountKey(
+    trade.trader_handle ||
+      trade.trader_address ||
+      trade.trader_name ||
+      trade.trader_id,
+  );
+}
+
+function getPaperAnalysisTraderKey(trade: PolymarketPaperTrade) {
+  return trackedAccountKey(trade.trader_name || trade.trader_id);
+}
+
+function buildAnalysisTradeRows(state: PolymarketBotState): AnalysisTradeRow[] {
+  const liveRows: AnalysisTradeRow[] = state.live.recent_decisions
     .filter((trade) => trade.status === "executed")
     .map((trade) => {
       const traderName = getTraderDisplayName(trade);
-      const traderKey =
-        trade.trader_id ||
-        trade.trader_address ||
-        trade.trader_handle ||
-        trade.trader_name;
       return {
-        id: trade.id,
+        id: `live-${trade.id}`,
         timestamp: trade.executed_at || trade.updated_at || trade.proposed_at,
-        traderKey,
+        traderKey: getLiveAnalysisTraderKey(trade),
         traderName,
+        traderHandle: trade.trader_handle,
+        traderAddress: trade.trader_address,
         marketId: trade.market_id,
         marketTitle: trade.market_title,
         outcome: trade.outcome,
@@ -765,27 +775,52 @@ function buildAnalysisTradeRows(
         shares: trade.shares,
         status: trade.status,
         pnl: getAnalysisTradePnl(trade),
-        reason: trade.reason || trade.command || "Copied trade",
+        reason: trade.reason || trade.command || "Copied live trade",
         traderNetWorth: trade.trader_net_worth_usd || 0,
       };
-    })
-    .sort(
-      (a, b) =>
-        (parseApiTimestamp(b.timestamp)?.getTime() ?? 0) -
-        (parseApiTimestamp(a.timestamp)?.getTime() ?? 0),
-    );
+    });
+
+  const paperRows: AnalysisTradeRow[] = state.trade_history
+    .filter((trade) => trade.status === "executed")
+    .map((trade) => ({
+      id: `paper-${trade.id}`,
+      timestamp: trade.timestamp,
+      traderKey: getPaperAnalysisTraderKey(trade),
+      traderName: trade.trader_name,
+      marketId: trade.market_id,
+      marketTitle: trade.market_title,
+      outcome: trade.outcome,
+      side: trade.side,
+      amount: trade.copied_usd,
+      price: trade.price,
+      shares: trade.shares,
+      status: trade.status,
+      pnl: trade.realized_pnl,
+      reason: trade.reason || "Copied paper trade",
+      traderNetWorth: 0,
+    }));
+
+  return [...liveRows, ...paperRows].sort(
+    (a, b) =>
+      (parseApiTimestamp(b.timestamp)?.getTime() ?? 0) -
+      (parseApiTimestamp(a.timestamp)?.getTime() ?? 0),
+  );
 }
 
 function getTrackedAccountForAnalysisRow(
   trade: AnalysisTradeRow,
   accounts: PolymarketTrackedAccount[],
 ) {
-  const tradeKey = trackedAccountKey(trade.traderKey);
-  const tradeName = trackedAccountKey(trade.traderName);
+  const tradeKeys = [
+    trade.traderKey,
+    trade.traderName,
+    trade.traderHandle,
+    trade.traderAddress,
+  ].map(trackedAccountKey);
   return accounts.find((account) =>
     [account.handle, account.target, account.address, account.proxy_wallet]
       .map(trackedAccountKey)
-      .some((key) => key && (key === tradeKey || key === tradeName)),
+      .some((key) => key && tradeKeys.includes(key)),
   );
 }
 
@@ -2134,7 +2169,7 @@ export default function PolymarketBotPage() {
       : previouslyRedeemedTradeRows;
   const analysisTradeRows =
     activeScreen === "analysis"
-      ? buildAnalysisTradeRows(state.live.recent_decisions)
+      ? buildAnalysisTradeRows(state)
       : [];
   const wonAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl >= 0);
   const lostAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl < 0);
