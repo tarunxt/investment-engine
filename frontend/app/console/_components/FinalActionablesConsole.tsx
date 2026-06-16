@@ -1334,12 +1334,15 @@ function formatTechnicalScanSourceLabel(scan: Pick<TechnicalScanResult, "runLabe
   return formatScanSourceLabel(scan.runLabel, scan.createdAt, "Technical Scan");
 }
 
-function getLatestTechnicalScanSourceLabel(scanMap: TechnicalScanMap) {
+function getLatestTechnicalScanSourceMeta(scanMap: TechnicalScanMap) {
   const latestScan = Object.values(scanMap)
     .filter((scan, index, scans) => scans.findIndex((candidate) => candidate.runId === scan.runId && candidate.jobId === scan.jobId) === index)
     .sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt))[0];
-  return latestScan ? formatTechnicalScanSourceLabel(latestScan) : null;
+  return latestScan
+    ? { label: formatTechnicalScanSourceLabel(latestScan), runId: latestScan.runId }
+    : { label: null, runId: null };
 }
+
 
 function buildMissingTechnicalScanReason(stock: StockConsensus, technicalScanSourceLabel?: string | null) {
   const sourceClause = technicalScanSourceLabel ? ` (${technicalScanSourceLabel})` : "";
@@ -1619,6 +1622,7 @@ function buildScoreMatrixDetail(
   technicalScan: TechnicalScanResult | null = null,
   formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
   technicalScanSourceLabel?: string | null,
+  technicalScanSourceRunId?: number | null,
 ): ScoreMatrixDetail {
   const entries: ScoreMatrixEntry[] = stock.rows.map((row) => {
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
@@ -1736,7 +1740,7 @@ function buildScoreMatrixDetail(
     rebalanceSourceLabel,
     rebalanceSourceRunId: rebalanceSourceMeta?.runId ?? null,
     technicalScanSourceLabel: technicalScanSourceLabelForStock,
-    technicalScanSourceRunId: technicalScan?.runId ?? null,
+    technicalScanSourceRunId: technicalScan?.runId ?? technicalScanSourceRunId ?? null,
     rows: [
       ...entries,
       {
@@ -4680,11 +4684,17 @@ function buildActionablesCalculationRows(
   onSetupClick?: (group: SetupStockGroup) => void,
   onMatrixOpen?: (detail: ScoreMatrixDetail) => void,
 ): ActionablesCalculationRow[] {
-  const technicalScanSourceLabel = getLatestTechnicalScanSourceLabel(technicalScans);
+  const technicalScanSourceMeta = getLatestTechnicalScanSourceMeta(technicalScans);
 
   return stocks.flatMap((stock) => {
     const technicalScan = getTechnicalScanForStock(technicalScans, stock);
-    const detail = buildScoreMatrixDetail(stock, technicalScan, formulaConfig, technicalScanSourceLabel);
+    const detail = buildScoreMatrixDetail(
+      stock,
+      technicalScan,
+      formulaConfig,
+      technicalScanSourceMeta.label,
+      technicalScanSourceMeta.runId,
+    );
     const meanModeCells = buildSummaryRowCells(stock, detail, detail.meanModeAction, detail.meanModeUnitsChange);
     const formulaCells = buildSummaryRowCells(stock, detail, detail.calculatedAction, detail.calculatedUnitsChange);
     const stockLabel = `${stock.exchange || "—"} · ${stock.symbol} · ${stock.representative["Stock Name"] || stock.symbol}`;
@@ -5840,8 +5850,16 @@ export function buildDashboardActionRows(
   technicalScans: TechnicalScanMap,
   formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ): DashboardActionRow[] {
+  const technicalScanSourceMeta = getLatestTechnicalScanSourceMeta(technicalScans);
+
   return stocks.map((stock) => {
-    const detail = buildScoreMatrixDetail(stock, getTechnicalScanForStock(technicalScans, stock), formulaConfig, getLatestTechnicalScanSourceLabel(technicalScans));
+    const detail = buildScoreMatrixDetail(
+      stock,
+      getTechnicalScanForStock(technicalScans, stock),
+      formulaConfig,
+      technicalScanSourceMeta.label,
+      technicalScanSourceMeta.runId,
+    );
     const formulaAction = detail.calculatedAction;
     return {
       id: getDashboardActionRowId(market, stock),
