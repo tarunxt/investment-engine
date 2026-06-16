@@ -332,7 +332,7 @@ function getTradeNetWorth(
   trade: PolymarketSourceTradeDecision,
   account?: PolymarketBotState["tracked_accounts"][number],
 ) {
-  return trade.trader_net_worth_usd || account?.net_worth_usd || 0;
+  return account?.net_worth_usd || trade.trader_net_worth_usd || 0;
 }
 
 function getNetWorthMissingReason(
@@ -346,7 +346,7 @@ function getNetWorthMissingReason(
   ) {
     return "Net worth refresh pending";
   }
-  return trade.trader_net_worth_usd || account.net_worth_usd
+  return account.net_worth_usd || trade.trader_net_worth_usd
     ? "—"
     : "Net worth unavailable from provider";
 }
@@ -3936,7 +3936,7 @@ export default function PolymarketBotPage() {
                         <th className="px-4 py-3">Trader invested</th>
                         <th className="px-4 py-3">Positions Value</th>
                         <th className="px-4 py-3">Net worth</th>
-                        <th className="px-4 py-3">% of Net Worth</th>
+                        <th className="px-4 py-3">% of net worth</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
