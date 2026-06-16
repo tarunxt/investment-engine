@@ -143,11 +143,14 @@ type DetailedRationaleScoreRow = {
 
 type TechnicalScanMultiplierKey = "bullish" | "bearish";
 
+type ScoreSymbolThresholdKey = "strongPositive" | "positive" | "weakPositive" | "weakNegative" | "negative" | "strongNegative";
+
 type ScoreMatrixFormulaConfig = {
   detailedRationaleMultipliers: Record<string, number>;
   detailedRationaleDenominator: number | null;
   actionScores: Record<ActionCategory, number>;
   technicalScanMultipliers: Record<TechnicalScanMultiplierKey, number>;
+  scoreSymbolThresholds: Record<ScoreSymbolThresholdKey, number>;
 };
 
 export type ActionablesCalculationFocusTarget = {
@@ -639,6 +642,24 @@ const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; key: TechnicalScanM
   { label: "Bearish", key: "bearish" },
 ];
 
+const DEFAULT_SCORE_SYMBOL_THRESHOLDS: Record<ScoreSymbolThresholdKey, number> = {
+  strongPositive: 2,
+  positive: 1,
+  weakPositive: 0,
+  weakNegative: -1,
+  negative: -2,
+  strongNegative: -3,
+};
+
+const SCORE_SYMBOL_THRESHOLD_ROWS: Array<{ key: ScoreSymbolThresholdKey; label: string }> = [
+  { key: "strongPositive", label: "Green up minimum" },
+  { key: "positive", label: "Light green up minimum" },
+  { key: "weakPositive", label: "Yellow up minimum" },
+  { key: "weakNegative", label: "Yellow down minimum" },
+  { key: "negative", label: "Light red down minimum" },
+  { key: "strongNegative", label: "Red down minimum" },
+];
+
 const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
   detailedRationaleMultipliers: {
     cruxx: 3,
@@ -658,6 +679,7 @@ const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
     bullish: 1,
     bearish: -1,
   },
+  scoreSymbolThresholds: DEFAULT_SCORE_SYMBOL_THRESHOLDS,
 };
 
 const SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY = "investor:final-actionables:score-matrix-formula-config:v1";
@@ -722,6 +744,14 @@ function normalizeScoreMatrixFormulaConfig(
     });
   }
 
+  const scoreSymbolThresholds = { ...DEFAULT_SCORE_SYMBOL_THRESHOLDS };
+  if (config?.scoreSymbolThresholds) {
+    SCORE_SYMBOL_THRESHOLD_ROWS.forEach((row) => {
+      const value = config.scoreSymbolThresholds?.[row.key];
+      if (Number.isFinite(value)) scoreSymbolThresholds[row.key] = value as number;
+    });
+  }
+
   const denominator = config?.detailedRationaleDenominator;
 
   return {
@@ -730,6 +760,7 @@ function normalizeScoreMatrixFormulaConfig(
       typeof denominator === "number" && Number.isFinite(denominator) ? denominator : null,
     actionScores,
     technicalScanMultipliers,
+    scoreSymbolThresholds,
   };
 }
 
@@ -1120,8 +1151,28 @@ type ScoreSymbolDefinition = {
   symbolLabel: string;
   direction: "up" | "down";
   className: string;
-  matches: (score: number) => boolean;
+  matches: (score: number, thresholds: Record<ScoreSymbolThresholdKey, number>) => boolean;
 };
+
+function formatScoreSymbolRangeLabel(id: string, thresholds: Record<ScoreSymbolThresholdKey, number>) {
+  const { strongPositive, positive, weakPositive, weakNegative, negative, strongNegative } = thresholds;
+  switch (id) {
+    case "greater-than-2":
+      return `>${formatScoreValue(strongPositive)}`;
+    case "1-to-2":
+      return `${formatScoreValue(positive)}-${formatScoreValue(strongPositive)}`;
+    case "0-to-1":
+      return `${formatScoreValue(weakPositive)}-${formatScoreValue(positive)}`;
+    case "minus-1-to-0":
+      return `${formatScoreValue(weakNegative)} - ${formatScoreValue(weakPositive)}`;
+    case "minus-2-to-minus-1":
+      return `${formatScoreValue(negative)} - ${formatScoreValue(weakNegative)}`;
+    case "minus-3-to-minus-2":
+      return `${formatScoreValue(strongNegative)} - ${formatScoreValue(negative)}`;
+    default:
+      return "—";
+  }
+}
 
 const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
   {
@@ -1130,7 +1181,7 @@ const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
     symbolLabel: "Up triangle (Green)",
     direction: "up",
     className: "text-emerald-600",
-    matches: (score) => score > 2,
+    matches: (score, thresholds) => score > thresholds.strongPositive,
   },
   {
     id: "1-to-2",
@@ -1138,7 +1189,7 @@ const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
     symbolLabel: "Up triangle (Light Green)",
     direction: "up",
     className: "text-lime-500",
-    matches: (score) => score >= 1 && score <= 2,
+    matches: (score, thresholds) => score >= thresholds.positive && score <= thresholds.strongPositive,
   },
   {
     id: "0-to-1",
@@ -1146,7 +1197,7 @@ const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
     symbolLabel: "Up triangle (Yellow)",
     direction: "up",
     className: "text-amber-400",
-    matches: (score) => score >= 0 && score < 1,
+    matches: (score, thresholds) => score >= thresholds.weakPositive && score < thresholds.positive,
   },
   {
     id: "minus-1-to-0",
@@ -1154,7 +1205,7 @@ const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
     symbolLabel: "Down triangle (Yellow)",
     direction: "down",
     className: "text-amber-400",
-    matches: (score) => score >= -1 && score < 0,
+    matches: (score, thresholds) => score >= thresholds.weakNegative && score < thresholds.weakPositive,
   },
   {
     id: "minus-2-to-minus-1",
@@ -1162,7 +1213,7 @@ const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
     symbolLabel: "Down triangle (Light red)",
     direction: "down",
     className: "text-rose-400",
-    matches: (score) => score >= -2 && score < -1,
+    matches: (score, thresholds) => score >= thresholds.negative && score < thresholds.weakNegative,
   },
   {
     id: "minus-3-to-minus-2",
@@ -1170,18 +1221,19 @@ const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
     symbolLabel: "Down triangle (Red)",
     direction: "down",
     className: "text-red-600",
-    matches: (score) => score >= -3 && score < -2,
+    matches: (score, thresholds) => score >= thresholds.strongNegative && score < thresholds.negative,
   },
 ];
 
-function getScoreSymbolDefinition(score: number | null) {
+function getScoreSymbolDefinition(score: number | null, formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG) {
   if (score === null || !Number.isFinite(score)) return null;
-  const boundedScore = Math.max(-3, Math.min(3, score));
-  return SCORE_SYMBOL_MATRIX_ROWS.find((row) => row.matches(boundedScore)) ?? null;
+  const thresholds = formulaConfig.scoreSymbolThresholds;
+  const boundedScore = Math.max(thresholds.strongNegative, Math.min(3, score));
+  return SCORE_SYMBOL_MATRIX_ROWS.find((row) => row.matches(boundedScore, thresholds)) ?? null;
 }
 
-function ScoreSymbol({ score, className }: { score: number | null; className?: string }) {
-  const symbol = getScoreSymbolDefinition(score);
+function ScoreSymbol({ score, formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG, className }: { score: number | null; formulaConfig?: ScoreMatrixFormulaConfig; className?: string }) {
+  const symbol = getScoreSymbolDefinition(score, formulaConfig);
 
   if (!symbol) {
     return <span className={cn("whitespace-nowrap text-slate-400", className)}>—</span>;
@@ -1198,8 +1250,8 @@ function ScoreSymbol({ score, className }: { score: number | null; className?: s
   );
 }
 
-function ScoreTriangleIcon({ score, className }: { score: number | null; className?: string }) {
-  const symbol = getScoreSymbolDefinition(score);
+function ScoreTriangleIcon({ score, formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG, className }: { score: number | null; formulaConfig?: ScoreMatrixFormulaConfig; className?: string }) {
+  const symbol = getScoreSymbolDefinition(score, formulaConfig);
   if (!symbol) return null;
 
   return (
@@ -1245,10 +1297,12 @@ function SelectInputsIcon({ className }: { className?: string }) {
 
 export function ScoreMatrixButton({
   detail,
+  formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
   onOpenDetail,
   className,
 }: {
   detail: ScoreMatrixDetail;
+  formulaConfig?: ScoreMatrixFormulaConfig;
   onOpenDetail: (detail: ScoreMatrixDetail) => void;
   className?: string;
 }) {
@@ -1266,7 +1320,7 @@ export function ScoreMatrixButton({
       aria-label={`Open consolidated score matrix for ${detail.stockSymbol}`}
       title={`Open consolidated score matrix for ${detail.stockSymbol}`}
     >
-      <ScoreSymbol score={detail.calculatedScore} />
+      <ScoreSymbol score={detail.calculatedScore} formulaConfig={formulaConfig} />
     </button>
   );
 }
@@ -3839,6 +3893,15 @@ function ScoreReferenceTables({
     }));
   };
 
+  const updateScoreSymbolThreshold = (key: ScoreSymbolThresholdKey, value: string) => {
+    const parsed = parseFiniteDraft(value);
+    if (parsed === null) return;
+    onFormulaConfigChange?.((current) => normalizeScoreMatrixFormulaConfig({
+      ...current,
+      scoreSymbolThresholds: { ...current.scoreSymbolThresholds, [key]: parsed },
+    }));
+  };
+
   return (
     <section className="grid gap-4 lg:grid-cols-3">
       <div className="rounded-xl border border-slate-200 bg-white">
@@ -3921,23 +3984,41 @@ function ScoreReferenceTables({
               <tr>
                 <th className="px-4 py-2 font-semibold">Score range</th>
                 <th className="px-4 py-2 font-semibold">Symbol</th>
+                {onFormulaConfigChange ? <th className="px-4 py-2 text-right font-semibold">Minimum</th> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {SCORE_SYMBOL_MATRIX_ROWS.map((row) => (
-                <tr key={row.id}>
-                  <td className="whitespace-nowrap px-4 py-2 text-slate-900">{row.rangeLabel}</td>
-                  <td className="px-4 py-2 font-medium text-slate-900">
-                    <span className="inline-flex items-center gap-2">
-                      <Triangle
-                        className={cn("size-3.5 fill-current", row.className, row.direction === "down" ? "rotate-180" : "")}
-                        aria-hidden="true"
-                      />
-                      {row.symbolLabel}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {SCORE_SYMBOL_MATRIX_ROWS.map((row, index) => {
+                const thresholdRow = SCORE_SYMBOL_THRESHOLD_ROWS[index];
+                return (
+                  <tr key={row.id}>
+                    <td className="whitespace-nowrap px-4 py-2 text-slate-900">
+                      {formatScoreSymbolRangeLabel(row.id, formulaConfig.scoreSymbolThresholds)}
+                    </td>
+                    <td className="px-4 py-2 font-medium text-slate-900">
+                      <span className="inline-flex items-center gap-2">
+                        <Triangle
+                          className={cn("size-3.5 fill-current", row.className, row.direction === "down" ? "rotate-180" : "")}
+                          aria-hidden="true"
+                        />
+                        {row.symbolLabel}
+                      </span>
+                    </td>
+                    {onFormulaConfigChange && thresholdRow ? (
+                      <td className="px-4 py-2 text-right">
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={formulaConfig.scoreSymbolThresholds[thresholdRow.key]}
+                          onChange={(event) => updateScoreSymbolThreshold(thresholdRow.key, event.target.value)}
+                          className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          aria-label={thresholdRow.label}
+                        />
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -6275,6 +6356,10 @@ export function DashboardFinalActionablesTables() {
                 .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans));
               const showBuyAmountTotal = action === "Add more" || action === "Buy New";
               const buyAmountTotal = showBuyAmountTotal ? getBuyActionAmountTotal(rows) : null;
+              const currentValueTotal = rows.reduce((total, row) => {
+                const currentValue = row.formulaEstimate.currentInvestmentAmount ?? getCurrentValueAmount(row.stock.representative);
+                return total + (currentValue ?? 0);
+              }, 0);
               if (!rows.length) return null;
               return (
                 <Card
@@ -6295,6 +6380,27 @@ export function DashboardFinalActionablesTables() {
                       <div className="overflow-x-auto">
                         <table className="min-w-[64rem] text-xs">
                           <thead>
+                            <tr className="bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                              {finalActionableLayout.order.map((column) => {
+                                const width = finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column];
+                                return (
+                                  <th
+                                    key={`${column}-section-current-value-total`}
+                                    className={cn(
+                                      "px-3 pb-1 pt-2 align-bottom font-semibold",
+                                      column === "currentValue" ? "bg-blue-50 text-blue-950" : "",
+                                    )}
+                                    style={{ width, minWidth: width, maxWidth: width }}
+                                  >
+                                    {column === "currentValue" ? (
+                                      <div className="whitespace-nowrap text-sm font-semibold text-blue-950">
+                                        {formatDisplayAmount(currentValueTotal, market)}
+                                      </div>
+                                    ) : null}
+                                  </th>
+                                );
+                              })}
+                            </tr>
                             <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
                               {finalActionableLayout.order.map((column) => {
                                 const width = finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column];
@@ -6369,7 +6475,7 @@ export function DashboardFinalActionablesTables() {
                                     </span>
                                   );
                                 }
-                                if (column === "score") return <ScoreMatrixButton detail={row.detail} onOpenDetail={setSelectedMatrixDetail} />;
+                                if (column === "score") return <ScoreMatrixButton detail={row.detail} formulaConfig={scoreMatrixFormulaConfig} onOpenDetail={setSelectedMatrixDetail} />;
                                 if (column === "consensus") return <ConsensusBreakupButton stock={stock} action={action} />;
                                 if (column === "currentValue") return formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentValueAmount(stock.representative), market);
                                 if (column === "actionCurrentUnits") {
