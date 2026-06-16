@@ -238,11 +238,12 @@ function trackedAccountKey(value?: string | null) {
 
 const COPIED_TRADER_DEFAULT_NET_WORTH_USD: Record<string, number> = {
   rn1: 400_000,
-  "0x29b52d98ac9ef9414b04164246c95bc63d7": 70_000,
+  "0x29b52d98ac9ef9414b04164246c95bc63d7": 60_000,
   "0x6db5...e279": 1_000_000,
   swisstony: 2_700_000,
   zzzz87: 500_000,
-  tradecraft: 40_000,
+  uptheblues: 20_000,
+  tradecraft: 30_000,
   rainbowlilies: 50_000,
   mooseborzoi: 150_000,
 };
