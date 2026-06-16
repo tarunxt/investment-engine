@@ -6393,8 +6393,9 @@ export function DashboardFinalActionablesTables() {
                                     style={{ width, minWidth: width, maxWidth: width }}
                                   >
                                     {column === "currentValue" ? (
-                                      <div className="whitespace-nowrap text-sm font-semibold text-blue-950">
-                                        {formatDisplayAmount(currentValueTotal, market)}
+                                      <div className="space-y-0.5 whitespace-nowrap">
+                                        <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-blue-500">Section total</div>
+                                        <div className="text-sm font-black text-blue-950">{formatDisplayAmount(currentValueTotal, market)}</div>
                                       </div>
                                     ) : null}
                                   </th>
