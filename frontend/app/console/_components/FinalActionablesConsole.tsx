@@ -2142,10 +2142,17 @@ function parseTechnicalScanResponse(
     );
     if (!hasStockColumn || !hasSetupColumn) continue;
 
-    const getIndex = (names: string[]) =>
-      headers.findIndex((header) =>
-        names.some((name) => header === name || header.includes(name)),
-      );
+    const getIndex = (names: string[]) => {
+      for (const name of names) {
+        const exactIndex = headers.findIndex((header) => header === name);
+        if (exactIndex >= 0) return exactIndex;
+      }
+      for (const name of names) {
+        const partialIndex = headers.findIndex((header) => header.includes(name));
+        if (partialIndex >= 0) return partialIndex;
+      }
+      return -1;
+    };
     const exchangeIndex = getIndex(["exchange symbol", "exchange", "market"]);
     const symbolIndex = getIndex(["stock symbol", "ticker symbol", "symbol", "ticker", "stock"]);
     const primaryIndex = getIndex(["primary setup", "primary technical setup", "technical setup", "setup name", "setup", "pattern", "technical pattern"]);
