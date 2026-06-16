@@ -197,6 +197,10 @@ export type ScoreMatrixDetail = {
   detailedRationaleRows: DetailedRationaleScoreRow[];
   detailedRationaleFinalScore: number | null;
   detailedRationaleDenominator: number;
+  rebalanceSourceLabel: string | null;
+  rebalanceSourceRunId: number | null;
+  technicalScanSourceLabel: string | null;
+  technicalScanSourceRunId: number | null;
 };
 
 export type SetupStockDetail = {
@@ -1317,10 +1321,17 @@ function getTechnicalScanScoreMultiplier(
   return 0;
 }
 
+function formatScanSourceLabel(runLabel: string | null | undefined, createdAt: string | null | undefined, scanType: "Rebalance Scan" | "Technical Scan") {
+  const fallbackLabel = scanType === "Rebalance Scan" ? "Selected rebalance run" : "Selected technical run";
+  const baseLabel = runLabel?.trim() || fallbackLabel;
+  const typedLabel = new RegExp(`\\(${scanType.replace(" Scan", "")} Scan\\)`, "i").test(baseLabel)
+    ? baseLabel
+    : `${baseLabel} (${scanType})`;
+  return createdAt ? `${typedLabel} · ${formatDateTime(createdAt)}` : typedLabel;
+}
+
 function formatTechnicalScanSourceLabel(scan: Pick<TechnicalScanResult, "runLabel" | "createdAt">) {
-  const runLabel = scan.runLabel || "Selected run";
-  const technicalLabel = /technical scan/i.test(runLabel) ? runLabel : `${runLabel} (Technical Scan)`;
-  return `${technicalLabel} · ${formatDateTime(scan.createdAt)}`;
+  return formatScanSourceLabel(scan.runLabel, scan.createdAt, "Technical Scan");
 }
 
 function getLatestTechnicalScanSourceLabel(scanMap: TechnicalScanMap) {
@@ -1664,7 +1675,23 @@ function buildScoreMatrixDetail(
       .map((value) => Math.abs(value)),
   );
 
-  const detailedRationaleRows = buildDetailedRationaleScoreRows(stock, technicalScan, modeAction, formulaConfig);
+  const rebalanceSourceMeta = [...stock.rows]
+    .map((row) => row.meta)
+    .sort((left, right) => parseTimestampMs(right.createdAt) - parseTimestampMs(left.createdAt))[0];
+  const rebalanceSourceLabel = rebalanceSourceMeta
+    ? formatScanSourceLabel(rebalanceSourceMeta.runLabel, rebalanceSourceMeta.createdAt, "Rebalance Scan")
+    : null;
+  const technicalScanSourceLabelForStock = technicalScan
+    ? formatTechnicalScanSourceLabel(technicalScan)
+    : (technicalScanSourceLabel ?? null);
+
+  const detailedRationaleRows = buildDetailedRationaleScoreRows(
+    stock,
+    technicalScan,
+    modeAction,
+    formulaConfig,
+    technicalScanSourceLabelForStock,
+  );
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
     calculateWeightedRationaleScore(detailedRationaleRows, formulaConfig.detailedRationaleDenominator);
   const calculatedScore = detailedRationaleFinalScore ?? meanScore;
@@ -1706,6 +1733,10 @@ function buildScoreMatrixDetail(
     detailedRationaleRows,
     detailedRationaleFinalScore,
     detailedRationaleDenominator,
+    rebalanceSourceLabel,
+    rebalanceSourceRunId: rebalanceSourceMeta?.runId ?? null,
+    technicalScanSourceLabel: technicalScanSourceLabelForStock,
+    technicalScanSourceRunId: technicalScan?.runId ?? null,
     rows: [
       ...entries,
       {
@@ -3667,10 +3698,27 @@ function DetailedRationaleScoreSection({
     </tr>
   );
 
-  const renderGroup = (title: string, description: string, rows: DetailedRationaleScoreRow[]) => rows.length ? (
+  const renderSourceTag = (label: string | null, runId: number | null) => {
+    if (!label) return null;
+    const className = "inline-flex max-w-full items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500";
+    return runId ? (
+      <Link href={URLs.routes.console.runDetail(runId)} className={className} title={`Open ${label}`}>
+        <span className="truncate">{label}</span>
+      </Link>
+    ) : (
+      <span className={cn(className, "text-slate-600")} title={label}>
+        <span className="truncate">{label}</span>
+      </span>
+    );
+  };
+
+  const renderGroup = (title: string, description: string, rows: DetailedRationaleScoreRow[], sourceLabel?: string | null, sourceRunId?: number | null) => rows.length ? (
     <section className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
-        <h3 className="font-semibold text-slate-950">{title}</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-semibold text-slate-950">{title}</h3>
+          {renderSourceTag(sourceLabel ?? null, sourceRunId ?? null)}
+        </div>
         <p className="mt-1 text-xs text-slate-500">{description}</p>
       </div>
       <div className="overflow-x-auto">
@@ -3691,14 +3739,18 @@ function DetailedRationaleScoreSection({
   return (
     <div className="space-y-4">
       {renderGroup(
-        "Rebalance",
+        "Rebalance Scan",
         `Values drawn from the Rebalance Scan for ${detail.stockSymbol}. Click a parameter or score to open the Actionables Calculations Excel layout at this stock and column.`,
         rebalanceRows,
+        detail.rebalanceSourceLabel,
+        detail.rebalanceSourceRunId,
       )}
       {renderGroup(
         "Technical Scan",
         `Values drawn from the Technical Scan for ${detail.stockSymbol}. Click a parameter or score to open the technical scan columns at this stock.`,
         technicalScanRows,
+        detail.technicalScanSourceLabel,
+        detail.technicalScanSourceRunId,
       )}
       {renderGroup(
         "Consolidated action",
@@ -4925,6 +4977,10 @@ function ActionablesFormulaModal({
             ],
             detailedRationaleFinalScore: null,
             detailedRationaleDenominator: 13,
+            rebalanceSourceLabel: null,
+            rebalanceSourceRunId: null,
+            technicalScanSourceLabel: null,
+            technicalScanSourceRunId: null,
           }} />
           <ScoreReferenceTables
             formulaConfig={formulaConfig}
