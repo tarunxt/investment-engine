@@ -5857,6 +5857,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
       const payload = (event as CustomEvent<{ runId?: number; stage?: WorkflowStageKey; portfolio?: WorkflowPortfolio }>).detail;
       if (!payload?.runId || !payload.stage || !payload.portfolio) return;
       if (payload.stage !== "rebalance" && payload.stage !== "technical") return;
+      event.preventDefault();
       const title = `${payload.portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[payload.stage].idle} Output`;
       setOutputDialog({
         portfolio: payload.portfolio,
