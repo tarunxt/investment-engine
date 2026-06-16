@@ -2420,6 +2420,11 @@ function BoxArrowIcon({
   variant: "input" | "output";
 }) {
   const isInput = variant === "input";
+  const boxPath = isInput
+    ? "M12 12h40v40H12M12 12v13M12 39v13"
+    : "M12 12h40M12 12v40M12 52h40M52 12v13M52 39v13";
+  const arrowLinePath = isInput ? "M7 32h32" : "M25 32h32";
+  const arrowHeadPath = isInput ? "M29 22l10 10-10 10" : "M47 22l10 10-10 10";
 
   return (
     <svg
@@ -2430,29 +2435,25 @@ function BoxArrowIcon({
       xmlns="http://www.w3.org/2000/svg"
     >
       <path
-        d={
-          isInput
-            ? "M12 12h40v40H12M12 12v13M12 39v13"
-            : "M12 12h40M12 12v40M12 52h40M52 12v13M52 39v13"
-        }
+        d={boxPath}
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="5"
+        strokeWidth="6"
       />
       <path
-        d={isInput ? "M7 32h32" : "M22 32h35"}
+        d={arrowLinePath}
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="5"
+        strokeWidth="6"
       />
       <path
-        d={isInput ? "M29 22l10 10-10 10" : "M47 22l10 10-10 10"}
+        d={arrowHeadPath}
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="5"
+        strokeWidth="6"
       />
     </svg>
   );
