@@ -6275,6 +6275,10 @@ export function DashboardFinalActionablesTables() {
                 .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans));
               const showBuyAmountTotal = action === "Add more" || action === "Buy New";
               const buyAmountTotal = showBuyAmountTotal ? getBuyActionAmountTotal(rows) : null;
+              const currentValueTotal = rows.reduce((total, row) => {
+                const currentValue = row.formulaEstimate.currentInvestmentAmount ?? getCurrentValueAmount(row.stock.representative);
+                return total + (currentValue ?? 0);
+              }, 0);
               if (!rows.length) return null;
               return (
                 <Card
@@ -6295,6 +6299,28 @@ export function DashboardFinalActionablesTables() {
                       <div className="overflow-x-auto">
                         <table className="min-w-[64rem] text-xs">
                           <thead>
+                            <tr className="bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                              {finalActionableLayout.order.map((column) => {
+                                const width = finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column];
+                                return (
+                                  <th
+                                    key={`${column}-section-current-value-total`}
+                                    className={cn(
+                                      "px-3 pb-1 pt-2 align-bottom font-semibold",
+                                      column === "currentValue" ? "bg-blue-50 text-blue-950" : "",
+                                    )}
+                                    style={{ width, minWidth: width, maxWidth: width }}
+                                  >
+                                    {column === "currentValue" ? (
+                                      <div className="space-y-0.5 whitespace-nowrap">
+                                        <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-blue-500">Section total</div>
+                                        <div className="text-sm font-black text-blue-950">{formatDisplayAmount(currentValueTotal, market)}</div>
+                                      </div>
+                                    ) : null}
+                                  </th>
+                                );
+                              })}
+                            </tr>
                             <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
                               {finalActionableLayout.order.map((column) => {
                                 const width = finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column];
