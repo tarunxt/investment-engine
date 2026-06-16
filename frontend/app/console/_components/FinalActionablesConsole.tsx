@@ -3708,9 +3708,18 @@ function DetailedRationaleScoreSection({
         title={`Open ${label} output`}
         onClick={() => {
           const portfolio = detail.stockExchange.toUpperCase().includes("NSE") || detail.stockExchange.toUpperCase().includes("BSE") ? "zerodha" : "indmoneyUs";
-          window.dispatchEvent(new CustomEvent("final-actionables:open-stage-output", {
+          const eventHandled = !window.dispatchEvent(new CustomEvent("final-actionables:open-stage-output", {
+            cancelable: true,
             detail: { runId, stage, portfolio },
           }));
+          if (eventHandled) return;
+
+          const popup = window.open(
+            URLs.routes.console.runDetail(runId),
+            `final-actionables-${stage}-run-${runId}`,
+            "popup=yes,width=1280,height=840,noopener,noreferrer",
+          );
+          popup?.focus();
         }}
       >
         <span className="truncate">{label}</span>
