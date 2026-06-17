@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, Triangle, X } from "lucide-react";
 
@@ -3038,6 +3038,7 @@ export function ConsensusBreakupButton({
   action: ActionCategory;
 }) {
   const [open, setOpen] = useState(false);
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
   const consensusText = `${stock.actionCounts[action]}/${stock.totalSuggestions}`;
 
   return (
@@ -3062,8 +3063,8 @@ export function ConsensusBreakupButton({
           aria-label={`${stock.symbol} consensus breakup`}
           onClick={() => setOpen(false)}
         >
-          <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4">
+          <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl" style={draggableStyle} onClick={(event) => event.stopPropagation()}>
+            <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4" {...dragHandleProps}>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-600">Consensus breakup</p>
                 <h2 className="mt-1 flex flex-wrap items-baseline gap-2 text-2xl font-bold text-gray-900">
@@ -3075,6 +3076,7 @@ export function ConsensusBreakupButton({
                 <p className="mt-2 text-sm text-gray-500">
                   Recommendation from every LLM included in the consolidated actionables run; missing stock mentions are marked as Not mentioned.
                 </p>
+                <PopupDragHint />
               </div>
               <button type="button" onClick={() => setOpen(false)} className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close consensus breakup">
                 <X className="h-5 w-5" />
@@ -3148,6 +3150,7 @@ export function StockDetailsButton({
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
   const eventRows = getAnalysisTableRowsForStock(
     detailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...detailsData.eventsAnalysis.table }] : [],
     stock,
@@ -3179,9 +3182,10 @@ export function StockDetailsButton({
         >
           <div
             className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+            style={draggableStyle}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4">
+            <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4" {...dragHandleProps}>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Captured stock details</p>
                 <h2 id={`stock-details-${stock.key}`} className="mt-1 text-xl font-bold text-gray-900">
@@ -4027,6 +4031,65 @@ function ScoreReferenceTables({
   );
 }
 
+
+function useDraggablePopup() {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragStartRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const beginDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, a, input, textarea, select, [data-no-popup-drag]")) return;
+
+    event.preventDefault();
+    dragStartRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: offset.x,
+      originY: offset.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [offset.x, offset.y]);
+
+  const moveDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const dragStart = dragStartRef.current;
+    if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+
+    setOffset({
+      x: dragStart.originX + event.clientX - dragStart.startX,
+      y: dragStart.originY + event.clientY - dragStart.startY,
+    });
+  }, []);
+
+  const endDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const dragStart = dragStartRef.current;
+    if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+
+    dragStartRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  const dragHandleProps = {
+    onPointerDown: beginDrag,
+    onPointerMove: moveDrag,
+    onPointerUp: endDrag,
+    onPointerCancel: endDrag,
+  };
+  const draggableStyle = { transform: `translate3d(${offset.x}px, ${offset.y}px, 0)` } satisfies CSSProperties;
+
+  return { dragHandleProps, draggableStyle };
+}
+
+function PopupDragHint() {
+  return (
+    <span className="mt-2 inline-flex w-fit items-center rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-600">
+      Drag header to move
+    </span>
+  );
+}
+
 export function ScoreMatrixModal({
   detail,
   formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
@@ -4097,6 +4160,8 @@ export function ScoreMatrixModal({
     [configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts],
   );
 
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
+
   if (!editedDetail) return null;
 
   const matchedRule = editedDetail.rules.find((rule) => rule.matched) ?? null;
@@ -4112,9 +4177,12 @@ export function ScoreMatrixModal({
     >
       <div
         className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+        style={draggableStyle}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4">
+        <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4"
+          {...dragHandleProps}
+        >
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
               Consolidated score matrix
@@ -4131,6 +4199,7 @@ export function ScoreMatrixModal({
               <FinalActionTag action={editedDetail.calculatedAction} />
               {" "}with units change {formatSignedQuantity(editedDetail.calculatedUnitsChange)}.
             </p>
+            <PopupDragHint />
           </div>
           <div className="flex items-center gap-2">
             {onFocusCalculation ? (
@@ -5048,6 +5117,8 @@ function ActionablesFormulaModal({
   onFormulaConfigChange: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
   onClose: () => void;
 }) {
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
+
   if (!open) return null;
 
   return (
@@ -5058,11 +5129,12 @@ function ActionablesFormulaModal({
       aria-labelledby="actionables-formula-modal-title"
       onClick={onClose}
     >
-      <div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+      <div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl" style={draggableStyle} onClick={(event) => event.stopPropagation()}>
+        <div className="flex cursor-move touch-none select-none items-start justify-between gap-4 border-b border-slate-200 px-5 py-4" {...dragHandleProps}>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Actionables calculations</p>
             <h2 id="actionables-formula-modal-title" className="mt-1 text-xl font-bold text-slate-950">Logics and formulas</h2>
+            <PopupDragHint />
           </div>
           <button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close formulas popup">
             <X className="h-5 w-5" />
@@ -5498,6 +5570,8 @@ function ActionablesCalculationsModal({
     return () => window.cancelAnimationFrame(frameId);
   }, [activeFocusTarget, open, rowGroups]);
 
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
+
   if (!open) return null;
 
   const orderedHeaders = columnLayout.order;
@@ -5562,8 +5636,8 @@ function ActionablesCalculationsModal({
         aria-labelledby="actionables-calculations-modal-title"
         onClick={onClose}
       >
-        <div className="w-full max-w-[96vw] rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-          <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4">
+        <div className="w-full max-w-[96vw] rounded-2xl bg-white shadow-2xl" style={draggableStyle} onClick={(event) => event.stopPropagation()}>
+          <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4" {...dragHandleProps}>
             <div className="flex items-start gap-3">
               <button
                 type="button"
@@ -5578,6 +5652,7 @@ function ActionablesCalculationsModal({
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Actionables Calculations</p>
                 <h2 id="actionables-calculations-modal-title" className="mt-1 text-2xl font-bold text-slate-950">{title} Excel layout</h2>
                 <p className="mt-1 text-sm text-slate-500">Grouped in the same rebalance export column order with sortable Excel-style headers.</p>
+                <PopupDragHint />
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -7086,6 +7161,8 @@ function SetupStocksModal({
   group: SetupStockGroup | null;
   onClose: () => void;
 }) {
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
+
   if (!group) return null;
 
   return (
@@ -7098,14 +7175,16 @@ function SetupStocksModal({
     >
       <div
         className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl"
+        style={draggableStyle}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+        <div className="flex cursor-move touch-none select-none items-start justify-between gap-4 border-b border-gray-200 px-5 py-4" {...dragHandleProps}>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Technical setup stocks</p>
             <h2 id="setup-stocks-modal-title" className="mt-1 text-lg font-semibold text-gray-950">
               {group.setup} ({group.stocks.length})
             </h2>
+            <PopupDragHint />
           </div>
           <button
             type="button"
