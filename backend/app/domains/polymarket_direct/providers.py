@@ -75,57 +75,13 @@ class MarketDataProvider(Protocol):
 
 
 class MockProvider:
-    def __init__(self) -> None:
-        self._counter = 0
-
     async def get_top_traders(self) -> list[PolymarketTrader]:
-        return [
-            PolymarketTrader(
-                id=f"mock-trader-{index + 1}",
-                name=f"Mock Trader {index + 1}",
-                address=f"0xMOCK{str(index + 1).rjust(36, '0')}",
-                activity_source="fallback",
-                volume_24h=50_000 - index * 2_750,
-                trades_24h=120 - index * 8,
-                source_reason="Mock trader",
-                source="mock",
-            )
-            for index in range(10)
-        ]
+        return []
 
     async def get_recent_trades(
         self, traders: list[PolymarketTrader]
     ) -> list[PolymarketSourceTrade]:
-        self._counter += 1
-        batch_size = 6 if self._counter == 1 else 1 + (self._counter % 3)
-        rows: list[PolymarketSourceTrade] = []
-        for index in range(batch_size):
-            trader = traders[(self._counter + index) % len(traders)]
-            market = MOCK_MARKETS[(self._counter + index) % len(MOCK_MARKETS)]
-            side = "BUY" if (self._counter + index) % 3 else "SELL"
-            price = round(0.25 + (((self._counter + index) * 7) % 50) / 100, 2)
-            size_usd = round(10 + (((self._counter + index) * 13) % 90), 2)
-            rows.append(
-                PolymarketSourceTrade(
-                    id=f"mock-{self._counter}-{index}-{side}-{market[0]}",
-                    source_trade_key=(
-                        f"mock:{trader.id}:{market[0]}:{market[2]}:{side}:{self._counter}:{size_usd:.6f}:{price:.4f}"
-                    ),
-                    trader_id=trader.id,
-                    trader_name=trader.name,
-                    trader_address=trader.address,
-                    clean_trader_identity=trader.address,
-                    market_id=market[0],
-                    market_title=market[1],
-                    outcome=market[2],
-                    side=side,
-                    price=price,
-                    size_usd=size_usd,
-                    timestamp=utc_now(),
-                    source="mock",
-                )
-            )
-        return rows
+        return []
 
 
 class DirectPolymarketReadOnlyProvider:
