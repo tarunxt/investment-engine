@@ -374,7 +374,10 @@ function getCopiedTraderAnalysisForTrade(
 
 function getPositionsValueMissingReason(
   account?: PolymarketBotState["tracked_accounts"][number],
+  copiedTrader?: CopiedTraderAnalysisRow,
 ) {
+  if (!account && !copiedTrader) return "No matching tracked account found";
+  if (copiedTrader?.positionsValueUsd != null) return "—";
   if (!account) return "No matching tracked account found";
   if (
     account?.net_worth_source === "pending_refresh" ||
@@ -660,6 +663,7 @@ type CopiedTraderAnalysisRow = {
   totalLosses: number;
   totalPnl: number;
   netWorth: number;
+  positionsValueUsd?: number;
   trades: AnalysisTradeRow[];
 };
 
@@ -766,6 +770,8 @@ function buildCopiedTraderAnalysisRows(
       trade.traderNetWorth ||
       existing.netWorth ||
       getCopiedTraderDefaultNetWorth(trade.traderName, trade.traderKey);
+    existing.positionsValueUsd =
+      account?.positions_value_usd ?? existing.positionsValueUsd;
     existing.copiedTrades += 1;
     existing.trades.push(trade);
     if (trade.pnl >= 0) {
@@ -3986,7 +3992,10 @@ export default function PolymarketBotPage() {
                             traderAccount?.positions_value_usd ??
                             copiedTrader?.positionsValueUsd;
                           const positionsValueMissingReason =
-                            getPositionsValueMissingReason(traderAccount);
+                            getPositionsValueMissingReason(
+                              traderAccount,
+                              copiedTrader,
+                            );
                           const missingReason = getNetWorthMissingReason(
                             trade,
                             traderAccount,
