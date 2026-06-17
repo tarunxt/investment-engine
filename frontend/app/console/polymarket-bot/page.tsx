@@ -419,24 +419,44 @@ function getTrackedAccountForTrade(
 function getTradeNetWorth(
   trade: PolymarketSourceTradeDecision,
   account?: PolymarketBotState["tracked_accounts"][number],
+  copiedTrader?: CopiedTraderAnalysisRow,
 ) {
-  return account?.net_worth_usd || trade.trader_net_worth_usd || 0;
+  return (
+    account?.net_worth_usd ||
+    copiedTrader?.netWorth ||
+    trade.trader_net_worth_usd ||
+    0
+  );
 }
 
 function getNetWorthMissingReason(
   trade: PolymarketSourceTradeDecision,
   account?: PolymarketBotState["tracked_accounts"][number],
+  copiedTrader?: CopiedTraderAnalysisRow,
 ) {
-  if (!account) return "No matching tracked account found";
+  if (!account && !copiedTrader) return "No matching tracked account found";
+  if (copiedTrader?.netWorth) return "—";
   if (
-    account.net_worth_source === "pending_refresh" ||
-    !account.net_worth_checked_at
+    account?.net_worth_source === "pending_refresh" ||
+    (account && !account.net_worth_checked_at)
   ) {
     return "Net worth refresh pending";
   }
-  return account.net_worth_usd || trade.trader_net_worth_usd
+  return account?.net_worth_usd || trade.trader_net_worth_usd
     ? "—"
     : "Net worth unavailable from provider";
+}
+
+function getCopiedTraderAnalysisForTrade(
+  trade: PolymarketSourceTradeDecision,
+  copiedTraders: CopiedTraderAnalysisRow[],
+) {
+  const tradeKeys = new Set(getTradeIdentityKeys(trade));
+  return copiedTraders.find((trader) =>
+    [trader.traderName, trader.key]
+      .map(trackedAccountKey)
+      .some((key) => key && tradeKeys.has(key)),
+  );
 }
 
 function getPositionsValueMissingReason(
@@ -444,8 +464,8 @@ function getPositionsValueMissingReason(
 ) {
   if (!account) return "No matching tracked account found";
   if (
-    account.net_worth_source === "pending_refresh" ||
-    !account.net_worth_checked_at
+    account?.net_worth_source === "pending_refresh" ||
+    (account && !account.net_worth_checked_at)
   ) {
     return "Positions refresh pending";
   }
@@ -4563,17 +4583,24 @@ export default function PolymarketBotPage() {
                             trade,
                             state.tracked_accounts,
                           );
+                          const copiedTrader = getCopiedTraderAnalysisForTrade(
+                            trade,
+                            copiedTraderAnalysisRows,
+                          );
                           const netWorth = getTradeNetWorth(
                             trade,
                             traderAccount,
+                            copiedTrader,
                           );
                           const positionsValue =
-                            traderAccount?.positions_value_usd;
+                            traderAccount?.positions_value_usd ??
+                            copiedTrader?.positionsValueUsd;
                           const positionsValueMissingReason =
                             getPositionsValueMissingReason(traderAccount);
                           const missingReason = getNetWorthMissingReason(
                             trade,
                             traderAccount,
+                            copiedTrader,
                           );
                           const netWorthPercent =
                             netWorth > 0
