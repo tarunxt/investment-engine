@@ -68,6 +68,7 @@ import type {
   JobResponse,
   PortfolioAnalysisHistoryItem,
   ZerodhaPortfolioSnapshotDetail,
+  ZerodhaPortfolioOverviewResponse,
   IndMoneyUsThreatAnalysis,
   ProviderInfo,
   ProviderModelTarget,
@@ -216,6 +217,7 @@ const GPT_4O_MINI_MODEL = "gpt-4o-mini";
 const POLL_INTERVAL_MS = 3000;
 const MAX_RUN_POLLS = 160;
 const MAX_JOB_POLLS = 120;
+const MAX_ZERODHA_SYNC_POLLS = 30;
 const WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
 const STAGE_LLM_SELECTION_STORAGE_KEY = "investor:dashboard-stage-llms:v1";
 const WORKFLOW_COMPLETION_RESET_DELAY_MS = 10000;
@@ -624,6 +626,25 @@ async function waitForRunCompletion(
   const lastRun = await apiService.getRun(runId);
   onProgress?.(lastRun);
   return lastRun;
+}
+
+
+async function waitForZerodhaPortfolioSync(
+  previousCapturedAt?: string | null,
+): Promise<ZerodhaPortfolioOverviewResponse> {
+  let latestOverview = await apiService.zerodhaPortfolioOverview();
+
+  for (let attempt = 0; attempt < MAX_ZERODHA_SYNC_POLLS; attempt += 1) {
+    const latestCapturedAt = latestOverview.latest?.captured_at ?? null;
+    if (latestCapturedAt && latestCapturedAt !== (previousCapturedAt ?? null)) {
+      return latestOverview;
+    }
+
+    await sleep(POLL_INTERVAL_MS);
+    latestOverview = await apiService.zerodhaPortfolioOverview();
+  }
+
+  return latestOverview;
 }
 
 async function waitForThreatCompletion(
@@ -6289,11 +6310,17 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
           markRunning(portfolio, "sync");
           if (portfolio === "zerodha") {
             await ensureZerodhaConnectedForSync(zerodhaPopup);
+            const previousOverview = await apiService.zerodhaPortfolioOverview();
             const synced = await apiService.zerodhaSyncPortfolio();
-            const overview = await apiService.zerodhaPortfolioOverview();
+            const overview = await waitForZerodhaPortfolioSync(
+              previousOverview.latest?.captured_at,
+            );
             markCompleted(portfolio, "sync", {
               completedAt: overview.latest?.captured_at,
-              runStatus: synced.status,
+              runStatus:
+                overview.latest?.captured_at !== previousOverview.latest?.captured_at
+                  ? "synced"
+                  : synced.status,
             });
           } else if (indmoneyPayload) {
             const snapshot =
@@ -6812,11 +6839,17 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
         markRunning(portfolio, "sync");
         if (portfolio === "zerodha") {
           await ensureZerodhaConnectedForSync(zerodhaPopup);
+          const previousOverview = await apiService.zerodhaPortfolioOverview();
           const synced = await apiService.zerodhaSyncPortfolio();
-          const overview = await apiService.zerodhaPortfolioOverview();
+          const overview = await waitForZerodhaPortfolioSync(
+            previousOverview.latest?.captured_at,
+          );
           markCompleted(portfolio, "sync", {
             completedAt: overview.latest?.captured_at,
-            runStatus: synced.status,
+            runStatus:
+              overview.latest?.captured_at !== previousOverview.latest?.captured_at
+                ? "synced"
+                : synced.status,
           });
         } else if (payload) {
           const snapshot =
