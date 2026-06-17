@@ -145,7 +145,7 @@ type TechnicalScanMultiplierKey = "bullish" | "bearish";
 
 type ScoreSymbolThresholdKey = "strongPositive" | "positive" | "weakPositive" | "weakNegative" | "negative" | "strongNegative";
 
-type ScoreMatrixFormulaConfig = {
+export type ScoreMatrixFormulaConfig = {
   detailedRationaleMultipliers: Record<string, number>;
   detailedRationaleDenominator: number | null;
   actionScores: Record<ActionCategory, number>;
@@ -660,7 +660,7 @@ const SCORE_SYMBOL_THRESHOLD_ROWS: Array<{ key: ScoreSymbolThresholdKey; label: 
   { key: "strongNegative", label: "Red down minimum" },
 ];
 
-const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
+export const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
   detailedRationaleMultipliers: {
     cruxx: 3,
     "technical-short": 3,
@@ -716,7 +716,7 @@ function readDashboardActionablesCompletedAtByMarket() {
   } satisfies Record<SwingTradeMarket, string | null>;
 }
 
-function normalizeScoreMatrixFormulaConfig(
+export function normalizeScoreMatrixFormulaConfig(
   config?: Partial<ScoreMatrixFormulaConfig> | null,
 ): ScoreMatrixFormulaConfig {
   const detailedRationaleMultipliers = {
@@ -764,7 +764,7 @@ function normalizeScoreMatrixFormulaConfig(
   };
 }
 
-function loadScoreMatrixFormulaConfig() {
+export function loadScoreMatrixFormulaConfig() {
   if (typeof window === "undefined") return DEFAULT_SCORE_MATRIX_FORMULA_CONFIG;
 
   try {
@@ -777,7 +777,7 @@ function loadScoreMatrixFormulaConfig() {
   }
 }
 
-function saveScoreMatrixFormulaConfig(config: ScoreMatrixFormulaConfig) {
+export function saveScoreMatrixFormulaConfig(config: ScoreMatrixFormulaConfig) {
   if (typeof window === "undefined") return;
 
   try {

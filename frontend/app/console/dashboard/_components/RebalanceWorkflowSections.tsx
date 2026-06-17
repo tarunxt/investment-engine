@@ -24,6 +24,9 @@ import {
   ScoreMatrixModal,
   StockDetailsButton,
   getTechnicalScanForStock,
+  loadScoreMatrixFormulaConfig,
+  saveScoreMatrixFormulaConfig,
+  type ScoreMatrixFormulaConfig,
   type ActionCategory,
   type ActionEstimate,
   extractRebalanceInputFingerprint,
@@ -2804,6 +2807,8 @@ function ZerodhaBasketPreviewDialog({
   placing,
   submission,
   detailsData,
+  formulaConfig,
+  onFormulaConfigChange,
 }: {
   open: boolean;
   loading: boolean;
@@ -2821,6 +2826,8 @@ function ZerodhaBasketPreviewDialog({
   placing: boolean;
   submission: ZerodhaBasketSubmission | null;
   detailsData: StockDetailsData;
+  formulaConfig: ScoreMatrixFormulaConfig;
+  onFormulaConfigChange: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
 }) {
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
 
@@ -3104,6 +3111,8 @@ function ZerodhaBasketPreviewDialog({
 
         <ScoreMatrixModal
           detail={selectedMatrixDetail}
+          formulaConfig={formulaConfig}
+          onFormulaConfigChange={onFormulaConfigChange}
           onClose={() => setSelectedMatrixDetail(null)}
         />
       </div>
@@ -4885,6 +4894,7 @@ export function RebalanceWorkflowSections({
     threatsAnalysis: null,
     error: null,
   });
+  const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const activeRunIdsRef = useRef<number[]>([]);
   const cancelRequestedRef = useRef(false);
@@ -4957,6 +4967,47 @@ export function RebalanceWorkflowSections({
     }
   }, []);
 
+  useEffect(() => {
+    saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
+  }, [scoreMatrixFormulaConfig]);
+
+  const handleScoreMatrixFormulaConfigChange = useCallback((updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => {
+    setScoreMatrixFormulaConfig((current) => {
+      const next = updater(current);
+      setZerodhaBasketOrders((currentOrders) => {
+        if (!zerodhaBasketOpen || currentOrders.length === 0) return currentOrders;
+
+        const stocksByKey = new Map<string, StockConsensus>();
+        const technicalScansBySymbol: Record<string, TechnicalScanResult> = {};
+        currentOrders.forEach((order) => {
+          stocksByKey.set(order.stock.key, order.stock);
+          if (order.technicalScan) {
+            technicalScansBySymbol[`SYMBOL:${order.symbol.toUpperCase()}`] = order.technicalScan;
+            technicalScansBySymbol[`SYMBOL:${order.stock.symbol.toUpperCase()}`] = order.technicalScan;
+          }
+        });
+
+        const actionRows = buildDashboardActionRows(
+          [...stocksByKey.values()],
+          "india",
+          technicalScansBySymbol,
+          next,
+        );
+        const rebuiltOrders = buildZerodhaBasketPreviewOrders(
+          actionRows,
+          technicalScansBySymbol,
+          zerodhaBasketDetailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null,
+        );
+        const previousBySymbol = new Map(currentOrders.map((order) => [order.symbol, order]));
+        return rebuiltOrders.map((order) => ({
+          ...order,
+          orderKind: previousBySymbol.get(order.symbol)?.orderKind ?? order.orderKind,
+        }));
+      });
+      return next;
+    });
+  }, [zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen]);
+
   const closeAutoRebalanceCostHistory = useCallback(() => {
     setCostHistoryPortfolio(null);
     setSelectedCostGroup(null);
@@ -4983,7 +5034,7 @@ export function RebalanceWorkflowSections({
         overview.latest,
       );
       const technicalScans = buildTechnicalScanMap(runs);
-      const actionRows = buildDashboardActionRows(stocks, "india", technicalScans);
+      const actionRows = buildDashboardActionRows(stocks, "india", technicalScans, scoreMatrixFormulaConfig);
       const orders = buildZerodhaBasketPreviewOrders(actionRows, technicalScans, overview.latest);
       const capturedDetailsErrors = [eventsResult, threatsResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
@@ -5007,7 +5058,7 @@ export function RebalanceWorkflowSections({
     } finally {
       setZerodhaBasketLoading(false);
     }
-  }, []);
+  }, [scoreMatrixFormulaConfig]);
 
   const toggleZerodhaBasketOrder = useCallback((id: string) => {
     setSelectedZerodhaBasketIds((current) => {
@@ -7161,6 +7212,8 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
         placing={zerodhaBasketPlacing}
         submission={zerodhaBasketSubmission}
         detailsData={zerodhaBasketDetailsData}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={handleScoreMatrixFormulaConfigChange}
       />
 
       {promptDialog ? (
