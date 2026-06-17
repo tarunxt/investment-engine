@@ -14,6 +14,7 @@ import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import { ScanHistoryButton } from "@/components/shared/ScanHistoryButton";
 import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
+import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -6395,11 +6396,20 @@ export function DashboardFinalActionablesTables() {
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               {market === "us" ? "US" : "Zerodha India"}
             </div>
-            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
               <h3 className="font-serif text-xl tracking-tight text-slate-950">{title}</h3>
               <span className="text-xs font-medium text-slate-500">
                 Last updated: {lastUpdatedAt ? formatDateTime(lastUpdatedAt) : "—"}
               </span>
+              <TradingViewUrlListButton
+                items={actionRows.map((row) => ({
+                  symbol: row.stock.symbol,
+                  market,
+                  exchange: row.stock.exchange,
+                }))}
+                title={`${title} TradingView URLs`}
+                ariaLabel={`Open ${title} TradingView URL list`}
+              />
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
           </div>
@@ -6469,7 +6479,6 @@ export function DashboardFinalActionablesTables() {
                                   >
                                     {column === "currentValue" ? (
                                       <div className="space-y-0.5 whitespace-nowrap">
-                                        <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-blue-500">Section total</div>
                                         <div className="text-sm font-black text-blue-950">{formatDisplayAmount(currentValueTotal, market)}</div>
                                       </div>
                                     ) : null}

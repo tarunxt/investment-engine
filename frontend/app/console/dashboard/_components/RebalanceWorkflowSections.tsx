@@ -40,6 +40,7 @@ import {
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
+import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
 import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
 import MarkdownRenderer from "@/components/shared/MarkdownRenderer";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
@@ -2868,9 +2869,20 @@ function ZerodhaBasketPreviewDialog({
             <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-400">
               Zerodha Basket Preview
             </div>
-            <h3 className="mt-2 text-xl font-bold text-slate-950">
-              Zerodha India Place Order Basket
-            </h3>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <h3 className="text-xl font-bold text-slate-950">
+                Zerodha India Place Order Basket
+              </h3>
+              <TradingViewUrlListButton
+                items={orders.map((order) => ({
+                  symbol: order.symbol,
+                  market: "india",
+                  exchange: order.exchange,
+                }))}
+                title="Zerodha India Basket TradingView URLs"
+                ariaLabel="Open Zerodha India basket TradingView URL list"
+              />
+            </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, then open a Kite order tray to confirm and place the selected orders from Zerodha.
             </p>
