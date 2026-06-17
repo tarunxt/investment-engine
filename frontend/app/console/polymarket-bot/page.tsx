@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   Activity,
   AlertTriangle,
@@ -44,13 +45,39 @@ import type {
   PolymarketBullpenRedeemedTrade,
 } from "@/types/api";
 
-import { MetricGrid, type MetricItem } from "./_components/MetricGrid";
-import {
-  ManualWalletsTable,
-  TrackedAccountsTable,
-  TrackedTradersTable,
-  type TrackedAccountDraft,
-} from "./_components/TraderTables";
+import type { MetricItem } from "./_components/MetricGrid";
+import type { TrackedAccountDraft } from "./_components/TraderTables";
+
+const MetricGrid = dynamic(
+  () => import("./_components/MetricGrid").then((mod) => mod.MetricGrid),
+  {
+    loading: () => (
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="h-28 animate-pulse rounded-[22px] border border-slate-200 bg-slate-100/80"
+          />
+        ))}
+      </div>
+    ),
+  },
+);
+const ManualWalletsTable = dynamic(
+  () =>
+    import("./_components/TraderTables").then((mod) => mod.ManualWalletsTable),
+  { ssr: false },
+);
+const TrackedAccountsTable = dynamic(
+  () =>
+    import("./_components/TraderTables").then((mod) => mod.TrackedAccountsTable),
+  { ssr: false },
+);
+const TrackedTradersTable = dynamic(
+  () =>
+    import("./_components/TraderTables").then((mod) => mod.TrackedTradersTable),
+  { ssr: false },
+);
 
 function stringifyErrorDetail(detail: unknown): string | null {
   if (!detail) return null;
@@ -1485,6 +1512,8 @@ export default function PolymarketBotPage() {
   const lastDoctorAutoRefreshAt = useRef(0);
   const balanceAutoRefreshInFlight = useRef(false);
   const lastBalanceAutoRefreshAt = useRef(0);
+  const deferredCopiedSearchQuery = useDeferredValue(copiedSearchQuery);
+
   useEffect(() => {
     if (!pendingAction) return;
 
@@ -2123,7 +2152,9 @@ export default function PolymarketBotPage() {
     { key: "winning", label: "Winning" },
     { key: "losing", label: "Losing" },
   ];
-  const normalizedCopiedSearchQuery = copiedSearchQuery.trim().toLowerCase();
+  const normalizedCopiedSearchQuery = deferredCopiedSearchQuery
+    .trim()
+    .toLowerCase();
   const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades)
     .filter((event) => {
       if (!normalizedCopiedSearchQuery) return true;
