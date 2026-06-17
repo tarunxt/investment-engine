@@ -731,12 +731,8 @@ function getIndiaMarketStatus(now = new Date()) {
 }
 
 function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
-  // Kite Publisher/offsite baskets currently reject MARKET rows because the
-  // final basket submit does not forward market_protection. Use a limit order
-  // seeded with the displayed LTP instead, so the basket remains placeable and
-  // still lets the user review or edit the executable price inside Kite.
   return {
-    orderType: "LIMIT" as const,
+    orderType: order.orderKind === "Limit" ? ("LIMIT" as const) : ("MARKET" as const),
     variety: order.orderKind === "After market" || !marketOpen ? "amo" : "regular",
   };
 }
@@ -772,7 +768,7 @@ function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], mark
       readonly: false,
       tag: "credx",
     };
-    if (order.price) {
+    if (execution.orderType === "LIMIT" && order.price) {
       payload.price = Number(order.price.toFixed(2));
     }
     return payload;
@@ -3104,7 +3100,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Kite Publisher rows are submitted as limit orders. Missing or stale displayed prices are refreshed from live Zerodha quotes before opening Kite because offsite market baskets can be rejected before Kite forwards market protection; closed-market rows are sent as AMO limit orders.
+            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Market rows are submitted as MARKET orders without a price; LIMIT rows are submitted with the refreshed limit price. Closed-market rows are sent as AMO while preserving the selected order type.
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
