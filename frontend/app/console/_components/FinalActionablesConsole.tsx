@@ -6532,6 +6532,18 @@ export function DashboardFinalActionablesTables() {
     const lastUpdatedAt = [latestRebalanceAt, latestTechnicalAt, latestActionablesCompletedAt]
       .filter(Boolean)
       .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null;
+    const tradingViewItems = ACTION_CATEGORIES.flatMap((action) => {
+      const tableKey = `${market}:${action}`;
+      const sortState = sortStates[tableKey] ?? getDefaultDashboardActionSortState(action);
+      return actionRows
+        .filter((row) => row.formulaAction === action)
+        .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans))
+        .map((row) => ({
+          symbol: row.stock.symbol,
+          market,
+          exchange: row.stock.exchange,
+        }));
+    });
 
     return (
       <div id={market === "us" ? "final-actionable-us" : "final-actionable-zerodha"} className="scroll-mt-24 rounded-[28px] border border-slate-200 bg-white/80 p-4 shadow-sm">
@@ -6546,11 +6558,7 @@ export function DashboardFinalActionablesTables() {
                 Last updated: {lastUpdatedAt ? formatDateTime(lastUpdatedAt) : "—"}
               </span>
               <TradingViewUrlListButton
-                items={actionRows.map((row) => ({
-                  symbol: row.stock.symbol,
-                  market,
-                  exchange: row.stock.exchange,
-                }))}
+                items={tradingViewItems}
                 title={`${title} TradingView URLs`}
                 ariaLabel={`Open ${title} TradingView URL list`}
               />
