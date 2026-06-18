@@ -802,6 +802,8 @@ export interface ZerodhaOrder {
   placed_by: string;
   tag: string | null;
   order_timestamp: string | null;
+  exchange_timestamp?: string | null;
+  exchange_update_timestamp?: string | null;
   filled_quantity: number;
   pending_quantity: number;
 }
