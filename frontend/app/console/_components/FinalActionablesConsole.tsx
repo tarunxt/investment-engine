@@ -1407,12 +1407,14 @@ export function ScoreMatrixButton({
   onOpenDetail: (detail: ScoreMatrixDetail) => void;
   className?: string;
 }) {
+  const configuredDetail = applyScoreMatrixFormulaConfig(detail, formulaConfig);
+
   return (
     <button
       type="button"
       onClick={(event) => {
         event.stopPropagation();
-        onOpenDetail(detail);
+        onOpenDetail(configuredDetail);
       }}
       className={cn(
         "cursor-pointer rounded px-1.5 py-0.5 transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500",
@@ -1421,7 +1423,7 @@ export function ScoreMatrixButton({
       aria-label={`Open consolidated score matrix for ${detail.stockSymbol}`}
       title={`Open consolidated score matrix for ${detail.stockSymbol}`}
     >
-      <ScoreSymbol score={detail.calculatedScore} formulaConfig={formulaConfig} />
+      <ScoreSymbol score={configuredDetail.calculatedScore} formulaConfig={formulaConfig} />
     </button>
   );
 }
@@ -1944,7 +1946,7 @@ function applyScoreMatrixEdits(
     const multiplier = Number(draft);
     return Number.isFinite(multiplier) ? { ...row, multiplier } : row;
   });
-  const denominatorOverride = denominatorDraft.trim() === "" ? null : Number(denominatorDraft);
+  const denominatorOverride = denominatorDraft.trim() === "" ? detail.detailedRationaleDenominator : Number(denominatorDraft);
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
     calculateWeightedRationaleScore(
       detailedRationaleRows,
@@ -2019,6 +2021,43 @@ function applyScoreMatrixEdits(
     detailedRationaleFinalScore,
     detailedRationaleDenominator,
   };
+}
+
+function applyScoreMatrixFormulaConfig(
+  detail: ScoreMatrixDetail,
+  formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+) {
+  const configuredDetail: ScoreMatrixDetail = {
+    ...detail,
+    detailedRationaleRows: detail.detailedRationaleRows.map((row) => {
+      if (row.id === "mean-mode-action") {
+        return {
+          ...row,
+          score: detail.meanModeAction ? formulaConfig.actionScores[detail.meanModeAction] : null,
+          multiplier: formulaConfig.detailedRationaleMultipliers[row.id] ?? row.multiplier,
+        };
+      }
+      if (row.id === "technical-scan-confidence") {
+        const multiplier = row.multiplier === 0
+          ? 0
+          : row.multiplier > 0
+            ? formulaConfig.technicalScanMultipliers.bullish
+            : formulaConfig.technicalScanMultipliers.bearish;
+        return {
+          ...row,
+          multiplier,
+          denominatorWeight: multiplier === 0 ? 0 : 2,
+        };
+      }
+      return {
+        ...row,
+        multiplier: formulaConfig.detailedRationaleMultipliers[row.id] ?? row.multiplier,
+      };
+    }),
+    detailedRationaleDenominator: formulaConfig.detailedRationaleDenominator ?? detail.detailedRationaleDenominator,
+  };
+
+  return applyScoreMatrixEdits(configuredDetail, {}, "", {});
 }
 
 function getFormattedCurrentValueAmount(row: CanonicalRow, market: SwingTradeMarket) {
@@ -4269,35 +4308,7 @@ export function ScoreMatrixModal({
 
   const configuredDetail = useMemo(() => {
     if (!detail) return null;
-    return {
-      ...detail,
-      detailedRationaleRows: detail.detailedRationaleRows.map((row) => {
-        if (row.id === "mean-mode-action") {
-          return {
-            ...row,
-            score: detail.meanModeAction ? formulaConfig.actionScores[detail.meanModeAction] : null,
-            multiplier: formulaConfig.detailedRationaleMultipliers[row.id] ?? row.multiplier,
-          };
-        }
-        if (row.id === "technical-scan-confidence") {
-          const multiplier = row.multiplier === 0
-            ? 0
-            : row.multiplier > 0
-              ? formulaConfig.technicalScanMultipliers.bullish
-              : formulaConfig.technicalScanMultipliers.bearish;
-          return {
-            ...row,
-            multiplier,
-            denominatorWeight: multiplier === 0 ? 0 : 2,
-          };
-        }
-        return {
-          ...row,
-          multiplier: formulaConfig.detailedRationaleMultipliers[row.id] ?? row.multiplier,
-        };
-      }),
-      detailedRationaleDenominator: formulaConfig.detailedRationaleDenominator ?? detail.detailedRationaleDenominator,
-    };
+    return applyScoreMatrixFormulaConfig(detail, formulaConfig);
   }, [detail, formulaConfig]);
 
   const editedDetail = useMemo(
