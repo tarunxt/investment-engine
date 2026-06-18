@@ -770,7 +770,7 @@ export const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
     "fundamentals-short": 3,
     "fundamentals-medium-long": 1,
     "technical-scan-confidence": 1,
-    "premarket-trend": 5,
+    "premarket-trend": 0,
     "last-5-candles-trend": 5,
     "mean-mode-action": 4,
   },
