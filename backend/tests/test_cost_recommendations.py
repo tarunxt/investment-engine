@@ -59,3 +59,24 @@ def test_frontend_does_not_render_empty_confidence_label():
     with open("../frontend/app/console/profile/cost-drivers/page.tsx", encoding="utf-8") as handle:
         page = handle.read()
     assert ">confidence:" not in page.lower()
+
+
+def test_cost_dashboard_defaults_to_live_empty_when_mock_mode_unset(monkeypatch):
+    from app.domains.cost_drivers import service
+
+    monkeypatch.delenv("COST_DASHBOARD_MOCK_MODE", raising=False)
+    service._CACHE.update({"expires": 0, "data": None, "last_refresh": None})
+
+    data = service.get_dashboard(force_refresh=True)
+
+    assert data["debug"]["mockMode"] is False
+    assert data["traffic"] == []
+    assert data["recommendations"] == []
+
+
+def test_mock_dashboard_excludes_nonexistent_media_asset_placeholders():
+    data = _mock_dashboard()
+    paths = {row["path"] for row in data["traffic"]}
+
+    assert "/media/hero-loan-video.mp4" not in paths
+    assert "/images/home-banner.png" not in paths
