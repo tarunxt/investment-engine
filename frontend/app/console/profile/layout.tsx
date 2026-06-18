@@ -70,7 +70,7 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
             ))}
           </nav>
         </aside>
-        <div className="flex-1 lg:max-w-2xl pl-3">{children}</div>
+        <div className="min-w-0 flex-1 pl-3 lg:max-w-none">{children}</div>
       </div>
     </div>
   );
