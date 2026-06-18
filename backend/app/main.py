@@ -14,6 +14,7 @@ from app.core.seed import seed_system_prompts
 from app.domains.ai_providers.router import router as providers_router
 from app.domains.api_usage.router import router as api_usage_router
 from app.domains.auth.router import router as auth_router
+from app.domains.cost_drivers.router import router as cost_drivers_router
 from app.domains.google_sheets.router import router as google_sheets_router
 from app.domains.indmoney_us.events_router import router as indmoney_us_events_router
 from app.domains.indmoney_us.router import router as indmoney_us_router
@@ -35,6 +36,7 @@ from app.infrastructure.database.session import AsyncSessionLocal, async_engine
 from app.shared.exceptions import AppException
 
 # Ensure all ORM models are registered with the shared metadata
+from app.domains.cost_drivers.models import CostRecommendation, CostSnapshot, TrafficCostRollup  # noqa: F401
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
 from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
@@ -201,6 +203,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(cost_drivers_router)
 app.include_router(google_sheets_router)
 app.include_router(indmoney_us_events_router)
 app.include_router(indmoney_us_router)
