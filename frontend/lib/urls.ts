@@ -168,6 +168,11 @@ export const URLs = {
     return resolveFrontendBaseUrl();
   },
 
+  costDrivers: {
+    summary: () => `${resolveApiBaseUrl()}/api/admin/cost-drivers/summary`,
+    refresh: () => `${resolveApiBaseUrl()}/api/admin/cost-drivers/refresh`,
+  },
+
   // Health Check endpoints
   health: {
     ping: () => `${resolveApiBaseUrl()}/health`,
@@ -406,6 +411,7 @@ export const URLs = {
     profile: {
       root: () => "/console/profile",
       preferences: () => "/console/profile/preferences",
+      costDrivers: () => "/console/profile/cost-drivers",
       security: () => "/console/profile/security",
       activity: () => "/console/profile/activity",
     },
