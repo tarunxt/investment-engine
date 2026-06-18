@@ -175,6 +175,12 @@ const DEFAULT_NAVIGATION: NavigationEntry[] = [
         icon: HiOutlineUser,
     },
     {
+        id: 'platform-cost-drivers',
+        name: 'Platform Cost Drivers',
+        href: URLs.routes.profile.costDrivers(),
+        icon: HiOutlineChartBar,
+    },
+    {
         id: 'settings',
         name: 'Settings',
         href: URLs.routes.profile.preferences(),
