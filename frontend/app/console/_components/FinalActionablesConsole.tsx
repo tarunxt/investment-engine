@@ -348,7 +348,7 @@ function getZerodhaBuyTransactionsForStock(orders: ZerodhaOrder[], stock: StockC
       orderId: order.order_id,
       units: order.filled_quantity || order.quantity,
       price: Number(order.average_price || order.price || 0),
-      timestamp: order.order_timestamp,
+      timestamp: order.order_timestamp || order.exchange_timestamp || order.exchange_update_timestamp || null,
     }))
     .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
 }
@@ -363,14 +363,17 @@ function ZerodhaBuyTransactionValue({
   const [expanded, setExpanded] = useState(false);
   const latest = transactions[0];
   if (!latest) {
-    return fallbackAveragePrice > 0 ? <span>{formatDisplayAmount(fallbackAveragePrice, "india")} avg · transaction time unavailable</span> : <span>—</span>;
+    return fallbackAveragePrice > 0 ? <span>{formatDisplayAmount(fallbackAveragePrice, "india")} avg holding price</span> : <span>—</span>;
   }
 
-  const renderTransaction = (transaction: ZerodhaBuyTransaction) => (
-    <span className="whitespace-nowrap">
-      {formatDisplayAmount(transaction.price, "india")} · {transaction.units.toLocaleString("en-IN")} units · {formatDateTime(transaction.timestamp || "")}
-    </span>
-  );
+  const renderTransaction = (transaction: ZerodhaBuyTransaction) => {
+    const timestampLabel = transaction.timestamp ? formatDateTime(transaction.timestamp) : "time not provided by Zerodha";
+    return (
+      <span className="whitespace-nowrap">
+        {formatDisplayAmount(transaction.price, "india")} · {transaction.units.toLocaleString("en-IN")} units · {timestampLabel}
+      </span>
+    );
+  };
 
   const olderTransactions = transactions.slice(1);
 
