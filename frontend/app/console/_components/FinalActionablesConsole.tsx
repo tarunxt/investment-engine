@@ -42,6 +42,7 @@ import type {
   ProviderModelTarget,
   RunResponse,
   ZerodhaEventsAnalysis,
+  ZerodhaOrder,
   ZerodhaPortfolioSnapshotDetail,
   ZerodhaThreatAnalysis,
 } from "@/types/api";
@@ -311,6 +312,102 @@ export type StockDetailsData = {
   threatsAnalysis: ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis | null;
   error: string | null;
 };
+
+
+
+type ZerodhaBuyTransaction = {
+  orderId: string;
+  units: number;
+  price: number;
+  timestamp: string | null;
+};
+
+function isZerodhaPortfolioSnapshot(
+  snapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+): snapshot is ZerodhaPortfolioSnapshotDetail {
+  return Boolean(snapshot && Array.isArray((snapshot as ZerodhaPortfolioSnapshotDetail).holdings) && (snapshot as ZerodhaPortfolioSnapshotDetail).positions);
+}
+
+function getZerodhaHoldingForStock(
+  snapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+  stock: StockConsensus,
+) {
+  if (!isZerodhaPortfolioSnapshot(snapshot)) return null;
+  const symbol = stock.symbol.trim().toUpperCase();
+  return snapshot.holdings.find((holding) => holding.tradingsymbol.trim().toUpperCase() === symbol) ?? null;
+}
+
+function getZerodhaBuyTransactionsForStock(orders: ZerodhaOrder[], stock: StockConsensus): ZerodhaBuyTransaction[] {
+  const symbol = stock.symbol.trim().toUpperCase();
+  return orders
+    .filter((order) => {
+      const isCompletedBuy = order.status?.toUpperCase() === "COMPLETE" && order.transaction_type?.toUpperCase() === "BUY";
+      return isCompletedBuy && order.tradingsymbol?.trim().toUpperCase() === symbol && (order.filled_quantity || order.quantity) > 0;
+    })
+    .map((order) => ({
+      orderId: order.order_id,
+      units: order.filled_quantity || order.quantity,
+      price: Number(order.average_price || order.price || 0),
+      timestamp: order.order_timestamp,
+    }))
+    .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+}
+
+function ZerodhaBuyTransactionValue({
+  transactions,
+  fallbackAveragePrice,
+}: {
+  transactions: ZerodhaBuyTransaction[];
+  fallbackAveragePrice: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const latest = transactions[0];
+  if (!latest) {
+    return fallbackAveragePrice > 0 ? <span>{formatDisplayAmount(fallbackAveragePrice, "india")} avg · transaction time unavailable</span> : <span>—</span>;
+  }
+
+  const renderTransaction = (transaction: ZerodhaBuyTransaction) => (
+    <span className="whitespace-nowrap">
+      {formatDisplayAmount(transaction.price, "india")} · {transaction.units.toLocaleString("en-IN")} units · {formatDateTime(transaction.timestamp || "")}
+    </span>
+  );
+
+  const olderTransactions = transactions.slice(1);
+
+  return (
+    <span className="relative inline-flex max-w-full items-center gap-1">
+      {renderTransaction(latest)}
+      {olderTransactions.length > 0 ? (
+        <>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setExpanded((current) => !current);
+            }}
+            className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-white text-blue-700 transition hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Show older Zerodha buy transactions"
+            title="Show older buy transactions"
+          >
+            <ChevronDown className={cn("size-4 transition-transform", expanded ? "rotate-180" : "")} />
+          </button>
+          {expanded ? (
+            <div className="absolute left-0 top-8 z-20 min-w-max rounded-lg border border-blue-100 bg-white p-2 text-xs text-gray-700 shadow-xl">
+              <p className="mb-1 font-semibold text-blue-950">Older buy transactions</p>
+              <div className="space-y-1">
+                {olderTransactions.map((transaction) => (
+                  <div key={transaction.orderId} className="rounded-md bg-blue-50/70 px-2 py-1">
+                    {renderTransaction(transaction)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </span>
+  );
+}
 
 const TECHNICAL_SCAN_MARKER = "## Technical Scan Input Bundle";
 const TECHNICAL_SCAN_TABLE_COLUMNS = [
@@ -3151,12 +3248,42 @@ export function StockDetailsButton({
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [zerodhaOrders, setZerodhaOrders] = useState<ZerodhaOrder[]>([]);
+  const [zerodhaOrdersError, setZerodhaOrdersError] = useState<string | null>(null);
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
+  const zerodhaHolding = market === "india" ? getZerodhaHoldingForStock(detailsData.portfolioSnapshot, stock) : null;
+  const zerodhaBuyTransactions = useMemo(
+    () => (zerodhaHolding ? getZerodhaBuyTransactionsForStock(zerodhaOrders, stock) : []),
+    [stock, zerodhaHolding, zerodhaOrders],
+  );
   const eventRows = getAnalysisTableRowsForStock(
     detailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...detailsData.eventsAnalysis.table }] : [],
     stock,
   );
   const threatRows = getAnalysisTableRowsForStock(detailsData.threatsAnalysis?.report?.tables, stock);
+
+  useEffect(() => {
+    if (!open || market !== "india" || !zerodhaHolding) return;
+    let cancelled = false;
+    apiService
+      .zerodhaOrders()
+      .then((response) => {
+        if (!cancelled) {
+          setZerodhaOrders(response.data ?? []);
+          setZerodhaOrdersError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setZerodhaOrders([]);
+          setZerodhaOrdersError(error instanceof Error ? error.message : "Unable to load Zerodha orders");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [market, open, zerodhaHolding]);
 
   return (
     <>
@@ -3245,6 +3372,20 @@ export function StockDetailsButton({
                     ["Consensus", `${stock.actionCounts[stock.consensusAction]}/${stock.totalSuggestions}`],
                     ["Technical setup", formatTechnicalSetup(technicalScan, stock.representative)],
                     ["Confidence score", formatTechnicalConfidence(technicalScan, stock.representative)],
+                    ...(zerodhaHolding
+                      ? [[
+                          "Buy price / date time",
+                          <span key="zerodha-buy-transaction" className="inline-flex flex-col gap-1">
+                            <ZerodhaBuyTransactionValue
+                              transactions={zerodhaBuyTransactions}
+                              fallbackAveragePrice={zerodhaHolding.average_price}
+                            />
+                            {zerodhaOrdersError ? (
+                              <span className="text-xs text-amber-700">Zerodha order history unavailable: {zerodhaOrdersError}</span>
+                            ) : null}
+                          </span>,
+                        ] as [string, ReactNode]]
+                      : []),
                     ["Trigger level", technicalScan?.triggerLevel || "—"],
                     ["Invalidation level", technicalScan?.invalidationLevel || "—"],
                   ]}
