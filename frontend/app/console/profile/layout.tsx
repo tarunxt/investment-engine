@@ -15,6 +15,10 @@ const sidebarNavItems = [
     href: URLs.routes.profile.preferences(),
   },
   {
+    title: "Platform Cost Drivers",
+    href: URLs.routes.profile.costDrivers(),
+  },
+  {
     title: "Security",
     href: URLs.routes.profile.security(),
   },
