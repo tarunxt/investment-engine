@@ -1,17 +1,135 @@
 from __future__ import annotations
 
 import os, time, calendar
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from typing import Any
+from sqlalchemy import desc
 from app.core.logging import get_logger
+from app.infrastructure.database.sync_session import SyncSessionLocal
 from .estimators import estimate_data_transfer_cost, estimate_projected_month_end, classify_traffic_path
+from .models import TrafficCostRollup
 from .recommendations import generateDataTransferRecommendation, generateTransferFamilyRecommendation, generateUnattachedEbsRecommendation, sort_recommendations
 
 logger = get_logger(__name__)
 _CACHE: dict[str, object] = {"expires": 0, "data": None, "last_refresh": None}
 
+FREE_TRANSFER_GB = 100.0
+TRANSFER_RATE_PER_GB_DEFAULT = 0.09
+
+
 def _env_float(name: str, default: float) -> float:
     try: return float(os.getenv(name, default))
     except ValueError: return default
+
+
+def _days() -> tuple[datetime, int, int]:
+    now = datetime.now(timezone.utc)
+    return now, max(now.day, 1), calendar.monthrange(now.year, now.month)[1]
+
+
+def _aws_client(service: str, region: str):
+    try:
+        import boto3  # type: ignore
+        from botocore.config import Config  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("boto3 is not installed in the backend image") from exc
+    return boto3.client(service, region_name=region, config=Config(connect_timeout=3, read_timeout=8, retries={"max_attempts": 2}))
+
+
+def _collect_cost_explorer(now: datetime, elapsed: int, days: int, diagnostics: list[dict[str, str]]) -> dict[str, Any]:
+    start = now.replace(day=1).date().isoformat()
+    end = (now.date() + timedelta(days=1)).isoformat()
+    region = os.getenv("AWS_REGION", "ap-south-1")
+    empty = {"mtd_cost": 0.0, "top_services": [], "top_usage_types": [], "daily_cost": [], "transfer_gb": 0.0}
+    try:
+        ce = _aws_client("ce", "us-east-1")
+        daily_resp = ce.get_cost_and_usage(TimePeriod={"Start": start, "End": end}, Granularity="DAILY", Metrics=["UnblendedCost"])
+        daily_cost = [{"date": r["TimePeriod"]["Start"], "cost": round(float(r["Total"]["UnblendedCost"]["Amount"]), 2)} for r in daily_resp.get("ResultsByTime", [])]
+        mtd_cost = round(sum(float(r["cost"]) for r in daily_cost), 2)
+        services_resp = ce.get_cost_and_usage(TimePeriod={"Start": start, "End": end}, Granularity="MONTHLY", Metrics=["UnblendedCost", "UsageQuantity"], GroupBy=[{"Type":"DIMENSION", "Key":"SERVICE"}])
+        services = []
+        for g in (services_resp.get("ResultsByTime") or [{}])[0].get("Groups", []):
+            cost = float(g["Metrics"]["UnblendedCost"]["Amount"])
+            if cost > 0:
+                services.append({"name": g["Keys"][0], "cost": round(cost, 2), "usageQuantity": round(float(g["Metrics"]["UsageQuantity"]["Amount"]), 3), "unit": "mixed"})
+        services.sort(key=lambda x: x["cost"], reverse=True)
+        usage_resp = ce.get_cost_and_usage(TimePeriod={"Start": start, "End": end}, Granularity="MONTHLY", Metrics=["UnblendedCost", "UsageQuantity"], GroupBy=[{"Type":"DIMENSION", "Key":"USAGE_TYPE"}])
+        usage = []
+        transfer_gb = 0.0
+        for g in (usage_resp.get("ResultsByTime") or [{}])[0].get("Groups", []):
+            name = g["Keys"][0]
+            qty = float(g["Metrics"]["UsageQuantity"]["Amount"])
+            cost = float(g["Metrics"]["UnblendedCost"]["Amount"])
+            if "DataTransfer" in name or "Bytes" in name:
+                transfer_gb += max(qty, 0.0)
+            if cost > 0 or qty > 0:
+                usage.append({"name": name, "cost": round(cost, 2), "usageQuantity": round(qty, 3), "unit": "usage units"})
+        usage.sort(key=lambda x: (x["cost"], x["usageQuantity"]), reverse=True)
+        diagnostics.append({"service":"Cost Explorer", "status":"ok", "message":"Loaded live AWS billing data."})
+        return {"mtd_cost": mtd_cost, "top_services": services[:8], "top_usage_types": usage[:10], "daily_cost": daily_cost, "transfer_gb": round(transfer_gb, 3)}
+    except Exception as exc:
+        logger.exception("Cost Explorer collection failed")
+        diagnostics.append({"service":"Cost Explorer", "status":"error", "message": str(exc)[:300]})
+        return empty
+
+
+def _collect_inventory(diagnostics: list[dict[str, str]]) -> dict[str, Any]:
+    region = os.getenv("AWS_REGION", "ap-south-1")
+    inventory: dict[str, Any] = {"instances": [], "volumes": [], "logGroups": [], "missingPermissions": []}
+    try:
+        ec2 = _aws_client("ec2", region)
+        reservations = ec2.describe_instances(Filters=[{"Name":"instance-state-name", "Values":["running"]}]).get("Reservations", [])
+        for res in reservations:
+            for inst in res.get("Instances", []):
+                name = next((t.get("Value") for t in inst.get("Tags", []) if t.get("Key") == "Name"), "")
+                inventory["instances"].append({"instanceId": inst.get("InstanceId"), "name": name, "instanceType": inst.get("InstanceType"), "state": inst.get("State", {}).get("Name"), "publicIpv4": bool(inst.get("PublicIpAddress"))})
+        volumes = ec2.describe_volumes(Filters=[{"Name":"status", "Values":["available"]}]).get("Volumes", [])
+        now = datetime.now(timezone.utc)
+        for vol in volumes:
+            age = (now - vol.get("CreateTime", now)).days if vol.get("CreateTime") else 0
+            inventory["volumes"].append({"volumeId": vol.get("VolumeId"), "sizeGb": vol.get("Size", 0), "state": vol.get("State"), "type": vol.get("VolumeType"), "ageDays": age, "unattached": True})
+        diagnostics.append({"service":"EC2/EBS", "status":"ok", "message":"Loaded live instance and unattached volume inventory."})
+    except Exception as exc:
+        logger.exception("EC2/EBS inventory collection failed")
+        diagnostics.append({"service":"EC2/EBS", "status":"error", "message": str(exc)[:300]})
+        inventory["missingPermissions"].append("ec2:DescribeInstances/ec2:DescribeVolumes")
+    try:
+        logs = _aws_client("logs", region)
+        groups = logs.describe_log_groups(limit=20).get("logGroups", [])
+        inventory["logGroups"] = [{"name": g.get("logGroupName"), "retentionDays": g.get("retentionInDays"), "storedGb": round(float(g.get("storedBytes", 0))/1024**3, 3)} for g in groups]
+        diagnostics.append({"service":"CloudWatch Logs", "status":"ok", "message":"Loaded live log group inventory."})
+    except Exception as exc:
+        logger.exception("CloudWatch Logs collection failed")
+        diagnostics.append({"service":"CloudWatch Logs", "status":"error", "message": str(exc)[:300]})
+        inventory["missingPermissions"].append("logs:DescribeLogGroups")
+    return inventory
+
+
+def _collect_traffic_rollups(diagnostics: list[dict[str, str]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    try:
+        db = SyncSessionLocal()
+        try:
+            records = db.query(TrafficCostRollup).order_by(desc(TrafficCostRollup.period_end), desc(TrafficCostRollup.response_bytes)).limit(20).all()
+        finally:
+            db.close()
+        for r in records:
+            total_gb = round((r.response_bytes or 0) / 1024**3, 2)
+            cls = classify_traffic_path(r.path, r.content_type, r.extension, r.top_user_agent)
+            rows.append({"path": r.path, "contentType": r.content_type or "unknown", "extension": r.extension or "", "requests": r.request_count, "totalBytes": r.response_bytes, "totalGB": total_gb, "estimatedTransferCost": round(float(r.estimated_transfer_cost_usd or total_gb * _env_float("DATA_TRANSFER_OUT_RATE_PER_GB", TRANSFER_RATE_PER_GB_DEFAULT)), 2), "cacheHitRate": round((r.cache_hit_count or 0) / max(r.request_count or 0, 1), 3), "topUserAgent": r.top_user_agent or "unknown", "classification": cls, "recommendation": _traffic_recommendation(cls)})
+        diagnostics.append({"service":"App traffic logs", "status":"ok" if rows else "empty", "message":"Loaded traffic rollups from database." if rows else "No traffic rollups have been stored yet."})
+    except Exception as exc:
+        logger.exception("Traffic rollup collection failed")
+        diagnostics.append({"service":"App traffic logs", "status":"error", "message": str(exc)[:300]})
+    return rows
+
+
+def _traffic_recommendation(cls: str) -> str:
+    if cls == "videos": return "Move videos to a video CDN or hosted player."
+    if cls == "images": return "Resize/compress images, use WebP/AVIF, and cache aggressively."
+    if cls == "API JSON": return "Add pagination, compression, cacheable responses, and reduce polling."
+    if cls == "bots/crawlers": return "Add robots.txt, rate limits, WAF/Cloudflare rules, or block abusive agents."
+    return "Add cache headers and reduce payload size."
 
 def _mock_dashboard() -> dict:
     now = datetime.now(timezone.utc)
@@ -60,13 +178,36 @@ def _empty_live_dashboard() -> dict:
     now = datetime.now(timezone.utc).isoformat()
     return {"summary":{"monthToDateAwsCost":0,"projectedMonthEndCost":0,"dataTransferUsedGb":0,"freeTransferRemainingGb":100,"estimatedOverageGb":0,"ec2RunningInstances":0,"unattachedEbsGb":0,"activePublicIpv4Count":0,"activeHighRiskResources":{}},"dailyCostTrend":[],"dataTransferTrend":[],"topServices":[],"topUsageTypes":[],"costDrivers":[],"traffic":[],"recommendations":[],"inventory":{"instances":[],"volumes":[],"logGroups":[],"missingPermissions":[]},"diagnostics":[{"service":"Cost Explorer","status":"not_checked","message":"Live Cost Explorer collector is not configured in this build."},{"service":"EC2","status":"not_checked","message":"Live EC2 inventory collector is not configured in this build."},{"service":"EBS","status":"not_checked","message":"Live EBS inventory collector is not configured in this build."},{"service":"CloudWatch Logs","status":"not_checked","message":"Live CloudWatch Logs collector is not configured in this build."},{"service":"Transfer Family","status":"not_checked","message":"Live Transfer Family collector is not configured in this build."},{"service":"App traffic logs","status":"unavailable","message":"App traffic logs unavailable."}],"debug":{"mockMode":False,"lastAwsRefreshTime":now,"awsRegion":os.getenv("AWS_REGION","ap-south-1"),"costExplorerLabel":"not checked","cloudWatchLabel":"not checked","appLogsLabel":"unavailable","cacheTtlSeconds":int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS","3600"))}}
 
+def _live_dashboard() -> dict:
+    now, elapsed, days = _days()
+    diagnostics: list[dict[str, str]] = []
+    ce = _collect_cost_explorer(now, elapsed, days, diagnostics)
+    inventory = _collect_inventory(diagnostics)
+    traffic = _collect_traffic_rollups(diagnostics)
+    transfer_gb = max(float(ce.get("transfer_gb") or 0), sum(float(t.get("totalGB") or 0) for t in traffic))
+    transfer = estimate_data_transfer_cost(transfer_gb, elapsed, days, FREE_TRANSFER_GB, _env_float("DATA_TRANSFER_OUT_RATE_PER_GB", TRANSFER_RATE_PER_GB_DEFAULT))
+    mtd_cost = float(ce.get("mtd_cost") or 0)
+    projected = estimate_projected_month_end(mtd_cost, elapsed, days)
+    top_services = list(ce.get("top_services") or [])
+    drivers = []
+    for idx, s in enumerate(top_services, 1):
+        cost = float(s.get("cost") or 0)
+        drivers.append({"rank": idx, "driver": str(s.get("name") or "AWS service"), "source": "Cost Explorer", "monthToDateCost": cost, "projectedMonthEndCost": estimate_projected_month_end(cost, elapsed, days), "usageQuantity": float(s.get("usageQuantity") or 0), "unit": str(s.get("unit") or "usage units"), "confidence": "actual", "severity": "high" if idx <= 2 else "medium", "whyItCostsMoney": "AWS Cost Explorer reports month-to-date spend for this service.", "suggestedAction": "Review the matching AWS service, usage type, and recommendations below.", "estimatedMonthlySavings": round(cost * 0.25, 2), "linkToAWSConsole": "https://console.aws.amazon.com/costmanagement/home?region=us-east-1#/cost-explorer"})
+    unattached_gb = sum(float(v.get("sizeGb") or 0) for v in inventory.get("volumes", []))
+    public_ipv4 = sum(1 for i in inventory.get("instances", []) if i.get("publicIpv4"))
+    recs = [r for r in [
+        generateDataTransferRecommendation({"usedGb": transfer_gb, "projectedGb": transfer["projectedGb"], "source": "cost_explorer" if ce.get("transfer_gb") else "app_traffic_logs", "topBandwidthPath": traffic[0]["path"] if traffic else None}),
+        generateUnattachedEbsRecommendation({"volumes": inventory.get("volumes", []), "lastCheckedAt": now.isoformat()}),
+    ] if r]
+    return {"summary":{"monthToDateAwsCost":mtd_cost,"projectedMonthEndCost":projected,"dataTransferUsedGb":transfer_gb,"freeTransferRemainingGb":transfer["remainingFreeGb"],"estimatedOverageGb":transfer["estimatedOverageGb"],"ec2RunningInstances":len(inventory.get("instances", [])),"unattachedEbsGb":unattached_gb,"activePublicIpv4Count":public_ipv4,"activeHighRiskResources":{"transferFamily":0,"natGateways":0,"loadBalancers":0}},"dailyCostTrend":ce.get("daily_cost") or [],"dataTransferTrend":[{"date":f"{now.year}-{now.month:02d}-{d:02d}","gb":round(transfer_gb/elapsed*d,2),"freeTierGb":FREE_TRANSFER_GB} for d in range(1, elapsed+1)] if transfer_gb else [],"topServices":top_services,"topUsageTypes":ce.get("top_usage_types") or [],"costDrivers":drivers,"traffic":traffic,"recommendations":sort_recommendations(recs),"inventory":inventory,"diagnostics":diagnostics,"debug":{"mockMode":False,"lastAwsRefreshTime":_CACHE.get("last_refresh"),"awsRegion":os.getenv("AWS_REGION","ap-south-1"),"costExplorerLabel":"AWS actuals loaded" if ce.get("daily_cost") or top_services else "not available — see diagnostics", "cloudWatchLabel":"live checks attempted", "appLogsLabel":"database rollups loaded" if traffic else "no traffic rollups stored", "cacheTtlSeconds":int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS","3600")), "diagnostics": diagnostics}}
+
 def get_dashboard(force_refresh: bool=False) -> dict:
     ttl = int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS", "3600"))
     mock = os.getenv("COST_DASHBOARD_MOCK_MODE", "false").lower() == "true"
     if not force_refresh and _CACHE["data"] and time.time() < float(_CACHE["expires"]):
         return _CACHE["data"]  # type: ignore
     if not mock:
-        data = _empty_live_dashboard()
+        data = _live_dashboard()
         _CACHE.update({"data": data, "expires": time.time()+ttl, "last_refresh": datetime.now(timezone.utc).isoformat()})
         data["debug"]["lastAwsRefreshTime"] = _CACHE["last_refresh"]
         return data
