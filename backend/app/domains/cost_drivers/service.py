@@ -29,8 +29,6 @@ def _mock_dashboard() -> dict:
         {"name": "AWS Transfer Family", "cost": 2.4, "usageQuantity": 16, "unit": "Hrs"},
     ]
     traffic = [
-        ("/media/hero-loan-video.mp4", "video/mp4", ".mp4", 1240, 31_800_000_000, "Chrome", 0.18),
-        ("/images/home-banner.png", "image/png", ".png", 18420, 22_400_000_000, "Googlebot", 0.34),
         ("/api/rates/history", "application/json", "", 87210, 12_500_000_000, "CredX mobile web", 0.05),
         ("/_next/static/chunks/app.js", "application/javascript", ".js", 35600, 8_900_000_000, "Chrome", 0.82),
         ("/", "text/html", "", 29200, 3_200_000_000, "Bingbot", 0.42),
@@ -45,7 +43,7 @@ def _mock_dashboard() -> dict:
         elif cls == "bots/crawlers": rec = "Add robots.txt, rate limits, WAF/Cloudflare rules, or block abusive agents."
         traffic_rows.append({"path": path, "contentType": ct, "extension": ext, "requests": reqs, "totalBytes": bytes_, "totalGB": round(bytes_/1024**3, 2), "estimatedTransferCost": round(bytes_/1024**3*0.09, 2), "cacheHitRate": hit, "topUserAgent": ua, "classification": cls, "recommendation": rec})
     recs = [r for r in [
-        generateDataTransferRecommendation({"usedGb": transfer_gb, "projectedGb": transfer["projectedGb"], "source": "mock", "topBandwidthPath": traffic_rows[0]["path"], "estimatedMonthlySavingsUsd": 12.5}),
+        generateDataTransferRecommendation({"usedGb": transfer_gb, "projectedGb": transfer["projectedGb"], "source": "mock", "topBandwidthPath": traffic_rows[0]["path"] if traffic_rows else None, "estimatedMonthlySavingsUsd": 12.5}),
         generateTransferFamilyRecommendation({"servers": [], "billingCostUsd": 0, "lastCheckedAt": now.isoformat()}),
         generateUnattachedEbsRecommendation({"volumes": [{"volumeId":"vol-demo1234567890","sizeGb":32,"state":"available","ageDays":14}], "estimatedMonthlySavingsUsd": 3.2, "lastCheckedAt": now.isoformat()}),
     ] if r]
@@ -64,7 +62,7 @@ def _empty_live_dashboard() -> dict:
 
 def get_dashboard(force_refresh: bool=False) -> dict:
     ttl = int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS", "3600"))
-    mock = os.getenv("COST_DASHBOARD_MOCK_MODE", "true").lower() != "false"
+    mock = os.getenv("COST_DASHBOARD_MOCK_MODE", "false").lower() == "true"
     if not force_refresh and _CACHE["data"] and time.time() < float(_CACHE["expires"]):
         return _CACHE["data"]  # type: ignore
     if not mock:
