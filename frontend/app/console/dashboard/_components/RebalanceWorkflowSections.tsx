@@ -2851,6 +2851,7 @@ function ZerodhaBasketPreviewDialog({
   onUnitsChange,
   onPlaceOrder,
   placing,
+  executionMode,
   submission,
   detailsData,
   formulaConfig,
