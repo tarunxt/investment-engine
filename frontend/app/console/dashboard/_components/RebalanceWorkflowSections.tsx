@@ -2937,7 +2937,7 @@ function ZerodhaBasketPreviewDialog({
               />
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, then use direct Kite Connect for protected MARKET orders when available or the Publisher-safe protected LIMIT fallback.
+              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, then use the Publisher-safe protected LIMIT basket by default; direct Kite Connect protected MARKET is shown only when the backend is explicitly enabled for a Kite-whitelisted egress IP.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -5100,7 +5100,11 @@ export function RebalanceWorkflowSections({
         apiService.zerodhaStatus(),
         apiService.zerodhaLoginUrl(),
       ]);
-      setZerodhaExecutionMode(status.connected && login.configured ? "direct_market" : "publisher_limit");
+      setZerodhaExecutionMode(
+        status.connected && login.configured && status.direct_market_orders_enabled && login.direct_market_orders_enabled
+          ? "direct_market"
+          : "publisher_limit",
+      );
       const [eventsResult, threatsResult] = await Promise.allSettled([
         apiService.zerodhaEventsLatest(),
         apiService.zerodhaThreatsLatest(),

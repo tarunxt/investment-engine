@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class ZerodhaLoginUrlResponse(BaseModel):
     login_url: str
     configured: bool
+    direct_market_orders_enabled: bool = False
 
 
 class ZerodhaCallbackRequest(BaseModel):
@@ -16,6 +17,7 @@ class ZerodhaCallbackRequest(BaseModel):
 
 class ZerodhaStatusResponse(BaseModel):
     connected: bool
+    direct_market_orders_enabled: bool = False
     login_time: datetime | None = None
     expires_at: datetime | None = None
     last_portfolio_sync_at: datetime | None = None

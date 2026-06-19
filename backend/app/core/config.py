@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     zerodha_api_key: Optional[str] = None
     zerodha_api_secret: Optional[str] = None
     zerodha_token_encryption_key: Optional[str] = None  # Fernet key for access_token at-rest encryption
+    zerodha_enable_direct_market_orders: bool = False  # Enable only when the server egress IP is Kite-whitelisted
 
     # Google Sheets OAuth
     google_client_id: Optional[str] = None
