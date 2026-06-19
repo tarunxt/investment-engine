@@ -754,9 +754,15 @@ function getIndiaMarketStatus(now = new Date()) {
 }
 
 function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
+  const variety = order.orderKind === "After market" || !marketOpen ? "amo" as const : "regular" as const;
+
   return {
-    orderType: order.orderKind === "Market" ? "MARKET" as const : "LIMIT" as const,
-    variety: order.orderKind === "After market" || !marketOpen ? "amo" as const : "regular" as const,
+    // Kite Publisher currently drops market_protection from offsite basket orders before
+    // placing them, which makes MARKET rows fail with Zerodha's API protection check.
+    // Submit every Publisher basket row as a guarded LIMIT order instead; the backend
+    // prepare step computes the protective limit price from live quotes/circuit limits.
+    orderType: "LIMIT" as const,
+    variety,
   };
 }
 
