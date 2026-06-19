@@ -3,22 +3,17 @@ import { promisify } from "node:util";
 
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  BULLPEN_SOURCE_URLS,
+  normalizeBullpenScanFilters,
+  type BullpenQuestion,
+  type BullpenScanFilters,
+  type ScanMode,
+} from "@/lib/bullpen-ai";
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type BullpenQuestion = {
-  id: string;
-  question: string;
-  closeTime: string | null;
-  category: string;
-  yesOdds: number | null;
-  noOdds: number | null;
-  volume: string | null;
-  liquidity: string | null;
-  sourceUrl: string;
-};
-
-type ScanMode = "30-days" | "end-of-month";
 type WalkContext = {
   closeTime: string | null;
   category: string | null;
@@ -26,16 +21,14 @@ type WalkContext = {
 
 const execFileAsync = promisify(execFile);
 
-const TRENDING_URL =
-  "https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3";
-const CALENDAR_URL =
-  "https://app.bullpen.fi/predictions/trending?primaryMode=calendar&ref=intrepid-crane-3";
-const CLI_SOURCE_URL = "bullpen polymarket discover";
+const CLI_SOURCE_LABEL = "Bullpen CLI";
+const WEB_SOURCE_LABEL = "Bullpen trending page";
+const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
-const GAMMA_SOURCE_URL = "Polymarket Gamma API";
-const END_OF_MONTH_DATE = "2026-06-30";
+const POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event";
 const DISCOVER_FALLBACK_LIMIT = 10_000;
 const GAMMA_PAGE_SIZE = 500;
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CATEGORY_KEYS = [
   "category",
   "categorySlug",
@@ -59,6 +52,98 @@ const CLOSE_TIME_KEYS = [
   "closedAt",
   "deadline",
   "expiry",
+];
+const QUESTION_KEYS = [
+  "question",
+  "title",
+  "name",
+  "eventTitle",
+  "marketQuestion",
+];
+const SLUG_KEYS = [
+  "slug",
+  "marketSlug",
+  "questionSlug",
+  "eventSlug",
+  "urlSlug",
+];
+const OUTCOME_LABEL_KEYS = ["name", "label", "outcome", "title", "side"];
+const SPORTS_KEYWORDS = [
+  "sports",
+  "nba",
+  "nfl",
+  "mlb",
+  "nhl",
+  "ncaa",
+  "soccer",
+  "football",
+  "baseball",
+  "basketball",
+  "cricket",
+  "tennis",
+  "golf",
+  "mma",
+  "ufc",
+  "boxing",
+  "formula 1",
+  "f1",
+  "world cup",
+  "premier league",
+  "champions league",
+  "la liga",
+];
+const WEATHER_KEYWORDS = [
+  "weather",
+  "temperature",
+  "rain",
+  "snow",
+  "hurricane",
+  "storm",
+  "tornado",
+  "heatwave",
+  "forecast",
+  "climate",
+  "wind",
+  "precipitation",
+  "monsoon",
+];
+const MARKET_CATEGORY_KEYWORDS = [
+  "finance",
+  "business",
+  "markets",
+  "crypto",
+  "economy",
+  "economics",
+  "stocks",
+  "commodities",
+  "forex",
+];
+const MARKET_QUESTION_KEYWORDS = [
+  "bitcoin",
+  "ethereum",
+  "solana",
+  "dogecoin",
+  "memecoin",
+  "crypto",
+  "stock",
+  "stocks",
+  "share price",
+  "nasdaq",
+  "s&p",
+  "dow",
+  "oil",
+  "gold",
+  "silver",
+  "yield",
+  "bond",
+  "bonds",
+  "commodity",
+  "commodities",
+  "forex",
+  "inflation",
+  "interest rate",
+  "fed",
+  "etf",
 ];
 const BULLPEN_BIN_CANDIDATES = [
   process.env.BULLPEN_BIN,
@@ -134,20 +219,11 @@ function readOutcomeNumber(
     record.tokens,
     record.markets,
   ]) {
-    for (const item of [
-      ...toArray(collection),
-      ...parseJsonArray(collection),
-    ]) {
+    for (const item of [...toArray(collection), ...parseJsonArray(collection)]) {
       if (!item || typeof item !== "object") continue;
       const outcome = item as Record<string, unknown>;
-      const label = readString(outcome, [
-        "name",
-        "label",
-        "outcome",
-        "title",
-        "side",
-      ]);
-      if (!label || label.toLowerCase() !== outcomeName) continue;
+      const label = readString(outcome, OUTCOME_LABEL_KEYS);
+      if (!label || normalizeLabel(label) !== outcomeName) continue;
       const value = readNumber(outcome, [
         "odds",
         "decimalOdds",
@@ -208,35 +284,154 @@ function extractEmbeddedJson(html: string) {
   });
 }
 
+function normalizeLabel(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function dedupeOutcomeLabels(labels: string[]) {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const label of labels) {
+    const normalized = normalizeLabel(label);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    deduped.push(label.trim());
+  }
+
+  return deduped;
+}
+
+function readOutcomeLabels(record: Record<string, unknown>) {
+  const labels: string[] = [];
+
+  for (const collection of [
+    record.outcomes,
+    record.options,
+    record.tokens,
+    record.markets,
+  ]) {
+    for (const item of [...toArray(collection), ...parseJsonArray(collection)]) {
+      if (typeof item === "string" && item.trim()) {
+        labels.push(item.trim());
+        continue;
+      }
+      if (!item || typeof item !== "object") continue;
+      const label = readString(item as Record<string, unknown>, OUTCOME_LABEL_KEYS);
+      if (label) labels.push(label);
+    }
+  }
+
+  return dedupeOutcomeLabels(labels);
+}
+
+function isBinaryYesNoQuestion(outcomeLabels: string[], yesOdds: number | null, noOdds: number | null) {
+  if (outcomeLabels.length === 0) return yesOdds !== null && noOdds !== null;
+  if (outcomeLabels.length !== 2) return false;
+  const normalized = outcomeLabels.map(normalizeLabel);
+  return normalized.includes("yes") && normalized.includes("no");
+}
+
+function buildMarketUrl(slug: string | null) {
+  if (!slug) return null;
+  return `${POLYMARKET_EVENT_BASE_URL}/${slug}`;
+}
+
+function getDateKey(value: string | null) {
+  if (!value) return null;
+  const directMatch = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (directMatch) return directMatch[1];
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function getDaysUntilClose(closeTime: string | null) {
+  if (!closeTime) return null;
+  const closeDate = new Date(closeTime);
+  if (Number.isNaN(closeDate.getTime())) return null;
+  return Number(
+    ((closeDate.getTime() - Date.now()) / MILLISECONDS_PER_DAY).toFixed(1),
+  );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchesKeyword(text: string, keyword: string) {
+  return new RegExp(`(^|\\W)${escapeRegExp(keyword)}(?=$|\\W)`, "i").test(text);
+}
+
+function includesAnyKeyword(text: string, keywords: string[]) {
+  return keywords.some((keyword) => matchesKeyword(text, keyword));
+}
+
+function getQuestionSearchText(question: BullpenQuestion) {
+  return [
+    question.question,
+    question.category,
+    question.slug,
+    question.outcomeLabels.join(" "),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function isSportsQuestion(question: BullpenQuestion) {
+  return includesAnyKeyword(getQuestionSearchText(question), SPORTS_KEYWORDS);
+}
+
+function isWeatherQuestion(question: BullpenQuestion) {
+  return includesAnyKeyword(getQuestionSearchText(question), WEATHER_KEYWORDS);
+}
+
+function isMarketPredictionQuestion(question: BullpenQuestion) {
+  const searchText = getQuestionSearchText(question);
+  return (
+    includesAnyKeyword(question.category.toLowerCase(), MARKET_CATEGORY_KEYWORDS) ||
+    includesAnyKeyword(searchText, MARKET_QUESTION_KEYWORDS)
+  );
+}
+
+function sortQuestions(questions: BullpenQuestion[]) {
+  return [...questions].sort((left, right) => {
+    const leftTime = left.closeTime ? new Date(left.closeTime).getTime() : Number.POSITIVE_INFINITY;
+    const rightTime = right.closeTime ? new Date(right.closeTime).getTime() : Number.POSITIVE_INFINITY;
+
+    if (leftTime !== rightTime) return leftTime - rightTime;
+    return left.question.localeCompare(right.question);
+  });
+}
+
 function normalizeGammaMarket(
   record: Record<string, unknown>,
+  sourceUrl: string,
 ): BullpenQuestion | null {
-  const question = readString(record, [
-    "question",
-    "title",
-    "name",
-    "eventTitle",
-    "marketQuestion",
-  ]);
+  const question = readString(record, QUESTION_KEYS);
   if (!question || question.length < 8) return null;
 
-  const outcomes = parseJsonArray(record.outcomes).map(String);
+  const outcomeLabels = readOutcomeLabels(record);
   const outcomePrices = parseJsonArray(record.outcomePrices)
     .map((value) => parseNumber(value))
     .filter((value): value is number => value !== null);
-  const yesIndex = outcomes.findIndex((outcome) => /^yes$/i.test(outcome));
-  const noIndex = outcomes.findIndex((outcome) => /^no$/i.test(outcome));
+  const normalizedOutcomeLabels = outcomeLabels.map(normalizeLabel);
+  const yesIndex = normalizedOutcomeLabels.findIndex((outcome) => outcome === "yes");
+  const noIndex = normalizedOutcomeLabels.findIndex((outcome) => outcome === "no");
   const yesPrice = yesIndex >= 0 ? outcomePrices[yesIndex] : null;
   const noPrice = noIndex >= 0 ? outcomePrices[noIndex] : null;
+  const yesOdds = normalizeOdds(yesPrice);
+  const noOdds = normalizeOdds(noPrice);
+  const slug = readString(record, SLUG_KEYS);
 
   return {
-    id:
-      readString(record, ["id", "slug", "marketId", "conditionId"]) || question,
+    id: readString(record, ["id", ...SLUG_KEYS, "marketId", "conditionId"]) || question,
     question,
     closeTime: readString(record, CLOSE_TIME_KEYS),
     category: readString(record, CATEGORY_KEYS) || "Uncategorized",
-    yesOdds: normalizeOdds(yesPrice),
-    noOdds: normalizeOdds(noPrice),
+    yesOdds,
+    noOdds,
     volume: readDisplayValue(record, [
       "volume",
       "volume24hr",
@@ -252,7 +447,18 @@ function normalizeGammaMarket(
       "liquidityUsd",
       "liquidityUSD",
     ]),
-    sourceUrl: GAMMA_SOURCE_URL,
+    sourceUrl,
+    slug,
+    marketUrl: buildMarketUrl(slug),
+    outcomeLabels,
+    outcomeCount:
+      outcomeLabels.length > 0
+        ? outcomeLabels.length
+        : yesOdds !== null && noOdds !== null
+          ? 2
+          : null,
+    isBinaryYesNo: isBinaryYesNoQuestion(outcomeLabels, yesOdds, noOdds),
+    daysUntilClose: getDaysUntilClose(readString(record, CLOSE_TIME_KEYS)),
   };
 }
 
@@ -261,20 +467,11 @@ function normalizeQuestion(
   sourceUrl: string,
   context: WalkContext,
 ): BullpenQuestion | null {
-  const question = readString(record, [
-    "question",
-    "title",
-    "name",
-    "eventTitle",
-    "marketQuestion",
-  ]);
+  const question = readString(record, QUESTION_KEYS);
   if (!question || question.length < 8) return null;
 
   const category =
     readString(record, CATEGORY_KEYS) || context.category || "Uncategorized";
-  // Bullpen's UI time-window tabs do not apply outcome/category/odds filters,
-  // so keep every question-shaped market and only derive Yes/No odds when present.
-
   const yesOdds = normalizeOdds(
     readOutcomeNumber(record, "yes", [
       "yesOdds",
@@ -300,8 +497,10 @@ function normalizeQuestion(
     ]),
   );
   const closeTime = readString(record, CLOSE_TIME_KEYS) || context.closeTime;
+  const slug = readString(record, SLUG_KEYS);
+  const outcomeLabels = readOutcomeLabels(record);
   const id =
-    readString(record, ["id", "slug", "marketId", "eventId", "conditionId"]) ||
+    readString(record, ["id", ...SLUG_KEYS, "marketId", "eventId", "conditionId"]) ||
     `${question}-${closeTime || "unknown"}`;
 
   return {
@@ -328,40 +527,66 @@ function normalizeQuestion(
       "liquidityUSD",
     ]),
     sourceUrl,
+    slug,
+    marketUrl: buildMarketUrl(slug),
+    outcomeLabels,
+    outcomeCount:
+      outcomeLabels.length > 0
+        ? outcomeLabels.length
+        : yesOdds !== null && noOdds !== null
+          ? 2
+          : null,
+    isBinaryYesNo: isBinaryYesNoQuestion(outcomeLabels, yesOdds, noOdds),
+    daysUntilClose: getDaysUntilClose(closeTime),
   };
 }
 
-function passesFilters(question: BullpenQuestion, mode: ScanMode) {
-  if (!question.closeTime) return mode === "30-days";
+function passesTimeFilter(question: BullpenQuestion, mode: ScanMode, filters: BullpenScanFilters) {
+  if (!question.closeTime) return false;
   const closeDate = new Date(question.closeTime);
-  if (Number.isNaN(closeDate.getTime())) return mode === "30-days";
+  if (Number.isNaN(closeDate.getTime())) return false;
 
   if (mode === "end-of-month") {
-    return closeDate.toISOString().slice(0, 10) === END_OF_MONTH_DATE;
+    return getDateKey(question.closeTime) === filters.targetDate;
   }
 
-  const now = new Date();
-  const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-  return (
-    closeDate.getTime() > now.getTime() &&
-    closeDate.getTime() - now.getTime() < thirtyDays
-  );
+  const difference = closeDate.getTime() - Date.now();
+  return difference > 0 && difference <= filters.maxClosingDays * MILLISECONDS_PER_DAY;
 }
 
-function collectQuestions(
-  payloads: unknown[],
-  sourceUrl: string,
-  mode: ScanMode,
-) {
+function passesFilters(question: BullpenQuestion, mode: ScanMode, filters: BullpenScanFilters) {
+  if (!passesTimeFilter(question, mode, filters)) return false;
+  if (filters.excludeSports && isSportsQuestion(question)) return false;
+  if (filters.excludeWeather && isWeatherQuestion(question)) return false;
+  if (filters.excludeMarketPredictions && isMarketPredictionQuestion(question))
+    return false;
+  if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) return false;
+  if (filters.minYesOdds > 0 && (question.yesOdds === null || question.yesOdds < filters.minYesOdds))
+    return false;
+  if (filters.minNoOdds > 0 && (question.noOdds === null || question.noOdds < filters.minNoOdds))
+    return false;
+  return true;
+}
+
+function collectQuestions(payloads: unknown[], sourceUrl: string) {
   const candidates = new Map<string, BullpenQuestion>();
   for (const payload of payloads) {
     walk(payload, (record, context) => {
       const normalized = normalizeQuestion(record, sourceUrl, context);
-      if (normalized && passesFilters(normalized, mode))
-        candidates.set(normalized.id, normalized);
+      if (normalized) candidates.set(normalized.id, normalized);
     });
   }
-  return Array.from(candidates.values());
+  return sortQuestions(Array.from(candidates.values()));
+}
+
+function applyFilters(
+  candidates: BullpenQuestion[],
+  mode: ScanMode,
+  filters: BullpenScanFilters,
+) {
+  return sortQuestions(
+    candidates.filter((question) => passesFilters(question, mode, filters)),
+  );
 }
 
 function bullpenProcessEnv() {
@@ -415,10 +640,14 @@ async function runBullpenDiscover() {
       }
     }
   }
+
   throw new Error(`Bullpen CLI scan failed (${errors.join("; ")})`);
 }
 
-async function fetchGammaMarkets(mode: ScanMode) {
+async function fetchGammaMarkets(
+  mode: ScanMode,
+  filters: BullpenScanFilters,
+) {
   const candidates = new Map<string, BullpenQuestion>();
   let offset = 0;
 
@@ -449,9 +678,11 @@ async function fetchGammaMarkets(mode: ScanMode) {
     const rows = Array.isArray(payload) ? payload : [];
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;
-      const normalized = normalizeGammaMarket(row as Record<string, unknown>);
-      if (normalized && passesFilters(normalized, mode))
-        candidates.set(normalized.id, normalized);
+      const normalized = normalizeGammaMarket(
+        row as Record<string, unknown>,
+        POLYMARKET_GAMMA_MARKETS_URL,
+      );
+      if (normalized) candidates.set(normalized.id, normalized);
     }
 
     if (rows.length < GAMMA_PAGE_SIZE) break;
@@ -466,15 +697,27 @@ async function fetchGammaMarkets(mode: ScanMode) {
       if (!closeTime) return false;
       const closeDate = new Date(closeTime);
       if (Number.isNaN(closeDate.getTime())) return false;
+
       if (mode === "end-of-month") {
-        return closeDate.toISOString().slice(0, 10) > END_OF_MONTH_DATE;
+        const targetDate = filters.targetDate;
+        const rowDate = getDateKey(closeTime);
+        return rowDate !== null && rowDate > targetDate;
       }
-      return closeDate.getTime() - Date.now() >= 30 * 24 * 60 * 60 * 1000;
+
+      return (
+        closeDate.getTime() - Date.now() >=
+        filters.maxClosingDays * MILLISECONDS_PER_DAY
+      );
     });
+
     if (earliestOutsideWindow) break;
   }
 
-  return Array.from(candidates.values());
+  return sortQuestions(Array.from(candidates.values()));
+}
+
+function isVercelSecurityCheckpoint(html: string) {
+  return /Vercel Security Checkpoint/i.test(html);
 }
 
 async function fetchBullpenPage(sourceUrl: string) {
@@ -490,69 +733,126 @@ async function fetchBullpenPage(sourceUrl: string) {
     throw new Error(`Bullpen web returned HTTP ${response.status}`);
   }
 
-  return response.text();
+  const html = await response.text();
+  if (isVercelSecurityCheckpoint(html)) {
+    throw new Error("Bullpen web is behind a Vercel Security Checkpoint");
+  }
+
+  return html;
+}
+
+function buildResponse({
+  mode,
+  sourceUrl,
+  sourceLabel,
+  scannedAt,
+  filters,
+  candidates,
+  warning,
+  details,
+}: {
+  mode: ScanMode;
+  sourceUrl: string;
+  sourceLabel: string;
+  scannedAt: string;
+  filters: BullpenScanFilters;
+  candidates: BullpenQuestion[];
+  warning?: string;
+  details?: string;
+}) {
+  return {
+    mode,
+    sourceUrl,
+    sourceLabel,
+    scannedAt,
+    filters,
+    totalCandidates: candidates.length,
+    questions: applyFilters(candidates, mode, filters),
+    ...(warning ? { warning } : {}),
+    ...(details ? { details } : {}),
+  };
 }
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-  const mode =
+  const mode: ScanMode =
     searchParams.get("mode") === "end-of-month" ? "end-of-month" : "30-days";
-  const sourceUrl = mode === "end-of-month" ? CALENDAR_URL : TRENDING_URL;
+  const filters = normalizeBullpenScanFilters(mode, searchParams);
+  const sourceUrl = BULLPEN_SOURCE_URLS[mode];
   const scannedAt = new Date().toISOString();
 
   try {
     const cliPayload = await runBullpenDiscover();
-    const questions = collectQuestions([cliPayload], CLI_SOURCE_URL, mode);
-    if (questions.length > 0) {
-      return NextResponse.json({
-        mode,
-        sourceUrl: CLI_SOURCE_URL,
-        scannedAt,
-        questions,
-      });
+    const candidates = collectQuestions([cliPayload], sourceUrl);
+    if (candidates.length > 0) {
+      return NextResponse.json(
+        buildResponse({
+          mode,
+          sourceUrl,
+          sourceLabel: CLI_SOURCE_LABEL,
+          scannedAt,
+          filters,
+          candidates,
+        }),
+      );
     }
-    throw new Error(`Bullpen CLI returned no ${mode} results`);
+    throw new Error("Bullpen CLI returned no discoverable markets");
   } catch (cliError) {
     try {
       const html = await fetchBullpenPage(sourceUrl);
-      const questions = collectQuestions(
-        extractEmbeddedJson(html),
-        sourceUrl,
-        mode,
-      );
-      return NextResponse.json({
-        mode,
-        sourceUrl,
-        scannedAt,
-        questions,
-        warning:
-          questions.length === 0
-            ? "No prediction markets matched the current Bullpen scan filters"
-            : cliError instanceof Error
-              ? cliError.message
-              : "Bullpen CLI scan failed",
-      });
+      const candidates = collectQuestions(extractEmbeddedJson(html), sourceUrl);
+      if (candidates.length > 0) {
+        return NextResponse.json(
+          buildResponse({
+            mode,
+            sourceUrl,
+            sourceLabel: WEB_SOURCE_LABEL,
+            scannedAt,
+            filters,
+            candidates,
+            warning:
+              cliError instanceof Error
+                ? `Using Bullpen web fallback because the CLI scan failed. ${cliError.message}`
+                : "Using Bullpen web fallback because the CLI scan failed.",
+          }),
+        );
+      }
+      throw new Error("Bullpen web returned no discoverable markets");
     } catch (webError) {
       try {
-        const questions = await fetchGammaMarkets(mode);
-        return NextResponse.json({
-          mode,
-          sourceUrl: GAMMA_SOURCE_URL,
-          scannedAt,
-          questions,
-          warning:
-            questions.length === 0
-              ? "No prediction markets matched the current Bullpen scan filters"
-              : webError instanceof Error
-                ? webError.message
-                : "Bullpen web scan failed",
-        });
+        const candidates = await fetchGammaMarkets(mode, filters);
+        if (candidates.length > 0) {
+          return NextResponse.json(
+            buildResponse({
+              mode,
+              sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+              sourceLabel: GAMMA_SOURCE_LABEL,
+              scannedAt,
+              filters,
+              candidates,
+              warning:
+                "Using Polymarket Gamma API fallback because Bullpen sources were unavailable.",
+              details: [
+                cliError instanceof Error
+                  ? cliError.message
+                  : "Bullpen CLI scan failed",
+                webError instanceof Error
+                  ? webError.message
+                  : "Bullpen web scan failed",
+              ].join("; "),
+            }),
+          );
+        }
+        throw new Error("Polymarket Gamma returned no discoverable markets");
       } catch (gammaError) {
         return NextResponse.json(
           {
             mode,
             sourceUrl,
+            sourceLabel: WEB_SOURCE_LABEL,
             scannedAt,
+            filters,
+            totalCandidates: 0,
             questions: [],
             error:
               gammaError instanceof Error
