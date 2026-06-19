@@ -361,8 +361,14 @@ function passesFilters(question: BullpenQuestion, mode: ScanMode) {
     `${question.category} ${question.question}`.toLowerCase();
   if (EXCLUDED_CATEGORIES.some((category) => categoryText.includes(category)))
     return false;
-  if (question.yesOdds !== null && question.yesOdds <= 5) return false;
-  if (question.noOdds !== null && question.noOdds <= 5) return false;
+  // Binary prices cannot have both YES and NO trading above 5x at the same
+  // time, because their implied probabilities sum to roughly 100%. Treat the
+  // scan as looking in both directions and keep markets where either side is
+  // a long-shot opportunity.
+  const hasEligibleLongShot =
+    (question.yesOdds !== null && question.yesOdds > 5) ||
+    (question.noOdds !== null && question.noOdds > 5);
+  if (!hasEligibleLongShot) return false;
 
   if (!question.closeTime) return mode === "30-days";
   const closeDate = new Date(question.closeTime);

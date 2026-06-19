@@ -47,7 +47,7 @@ const TABS: { mode: ScanMode; label: string; href: string; description: string }
     mode: "end-of-month",
     label: "End of Month",
     href: URLs.routes.console.bullpenAiEndOfMonth(),
-    description: "Calendar Bullpen Yes/No questions ending exactly on June 30, 2026 with eligible two-sided odds.",
+    description: "Calendar Bullpen Yes/No questions ending exactly on June 30, 2026 with at least one side above 5x.",
   },
 ];
 
@@ -106,7 +106,7 @@ export default function BullpenAiPage() {
         <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">Copy Trading Bots</p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Bullpen x AI</h1>
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Run focused Bullpen scans for binary Yes/No prediction questions with odds greater than 5x in both directions.
+          Run focused Bullpen scans for binary Yes/No prediction questions with odds greater than 5x on either side.
         </p>
       </div>
 
