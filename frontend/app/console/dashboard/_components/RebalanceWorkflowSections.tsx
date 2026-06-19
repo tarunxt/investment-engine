@@ -755,8 +755,8 @@ function getIndiaMarketStatus(now = new Date()) {
 
 function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
   return {
-    orderType: "LIMIT" as const,
-    variety: order.orderKind === "After market" || !marketOpen ? "amo" : "regular",
+    orderType: order.orderKind === "Market" ? "MARKET" as const : "LIMIT" as const,
+    variety: order.orderKind === "After market" || !marketOpen ? "amo" as const : "regular" as const,
   };
 }
 
