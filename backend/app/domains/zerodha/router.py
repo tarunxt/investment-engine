@@ -28,6 +28,9 @@ from app.domains.zerodha.schemas import (
     ZerodhaLoginUrlResponse,
     ZerodhaPrepareBasketRequest,
     ZerodhaPrepareBasketResponse,
+    ZerodhaProtectedMarketRequest,
+    ZerodhaProtectedMarketResponse,
+    ZerodhaProtectedMarketOrderResult,
     ZerodhaPreparedBasketOrder,
     ZerodhaPortfolioOverviewResponse,
     ZerodhaPortfolioSnapshotDetailResponse,
@@ -487,6 +490,89 @@ async def prepare_basket_orders(
     return ZerodhaPrepareBasketResponse(
         orders=prepared_orders, adjusted_count=adjusted_count
     )
+
+
+@router.post("/orders/place-protected-market", response_model=ZerodhaProtectedMarketResponse)
+async def place_protected_market_orders(
+    request: Request,
+    body: ZerodhaProtectedMarketRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    ip = _client_ip(request)
+    repo = ZerodhaCredentialRepository(db)
+    audit = ZerodhaAuditRepository(db)
+
+    if not _svc.is_configured:
+        raise HTTPException(503, detail="Zerodha direct order placement is not configured on this server")
+
+    token = await repo.get_plaintext_token(current_user.id)
+    if not token:
+        raise HTTPException(401, detail="Not connected to Zerodha. Please login first.")
+
+    if not body.orders:
+        return ZerodhaProtectedMarketResponse(results=[], placed_count=0, failed_count=0)
+
+    await audit.log(
+        current_user.id,
+        "token_used",
+        ip,
+        {"operation": "place_protected_market_orders", "count": len(body.orders)},
+    )
+
+    results: list[ZerodhaProtectedMarketOrderResult] = []
+    for order in body.orders:
+        order_data: dict[str, str] = {
+            "variety": "regular",
+            "tradingsymbol": order.tradingsymbol.upper(),
+            "exchange": order.exchange.upper(),
+            "transaction_type": order.transaction_type.upper(),
+            "quantity": str(order.quantity),
+            "product": "CNC",
+            "validity": "DAY",
+            "order_type": "MARKET",
+            "market_protection": order.market_protection,
+        }
+        try:
+            result = await _svc.place_order(token, order_data, variety="regular")
+            results.append(ZerodhaProtectedMarketOrderResult(
+                tradingsymbol=order_data["tradingsymbol"],
+                exchange=order_data["exchange"],
+                transaction_type=order_data["transaction_type"],
+                quantity=order.quantity,
+                status="placed",
+                order_id=result.get("order_id", ""),
+            ))
+        except KiteError as exc:
+            results.append(ZerodhaProtectedMarketOrderResult(
+                tradingsymbol=order_data["tradingsymbol"],
+                exchange=order_data["exchange"],
+                transaction_type=order_data["transaction_type"],
+                quantity=order.quantity,
+                status="failed",
+                error=exc.message,
+            ))
+        except Exception:
+            logger.exception("Failed to place protected Zerodha MARKET order for user %s", current_user.id)
+            results.append(ZerodhaProtectedMarketOrderResult(
+                tradingsymbol=order_data["tradingsymbol"],
+                exchange=order_data["exchange"],
+                transaction_type=order_data["transaction_type"],
+                quantity=order.quantity,
+                status="failed",
+                error="Failed to place order on Zerodha",
+            ))
+
+    placed_count = sum(1 for result in results if result.status == "placed")
+    failed_count = len(results) - placed_count
+    await audit.log(
+        current_user.id,
+        "place_protected_market_orders",
+        ip,
+        {"placed_count": placed_count, "failed_count": failed_count},
+    )
+    await db.commit()
+    return ZerodhaProtectedMarketResponse(results=results, placed_count=placed_count, failed_count=failed_count)
 
 
 @router.post("/orders", response_model=ZerodhaPlaceOrderResponse)

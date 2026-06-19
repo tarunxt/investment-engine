@@ -864,6 +864,37 @@ export interface ZerodhaPlaceOrderResponse {
   auto_converted_to_amo?: boolean;
 }
 
+export interface ZerodhaProtectedMarketOrderRequest {
+  tradingsymbol: string;
+  exchange: 'NSE' | 'BSE';
+  transaction_type: 'BUY' | 'SELL';
+  quantity: number;
+  product?: 'CNC';
+  validity?: 'DAY';
+  market_protection?: string;
+}
+
+export interface ZerodhaProtectedMarketRequest {
+  orders: ZerodhaProtectedMarketOrderRequest[];
+}
+
+export interface ZerodhaProtectedMarketOrderResult {
+  tradingsymbol: string;
+  exchange: string;
+  transaction_type: 'BUY' | 'SELL';
+  quantity: number;
+  status: 'placed' | 'failed';
+  order_id?: string | null;
+  error?: string | null;
+}
+
+export interface ZerodhaProtectedMarketResponse {
+  results: ZerodhaProtectedMarketOrderResult[];
+  placed_count: number;
+  failed_count: number;
+}
+
+
 export interface ZerodhaThreatSummary {
   main_portfolio_risk: string | null;
   biggest_weakness: string | null;

@@ -709,7 +709,8 @@ const ZERODHA_BASKET_SECTION_LABELS: Partial<Record<ActionCategory, string>> = {
 const ZERODHA_BASKET_INCREASING_SCORE_ACTIONS = new Set<ActionCategory>(["Sell All", "Trim"]);
 const ZERODHA_BASKET_DECREASING_SCORE_ACTIONS = new Set<ActionCategory>(["Add more", "Buy New"]);
 const ZERODHA_MARKET_INTENT_ACTIONS = new Set<ActionCategory>(["Buy New", "Add more", "Sell All", "Trim"]);
-const ZERODHA_DEFAULT_MARKET_PROTECTION = -1;
+const ZERODHA_DEFAULT_MARKET_PROTECTION = "-1";
+type ZerodhaExecutionMode = "direct_market" | "publisher_limit";
 const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
   "threats",
   "swing",
@@ -755,12 +756,12 @@ function getIndiaMarketStatus(now = new Date()) {
   };
 }
 
-function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
+function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean, executionMode: ZerodhaExecutionMode = "publisher_limit") {
   const variety = order.orderKind === "After market" || !marketOpen ? "amo" as const : "regular" as const;
   const isMarketIntent = order.orderKind !== "Limit" && ZERODHA_MARKET_INTENT_ACTIONS.has(order.action);
 
   return {
-    orderType: isMarketIntent ? "MARKET" as const : "LIMIT" as const,
+    orderType: executionMode === "direct_market" && isMarketIntent ? "MARKET" as const : "LIMIT" as const,
     variety,
   };
 }
@@ -783,7 +784,7 @@ function chunkZerodhaBasketOrders(orders: ZerodhaBasketPreviewOrder[]) {
 
 function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], marketOpen: boolean) {
   return orders.map((order) => {
-    const execution = getZerodhaBasketOrderExecution(order, marketOpen);
+    const execution = getZerodhaBasketOrderExecution(order, marketOpen, "publisher_limit");
     const payload: Record<string, string | number | boolean> = {
       variety: execution.variety,
       tradingsymbol: order.symbol.toUpperCase(),
@@ -797,7 +798,7 @@ function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], mark
       tag: "credx",
     };
     if (execution.orderType === "MARKET") {
-      payload.market_protection = ZERODHA_DEFAULT_MARKET_PROTECTION;
+      throw new Error("Publisher basket payload cannot contain MARKET orders");
     } else if (order.price) {
       payload.price = Number(order.price.toFixed(2));
     }
@@ -806,7 +807,7 @@ function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], mark
 }
 
 async function prepareZerodhaBasketOrdersForKite(orders: ZerodhaBasketPreviewOrder[]) {
-  const limitOrders = orders.filter((order) => getZerodhaBasketOrderExecution(order, true).orderType === "LIMIT");
+  const limitOrders = orders;
   if (limitOrders.length === 0) return orders;
 
   const response = await apiService.zerodhaPrepareBasketOrders({
@@ -869,7 +870,7 @@ function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], mark
   ];
 
   orders.forEach((order) => {
-    const execution = getZerodhaBasketOrderExecution(order, marketOpen);
+    const execution = getZerodhaBasketOrderExecution(order, marketOpen, "publisher_limit");
     const price = execution.orderType === "LIMIT" && order.price ? order.price.toFixed(2) : "";
     const marketProtection = execution.orderType === "MARKET" ? String(ZERODHA_DEFAULT_MARKET_PROTECTION) : "";
     lines.push([
@@ -2869,6 +2870,7 @@ function ZerodhaBasketPreviewDialog({
   onUnitsChange: (id: string, delta: number) => void;
   onPlaceOrder: () => void;
   placing: boolean;
+  executionMode: ZerodhaExecutionMode;
   submission: ZerodhaBasketSubmission | null;
   detailsData: StockDetailsData;
   formulaConfig: ScoreMatrixFormulaConfig;
@@ -2895,6 +2897,8 @@ function ZerodhaBasketPreviewDialog({
       .sort(compareZerodhaBasketOrdersByScore),
   })).filter((group) => group.orders.length > 0);
 
+  const buttonText = executionMode === "direct_market" ? "Place protected MARKET" : "Open Kite protected LIMIT basket";
+  const busyText = executionMode === "direct_market" ? "Placing…" : "Opening…";
   const renderPlaceOrderButton = (className?: string) => (
     <Button
       type="button"
@@ -2905,7 +2909,7 @@ function ZerodhaBasketPreviewDialog({
         className,
       )}
     >
-      {placing ? "Opening…" : "Open Kite"}
+      {placing ? busyText : buttonText}
     </Button>
   );
 
@@ -2932,7 +2936,7 @@ function ZerodhaBasketPreviewDialog({
               />
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, then open a Kite order tray to confirm and place the selected orders from Zerodha.
+              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, then use direct Kite Connect for protected MARKET orders when available or the Publisher-safe protected LIMIT fallback.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -2965,9 +2969,17 @@ function ZerodhaBasketPreviewDialog({
 
               {submission ? (
                 <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                  Created {submission.basketCount} Kite order tray{submission.basketCount === 1 ? "" : "s"} for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
-                  {submission.basketCount > 1 ? ` Each tray contains at most ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders; place every tray in Kite.` : ""}
-                  {submission.clipboardCopied ? " A backup order checklist was copied to your clipboard." : " Use the table below as your backup manual-entry checklist if Kite rejects the basket payload."}
+                  {executionMode === "direct_market" ? (
+                    <>
+                      Placed {submission.redirected} protected MARKET order{submission.redirected === 1 ? "" : "s"} through direct Kite Connect.
+                    </>
+                  ) : (
+                    <>
+                      Created {submission.basketCount} Kite protected LIMIT basket tray{submission.basketCount === 1 ? "" : "s"} for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
+                      {submission.basketCount > 1 ? ` Each tray contains at most ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders; place every tray in Kite.` : ""}
+                      {submission.clipboardCopied ? " A backup order checklist was copied to your clipboard." : " Use the table below as your backup manual-entry checklist if Kite rejects the basket payload."}
+                    </>
+                  )}
                 </div>
               ) : null}
 
@@ -3139,7 +3151,7 @@ function ZerodhaBasketPreviewDialog({
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
                                 {submission?.orders.some((submittedOrder) => submittedOrder.id === order.id) ? (
-                                  <span className="text-blue-700">Sent to Kite tray</span>
+                                  <span className="text-blue-700">{executionMode === "direct_market" ? "Submitted direct" : "Sent to protected LIMIT tray"}</span>
                                 ) : (
                                   <span>Pending</span>
                                 )}
@@ -3162,7 +3174,9 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Market-intent rows are sent as MARKET with Zerodha auto market protection and no price; explicit Limit rows remain circuit-validated LIMIT orders. Closed-market rows are sent as AMO while preserving the selected timing.
+            {executionMode === "direct_market"
+              ? "Protected MARKET mode places selected market-intent rows through the backend using Kite Connect with market_protection=-1 after this explicit in-app confirmation. Access tokens never reach the browser."
+              : `Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. Market-intent rows are converted to LTP-buffered circuit-safe LIMIT prices; stale recommendation prices are never used as execution prices.`}
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
@@ -4946,6 +4960,7 @@ export function RebalanceWorkflowSections({
   const [zerodhaBasketSubmission, setZerodhaBasketSubmission] = useState<ZerodhaBasketSubmission | null>(null);
   const [zerodhaBasketError, setZerodhaBasketError] = useState<string | null>(null);
   const [zerodhaBasketOrders, setZerodhaBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
+  const [zerodhaExecutionMode, setZerodhaExecutionMode] = useState<ZerodhaExecutionMode>("publisher_limit");
   const [zerodhaBasketDetailsData, setZerodhaBasketDetailsData] = useState<StockDetailsData>({
     portfolioSnapshot: null,
     eventsAnalysis: null,
@@ -5078,10 +5093,13 @@ export function RebalanceWorkflowSections({
     setZerodhaBasketError(null);
     setZerodhaBasketSubmission(null);
     try {
-      const [runs, overview] = await Promise.all([
+      const [runs, overview, status, login] = await Promise.all([
         fetchAllFullRuns(),
         apiService.zerodhaPortfolioOverview(),
+        apiService.zerodhaStatus(),
+        apiService.zerodhaLoginUrl(),
       ]);
+      setZerodhaExecutionMode(status.connected && login.configured ? "direct_market" : "publisher_limit");
       const [eventsResult, threatsResult] = await Promise.allSettled([
         apiService.zerodhaEventsLatest(),
         apiService.zerodhaThreatsLatest(),
@@ -5193,13 +5211,47 @@ export function RebalanceWorkflowSections({
     const shouldContinue = window.confirm(
       `${marketStatus.label}
 
-This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 ? "" : "s"} for ${selectedOrders.length} selected Zerodha order${selectedOrders.length === 1 ? "" : "s"}. Orders are split into batches of ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} so Kite does not leave later rows unsubmitted. Review and place every tray inside Kite. Continue?`,
+${zerodhaExecutionMode === "direct_market"
+  ? `This will place ${selectedOrders.length} selected Zerodha protected MARKET order${selectedOrders.length === 1 ? "" : "s"} directly through Kite Connect with market_protection=-1. Continue?`
+  : `This will open ${orderChunks.length} Kite protected LIMIT basket tray${orderChunks.length === 1 ? "" : "s"} for ${selectedOrders.length} selected Zerodha order${selectedOrders.length === 1 ? "" : "s"}. Orders are split into batches of ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} so Kite does not leave later rows unsubmitted. Review and place every tray inside Kite. Continue?`}`,
     );
     if (!shouldContinue) return;
 
     setZerodhaBasketPlacing(true);
     setZerodhaBasketSubmission(null);
     setZerodhaBasketError(null);
+
+    if (zerodhaExecutionMode === "direct_market") {
+      try {
+        const response = await apiService.zerodhaPlaceProtectedMarketOrders({
+          orders: selectedOrders.map((order) => ({
+            tradingsymbol: order.symbol.toUpperCase(),
+            exchange: order.exchange.toUpperCase() as "NSE" | "BSE",
+            transaction_type: order.side,
+            quantity: Math.max(1, Math.floor(order.units ?? 0)),
+            product: "CNC",
+            validity: "DAY",
+            market_protection: ZERODHA_DEFAULT_MARKET_PROTECTION,
+          })),
+        });
+        const failed = response.results.filter((result) => result.status === "failed");
+        setZerodhaBasketSubmission({
+          redirected: response.placed_count,
+          basketCount: 0,
+          clipboardCopied: false,
+          orders: selectedOrders,
+        });
+        if (failed.length) {
+          setZerodhaBasketError(`Placed ${response.placed_count} protected MARKET order${response.placed_count === 1 ? "" : "s"}; ${response.failed_count} failed: ${failed.map((result) => `${result.tradingsymbol}: ${result.error || "unknown error"}`).join("; ")}`);
+        }
+      } catch (error) {
+        setZerodhaBasketError(`Could not place protected MARKET orders: ${normalizeError(error)}. Use the Publisher-safe protected LIMIT fallback if direct order placement is unavailable.`);
+      } finally {
+        setZerodhaBasketPlacing(false);
+      }
+      return;
+    }
+
     const kiteTargetPrefix = `zerodha-basket-${Date.now()}`;
     const kiteWindows = orderChunks.map((_, index) => {
       const targetName = `${kiteTargetPrefix}-${index + 1}`;
@@ -5211,7 +5263,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
     if (kiteWindows.some((entry) => !entry.win)) {
       kiteWindows.forEach((entry) => entry.win?.close());
       setZerodhaBasketPlacing(false);
-      setZerodhaBasketError(`Your browser blocked one or more Kite basket popups. Allow popups for this site, then try Open Kite again. ${orderChunks.length} popup${orderChunks.length === 1 ? "" : "s"} required for the selected rows.`);
+      setZerodhaBasketError(`Your browser blocked one or more Kite basket popups. Allow popups for this site, then try the protected LIMIT basket again. ${orderChunks.length} popup${orderChunks.length === 1 ? "" : "s"} required for the selected rows.`);
       return;
     }
     kiteWindows.forEach((entry) => {
@@ -5253,7 +5305,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
     } finally {
       setZerodhaBasketPlacing(false);
     }
-  }, [selectedZerodhaBasketIds, zerodhaBasketOrders]);
+  }, [selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaExecutionMode]);
 
   const loadLatestIdleStageInfo = useCallback(async () => {
     const [
@@ -7280,6 +7332,7 @@ This will open ${orderChunks.length} Kite basket tray${orderChunks.length === 1 
         onUnitsChange={updateZerodhaBasketUnits}
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
         placing={zerodhaBasketPlacing}
+        executionMode={zerodhaExecutionMode}
         submission={zerodhaBasketSubmission}
         detailsData={zerodhaBasketDetailsData}
         formulaConfig={scoreMatrixFormulaConfig}
