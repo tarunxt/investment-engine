@@ -145,6 +145,23 @@ const MARKET_QUESTION_KEYWORDS = [
   "fed",
   "etf",
 ];
+const MONTH_NAMES = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+];
+const MONTH_INDEX_BY_NAME = Object.fromEntries(
+  MONTH_NAMES.map((month, index) => [month, index]),
+) as Record<string, number>;
 const BULLPEN_BIN_CANDIDATES = [
   process.env.BULLPEN_BIN,
   "/usr/local/bin/bullpen",
@@ -391,6 +408,76 @@ function getDaysUntilClose(closeTime: string | null) {
   );
 }
 
+function toValidDate(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function extractMentionedDate(
+  value: string | null,
+  fallbackYear = new Date().getUTCFullYear(),
+) {
+  if (!value) return null;
+  const match = value.match(
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:,\s*(\d{4}))?\b/i,
+  );
+  if (!match) return null;
+
+  const monthIndex = MONTH_INDEX_BY_NAME[match[1].toLowerCase()];
+  const day = Number(match[2]);
+  const year = match[3] ? Number(match[3]) : fallbackYear;
+  if (
+    monthIndex === undefined ||
+    !Number.isInteger(day) ||
+    day < 1 ||
+    day > 31 ||
+    !Number.isInteger(year)
+  ) {
+    return null;
+  }
+
+  return new Date(Date.UTC(year, monthIndex, day, 23, 59, 0)).toISOString();
+}
+
+function inferSemanticCloseTime(record: Record<string, unknown>, question: string) {
+  const candidates = [
+    readString(record, ["description"]),
+    readString(record, ["groupItemTitle", "groupTitle"]),
+    question,
+    readDeepString(record, ["groupItemTitle", "groupTitle", "description"]),
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = extractMentionedDate(candidate);
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
+function chooseCloseTime(rawCloseTime: string | null, semanticCloseTime: string | null) {
+  const rawDate = toValidDate(rawCloseTime);
+  const semanticDate = toValidDate(semanticCloseTime);
+
+  if (!semanticDate) return rawCloseTime;
+  if (!rawDate) return semanticCloseTime;
+
+  const now = Date.now();
+  const rawIsPast = rawDate.getTime() < now;
+  const semanticIsFuture = semanticDate.getTime() >= now;
+
+  if (rawIsPast && semanticIsFuture) return semanticCloseTime;
+  if (
+    rawDate.getUTCFullYear() < semanticDate.getUTCFullYear() &&
+    semanticDate.getTime() >= now - MILLISECONDS_PER_DAY
+  ) {
+    return semanticCloseTime;
+  }
+
+  return rawCloseTime;
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -460,11 +547,15 @@ function normalizeGammaMarket(
   const yesOdds = normalizeOdds(yesPrice);
   const noOdds = normalizeOdds(noPrice);
   const slug = readString(record, SLUG_KEYS);
+  const closeTime = chooseCloseTime(
+    readString(record, CLOSE_TIME_KEYS),
+    inferSemanticCloseTime(record, question),
+  );
 
   return {
     id: readString(record, ["id", ...SLUG_KEYS, "marketId", "conditionId"]) || question,
     question,
-    closeTime: readString(record, CLOSE_TIME_KEYS),
+    closeTime,
     category: readString(record, CATEGORY_KEYS) || "Uncategorized",
     yesOdds,
     noOdds,
@@ -494,7 +585,7 @@ function normalizeGammaMarket(
           ? 2
           : null,
     isBinaryYesNo: isBinaryYesNoQuestion(outcomeLabels, yesOdds, noOdds),
-    daysUntilClose: getDaysUntilClose(readString(record, CLOSE_TIME_KEYS)),
+    daysUntilClose: getDaysUntilClose(closeTime),
   };
 }
 
@@ -532,10 +623,14 @@ function normalizeQuestion(
       "noProbability",
     ]),
   );
-  const closeTime =
+  const rawCloseTime =
     readString(record, CLOSE_TIME_KEYS) ||
     readDeepString(record, CLOSE_TIME_KEYS) ||
     context.closeTime;
+  const closeTime = chooseCloseTime(
+    rawCloseTime,
+    inferSemanticCloseTime(record, question),
+  );
   const slug = readString(record, SLUG_KEYS) || readDeepString(record, SLUG_KEYS);
   const outcomeLabels = readOutcomeLabels(record);
   const id =
@@ -626,6 +721,13 @@ function applyFilters(
   return sortQuestions(
     candidates.filter((question) => passesFilters(question, mode, filters)),
   );
+}
+
+function sourceHasFutureCandidates(candidates: BullpenQuestion[]) {
+  return candidates.some((candidate) => {
+    const closeDate = toValidDate(candidate.closeTime);
+    return closeDate !== null && closeDate.getTime() >= Date.now();
+  });
 }
 
 function bullpenProcessEnv() {
@@ -823,6 +925,9 @@ export async function GET(request: NextRequest) {
   try {
     const cliPayload = await runBullpenDiscover();
     const candidates = collectQuestions([cliPayload], sourceUrl);
+    if (!sourceHasFutureCandidates(candidates)) {
+      throw new Error("Bullpen CLI returned stale markets with past close dates");
+    }
     if (candidates.length > 0) {
       return NextResponse.json(
         buildResponse({
@@ -840,6 +945,9 @@ export async function GET(request: NextRequest) {
     try {
       const html = await fetchBullpenPage(sourceUrl);
       const candidates = collectQuestions(extractEmbeddedJson(html), sourceUrl);
+      if (!sourceHasFutureCandidates(candidates)) {
+        throw new Error("Bullpen web returned stale markets with past close dates");
+      }
       if (candidates.length > 0) {
         return NextResponse.json(
           buildResponse({
