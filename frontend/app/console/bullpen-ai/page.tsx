@@ -24,6 +24,8 @@ type BullpenQuestion = {
   sourceUrl: string;
 };
 
+const LIMIT_PRESETS = [25, 100, 250, 500] as const;
+
 type ScanResult = {
   mode: ScanMode;
   sourceUrl: string;
@@ -115,16 +117,37 @@ export default function BullpenAiPage() {
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="flex flex-wrap items-end gap-3">
-            <div className="w-36 space-y-2">
-              <Label htmlFor="bullpen-limit">Questions</Label>
-              <Input
-                id="bullpen-limit"
-                type="number"
-                min={1}
-                max={500}
-                value={limit}
-                onChange={(event) => setLimit(Math.min(Math.max(Number(event.target.value) || 100, 1), 500))}
-              />
+            <div className="min-w-64 space-y-2">
+              <Label htmlFor="bullpen-limit">Question limit</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id="bullpen-limit"
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={limit}
+                  onChange={(event) => setLimit(Math.min(Math.max(Number(event.target.value) || 100, 1), 500))}
+                  className="w-28"
+                />
+                <div className="flex flex-wrap gap-1.5" aria-label="Question limit presets">
+                  {LIMIT_PRESETS.map((preset) => (
+                    <Button
+                      key={preset}
+                      type="button"
+                      variant={limit === preset ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setLimit(preset)}
+                      disabled={isScanning}
+                      className="h-9 px-3 text-xs"
+                    >
+                      {preset}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs leading-relaxed text-slate-500">
+                Choose how many Bullpen questions to inspect before filtering for eligible odds. Higher limits scan broader, but may take longer.
+              </p>
             </div>
             <Button onClick={runScan} disabled={isScanning} className="gap-2">
               {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -170,7 +193,7 @@ export default function BullpenAiPage() {
                   )) : (
                     <tr>
                       <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
-                        {isScanning ? "Scanning Bullpen..." : "No scan results yet. Choose a limit and click Run Bullpen Scan."}
+                        {isScanning ? "Scanning Bullpen..." : "No scan results yet. Use the Question limit field or a preset, then click Run Bullpen Scan."}
                       </td>
                     </tr>
                   )}
