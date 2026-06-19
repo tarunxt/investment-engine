@@ -728,7 +728,6 @@ function buildKiteBasketUrl(apiKey: string) {
 const INDIA_MARKET_TIME_ZONE = "Asia/Kolkata";
 const INDIA_MARKET_OPEN_MINUTES = 9 * 60 + 15;
 const INDIA_MARKET_CLOSE_MINUTES = 15 * 60 + 30;
-const ZERODHA_MARKET_PROTECTION_PERCENT = 5;
 
 function getIndiaMarketStatus(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -797,9 +796,6 @@ function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], mark
       readonly: false,
       tag: "credx",
     };
-    if (execution.orderType === "MARKET") {
-      payload.market_protection = ZERODHA_MARKET_PROTECTION_PERCENT;
-    }
     if (execution.orderType === "LIMIT" && order.price) {
       payload.price = Number(order.price.toFixed(2));
     }
@@ -858,7 +854,7 @@ function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], mark
   orders.forEach((order) => {
     const execution = getZerodhaBasketOrderExecution(order, marketOpen);
     const price = order.price ? order.price.toFixed(2) : "";
-    const marketProtection = execution.orderType === "MARKET" ? String(ZERODHA_MARKET_PROTECTION_PERCENT) : "";
+    const marketProtection = "";
     lines.push([
       order.exchange,
       order.symbol,
