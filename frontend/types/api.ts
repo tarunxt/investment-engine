@@ -815,6 +815,7 @@ export interface ZerodhaPrepareBasketOrderRequest {
   transaction_type: 'BUY' | 'SELL';
   quantity: number;
   price: number;
+  last_price?: number | null;
 }
 
 export interface ZerodhaPrepareBasketRequest {
