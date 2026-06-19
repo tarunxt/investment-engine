@@ -44,7 +44,7 @@ from app.infrastructure.database.session import get_async_db
 
 logger = logging.getLogger(__name__)
 
-ZERODHA_DEFAULT_MARKET_PROTECTION_PERCENT = 5
+ZERODHA_AUTO_MARKET_PROTECTION = -1
 
 router = APIRouter(prefix="/zerodha", tags=["zerodha"])
 _svc = ZerodhaService()
@@ -525,18 +525,16 @@ async def place_order(
         "validity": body.validity,
     }
     if body.order_type in {"MARKET", "SL-M"}:
-        order_data["market_protection"] = str(
+        market_protection = (
             body.market_protection
-            if body.market_protection
-            else ZERODHA_DEFAULT_MARKET_PROTECTION_PERCENT
+            if body.market_protection != 0
+            else ZERODHA_AUTO_MARKET_PROTECTION
         )
-    if body.price:
+        order_data["market_protection"] = str(market_protection)
+    if body.price and body.order_type != "MARKET":
         order_data["price"] = str(body.price)
     if body.trigger_price:
         order_data["trigger_price"] = str(body.trigger_price)
-    if body.market_protection:
-        order_data["market_protection"] = str(body.market_protection)
-
     order_meta = {
         "tradingsymbol": order_data["tradingsymbol"],
         "exchange": order_data["exchange"],

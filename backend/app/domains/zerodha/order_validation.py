@@ -5,8 +5,6 @@ from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Literal
 
 DEFAULT_EQUITY_TICK_SIZE = Decimal("0.05")
-MARKETABLE_LIMIT_BUFFER = Decimal("0.005")
-
 OrderSide = Literal["BUY", "SELL"]
 
 
@@ -18,6 +16,7 @@ class ZerodhaPriceGuardInput:
     lower_circuit_limit: float | int | str | None = None
     upper_circuit_limit: float | int | str | None = None
     tick_size: float | int | str | None = None
+    instrument_kind: Literal["EQ", "FUT", "OPT"] = "EQ"
 
 
 @dataclass(frozen=True)
@@ -60,6 +59,27 @@ def _clamp_to_circuit(
     return value
 
 
+def _protection_pct(
+    last_price: Decimal, instrument_kind: Literal["EQ", "FUT", "OPT"]
+) -> Decimal:
+    """Return Zerodha default market-protection percentage as a ratio."""
+    if instrument_kind == "OPT":
+        if last_price < Decimal("10"):
+            return Decimal("0.05")
+        if last_price <= Decimal("100"):
+            return Decimal("0.03")
+        if last_price <= Decimal("500"):
+            return Decimal("0.02")
+        return Decimal("0.01")
+
+    # Zerodha default bands for equities and futures.
+    if last_price < Decimal("100"):
+        return Decimal("0.02")
+    if last_price <= Decimal("500"):
+        return Decimal("0.01")
+    return Decimal("0.005")
+
+
 def guard_zerodha_limit_price(order: ZerodhaPriceGuardInput) -> ZerodhaPriceGuardResult:
     """Return a Kite-safe marketable limit price.
 
@@ -81,14 +101,16 @@ def guard_zerodha_limit_price(order: ZerodhaPriceGuardInput) -> ZerodhaPriceGuar
 
     if order.side == "BUY":
         raw_price = (
-            reference * (Decimal("1") + MARKETABLE_LIMIT_BUFFER)
+            reference
+            * (Decimal("1") + _protection_pct(reference, order.instrument_kind))
             if last_price
             else reference
         )
         rounding = ROUND_CEILING
     else:
         raw_price = (
-            reference * (Decimal("1") - MARKETABLE_LIMIT_BUFFER)
+            reference
+            * (Decimal("1") - _protection_pct(reference, order.instrument_kind))
             if last_price
             else reference
         )

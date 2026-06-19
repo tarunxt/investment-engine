@@ -848,13 +848,12 @@ function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], mark
     "Cred-X Zerodha order basket for Kite",
     "Paste/reference this in Kite while placing the orders manually:",
     "",
-    "Exchange, Symbol, Side, Qty, Order Type, Variety, Product, Validity, Price, Market Protection",
+    "Exchange, Symbol, Side, Qty, Order Type, Variety, Product, Validity, Price",
   ];
 
   orders.forEach((order) => {
     const execution = getZerodhaBasketOrderExecution(order, marketOpen);
     const price = order.price ? order.price.toFixed(2) : "";
-    const marketProtection = "";
     lines.push([
       order.exchange,
       order.symbol,
@@ -865,7 +864,6 @@ function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], mark
       "CNC",
       "DAY",
       price,
-      marketProtection,
     ].join(", "));
   });
 
@@ -3112,7 +3110,9 @@ function ZerodhaBasketPreviewDialog({
                                   className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
                                 >
                                   {ZERODHA_ORDER_KINDS.map((orderKind) => (
-                                    <option key={orderKind} value={orderKind}>{orderKind}</option>
+                                    <option key={orderKind} value={orderKind}>
+                                      {orderKind === "Market" ? "Protected LIMIT" : orderKind}
+                                    </option>
                                   ))}
                                 </select>
                               </td>
@@ -3141,7 +3141,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Market rows are submitted as MARKET orders with explicit 5% Zerodha market protection; rows explicitly set to Limit keep a refreshed Kite-safe limit price. Closed-market rows are sent as AMO while preserving the selected timing.
+            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Publisher does not reliably forward Zerodha market_protection, so Market-intent rows are shown as Protected LIMIT and sent as refreshed Kite-safe LIMIT prices within circuit bounds. Closed-market rows are sent as AMO while preserving the selected timing.
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>

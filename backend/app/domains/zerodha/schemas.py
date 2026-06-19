@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ZerodhaLoginUrlResponse(BaseModel):
@@ -56,6 +56,36 @@ class ZerodhaPlaceOrderRequest(BaseModel):
         if v not in ("MARKET", "LIMIT", "SL", "SL-M"):
             raise ValueError("order_type must be MARKET, LIMIT, SL, or SL-M")
         return v
+
+    @field_validator("market_protection", mode="before")
+    @classmethod
+    def validate_market_protection_type(cls, v):
+        if isinstance(v, bool):
+            raise ValueError(
+                "market_protection must be -1 or a percentage from >0 to 100"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_order_prices_and_protection(self):
+        if self.order_type in ("MARKET", "SL-M"):
+            if self.market_protection == 0:
+                self.market_protection = -1
+            elif self.market_protection != -1 and not (
+                0 < self.market_protection <= 100
+            ):
+                raise ValueError(
+                    "market_protection must be -1 or a percentage from >0 to 100"
+                )
+            if self.order_type == "MARKET":
+                self.price = 0
+        elif self.market_protection not in (0, -1) and not (
+            0 < self.market_protection <= 100
+        ):
+            raise ValueError(
+                "market_protection must be -1 or a percentage from >0 to 100"
+            )
+        return self
 
     @field_validator("variety")
     @classmethod

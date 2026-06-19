@@ -8,7 +8,10 @@ from app.domains.zerodha.basket import (
     is_kite_quote_permission_error_message,
     prepare_basket_order_from_request,
 )
-from app.domains.zerodha.schemas import ZerodhaPrepareBasketOrderRequest
+from app.domains.zerodha.schemas import (
+    ZerodhaPlaceOrderRequest,
+    ZerodhaPrepareBasketOrderRequest,
+)
 
 
 def test_guard_rounds_sell_price_to_tick_multiple():
@@ -16,7 +19,7 @@ def test_guard_rounds_sell_price_to_tick_multiple():
         ZerodhaPriceGuardInput(side="SELL", requested_price=143.78, last_price=143.70)
     )
 
-    assert result.price == 142.95
+    assert result.price == 142.25
     assert Decimal(str(result.price)) % Decimal("0.05") == 0
     assert result.adjusted is True
 
@@ -34,7 +37,7 @@ def test_guard_clamps_buy_price_to_upper_circuit_and_tick():
 
     assert result.price <= 257.25
     assert Decimal(str(result.price)) % Decimal("0.05") == 0
-    assert result.price == 233.80
+    assert result.price == 234.95
     assert result.adjusted is True
     assert "using_ltp_derived_marketable_limit" in result.reasons
 
@@ -71,3 +74,35 @@ def test_kite_quote_permission_error_detection_matches_reported_message():
     assert is_kite_quote_permission_error_message(
         "Insufficient permission for that call."
     )
+
+
+def test_market_order_defaults_to_zerodha_auto_market_protection_and_omits_price():
+    order = ZerodhaPlaceOrderRequest(
+        tradingsymbol="PFC",
+        exchange="NSE",
+        transaction_type="BUY",
+        order_type="MARKET",
+        quantity=18,
+        product="CNC",
+        price=580,
+    )
+
+    assert order.market_protection == -1
+    assert order.price == 0
+
+
+def test_rejects_unprotected_market_order_value_over_api_limit():
+    try:
+        ZerodhaPlaceOrderRequest(
+            tradingsymbol="PFC",
+            exchange="NSE",
+            transaction_type="BUY",
+            order_type="MARKET",
+            quantity=18,
+            product="CNC",
+            market_protection=101,
+        )
+    except ValueError as exc:
+        assert "market_protection" in str(exc)
+    else:
+        raise AssertionError("market_protection above 100 should be rejected")
