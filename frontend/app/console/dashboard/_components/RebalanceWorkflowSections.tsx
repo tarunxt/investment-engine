@@ -708,6 +708,8 @@ const ZERODHA_BASKET_SECTION_LABELS: Partial<Record<ActionCategory, string>> = {
 };
 const ZERODHA_BASKET_INCREASING_SCORE_ACTIONS = new Set<ActionCategory>(["Sell All", "Trim"]);
 const ZERODHA_BASKET_DECREASING_SCORE_ACTIONS = new Set<ActionCategory>(["Add more", "Buy New"]);
+const ZERODHA_MARKET_INTENT_ACTIONS = new Set<ActionCategory>(["Buy New", "Add more", "Sell All", "Trim"]);
+const ZERODHA_DEFAULT_MARKET_PROTECTION = -1;
 const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
   "threats",
   "swing",
@@ -755,13 +757,10 @@ function getIndiaMarketStatus(now = new Date()) {
 
 function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
   const variety = order.orderKind === "After market" || !marketOpen ? "amo" as const : "regular" as const;
+  const isMarketIntent = order.orderKind !== "Limit" && ZERODHA_MARKET_INTENT_ACTIONS.has(order.action);
 
   return {
-    // Kite Publisher currently drops market_protection from offsite basket orders before
-    // placing them, which makes MARKET rows fail with Zerodha's API protection check.
-    // Submit every Publisher basket row as a guarded LIMIT order instead; the backend
-    // prepare step computes the protective limit price from live quotes/circuit limits.
-    orderType: "LIMIT" as const,
+    orderType: isMarketIntent ? "MARKET" as const : "LIMIT" as const,
     variety,
   };
 }
@@ -797,7 +796,9 @@ function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], mark
       readonly: false,
       tag: "credx",
     };
-    if (execution.orderType === "LIMIT" && order.price) {
+    if (execution.orderType === "MARKET") {
+      payload.market_protection = ZERODHA_DEFAULT_MARKET_PROTECTION;
+    } else if (order.price) {
       payload.price = Number(order.price.toFixed(2));
     }
     return payload;
@@ -805,8 +806,11 @@ function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], mark
 }
 
 async function prepareZerodhaBasketOrdersForKite(orders: ZerodhaBasketPreviewOrder[]) {
+  const limitOrders = orders.filter((order) => getZerodhaBasketOrderExecution(order, true).orderType === "LIMIT");
+  if (limitOrders.length === 0) return orders;
+
   const response = await apiService.zerodhaPrepareBasketOrders({
-    orders: orders.map((order) => ({
+    orders: limitOrders.map((order) => ({
       tradingsymbol: order.symbol.toUpperCase(),
       exchange: order.exchange.toUpperCase(),
       transaction_type: order.side,
@@ -815,8 +819,12 @@ async function prepareZerodhaBasketOrdersForKite(orders: ZerodhaBasketPreviewOrd
       last_price: order.lastPrice ?? undefined,
     })),
   });
-  return orders.map((order, index) => {
-    const prepared = response.orders[index];
+  const preparedByOrderId = new Map(
+    limitOrders.map((order, index) => [order.id, response.orders[index]] as const),
+  );
+
+  return orders.map((order) => {
+    const prepared = preparedByOrderId.get(order.id);
     return prepared
       ? {
           ...order,
@@ -857,12 +865,13 @@ function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], mark
     "Cred-X Zerodha order basket for Kite",
     "Paste/reference this in Kite while placing the orders manually:",
     "",
-    "Exchange, Symbol, Side, Qty, Order Type, Variety, Product, Validity, Price",
+    "Exchange, Symbol, Side, Qty, Order Type, Variety, Product, Validity, Price, Market Protection",
   ];
 
   orders.forEach((order) => {
     const execution = getZerodhaBasketOrderExecution(order, marketOpen);
-    const price = order.price ? order.price.toFixed(2) : "";
+    const price = execution.orderType === "LIMIT" && order.price ? order.price.toFixed(2) : "";
+    const marketProtection = execution.orderType === "MARKET" ? String(ZERODHA_DEFAULT_MARKET_PROTECTION) : "";
     lines.push([
       order.exchange,
       order.symbol,
@@ -873,6 +882,7 @@ function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], mark
       "CNC",
       "DAY",
       price,
+      marketProtection,
     ].join(", "));
   });
 
@@ -3122,7 +3132,7 @@ function ZerodhaBasketPreviewDialog({
                                 >
                                   {ZERODHA_ORDER_KINDS.map((orderKind) => (
                                     <option key={orderKind} value={orderKind}>
-                                      {orderKind === "Market" ? "Protected LIMIT" : orderKind}
+                                      {orderKind}
                                     </option>
                                   ))}
                                 </select>
@@ -3152,7 +3162,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Publisher does not reliably forward Zerodha market_protection, so Market-intent rows are shown as Protected LIMIT and sent as refreshed Kite-safe LIMIT prices within circuit bounds. Closed-market rows are sent as AMO while preserving the selected timing.
+            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Market-intent rows are sent as MARKET with Zerodha auto market protection and no price; explicit Limit rows remain circuit-validated LIMIT orders. Closed-market rows are sent as AMO while preserving the selected timing.
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>

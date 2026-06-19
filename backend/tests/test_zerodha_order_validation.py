@@ -124,3 +124,57 @@ def test_rejects_unprotected_market_order_value_over_api_limit():
         assert "market_protection" in str(exc)
     else:
         raise AssertionError("market_protection above 100 should be rejected")
+
+
+def test_market_intent_direct_order_payload_uses_market_protection_without_price():
+    orders = [
+        ZerodhaPlaceOrderRequest(
+            tradingsymbol="PFC",
+            exchange="NSE",
+            transaction_type="BUY",
+            order_type="MARKET",
+            quantity=18,
+            product="CNC",
+            price=580,
+        ),
+        ZerodhaPlaceOrderRequest(
+            tradingsymbol="HAL",
+            exchange="NSE",
+            transaction_type="BUY",
+            order_type="MARKET",
+            quantity=2,
+            product="CNC",
+            price=5450,
+        ),
+        ZerodhaPlaceOrderRequest(
+            tradingsymbol="HINDALCO",
+            exchange="NSE",
+            transaction_type="BUY",
+            order_type="MARKET",
+            quantity=13,
+            product="CNC",
+            price=778,
+        ),
+    ]
+
+    for order in orders:
+        payload = order.model_dump(exclude={"price", "trigger_price"})
+        assert payload["order_type"] == "MARKET"
+        assert payload["market_protection"] == -1
+        assert "price" not in payload
+        assert "trigger_price" not in payload
+
+
+def test_explicit_limit_order_keeps_validated_limit_price():
+    order = ZerodhaPlaceOrderRequest(
+        tradingsymbol="INFY",
+        exchange="NSE",
+        transaction_type="BUY",
+        order_type="LIMIT",
+        quantity=3,
+        product="CNC",
+        price=143.8,
+    )
+
+    assert order.order_type == "LIMIT"
+    assert order.price == 143.8
