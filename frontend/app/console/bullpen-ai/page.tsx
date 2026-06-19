@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, ExternalLink, Loader2, Menu, RefreshCw } from "lucide-react";
 
+import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,16 +15,31 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  archiveBullpenScanSnapshot,
   BULLPEN_SOURCE_URLS,
+  buildBullpenLlmPrompt,
   buildBullpenScanQueryParams,
+  createBullpenQuestionRow,
   createBullpenScanFilters,
+  createBullpenScanSnapshot,
   normalizeBullpenScanFilters,
-  type BullpenQuestion,
+  parseBullpenLlmAnalysisPayload,
+  type BullpenQuestionRow,
   type BullpenScanFilters,
+  type BullpenScanSnapshot,
+  type BullpenSnapshotHistory,
   type ScanMode,
   type ScanResult,
 } from "@/lib/bullpen-ai";
 import { URLs } from "@/lib/urls";
+import { APIError, apiService } from "@/services/api";
+import type { ProviderModelTarget, RunResponse } from "@/types/api";
+
+import {
+  BullpenQuestionsTable,
+  type BullpenTableSortKey,
+  type BullpenTableSortState,
+} from "./_components/BullpenQuestionsTable";
 
 const TABS: {
   mode: ScanMode;
@@ -42,6 +58,45 @@ const TABS: {
   },
 ];
 
+const BULLPEN_SNAPSHOT_STORAGE_KEY = "investor:bullpen-ai:snapshots:v1";
+const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
+  "investor:bullpen-ai:last-llm-target:v1";
+const MAX_BULLPEN_SNAPSHOT_HISTORY = 10;
+const RUN_POLL_INTERVAL_MS = 4_000;
+const MAX_RUN_POLLS = 90;
+const DEFAULT_SORT_STATE: BullpenTableSortState = {
+  key: "closeTime",
+  direction: "asc",
+};
+
+function createEmptySnapshotHistory(): Record<ScanMode, BullpenSnapshotHistory> {
+  return {
+    "30-days": { current: null, history: [] },
+    "end-of-month": { current: null, history: [] },
+  };
+}
+
+function createEmptySelectionMap(): Record<ScanMode, string[]> {
+  return {
+    "30-days": [],
+    "end-of-month": [],
+  };
+}
+
+function createEmptySortMap(): Record<ScanMode, BullpenTableSortState> {
+  return {
+    "30-days": { ...DEFAULT_SORT_STATE },
+    "end-of-month": { ...DEFAULT_SORT_STATE },
+  };
+}
+
+function createEmptySnapshotViewMap(): Record<ScanMode, string | null> {
+  return {
+    "30-days": null,
+    "end-of-month": null,
+  };
+}
+
 function formatDate(value: string | null) {
   if (!value) return "—";
   const date = new Date(value);
@@ -56,23 +111,6 @@ function formatDateOnly(value: string) {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString("en-IN", { dateStyle: "long" });
-}
-
-function formatOdds(value: number | null) {
-  if (value === null) return "—";
-  return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
-}
-
-function formatDays(value: number | null) {
-  if (value === null) return "—";
-  return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}d`;
-}
-
-function formatOutcomeSummary(question: BullpenQuestion) {
-  if (question.outcomeLabels.length > 0) return question.outcomeLabels.join(" / ");
-  if (question.isBinaryYesNo) return "Yes / No";
-  if (question.outcomeCount !== null) return `${question.outcomeCount} outcomes`;
-  return "—";
 }
 
 function getModeDescription(mode: ScanMode, filters: BullpenScanFilters) {
@@ -93,6 +131,155 @@ function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
     left.onlyBinaryYesNo === right.onlyBinaryYesNo &&
     left.minYesOdds === right.minYesOdds &&
     left.minNoOdds === right.minNoOdds
+  );
+}
+
+function normalizeError(error: unknown) {
+  if (error instanceof APIError) return error.message;
+  if (error instanceof Error) return error.message;
+  return "Something went wrong.";
+}
+
+function normalizeSnapshot(
+  snapshot: BullpenScanSnapshot | Record<string, unknown> | null | undefined,
+) {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const record = snapshot as Record<string, unknown>;
+  if (!Array.isArray(record.questions) || typeof record.mode !== "string") {
+    return null;
+  }
+
+  return {
+    ...(record as unknown as BullpenScanSnapshot),
+    snapshotId:
+      typeof record.snapshotId === "string"
+        ? record.snapshotId
+        : `bullpen-scan-${Date.now().toString(36)}`,
+    archivedAt:
+      typeof record.archivedAt === "string" ? record.archivedAt : null,
+    questions: record.questions.map((question) =>
+      createBullpenQuestionRow(question as BullpenQuestionRow),
+    ),
+  } satisfies BullpenScanSnapshot;
+}
+
+function readBullpenSnapshotsFromStorage() {
+  if (typeof window === "undefined") return createEmptySnapshotHistory();
+
+  try {
+    const raw = window.localStorage.getItem(BULLPEN_SNAPSHOT_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    const next = createEmptySnapshotHistory();
+
+    for (const mode of ["30-days", "end-of-month"] as const) {
+      const entry =
+        parsed && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>)[mode]
+          : null;
+      if (!entry || typeof entry !== "object") continue;
+
+      const current = normalizeSnapshot(
+        (entry as Record<string, unknown>).current as
+          | BullpenScanSnapshot
+          | Record<string, unknown>
+          | null,
+      );
+      const history = Array.isArray((entry as Record<string, unknown>).history)
+        ? ((entry as Record<string, unknown>).history as Record<string, unknown>[])
+            .map((snapshot) => normalizeSnapshot(snapshot))
+            .filter((snapshot): snapshot is BullpenScanSnapshot => Boolean(snapshot))
+        : [];
+
+      next[mode] = {
+        current,
+        history,
+      };
+    }
+
+    return next;
+  } catch {
+    return createEmptySnapshotHistory();
+  }
+}
+
+function writeBullpenSnapshotsToStorage(
+  snapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>,
+) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      BULLPEN_SNAPSHOT_STORAGE_KEY,
+      JSON.stringify(snapshotsByMode),
+    );
+  } catch {
+    // Keep the screen usable even when localStorage is unavailable.
+  }
+}
+
+function readLastLlmTargetFromStorage() {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(BULLPEN_LAST_LLM_TARGET_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.provider === "string" &&
+      typeof parsed.model === "string"
+    ) {
+      return {
+        provider: parsed.provider,
+        model: parsed.model,
+      } satisfies ProviderModelTarget;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function writeLastLlmTargetToStorage(target: ProviderModelTarget | null) {
+  if (typeof window === "undefined" || !target) return;
+
+  try {
+    window.localStorage.setItem(
+      BULLPEN_LAST_LLM_TARGET_STORAGE_KEY,
+      JSON.stringify(target),
+    );
+  } catch {
+    // Best effort only.
+  }
+}
+
+function getDefaultBullpenLlmTarget(lastTarget: ProviderModelTarget | null) {
+  return lastTarget ?? { provider: "deepseek", model: "deepseek-v4-flash" };
+}
+
+async function waitForBullpenRunCompletion(runId: number) {
+  for (let attempt = 0; attempt < MAX_RUN_POLLS; attempt += 1) {
+    const run = await apiService.getRun(runId);
+    const status = (run.status || "").toLowerCase();
+    if (status === "completed" || status === "partial" || status === "failed") {
+      return run;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, RUN_POLL_INTERVAL_MS));
+  }
+
+  return apiService.getRun(runId);
+}
+
+function getBullpenRunJob(run: RunResponse, target: ProviderModelTarget) {
+  return (
+    run.run_jobs.find(
+      (runJob) =>
+        runJob.job.provider === target.provider &&
+        runJob.job.model === target.model,
+    )?.job ||
+    run.run_jobs[0]?.job ||
+    null
   );
 }
 
@@ -132,28 +319,85 @@ export default function BullpenAiPage() {
   const activeMode: ScanMode =
     searchParams.get("tab") === "end-of-month" ? "end-of-month" : "30-days";
   const activeTab = TABS.find((tab) => tab.mode === activeMode) || TABS[0];
-  const [filtersByMode, setFiltersByMode] = useState<Record<ScanMode, BullpenScanFilters>>(() => ({
+  const [filtersByMode, setFiltersByMode] = useState<
+    Record<ScanMode, BullpenScanFilters>
+  >(() => ({
     "30-days": normalizeBullpenScanFilters("30-days", searchParams),
     "end-of-month": normalizeBullpenScanFilters("end-of-month", searchParams),
   }));
-  const [resultsByMode, setResultsByMode] = useState<Record<ScanMode, ScanResult | null>>({
+  const [snapshotsByMode, setSnapshotsByMode] = useState<
+    Record<ScanMode, BullpenSnapshotHistory>
+  >(createEmptySnapshotHistory);
+  const [selectedSnapshotIdByMode, setSelectedSnapshotIdByMode] = useState<
+    Record<ScanMode, string | null>
+  >(createEmptySnapshotViewMap);
+  const [selectedQuestionIdsByMode, setSelectedQuestionIdsByMode] = useState<
+    Record<ScanMode, string[]>
+  >(createEmptySelectionMap);
+  const [sortByMode, setSortByMode] = useState<
+    Record<ScanMode, BullpenTableSortState>
+  >(createEmptySortMap);
+  const [messagesByMode, setMessagesByMode] = useState<
+    Record<ScanMode, string | null>
+  >({
     "30-days": null,
     "end-of-month": null,
   });
-  const [messagesByMode, setMessagesByMode] = useState<Record<ScanMode, string | null>>({
+  const [llmMessagesByMode, setLlmMessagesByMode] = useState<
+    Record<ScanMode, string | null>
+  >({
     "30-days": null,
     "end-of-month": null,
   });
   const [scanningMode, setScanningMode] = useState<ScanMode | null>(null);
+  const [llmRunningMode, setLlmRunningMode] = useState<ScanMode | null>(null);
+  const [lastLlmTarget, setLastLlmTarget] = useState<ProviderModelTarget | null>(
+    null,
+  );
+  const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
+
+  useEffect(() => {
+    setSnapshotsByMode(readBullpenSnapshotsFromStorage());
+    setLastLlmTarget(readLastLlmTargetFromStorage());
+    setHasLoadedStorage(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) return;
+    writeBullpenSnapshotsToStorage(snapshotsByMode);
+  }, [hasLoadedStorage, snapshotsByMode]);
 
   const activeFilters = filtersByMode[activeMode];
-  const activeResult = resultsByMode[activeMode];
-  const hasFreshResult =
-    activeResult !== null && filtersEqual(activeResult.filters, activeFilters);
-  const visibleResult = hasFreshResult ? activeResult : null;
-  const hasStaleResult = activeResult !== null && !hasFreshResult;
+  const activeSnapshots = snapshotsByMode[activeMode];
+  const activeCurrentSnapshot = activeSnapshots.current;
+  const activeSelectedSnapshotId = selectedSnapshotIdByMode[activeMode];
+  const activeVisibleSnapshot =
+    !activeSelectedSnapshotId ||
+    activeCurrentSnapshot?.snapshotId === activeSelectedSnapshotId
+      ? activeCurrentSnapshot
+      : activeSnapshots.history.find(
+          (snapshot) => snapshot.snapshotId === activeSelectedSnapshotId,
+        ) || activeCurrentSnapshot;
+  const isViewingHistory = Boolean(
+    activeVisibleSnapshot &&
+      activeCurrentSnapshot &&
+      activeVisibleSnapshot.snapshotId !== activeCurrentSnapshot.snapshotId,
+  );
+  const hasStaleResult =
+    activeCurrentSnapshot !== null &&
+    !filtersEqual(activeCurrentSnapshot.filters, activeFilters);
   const notice = messagesByMode[activeMode];
+  const llmNotice = llmMessagesByMode[activeMode];
   const isScanning = scanningMode === activeMode;
+  const isRunningLlm = llmRunningMode === activeMode;
+  const selectionEnabled = Boolean(activeCurrentSnapshot && !isViewingHistory);
+  const selectedQuestionIds = selectionEnabled
+    ? selectedQuestionIdsByMode[activeMode].filter((questionId) =>
+        activeCurrentSnapshot?.questions.some((question) => question.id === questionId),
+      )
+    : [];
+  const selectedQuestionIdSet = new Set(selectedQuestionIds);
+  const selectedQuestionCount = selectedQuestionIds.length;
 
   function updateActiveFilters(patch: Partial<BullpenScanFilters>) {
     setFiltersByMode((current) => ({
@@ -172,6 +416,60 @@ export default function BullpenAiPage() {
     }));
   }
 
+  function setActiveSort(sortKey: BullpenTableSortKey) {
+    setSortByMode((current) => {
+      const previous = current[activeMode];
+      return {
+        ...current,
+        [activeMode]:
+          previous.key === sortKey
+            ? {
+                key: sortKey,
+                direction: previous.direction === "asc" ? "desc" : "asc",
+              }
+            : {
+                key: sortKey,
+                direction: "asc",
+              },
+      };
+    });
+  }
+
+  function toggleQuestionSelection(questionId: string) {
+    if (!selectionEnabled) return;
+
+    setSelectedQuestionIdsByMode((current) => {
+      const next = new Set(current[activeMode]);
+      if (next.has(questionId)) {
+        next.delete(questionId);
+      } else {
+        next.add(questionId);
+      }
+      return {
+        ...current,
+        [activeMode]: Array.from(next),
+      };
+    });
+  }
+
+  function toggleSelectAllQuestions() {
+    if (!selectionEnabled || !activeCurrentSnapshot) return;
+
+    setSelectedQuestionIdsByMode((current) => {
+      const allQuestionIds = activeCurrentSnapshot.questions.map(
+        (question) => question.id,
+      );
+      const everySelected = allQuestionIds.every((questionId) =>
+        current[activeMode].includes(questionId),
+      );
+
+      return {
+        ...current,
+        [activeMode]: everySelected ? [] : allQuestionIds,
+      };
+    });
+  }
+
   async function runScan() {
     const params = buildBullpenScanQueryParams(activeMode, activeFilters);
     setScanningMode(activeMode);
@@ -182,8 +480,36 @@ export default function BullpenAiPage() {
         cache: "no-store",
       });
       const payload = (await response.json()) as ScanResult;
+      const isSuccessfulScan = response.ok && !payload.error;
 
-      setResultsByMode((current) => ({ ...current, [activeMode]: payload }));
+      if (isSuccessfulScan) {
+        const nextSnapshot = createBullpenScanSnapshot(payload);
+
+        setSnapshotsByMode((current) => {
+          const previousCurrent = current[activeMode].current;
+          return {
+            ...current,
+            [activeMode]: {
+              current: nextSnapshot,
+              history: previousCurrent
+                ? [
+                    archiveBullpenScanSnapshot(previousCurrent),
+                    ...current[activeMode].history,
+                  ].slice(0, MAX_BULLPEN_SNAPSHOT_HISTORY)
+                : current[activeMode].history,
+            },
+          };
+        });
+        setSelectedSnapshotIdByMode((current) => ({
+          ...current,
+          [activeMode]: null,
+        }));
+        setSelectedQuestionIdsByMode((current) => ({
+          ...current,
+          [activeMode]: [],
+        }));
+      }
+
       setMessagesByMode((current) => ({
         ...current,
         [activeMode]:
@@ -208,6 +534,128 @@ export default function BullpenAiPage() {
     }
   }
 
+  async function runLlm(target: ProviderModelTarget | null) {
+    if (!target) {
+      setLlmMessagesByMode((current) => ({
+        ...current,
+        [activeMode]: "No configured LLM is available right now.",
+      }));
+      return;
+    }
+
+    if (!activeCurrentSnapshot) {
+      setLlmMessagesByMode((current) => ({
+        ...current,
+        [activeMode]: "Run Bullpen Scan first so there is a current table to analyze.",
+      }));
+      return;
+    }
+
+    if (isViewingHistory) {
+      setLlmMessagesByMode((current) => ({
+        ...current,
+        [activeMode]:
+          "Switch back to the current snapshot before running LLM analysis. Saved history is read-only.",
+      }));
+      return;
+    }
+
+    const selectedQuestions = activeCurrentSnapshot.questions.filter((question) =>
+      selectedQuestionIdSet.has(question.id),
+    );
+
+    if (selectedQuestions.length === 0) {
+      setLlmMessagesByMode((current) => ({
+        ...current,
+        [activeMode]:
+          "Select at least one question from the table before running LLM analysis.",
+      }));
+      return;
+    }
+
+    setLlmRunningMode(activeMode);
+    setLlmMessagesByMode((current) => ({ ...current, [activeMode]: null }));
+    setLastLlmTarget(target);
+    writeLastLlmTargetToStorage(target);
+
+    try {
+      const run = await apiService.createRun({
+        prompt: buildBullpenLlmPrompt(selectedQuestions),
+        targets: [target],
+        allow_parallel: true,
+      });
+      const completedRun = await waitForBullpenRunCompletion(run.id);
+      const job = getBullpenRunJob(completedRun, target);
+
+      if (!job?.response) {
+        const detail = job?.error_message
+          ? job.error_message
+          : (completedRun.status || "").toLowerCase() === "failed"
+            ? `Run failed with status "${completedRun.status}".`
+            : `Run #${completedRun.id} is still processing.`;
+        throw new Error(detail || "The selected LLM did not return any output.");
+      }
+
+      const analysisPayload = parseBullpenLlmAnalysisPayload(job.response);
+
+      setSnapshotsByMode((current) => {
+        const currentSnapshot = current[activeMode].current;
+        if (!currentSnapshot) return current;
+
+        const nextQuestions = currentSnapshot.questions.map((question) => {
+          const analysis = analysisPayload.markets.find(
+            (item) => item.questionId === question.id,
+          );
+          if (!analysis) return question;
+
+          return createBullpenQuestionRow({
+            ...question,
+            llmYesOdds: analysis.llmYesOdds,
+            llmNoOdds: analysis.llmNoOdds,
+            currentVsLlmOddsDifference:
+              analysis.llmYesOdds === null || question.yesOdds === null
+                ? null
+                : Number((question.yesOdds - analysis.llmYesOdds).toFixed(2)),
+            llmNotes: analysis.notes,
+            llmProvider: target.provider,
+            llmModel: target.model,
+            llmRunId: completedRun.id,
+            llmCompletedAt: new Date().toISOString(),
+          });
+        });
+
+        return {
+          ...current,
+          [activeMode]: {
+            ...current[activeMode],
+            current: {
+              ...currentSnapshot,
+              questions: nextQuestions,
+            },
+          },
+        };
+      });
+
+      setLlmMessagesByMode((current) => ({
+        ...current,
+        [activeMode]: `LLM odds updated for ${selectedQuestions.length} selected question${selectedQuestions.length === 1 ? "" : "s"} using ${target.provider} / ${target.model}.`,
+      }));
+    } catch (error) {
+      setLlmMessagesByMode((current) => ({
+        ...current,
+        [activeMode]: normalizeError(error),
+      }));
+    } finally {
+      setLlmRunningMode(null);
+    }
+  }
+
+  const currentTableEmptyMessage = isScanning
+    ? "Scanning Bullpen..."
+    : activeVisibleSnapshot
+      ? "No saved questions are available in this snapshot."
+      : "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions.";
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
       <div>
@@ -220,7 +668,7 @@ export default function BullpenAiPage() {
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
           Run Bullpen scans for non-sports, non-weather, non-market binary
           Yes/No questions inside the selected time window, then inspect the
-          matching markets in a single table.
+          matching markets in a saved table that persists across refresh.
         </p>
       </div>
 
@@ -328,21 +776,21 @@ export default function BullpenAiPage() {
               </p>
             </div>
 
-            <div className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                   Source
                 </p>
                 <p className="mt-2 text-sm text-slate-700">
-                  Scan Bullpen’s trending source for this tab, then fall back to
+                  Scan Bullpen&apos;s trending source for this tab, then fall back to
                   alternate market feeds only if Bullpen access fails.
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="space-y-2">
                 <Button
                   onClick={() => runScan()}
                   disabled={isScanning}
-                  className="gap-2 whitespace-nowrap"
+                  className="w-full gap-2 whitespace-nowrap"
                 >
                   {isScanning ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -351,21 +799,37 @@ export default function BullpenAiPage() {
                   )}
                   Run Bullpen Scan
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => resetActiveFilters()}
-                >
-                  Reset Filters
-                </Button>
-                <a
-                  href={BULLPEN_SOURCE_URLS[activeMode]}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 self-center whitespace-nowrap text-sm font-medium text-purple-700 hover:text-purple-900"
-                >
-                  Open source <ExternalLink className="h-3.5 w-3.5" />
-                </a>
+                <EventScanRunControls
+                  buttonLabel="Run LLM"
+                  containerClassName="gap-0"
+                  defaultTarget={getDefaultBullpenLlmTarget(lastLlmTarget)}
+                  disabled={
+                    !activeCurrentSnapshot || isViewingHistory || selectedQuestionCount === 0
+                  }
+                  onRun={runLlm}
+                  pickerDialogLabel="Select LLM"
+                  pickerIcon={<Menu className="size-4" />}
+                  running={isRunningLlm}
+                  buttonClassName="rounded-r-none"
+                  pickerButtonClassName="h-10 w-10 rounded-l-none rounded-r-none border border-l-0 border-transparent bg-primary text-primary-foreground hover:bg-primary/80 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => resetActiveFilters()}
+                  >
+                    Reset Filters
+                  </Button>
+                  <a
+                    href={BULLPEN_SOURCE_URLS[activeMode]}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 self-center whitespace-nowrap text-sm font-medium text-purple-700 hover:text-purple-900"
+                  >
+                    Open source <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </div>
               </div>
             </div>
           </div>
@@ -416,105 +880,103 @@ export default function BullpenAiPage() {
             </div>
           ) : null}
 
+          {llmNotice ? (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+              {llmNotice}
+            </div>
+          ) : null}
+
           {hasStaleResult ? (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-              Filters changed for this tab after the last scan. Run Bullpen Scan
-              again to refresh the table with the current settings.
+              Filters changed for this tab after the last saved scan. The table
+              below is still showing the previous saved snapshot until you run
+              Bullpen Scan again.
             </div>
           ) : null}
 
-          {visibleResult ? (
+          {activeCurrentSnapshot ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Saved Snapshots
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedSnapshotIdByMode((current) => ({
+                      ...current,
+                      [activeMode]: null,
+                    }))
+                  }
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${!isViewingHistory ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}
+                >
+                  Current · {formatDate(activeCurrentSnapshot.scannedAt)}
+                </button>
+                {activeSnapshots.history.map((snapshot, index) => (
+                  <button
+                    key={snapshot.snapshotId}
+                    type="button"
+                    onClick={() =>
+                      setSelectedSnapshotIdByMode((current) => ({
+                        ...current,
+                        [activeMode]: snapshot.snapshotId,
+                      }))
+                    }
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${activeSelectedSnapshotId === snapshot.snapshotId ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}
+                  >
+                    Saved {index + 1} · {formatDate(snapshot.scannedAt)}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-slate-600">
+                {isViewingHistory
+                  ? "Viewing a saved history version. Switch back to Current to select questions or run LLM analysis."
+                  : "The current table is saved locally with its scan timestamp and will remain visible after refresh."}
+              </p>
+            </div>
+          ) : null}
+
+          {activeVisibleSnapshot ? (
             <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-              <span>{visibleResult.questions.length} matches</span>
-              <span>{visibleResult.totalCandidates} markets scanned</span>
-              <span>Source used: {visibleResult.sourceLabel}</span>
-              <span>Scanned at: {formatDate(visibleResult.scannedAt)}</span>
+              <span>
+                {isViewingHistory ? "Viewing saved version" : "Viewing current version"}
+              </span>
+              <span>{activeVisibleSnapshot.questions.length} matches</span>
+              <span>{activeVisibleSnapshot.totalCandidates} markets scanned</span>
+              <span>Source used: {activeVisibleSnapshot.sourceLabel}</span>
+              <span>Scanned at: {formatDate(activeVisibleSnapshot.scannedAt)}</span>
+              {activeVisibleSnapshot.archivedAt ? (
+                <span>Archived at: {formatDate(activeVisibleSnapshot.archivedAt)}</span>
+              ) : null}
             </div>
           ) : null}
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Question</th>
-                    <th className="px-4 py-3">Closing time</th>
-                    <th className="px-4 py-3">Days left</th>
-                    <th className="px-4 py-3">Category</th>
-                    <th className="px-4 py-3">Outcomes</th>
-                    <th className="px-4 py-3">Yes odds %</th>
-                    <th className="px-4 py-3">No odds %</th>
-                    <th className="px-4 py-3">Volume</th>
-                    <th className="px-4 py-3">Liquidity</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {visibleResult?.questions.length ? (
-                    visibleResult.questions.map((question) => (
-                      <tr key={question.id} className="align-top hover:bg-slate-50">
-                        <td className="max-w-xl px-4 py-3 font-medium text-slate-900">
-                          <div>{question.question}</div>
-                          {question.marketUrl || question.slug ? (
-                            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
-                              {question.marketUrl ? (
-                                <a
-                                  href={question.marketUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1 text-purple-700 hover:text-purple-900"
-                                >
-                                  Open market
-                                  <ExternalLink className="h-3.5 w-3.5" />
-                                </a>
-                              ) : null}
-                              {question.slug ? <span>{question.slug}</span> : null}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {formatDate(question.closeTime)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {formatDays(question.daysUntilClose)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {question.category}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {formatOutcomeSummary(question)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-emerald-700">
-                          {formatOdds(question.yesOdds)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-rose-700">
-                          {formatOdds(question.noOdds)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {question.volume || "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {question.liquidity || "—"}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td
-                        colSpan={9}
-                        className="px-4 py-12 text-center text-slate-500"
-                      >
-                        {isScanning
-                          ? "Scanning Bullpen..."
-                          : hasStaleResult
-                            ? "Filters changed. Click Run Bullpen Scan to refresh the table for this tab."
-                            : "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions."}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+          {activeCurrentSnapshot ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+              <span>
+                {selectionEnabled
+                  ? `${selectedQuestionCount} question${selectedQuestionCount === 1 ? "" : "s"} selected for LLM analysis.`
+                  : "History view is read-only; switch back to Current to select questions."}
+              </span>
+              {lastLlmTarget ? (
+                <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                  Last LLM: {lastLlmTarget.provider} / {lastLlmTarget.model}
+                </span>
+              ) : null}
             </div>
-          </div>
+          ) : null}
+
+          <BullpenQuestionsTable
+            snapshot={activeVisibleSnapshot}
+            emptyMessage={currentTableEmptyMessage}
+            isLoading={isScanning}
+            onSortChange={setActiveSort}
+            selectedQuestionIds={selectedQuestionIdSet}
+            selectionEnabled={selectionEnabled}
+            sortState={sortByMode[activeMode]}
+            onToggleQuestion={toggleQuestionSelection}
+            onToggleSelectAll={toggleSelectAllQuestions}
+          />
         </CardContent>
       </Card>
     </div>

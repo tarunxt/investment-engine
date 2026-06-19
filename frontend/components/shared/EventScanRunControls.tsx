@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Bot, Loader2, Sparkles } from "lucide-react";
@@ -27,11 +28,14 @@ type SavedModelMix = {
 interface EventScanRunControlsProps {
   buttonClassName?: string;
   buttonLabel?: string;
+  containerClassName?: string;
   defaultTarget?: ProviderModelTarget | null;
   disabled?: boolean;
   historicalEstimatedCostInrByTarget?: Record<string, number>;
   onRun: (target: ProviderModelTarget | null) => void | Promise<void>;
   pickerButtonClassName?: string;
+  pickerDialogLabel?: string;
+  pickerIcon?: ReactNode;
   running?: boolean;
 }
 
@@ -144,11 +148,14 @@ function getPreferredTarget(
 export function EventScanRunControls({
   buttonClassName,
   buttonLabel = "Run Events Scan",
+  containerClassName,
   defaultTarget,
   disabled,
   historicalEstimatedCostInrByTarget,
   onRun,
   pickerButtonClassName,
+  pickerDialogLabel = "Choose LLM model",
+  pickerIcon,
   running,
 }: EventScanRunControlsProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -416,7 +423,10 @@ export function EventScanRunControls({
     : buttonLabel;
 
   return (
-    <div ref={containerRef} className="relative flex items-center gap-2">
+    <div
+      ref={containerRef}
+      className={cn("relative flex items-center gap-2", containerClassName)}
+    >
       <Button
         onClick={() => void onRun(activeTarget)}
         disabled={runButtonDisabled}
@@ -433,8 +443,8 @@ export function EventScanRunControls({
 
       <button
         type="button"
-        title="Choose LLM model"
-        aria-label="Choose LLM model"
+        title={pickerDialogLabel}
+        aria-label={pickerDialogLabel}
         aria-expanded={pickerOpen}
         aria-haspopup="dialog"
         onClick={() => {
@@ -449,7 +459,7 @@ export function EventScanRunControls({
           pickerButtonClassName,
         )}
       >
-        <Bot className="size-4" />
+        {pickerIcon ?? <Bot className="size-4" />}
       </button>
 
       {pickerOpen && pickerPosition && typeof document !== "undefined"
@@ -457,7 +467,7 @@ export function EventScanRunControls({
             <div
               ref={pickerPanelRef}
               role="dialog"
-              aria-label="Choose LLM model"
+              aria-label={pickerDialogLabel}
               className="fixed z-[110] overflow-hidden rounded-[26px] border border-slate-200 bg-white text-slate-900 shadow-[0_28px_70px_-26px_rgba(15,23,42,0.45)]"
               style={{
                 top: pickerPosition.top,
