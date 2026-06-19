@@ -33,15 +33,8 @@ const CALENDAR_URL =
 const CLI_SOURCE_URL = "bullpen polymarket discover";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const GAMMA_SOURCE_URL = "Polymarket Gamma API";
-const EXCLUDED_CATEGORIES = [
-  "sport",
-  "sports",
-  "esport",
-  "weather",
-  "market",
-  "crypto",
-];
 const END_OF_MONTH_DATE = "2026-06-30";
+const DISCOVER_FALLBACK_LIMIT = 10_000;
 const CATEGORY_KEYS = [
   "category",
   "categorySlug",
@@ -357,19 +350,6 @@ function normalizeQuestion(
 }
 
 function passesFilters(question: BullpenQuestion, mode: ScanMode) {
-  const categoryText =
-    `${question.category} ${question.question}`.toLowerCase();
-  if (EXCLUDED_CATEGORIES.some((category) => categoryText.includes(category)))
-    return false;
-  // Binary prices cannot have both YES and NO trading above 5x at the same
-  // time, because their implied probabilities sum to roughly 100%. Treat the
-  // scan as looking in both directions and keep markets where either side is
-  // a long-shot opportunity.
-  const hasEligibleLongShot =
-    (question.yesOdds !== null && question.yesOdds > 5) ||
-    (question.noOdds !== null && question.noOdds > 5);
-  if (!hasEligibleLongShot) return false;
-
   if (!question.closeTime) return mode === "30-days";
   const closeDate = new Date(question.closeTime);
   if (Number.isNaN(closeDate.getTime())) return mode === "30-days";
@@ -390,7 +370,6 @@ function collectQuestions(
   payloads: unknown[],
   sourceUrl: string,
   mode: ScanMode,
-  limit: number,
 ) {
   const candidates = new Map<string, BullpenQuestion>();
   for (const payload of payloads) {
@@ -400,7 +379,7 @@ function collectQuestions(
         candidates.set(normalized.id, normalized);
     });
   }
-  return Array.from(candidates.values()).slice(0, limit);
+  return Array.from(candidates.values());
 }
 
 function bullpenProcessEnv() {
@@ -413,30 +392,26 @@ function bullpenProcessEnv() {
   return env;
 }
 
-async function runBullpenDiscover(limit: number) {
+async function runBullpenDiscover() {
   const errors: string[] = [];
   const commandVariants = [
+    ["polymarket", "discover", "--sort", "ending-soon", "--output", "json"],
+    ["polymarket", "discover", "--sort", "ending-soon", "--json"],
     [
       "polymarket",
       "discover",
-      "--sort",
-      "ending-soon",
       "--limit",
-      String(limit),
+      String(DISCOVER_FALLBACK_LIMIT),
       "--output",
       "json",
     ],
     [
       "polymarket",
       "discover",
-      "--sort",
-      "ending-soon",
       "--limit",
-      String(limit),
+      String(DISCOVER_FALLBACK_LIMIT),
       "--json",
     ],
-    ["polymarket", "discover", "--limit", String(limit), "--output", "json"],
-    ["polymarket", "discover", "--limit", String(limit), "--json"],
   ];
 
   for (const candidate of BULLPEN_BIN_CANDIDATES) {
@@ -461,12 +436,12 @@ async function runBullpenDiscover(limit: number) {
   throw new Error(`Bullpen CLI scan failed (${errors.join("; ")})`);
 }
 
-async function fetchGammaMarkets(mode: ScanMode, limit: number) {
+async function fetchGammaMarkets(mode: ScanMode) {
   const params = new URLSearchParams({
     active: "true",
     archived: "false",
     closed: "false",
-    limit: String(Math.max(limit, 500)),
+    limit: String(DISCOVER_FALLBACK_LIMIT),
     order: "endDate",
     ascending: "true",
   });
@@ -492,7 +467,7 @@ async function fetchGammaMarkets(mode: ScanMode, limit: number) {
     if (normalized && passesFilters(normalized, mode))
       candidates.set(normalized.id, normalized);
   }
-  return Array.from(candidates.values()).slice(0, limit);
+  return Array.from(candidates.values());
 }
 
 async function fetchBullpenPage(sourceUrl: string) {
@@ -515,26 +490,16 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const mode =
     searchParams.get("mode") === "end-of-month" ? "end-of-month" : "30-days";
-  const limit = Math.min(
-    Math.max(Number(searchParams.get("limit")) || 100, 1),
-    500,
-  );
   const sourceUrl = mode === "end-of-month" ? CALENDAR_URL : TRENDING_URL;
   const scannedAt = new Date().toISOString();
 
   try {
-    const cliPayload = await runBullpenDiscover(Math.max(limit, 500));
-    const questions = collectQuestions(
-      [cliPayload],
-      CLI_SOURCE_URL,
-      mode,
-      limit,
-    );
+    const cliPayload = await runBullpenDiscover();
+    const questions = collectQuestions([cliPayload], CLI_SOURCE_URL, mode);
     if (questions.length > 0 || mode === "30-days") {
       return NextResponse.json({
         mode,
         sourceUrl: CLI_SOURCE_URL,
-        limit,
         scannedAt,
         questions,
       });
@@ -547,41 +512,39 @@ export async function GET(request: NextRequest) {
         extractEmbeddedJson(html),
         sourceUrl,
         mode,
-        limit,
       );
       return NextResponse.json({
         mode,
         sourceUrl,
-        limit,
         scannedAt,
         questions,
-        warning: questions.length === 0
-          ? "No eligible prediction markets matched the current Bullpen scan filters"
-          : cliError instanceof Error
-            ? cliError.message
-            : "Bullpen CLI scan failed",
+        warning:
+          questions.length === 0
+            ? "No prediction markets matched the current Bullpen scan filters"
+            : cliError instanceof Error
+              ? cliError.message
+              : "Bullpen CLI scan failed",
       });
     } catch (webError) {
       try {
-        const questions = await fetchGammaMarkets(mode, limit);
+        const questions = await fetchGammaMarkets(mode);
         return NextResponse.json({
           mode,
           sourceUrl: GAMMA_SOURCE_URL,
-          limit,
           scannedAt,
           questions,
-          warning: questions.length === 0
-            ? "No eligible prediction markets matched the current Bullpen scan filters"
-            : webError instanceof Error
-              ? webError.message
-              : "Bullpen web scan failed",
+          warning:
+            questions.length === 0
+              ? "No prediction markets matched the current Bullpen scan filters"
+              : webError instanceof Error
+                ? webError.message
+                : "Bullpen web scan failed",
         });
       } catch (gammaError) {
         return NextResponse.json(
           {
             mode,
             sourceUrl,
-            limit,
             scannedAt,
             questions: [],
             error:
