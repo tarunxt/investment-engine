@@ -205,6 +205,34 @@ function readDisplayValue(record: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
+function readDeepString(
+  value: unknown,
+  keys: string[],
+  seen = new Set<unknown>(),
+): string | null {
+  if (!value || typeof value !== "object" || seen.has(value)) return null;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = readDeepString(item, keys, seen);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const direct = readString(record, keys);
+  if (direct) return direct;
+
+  for (const child of Object.values(record)) {
+    const nested = readDeepString(child, keys, seen);
+    if (nested) return nested;
+  }
+
+  return null;
+}
+
 function readOutcomeNumber(
   record: Record<string, unknown>,
   outcomeName: "yes" | "no",
@@ -496,8 +524,11 @@ function normalizeQuestion(
       "noProbability",
     ]),
   );
-  const closeTime = readString(record, CLOSE_TIME_KEYS) || context.closeTime;
-  const slug = readString(record, SLUG_KEYS);
+  const closeTime =
+    readString(record, CLOSE_TIME_KEYS) ||
+    readDeepString(record, CLOSE_TIME_KEYS) ||
+    context.closeTime;
+  const slug = readString(record, SLUG_KEYS) || readDeepString(record, SLUG_KEYS);
   const outcomeLabels = readOutcomeLabels(record);
   const id =
     readString(record, ["id", ...SLUG_KEYS, "marketId", "eventId", "conditionId"]) ||
