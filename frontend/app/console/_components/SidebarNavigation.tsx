@@ -115,6 +115,12 @@ const PORTFOLIO_CHILDREN: NavigationChild[] = [
                 href: URLs.routes.console.polymarketDirectBot(),
                 icon: HiOutlineTrendingUp,
             },
+            {
+                id: 'portfolio-bullpen-ai',
+                name: 'Bullpen x AI',
+                href: URLs.routes.console.bullpenAi(),
+                icon: HiOutlineTrendingUp,
+            },
         ],
     },
 ];
