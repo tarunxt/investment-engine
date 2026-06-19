@@ -728,7 +728,7 @@ function buildKiteBasketUrl(apiKey: string) {
 const INDIA_MARKET_TIME_ZONE = "Asia/Kolkata";
 const INDIA_MARKET_OPEN_MINUTES = 9 * 60 + 15;
 const INDIA_MARKET_CLOSE_MINUTES = 15 * 60 + 30;
-const ZERODHA_AUTO_MARKET_PROTECTION = -1;
+const ZERODHA_MARKET_PROTECTION_PERCENT = 5;
 
 function getIndiaMarketStatus(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -792,7 +792,7 @@ function buildZerodhaKiteBasketPayload(orders: ZerodhaBasketPreviewOrder[], mark
       tag: "credx",
     };
     if (execution.orderType === "MARKET") {
-      payload.market_protection = ZERODHA_AUTO_MARKET_PROTECTION;
+      payload.market_protection = ZERODHA_MARKET_PROTECTION_PERCENT;
     }
     if (execution.orderType === "LIMIT" && order.price) {
       payload.price = Number(order.price.toFixed(2));
@@ -852,7 +852,7 @@ function buildZerodhaKiteClipboardText(orders: ZerodhaBasketPreviewOrder[], mark
   orders.forEach((order) => {
     const execution = getZerodhaBasketOrderExecution(order, marketOpen);
     const price = order.price ? order.price.toFixed(2) : "";
-    const marketProtection = execution.orderType === "MARKET" ? String(ZERODHA_AUTO_MARKET_PROTECTION) : "";
+    const marketProtection = execution.orderType === "MARKET" ? String(ZERODHA_MARKET_PROTECTION_PERCENT) : "";
     lines.push([
       order.exchange,
       order.symbol,
@@ -3139,7 +3139,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Market rows are submitted as MARKET orders with Zerodha automatic market protection; rows explicitly set to Limit keep a refreshed Kite-safe limit price. Closed-market rows are sent as AMO while preserving the selected timing.
+            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Market rows are submitted as MARKET orders with explicit 5% Zerodha market protection; rows explicitly set to Limit keep a refreshed Kite-safe limit price. Closed-market rows are sent as AMO while preserving the selected timing.
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
