@@ -35,6 +35,7 @@ const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const GAMMA_SOURCE_URL = "Polymarket Gamma API";
 const END_OF_MONTH_DATE = "2026-06-30";
 const DISCOVER_FALLBACK_LIMIT = 10_000;
+const GAMMA_PAGE_SIZE = 500;
 const CATEGORY_KEYS = [
   "category",
   "categorySlug",
@@ -271,27 +272,8 @@ function normalizeQuestion(
 
   const category =
     readString(record, CATEGORY_KEYS) || context.category || "Uncategorized";
-  const outcomes = [
-    ...toArray(record.outcomes || record.options || record.markets),
-    ...parseJsonArray(record.outcomes || record.options || record.markets),
-  ]
-    .map((item) =>
-      typeof item === "string"
-        ? item
-        : readString((item || {}) as Record<string, unknown>, [
-            "name",
-            "label",
-            "outcome",
-            "title",
-          ]),
-    )
-    .filter(Boolean) as string[];
-  const hasBinaryOutcomes =
-    outcomes.length === 0 ||
-    (outcomes.length === 2 &&
-      outcomes.some((item) => /^yes$/i.test(item)) &&
-      outcomes.some((item) => /^no$/i.test(item)));
-  if (!hasBinaryOutcomes) return null;
+  // Bullpen's UI time-window tabs do not apply outcome/category/odds filters,
+  // so keep every question-shaped market and only derive Yes/No odds when present.
 
   const yesOdds = normalizeOdds(
     readOutcomeNumber(record, "yes", [
@@ -437,36 +419,61 @@ async function runBullpenDiscover() {
 }
 
 async function fetchGammaMarkets(mode: ScanMode) {
-  const params = new URLSearchParams({
-    active: "true",
-    archived: "false",
-    closed: "false",
-    limit: String(DISCOVER_FALLBACK_LIMIT),
-    order: "endDate",
-    ascending: "true",
-  });
-
-  const response = await fetch(
-    `${POLYMARKET_GAMMA_MARKETS_URL}?${params.toString()}`,
-    {
-      cache: "no-store",
-      headers: { accept: "application/json" },
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Polymarket Gamma returned HTTP ${response.status}`);
-  }
-
-  const payload = await response.json();
-  const rows = Array.isArray(payload) ? payload : [];
   const candidates = new Map<string, BullpenQuestion>();
-  for (const row of rows) {
-    if (!row || typeof row !== "object") continue;
-    const normalized = normalizeGammaMarket(row as Record<string, unknown>);
-    if (normalized && passesFilters(normalized, mode))
-      candidates.set(normalized.id, normalized);
+  let offset = 0;
+
+  while (offset < DISCOVER_FALLBACK_LIMIT) {
+    const params = new URLSearchParams({
+      active: "true",
+      archived: "false",
+      closed: "false",
+      limit: String(GAMMA_PAGE_SIZE),
+      offset: String(offset),
+      order: "endDate",
+      ascending: "true",
+    });
+
+    const response = await fetch(
+      `${POLYMARKET_GAMMA_MARKETS_URL}?${params.toString()}`,
+      {
+        cache: "no-store",
+        headers: { accept: "application/json" },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Polymarket Gamma returned HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const rows = Array.isArray(payload) ? payload : [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const normalized = normalizeGammaMarket(row as Record<string, unknown>);
+      if (normalized && passesFilters(normalized, mode))
+        candidates.set(normalized.id, normalized);
+    }
+
+    if (rows.length < GAMMA_PAGE_SIZE) break;
+    offset += GAMMA_PAGE_SIZE;
+
+    const earliestOutsideWindow = rows.every((row) => {
+      if (!row || typeof row !== "object") return false;
+      const closeTime = readString(
+        row as Record<string, unknown>,
+        CLOSE_TIME_KEYS,
+      );
+      if (!closeTime) return false;
+      const closeDate = new Date(closeTime);
+      if (Number.isNaN(closeDate.getTime())) return false;
+      if (mode === "end-of-month") {
+        return closeDate.toISOString().slice(0, 10) > END_OF_MONTH_DATE;
+      }
+      return closeDate.getTime() - Date.now() >= 30 * 24 * 60 * 60 * 1000;
+    });
+    if (earliestOutsideWindow) break;
   }
+
   return Array.from(candidates.values());
 }
 
@@ -496,7 +503,7 @@ export async function GET(request: NextRequest) {
   try {
     const cliPayload = await runBullpenDiscover();
     const questions = collectQuestions([cliPayload], CLI_SOURCE_URL, mode);
-    if (questions.length > 0 || mode === "30-days") {
+    if (questions.length > 0) {
       return NextResponse.json({
         mode,
         sourceUrl: CLI_SOURCE_URL,
@@ -504,7 +511,7 @@ export async function GET(request: NextRequest) {
         questions,
       });
     }
-    throw new Error("Bullpen CLI returned no June 30 calendar results");
+    throw new Error(`Bullpen CLI returned no ${mode} results`);
   } catch (cliError) {
     try {
       const html = await fetchBullpenPage(sourceUrl);
