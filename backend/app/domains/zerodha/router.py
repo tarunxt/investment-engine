@@ -157,6 +157,7 @@ async def get_login_url(current_user: User = Depends(get_current_user)):
     return ZerodhaLoginUrlResponse(
         login_url=_svc.get_login_url() if _svc.is_configured else "",
         configured=_svc.is_configured,
+        direct_market_orders_enabled=_svc.direct_market_orders_enabled,
     )
 
 
@@ -216,7 +217,10 @@ async def callback(
         "Zerodha connected for user %s, expires %s", current_user.id, expires_at
     )
     return ZerodhaStatusResponse(
-        connected=True, login_time=login_time, expires_at=expires_at
+        connected=True,
+        login_time=login_time,
+        expires_at=expires_at,
+        direct_market_orders_enabled=_svc.direct_market_orders_enabled,
     )
 
 
@@ -238,11 +242,20 @@ async def get_status(
         ),
     }
     if not cred:
-        return ZerodhaStatusResponse(connected=False, **snapshot_meta)
+        return ZerodhaStatusResponse(
+            connected=False,
+            direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+            **snapshot_meta,
+        )
     if cred.expires_at <= datetime.now(tz=timezone.utc):
-        return ZerodhaStatusResponse(connected=False, **snapshot_meta)
+        return ZerodhaStatusResponse(
+            connected=False,
+            direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+            **snapshot_meta,
+        )
     return ZerodhaStatusResponse(
         connected=True,
+        direct_market_orders_enabled=_svc.direct_market_orders_enabled,
         login_time=cred.login_time,
         expires_at=cred.expires_at,
         **snapshot_meta,
@@ -503,8 +516,14 @@ async def place_protected_market_orders(
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
 
-    if not _svc.is_configured:
-        raise HTTPException(503, detail="Zerodha direct order placement is not configured on this server")
+    if not _svc.direct_market_orders_enabled:
+        raise HTTPException(
+            503,
+            detail=(
+                "Zerodha direct MARKET order placement is disabled on this server. "
+                "Use the protected LIMIT Kite basket fallback unless the backend egress IP is allowed in Kite."
+            ),
+        )
 
     token = await repo.get_plaintext_token(current_user.id)
     if not token:

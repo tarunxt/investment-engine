@@ -27,6 +27,10 @@ class ZerodhaService:
     def is_configured(self) -> bool:
         return bool(settings.zerodha_api_key and settings.zerodha_api_secret)
 
+    @property
+    def direct_market_orders_enabled(self) -> bool:
+        return bool(self.is_configured and settings.zerodha_enable_direct_market_orders)
+
     def get_login_url(self) -> str:
         return f"{self.LOGIN_BASE}?v=3&api_key={settings.zerodha_api_key}"
 

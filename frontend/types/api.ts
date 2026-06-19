@@ -438,10 +438,12 @@ export interface HTTPValidationError {
 export interface ZerodhaLoginUrlResponse {
   login_url: string;
   configured: boolean;
+  direct_market_orders_enabled?: boolean;
 }
 
 export interface ZerodhaStatusResponse {
   connected: boolean;
+  direct_market_orders_enabled?: boolean;
   login_time: string | null;
   expires_at: string | null;
   last_portfolio_sync_at?: string | null;
