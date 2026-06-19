@@ -60,7 +60,7 @@ function formatDateOnly(value: string) {
 
 function formatOdds(value: number | null) {
   if (value === null) return "—";
-  return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}x`;
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
 }
 
 function formatDays(value: number | null) {
@@ -288,7 +288,7 @@ export default function BullpenAiPage() {
 
             <div className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Min Yes Odds
+                Min Yes Odds %
               </p>
               <input
                 type="number"
@@ -303,13 +303,13 @@ export default function BullpenAiPage() {
                 className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
               />
               <p className="text-xs leading-5 text-slate-600">
-                Require the Yes side to meet or exceed this decimal odds floor.
+                Require the Yes side to meet or exceed this Bullpen odds percentage floor.
               </p>
             </div>
 
             <div className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Min No Odds
+                Min No Odds %
               </p>
               <input
                 type="number"
@@ -324,7 +324,7 @@ export default function BullpenAiPage() {
                 className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
               />
               <p className="text-xs leading-5 text-slate-600">
-                Require the No side to meet or exceed this decimal odds floor.
+                Require the No side to meet or exceed this Bullpen odds percentage floor.
               </p>
             </div>
 
@@ -442,8 +442,8 @@ export default function BullpenAiPage() {
                     <th className="px-4 py-3">Days left</th>
                     <th className="px-4 py-3">Category</th>
                     <th className="px-4 py-3">Outcomes</th>
-                    <th className="px-4 py-3">Yes odds</th>
-                    <th className="px-4 py-3">No odds</th>
+                    <th className="px-4 py-3">Yes odds %</th>
+                    <th className="px-4 py-3">No odds %</th>
                     <th className="px-4 py-3">Volume</th>
                     <th className="px-4 py-3">Liquidity</th>
                   </tr>

@@ -26,6 +26,7 @@ const WEB_SOURCE_LABEL = "Bullpen trending page";
 const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event";
+const CLI_DISCOVER_LIMIT = 1_000;
 const DISCOVER_FALLBACK_LIMIT = 10_000;
 const GAMMA_PAGE_SIZE = 500;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -295,8 +296,11 @@ function readOutcomeNumber(
 }
 
 function normalizeOdds(value: number | null) {
-  if (value === null || value <= 0) return null;
-  return value <= 1 ? 1 / value : value;
+  if (value === null || value < 0) return null;
+  if (value <= 1) {
+    return Number((value * 100).toFixed(2));
+  }
+  return value;
 }
 
 function walk(
@@ -730,6 +734,15 @@ function sourceHasFutureCandidates(candidates: BullpenQuestion[]) {
   });
 }
 
+function parseBullpenJsonOutput(stdout: string) {
+  const sanitized = stdout
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.startsWith("Update available:"))
+    .join("\n");
+
+  return JSON.parse(sanitized);
+}
+
 function bullpenProcessEnv() {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -743,22 +756,27 @@ function bullpenProcessEnv() {
 async function runBullpenDiscover() {
   const errors: string[] = [];
   const commandVariants = [
-    ["polymarket", "discover", "--sort", "ending-soon", "--output", "json"],
-    ["polymarket", "discover", "--sort", "ending-soon", "--json"],
     [
       "polymarket",
       "discover",
+      "--status",
+      "active",
       "--limit",
-      String(DISCOVER_FALLBACK_LIMIT),
+      String(CLI_DISCOVER_LIMIT),
       "--output",
       "json",
     ],
     [
       "polymarket",
       "discover",
+      "--status",
+      "active",
+      "--sort",
+      "newest",
       "--limit",
-      String(DISCOVER_FALLBACK_LIMIT),
-      "--json",
+      String(CLI_DISCOVER_LIMIT),
+      "--output",
+      "json",
     ],
   ];
 
@@ -770,7 +788,7 @@ async function runBullpenDiscover() {
           timeout: 25_000,
           maxBuffer: 10 * 1024 * 1024,
         });
-        return JSON.parse(stdout);
+        return parseBullpenJsonOutput(stdout);
       } catch (error) {
         const command = `${candidate} ${args.join(" ")}`;
         errors.push(
