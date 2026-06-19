@@ -68,6 +68,8 @@ import {
   ZerodhaPrepareBasketResponse,
   ZerodhaPlaceOrderRequest,
   ZerodhaPlaceOrderResponse,
+  ZerodhaProtectedMarketRequest,
+  ZerodhaProtectedMarketResponse,
   ZerodhaThreatAnalysis,
   ZerodhaThreatHistoryResponse,
   ZerodhaThreatLatestResponse,
@@ -683,6 +685,10 @@ class apiServiceClass implements IApiService {
 
   zerodhaPlaceOrder(data: ZerodhaPlaceOrderRequest): Promise<ZerodhaPlaceOrderResponse> {
     return this.post<ZerodhaPlaceOrderResponse>(URLs.zerodha.orders(), data);
+  }
+
+  zerodhaPlaceProtectedMarketOrders(data: ZerodhaProtectedMarketRequest): Promise<ZerodhaProtectedMarketResponse> {
+    return this.post<ZerodhaProtectedMarketResponse>(URLs.zerodha.placeProtectedMarketOrders(), data);
   }
 
   zerodhaDisconnect(): Promise<{ message: string }> {

@@ -11,6 +11,7 @@ from app.domains.zerodha.basket import (
 from app.domains.zerodha.schemas import (
     ZerodhaPlaceOrderRequest,
     ZerodhaPrepareBasketOrderRequest,
+    ZerodhaProtectedMarketOrderRequest,
 )
 
 
@@ -178,3 +179,45 @@ def test_explicit_limit_order_keeps_validated_limit_price():
 
     assert order.order_type == "LIMIT"
     assert order.price == 143.8
+
+
+def test_direct_protected_market_orders_use_string_market_protection_without_prices():
+    for symbol, qty in [("PFC", 18), ("HAL", 2), ("HINDALCO", 13)]:
+        order = ZerodhaProtectedMarketOrderRequest(
+            tradingsymbol=symbol,
+            exchange="NSE",
+            transaction_type="BUY",
+            quantity=qty,
+            market_protection="-1",
+        )
+        payload = {
+            "variety": "regular",
+            "tradingsymbol": order.tradingsymbol.upper(),
+            "exchange": order.exchange.upper(),
+            "transaction_type": order.transaction_type.upper(),
+            "quantity": str(order.quantity),
+            "product": "CNC",
+            "validity": "DAY",
+            "order_type": "MARKET",
+            "market_protection": order.market_protection,
+        }
+        assert payload["order_type"] == "MARKET"
+        assert payload["market_protection"] == "-1"
+        assert "price" not in payload
+        assert "trigger_price" not in payload
+
+
+def test_direct_protected_market_rejects_missing_zero_or_boolean_protection():
+    for bad_value in ("0", 0, True, False):
+        try:
+            ZerodhaProtectedMarketOrderRequest(
+                tradingsymbol="PFC",
+                exchange="NSE",
+                transaction_type="BUY",
+                quantity=18,
+                market_protection=bad_value,
+            )
+        except ValueError as exc:
+            assert "market_protection" in str(exc)
+        else:
+            raise AssertionError(f"market_protection {bad_value!r} should be rejected")

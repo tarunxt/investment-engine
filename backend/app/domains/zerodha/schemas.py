@@ -151,6 +151,73 @@ class ZerodhaPrepareBasketResponse(BaseModel):
     adjusted_count: int
 
 
+class ZerodhaProtectedMarketOrderRequest(BaseModel):
+    tradingsymbol: str
+    exchange: str
+    transaction_type: str
+    quantity: int
+    product: str = "CNC"
+    validity: str = "DAY"
+    market_protection: str = "-1"
+
+    @field_validator("quantity")
+    @classmethod
+    def protected_quantity_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("quantity must be positive")
+        return v
+
+    @field_validator("exchange")
+    @classmethod
+    def validate_protected_exchange(cls, v: str) -> str:
+        normalized = v.upper()
+        if normalized not in ("NSE", "BSE"):
+            raise ValueError("exchange must be NSE or BSE")
+        return normalized
+
+    @field_validator("transaction_type")
+    @classmethod
+    def validate_protected_transaction_type(cls, v: str) -> str:
+        normalized = v.upper()
+        if normalized not in ("BUY", "SELL"):
+            raise ValueError("transaction_type must be BUY or SELL")
+        return normalized
+
+    @field_validator("market_protection", mode="before")
+    @classmethod
+    def validate_protected_market_protection(cls, v):
+        if isinstance(v, bool):
+            raise ValueError("market_protection must be a decimal string, not boolean")
+        text = str(v).strip()
+        if text in ("", "0", "0.0"):
+            raise ValueError("market_protection must be -1 or a positive percentage")
+        if text != "-1":
+            value = float(text)
+            if value <= 0 or value > 100:
+                raise ValueError("market_protection must be -1 or a positive percentage up to 100")
+        return text
+
+
+class ZerodhaProtectedMarketRequest(BaseModel):
+    orders: list[ZerodhaProtectedMarketOrderRequest]
+
+
+class ZerodhaProtectedMarketOrderResult(BaseModel):
+    tradingsymbol: str
+    exchange: str
+    transaction_type: str
+    quantity: int
+    status: str
+    order_id: str | None = None
+    error: str | None = None
+
+
+class ZerodhaProtectedMarketResponse(BaseModel):
+    results: list[ZerodhaProtectedMarketOrderResult]
+    placed_count: int
+    failed_count: int
+
+
 class ZerodhaPortfolioHolding(BaseModel):
     tradingsymbol: str
     exchange: str

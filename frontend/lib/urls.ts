@@ -239,6 +239,7 @@ export const URLs = {
     portfolioSnapshot: (snapshotDate: string) => `${resolveApiBaseUrl()}/zerodha/portfolio/${snapshotDate}`,
     orders: () => `${resolveApiBaseUrl()}/zerodha/orders`,
     prepareBasketOrders: () => `${resolveApiBaseUrl()}/zerodha/orders/prepare-basket`,
+    placeProtectedMarketOrders: () => `${resolveApiBaseUrl()}/zerodha/orders/place-protected-market`,
     disconnect: () => `${resolveApiBaseUrl()}/zerodha/disconnect`,
     eventsLatest: () => `${resolveApiBaseUrl()}/zerodha/events/latest`,
     eventsHistory: () => `${resolveApiBaseUrl()}/zerodha/events/history`,
