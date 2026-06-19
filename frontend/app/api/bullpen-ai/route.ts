@@ -208,26 +208,34 @@ function readDisplayValue(record: Record<string, unknown>, keys: string[]) {
 function readDeepString(
   value: unknown,
   keys: string[],
-  seen = new Set<unknown>(),
 ): string | null {
-  if (!value || typeof value !== "object" || seen.has(value)) return null;
-  seen.add(value);
+  const seen = new Set<unknown>();
+  const stack: unknown[] = [value];
+  let inspected = 0;
 
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const nested = readDeepString(item, keys, seen);
-      if (nested) return nested;
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    inspected += 1;
+
+    // Bound the traversal so a very large payload cannot blow up route latency.
+    if (inspected > 10_000) break;
+
+    if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        stack.push(current[index]);
+      }
+      continue;
     }
-    return null;
-  }
 
-  const record = value as Record<string, unknown>;
-  const direct = readString(record, keys);
-  if (direct) return direct;
+    const record = current as Record<string, unknown>;
+    const direct = readString(record, keys);
+    if (direct) return direct;
 
-  for (const child of Object.values(record)) {
-    const nested = readDeepString(child, keys, seen);
-    if (nested) return nested;
+    for (const child of Object.values(record)) {
+      stack.push(child);
+    }
   }
 
   return null;
