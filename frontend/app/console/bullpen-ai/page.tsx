@@ -73,19 +73,26 @@ export default function BullpenAiPage() {
 
   const filteredResult = useMemo(() => (result?.mode === activeMode ? result : null), [activeMode, result]);
 
-  async function runScan() {
+  async function runScan(scanLimit = limit) {
     setIsScanning(true);
     setError(null);
     try {
-      const response = await fetch(`/api/bullpen-ai?mode=${activeMode}&limit=${limit}`, { cache: "no-store" });
+      const response = await fetch(`/api/bullpen-ai?mode=${activeMode}&limit=${scanLimit}`, { cache: "no-store" });
       const payload = (await response.json()) as ScanResult;
       setResult(payload);
+      setLimit(payload.limit || scanLimit);
       if (!response.ok || payload.error) setError(payload.error || "Bullpen scan failed.");
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : "Bullpen scan failed.");
     } finally {
       setIsScanning(false);
     }
+  }
+
+  function chooseLimit(nextLimit: number) {
+    if (isScanning) return;
+    setLimit(nextLimit);
+    void runScan(nextLimit);
   }
 
   return (
@@ -136,7 +143,7 @@ export default function BullpenAiPage() {
                       type="button"
                       variant={limit === preset ? "default" : "outline"}
                       size="sm"
-                      onClick={() => setLimit(preset)}
+                      onClick={() => chooseLimit(preset)}
                       disabled={isScanning}
                       className="h-9 px-3 text-xs"
                     >
@@ -146,10 +153,10 @@ export default function BullpenAiPage() {
                 </div>
               </div>
               <p className="text-xs leading-relaxed text-slate-500">
-                Choose how many Bullpen questions to inspect before filtering for eligible odds. Higher limits scan broader, but may take longer.
+                Choose a preset to scan immediately, or enter a custom limit and click Run Bullpen Scan. Higher limits scan broader, but may take longer.
               </p>
             </div>
-            <Button onClick={runScan} disabled={isScanning} className="gap-2">
+            <Button onClick={() => runScan()} disabled={isScanning} className="gap-2">
               {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Run Bullpen Scan
             </Button>
@@ -193,7 +200,7 @@ export default function BullpenAiPage() {
                   )) : (
                     <tr>
                       <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
-                        {isScanning ? "Scanning Bullpen..." : "No scan results yet. Use the Question limit field or a preset, then click Run Bullpen Scan."}
+                        {isScanning ? "Scanning Bullpen..." : "No scan results yet. Choose a preset to scan immediately, or enter a custom limit and click Run Bullpen Scan."}
                       </td>
                     </tr>
                   )}
