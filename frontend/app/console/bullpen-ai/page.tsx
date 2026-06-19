@@ -33,6 +33,7 @@ type ScanResult = {
   scannedAt: string;
   questions: BullpenQuestion[];
   error?: string;
+  warning?: string;
 };
 
 const TABS: { mode: ScanMode; label: string; href: string; description: string }[] = [
@@ -82,6 +83,10 @@ export default function BullpenAiPage() {
       setResult(payload);
       setLimit(payload.limit || scanLimit);
       if (!response.ok || payload.error) setError(payload.error || "Bullpen scan failed.");
+      else if (payload.warning) setError(payload.warning);
+      else if (payload.questions.length === 0) {
+        setError("No eligible Bullpen questions matched the current scan filters. Try a higher limit or rerun the scan later");
+      }
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : "Bullpen scan failed.");
     } finally {
@@ -123,7 +128,7 @@ export default function BullpenAiPage() {
           <CardDescription>{activeTab.description}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-end gap-4">
             <div className="min-w-64 space-y-2">
               <Label htmlFor="bullpen-limit">Question limit</Label>
               <div className="flex flex-wrap items-center gap-2">
@@ -156,11 +161,11 @@ export default function BullpenAiPage() {
                 Choose a preset to scan immediately, or enter a custom limit and click Run Bullpen Scan. Higher limits scan broader, but may take longer.
               </p>
             </div>
-            <Button onClick={() => runScan()} disabled={isScanning} className="gap-2">
+            <Button onClick={() => runScan()} disabled={isScanning} className="gap-2 whitespace-nowrap">
               {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Run Bullpen Scan
             </Button>
-            <a href={filteredResult?.sourceUrl || (activeMode === "end-of-month" ? "https://app.bullpen.fi/predictions/trending?primaryMode=calendar&ref=intrepid-crane-3" : "https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3")} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-purple-700 hover:text-purple-900">
+            <a href={filteredResult?.sourceUrl || (activeMode === "end-of-month" ? "https://app.bullpen.fi/predictions/trending?primaryMode=calendar&ref=intrepid-crane-3" : "https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3")} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 whitespace-nowrap text-sm font-medium text-purple-700 hover:text-purple-900">
               Open source <ExternalLink className="h-3.5 w-3.5" />
             </a>
           </div>

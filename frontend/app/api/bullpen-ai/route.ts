@@ -537,19 +537,21 @@ export async function GET(request: NextRequest) {
   } catch (cliError) {
     try {
       const html = await fetchBullpenPage(sourceUrl);
+      const questions = collectQuestions(
+        extractEmbeddedJson(html),
+        sourceUrl,
+        mode,
+        limit,
+      );
       return NextResponse.json({
         mode,
         sourceUrl,
         limit,
         scannedAt,
-        questions: collectQuestions(
-          extractEmbeddedJson(html),
-          sourceUrl,
-          mode,
-          limit,
-        ),
-        warning:
-          cliError instanceof Error
+        questions,
+        warning: questions.length === 0
+          ? "No eligible prediction markets matched the current Bullpen scan filters"
+          : cliError instanceof Error
             ? cliError.message
             : "Bullpen CLI scan failed",
       });
@@ -562,8 +564,9 @@ export async function GET(request: NextRequest) {
           limit,
           scannedAt,
           questions,
-          warning:
-            webError instanceof Error
+          warning: questions.length === 0
+            ? "No eligible prediction markets matched the current Bullpen scan filters"
+            : webError instanceof Error
               ? webError.message
               : "Bullpen web scan failed",
         });
