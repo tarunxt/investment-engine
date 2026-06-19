@@ -754,11 +754,7 @@ function getIndiaMarketStatus(now = new Date()) {
 
 function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean) {
   return {
-    // Kite Publisher basket MARKET rows have been observed to arrive in Kite
-    // with Price=0 and then fail during placement. The backend already prepares
-    // a refreshed, marketable limit price for every selected row, so submit all
-    // Publisher rows as LIMIT while preserving the user's regular/AMO timing.
-    orderType: "LIMIT" as const,
+    orderType: order.orderKind === "Limit" ? "LIMIT" as const : "MARKET" as const,
     variety: order.orderKind === "After market" || !marketOpen ? "amo" : "regular",
   };
 }
@@ -3137,7 +3133,7 @@ function ZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Rows are submitted as marketable LIMIT orders using refreshed Kite-safe prices so Kite does not receive Price=0 MARKET rows. Closed-market rows are sent as AMO while preserving the selected timing.
+            Selected rows are posted to Zerodha Kite Publisher in batches of up to {ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders to avoid Kite leaving later rows unsubmitted. Market rows are submitted as MARKET orders without a limit price; rows explicitly set to Limit keep a refreshed Kite-safe limit price. Closed-market rows are sent as AMO while preserving the selected timing.
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
