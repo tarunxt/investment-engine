@@ -19,6 +19,10 @@ type BullpenQuestion = {
 };
 
 type ScanMode = "30-days" | "end-of-month";
+type WalkContext = {
+  closeTime: string | null;
+  category: string | null;
+};
 
 const execFileAsync = promisify(execFile);
 
@@ -27,6 +31,21 @@ const CALENDAR_URL = "https://app.bullpen.fi/predictions/trending?primaryMode=ca
 const CLI_SOURCE_URL = "bullpen polymarket discover";
 const EXCLUDED_CATEGORIES = ["sport", "sports", "esport", "weather", "market", "crypto"];
 const END_OF_MONTH_DATE = "2026-06-30";
+const CATEGORY_KEYS = ["category", "categorySlug", "type", "topic", "primaryCategory", "categoryName", "group", "tag"];
+const CLOSE_TIME_KEYS = [
+  "closeTime",
+  "closingTime",
+  "endDate",
+  "end_date",
+  "endTime",
+  "resolutionDate",
+  "endDateIso",
+  "endDateISO",
+  "closesAt",
+  "closedAt",
+  "deadline",
+  "expiry",
+];
 const BULLPEN_BIN_CANDIDATES = [
   process.env.BULLPEN_BIN,
   "/usr/local/bin/bullpen",
@@ -43,31 +62,73 @@ function readString(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function parseNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[%x,$,]/g, ""));
+    if (Number.isFinite(parsed)) return parsed;
   }
   return null;
 }
 
 function readNumber(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string") {
-      const parsed = Number(value.replace(/[%x,$,]/g, ""));
-      if (Number.isFinite(parsed)) return parsed;
-    }
+    const parsed = parseNumber(record[key]);
+    if (parsed !== null) return parsed;
   }
   return null;
 }
 
-function walk(value: unknown, visit: (record: Record<string, unknown>) => void) {
+function readDisplayValue(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  }
+  return null;
+}
+
+function readOutcomeNumber(record: Record<string, unknown>, outcomeName: "yes" | "no", keys: string[]) {
+  const direct = readNumber(record, keys);
+  if (direct !== null) return direct;
+
+  for (const collection of [record.outcomes, record.options, record.tokens, record.markets]) {
+    for (const item of toArray(collection)) {
+      if (!item || typeof item !== "object") continue;
+      const outcome = item as Record<string, unknown>;
+      const label = readString(outcome, ["name", "label", "outcome", "title", "side"]);
+      if (!label || label.toLowerCase() !== outcomeName) continue;
+      const value = readNumber(outcome, ["odds", "decimalOdds", "price", "lastPrice", "bestAsk", "bestBid", "probability", "probabilityValue"]);
+      if (value !== null) return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizeOdds(value: number | null) {
+  if (value === null || value <= 0) return null;
+  return value <= 1 ? 1 / value : value;
+}
+
+function walk(value: unknown, visit: (record: Record<string, unknown>, context: WalkContext) => void, context: WalkContext = { closeTime: null, category: null }) {
   if (!value || typeof value !== "object") return;
   if (Array.isArray(value)) {
-    value.forEach((item) => walk(item, visit));
+    value.forEach((item) => walk(item, visit, context));
     return;
   }
   const record = value as Record<string, unknown>;
-  visit(record);
-  Object.values(record).forEach((child) => walk(child, visit));
+  const nextContext = {
+    closeTime: readString(record, CLOSE_TIME_KEYS) || context.closeTime,
+    category: readString(record, CATEGORY_KEYS) || context.category,
+  };
+  visit(record, nextContext);
+  Object.values(record).forEach((child) => walk(child, visit, nextContext));
 }
 
 function extractEmbeddedJson(html: string) {
@@ -85,23 +146,21 @@ function extractEmbeddedJson(html: string) {
   });
 }
 
-function normalizeQuestion(record: Record<string, unknown>, sourceUrl: string): BullpenQuestion | null {
+function normalizeQuestion(record: Record<string, unknown>, sourceUrl: string, context: WalkContext): BullpenQuestion | null {
   const question = readString(record, ["question", "title", "name", "eventTitle", "marketQuestion"]);
   if (!question || question.length < 8) return null;
 
-  const category = readString(record, ["category", "categorySlug", "type", "topic", "primaryCategory"]) || "Uncategorized";
-  const outcomes = toArray(record.outcomes || record.options || record.markets).map((item) =>
-    typeof item === "string" ? item : readString((item || {}) as Record<string, unknown>, ["name", "label", "outcome", "title"]),
-  ).filter(Boolean) as string[];
-  const hasBinaryOutcomes = outcomes.length === 0 || (
-    outcomes.length === 2 && outcomes.some((item) => /^yes$/i.test(item)) && outcomes.some((item) => /^no$/i.test(item))
-  );
+  const category = readString(record, CATEGORY_KEYS) || context.category || "Uncategorized";
+  const outcomes = toArray(record.outcomes || record.options || record.markets)
+    .map((item) => (typeof item === "string" ? item : readString((item || {}) as Record<string, unknown>, ["name", "label", "outcome", "title"])))
+    .filter(Boolean) as string[];
+  const hasBinaryOutcomes = outcomes.length === 0 || (outcomes.length === 2 && outcomes.some((item) => /^yes$/i.test(item)) && outcomes.some((item) => /^no$/i.test(item)));
   if (!hasBinaryOutcomes) return null;
 
-  const yesOdds = readNumber(record, ["yesOdds", "yes_odd", "yesPrice", "yes", "bestYesOdds", "probabilityYes"]);
-  const noOdds = readNumber(record, ["noOdds", "no_odd", "noPrice", "no", "bestNoOdds", "probabilityNo"]);
-  const closeTime = readString(record, ["closeTime", "closingTime", "endDate", "end_date", "endTime", "resolutionDate"]);
-  const id = readString(record, ["id", "slug", "marketId", "eventId"]) || `${question}-${closeTime || "unknown"}`;
+  const yesOdds = normalizeOdds(readOutcomeNumber(record, "yes", ["yesOdds", "yes_odd", "yesDecimalOdds", "yesPrice", "yes", "bestYesOdds", "probabilityYes", "yesProbability"]));
+  const noOdds = normalizeOdds(readOutcomeNumber(record, "no", ["noOdds", "no_odd", "noDecimalOdds", "noPrice", "no", "bestNoOdds", "probabilityNo", "noProbability"]));
+  const closeTime = readString(record, CLOSE_TIME_KEYS) || context.closeTime;
+  const id = readString(record, ["id", "slug", "marketId", "eventId", "conditionId"]) || `${question}-${closeTime || "unknown"}`;
 
   return {
     id,
@@ -110,8 +169,8 @@ function normalizeQuestion(record: Record<string, unknown>, sourceUrl: string): 
     category,
     yesOdds,
     noOdds,
-    volume: readString(record, ["volume", "volume24hr", "volume24h", "totalVolume"]),
-    liquidity: readString(record, ["liquidity", "liquidityNum"]),
+    volume: readDisplayValue(record, ["volume", "volume24hr", "volume24h", "totalVolume", "volumeNum", "volumeUsd", "volumeUSD", "dollarVolume"]),
+    liquidity: readDisplayValue(record, ["liquidity", "liquidityNum", "liquidityUsd", "liquidityUSD"]),
     sourceUrl,
   };
 }
@@ -138,8 +197,8 @@ function passesFilters(question: BullpenQuestion, mode: ScanMode) {
 function collectQuestions(payloads: unknown[], sourceUrl: string, mode: ScanMode, limit: number) {
   const candidates = new Map<string, BullpenQuestion>();
   for (const payload of payloads) {
-    walk(payload, (record) => {
-      const normalized = normalizeQuestion(record, sourceUrl);
+    walk(payload, (record, context) => {
+      const normalized = normalizeQuestion(record, sourceUrl, context);
       if (normalized && passesFilters(normalized, mode)) candidates.set(normalized.id, normalized);
     });
   }
@@ -203,14 +262,18 @@ export async function GET(request: NextRequest) {
   const scannedAt = new Date().toISOString();
 
   try {
-    const cliPayload = await runBullpenDiscover(Math.max(limit, 100));
-    return NextResponse.json({
-      mode,
-      sourceUrl: CLI_SOURCE_URL,
-      limit,
-      scannedAt,
-      questions: collectQuestions([cliPayload], CLI_SOURCE_URL, mode, limit),
-    });
+    const cliPayload = await runBullpenDiscover(Math.max(limit, 500));
+    const questions = collectQuestions([cliPayload], CLI_SOURCE_URL, mode, limit);
+    if (questions.length > 0 || mode === "30-days") {
+      return NextResponse.json({
+        mode,
+        sourceUrl: CLI_SOURCE_URL,
+        limit,
+        scannedAt,
+        questions,
+      });
+    }
+    throw new Error("Bullpen CLI returned no June 30 calendar results");
   } catch (cliError) {
     try {
       const html = await fetchBullpenPage(sourceUrl);
