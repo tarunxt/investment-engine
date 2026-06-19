@@ -70,6 +70,24 @@ def test_prepare_basket_fallback_uses_requested_price_when_quotes_forbidden():
     assert "live_quote_unavailable_using_requested_price" in prepared.reasons
 
 
+def test_prepare_basket_fallback_uses_client_last_price_when_quotes_forbidden():
+    order = ZerodhaPrepareBasketOrderRequest(
+        tradingsymbol="pfc",
+        exchange="nse",
+        transaction_type="BUY",
+        quantity=18,
+        price=580,
+        last_price=429.40,
+    )
+
+    prepared = prepare_basket_order_from_request(order)
+
+    assert prepared.price == 433.70
+    assert prepared.last_price == 429.40
+    assert prepared.adjusted is True
+    assert "using_ltp_derived_marketable_limit" in prepared.reasons
+    assert "live_quote_unavailable_using_client_last_price" in prepared.reasons
+
 def test_kite_quote_permission_error_detection_matches_reported_message():
     assert is_kite_quote_permission_error_message(
         "Insufficient permission for that call."

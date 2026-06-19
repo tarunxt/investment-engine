@@ -109,6 +109,7 @@ class ZerodhaPrepareBasketOrderRequest(BaseModel):
     transaction_type: str
     quantity: int
     price: float
+    last_price: float | None = None
 
     @field_validator("quantity")
     @classmethod

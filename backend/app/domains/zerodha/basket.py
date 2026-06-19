@@ -24,14 +24,18 @@ def prepare_basket_order_from_request(
         ZerodhaPriceGuardInput(
             side=order.transaction_type,
             requested_price=order.price,
-            last_price=None,
+            last_price=order.last_price,
             lower_circuit_limit=None,
             upper_circuit_limit=None,
             tick_size=None,
         )
     )
     reasons = list(guard.reasons)
-    reasons.append("live_quote_unavailable_using_requested_price")
+    reasons.append(
+        "live_quote_unavailable_using_client_last_price"
+        if order.last_price
+        else "live_quote_unavailable_using_requested_price"
+    )
     return ZerodhaPreparedBasketOrder(
         tradingsymbol=order.tradingsymbol.upper(),
         exchange=order.exchange.upper(),
@@ -39,7 +43,7 @@ def prepare_basket_order_from_request(
         quantity=order.quantity,
         requested_price=order.price,
         price=guard.price,
-        last_price=order.price,
+        last_price=order.last_price or order.price,
         tick_size=guard.tick_size,
         lower_circuit_limit=None,
         upper_circuit_limit=None,

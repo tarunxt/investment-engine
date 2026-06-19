@@ -189,6 +189,7 @@ type ZerodhaBasketPreviewOrder = {
   baseUnits: number | null;
   currentUnits: number | null;
   price: number | null;
+  lastPrice: number | null;
   amount: number | null;
   availableBalance: number | null;
   percent: ZerodhaBasketOrderPercent;
@@ -811,11 +812,19 @@ async function prepareZerodhaBasketOrdersForKite(orders: ZerodhaBasketPreviewOrd
       transaction_type: order.side,
       quantity: Math.max(1, Math.floor(order.units ?? 0)),
       price: order.price ?? 0,
+      last_price: order.lastPrice ?? undefined,
     })),
   });
   return orders.map((order, index) => {
     const prepared = response.orders[index];
-    return prepared ? { ...order, price: prepared.price, amount: calculateZerodhaBasketAmount(order.units, prepared.price) } : order;
+    return prepared
+      ? {
+          ...order,
+          price: prepared.price,
+          lastPrice: prepared.last_price,
+          amount: calculateZerodhaBasketAmount(order.units, prepared.price),
+        }
+      : order;
   });
 }
 
@@ -1126,7 +1135,8 @@ function buildZerodhaBasketPreviewOrders(
       const requestedPercent: ZerodhaBasketOrderPercent = action === "Trim" ? 50 : 100;
       const baseUnits = getZerodhaBasketBaseUnits(action, estimate);
       const normalizedSymbol = normalizeZerodhaBasketSymbol(stock.symbol) || stock.symbol;
-      const price = getBasketPrice(stock, estimate.amount, estimate.units, snapshotPriceBySymbol.get(normalizedSymbol) ?? null);
+      const snapshotPrice = snapshotPriceBySymbol.get(normalizedSymbol) ?? null;
+      const price = getBasketPrice(stock, estimate.amount, estimate.units, snapshotPrice);
       const rawUnits = calculatePercentBasketUnits(baseUnits, requestedPercent);
       const sellAvailableUnits = estimate.currentUnits ?? baseUnits;
       const maxUnits = side === "SELL"
@@ -1152,6 +1162,7 @@ function buildZerodhaBasketPreviewOrders(
         currentUnits: estimate.currentUnits,
         price,
         amount,
+        lastPrice: snapshotPrice,
         availableBalance,
         percent,
         orderKind: "Market" as const,
