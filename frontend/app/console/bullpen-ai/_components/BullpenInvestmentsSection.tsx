@@ -5,13 +5,11 @@ import { ExternalLink, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
+import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 import { cn } from "@/lib/utils";
 import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
-import {
-  BullpenPositionsDialog,
-  type BullpenActivePositionView,
-} from "./BullpenPositionsDialog";
+import { BullpenPositionsDialog } from "./BullpenPositionsDialog";
 
 function formatDate(value: string | null) {
   if (!value) return "—";
@@ -45,11 +43,15 @@ export function BullpenInvestmentsSection({
   activePositionsCount,
   activePositions,
   candidates,
+  claimError,
+  claimStatusMessage,
   emptyMessage,
   isHistoryView,
+  isClaimingPositions,
   isInvesting,
   isLoadingPositions,
   isRefreshingCurrentOdds,
+  onClaimNow,
   onInvest,
   onRefreshPositions,
   onRefreshCurrentOdds,
@@ -64,11 +66,15 @@ export function BullpenInvestmentsSection({
   activePositionsCount: number | null;
   activePositions: BullpenActivePositionView[];
   candidates: BullpenQuestionRow[];
+  claimError: string | null;
+  claimStatusMessage: string | null;
   emptyMessage: string;
   isHistoryView: boolean;
+  isClaimingPositions: boolean;
   isInvesting: boolean;
   isLoadingPositions: boolean;
   isRefreshingCurrentOdds: boolean;
+  onClaimNow: () => void;
   onInvest: () => void;
   onRefreshPositions: () => void;
   onRefreshCurrentOdds: () => void;
@@ -371,8 +377,12 @@ export function BullpenInvestmentsSection({
 
       {isPositionsDialogOpen ? (
         <BullpenPositionsDialog
+          claimError={claimError}
+          claimStatusMessage={claimStatusMessage}
+          isClaiming={isClaimingPositions}
           isLoading={isLoadingPositions}
           lastUpdatedAt={positionsLastUpdatedAt}
+          onClaimNow={onClaimNow}
           onClose={() => setIsPositionsDialogOpen(false)}
           onRefresh={onRefreshPositions}
           positions={activePositions}

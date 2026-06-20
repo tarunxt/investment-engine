@@ -1,0 +1,272 @@
+export type BullpenActivePositionView = {
+  key: string;
+  marketId: string;
+  marketTitle: string;
+  outcome: string;
+  shares: number;
+  averagePrice: number | null;
+  costBasis: number;
+  currentPrice: number | null;
+  currentValue: number | null;
+  unrealizedPnl: number | null;
+  unrealizedPnlPercent: number | null;
+  marketUrl: string | null;
+  closeTime: string | null;
+  isClaimable: boolean;
+  claimableValue: number | null;
+};
+
+export type BullpenPositionsSummary = {
+  activeCount: number;
+  claimableCount: number;
+  claimableValue: number;
+  cashBalance: number | null;
+  totalValue: number | null;
+  unrealizedPnl: number | null;
+  walletValue: number | null;
+};
+
+export type BullpenPositionsResponse = {
+  positions?: BullpenActivePositionView[];
+  summary?: BullpenPositionsSummary;
+  fetchedAt?: string;
+  error?: string;
+};
+
+export type BullpenCliPosition = {
+  action?: unknown;
+  avg_price?: unknown;
+  avgPrice?: unknown;
+  claimable?: unknown;
+  claimableValue?: unknown;
+  claimable_value?: unknown;
+  condition_id?: unknown;
+  currentPrice?: unknown;
+  current_price?: unknown;
+  currentValue?: unknown;
+  current_value?: unknown;
+  endDate?: unknown;
+  end_date?: unknown;
+  eventSlug?: unknown;
+  event_slug?: unknown;
+  investedUsd?: unknown;
+  invested_usd?: unknown;
+  isClaimable?: unknown;
+  isRedeemable?: unknown;
+  market?: unknown;
+  outcome?: unknown;
+  pnlPercent?: unknown;
+  pnl_percent?: unknown;
+  redeemable?: unknown;
+  redeemableValue?: unknown;
+  redeemable_value?: unknown;
+  shares?: unknown;
+  slug?: unknown;
+  status?: unknown;
+  title?: unknown;
+  unrealizedPnl?: unknown;
+  unrealized_pnl?: unknown;
+};
+
+export type BullpenCliPositionsPayload = {
+  positions?: unknown;
+  summary?: Record<string, unknown> | null;
+};
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[%,$\s]/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function readPrice(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1 && value <= 100 ? value / 100 : value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.endsWith("c")) {
+      const parsed = Number(normalized.replace(/[,$c\s]/g, ""));
+      return Number.isFinite(parsed) ? parsed / 100 : null;
+    }
+    const parsed = readNumber(value);
+    if (parsed === null) return null;
+    return parsed > 1 && parsed <= 100 ? parsed / 100 : parsed;
+  }
+  return null;
+}
+
+function readBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    if (
+      [
+        "true",
+        "yes",
+        "y",
+        "1",
+        "claimable",
+        "redeemable",
+        "won",
+      ].includes(normalized)
+    ) {
+      return true;
+    }
+    if (["false", "no", "n", "0", "open"].includes(normalized)) {
+      return false;
+    }
+  }
+  return null;
+}
+
+function round(value: number, digits: number) {
+  return Number(value.toFixed(digits));
+}
+
+function extractClaimableStatus(value: BullpenCliPosition) {
+  const flags = [
+    value.redeemable,
+    value.isRedeemable,
+    value.claimable,
+    value.isClaimable,
+  ]
+    .map(readBoolean)
+    .filter((flag): flag is boolean => flag !== null);
+  if (flags.includes(true)) return true;
+
+  const claimText = [value.action, value.status]
+    .map(readString)
+    .filter((entry): entry is string => Boolean(entry))
+    .join(" ")
+    .toLowerCase();
+
+  return /\b(claim|redeem|claimable|redeemable|won)\b/.test(claimText);
+}
+
+export function normalizeBullpenPosition(
+  value: BullpenCliPosition,
+  buildMarketUrl: (eventSlug: string | null) => string | null,
+): BullpenActivePositionView {
+  const marketId =
+    readString(value.slug) ||
+    readString(value.condition_id) ||
+    readString(value.market) ||
+    "unknown-market";
+  const marketTitle =
+    readString(value.market) || readString(value.title) || marketId;
+  const outcome = readString(value.outcome) || "—";
+  const shares = readNumber(value.shares) || 0;
+  const averagePrice = readPrice(value.avg_price ?? value.avgPrice);
+  const costBasis =
+    readNumber(value.invested_usd ?? value.investedUsd) ??
+    (averagePrice !== null ? shares * averagePrice : 0);
+  const currentPrice = readPrice(value.current_price ?? value.currentPrice);
+  const currentValue =
+    readNumber(value.current_value ?? value.currentValue) ??
+    (currentPrice !== null ? shares * currentPrice : null);
+  const unrealizedPnl =
+    readNumber(value.unrealized_pnl ?? value.unrealizedPnl) ??
+    (currentValue !== null ? currentValue - costBasis : null);
+  const unrealizedPnlPercent =
+    readNumber(value.pnl_percent ?? value.pnlPercent) ??
+    (costBasis > 0 && unrealizedPnl !== null
+      ? (unrealizedPnl / costBasis) * 100
+      : null);
+  const eventSlug = readString(value.event_slug ?? value.eventSlug);
+  const closeDate = readString(value.end_date ?? value.endDate);
+  const isClaimable = extractClaimableStatus(value);
+  const claimableValue =
+    readNumber(value.claimableValue) ??
+    readNumber(value.claimable_value) ??
+    readNumber(value.redeemableValue) ??
+    readNumber(value.redeemable_value) ??
+    (isClaimable ? currentValue ?? costBasis : null);
+
+  return {
+    key: `${marketId}::${outcome}`,
+    marketId,
+    marketTitle,
+    outcome,
+    shares: round(shares, 4),
+    averagePrice: averagePrice === null ? null : round(averagePrice, 4),
+    costBasis: round(costBasis, 2),
+    currentPrice: currentPrice === null ? null : round(currentPrice, 4),
+    currentValue: currentValue === null ? null : round(currentValue, 2),
+    unrealizedPnl: unrealizedPnl === null ? null : round(unrealizedPnl, 2),
+    unrealizedPnlPercent:
+      unrealizedPnlPercent === null ? null : round(unrealizedPnlPercent, 2),
+    marketUrl: buildMarketUrl(eventSlug),
+    closeTime: closeDate ? `${closeDate}T00:00:00.000Z` : null,
+    isClaimable,
+    claimableValue: claimableValue === null ? null : round(claimableValue, 2),
+  };
+}
+
+function sumCurrentPositionValue(positions: BullpenActivePositionView[]) {
+  return round(
+    positions.reduce(
+      (total, position) => total + (position.currentValue ?? position.costBasis),
+      0,
+    ),
+    2,
+  );
+}
+
+function sumUnrealizedPnl(positions: BullpenActivePositionView[]) {
+  return round(
+    positions.reduce(
+      (total, position) => total + (position.unrealizedPnl ?? 0),
+      0,
+    ),
+    2,
+  );
+}
+
+export function summarizeBullpenPositions(
+  positions: BullpenActivePositionView[],
+  summary?: Record<string, unknown> | null,
+): BullpenPositionsSummary {
+  const claimablePositions = positions.filter((position) => position.isClaimable);
+  const claimableValue = round(
+    claimablePositions.reduce(
+      (total, position) =>
+        total +
+        (position.claimableValue ?? position.currentValue ?? position.costBasis),
+      0,
+    ),
+    2,
+  );
+
+  return {
+    activeCount: readNumber(summary?.active_count) ?? positions.length,
+    claimableCount: claimablePositions.length,
+    claimableValue,
+    cashBalance: readNumber(summary?.cash_balance),
+    totalValue:
+      readNumber(summary?.total_value) ?? sumCurrentPositionValue(positions),
+    unrealizedPnl:
+      readNumber(summary?.unrealized_pnl) ?? sumUnrealizedPnl(positions),
+    walletValue: readNumber(summary?.wallet_value),
+  };
+}
+
+export function buildClaimableBullpenSignature(
+  positions: BullpenActivePositionView[],
+) {
+  return positions
+    .filter((position) => position.isClaimable)
+    .map((position) => position.key)
+    .sort((left, right) => left.localeCompare(right))
+    .join("|");
+}

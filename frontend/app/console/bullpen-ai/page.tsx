@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -61,8 +61,12 @@ import {
   type BullpenTableSortState,
 } from "./_components/BullpenQuestionsTable";
 import { BullpenInvestmentsSection } from "./_components/BullpenInvestmentsSection";
-import type { BullpenActivePositionView } from "./_components/BullpenPositionsDialog";
 import { BullpenPromptEditorDialog } from "./_components/BullpenPromptEditorDialog";
+import {
+  buildClaimableBullpenSignature,
+  type BullpenActivePositionView,
+  type BullpenPositionsResponse,
+} from "@/lib/bullpenPositions";
 
 const TABS: {
   mode: ScanMode;
@@ -106,12 +110,6 @@ type PolymarketMarketRefresh = {
 type BullpenCurrentOddsRefreshResponse = {
   markets?: Record<string, PolymarketMarketRefresh>;
   unresolvedQuestionIds?: string[];
-  error?: string;
-};
-
-type BullpenPositionsResponse = {
-  positions?: BullpenActivePositionView[];
-  fetchedAt?: string;
   error?: string;
 };
 
@@ -223,6 +221,20 @@ function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
   if (error instanceof Error) return error.message;
   return "Something went wrong.";
+}
+
+function buildClaimPositionMessage(
+  positions: BullpenActivePositionView[],
+  { automatic }: { automatic: boolean },
+) {
+  const claimableCount = positions.filter((position) => position.isClaimable).length;
+  const label =
+    claimableCount === 1
+      ? "1 resolved Bullpen position"
+      : `${claimableCount} resolved Bullpen positions`;
+  return automatic
+    ? `${label} became claimable, so the dashboard is submitting a Bullpen redeem/claim now.`
+    : `Submitting Bullpen redeem/claim now for ${label}.`;
 }
 
 function parseTimestampMs(value: string | null | undefined) {
@@ -671,6 +683,13 @@ export default function BullpenAiPage() {
   const [hasLoadedPositions, setHasLoadedPositions] = useState(false);
   const [isLoadingPositions, setIsLoadingPositions] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
+  const [claimPositionsError, setClaimPositionsError] = useState<string | null>(
+    null,
+  );
+  const [claimPositionsStatus, setClaimPositionsStatus] = useState<
+    string | null
+  >(null);
+  const [isClaimingPositions, setIsClaimingPositions] = useState(false);
   const [positionsLastUpdatedAt, setPositionsLastUpdatedAt] = useState<
     string | null
   >(null);
@@ -692,6 +711,8 @@ export default function BullpenAiPage() {
   const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
   const [isScanFiltersOpen, setIsScanFiltersOpen] = useState(false);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
+  const claimPositionsTaskRef = useRef<Promise<void> | null>(null);
+  const lastAutoClaimSignatureRef = useRef<string | null>(null);
   const scanFiltersMenuRef = useRef<HTMLDivElement | null>(null);
   const canonicalizedSnapshotIdsRef = useRef<Record<ScanMode, Set<string>>>({
     "30-days": new Set<string>(),
@@ -738,9 +759,27 @@ export default function BullpenAiPage() {
     };
   }, [isScanFiltersOpen]);
 
+  const pollBullpenPositions = useEffectEvent(() => {
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      return;
+    }
+    if (claimPositionsTaskRef.current) return;
+    void refreshBullpenPositions();
+  });
+
   useEffect(() => {
     void refreshBullpenPositions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      pollBullpenPositions();
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
@@ -1141,11 +1180,75 @@ export default function BullpenAiPage() {
           unrealizedPnlPercent,
           marketUrl: marketUpdate?.marketUrl ?? null,
           closeTime: resolvePositionCloseTime(position.market_title),
+          isClaimable: false,
+          claimableValue: null,
         } satisfies BullpenActivePositionView;
       });
   }
 
-  async function refreshBullpenPositions(stateOverride?: PolymarketBotState) {
+  async function claimBullpenResolvedPositions({
+    automatic = false,
+    positions = activePositions,
+  }: {
+    automatic?: boolean;
+    positions?: BullpenActivePositionView[];
+  } = {}) {
+    if (claimPositionsTaskRef.current) {
+      await claimPositionsTaskRef.current;
+      return;
+    }
+
+    const claimablePositions = positions.filter((position) => position.isClaimable);
+    if (claimablePositions.length === 0) {
+      setClaimPositionsError(null);
+      setClaimPositionsStatus(
+        "No resolved Bullpen positions are currently waiting to be claimed.",
+      );
+      return;
+    }
+
+    const task = (async () => {
+      setIsClaimingPositions(true);
+      setClaimPositionsError(null);
+      setClaimPositionsStatus(
+        buildClaimPositionMessage(claimablePositions, { automatic }),
+      );
+
+      try {
+        const state = await apiService.polymarketLiveRedeem();
+        setClaimPositionsStatus(
+          "Bullpen redeem/claim submitted. Refreshing the popup with the latest wallet data.",
+        );
+        await refreshBullpenPositions(state, { suppressAutoClaim: true });
+        setClaimPositionsStatus(
+          automatic
+            ? "Bullpen automatically submitted the resolved positions for claim."
+            : "Bullpen submitted the resolved positions for claim.",
+        );
+      } catch (error) {
+        setClaimPositionsStatus(null);
+        setClaimPositionsError(
+          automatic
+            ? `Automatic Bullpen claim failed: ${normalizeError(error)}`
+            : `Bullpen claim failed: ${normalizeError(error)}`,
+        );
+      } finally {
+        setIsClaimingPositions(false);
+      }
+    })();
+
+    claimPositionsTaskRef.current = task;
+    try {
+      await task;
+    } finally {
+      claimPositionsTaskRef.current = null;
+    }
+  }
+
+  async function refreshBullpenPositions(
+    stateOverride?: PolymarketBotState,
+    options?: { suppressAutoClaim?: boolean },
+  ) {
     setIsLoadingPositions(true);
     setPositionsError(null);
 
@@ -1162,11 +1265,25 @@ export default function BullpenAiPage() {
         );
       }
 
-      setActivePositions(livePositionsPayload.positions || []);
+      const livePositions = livePositionsPayload.positions || [];
+      setActivePositions(livePositions);
       setHasLoadedPositions(true);
       setPositionsLastUpdatedAt(
         livePositionsPayload.fetchedAt || new Date().toISOString(),
       );
+      const claimableSignature = buildClaimableBullpenSignature(livePositions);
+      if (!claimableSignature) {
+        lastAutoClaimSignatureRef.current = null;
+      } else if (
+        !options?.suppressAutoClaim &&
+        claimableSignature !== lastAutoClaimSignatureRef.current
+      ) {
+        lastAutoClaimSignatureRef.current = claimableSignature;
+        void claimBullpenResolvedPositions({
+          automatic: true,
+          positions: livePositions,
+        });
+      }
     } catch (livePositionsError) {
       try {
         const state = stateOverride ?? (await apiService.polymarketState());
@@ -1178,6 +1295,7 @@ export default function BullpenAiPage() {
           setActivePositions([]);
           setHasLoadedPositions(true);
           setPositionsLastUpdatedAt(new Date().toISOString());
+          lastAutoClaimSignatureRef.current = null;
           setPositionsError(
             `Live Bullpen wallet positions are unavailable right now, so the dashboard is showing the tracked-position fallback: ${normalizeError(
               livePositionsError,
@@ -1208,6 +1326,7 @@ export default function BullpenAiPage() {
           );
         }
 
+        lastAutoClaimSignatureRef.current = null;
         setActivePositions(
           buildActivePositionViews(openPositions, payload.markets || {}),
         );
@@ -1215,7 +1334,7 @@ export default function BullpenAiPage() {
         setPositionsLastUpdatedAt(new Date().toISOString());
         setPositionsError(
           `Live Bullpen wallet positions are unavailable right now, so the dashboard is showing the tracked-position fallback: ${normalizeError(
-            livePositionsError,
+              livePositionsError,
           )}`,
         );
       } catch (fallbackError) {
@@ -2351,11 +2470,17 @@ export default function BullpenAiPage() {
               activePositions={activePositions}
               activePositionsCount={hasLoadedPositions ? activePositions.length : null}
               candidates={activeInvestmentCandidates}
+              claimError={claimPositionsError}
+              claimStatusMessage={claimPositionsStatus}
               emptyMessage={investmentEmptyMessage}
+              isClaimingPositions={isClaimingPositions}
               isHistoryView={isViewingHistory}
               isInvesting={isInvesting}
               isLoadingPositions={isLoadingPositions}
               isRefreshingCurrentOdds={isRefreshingCurrentOdds}
+              onClaimNow={() => {
+                void claimBullpenResolvedPositions();
+              }}
               onInvest={investInSelectedEvents}
               onRefreshPositions={() => {
                 void refreshBullpenPositions();
