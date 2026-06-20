@@ -336,6 +336,14 @@ function calculateBullpenReturnsPerDay({
   return Number(((100 - currentOdds) / daysUntilClose).toFixed(2));
 }
 
+function calculateCurrentVsLlmOddsDifference({
+  yesOdds,
+  llmYesOdds,
+}: Pick<BullpenQuestionRow, "yesOdds" | "llmYesOdds">) {
+  if (yesOdds === null || llmYesOdds === null) return null;
+  return Number((yesOdds - llmYesOdds).toFixed(2));
+}
+
 function calculateBullpenAmountToBeInvested({
   llmNoOdds,
   returnsPerDay,
@@ -378,30 +386,23 @@ export function createBullpenQuestionRow(
       .at(-1) || null;
   const llmYesOdds = analysisFields.llmYesOdds ?? averageOdds.yes;
   const llmNoOdds = analysisFields.llmNoOdds ?? averageOdds.no;
-  const currentVsLlmOddsDifference =
-    analysisFields.currentVsLlmOddsDifference ?? null;
   const baseRow = {
     ...question,
     llmYesOdds,
     llmNoOdds,
-    currentVsLlmOddsDifference,
   } as BullpenQuestionRow;
-  const returnsPerDay =
-    analysisFields.returnsPerDay ?? calculateBullpenReturnsPerDay(baseRow);
-  const amountToBeInvested =
-    analysisFields.amountToBeInvested ??
-    calculateBullpenAmountToBeInvested({
-      llmNoOdds,
-      returnsPerDay,
-    });
-  const isAmountToBeInvestedHighlighted =
-    typeof analysisFields.isAmountToBeInvestedHighlighted === "boolean"
-      ? analysisFields.isAmountToBeInvestedHighlighted
-      : isBullpenQuestionInvestmentCandidate({
-          llmNoOdds,
-          returnsPerDay,
-          amountToBeInvested,
-        });
+  const currentVsLlmOddsDifference =
+    calculateCurrentVsLlmOddsDifference(baseRow);
+  const returnsPerDay = calculateBullpenReturnsPerDay(baseRow);
+  const amountToBeInvested = calculateBullpenAmountToBeInvested({
+    llmNoOdds,
+    returnsPerDay,
+  });
+  const isAmountToBeInvestedHighlighted = isBullpenQuestionInvestmentCandidate({
+    llmNoOdds,
+    returnsPerDay,
+    amountToBeInvested,
+  });
 
   return {
     ...question,

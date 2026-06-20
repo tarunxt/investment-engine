@@ -6,6 +6,14 @@ const MAX_GAMMA_LOOKUP_BATCH_SIZE = 25;
 
 type CanonicalizableQuestion = Pick<BullpenQuestion, "id" | "slug" | "marketUrl">;
 
+export type ResolvedPolymarketMarket = {
+  id: string;
+  slug: string | null;
+  marketUrl: string | null;
+  yesOdds: number | null;
+  noOdds: number | null;
+};
+
 function toArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -32,6 +40,21 @@ function readString(record: Record<string, unknown>, keys: string[]) {
   }
 
   return null;
+}
+
+function parseNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[%,$\s]/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizeOdds(value: number | null) {
+  if (value === null || value < 0) return null;
+  if (value <= 1) return Number((value * 100).toFixed(2));
+  return Number(value.toFixed(2));
 }
 
 function toRecord(value: unknown) {
@@ -90,6 +113,73 @@ export function getCanonicalPolymarketEventSlug(
   );
 }
 
+function getCanonicalPolymarketMarketSlug(
+  record: Record<string, unknown>,
+  fallbackSlug: string | null = null,
+) {
+  return (
+    readString(record, ["slug", "marketSlug", "questionSlug"]) || fallbackSlug
+  );
+}
+
+function readOutcomeOdds(record: Record<string, unknown>) {
+  const outcomes = parseJsonArray(record.outcomes);
+  const outcomeLabels = outcomes
+    .map((value) => {
+      if (typeof value === "string") return value.trim();
+      if (!value || typeof value !== "object") return null;
+      return readString(value as Record<string, unknown>, ["name", "label", "title"]);
+    })
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.toLowerCase());
+  const outcomePrices = parseJsonArray(record.outcomePrices).map((value) =>
+    parseNumber(value),
+  );
+  const yesIndex = outcomeLabels.findIndex((label) => label === "yes");
+  const noIndex = outcomeLabels.findIndex((label) => label === "no");
+  const readFallbackOutcomeOdds = (index: number) => {
+    const outcome = outcomes[index];
+    if (!outcome || typeof outcome !== "object") return null;
+    return parseNumber(
+      (outcome as Record<string, unknown>).price ??
+        (outcome as Record<string, unknown>).probability,
+    );
+  };
+  const yesOdds =
+    yesIndex >= 0
+      ? normalizeOdds(outcomePrices[yesIndex] ?? readFallbackOutcomeOdds(yesIndex))
+      : null;
+  const noOdds =
+    noIndex >= 0
+      ? normalizeOdds(outcomePrices[noIndex] ?? readFallbackOutcomeOdds(noIndex))
+      : null;
+
+  return {
+    yesOdds,
+    noOdds,
+  };
+}
+
+function normalizeResolvedMarket(
+  record: Record<string, unknown>,
+  fallbackSlug: string | null = null,
+): ResolvedPolymarketMarket | null {
+  const id = readString(record, ["id"]);
+  const slug = getCanonicalPolymarketMarketSlug(record, fallbackSlug);
+  const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
+  const { yesOdds, noOdds } = readOutcomeOdds(record);
+
+  if (!id) return null;
+
+  return {
+    id,
+    slug,
+    marketUrl: buildPolymarketEventUrl(eventSlug),
+    yesOdds,
+    noOdds,
+  };
+}
+
 async function fetchGammaMarketLookupBatch(
   questions: CanonicalizableQuestion[],
 ) {
@@ -137,49 +227,71 @@ async function fetchGammaMarketLookupBatch(
     : [];
 }
 
+export async function resolvePolymarketMarkets<
+  T extends CanonicalizableQuestion,
+>(questions: T[]) {
+  const resolvedByQuestionId: Record<string, ResolvedPolymarketMarket> = {};
+  if (questions.length === 0) return resolvedByQuestionId;
+
+  const recordsById = new Map<string, Record<string, unknown>>();
+  const recordsBySlug = new Map<string, Record<string, unknown>>();
+
+  for (
+    let index = 0;
+    index < questions.length;
+    index += MAX_GAMMA_LOOKUP_BATCH_SIZE
+  ) {
+    const batch = questions.slice(index, index + MAX_GAMMA_LOOKUP_BATCH_SIZE);
+    const records = await fetchGammaMarketLookupBatch(batch);
+
+    for (const record of records) {
+      const id = readString(record, ["id"]);
+      const slug = getCanonicalPolymarketMarketSlug(record);
+      if (id) recordsById.set(id, record);
+      if (slug) recordsBySlug.set(slug, record);
+    }
+  }
+
+  for (const question of questions) {
+    const record =
+      recordsById.get(question.id.trim()) ||
+      (question.slug ? recordsBySlug.get(question.slug.trim()) : undefined);
+    if (!record) continue;
+
+    const resolved = normalizeResolvedMarket(record, question.slug?.trim() || null);
+    if (resolved) {
+      resolvedByQuestionId[question.id] = resolved;
+    }
+  }
+
+  return resolvedByQuestionId;
+}
+
 export async function applyCanonicalPolymarketMarketUrls<
   T extends CanonicalizableQuestion,
 >(questions: T[]) {
   if (questions.length === 0) return questions;
 
   try {
-    const recordsById = new Map<string, Record<string, unknown>>();
-    const recordsBySlug = new Map<string, Record<string, unknown>>();
-
-    for (
-      let index = 0;
-      index < questions.length;
-      index += MAX_GAMMA_LOOKUP_BATCH_SIZE
-    ) {
-      const batch = questions.slice(index, index + MAX_GAMMA_LOOKUP_BATCH_SIZE);
-      const records = await fetchGammaMarketLookupBatch(batch);
-
-      for (const record of records) {
-        const id = readString(record, ["id"]);
-        const slug = readString(record, ["slug"]);
-        if (id) recordsById.set(id, record);
-        if (slug) recordsBySlug.set(slug, record);
-      }
-    }
+    const resolvedByQuestionId = await resolvePolymarketMarkets(questions);
 
     let changed = false;
     const nextQuestions = questions.map((question) => {
-      const record =
-        recordsById.get(question.id.trim()) ||
-        (question.slug ? recordsBySlug.get(question.slug) : undefined);
-      if (!record) return question;
+      const resolved = resolvedByQuestionId[question.id];
+      if (!resolved) return question;
 
-      const nextMarketUrl = buildPolymarketEventUrl(
-        getCanonicalPolymarketEventSlug(record, question.slug),
-      );
-      if (!nextMarketUrl || nextMarketUrl === question.marketUrl) {
+      if (
+        resolved.marketUrl === question.marketUrl &&
+        resolved.slug === question.slug
+      ) {
         return question;
       }
 
       changed = true;
       return {
         ...question,
-        marketUrl: nextMarketUrl,
+        slug: resolved.slug,
+        marketUrl: resolved.marketUrl,
       };
     });
 

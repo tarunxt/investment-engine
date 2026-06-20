@@ -88,6 +88,21 @@ const DEFAULT_SORT_STATE: BullpenTableSortState = {
   key: "closeTime",
   direction: "asc",
 };
+const INVESTMENT_PROGRESS_POLL_MS = 1_500;
+
+type PolymarketMarketRefresh = {
+  id: string;
+  slug: string | null;
+  marketUrl: string | null;
+  yesOdds: number | null;
+  noOdds: number | null;
+};
+
+type BullpenCurrentOddsRefreshResponse = {
+  markets?: Record<string, PolymarketMarketRefresh>;
+  unresolvedQuestionIds?: string[];
+  error?: string;
+};
 
 function createEmptySnapshotHistory(): Record<ScanMode, BullpenSnapshotHistory> {
   return {
@@ -197,7 +212,10 @@ function buildBullpenManualInvestOrder(
     return null;
   }
 
-  const marketId = question.slug || question.marketUrl;
+  const marketId =
+    typeof question.slug === "string" && question.slug.trim()
+      ? question.slug.trim()
+      : null;
   if (!marketId) return null;
 
   return {
@@ -212,24 +230,47 @@ function buildBullpenManualInvestOrder(
   };
 }
 
-function applySnapshotMarketUrls(
+function applySnapshotMarketUpdates(
   snapshot: BullpenScanSnapshot | null,
   snapshotId: string,
-  marketUrls: Record<string, string | null>,
+  marketUpdates: Record<string, Partial<PolymarketMarketRefresh>>,
 ) {
   if (!snapshot || snapshot.snapshotId !== snapshotId) return snapshot;
 
   let changed = false;
   const nextQuestions = snapshot.questions.map((question) => {
-    const nextMarketUrl = marketUrls[question.id];
-    if (!nextMarketUrl || nextMarketUrl === question.marketUrl) {
+    const marketUpdate = marketUpdates[question.id];
+    if (!marketUpdate) {
+      return question;
+    }
+
+    const nextSlug =
+      marketUpdate.slug === undefined ? question.slug : marketUpdate.slug;
+    const nextMarketUrl =
+      marketUpdate.marketUrl === undefined
+        ? question.marketUrl
+        : marketUpdate.marketUrl;
+    const nextYesOdds =
+      marketUpdate.yesOdds === undefined ? question.yesOdds : marketUpdate.yesOdds;
+    const nextNoOdds =
+      marketUpdate.noOdds === undefined ? question.noOdds : marketUpdate.noOdds;
+
+    if (
+      nextSlug === question.slug &&
+      nextMarketUrl === question.marketUrl &&
+      nextYesOdds === question.yesOdds &&
+      nextNoOdds === question.noOdds
+    ) {
       return question;
     }
 
     changed = true;
     return createBullpenQuestionRow({
       ...question,
+      slug: nextSlug,
       marketUrl: nextMarketUrl,
+      yesOdds: nextYesOdds,
+      noOdds: nextNoOdds,
     });
   });
 
@@ -526,9 +567,18 @@ export default function BullpenAiPage() {
     "30-days": null,
     "end-of-month": null,
   });
+  const [investmentProgressByMode, setInvestmentProgressByMode] = useState<
+    Record<ScanMode, string | null>
+  >({
+    "30-days": null,
+    "end-of-month": null,
+  });
   const [scanningMode, setScanningMode] = useState<ScanMode | null>(null);
   const [llmRunningMode, setLlmRunningMode] = useState<ScanMode | null>(null);
   const [investingMode, setInvestingMode] = useState<ScanMode | null>(null);
+  const [refreshingCurrentOddsMode, setRefreshingCurrentOddsMode] = useState<
+    ScanMode | null
+  >(null);
   const [lastLlmTargets, setLastLlmTargets] = useState<ProviderModelTarget[]>(
     [],
   );
@@ -606,9 +656,11 @@ export default function BullpenAiPage() {
   const notice = messagesByMode[activeMode];
   const llmNotice = llmMessagesByMode[activeMode];
   const investmentNotice = investmentMessagesByMode[activeMode];
+  const investmentProgress = investmentProgressByMode[activeMode];
   const isScanning = scanningMode === activeMode;
   const isRunningLlm = llmRunningMode === activeMode;
   const isInvesting = investingMode === activeMode;
+  const isRefreshingCurrentOdds = refreshingCurrentOddsMode === activeMode;
   const selectionEnabled = Boolean(activeCurrentSnapshot && !isViewingHistory);
   const selectedQuestionIds = selectionEnabled
     ? selectedQuestionIdsByMode[activeMode].filter((questionId) =>
@@ -621,10 +673,7 @@ export default function BullpenAiPage() {
   const activeInvestmentCandidates =
     selectionEnabled && activeCurrentSnapshot
       ? activeCurrentSnapshot.questions.filter((question) => {
-          return (
-            isBullpenQuestionInvestmentCandidate(question) &&
-            buildBullpenManualInvestOrder(question) !== null
-          );
+          return isBullpenQuestionInvestmentCandidate(question);
         })
       : [];
   const activeInvestmentCandidateIds = new Set(
@@ -647,10 +696,7 @@ export default function BullpenAiPage() {
 
     const eligibleIds = activeCurrentSnapshot.questions
       .filter((question) => {
-        return (
-          isBullpenQuestionInvestmentCandidate(question) &&
-          buildBullpenManualInvestOrder(question) !== null
-        );
+        return isBullpenQuestionInvestmentCandidate(question);
       })
       .map((question) => question.id);
     setSelectedInvestmentQuestionIdsByMode((current) => {
@@ -696,7 +742,7 @@ export default function BullpenAiPage() {
     const snapshotId = activeVisibleSnapshot.snapshotId;
 
     const questions = activeVisibleSnapshot.questions
-      .filter((question) => question.slug || question.marketUrl)
+      .filter((question) => question.id.trim())
       .map((question) => ({
         id: question.id,
         slug: question.slug,
@@ -720,20 +766,31 @@ export default function BullpenAiPage() {
 
         const payload = (await response.json()) as {
           marketUrls?: Record<string, string | null>;
+          marketSlugs?: Record<string, string | null>;
         };
-        if (cancelled || !payload.marketUrls) return;
+        if (cancelled || (!payload.marketUrls && !payload.marketSlugs)) return;
+
+        const marketUpdates = Object.fromEntries(
+          questions.map((question) => [
+            question.id,
+            {
+              marketUrl: payload.marketUrls?.[question.id],
+              slug: payload.marketSlugs?.[question.id],
+            },
+          ]),
+        );
 
         setSnapshotsByMode((current) => {
-          const nextCurrent = applySnapshotMarketUrls(
+          const nextCurrent = applySnapshotMarketUpdates(
             current[activeMode].current,
             snapshotId,
-            payload.marketUrls || {},
+            marketUpdates,
           );
           const nextHistory = current[activeMode].history.map((snapshot) =>
-            applySnapshotMarketUrls(
+            applySnapshotMarketUpdates(
               snapshot,
               snapshotId,
-              payload.marketUrls || {},
+              marketUpdates,
             ) || snapshot,
           );
 
@@ -1233,6 +1290,154 @@ export default function BullpenAiPage() {
     }
   }
 
+  async function refreshSelectedCurrentOdds({
+    questionIds = selectedInvestmentQuestionIds,
+    announceResult = true,
+    showLoadingState = true,
+  }: {
+    questionIds?: string[];
+    announceResult?: boolean;
+    showLoadingState?: boolean;
+  } = {}) {
+    if (!activeCurrentSnapshot || !selectionEnabled) {
+      throw new Error(
+        "Switch back to the current snapshot before refreshing Current %.",
+      );
+    }
+
+    const selectedQuestionIdSet = new Set(questionIds);
+    const questionsToRefresh = activeCurrentSnapshot.questions.filter((question) =>
+      selectedQuestionIdSet.has(question.id),
+    );
+
+    if (questionsToRefresh.length === 0) {
+      throw new Error("Select at least one pink event before refreshing Current %.");
+    }
+
+    if (showLoadingState) {
+      setRefreshingCurrentOddsMode(activeMode);
+    }
+    setInvestmentProgressByMode((current) => ({
+      ...current,
+      [activeMode]: `Refreshing latest Polymarket odds for ${formatCountLabel(questionsToRefresh.length, "selected event")}...`,
+    }));
+
+    try {
+      const response = await fetch("/api/bullpen-ai/current-odds", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        cache: "no-store",
+        body: JSON.stringify({
+          questions: questionsToRefresh.map((question) => ({
+            id: question.id,
+            question: question.question,
+            slug: question.slug,
+            marketUrl: question.marketUrl,
+          })),
+        }),
+      });
+      const payload = (await response.json()) as BullpenCurrentOddsRefreshResponse;
+      if (!response.ok) {
+        throw new Error(
+          payload.error || "Failed to refresh current Polymarket odds.",
+        );
+      }
+
+      const marketUpdates = payload.markets || {};
+      const currentSnapshotId = activeCurrentSnapshot.snapshotId;
+      const nextQuestions = activeCurrentSnapshot.questions.map((question) => {
+        const update = marketUpdates[question.id];
+        if (!update) return question;
+        return createBullpenQuestionRow({
+          ...question,
+          slug: update.slug ?? question.slug,
+          marketUrl: update.marketUrl ?? question.marketUrl,
+          yesOdds: update.yesOdds ?? question.yesOdds,
+          noOdds: update.noOdds ?? question.noOdds,
+        });
+      });
+      const refreshedQuestionIds = new Set(Object.keys(marketUpdates));
+      const unresolvedCount = payload.unresolvedQuestionIds?.length || 0;
+
+      setSnapshotsByMode((current) => ({
+        ...current,
+        [activeMode]: {
+          ...current[activeMode],
+          current: applySnapshotMarketUpdates(
+            current[activeMode].current,
+            currentSnapshotId,
+            marketUpdates,
+          ),
+          history: current[activeMode].history,
+        },
+      }));
+
+      if (announceResult) {
+        const summaryParts = [
+          `Refreshed Current % for ${formatCountLabel(refreshedQuestionIds.size, "selected event")}.`,
+        ];
+        if (unresolvedCount > 0) {
+          summaryParts.push(
+            `${formatCountLabel(unresolvedCount, "selected event")} could not be refreshed from Polymarket.`,
+          );
+        }
+        setInvestmentMessagesByMode((current) => ({
+          ...current,
+          [activeMode]: summaryParts.join(" "),
+        }));
+      }
+
+      return {
+        refreshedQuestions: nextQuestions.filter((question) =>
+          selectedQuestionIdSet.has(question.id),
+        ),
+        refreshedCount: refreshedQuestionIds.size,
+        unresolvedCount,
+      };
+    } finally {
+      if (showLoadingState) {
+        setRefreshingCurrentOddsMode(null);
+        setInvestmentProgressByMode((current) => ({
+          ...current,
+          [activeMode]: null,
+        }));
+      }
+    }
+  }
+
+  async function pollBullpenInvestmentProgress(
+    isStopped: () => boolean,
+    fallbackMessage: string,
+  ) {
+    while (!isStopped()) {
+      try {
+        const state = await apiService.polymarketState();
+        if (isStopped()) return;
+
+        const latestActivity = state.recent_activity[0]?.message?.trim();
+        const nextMessage =
+          latestActivity ||
+          (state.live.balance.status === "loading"
+            ? "Bullpen is syncing the latest wallet balance..."
+            : fallbackMessage);
+        if (nextMessage) {
+          setInvestmentProgressByMode((current) => ({
+            ...current,
+            [activeMode]: nextMessage,
+          }));
+        }
+      } catch {
+        if (isStopped()) return;
+      }
+
+      await new Promise((resolve) =>
+        window.setTimeout(resolve, INVESTMENT_PROGRESS_POLL_MS),
+      );
+    }
+  }
+
   async function investInSelectedEvents() {
     if (!activeCurrentSnapshot || !selectionEnabled) {
       setInvestmentMessagesByMode((current) => ({
@@ -1242,24 +1447,56 @@ export default function BullpenAiPage() {
       return;
     }
 
-    const selectedOrders = activeInvestmentCandidates
-      .filter((question) => selectedInvestmentQuestionIdSet.has(question.id))
-      .map((question) => buildBullpenManualInvestOrder(question))
-      .filter((order): order is PolymarketManualInvestOrderRequest => Boolean(order));
-
-    if (selectedOrders.length === 0) {
-      setInvestmentMessagesByMode((current) => ({
-        ...current,
-        [activeMode]:
-          "Select at least one pink event with a valid Bullpen market reference before investing.",
-      }));
-      return;
-    }
-
     setInvestingMode(activeMode);
     setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
+    setInvestmentProgressByMode((current) => ({
+      ...current,
+      [activeMode]: `Refreshing latest Polymarket odds for ${formatCountLabel(selectedInvestmentQuestionIds.length, "selected event")} before placing orders...`,
+    }));
+
+    let stopProgressPolling = false;
+    let progressPollingTask: Promise<void> | null = null;
 
     try {
+      const { refreshedQuestions, refreshedCount, unresolvedCount } =
+        await refreshSelectedCurrentOdds({
+          announceResult: false,
+          showLoadingState: false,
+        });
+      const refreshedEligibleQuestions = refreshedQuestions.filter((question) =>
+        isBullpenQuestionInvestmentCandidate(question),
+      );
+      const noLongerQualifiedCount =
+        refreshedQuestions.length - refreshedEligibleQuestions.length;
+      const selectedOrders = refreshedEligibleQuestions
+        .map((question) => buildBullpenManualInvestOrder(question))
+        .filter(
+          (order): order is PolymarketManualInvestOrderRequest => Boolean(order),
+        );
+
+      if (selectedOrders.length === 0) {
+        setInvestmentMessagesByMode((current) => ({
+          ...current,
+          [activeMode]:
+            noLongerQualifiedCount > 0
+              ? "After refreshing Polymarket, the selected rows were no longer pink invest candidates, so no Bullpen orders were placed."
+              : "The selected rows still need a valid market slug after refresh, so no Bullpen orders were placed.",
+        }));
+        return;
+      }
+
+      setInvestmentProgressByMode((current) => ({
+        ...current,
+        [activeMode]:
+          refreshedCount > 0
+            ? `Latest Polymarket odds synced for ${formatCountLabel(refreshedCount, "selected event")}. Bullpen is now checking your trading session and placing ${formatCountLabel(selectedOrders.length, "order")}.`
+            : `Bullpen is checking your trading session and placing ${formatCountLabel(selectedOrders.length, "order")}.`,
+      }));
+      progressPollingTask = pollBullpenInvestmentProgress(
+        () => stopProgressPolling,
+        "Bullpen is still working through the selected orders...",
+      );
+
       const response: PolymarketManualInvestResponse =
         await apiService.polymarketManualInvest({
           orders: selectedOrders,
@@ -1289,6 +1526,16 @@ export default function BullpenAiPage() {
             .join(" | ")}.`,
         );
       }
+      if (unresolvedCount > 0) {
+        summaryParts.push(
+          `${formatCountLabel(unresolvedCount, "selected event")} could not be refreshed from Polymarket first, so it was skipped unless a saved slug was already available.`,
+        );
+      }
+      if (noLongerQualifiedCount > 0) {
+        summaryParts.push(
+          `${formatCountLabel(noLongerQualifiedCount, "selected event")} was skipped because the refreshed odds no longer met the pink-row thresholds.`,
+        );
+      }
       if (summaryParts.length === 0) {
         summaryParts.push("No Bullpen orders were placed.");
       }
@@ -1303,7 +1550,26 @@ export default function BullpenAiPage() {
         [activeMode]: normalizeError(error),
       }));
     } finally {
+      stopProgressPolling = true;
+      if (progressPollingTask) {
+        await progressPollingTask;
+      }
       setInvestingMode(null);
+      setInvestmentProgressByMode((current) => ({
+        ...current,
+        [activeMode]: null,
+      }));
+    }
+  }
+
+  async function handleRefreshCurrentOdds() {
+    try {
+      await refreshSelectedCurrentOdds();
+    } catch (error) {
+      setInvestmentMessagesByMode((current) => ({
+        ...current,
+        [activeMode]: normalizeError(error),
+      }));
     }
   }
 
@@ -1743,10 +2009,13 @@ export default function BullpenAiPage() {
               emptyMessage={investmentEmptyMessage}
               isHistoryView={isViewingHistory}
               isInvesting={isInvesting}
+              isRefreshingCurrentOdds={isRefreshingCurrentOdds}
               onInvest={investInSelectedEvents}
+              onRefreshCurrentOdds={handleRefreshCurrentOdds}
               onToggleQuestion={toggleInvestmentSelection}
               onSelectAll={selectAllInvestmentCandidates}
               onClearAll={clearInvestmentCandidates}
+              progressMessage={investmentProgress}
               selectedQuestionIds={selectedInvestmentQuestionIdSet}
             />
           ) : null}

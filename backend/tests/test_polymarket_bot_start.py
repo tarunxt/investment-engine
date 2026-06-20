@@ -26,7 +26,10 @@ from app.domains.polymarket.bullpen import (
 from app.domains.polymarket.config import load_polymarket_config
 from app.domains.polymarket.logger import PolymarketFileLogger
 from app.domains.polymarket.schemas import (
+    PolymarketBalanceState,
+    PolymarketDoctorStatus,
     PolymarketLiveTradeDecision,
+    PolymarketManualInvestOrderRequest,
     PolymarketPaperTrade,
     PolymarketSourceTrade,
 )
@@ -939,14 +942,44 @@ class RedeemTrackingExecutor:
 
 class ReadyBalanceReader:
     async def refresh(self):
-        from app.domains.polymarket.schemas import PolymarketBalanceState
-
         return PolymarketBalanceState(
             status="ready",
             message="Bullpen account value: 114.07 USD",
             account_value_usd=114.07,
             available_balance_usd=97.48,
         )
+
+
+class ManualBatchExecutor:
+    def __init__(self):
+        self.doctor_calls = 0
+        self.execute_calls = 0
+
+    async def doctor(self):
+        self.doctor_calls += 1
+        return PolymarketDoctorStatus(
+            ok=True,
+            message="Bullpen ready",
+            checked_at="2026-06-20T00:00:00Z",
+        )
+
+    async def execute(self, decision):
+        self.execute_calls += 1
+        return "{}"
+
+
+class FailingManualBatchExecutor:
+    def __init__(self):
+        self.doctor_calls = 0
+        self.execute_calls = 0
+
+    async def doctor(self):
+        self.doctor_calls += 1
+        raise RuntimeError("Bullpen doctor timed out")
+
+    async def execute(self, decision):
+        self.execute_calls += 1
+        return "{}"
 
 
 @pytest.mark.anyio
@@ -978,6 +1011,107 @@ async def test_manual_balance_refresh_waits_for_values(tmp_path):
 
     assert bot.balance_state.status == "ready"
     assert bot.balance_state.account_value_usd == 114.07
+
+
+@pytest.mark.anyio
+async def test_manual_investments_refresh_doctor_once_for_batch(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": False,
+            "live_trading": True,
+            "use_live_reads": True,
+            "auto_redeem_live": False,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = EmptyProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    executor = ManualBatchExecutor()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=executor,
+        balance_reader=ReadyBalanceReader(),
+        logger=logger,
+    )
+
+    results = await bot.execute_manual_investments(
+        [
+            PolymarketManualInvestOrderRequest(
+                question_id="q1",
+                market_id="starmer-out-by-june-22-2026",
+                market_title="Starmer out by June 22, 2026?",
+                outcome="No",
+                amount=4.30,
+                price=0.8750,
+            ),
+            PolymarketManualInvestOrderRequest(
+                question_id="q2",
+                market_id="starmer-out-by-june-26-2026",
+                market_title="Starmer out by June 26, 2026?",
+                outcome="No",
+                amount=7.79,
+                price=0.5950,
+            ),
+        ]
+    )
+
+    assert executor.doctor_calls == 1
+    assert executor.execute_calls == 2
+    assert [result.status for result in results] == ["executed", "executed"]
+    assert any(
+        "Preparing manual Bullpen order 1 of 2" in activity.message
+        for activity in bot.recent_activity
+    )
+
+
+@pytest.mark.anyio
+async def test_manual_investments_fail_each_order_when_batch_doctor_fails(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": False,
+            "live_trading": True,
+            "use_live_reads": True,
+            "auto_redeem_live": False,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = EmptyProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    executor = FailingManualBatchExecutor()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=executor,
+        balance_reader=ReadyBalanceReader(),
+        logger=logger,
+    )
+
+    results = await bot.execute_manual_investments(
+        [
+            PolymarketManualInvestOrderRequest(
+                question_id="q1",
+                market_id="starmer-out-by-june-22-2026",
+                market_title="Starmer out by June 22, 2026?",
+                outcome="No",
+                amount=4.30,
+                price=0.8750,
+            )
+        ]
+    )
+
+    assert executor.doctor_calls == 1
+    assert executor.execute_calls == 0
+    assert results[0].status == "failed"
+    assert results[0].message == "Bullpen doctor timed out"
     assert bot.balance_state.available_balance_usd == 97.48
 
 

@@ -39,20 +39,26 @@ export function BullpenInvestmentsSection({
   emptyMessage,
   isHistoryView,
   isInvesting,
+  isRefreshingCurrentOdds,
   onInvest,
+  onRefreshCurrentOdds,
   onToggleQuestion,
   onSelectAll,
   onClearAll,
+  progressMessage,
   selectedQuestionIds,
 }: {
   candidates: BullpenQuestionRow[];
   emptyMessage: string;
   isHistoryView: boolean;
   isInvesting: boolean;
+  isRefreshingCurrentOdds: boolean;
   onInvest: () => void;
+  onRefreshCurrentOdds: () => void;
   onToggleQuestion: (questionId: string) => void;
   onSelectAll: () => void;
   onClearAll: () => void;
+  progressMessage: string | null;
   selectedQuestionIds: Set<string>;
 }) {
   const selectedCount = candidates.filter((question) =>
@@ -86,32 +92,59 @@ export function BullpenInvestmentsSection({
           </p>
         </div>
         {!isHistoryView && candidates.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => (allSelected ? onClearAll() : onSelectAll())}
-            >
-              {allSelected ? "Clear All" : "Select All"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onClearAll}
-              disabled={selectedCount === 0}
-            >
-              Unselect
-            </Button>
-            <Button onClick={onInvest} disabled={selectedCount === 0 || isInvesting}>
-              {isInvesting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Investing...
-                </>
-              ) : (
-                `Invest${selectedCount > 0 ? ` · ${formatMoney(totalSelectedAmount)}` : ""}`
-              )}
-            </Button>
+          <div className="flex flex-col items-start gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => (allSelected ? onClearAll() : onSelectAll())}
+              >
+                {allSelected ? "Clear All" : "Select All"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onClearAll}
+                disabled={selectedCount === 0}
+              >
+                Unselect
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRefreshCurrentOdds}
+                disabled={selectedCount === 0 || isInvesting || isRefreshingCurrentOdds}
+              >
+                {isRefreshingCurrentOdds ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Refreshing...
+                  </>
+                ) : (
+                  "Refresh Current %"
+                )}
+              </Button>
+              <Button
+                onClick={onInvest}
+                disabled={
+                  selectedCount === 0 || isInvesting || isRefreshingCurrentOdds
+                }
+              >
+                {isInvesting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Investing...
+                  </>
+                ) : (
+                  `Invest${selectedCount > 0 ? ` · ${formatMoney(totalSelectedAmount)}` : ""}`
+                )}
+              </Button>
+            </div>
+            {progressMessage ? (
+              <p className="max-w-xl text-xs leading-5 text-slate-600">
+                {progressMessage}
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>

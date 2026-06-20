@@ -371,18 +371,26 @@ class PolymarketPaperCopyBot:
     ) -> list[PolymarketManualInvestOrderResult]:
         async with self._lock:
             results: list[PolymarketManualInvestOrderResult] = []
+            total_orders = len(orders)
+            doctor_failed = False
 
-            for order in orders:
-                trade = self._manual_live_trade_decision(order)
-                await self._record_live_trade_unlocked(trade)
-
-                try:
-                    await self._execute_live_trade_unlocked(
-                        trade,
-                        "manual Bullpen x AI investment",
-                        bypass_trade_risk=True,
-                        skip_dashboard_unlock=True,
-                    )
+            self._add_activity(
+                f"Manual Bullpen batch started for {total_orders} order{'s' if total_orders != 1 else ''}."
+            )
+            try:
+                await self._refresh_doctor_unlocked()
+            except Exception as exc:
+                doctor_error = redact_secrets(str(exc))
+                await self.logger.error("Manual Bullpen doctor refresh failed", exc)
+                self._add_activity(
+                    f"Manual Bullpen batch blocked before execution: {doctor_error}"
+                )
+                for order in orders:
+                    trade = self._manual_live_trade_decision(order)
+                    trade.status = "failed"
+                    trade.failure_reason = doctor_error
+                    trade.updated_at = utc_now()
+                    await self._record_live_trade_unlocked(trade)
                     results.append(
                         PolymarketManualInvestOrderResult(
                             question_id=order.question_id,
@@ -391,36 +399,79 @@ class PolymarketPaperCopyBot:
                             outcome=order.outcome,
                             amount=order.amount,
                             price=order.price,
-                            status="executed",
-                            message="Order executed in Bullpen.",
+                            status="failed",
+                            message=doctor_error,
                             trade_id=trade.id,
                             executed_at=trade.executed_at,
                         )
                     )
-                except Exception as exc:
-                    results.append(
-                        PolymarketManualInvestOrderResult(
-                            question_id=order.question_id,
-                            market_id=order.market_id,
-                            market_title=order.market_title,
-                            outcome=order.outcome,
-                            amount=order.amount,
-                            price=order.price,
-                            status=(
-                                "skipped"
-                                if trade.status == "skipped"
-                                else "failed"
-                            ),
-                            message=redact_secrets(
-                                trade.failure_reason
-                                or trade.reason
-                                or str(exc)
-                            ),
-                            trade_id=trade.id,
-                            executed_at=trade.executed_at,
-                        )
-                    )
+                doctor_failed = True
 
+            if not doctor_failed:
+                self._add_activity(
+                    "Bullpen doctor passed for the manual batch. Executing selected orders now."
+                )
+
+                for index, order in enumerate(orders, start=1):
+                    self._add_activity(
+                        f"Preparing manual Bullpen order {index} of {total_orders}: {order.market_title}."
+                    )
+                    trade = self._manual_live_trade_decision(order)
+                    await self._record_live_trade_unlocked(trade)
+
+                    try:
+                        await self._execute_live_trade_unlocked(
+                            trade,
+                            "manual Bullpen x AI investment",
+                            bypass_trade_risk=True,
+                            skip_dashboard_unlock=True,
+                            skip_doctor_refresh=True,
+                        )
+                        results.append(
+                            PolymarketManualInvestOrderResult(
+                                question_id=order.question_id,
+                                market_id=order.market_id,
+                                market_title=order.market_title,
+                                outcome=order.outcome,
+                                amount=order.amount,
+                                price=order.price,
+                                status="executed",
+                                message="Order executed in Bullpen.",
+                                trade_id=trade.id,
+                                executed_at=trade.executed_at,
+                            )
+                        )
+                    except Exception as exc:
+                        results.append(
+                            PolymarketManualInvestOrderResult(
+                                question_id=order.question_id,
+                                market_id=order.market_id,
+                                market_title=order.market_title,
+                                outcome=order.outcome,
+                                amount=order.amount,
+                                price=order.price,
+                                status=(
+                                    "skipped"
+                                    if trade.status == "skipped"
+                                    else "failed"
+                                ),
+                                message=redact_secrets(
+                                    trade.failure_reason
+                                    or trade.reason
+                                    or str(exc)
+                                ),
+                                trade_id=trade.id,
+                                executed_at=trade.executed_at,
+                            )
+                        )
+                        self._add_activity(
+                            f"Manual Bullpen order failed for {order.market_title}: "
+                            f"{redact_secrets(trade.failure_reason or trade.reason or str(exc))}"
+                        )
+
+        self._add_activity(
+            "Manual Bullpen batch finished. Refreshing the latest Bullpen balance before the dashboard updates."
+        )
         try:
             await self.refresh_balance()
         except Exception as exc:
@@ -1259,8 +1310,10 @@ class PolymarketPaperCopyBot:
         *,
         bypass_trade_risk: bool = False,
         skip_dashboard_unlock: bool = False,
+        skip_doctor_refresh: bool = False,
     ) -> None:
-        await self._refresh_doctor_unlocked()
+        if not skip_doctor_refresh:
+            await self._refresh_doctor_unlocked()
         if skip_dashboard_unlock:
             if self.emergency_stopped:
                 block_reason = "Emergency stop is active."

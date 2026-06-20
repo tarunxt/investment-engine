@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyCanonicalPolymarketMarketUrls } from "../_lib/polymarketMarketUrls";
+import { resolvePolymarketMarkets } from "../_lib/polymarketMarketUrls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -43,14 +43,23 @@ export async function POST(request: NextRequest) {
       : [];
 
     if (questions.length === 0) {
-      return NextResponse.json({ marketUrls: {} });
+      return NextResponse.json({ marketUrls: {}, marketSlugs: {} });
     }
 
-    const resolvedQuestions = await applyCanonicalPolymarketMarketUrls(questions);
+    const resolvedByQuestionId = await resolvePolymarketMarkets(questions);
 
     return NextResponse.json({
       marketUrls: Object.fromEntries(
-        resolvedQuestions.map((question) => [question.id, question.marketUrl]),
+        questions.map((question) => [
+          question.id,
+          resolvedByQuestionId[question.id]?.marketUrl ?? question.marketUrl,
+        ]),
+      ),
+      marketSlugs: Object.fromEntries(
+        questions.map((question) => [
+          question.id,
+          resolvedByQuestionId[question.id]?.slug ?? question.slug,
+        ]),
       ),
     });
   } catch (error) {

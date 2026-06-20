@@ -65,10 +65,12 @@ const QUESTION_KEYS = [
   "eventTitle",
   "marketQuestion",
 ];
-const SLUG_KEYS = [
+const MARKET_SLUG_KEYS = [
   "slug",
   "marketSlug",
   "questionSlug",
+];
+const EVENT_SLUG_KEYS = [
   "eventSlug",
   "urlSlug",
 ];
@@ -582,7 +584,7 @@ function normalizeGammaMarket(
   const noPrice = noIndex >= 0 ? outcomePrices[noIndex] : null;
   const yesOdds = normalizeOdds(yesPrice);
   const noOdds = normalizeOdds(noPrice);
-  const slug = readString(record, SLUG_KEYS);
+  const slug = readString(record, MARKET_SLUG_KEYS);
   const closeTime = chooseCloseTime(
     readString(record, CLOSE_TIME_KEYS),
     inferSemanticCloseTime(record, question),
@@ -590,7 +592,9 @@ function normalizeGammaMarket(
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
 
   return {
-    id: readString(record, ["id", ...SLUG_KEYS, "marketId", "conditionId"]) || question,
+    id:
+      readString(record, ["id", ...MARKET_SLUG_KEYS, "marketId", "conditionId"]) ||
+      question,
     question,
     closeTime,
     category: readString(record, CATEGORY_KEYS) || "Uncategorized",
@@ -668,11 +672,23 @@ function normalizeQuestion(
     rawCloseTime,
     inferSemanticCloseTime(record, question),
   );
-  const slug = readString(record, SLUG_KEYS) || readDeepString(record, SLUG_KEYS);
+  const slug =
+    readString(record, MARKET_SLUG_KEYS) ||
+    readDeepString(record, MARKET_SLUG_KEYS);
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
   const outcomeLabels = readOutcomeLabels(record);
   const id =
-    readString(record, ["id", ...SLUG_KEYS, "marketId", "eventId", "conditionId"]) ||
+    readString(
+      record,
+      [
+        "id",
+        ...MARKET_SLUG_KEYS,
+        "marketId",
+        "conditionId",
+        ...EVENT_SLUG_KEYS,
+        "eventId",
+      ],
+    ) ||
     `${question}-${closeTime || "unknown"}`;
 
   return {
