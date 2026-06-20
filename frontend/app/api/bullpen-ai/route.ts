@@ -154,6 +154,23 @@ const MARKET_QUESTION_KEYWORDS = [
   "fed",
   "etf",
 ];
+const SOCIAL_POST_COUNT_KEYWORDS = [
+  "tweet",
+  "tweets",
+  "x post",
+  "x posts",
+  "posts on x",
+  "truth social post",
+  "truth social posts",
+  "truths",
+];
+const SOCIAL_POST_COUNT_PATTERNS = [
+  /\bhow many (?:tweets?|posts?|truths?)\b/i,
+  /\bnumber of (?:tweets?|posts?|truths?)\b/i,
+  /\b(?:at least|at most|more than|less than|over|under|between)\s+\d+[\w\s-]*(?:tweets?|posts?|truths?)\b/i,
+  /\b\d+\s*(?:-|to)\s*\d+\s+(?:tweets?|posts?|truths?)\b/i,
+  /\b\d+\+?\s+(?:tweets?|posts?|truths?)\b/i,
+];
 const MONTH_NAMES = [
   "january",
   "february",
@@ -530,6 +547,14 @@ function isMarketPredictionQuestion(question: BullpenQuestion) {
   );
 }
 
+function isTweetCountQuestion(question: BullpenQuestion) {
+  const searchText = getQuestionSearchText(question);
+  return (
+    includesAnyKeyword(searchText, SOCIAL_POST_COUNT_KEYWORDS) &&
+    SOCIAL_POST_COUNT_PATTERNS.some((pattern) => pattern.test(searchText))
+  );
+}
+
 function sortQuestions(questions: BullpenQuestion[]) {
   return [...questions].sort((left, right) => {
     const leftTime = left.closeTime ? new Date(left.closeTime).getTime() : Number.POSITIVE_INFINITY;
@@ -705,6 +730,8 @@ function passesFilters(question: BullpenQuestion, mode: ScanMode, filters: Bullp
   if (filters.excludeSports && isSportsQuestion(question)) return false;
   if (filters.excludeWeather && isWeatherQuestion(question)) return false;
   if (filters.excludeMarketPredictions && isMarketPredictionQuestion(question))
+    return false;
+  if (filters.excludeTweetCountQuestions && isTweetCountQuestion(question))
     return false;
   if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) return false;
   if (filters.minYesOdds > 0 && (question.yesOdds === null || question.yesOdds < filters.minYesOdds))

@@ -113,6 +113,10 @@ function formatDateOnly(value: string) {
   return date.toLocaleDateString("en-IN", { dateStyle: "long" });
 }
 
+function formatCountLabel(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function getModeDescription(mode: ScanMode, filters: BullpenScanFilters) {
   if (mode === "end-of-month") {
     return `Bullpen questions ending exactly on ${formatDateOnly(filters.targetDate)}.`;
@@ -128,6 +132,8 @@ function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
     left.excludeSports === right.excludeSports &&
     left.excludeWeather === right.excludeWeather &&
     left.excludeMarketPredictions === right.excludeMarketPredictions &&
+    Boolean(left.excludeTweetCountQuestions) ===
+      Boolean(right.excludeTweetCountQuestions) &&
     left.onlyBinaryYesNo === right.onlyBinaryYesNo &&
     left.minYesOdds === right.minYesOdds &&
     left.minNoOdds === right.minNoOdds
@@ -148,15 +154,30 @@ function normalizeSnapshot(
   if (!Array.isArray(record.questions) || typeof record.mode !== "string") {
     return null;
   }
+  const mode: ScanMode =
+    record.mode === "end-of-month" ? "end-of-month" : "30-days";
+  const defaultFilters = createBullpenScanFilters(mode);
+  const storedFilters =
+    record.filters && typeof record.filters === "object"
+      ? (record.filters as Partial<BullpenScanFilters>)
+      : {};
 
   return {
     ...(record as unknown as BullpenScanSnapshot),
+    mode,
     snapshotId:
       typeof record.snapshotId === "string"
         ? record.snapshotId
         : `bullpen-scan-${Date.now().toString(36)}`,
     archivedAt:
       typeof record.archivedAt === "string" ? record.archivedAt : null,
+    filters: {
+      ...defaultFilters,
+      ...storedFilters,
+      excludeTweetCountQuestions: Boolean(
+        storedFilters.excludeTweetCountQuestions,
+      ),
+    },
     questions: record.questions.map((question) =>
       createBullpenQuestionRow(question as BullpenQuestionRow),
     ),
@@ -596,16 +617,34 @@ export default function BullpenAiPage() {
         throw new Error(detail || "The selected LLM did not return any output.");
       }
 
-      const analysisPayload = parseBullpenLlmAnalysisPayload(job.response);
+      const analysisPayload = parseBullpenLlmAnalysisPayload(
+        job.response,
+        selectedQuestions,
+      );
+      const selectedQuestionIdsSet = new Set(
+        selectedQuestions.map((question) => question.id),
+      );
+      const analysisByQuestionId = new Map(
+        analysisPayload.markets
+          .filter((item) => selectedQuestionIdsSet.has(item.questionId))
+          .map((item) => [item.questionId, item] as const),
+      );
+      const matchedCount = analysisByQuestionId.size;
+      const rowsWithOddsCount = Array.from(analysisByQuestionId.values()).filter(
+        (item) => item.llmYesOdds !== null || item.llmNoOdds !== null,
+      ).length;
+      const blankOddsCount = matchedCount - rowsWithOddsCount;
+      const unmatchedCount = Math.max(
+        0,
+        analysisPayload.markets.length - matchedCount,
+      );
 
       setSnapshotsByMode((current) => {
         const currentSnapshot = current[activeMode].current;
         if (!currentSnapshot) return current;
 
         const nextQuestions = currentSnapshot.questions.map((question) => {
-          const analysis = analysisPayload.markets.find(
-            (item) => item.questionId === question.id,
-          );
+          const analysis = analysisByQuestionId.get(question.id);
           if (!analysis) return question;
 
           return createBullpenQuestionRow({
@@ -636,9 +675,39 @@ export default function BullpenAiPage() {
         };
       });
 
+      const summaryParts = [
+        `LLM finished with ${target.provider} / ${target.model}.`,
+      ];
+
+      if (rowsWithOddsCount > 0) {
+        summaryParts.push(
+          `Filled odds for ${formatCountLabel(rowsWithOddsCount, "selected question")}.`,
+        );
+      } else if (matchedCount > 0) {
+        summaryParts.push(
+          `Matched ${formatCountLabel(matchedCount, "selected row")} back to the table, but the model left their odds blank.`,
+        );
+      } else {
+        summaryParts.push(
+          "The model returned results, but none could be matched back to the selected table rows, so the LLM odds columns stayed unchanged.",
+        );
+      }
+
+      if (blankOddsCount > 0) {
+        summaryParts.push(
+          `${formatCountLabel(blankOddsCount, "matched row")} came back with insufficient evidence, so those LLM odds stayed blank.`,
+        );
+      }
+
+      if (unmatchedCount > 0) {
+        summaryParts.push(
+          `${formatCountLabel(unmatchedCount, "returned row")} could not be matched back to the selected questions.`,
+        );
+      }
+
       setLlmMessagesByMode((current) => ({
         ...current,
-        [activeMode]: `LLM odds updated for ${selectedQuestions.length} selected question${selectedQuestions.length === 1 ? "" : "s"} using ${target.provider} / ${target.model}.`,
+        [activeMode]: summaryParts.join(" "),
       }));
     } catch (error) {
       setLlmMessagesByMode((current) => ({
@@ -813,6 +882,15 @@ export default function BullpenAiPage() {
                   buttonClassName="rounded-r-none"
                   pickerButtonClassName="h-10 w-10 rounded-l-none rounded-r-none border border-l-0 border-transparent bg-primary text-primary-foreground hover:bg-primary/80 focus:outline-none focus:ring-2 focus:ring-ring/30"
                 />
+                {isRunningLlm ? (
+                  <p className="text-xs leading-5 text-slate-600">
+                    Running {lastLlmTarget?.provider || "the selected LLM"} /{" "}
+                    {lastLlmTarget?.model || "selected model"} on the selected
+                    questions now. When it finishes, we&apos;ll say how many
+                    table rows were updated and whether any LLM odds stayed
+                    blank.
+                  </p>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
@@ -834,7 +912,7 @@ export default function BullpenAiPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <FilterToggle
               checked={activeFilters.excludeSports}
               onChange={(checked) => updateActiveFilters({ excludeSports: checked })}
@@ -856,6 +934,14 @@ export default function BullpenAiPage() {
               }
               label="Exclude market predictions"
               description="Remove finance, macro, stocks, commodities, and crypto-price style questions."
+            />
+            <FilterToggle
+              checked={activeFilters.excludeTweetCountQuestions}
+              onChange={(checked) =>
+                updateActiveFilters({ excludeTweetCountQuestions: checked })
+              }
+              label="Exclude tweet counts"
+              description="Remove questions asking how many tweets or social posts someone will make."
             />
             <FilterToggle
               checked={activeFilters.onlyBinaryYesNo}

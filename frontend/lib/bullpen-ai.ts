@@ -37,6 +37,7 @@ export type BullpenScanFilters = {
   excludeSports: boolean;
   excludeWeather: boolean;
   excludeMarketPredictions: boolean;
+  excludeTweetCountQuestions: boolean;
   onlyBinaryYesNo: boolean;
   minYesOdds: number;
   minNoOdds: number;
@@ -96,6 +97,7 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     excludeSports: true,
     excludeWeather: true,
     excludeMarketPredictions: true,
+    excludeTweetCountQuestions: false,
     onlyBinaryYesNo: true,
     minYesOdds: 5,
     minNoOdds: 5,
@@ -106,6 +108,7 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     excludeSports: true,
     excludeWeather: true,
     excludeMarketPredictions: true,
+    excludeTweetCountQuestions: false,
     onlyBinaryYesNo: true,
     minYesOdds: 5,
     minNoOdds: 5,
@@ -166,6 +169,10 @@ export function normalizeBullpenScanFilters(
       searchParams.get("excludeMarketPredictions"),
       defaults.excludeMarketPredictions,
     ),
+    excludeTweetCountQuestions: parseBooleanSearchParam(
+      searchParams.get("excludeTweetCountQuestions"),
+      defaults.excludeTweetCountQuestions,
+    ),
     onlyBinaryYesNo: parseBooleanSearchParam(
       searchParams.get("onlyBinaryYesNo"),
       defaults.onlyBinaryYesNo,
@@ -194,6 +201,10 @@ export function buildBullpenScanQueryParams(
   params.set(
     "excludeMarketPredictions",
     String(filters.excludeMarketPredictions),
+  );
+  params.set(
+    "excludeTweetCountQuestions",
+    String(filters.excludeTweetCountQuestions),
   );
   params.set("onlyBinaryYesNo", String(filters.onlyBinaryYesNo));
   params.set("minYesOdds", String(filters.minYesOdds));
@@ -281,19 +292,26 @@ function extractNumber(value: unknown) {
   return null;
 }
 
-function extractObjectFromText(text: string) {
+function extractJsonValueFromText(text: string) {
   const trimmed = text.trim();
   if (!trimmed) {
     throw new Error("LLM returned an empty response.");
   }
 
-  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const fencedMatches = Array.from(
+    trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi),
+  ).map((match) => match[1]);
   const candidates = [
-    fencedMatch?.[1],
+    ...fencedMatches,
     trimmed,
     (() => {
       const start = trimmed.indexOf("{");
       const end = trimmed.lastIndexOf("}");
+      return start >= 0 && end > start ? trimmed.slice(start, end + 1) : null;
+    })(),
+    (() => {
+      const start = trimmed.indexOf("[");
+      const end = trimmed.lastIndexOf("]");
       return start >= 0 && end > start ? trimmed.slice(start, end + 1) : null;
     })(),
   ].filter((candidate): candidate is string => Boolean(candidate));
@@ -309,13 +327,130 @@ function extractObjectFromText(text: string) {
   throw new Error("LLM response was not valid JSON.");
 }
 
+function getBullpenQuestionRef(index: number) {
+  return `Q${index + 1}`;
+}
+
+function normalizeQuestionLookupValue(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizeLooseQuestionLookupValue(value: string) {
+  return normalizeQuestionLookupValue(value).replace(/[^a-z0-9]+/g, "");
+}
+
+function readStringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function buildBullpenQuestionLookupMap(questions: BullpenQuestionRow[]) {
+  const aliasToQuestionId = new Map<string, string>();
+
+  const registerAlias = (alias: string | null, questionId: string) => {
+    if (!alias) return;
+    const normalized = normalizeQuestionLookupValue(alias);
+    const loose = normalizeLooseQuestionLookupValue(alias);
+
+    if (normalized && !aliasToQuestionId.has(normalized)) {
+      aliasToQuestionId.set(normalized, questionId);
+    }
+    if (loose && !aliasToQuestionId.has(loose)) {
+      aliasToQuestionId.set(loose, questionId);
+    }
+  };
+
+  questions.forEach((question, index) => {
+    for (const alias of [
+      getBullpenQuestionRef(index),
+      question.id,
+      question.question,
+      question.slug,
+      question.marketUrl,
+    ]) {
+      registerAlias(alias, question.id);
+    }
+  });
+
+  return aliasToQuestionId;
+}
+
+function resolveBullpenQuestionId(
+  record: Record<string, unknown>,
+  aliasToQuestionId: Map<string, string> | null,
+) {
+  if (!aliasToQuestionId) {
+    return (
+      readStringValue(record.question_id) ||
+      readStringValue(record.questionId) ||
+      readStringValue(record.question_ref) ||
+      readStringValue(record.questionRef) ||
+      readStringValue(record.question) ||
+      readStringValue(record.market_question) ||
+      readStringValue(record.title) ||
+      readStringValue(record.slug) ||
+      readStringValue(record.market_url) ||
+      readStringValue(record.marketUrl)
+    );
+  }
+
+  const aliases = [
+    readStringValue(record.question_ref),
+    readStringValue(record.questionRef),
+    readStringValue(record.question_id),
+    readStringValue(record.questionId),
+    readStringValue(record.question),
+    readStringValue(record.market_question),
+    readStringValue(record.title),
+    readStringValue(record.name),
+    readStringValue(record.slug),
+    readStringValue(record.market_url),
+    readStringValue(record.marketUrl),
+  ].filter((alias): alias is string => Boolean(alias));
+
+  for (const alias of aliases) {
+    const normalized = normalizeQuestionLookupValue(alias);
+    const loose = normalizeLooseQuestionLookupValue(alias);
+    const matchedQuestionId =
+      aliasToQuestionId.get(normalized) || aliasToQuestionId.get(loose);
+
+    if (matchedQuestionId) return matchedQuestionId;
+  }
+
+  return aliases[0] ?? null;
+}
+
+function extractMarketsFromParsedLlmPayload(parsed: unknown) {
+  if (Array.isArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== "object") return [];
+
+  const record = parsed as Record<string, unknown>;
+  const collections = [
+    record.markets,
+    record.questions,
+    record.predictions,
+    record.results,
+    record.items,
+  ];
+
+  for (const collection of collections) {
+    if (Array.isArray(collection)) return collection;
+  }
+
+  if (record.content && typeof record.content === "object") {
+    return extractMarketsFromParsedLlmPayload(record.content);
+  }
+
+  return [];
+}
+
 export function parseBullpenLlmAnalysisPayload(
   responseText: string,
+  questions: BullpenQuestionRow[] = [],
 ): BullpenLlmAnalysisPayload {
-  const parsed = extractObjectFromText(responseText);
-  const markets = Array.isArray((parsed as { markets?: unknown[] })?.markets)
-    ? ((parsed as { markets?: unknown[] }).markets ?? [])
-    : [];
+  const parsed = extractJsonValueFromText(responseText);
+  const markets = extractMarketsFromParsedLlmPayload(parsed);
+  const aliasToQuestionId =
+    questions.length > 0 ? buildBullpenQuestionLookupMap(questions) : null;
 
   if (markets.length === 0) {
     throw new Error("LLM response did not include any market odds.");
@@ -325,24 +460,47 @@ export function parseBullpenLlmAnalysisPayload(
     .map((item: unknown): BullpenLlmAnalysisItem | null => {
       if (!item || typeof item !== "object") return null;
       const record = item as Record<string, unknown>;
-      const questionId =
-        typeof record.question_id === "string"
-          ? record.question_id
-          : typeof record.questionId === "string"
-            ? record.questionId
-            : null;
+      const questionId = resolveBullpenQuestionId(record, aliasToQuestionId);
       if (!questionId) return null;
 
       const normalizedOdds = normalizeOddsPair(
-        extractNumber(record.llm_yes_odds ?? record.llmYesOdds ?? record.yes_odds),
-        extractNumber(record.llm_no_odds ?? record.llmNoOdds ?? record.no_odds),
+        extractNumber(
+          record.llm_yes_odds ??
+            record.llmYesOdds ??
+            record.yes_odds ??
+            record.yesOdds ??
+            record.yes_probability ??
+            record.yesProbability ??
+            record.prob_yes ??
+            record.probYes ??
+            record.probability_yes ??
+            record.probabilityYes,
+        ),
+        extractNumber(
+          record.llm_no_odds ??
+            record.llmNoOdds ??
+            record.no_odds ??
+            record.noOdds ??
+            record.no_probability ??
+            record.noProbability ??
+            record.prob_no ??
+            record.probNo ??
+            record.probability_no ??
+            record.probabilityNo,
+        ),
       );
 
       const notes =
         typeof record.notes === "string"
           ? record.notes.trim()
+          : typeof record.note === "string"
+            ? record.note.trim()
           : typeof record.reasoning === "string"
             ? record.reasoning.trim()
+            : typeof record.explanation === "string"
+              ? record.explanation.trim()
+              : typeof record.summary === "string"
+                ? record.summary.trim()
             : null;
 
       return {
@@ -369,7 +527,7 @@ Return ONLY valid JSON in this exact shape:
 {
   "markets": [
     {
-      "question_id": "string",
+      "question_ref": "Q1",
       "llm_yes_odds": 0,
       "llm_no_odds": 0,
       "notes": "short explanation"
@@ -380,6 +538,7 @@ Return ONLY valid JSON in this exact shape:
 Rules:
 - Analyze every provided question independently using live web research.
 - The provided current market odds are context only. Do not anchor blindly to them.
+- Copy each "question_ref" exactly as provided for the matching market.
 - Use numbers from 0 to 100 with up to 2 decimals.
 - If both yes and no odds are present, they must sum to 100.
 - If evidence is insufficient, return null for both odds and explain briefly in notes.
@@ -387,7 +546,8 @@ Rules:
 
 Questions:
 ${JSON.stringify(
-    questions.map((question) => ({
+    questions.map((question, index) => ({
+      question_ref: getBullpenQuestionRef(index),
       question_id: question.id,
       question: question.question,
       closing_time: question.closeTime,
