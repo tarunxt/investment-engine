@@ -21,6 +21,13 @@ async def _get_bot(current_user: User) -> object:
     return await polymarket_direct_bot_manager.get_bot(current_user.id)
 
 
+def _http_error_detail(exc: Exception) -> str:
+    message = str(exc).strip()
+    if message and message.lower() != "none":
+        return f"{exc.__class__.__name__}: {message}"
+    return f"{exc.__class__.__name__}: {exc!r}"
+
+
 @router.get("/state", response_model=PolymarketBotState)
 async def get_polymarket_state(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
@@ -33,7 +40,7 @@ async def start_polymarket_bot(current_user: User = Depends(get_current_user)):
     try:
         await bot.start()
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()
 
 
@@ -64,7 +71,7 @@ async def unlock_polymarket_live(current_user: User = Depends(get_current_user))
     try:
         await bot.unlock_live()
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()
 
 
@@ -97,7 +104,7 @@ async def redeem_polymarket_live_positions(
     try:
         await bot.redeem_live_positions()
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()
 
 
@@ -128,7 +135,7 @@ async def update_polymarket_live_limits(
     try:
         await bot.update_live_limits(request)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()
 
 
@@ -140,7 +147,7 @@ async def confirm_polymarket_trade(
     try:
         await bot.confirm_live_trade(trade_id)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()
 
 
@@ -152,7 +159,7 @@ async def reject_polymarket_trade(
     try:
         await bot.reject_live_trade(trade_id)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()
 
 
@@ -172,7 +179,7 @@ async def add_polymarket_tracked_account(
     try:
         await bot.add_tracked_account(request)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()
 
 
@@ -186,7 +193,7 @@ async def update_polymarket_tracked_account(
     try:
         await bot.update_tracked_account(account_id, request)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()
 
 
@@ -198,7 +205,7 @@ async def delete_polymarket_tracked_account(
     try:
         await bot.delete_tracked_account(account_id)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()
 
 
@@ -211,4 +218,4 @@ async def debug_polymarket_discovery(
     try:
         return await bot.debug_discovery(request.target)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc

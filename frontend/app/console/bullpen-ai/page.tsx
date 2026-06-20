@@ -43,6 +43,7 @@ import {
   type ScanMode,
   type ScanResult,
 } from "@/lib/bullpen-ai";
+import { formatApiErrorSummary, formatUnknownError } from "@/lib/apiErrors";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
@@ -218,9 +219,8 @@ function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
 }
 
 function normalizeError(error: unknown) {
-  if (error instanceof APIError) return error.message;
-  if (error instanceof Error) return error.message;
-  return "Something went wrong.";
+  if (error instanceof APIError) return formatApiErrorSummary(error);
+  return formatUnknownError(error);
 }
 
 function buildClaimPositionMessage(

@@ -1,0 +1,58 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFileSync } from "node:fs";
+import ts from "typescript";
+
+async function loadApiErrorsModule() {
+  const source = readFileSync(
+    new URL("../lib/apiErrors.ts", import.meta.url),
+    "utf8",
+  );
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: "apiErrors.ts",
+  });
+
+  return import(
+    `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
+  );
+}
+
+test("deriveApiErrorMessage handles nested and string payloads", async () => {
+  const {
+    deriveApiErrorMessage,
+    formatApiErrorSummary,
+    stringifyErrorDetail,
+  } = await loadApiErrorsModule();
+
+  assert.equal(
+    deriveApiErrorMessage({ detail: { error: "Bullpen claim rejected" } }),
+    "Bullpen claim rejected",
+  );
+  assert.equal(
+    deriveApiErrorMessage("Bullpen claim rejected"),
+    "Bullpen claim rejected",
+  );
+  assert.equal(
+    deriveApiErrorMessage(undefined, "Fallback message"),
+    "Fallback message",
+  );
+  assert.equal(
+    stringifyErrorDetail([
+      { detail: "first" },
+      { message: "second" },
+    ]),
+    "first; second",
+  );
+  assert.equal(
+    formatApiErrorSummary({
+      status: 400,
+      message: "API request failed",
+      details: { detail: "RuntimeError: Bullpen claim rejected" },
+    }),
+    "HTTP 400: API request failed. Details: RuntimeError: Bullpen claim rejected",
+  );
+});

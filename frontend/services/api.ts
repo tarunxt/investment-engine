@@ -1,4 +1,5 @@
 import { URLs } from "@/lib/urls";
+import { deriveApiErrorMessage } from "@/lib/apiErrors";
 import { sessionStorage } from "@/services/session";
 import { syncTokenToCookie } from "@/services/cookies";
 import { signOut } from "next-auth/react";
@@ -91,7 +92,7 @@ export class APIError extends Error {
     public message: string,
     public details?: unknown,
   ) {
-    super(message);
+    super(message || "API request failed");
     this.name = "APIError";
   }
 }
@@ -127,6 +128,23 @@ let refreshPromise: Promise<boolean> | null = null;
  * API Service - Wrapper around URL resolver for making API calls
  */
 class apiServiceClass implements IApiService {
+  async parseErrorResponse(response: Response): Promise<unknown> {
+    const text = await response.text();
+    if (!text.trim()) {
+      return {
+        message:
+          response.statusText ||
+          `Request failed with status ${response.status}`,
+      };
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+
   async fetch<T>(
     url: string,
     options: ApiRequestOptions = {},
@@ -195,12 +213,13 @@ class apiServiceClass implements IApiService {
         }
 
         // Handle other errors
-        const errorData = await response.json().catch(() => ({
-          message: response.statusText,
-        }));
+        const errorData = await this.parseErrorResponse(response);
+        const fallbackMessage =
+          response.statusText || `Request failed with status ${response.status}`;
+        const errorMessage = deriveApiErrorMessage(errorData, fallbackMessage);
 
         this.error(`❌ API Error ${response.status}:`, errorData);
-        throw new APIError(response.status, errorData.message || errorData.detail, errorData);
+        throw new APIError(response.status, errorMessage, errorData);
       }
 
       const data = await response.json();
@@ -366,11 +385,12 @@ class apiServiceClass implements IApiService {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({
-        message: response.statusText,
-      }));
+      const error = await this.parseErrorResponse(response);
+      const fallbackMessage =
+        response.statusText || `Request failed with status ${response.status}`;
+      const errorMessage = deriveApiErrorMessage(error, fallbackMessage);
       this.error("Refresh token request failed:", error);
-      throw new APIError(response.status, error.message || error.detail, error);
+      throw new APIError(response.status, errorMessage, error);
     }
 
     const data = await response.json() as RefreshTokenResponse;
