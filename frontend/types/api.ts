@@ -1107,6 +1107,30 @@ export interface PolymarketLiveLimitUpdate {
   max_live_exposure_per_market: number;
 }
 
+export interface PolymarketManualInvestOrderRequest {
+  question_id: string;
+  market_id: string;
+  market_title: string;
+  outcome: string;
+  amount: number;
+  price: number;
+  event_end_at?: string | null;
+  market_url?: string | null;
+}
+
+export interface PolymarketManualInvestOrderResult {
+  question_id: string;
+  market_id: string;
+  market_title: string;
+  outcome: string;
+  amount: number;
+  price: number;
+  status: 'executed' | 'failed' | 'skipped';
+  message: string;
+  trade_id?: string | null;
+  executed_at?: string | null;
+}
+
 export interface PolymarketTrackedAccountUpdate {
   target?: string;
   threshold_percent?: number;
@@ -1318,6 +1342,11 @@ export interface PolymarketBotState {
   metrics: PolymarketMetrics;
   config: PolymarketBotConfig;
   live: PolymarketLiveControlState;
+}
+
+export interface PolymarketManualInvestResponse {
+  orders: PolymarketManualInvestOrderResult[];
+  state: PolymarketBotState;
 }
 
 export interface PolymarketDiscoveryDebugRequest {

@@ -31,6 +31,7 @@ import {
   createBullpenScanFilters,
   createBullpenScanSnapshot,
   DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
+  isBullpenQuestionInvestmentCandidate,
   normalizeBullpenScanFilters,
   parseBullpenLlmAnalysisPayload,
   summarizeBullpenLlmNotes,
@@ -44,13 +45,18 @@ import {
 import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
-import type { ProviderModelTarget } from "@/types/api";
+import type {
+  PolymarketManualInvestOrderRequest,
+  PolymarketManualInvestResponse,
+  ProviderModelTarget,
+} from "@/types/api";
 
 import {
   BullpenQuestionsTable,
   type BullpenTableSortKey,
   type BullpenTableSortState,
 } from "./_components/BullpenQuestionsTable";
+import { BullpenInvestmentsSection } from "./_components/BullpenInvestmentsSection";
 import { BullpenPromptEditorDialog } from "./_components/BullpenPromptEditorDialog";
 
 const TABS: {
@@ -176,6 +182,34 @@ function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
   if (error instanceof Error) return error.message;
   return "Something went wrong.";
+}
+
+function buildBullpenManualInvestOrder(
+  question: BullpenQuestionRow,
+): PolymarketManualInvestOrderRequest | null {
+  if (
+    question.amountToBeInvested === null ||
+    question.amountToBeInvested <= 0 ||
+    question.noOdds === null ||
+    question.noOdds <= 0 ||
+    question.noOdds >= 100
+  ) {
+    return null;
+  }
+
+  const marketId = question.slug || question.marketUrl;
+  if (!marketId) return null;
+
+  return {
+    question_id: question.id,
+    market_id: marketId,
+    market_title: question.question,
+    outcome: "No",
+    amount: Number(question.amountToBeInvested.toFixed(2)),
+    price: Number((question.noOdds / 100).toFixed(4)),
+    event_end_at: question.closeTime,
+    market_url: question.marketUrl,
+  };
 }
 
 function applySnapshotMarketUrls(
@@ -467,6 +501,10 @@ export default function BullpenAiPage() {
   const [selectedQuestionIdsByMode, setSelectedQuestionIdsByMode] = useState<
     Record<ScanMode, string[]>
   >(createEmptySelectionMap);
+  const [
+    selectedInvestmentQuestionIdsByMode,
+    setSelectedInvestmentQuestionIdsByMode,
+  ] = useState<Record<ScanMode, string[]>>(createEmptySelectionMap);
   const [sortByMode, setSortByMode] = useState<
     Record<ScanMode, BullpenTableSortState>
   >(createEmptySortMap);
@@ -482,8 +520,15 @@ export default function BullpenAiPage() {
     "30-days": null,
     "end-of-month": null,
   });
+  const [investmentMessagesByMode, setInvestmentMessagesByMode] = useState<
+    Record<ScanMode, string | null>
+  >({
+    "30-days": null,
+    "end-of-month": null,
+  });
   const [scanningMode, setScanningMode] = useState<ScanMode | null>(null);
   const [llmRunningMode, setLlmRunningMode] = useState<ScanMode | null>(null);
+  const [investingMode, setInvestingMode] = useState<ScanMode | null>(null);
   const [lastLlmTargets, setLastLlmTargets] = useState<ProviderModelTarget[]>(
     [],
   );
@@ -560,8 +605,10 @@ export default function BullpenAiPage() {
     !filtersEqual(activeCurrentSnapshot.filters, activeFilters);
   const notice = messagesByMode[activeMode];
   const llmNotice = llmMessagesByMode[activeMode];
+  const investmentNotice = investmentMessagesByMode[activeMode];
   const isScanning = scanningMode === activeMode;
   const isRunningLlm = llmRunningMode === activeMode;
+  const isInvesting = investingMode === activeMode;
   const selectionEnabled = Boolean(activeCurrentSnapshot && !isViewingHistory);
   const selectedQuestionIds = selectionEnabled
     ? selectedQuestionIdsByMode[activeMode].filter((questionId) =>
@@ -571,6 +618,67 @@ export default function BullpenAiPage() {
   const selectedQuestionIdSet = new Set(selectedQuestionIds);
   const selectedQuestionCount = selectedQuestionIds.length;
   const activeFilterBadges = getFilterBadgeLabels(activeMode, activeFilters);
+  const activeInvestmentCandidates =
+    selectionEnabled && activeCurrentSnapshot
+      ? activeCurrentSnapshot.questions.filter((question) => {
+          return (
+            isBullpenQuestionInvestmentCandidate(question) &&
+            buildBullpenManualInvestOrder(question) !== null
+          );
+        })
+      : [];
+  const activeInvestmentCandidateIds = new Set(
+    activeInvestmentCandidates.map((question) => question.id),
+  );
+  const selectedInvestmentQuestionIds = selectionEnabled
+    ? selectedInvestmentQuestionIdsByMode[activeMode].filter((questionId) =>
+        activeInvestmentCandidateIds.has(questionId),
+      )
+    : [];
+  const selectedInvestmentQuestionIdSet = new Set(selectedInvestmentQuestionIds);
+  const activeHasAnyLlmOdds = Boolean(
+    activeCurrentSnapshot?.questions.some(
+      (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
+    ),
+  );
+
+  useEffect(() => {
+    if (!selectionEnabled || !activeCurrentSnapshot) return;
+
+    const eligibleIds = activeCurrentSnapshot.questions
+      .filter((question) => {
+        return (
+          isBullpenQuestionInvestmentCandidate(question) &&
+          buildBullpenManualInvestOrder(question) !== null
+        );
+      })
+      .map((question) => question.id);
+    setSelectedInvestmentQuestionIdsByMode((current) => {
+      const previous = current[activeMode];
+      const filtered = previous.filter((questionId) => eligibleIds.includes(questionId));
+
+      if (previous.length > 0) {
+        if (
+          previous.length === filtered.length &&
+          previous.every((questionId, index) => questionId === filtered[index])
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [activeMode]: filtered,
+        };
+      }
+
+      if (eligibleIds.length === 0) return current;
+
+      return {
+        ...current,
+        [activeMode]: eligibleIds,
+      };
+    });
+  }, [activeCurrentSnapshot, activeMode, selectionEnabled]);
 
   useEffect(() => {
     if (!hasLoadedStorage || !activeVisibleSnapshot) return;
@@ -729,10 +837,43 @@ export default function BullpenAiPage() {
     });
   }
 
+  function toggleInvestmentSelection(questionId: string) {
+    if (!selectionEnabled || !activeInvestmentCandidateIds.has(questionId)) return;
+
+    setSelectedInvestmentQuestionIdsByMode((current) => {
+      const next = new Set(current[activeMode]);
+      if (next.has(questionId)) {
+        next.delete(questionId);
+      } else {
+        next.add(questionId);
+      }
+      return {
+        ...current,
+        [activeMode]: Array.from(next).filter((id) => activeInvestmentCandidateIds.has(id)),
+      };
+    });
+  }
+
+  function selectAllInvestmentCandidates() {
+    if (!selectionEnabled) return;
+    setSelectedInvestmentQuestionIdsByMode((current) => ({
+      ...current,
+      [activeMode]: activeInvestmentCandidates.map((question) => question.id),
+    }));
+  }
+
+  function clearInvestmentCandidates() {
+    setSelectedInvestmentQuestionIdsByMode((current) => ({
+      ...current,
+      [activeMode]: [],
+    }));
+  }
+
   async function runScan() {
     const params = buildBullpenScanQueryParams(activeMode, activeFilters);
     setScanningMode(activeMode);
     setMessagesByMode((current) => ({ ...current, [activeMode]: null }));
+    setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
 
     try {
       const response = await fetch(`/api/bullpen-ai?${params.toString()}`, {
@@ -764,6 +905,10 @@ export default function BullpenAiPage() {
           [activeMode]: null,
         }));
         setSelectedQuestionIdsByMode((current) => ({
+          ...current,
+          [activeMode]: [],
+        }));
+        setSelectedInvestmentQuestionIdsByMode((current) => ({
           ...current,
           [activeMode]: [],
         }));
@@ -834,6 +979,7 @@ export default function BullpenAiPage() {
 
     setLlmRunningMode(activeMode);
     setLlmMessagesByMode((current) => ({ ...current, [activeMode]: null }));
+    setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     setLastLlmTargets(targets);
     writeLastLlmTargetsToStorage(targets);
 
@@ -983,6 +1129,53 @@ export default function BullpenAiPage() {
           },
         };
       });
+      setSelectedInvestmentQuestionIdsByMode((current) => {
+        const currentSnapshot = snapshotsByMode[activeMode].current;
+        const sourceQuestions = currentSnapshot?.questions || [];
+        const nextQuestions = sourceQuestions.map((question) => {
+          const llmBreakdown = breakdownByQuestionId.get(question.id);
+          if (!llmBreakdown || llmBreakdown.length === 0) return question;
+
+          const averageOdds = averageBullpenLlmOdds(llmBreakdown);
+          const completedAt =
+            [...llmBreakdown]
+              .map((entry) => entry.timestamp)
+              .filter((timestamp): timestamp is string => Boolean(timestamp))
+              .sort()
+              .at(-1) || new Date().toISOString();
+
+          return createBullpenQuestionRow({
+            ...question,
+            llmYesOdds: averageOdds.yes,
+            llmNoOdds: averageOdds.no,
+            currentVsLlmOddsDifference:
+              averageOdds.yes === null || question.yesOdds === null
+                ? null
+                : Number((question.yesOdds - averageOdds.yes).toFixed(2)),
+            llmNotes: summarizeBullpenLlmNotes(llmBreakdown),
+            llmProvider:
+              llmBreakdown.length === 1 ? llmBreakdown[0]?.provider || null : null,
+            llmModel:
+              llmBreakdown.length === 1 ? llmBreakdown[0]?.model || null : null,
+            llmRunId: completedRun.id,
+            llmCompletedAt: completedAt,
+            llmBreakdown,
+          });
+        });
+        const eligibleIds = nextQuestions
+          .filter((question) => {
+            return (
+              isBullpenQuestionInvestmentCandidate(question) &&
+              buildBullpenManualInvestOrder(question) !== null
+            );
+          })
+          .map((question) => question.id);
+
+        return {
+          ...current,
+          [activeMode]: eligibleIds,
+        };
+      });
 
       const summaryParts = [
         `LLM finished with ${targets.length} selected model${targets.length === 1 ? "" : "s"}.`,
@@ -1040,11 +1233,90 @@ export default function BullpenAiPage() {
     }
   }
 
+  async function investInSelectedEvents() {
+    if (!activeCurrentSnapshot || !selectionEnabled) {
+      setInvestmentMessagesByMode((current) => ({
+        ...current,
+        [activeMode]: "Switch back to the current snapshot before placing Bullpen orders.",
+      }));
+      return;
+    }
+
+    const selectedOrders = activeInvestmentCandidates
+      .filter((question) => selectedInvestmentQuestionIdSet.has(question.id))
+      .map((question) => buildBullpenManualInvestOrder(question))
+      .filter((order): order is PolymarketManualInvestOrderRequest => Boolean(order));
+
+    if (selectedOrders.length === 0) {
+      setInvestmentMessagesByMode((current) => ({
+        ...current,
+        [activeMode]:
+          "Select at least one pink event with a valid Bullpen market reference before investing.",
+      }));
+      return;
+    }
+
+    setInvestingMode(activeMode);
+    setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
+
+    try {
+      const response: PolymarketManualInvestResponse =
+        await apiService.polymarketManualInvest({
+          orders: selectedOrders,
+        });
+      const executedOrders = response.orders.filter(
+        (order) => order.status === "executed",
+      );
+      const failedOrders = response.orders.filter(
+        (order) => order.status !== "executed",
+      );
+
+      setSelectedInvestmentQuestionIdsByMode((current) => ({
+        ...current,
+        [activeMode]: failedOrders.map((order) => order.question_id),
+      }));
+
+      const summaryParts: string[] = [];
+      if (executedOrders.length > 0) {
+        summaryParts.push(
+          `Placed ${executedOrders.length} Bullpen order${executedOrders.length === 1 ? "" : "s"}.`,
+        );
+      }
+      if (failedOrders.length > 0) {
+        summaryParts.push(
+          `${failedOrders.length} order${failedOrders.length === 1 ? "" : "s"} failed: ${failedOrders
+            .map((order) => `${order.market_title}: ${order.message}`)
+            .join(" | ")}.`,
+        );
+      }
+      if (summaryParts.length === 0) {
+        summaryParts.push("No Bullpen orders were placed.");
+      }
+
+      setInvestmentMessagesByMode((current) => ({
+        ...current,
+        [activeMode]: summaryParts.join(" "),
+      }));
+    } catch (error) {
+      setInvestmentMessagesByMode((current) => ({
+        ...current,
+        [activeMode]: normalizeError(error),
+      }));
+    } finally {
+      setInvestingMode(null);
+    }
+  }
+
   const currentTableEmptyMessage = isScanning
     ? "Scanning Bullpen..."
     : activeVisibleSnapshot
       ? "No saved questions are available in this snapshot."
       : "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions.";
+  const investmentEmptyMessage = !activeCurrentSnapshot
+    ? "Run Bullpen Scan first to load the current questions table."
+    : !activeHasAnyLlmOdds
+      ? "Run LLM analysis first. Pink invest rows appear after LLM No Odds and Returns/day qualify."
+      : "No rows are currently pink. Rows appear here when LLM No Odds is above 80% and Returns/day is above 5%.";
 
   function handlePromptTemplateSave(template: string) {
     setBullpenLlmPromptTemplate(template);
@@ -1394,6 +1666,12 @@ export default function BullpenAiPage() {
             </div>
           ) : null}
 
+          {investmentNotice ? (
+            <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-4 py-3 text-sm text-fuchsia-950">
+              {investmentNotice}
+            </div>
+          ) : null}
+
           {hasStaleResult ? (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
               Filters changed for this tab after the last saved scan. The table
@@ -1457,6 +1735,20 @@ export default function BullpenAiPage() {
                 <span>Archived at: {formatDate(activeVisibleSnapshot.archivedAt)}</span>
               ) : null}
             </div>
+          ) : null}
+
+          {activeVisibleSnapshot ? (
+            <BullpenInvestmentsSection
+              candidates={activeInvestmentCandidates}
+              emptyMessage={investmentEmptyMessage}
+              isHistoryView={isViewingHistory}
+              isInvesting={isInvesting}
+              onInvest={investInSelectedEvents}
+              onToggleQuestion={toggleInvestmentSelection}
+              onSelectAll={selectAllInvestmentCandidates}
+              onClearAll={clearInvestmentCandidates}
+              selectedQuestionIds={selectedInvestmentQuestionIdSet}
+            />
           ) : null}
 
           {activeCurrentSnapshot ? (

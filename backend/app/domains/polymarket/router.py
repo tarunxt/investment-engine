@@ -8,6 +8,8 @@ from app.domains.polymarket.schemas import (
     PolymarketBotState,
     PolymarketDiscoveryDebugReport,
     PolymarketDiscoveryDebugRequest,
+    PolymarketManualInvestRequest,
+    PolymarketManualInvestResponse,
     PolymarketLiveLimitUpdate,
     PolymarketTrackedAccountCreate,
     PolymarketTrackedAccountUpdate,
@@ -161,6 +163,22 @@ async def reject_all_polymarket_trades(current_user: User = Depends(get_current_
     bot = await _get_bot(current_user)
     await bot.reject_all_pending_live_trades()
     return await bot.get_state()
+
+
+@router.post("/manual-invest", response_model=PolymarketManualInvestResponse)
+async def manual_invest_polymarket_orders(
+    request: PolymarketManualInvestRequest,
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        orders = await bot.execute_manual_investments(request.orders)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PolymarketManualInvestResponse(
+        orders=orders,
+        state=await bot.get_state(),
+    )
 
 
 @router.post("/tracked-accounts", response_model=PolymarketBotState)

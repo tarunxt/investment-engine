@@ -42,6 +42,8 @@ from app.domains.polymarket.schemas import (
     PolymarketLiveSourceStatus,
     PolymarketBullpenRedeemedTrade,
     PolymarketLiveTradeDecision,
+    PolymarketManualInvestOrderRequest,
+    PolymarketManualInvestOrderResult,
     PolymarketMetrics,
     PolymarketPaperTrade,
     PolymarketPosition,
@@ -363,6 +365,68 @@ class PolymarketPaperCopyBot:
             await self._execute_live_trade_unlocked(
                 trade, "manual dashboard confirmation"
             )
+
+    async def execute_manual_investments(
+        self, orders: list[PolymarketManualInvestOrderRequest]
+    ) -> list[PolymarketManualInvestOrderResult]:
+        async with self._lock:
+            results: list[PolymarketManualInvestOrderResult] = []
+
+            for order in orders:
+                trade = self._manual_live_trade_decision(order)
+                await self._record_live_trade_unlocked(trade)
+
+                try:
+                    await self._execute_live_trade_unlocked(
+                        trade,
+                        "manual Bullpen x AI investment",
+                        bypass_trade_risk=True,
+                        skip_dashboard_unlock=True,
+                    )
+                    results.append(
+                        PolymarketManualInvestOrderResult(
+                            question_id=order.question_id,
+                            market_id=order.market_id,
+                            market_title=order.market_title,
+                            outcome=order.outcome,
+                            amount=order.amount,
+                            price=order.price,
+                            status="executed",
+                            message="Order executed in Bullpen.",
+                            trade_id=trade.id,
+                            executed_at=trade.executed_at,
+                        )
+                    )
+                except Exception as exc:
+                    results.append(
+                        PolymarketManualInvestOrderResult(
+                            question_id=order.question_id,
+                            market_id=order.market_id,
+                            market_title=order.market_title,
+                            outcome=order.outcome,
+                            amount=order.amount,
+                            price=order.price,
+                            status=(
+                                "skipped"
+                                if trade.status == "skipped"
+                                else "failed"
+                            ),
+                            message=redact_secrets(
+                                trade.failure_reason
+                                or trade.reason
+                                or str(exc)
+                            ),
+                            trade_id=trade.id,
+                            executed_at=trade.executed_at,
+                        )
+                    )
+
+        try:
+            await self.refresh_balance()
+        except Exception as exc:
+            await self.logger.error("Manual Bullpen x AI balance refresh failed", exc)
+
+        return results
 
     async def update_live_limits(self, request: PolymarketLiveLimitUpdate) -> None:
         async with self._lock:
@@ -1194,14 +1258,23 @@ class PolymarketPaperCopyBot:
         confirmation_reason: str,
         *,
         bypass_trade_risk: bool = False,
+        skip_dashboard_unlock: bool = False,
     ) -> None:
         await self._refresh_doctor_unlocked()
-        block_reason = self.live_guard.startup_block_reason(
-            self.doctor_status,
-            self.live_unlocked,
-            self.emergency_stopped,
-            self.live_manually_locked,
-        )
+        if skip_dashboard_unlock:
+            if self.emergency_stopped:
+                block_reason = "Emergency stop is active."
+            elif self.live_manually_locked:
+                block_reason = "Live locked manually."
+            else:
+                block_reason = self.live_guard.hard_block_reason(self.doctor_status)
+        else:
+            block_reason = self.live_guard.startup_block_reason(
+                self.doctor_status,
+                self.live_unlocked,
+                self.emergency_stopped,
+                self.live_manually_locked,
+            )
         if block_reason:
             trade.status = "failed"
             trade.failure_reason = f"Live execution blocked: {block_reason}"
@@ -1585,6 +1658,36 @@ class PolymarketPaperCopyBot:
             status=status,
             command="buy" if source_trade.side == "BUY" else "sell",
             source=source_trade.source,
+        )
+
+    def _manual_live_trade_decision(
+        self, order: PolymarketManualInvestOrderRequest
+    ) -> PolymarketLiveTradeDecision:
+        source_trade = PolymarketSourceTrade(
+            id=str(uuid4()),
+            source_trade_key=f"manual-bullpen-ai:{uuid4()}",
+            trader_id="bullpen-ai-dashboard",
+            trader_name="Bullpen x AI",
+            trader_address="",
+            trader_handle="bullpen-ai",
+            clean_trader_identity="bullpen-ai-dashboard",
+            market_id=order.market_id,
+            market_title=order.market_title,
+            event_end_at=order.event_end_at,
+            outcome=order.outcome,
+            side="BUY",
+            price=order.price,
+            size_usd=order.amount,
+            trader_invested_usd=order.amount,
+            timestamp=utc_now(),
+            source="live-market-read",
+        )
+        return self._live_decision(
+            source_trade,
+            "proposed",
+            order.amount,
+            order.amount / order.price,
+            "Manual Bullpen x AI investment requested in dashboard.",
         )
 
     def _live_state(self) -> PolymarketLiveControlState:

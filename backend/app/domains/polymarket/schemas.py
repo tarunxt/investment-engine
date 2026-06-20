@@ -60,6 +60,52 @@ class PolymarketLiveLimitUpdate(BaseModel):
     max_live_exposure_per_market: float = Field(default=5, gt=0)
 
 
+class PolymarketManualInvestOrderRequest(BaseModel):
+    question_id: str = Field(min_length=1, max_length=200)
+    market_id: str = Field(min_length=1, max_length=500)
+    market_title: str = Field(min_length=1, max_length=500)
+    outcome: str = Field(min_length=1, max_length=100)
+    amount: float = Field(gt=0, le=1_000_000)
+    price: float = Field(gt=0, lt=1)
+    event_end_at: str | None = None
+    market_url: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("question_id", "market_id", "market_title", "outcome")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("event_end_at", "market_url")
+    @classmethod
+    def strip_optional_text(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else value
+
+
+class PolymarketManualInvestRequest(BaseModel):
+    orders: list[PolymarketManualInvestOrderRequest] = Field(
+        min_length=1,
+        max_length=25,
+    )
+
+
+class PolymarketManualInvestOrderResult(BaseModel):
+    question_id: str
+    market_id: str
+    market_title: str
+    outcome: str
+    amount: float
+    price: float
+    status: Literal["executed", "failed", "skipped"]
+    message: str
+    trade_id: str | None = None
+    executed_at: str | None = None
+
+
+class PolymarketManualInvestResponse(BaseModel):
+    orders: list[PolymarketManualInvestOrderResult]
+    state: "PolymarketBotState"
+
+
 class PolymarketTrackedAccountUpdate(BaseModel):
     target: str | None = Field(default=None, min_length=1, max_length=180)
     threshold_percent: float | None = Field(default=None, ge=0, le=100)
@@ -406,3 +452,6 @@ class PolymarketDiscoveryDebugReport(BaseModel):
     accepted: list[PolymarketDiscoveryDebugAccepted] = Field(default_factory=list)
     rejected: list[PolymarketDiscoveryDebugRejected] = Field(default_factory=list)
     errors: list[PolymarketDiscoveryDebugError] = Field(default_factory=list)
+
+
+PolymarketManualInvestResponse.model_rebuild()

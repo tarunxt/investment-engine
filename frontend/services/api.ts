@@ -29,6 +29,8 @@ import {
   IndMoneyUsThreatLatestResponse,
   IndMoneyUsThreatRunResponse,
   PolymarketBotState,
+  PolymarketManualInvestOrderRequest,
+  PolymarketManualInvestResponse,
   PolymarketLiveLimitUpdate,
   PolymarketTrackedAccountCreate,
   PolymarketTrackedAccountUpdate,
@@ -861,6 +863,15 @@ class apiServiceClass implements IApiService {
 
   polymarketLiveRejectAll(): Promise<PolymarketBotState> {
     return this.post<PolymarketBotState>(URLs.polymarket.liveRejectAll());
+  }
+
+  polymarketManualInvest(data: {
+    orders: PolymarketManualInvestOrderRequest[];
+  }): Promise<PolymarketManualInvestResponse> {
+    return this.post<PolymarketManualInvestResponse>(
+      URLs.polymarket.manualInvest(),
+      data,
+    );
   }
 
   polymarketAddTrackedAccount(data: PolymarketTrackedAccountCreate): Promise<PolymarketBotState> {

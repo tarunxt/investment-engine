@@ -7,6 +7,7 @@ import type {
   BullpenQuestionRow,
   BullpenScanSnapshot,
 } from "@/lib/bullpen-ai";
+import { cn } from "@/lib/utils";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
 
 export type BullpenTableSortKey =
@@ -21,7 +22,9 @@ export type BullpenTableSortKey =
   | "liquidity"
   | "llmYesOdds"
   | "llmNoOdds"
-  | "currentVsLlmOddsDifference";
+  | "currentVsLlmOddsDifference"
+  | "returnsPerDay"
+  | "amountToBeInvested";
 
 export type BullpenTableSortDirection = "asc" | "desc";
 
@@ -50,10 +53,17 @@ function formatDays(value: number | null) {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}d`;
 }
 
-function formatDifference(value: number | null) {
+function formatReturnsPerDay(value: number | null) {
   if (value === null) return "—";
-  const prefix = value > 0 ? "+" : "";
-  return `${prefix}${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
+}
+
+function formatMoney(value: number | null) {
+  if (value === null) return "—";
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function formatOutcomeSummary(question: BullpenQuestionRow) {
@@ -122,6 +132,10 @@ function getComparatorValue(
       return question.llmNoOdds;
     case "currentVsLlmOddsDifference":
       return question.currentVsLlmOddsDifference;
+    case "returnsPerDay":
+      return question.returnsPerDay;
+    case "amountToBeInvested":
+      return question.amountToBeInvested;
     default:
       return question.question;
   }
@@ -146,6 +160,8 @@ function sortQuestions(
       case "llmYesOdds":
       case "llmNoOdds":
       case "currentVsLlmOddsDifference":
+      case "returnsPerDay":
+      case "amountToBeInvested":
         result = compareNumber(
           getComparatorValue(left, sortState.key) as number | null,
           getComparatorValue(right, sortState.key) as number | null,
@@ -195,6 +211,13 @@ function SortButton({
       <Icon className="h-3.5 w-3.5" />
     </button>
   );
+}
+
+function getLlmOddsCellClass(value: number | null) {
+  if (value === null) return "";
+  if (value > 90) return "bg-lime-400 text-slate-950";
+  if (value > 80) return "bg-green-500/75 text-slate-950";
+  return "";
 }
 
 export function BullpenQuestionsTable({
@@ -317,8 +340,16 @@ export function BullpenQuestionsTable({
               </th>
               <th className="px-4 py-3">
                 <SortButton
-                  label="Current vs LLM Odds Difference"
-                  sortKey="currentVsLlmOddsDifference"
+                  label="Returns/day"
+                  sortKey="returnsPerDay"
+                  sortState={sortState}
+                  onSortChange={onSortChange}
+                />
+              </th>
+              <th className="px-4 py-3">
+                <SortButton
+                  label="Amount to be invested"
+                  sortKey="amountToBeInvested"
                   sortState={sortState}
                   onSortChange={onSortChange}
                 />
@@ -393,12 +424,22 @@ export function BullpenQuestionsTable({
                       <button
                         type="button"
                         onClick={() => setBreakdownQuestion(question)}
-                        className="rounded-md underline decoration-indigo-300 underline-offset-4 transition hover:text-indigo-900"
+                        className={cn(
+                          "rounded-md px-2 py-1 underline decoration-indigo-300 underline-offset-4 transition hover:text-indigo-900",
+                          getLlmOddsCellClass(question.llmYesOdds),
+                        )}
                       >
                         {formatOdds(question.llmYesOdds)}
                       </button>
                     ) : (
-                      formatOdds(question.llmYesOdds)
+                      <span
+                        className={cn(
+                          "rounded-md px-2 py-1",
+                          getLlmOddsCellClass(question.llmYesOdds),
+                        )}
+                      >
+                        {formatOdds(question.llmYesOdds)}
+                      </span>
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 font-semibold text-violet-700">
@@ -406,16 +447,36 @@ export function BullpenQuestionsTable({
                       <button
                         type="button"
                         onClick={() => setBreakdownQuestion(question)}
-                        className="rounded-md underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
+                        className={cn(
+                          "rounded-md px-2 py-1 underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900",
+                          getLlmOddsCellClass(question.llmNoOdds),
+                        )}
                       >
                         {formatOdds(question.llmNoOdds)}
                       </button>
                     ) : (
-                      formatOdds(question.llmNoOdds)
+                      <span
+                        className={cn(
+                          "rounded-md px-2 py-1",
+                          getLlmOddsCellClass(question.llmNoOdds),
+                        )}
+                      >
+                        {formatOdds(question.llmNoOdds)}
+                      </span>
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
-                    {formatDifference(question.currentVsLlmOddsDifference)}
+                    {formatReturnsPerDay(question.returnsPerDay)}
+                  </td>
+                  <td
+                    className={cn(
+                      "whitespace-nowrap px-4 py-3 text-right font-semibold text-slate-700",
+                      question.isAmountToBeInvestedHighlighted
+                        ? "bg-fuchsia-500 text-slate-950"
+                        : "",
+                    )}
+                  >
+                    {formatMoney(question.amountToBeInvested)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                     {question.volume || "—"}
@@ -428,7 +489,7 @@ export function BullpenQuestionsTable({
             ) : (
               <tr>
                 <td
-                  colSpan={13}
+                  colSpan={14}
                   className="px-4 py-12 text-center text-slate-500"
                 >
                   {isLoading ? "Scanning Bullpen..." : emptyMessage}

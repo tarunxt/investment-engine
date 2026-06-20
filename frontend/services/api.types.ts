@@ -44,6 +44,8 @@ import {
     IndMoneyUsThreatLatestResponse,
     IndMoneyUsThreatRunResponse,
     PolymarketBotState,
+    PolymarketManualInvestOrderRequest,
+    PolymarketManualInvestResponse,
     PolymarketLiveLimitUpdate,
     PolymarketTrackedAccountCreate,
     PolymarketTrackedAccountUpdate,
@@ -173,6 +175,7 @@ export interface IApiService {
     polymarketLiveTradeConfirm(tradeId: string): Promise<PolymarketBotState>;
     polymarketLiveTradeReject(tradeId: string): Promise<PolymarketBotState>;
     polymarketLiveRejectAll(): Promise<PolymarketBotState>;
+    polymarketManualInvest(data: { orders: PolymarketManualInvestOrderRequest[] }): Promise<PolymarketManualInvestResponse>;
     polymarketAddTrackedAccount(data: PolymarketTrackedAccountCreate): Promise<PolymarketBotState>;
     polymarketUpdateTrackedAccount(accountId: string, data: PolymarketTrackedAccountUpdate): Promise<PolymarketBotState>;
     polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState>;

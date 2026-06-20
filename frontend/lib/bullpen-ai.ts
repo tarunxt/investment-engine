@@ -22,6 +22,9 @@ export type BullpenQuestionAnalysis = {
   llmYesOdds: number | null;
   llmNoOdds: number | null;
   currentVsLlmOddsDifference: number | null;
+  returnsPerDay: number | null;
+  amountToBeInvested: number | null;
+  isAmountToBeInvestedHighlighted: boolean;
   llmNotes: string | null;
   llmProvider: string | null;
   llmModel: string | null;
@@ -310,6 +313,52 @@ function normalizeOddsPair(
   return { yes, no };
 }
 
+function calculateBullpenReturnsPerDay({
+  yesOdds,
+  noOdds,
+  llmYesOdds,
+  daysUntilClose,
+}: Pick<
+  BullpenQuestionRow,
+  "yesOdds" | "noOdds" | "llmYesOdds" | "daysUntilClose"
+>) {
+  if (
+    yesOdds === null ||
+    noOdds === null ||
+    llmYesOdds === null ||
+    daysUntilClose === null ||
+    daysUntilClose <= 0
+  ) {
+    return null;
+  }
+
+  const currentOdds = llmYesOdds > 50 ? yesOdds : noOdds;
+  return Number(((100 - currentOdds) / daysUntilClose).toFixed(2));
+}
+
+function calculateBullpenAmountToBeInvested({
+  llmNoOdds,
+  returnsPerDay,
+}: Pick<BullpenQuestionRow, "llmNoOdds" | "returnsPerDay">) {
+  if (llmNoOdds === null || returnsPerDay === null) return null;
+  return Number(((5 * (llmNoOdds - 80) * returnsPerDay) / 100).toFixed(2));
+}
+
+export function isBullpenQuestionInvestmentCandidate(
+  question: Pick<
+    BullpenQuestionRow,
+    "llmNoOdds" | "returnsPerDay" | "amountToBeInvested"
+  >,
+) {
+  return (
+    question.llmNoOdds !== null &&
+    question.returnsPerDay !== null &&
+    question.amountToBeInvested !== null &&
+    question.llmNoOdds > 80 &&
+    question.returnsPerDay > 5
+  );
+}
+
 export function createBullpenQuestionRow(
   question: BullpenQuestion | BullpenQuestionRow,
 ): BullpenQuestionRow {
@@ -327,13 +376,41 @@ export function createBullpenQuestionRow(
       .filter((timestamp): timestamp is string => Boolean(timestamp))
       .sort()
       .at(-1) || null;
+  const llmYesOdds = analysisFields.llmYesOdds ?? averageOdds.yes;
+  const llmNoOdds = analysisFields.llmNoOdds ?? averageOdds.no;
+  const currentVsLlmOddsDifference =
+    analysisFields.currentVsLlmOddsDifference ?? null;
+  const baseRow = {
+    ...question,
+    llmYesOdds,
+    llmNoOdds,
+    currentVsLlmOddsDifference,
+  } as BullpenQuestionRow;
+  const returnsPerDay =
+    analysisFields.returnsPerDay ?? calculateBullpenReturnsPerDay(baseRow);
+  const amountToBeInvested =
+    analysisFields.amountToBeInvested ??
+    calculateBullpenAmountToBeInvested({
+      llmNoOdds,
+      returnsPerDay,
+    });
+  const isAmountToBeInvestedHighlighted =
+    typeof analysisFields.isAmountToBeInvestedHighlighted === "boolean"
+      ? analysisFields.isAmountToBeInvestedHighlighted
+      : isBullpenQuestionInvestmentCandidate({
+          llmNoOdds,
+          returnsPerDay,
+          amountToBeInvested,
+        });
 
   return {
     ...question,
-    llmYesOdds: analysisFields.llmYesOdds ?? averageOdds.yes,
-    llmNoOdds: analysisFields.llmNoOdds ?? averageOdds.no,
-    currentVsLlmOddsDifference:
-      analysisFields.currentVsLlmOddsDifference ?? null,
+    llmYesOdds,
+    llmNoOdds,
+    currentVsLlmOddsDifference,
+    returnsPerDay,
+    amountToBeInvested,
+    isAmountToBeInvestedHighlighted,
     llmNotes: analysisFields.llmNotes ?? summarizeBullpenLlmNotes(llmBreakdown),
     llmProvider:
       analysisFields.llmProvider ??

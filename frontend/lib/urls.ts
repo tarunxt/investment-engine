@@ -284,6 +284,7 @@ export const URLs = {
     liveTradeConfirm: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket/live/trades/${tradeId}/confirm`,
     liveTradeReject: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket/live/trades/${tradeId}/reject`,
     liveRejectAll: () => `${resolveApiBaseUrl()}/polymarket/live/trades/reject-all`,
+    manualInvest: () => `${resolveApiBaseUrl()}/polymarket/manual-invest`,
     trackedAccounts: () => `${resolveApiBaseUrl()}/polymarket/tracked-accounts`,
     trackedAccount: (accountId: string) => `${resolveApiBaseUrl()}/polymarket/tracked-accounts/${accountId}`,
     trackedAccountNetWorthRefresh: (accountId: string) => `${resolveApiBaseUrl()}/polymarket/tracked-accounts/${accountId}/net-worth/refresh`,
