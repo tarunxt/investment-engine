@@ -37,6 +37,7 @@ import {
   PolymarketTrackedAccountUpdate,
   PolymarketDiscoveryDebugReport,
   PolymarketDiscoveryDebugRequest,
+  TradingBotsOverviewResponse,
   JobCreate,
   JobResponse,
   LoginResponse,
@@ -1002,6 +1003,10 @@ class apiServiceClass implements IApiService {
     data: PolymarketDiscoveryDebugRequest,
   ): Promise<PolymarketDiscoveryDebugReport> {
     return this.post<PolymarketDiscoveryDebugReport>(URLs.polymarketDirect.discoveryDebug(), data);
+  }
+
+  getTradingBotsOverview(): Promise<TradingBotsOverviewResponse> {
+    return this.get<TradingBotsOverviewResponse>(URLs.tradingBots.overview());
   }
 
   googleSheetsAuthUrl(): Promise<GoogleSheetsAuthUrlResponse> {

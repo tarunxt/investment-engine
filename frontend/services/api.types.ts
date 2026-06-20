@@ -51,6 +51,7 @@ import {
     PolymarketTrackedAccountUpdate,
     PolymarketDiscoveryDebugReport,
     PolymarketDiscoveryDebugRequest,
+    TradingBotsOverviewResponse,
     ZerodhaLoginUrlResponse,
     ZerodhaOrder,
     ZerodhaPrepareBasketRequest,
@@ -180,6 +181,7 @@ export interface IApiService {
     polymarketUpdateTrackedAccount(accountId: string, data: PolymarketTrackedAccountUpdate): Promise<PolymarketBotState>;
     polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState>;
     polymarketDiscoveryDebug(data: PolymarketDiscoveryDebugRequest): Promise<PolymarketDiscoveryDebugReport>;
+    getTradingBotsOverview(): Promise<TradingBotsOverviewResponse>;
 }
 
 // Type for API error handling

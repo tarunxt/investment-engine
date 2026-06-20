@@ -1405,6 +1405,66 @@ export interface PolymarketDiscoveryDebugReport {
   errors: PolymarketDiscoveryDebugError[];
 }
 
+export type TradingBotStatus =
+  | "running"
+  | "paused"
+  | "stopped"
+  | "error"
+  | "not-configured";
+
+export type TradingBotMode =
+  | "paper"
+  | "live-read"
+  | "live-trading"
+  | "dry-run"
+  | "analysis-only";
+
+export type TradingBotGuardrailTone =
+  | "neutral"
+  | "positive"
+  | "warning"
+  | "critical";
+
+export type TradingBotSummaryId =
+  | "bullpen-x-polymarket"
+  | "polymarket-direct"
+  | "bullpen-x-ai"
+  | "bullpen-ai-auto-live";
+
+export interface TradingBotGuardrail {
+  label: string;
+  value: string;
+  tone?: TradingBotGuardrailTone;
+}
+
+export interface TradingBotSummary {
+  id: TradingBotSummaryId;
+  name: string;
+  href: string;
+  details_href?: string | null;
+  status: TradingBotStatus;
+  mode: TradingBotMode;
+  money_invested: number | null;
+  current_value: number | null;
+  profit_loss: number | null;
+  return_pct: number | null;
+  active_positions_count: number | null;
+  trades_today: number | null;
+  last_run_time: string | null;
+  next_scheduled_run: string | null;
+  guardrails_summary: string;
+  guardrails: TradingBotGuardrail[];
+  strategy: string;
+  risk_warning: string;
+  note?: string | null;
+  source?: string | null;
+}
+
+export interface TradingBotsOverviewResponse {
+  generated_at: string;
+  bots: TradingBotSummary[];
+}
+
 // ==================== API Response Wrapper Types ====================
 
 export interface ApiResponse<T = unknown> {

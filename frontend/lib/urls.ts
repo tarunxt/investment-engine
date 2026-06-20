@@ -314,6 +314,10 @@ export const URLs = {
     discoveryDebug: () => `${resolveApiBaseUrl()}/polymarket-direct/live/discovery/debug`,
   },
 
+  tradingBots: {
+    overview: () => `${resolveApiBaseUrl()}/trading-bots/overview`,
+  },
+
   // Google Sheets endpoints
   googleSheets: {
     authUrl: () => `${resolveApiBaseUrl()}/google-sheets/auth-url`,
@@ -402,9 +406,11 @@ export const URLs = {
       indmoneyUsFinalActionables: () => "/console/indmoney-us/final-actionables",
       zerodhaThreats: () => "/console/zerodha/threats",
       indmoneyUsThreats: () => "/console/indmoney-us/threats",
+      tradingBots: () => "/console/trading-bots",
       polymarketBot: () => "/console/polymarket-bot",
       polymarketDirectBot: () => "/console/polymarket-direct-bot",
       bullpenAi: () => "/console/bullpen-ai",
+      bullpenAiAutoLive: () => "/console/bullpen-ai-auto-live",
       bullpenAi30Days: () => "/console/bullpen-ai?tab=30-days",
       bullpenAiEndOfMonth: () => "/console/bullpen-ai?tab=end-of-month",
       googleSheets: () => "/console/google-sheets",

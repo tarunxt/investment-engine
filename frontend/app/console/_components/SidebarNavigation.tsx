@@ -47,6 +47,7 @@ type NavigationItem = {
 type NavigationSubGroup = {
     id: string;
     name: string;
+    href?: string;
     icon: IconType;
     children: NavigationItem[];
 };
@@ -79,11 +80,13 @@ type SortableNavigationRowProps = {
     isReordering: boolean;
     item: NavigationEntry;
     onNavigate: () => void;
-    isCopyTradingActive: boolean;
-    isCopyTradingExpanded: boolean;
+    isTradingBotsActive: boolean;
+    isTradingBotsExpanded: boolean;
     onTogglePortfolio: () => void;
-    onToggleCopyTrading: () => void;
+    onToggleTradingBots: () => void;
 };
+
+const TRADING_BOTS_OVERVIEW_HREF = URLs.routes.console.tradingBots();
 
 const PORTFOLIO_CHILDREN: NavigationChild[] = [
     {
@@ -99,8 +102,9 @@ const PORTFOLIO_CHILDREN: NavigationChild[] = [
         icon: HiOutlineTrendingUp,
     },
     {
-        id: 'portfolio-copy-trading-bots',
-        name: 'Copy Trading Bots',
+        id: 'portfolio-trading-bots',
+        name: 'Trading Bots',
+        href: TRADING_BOTS_OVERVIEW_HREF,
         icon: HiOutlineTrendingUp,
         children: [
             {
@@ -119,6 +123,12 @@ const PORTFOLIO_CHILDREN: NavigationChild[] = [
                 id: 'portfolio-bullpen-ai',
                 name: 'Bullpen x AI',
                 href: URLs.routes.console.bullpenAi(),
+                icon: HiOutlineTrendingUp,
+            },
+            {
+                id: 'portfolio-bullpen-ai-auto-live',
+                name: 'Bullpen AI Auto-Live',
+                href: URLs.routes.console.bullpenAiAutoLive(),
                 icon: HiOutlineTrendingUp,
             },
         ],
@@ -197,18 +207,25 @@ const DEFAULT_NAVIGATION: NavigationEntry[] = [
 const DEFAULT_NAVIGATION_ORDER = DEFAULT_NAVIGATION.map((item) => item.id);
 const DEFAULT_NAVIGATION_ID_SET = new Set(DEFAULT_NAVIGATION_ORDER);
 function isNavigationItem(item: NavigationChild): item is NavigationItem {
-    return 'href' in item;
+    return !('children' in item);
 }
 
 function getNavigationChildRoutes(children: NavigationChild[]): string[] {
-    return children.flatMap((child) => (isNavigationItem(child) ? [child.href] : getNavigationChildRoutes(child.children)));
+    return children.flatMap((child) => (
+        isNavigationItem(child)
+            ? [child.href]
+            : [...(child.href ? [child.href] : []), ...getNavigationChildRoutes(child.children)]
+    ));
 }
 
 const PORTFOLIO_ROUTES = getNavigationChildRoutes(PORTFOLIO_CHILDREN);
-const COPY_TRADING_CHILDREN = PORTFOLIO_CHILDREN.find(
-    (child): child is NavigationSubGroup => child.id === 'portfolio-copy-trading-bots' && !isNavigationItem(child),
+const TRADING_BOTS_CHILDREN = PORTFOLIO_CHILDREN.find(
+    (child): child is NavigationSubGroup => child.id === 'portfolio-trading-bots' && !isNavigationItem(child),
 )?.children ?? [];
-const COPY_TRADING_ROUTES = getNavigationChildRoutes(COPY_TRADING_CHILDREN);
+const TRADING_BOTS_ROUTES = [
+    TRADING_BOTS_OVERVIEW_HREF,
+    ...getNavigationChildRoutes(TRADING_BOTS_CHILDREN),
+];
 const SIDEBAR_ORDER_UPDATED_EVENT = 'investor:sidebar-order-updated';
 const navigationOrderSnapshotCache = new Map<string, { raw: string | null; value: string[] }>();
 
@@ -400,11 +417,11 @@ function SortableNavigationRow({
     isPortfolioExpanded,
     isReordering,
     item,
-    isCopyTradingActive,
-    isCopyTradingExpanded,
+    isTradingBotsActive,
+    isTradingBotsExpanded,
     onNavigate,
     onTogglePortfolio,
-    onToggleCopyTrading,
+    onToggleTradingBots,
 }: SortableNavigationRowProps) {
     const {
         attributes,
@@ -487,27 +504,40 @@ function SortableNavigationRow({
                                     </Link>
                                 ) : (
                                     <div key={child.id} className="space-y-1">
-                                        <button
-                                            type="button"
-                                            onClick={onToggleCopyTrading}
-                                            className={`flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isCopyTradingActive
+                                        <div
+                                            className={`flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isTradingBotsActive
                                                 ? 'bg-sidebar-accent text-sidebar-primary'
                                                 : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                                                 }`}
                                         >
-                                            <span className={`mr-2 text-xs ${isCopyTradingActive ? 'text-sidebar-primary' : 'text-muted-foreground/60'}`}>
+                                            <span className={`mr-2 text-xs ${isTradingBotsActive ? 'text-sidebar-primary' : 'text-muted-foreground/60'}`}>
                                                 •
                                             </span>
-                                            <span className="truncate">{child.name}</span>
-                                            <span className="ml-auto text-muted-foreground">
-                                                {isCopyTradingExpanded ? (
+                                            {child.href ? (
+                                                <Link
+                                                    href={child.href}
+                                                    onClick={onNavigate}
+                                                    className="min-w-0 flex-1 truncate"
+                                                >
+                                                    {child.name}
+                                                </Link>
+                                            ) : (
+                                                <span className="min-w-0 flex-1 truncate">{child.name}</span>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={onToggleTradingBots}
+                                                className={`ml-2 rounded-md p-1 text-muted-foreground transition hover:bg-sidebar hover:text-sidebar-foreground ${isTradingBotsExpanded ? 'text-sidebar-primary' : ''}`}
+                                                aria-label={isTradingBotsExpanded ? 'Collapse trading bots' : 'Expand trading bots'}
+                                            >
+                                                {isTradingBotsExpanded ? (
                                                     <ChevronDown className="h-4 w-4" />
                                                 ) : (
                                                     <ChevronRight className="h-4 w-4" />
                                                 )}
-                                            </span>
-                                        </button>
-                                        {isCopyTradingExpanded ? (
+                                            </button>
+                                        </div>
+                                        {isTradingBotsExpanded ? (
                                             <div className="ml-5 space-y-1 border-l border-sidebar-border pl-3">
                                                 {child.children.map((subChild) => (
                                                     <Link
@@ -566,7 +596,7 @@ export function SidebarNavigation({
 }: SidebarNavigationProps) {
     const [isReordering, setIsReordering] = useState(false);
     const [portfolioOpen, setPortfolioOpen] = useState(true);
-    const [copyTradingOpen, setCopyTradingOpen] = useState(true);
+    const [tradingBotsOpen, setTradingBotsOpen] = useState(true);
 
     const storageKey = useMemo(() => buildStorageKey(userId), [userId]);
     const navigationOrder = useSyncExternalStore(
@@ -609,10 +639,10 @@ export function SidebarNavigation({
         (href) => pathname === href || pathname.startsWith(`${href}/`),
     );
     const isPortfolioExpanded = !isReordering && (portfolioOpen || isPortfolioActive);
-    const isCopyTradingActive = COPY_TRADING_ROUTES.some(
+    const isTradingBotsActive = TRADING_BOTS_ROUTES.some(
         (href) => pathname === href || pathname.startsWith(`${href}/`),
     );
-    const isCopyTradingExpanded = !isReordering && isPortfolioExpanded && (copyTradingOpen || isCopyTradingActive);
+    const isTradingBotsExpanded = !isReordering && isPortfolioExpanded && (tradingBotsOpen || isTradingBotsActive);
 
     const handleDragEnd = ({ active, over }: DragEndEvent) => {
         if (!over || active.id === over.id) {
@@ -684,12 +714,12 @@ export function SidebarNavigation({
                                 isActive={isActive}
                                 isPortfolioActive={isPortfolioActive}
                                 isPortfolioExpanded={isPortfolioExpanded}
-                                isCopyTradingActive={isCopyTradingActive}
-                                isCopyTradingExpanded={isCopyTradingExpanded}
+                                isTradingBotsActive={isTradingBotsActive}
+                                isTradingBotsExpanded={isTradingBotsExpanded}
                                 isReordering={isReordering}
                                 onNavigate={onNavigate}
                                 onTogglePortfolio={() => setPortfolioOpen((current) => !current)}
-                                onToggleCopyTrading={() => setCopyTradingOpen((current) => !current)}
+                                onToggleTradingBots={() => setTradingBotsOpen((current) => !current)}
                             />
                         ))}
                     </div>
