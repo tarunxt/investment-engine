@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -41,6 +41,7 @@ import {
   type ScanMode,
   type ScanResult,
 } from "@/lib/bullpen-ai";
+import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type { ProviderModelTarget } from "@/types/api";
@@ -138,6 +139,24 @@ function getModeDescription(mode: ScanMode, filters: BullpenScanFilters) {
   return `Bullpen questions closing within ${filters.maxClosingDays} days.`;
 }
 
+function getFilterBadgeLabels(mode: ScanMode, filters: BullpenScanFilters) {
+  const badges = [
+    mode === "30-days"
+      ? `Closes within ${filters.maxClosingDays} day${filters.maxClosingDays === 1 ? "" : "s"}`
+      : `Target date: ${formatDateOnly(filters.targetDate)}`,
+    `Yes >= ${filters.minYesOdds}%`,
+    `No >= ${filters.minNoOdds}%`,
+  ];
+
+  if (filters.excludeSports) badges.push("No sports");
+  if (filters.excludeWeather) badges.push("No weather");
+  if (filters.excludeMarketPredictions) badges.push("No market predictions");
+  if (filters.excludeTweetCountQuestions) badges.push("No tweet counts");
+  if (filters.onlyBinaryYesNo) badges.push("Yes / No only");
+
+  return badges;
+}
+
 function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
   return (
     left.maxClosingDays === right.maxClosingDays &&
@@ -157,6 +176,35 @@ function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
   if (error instanceof Error) return error.message;
   return "Something went wrong.";
+}
+
+function applySnapshotMarketUrls(
+  snapshot: BullpenScanSnapshot | null,
+  snapshotId: string,
+  marketUrls: Record<string, string | null>,
+) {
+  if (!snapshot || snapshot.snapshotId !== snapshotId) return snapshot;
+
+  let changed = false;
+  const nextQuestions = snapshot.questions.map((question) => {
+    const nextMarketUrl = marketUrls[question.id];
+    if (!nextMarketUrl || nextMarketUrl === question.marketUrl) {
+      return question;
+    }
+
+    changed = true;
+    return createBullpenQuestionRow({
+      ...question,
+      marketUrl: nextMarketUrl,
+    });
+  });
+
+  return changed
+    ? {
+        ...snapshot,
+        questions: nextQuestions,
+      }
+    : snapshot;
 }
 
 function normalizeSnapshot(
@@ -366,14 +414,21 @@ function FilterToggle({
   label,
   description,
   onChange,
+  className,
 }: {
   checked: boolean;
   label: string;
   description: string;
   onChange: (checked: boolean) => void;
+  className?: string;
 }) {
   return (
-    <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+    <label
+      className={cn(
+        "flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3",
+        className,
+      )}
+    >
       <input
         type="checkbox"
         checked={checked}
@@ -436,7 +491,13 @@ export default function BullpenAiPage() {
     DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
   );
   const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
+  const [isScanFiltersOpen, setIsScanFiltersOpen] = useState(false);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
+  const scanFiltersMenuRef = useRef<HTMLDivElement | null>(null);
+  const canonicalizedSnapshotIdsRef = useRef<Record<ScanMode, Set<string>>>({
+    "30-days": new Set<string>(),
+    "end-of-month": new Set<string>(),
+  });
 
   useEffect(() => {
     setSnapshotsByMode(readBullpenSnapshotsFromStorage());
@@ -449,6 +510,34 @@ export default function BullpenAiPage() {
     if (!hasLoadedStorage) return;
     writeBullpenSnapshotsToStorage(snapshotsByMode);
   }, [hasLoadedStorage, snapshotsByMode]);
+
+  useEffect(() => {
+    setIsScanFiltersOpen(false);
+  }, [activeMode]);
+
+  useEffect(() => {
+    if (!isScanFiltersOpen) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!scanFiltersMenuRef.current) return;
+      if (scanFiltersMenuRef.current.contains(event.target as Node)) return;
+      setIsScanFiltersOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsScanFiltersOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isScanFiltersOpen]);
 
   const activeFilters = filtersByMode[activeMode];
   const activeSnapshots = snapshotsByMode[activeMode];
@@ -481,6 +570,93 @@ export default function BullpenAiPage() {
     : [];
   const selectedQuestionIdSet = new Set(selectedQuestionIds);
   const selectedQuestionCount = selectedQuestionIds.length;
+  const activeFilterBadges = getFilterBadgeLabels(activeMode, activeFilters);
+
+  useEffect(() => {
+    if (!hasLoadedStorage || !activeVisibleSnapshot) return;
+    if (
+      canonicalizedSnapshotIdsRef.current[activeMode].has(
+        activeVisibleSnapshot.snapshotId,
+      )
+    ) {
+      return;
+    }
+
+    canonicalizedSnapshotIdsRef.current[activeMode].add(
+      activeVisibleSnapshot.snapshotId,
+    );
+    const snapshotId = activeVisibleSnapshot.snapshotId;
+
+    const questions = activeVisibleSnapshot.questions
+      .filter((question) => question.slug || question.marketUrl)
+      .map((question) => ({
+        id: question.id,
+        slug: question.slug,
+        marketUrl: question.marketUrl,
+      }));
+    if (questions.length === 0) return;
+
+    let cancelled = false;
+
+    async function refreshMarketUrls() {
+      try {
+        const response = await fetch("/api/bullpen-ai/market-urls", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          cache: "no-store",
+          body: JSON.stringify({ questions }),
+        });
+        if (!response.ok) return;
+
+        const payload = (await response.json()) as {
+          marketUrls?: Record<string, string | null>;
+        };
+        if (cancelled || !payload.marketUrls) return;
+
+        setSnapshotsByMode((current) => {
+          const nextCurrent = applySnapshotMarketUrls(
+            current[activeMode].current,
+            snapshotId,
+            payload.marketUrls || {},
+          );
+          const nextHistory = current[activeMode].history.map((snapshot) =>
+            applySnapshotMarketUrls(
+              snapshot,
+              snapshotId,
+              payload.marketUrls || {},
+            ) || snapshot,
+          );
+
+          if (
+            nextCurrent === current[activeMode].current &&
+            nextHistory.every(
+              (snapshot, index) => snapshot === current[activeMode].history[index],
+            )
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            [activeMode]: {
+              current: nextCurrent,
+              history: nextHistory,
+            },
+          };
+        });
+      } catch {
+        // Best effort only. Existing saved snapshots will continue using stored URLs.
+      }
+    }
+
+    void refreshMarketUrls();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMode, activeVisibleSnapshot, hasLoadedStorage]);
 
   function updateActiveFilters(patch: Partial<BullpenScanFilters>) {
     setFiltersByMode((current) => ({
@@ -885,9 +1061,9 @@ export default function BullpenAiPage() {
           Bullpen x AI
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Run Bullpen scans for non-sports, non-weather, non-market binary
-          Yes/No questions inside the selected time window, then inspect the
-          matching markets in a saved table that persists across refresh.
+          Run Bullpen scans inside the selected time window, tune the scan
+          filters from the menu, then inspect the matching markets in a saved
+          table that persists across refresh.
         </p>
       </div>
 
@@ -911,90 +1087,26 @@ export default function BullpenAiPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 lg:grid-cols-2 2xl:grid-cols-4">
-            <div className="space-y-2">
+          <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                {activeMode === "30-days" ? "Closing Window" : "Target Date"}
+                Current Filters
               </p>
-              {activeMode === "30-days" ? (
-                <>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={activeFilters.maxClosingDays}
-                    onChange={(event) => {
-                      const parsed = Number(event.target.value);
-                      if (!Number.isFinite(parsed)) return;
-                      updateActiveFilters({
-                        maxClosingDays: Math.max(1, parsed),
-                      });
-                    }}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                  />
-                  <p className="text-xs leading-5 text-slate-600">
-                    Include only questions closing within this many days.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <input
-                    type="date"
-                    value={activeFilters.targetDate}
-                    onChange={(event) =>
-                      updateActiveFilters({ targetDate: event.target.value })
-                    }
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                  />
-                  <p className="text-xs leading-5 text-slate-600">
-                    Only questions whose closing date matches this calendar day.
-                  </p>
-                </>
-              )}
+              <p className="mt-2 text-sm text-slate-700">
+                Open the scan menu to edit the time window, odds floors, and
+                market exclusions for the next Bullpen run.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {activeFilterBadges.map((badge) => (
+                  <span
+                    key={badge}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700"
+                  >
+                    {badge}
+                  </span>
+                ))}
+              </div>
             </div>
-
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Min Yes Odds %
-              </p>
-              <input
-                type="number"
-                min={0}
-                step={0.1}
-                value={activeFilters.minYesOdds}
-                onChange={(event) => {
-                  const parsed = Number(event.target.value);
-                  if (!Number.isFinite(parsed)) return;
-                  updateActiveFilters({ minYesOdds: Math.max(0, parsed) });
-                }}
-                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-              />
-              <p className="text-xs leading-5 text-slate-600">
-                Require the Yes side to meet or exceed this Bullpen odds percentage floor.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Min No Odds %
-              </p>
-              <input
-                type="number"
-                min={0}
-                step={0.1}
-                value={activeFilters.minNoOdds}
-                onChange={(event) => {
-                  const parsed = Number(event.target.value);
-                  if (!Number.isFinite(parsed)) return;
-                  updateActiveFilters({ minNoOdds: Math.max(0, parsed) });
-                }}
-                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-              />
-              <p className="text-xs leading-5 text-slate-600">
-                Require the No side to meet or exceed this Bullpen odds percentage floor.
-              </p>
-            </div>
-
             <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -1006,18 +1118,206 @@ export default function BullpenAiPage() {
                 </p>
               </div>
               <div className="space-y-2">
-                <Button
-                  onClick={() => runScan()}
-                  disabled={isScanning}
-                  className="w-full gap-2 whitespace-nowrap"
-                >
-                  {isScanning ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  Run Bullpen Scan
-                </Button>
+                <div ref={scanFiltersMenuRef} className="relative">
+                  <div className="flex items-center">
+                    <Button
+                      onClick={() => {
+                        setIsScanFiltersOpen(false);
+                        void runScan();
+                      }}
+                      disabled={isScanning}
+                      className="min-w-0 flex-1 rounded-r-none gap-2 whitespace-nowrap"
+                    >
+                      {isScanning ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      <span className="truncate">Run Bullpen Scan</span>
+                    </Button>
+                    <Button
+                      size="icon"
+                      className="h-10 w-10 rounded-l-none border-l border-primary-foreground/15"
+                      onClick={() =>
+                        setIsScanFiltersOpen((current) => !current)
+                      }
+                      title="Open scan filters"
+                      aria-label="Open scan filters"
+                      aria-expanded={isScanFiltersOpen}
+                      aria-haspopup="dialog"
+                    >
+                      <Menu className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {isScanFiltersOpen ? (
+                    <div className="absolute right-0 top-full z-20 mt-2 w-[min(34rem,calc(100vw-3rem))] rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                            Scan Filters
+                          </p>
+                          <p className="mt-1 text-sm text-slate-600">
+                            These settings apply to the next Bullpen scan.
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => resetActiveFilters()}
+                        >
+                          Reset Filters
+                        </Button>
+                      </div>
+
+                      <div className="mt-4 space-y-4">
+                        <div className="grid gap-4 sm:grid-cols-3">
+                          <div className="space-y-2 sm:col-span-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              {activeMode === "30-days"
+                                ? "Closing Window"
+                                : "Target Date"}
+                            </p>
+                            {activeMode === "30-days" ? (
+                              <>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  step={1}
+                                  value={activeFilters.maxClosingDays}
+                                  onChange={(event) => {
+                                    const parsed = Number(event.target.value);
+                                    if (!Number.isFinite(parsed)) return;
+                                    updateActiveFilters({
+                                      maxClosingDays: Math.max(1, parsed),
+                                    });
+                                  }}
+                                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                />
+                                <p className="text-xs leading-5 text-slate-600">
+                                  Include only questions closing within this many days.
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <input
+                                  type="date"
+                                  value={activeFilters.targetDate}
+                                  onChange={(event) =>
+                                    updateActiveFilters({
+                                      targetDate: event.target.value,
+                                    })
+                                  }
+                                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                />
+                                <p className="text-xs leading-5 text-slate-600">
+                                  Only questions whose closing date matches this calendar day.
+                                </p>
+                              </>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              Min Yes Odds %
+                            </p>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.1}
+                              value={activeFilters.minYesOdds}
+                              onChange={(event) => {
+                                const parsed = Number(event.target.value);
+                                if (!Number.isFinite(parsed)) return;
+                                updateActiveFilters({
+                                  minYesOdds: Math.max(0, parsed),
+                                });
+                              }}
+                              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                            />
+                            <p className="text-xs leading-5 text-slate-600">
+                              Require the Yes side to meet or exceed this Bullpen odds percentage floor.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              Min No Odds %
+                            </p>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.1}
+                              value={activeFilters.minNoOdds}
+                              onChange={(event) => {
+                                const parsed = Number(event.target.value);
+                                if (!Number.isFinite(parsed)) return;
+                                updateActiveFilters({
+                                  minNoOdds: Math.max(0, parsed),
+                                });
+                              }}
+                              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                            />
+                            <p className="text-xs leading-5 text-slate-600">
+                              Require the No side to meet or exceed this Bullpen odds percentage floor.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <FilterToggle
+                            checked={activeFilters.excludeSports}
+                            onChange={(checked) =>
+                              updateActiveFilters({ excludeSports: checked })
+                            }
+                            label="Exclude sports"
+                            description="Remove sports leagues, teams, games, tournaments, and match-result markets."
+                            className="h-full"
+                          />
+                          <FilterToggle
+                            checked={activeFilters.excludeWeather}
+                            onChange={(checked) =>
+                              updateActiveFilters({ excludeWeather: checked })
+                            }
+                            label="Exclude weather"
+                            description="Remove temperature, storm, rainfall, hurricane, and climate-style markets."
+                            className="h-full"
+                          />
+                          <FilterToggle
+                            checked={activeFilters.excludeMarketPredictions}
+                            onChange={(checked) =>
+                              updateActiveFilters({
+                                excludeMarketPredictions: checked,
+                              })
+                            }
+                            label="Exclude market predictions"
+                            description="Remove finance, macro, stocks, commodities, and crypto-price style questions."
+                            className="h-full"
+                          />
+                          <FilterToggle
+                            checked={activeFilters.excludeTweetCountQuestions}
+                            onChange={(checked) =>
+                              updateActiveFilters({
+                                excludeTweetCountQuestions: checked,
+                              })
+                            }
+                            label="Exclude tweet counts"
+                            description="Remove questions asking how many tweets or social posts someone will make."
+                            className="h-full"
+                          />
+                          <FilterToggle
+                            checked={activeFilters.onlyBinaryYesNo}
+                            onChange={(checked) =>
+                              updateActiveFilters({ onlyBinaryYesNo: checked })
+                            }
+                            label="Only Yes / No"
+                            description="Keep only binary markets that resolve between a Yes and No outcome."
+                            className="h-full sm:col-span-2"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="flex items-center gap-0">
                   <Button
                     size="icon"
@@ -1046,10 +1346,6 @@ export default function BullpenAiPage() {
                     pickerButtonClassName="h-10 w-10 rounded-none border border-l-0 border-transparent bg-primary text-primary-foreground hover:bg-primary/80 focus:outline-none focus:ring-2 focus:ring-ring/30"
                   />
                 </div>
-                <p className="text-xs leading-5 text-slate-500">
-                  Open the prompt from the left icon to inspect or edit the LLM
-                  instructions. Saved edits persist on this device.
-                </p>
                 {isRunningLlm ? (
                   <p className="text-xs leading-5 text-slate-600">
                     Running {formatTargetSummary(lastLlmTargets)} on the selected
@@ -1077,47 +1373,6 @@ export default function BullpenAiPage() {
                 </div>
               </div>
             </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <FilterToggle
-              checked={activeFilters.excludeSports}
-              onChange={(checked) => updateActiveFilters({ excludeSports: checked })}
-              label="Exclude sports"
-              description="Remove sports leagues, teams, games, tournaments, and match-result markets."
-            />
-            <FilterToggle
-              checked={activeFilters.excludeWeather}
-              onChange={(checked) =>
-                updateActiveFilters({ excludeWeather: checked })
-              }
-              label="Exclude weather"
-              description="Remove temperature, storm, rainfall, hurricane, and climate-style markets."
-            />
-            <FilterToggle
-              checked={activeFilters.excludeMarketPredictions}
-              onChange={(checked) =>
-                updateActiveFilters({ excludeMarketPredictions: checked })
-              }
-              label="Exclude market predictions"
-              description="Remove finance, macro, stocks, commodities, and crypto-price style questions."
-            />
-            <FilterToggle
-              checked={activeFilters.excludeTweetCountQuestions}
-              onChange={(checked) =>
-                updateActiveFilters({ excludeTweetCountQuestions: checked })
-              }
-              label="Exclude tweet counts"
-              description="Remove questions asking how many tweets or social posts someone will make."
-            />
-            <FilterToggle
-              checked={activeFilters.onlyBinaryYesNo}
-              onChange={(checked) =>
-                updateActiveFilters({ onlyBinaryYesNo: checked })
-              }
-              label="Only Yes / No"
-              description="Keep only binary markets that resolve between a Yes and No outcome."
-            />
           </div>
 
           {notice ? (

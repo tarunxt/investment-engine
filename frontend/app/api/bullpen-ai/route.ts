@@ -4,6 +4,11 @@ import { promisify } from "node:util";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  applyCanonicalPolymarketMarketUrls,
+  buildPolymarketEventUrl,
+  getCanonicalPolymarketEventSlug,
+} from "./_lib/polymarketMarketUrls";
+import {
   BULLPEN_SOURCE_URLS,
   normalizeBullpenScanFilters,
   type BullpenQuestion,
@@ -25,7 +30,6 @@ const CLI_SOURCE_LABEL = "Bullpen CLI";
 const WEB_SOURCE_LABEL = "Bullpen trending page";
 const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
-const POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event";
 const CLI_DISCOVER_LIMIT = 1_000;
 const DISCOVER_FALLBACK_LIMIT = 10_000;
 const GAMMA_PAGE_SIZE = 500;
@@ -414,11 +418,6 @@ function isBinaryYesNoQuestion(outcomeLabels: string[], yesOdds: number | null, 
   return normalized.includes("yes") && normalized.includes("no");
 }
 
-function buildMarketUrl(slug: string | null) {
-  if (!slug) return null;
-  return `${POLYMARKET_EVENT_BASE_URL}/${slug}`;
-}
-
 function getDateKey(value: string | null) {
   if (!value) return null;
   const directMatch = value.match(/^(\d{4}-\d{2}-\d{2})/);
@@ -588,6 +587,7 @@ function normalizeGammaMarket(
     readString(record, CLOSE_TIME_KEYS),
     inferSemanticCloseTime(record, question),
   );
+  const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
 
   return {
     id: readString(record, ["id", ...SLUG_KEYS, "marketId", "conditionId"]) || question,
@@ -613,7 +613,7 @@ function normalizeGammaMarket(
     ]),
     sourceUrl,
     slug,
-    marketUrl: buildMarketUrl(slug),
+    marketUrl: buildPolymarketEventUrl(eventSlug),
     outcomeLabels,
     outcomeCount:
       outcomeLabels.length > 0
@@ -669,6 +669,7 @@ function normalizeQuestion(
     inferSemanticCloseTime(record, question),
   );
   const slug = readString(record, SLUG_KEYS) || readDeepString(record, SLUG_KEYS);
+  const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
   const outcomeLabels = readOutcomeLabels(record);
   const id =
     readString(record, ["id", ...SLUG_KEYS, "marketId", "eventId", "conditionId"]) ||
@@ -699,7 +700,7 @@ function normalizeQuestion(
     ]),
     sourceUrl,
     slug,
-    marketUrl: buildMarketUrl(slug),
+    marketUrl: buildPolymarketEventUrl(eventSlug),
     outcomeLabels,
     outcomeCount:
       outcomeLabels.length > 0
@@ -935,7 +936,7 @@ async function fetchBullpenPage(sourceUrl: string) {
   return html;
 }
 
-function buildResponse({
+async function buildResponse({
   mode,
   sourceUrl,
   sourceLabel,
@@ -954,6 +955,10 @@ function buildResponse({
   warning?: string;
   details?: string;
 }) {
+  const questions = await applyCanonicalPolymarketMarketUrls(
+    applyFilters(candidates, mode, filters),
+  );
+
   return {
     mode,
     sourceUrl,
@@ -961,7 +966,7 @@ function buildResponse({
     scannedAt,
     filters,
     totalCandidates: candidates.length,
-    questions: applyFilters(candidates, mode, filters),
+    questions,
     ...(warning ? { warning } : {}),
     ...(details ? { details } : {}),
   };
@@ -983,7 +988,7 @@ export async function GET(request: NextRequest) {
     }
     if (candidates.length > 0) {
       return NextResponse.json(
-        buildResponse({
+        await buildResponse({
           mode,
           sourceUrl,
           sourceLabel: CLI_SOURCE_LABEL,
@@ -1003,7 +1008,7 @@ export async function GET(request: NextRequest) {
       }
       if (candidates.length > 0) {
         return NextResponse.json(
-          buildResponse({
+          await buildResponse({
             mode,
             sourceUrl,
             sourceLabel: WEB_SOURCE_LABEL,
@@ -1023,7 +1028,7 @@ export async function GET(request: NextRequest) {
         const candidates = await fetchGammaMarkets(mode, filters);
         if (candidates.length > 0) {
           return NextResponse.json(
-            buildResponse({
+            await buildResponse({
               mode,
               sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
               sourceLabel: GAMMA_SOURCE_LABEL,

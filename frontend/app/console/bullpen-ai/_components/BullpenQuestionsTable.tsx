@@ -356,26 +356,18 @@ export function BullpenQuestionsTable({
                   </td>
                   <td className="max-w-xl px-4 py-3 font-medium text-slate-900">
                     <div>{question.question}</div>
-                    {question.marketUrl || question.slug ? (
+                    {question.marketUrl ? (
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
-                        {question.marketUrl ? (
-                          <a
-                            href={question.marketUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-purple-700 hover:text-purple-900"
-                          >
-                            Open market
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        ) : null}
-                        {question.slug ? <span>{question.slug}</span> : null}
+                        <a
+                          href={question.marketUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-purple-700 hover:text-purple-900"
+                        >
+                          Open market
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
                       </div>
-                    ) : null}
-                    {question.llmNotes ? (
-                      <p className="mt-2 text-xs font-normal leading-5 text-slate-500">
-                        LLM note: {question.llmNotes}
-                      </p>
                     ) : null}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-slate-600">
