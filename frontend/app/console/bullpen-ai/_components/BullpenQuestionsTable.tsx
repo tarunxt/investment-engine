@@ -1,6 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 
 import type {
@@ -8,6 +15,16 @@ import type {
   BullpenScanSnapshot,
 } from "@/lib/bullpen-ai";
 import { cn } from "@/lib/utils";
+import {
+  BULLPEN_TABLE_COLUMN_IDS,
+  DEFAULT_BULLPEN_TABLE_COLUMN_WIDTHS,
+  clampBullpenTableColumnWidth,
+  getBullpenTableWidth,
+  readBullpenTableColumnWidthsFromStorage,
+  writeBullpenTableColumnWidthsToStorage,
+  type BullpenTableColumnId,
+  type BullpenTableColumnWidths,
+} from "./bullpenTableColumnWidths";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
 
 export type BullpenTableSortKey =
@@ -31,6 +48,14 @@ export type BullpenTableSortDirection = "asc" | "desc";
 export type BullpenTableSortState = {
   key: BullpenTableSortKey;
   direction: BullpenTableSortDirection;
+};
+
+type ResizableBullpenTableColumnId = Exclude<BullpenTableColumnId, "select">;
+
+type ResizeState = {
+  columnId: ResizableBullpenTableColumnId;
+  startX: number;
+  startWidth: number;
 };
 
 function formatDate(value: string | null) {
@@ -213,6 +238,116 @@ function SortButton({
   );
 }
 
+function ColumnResizeHandle({
+  columnId,
+  label,
+  isResizing,
+  onResizeStart,
+  onResizeStep,
+  onReset,
+}: {
+  columnId: ResizableBullpenTableColumnId;
+  label: string;
+  isResizing: boolean;
+  onResizeStart: (
+    columnId: ResizableBullpenTableColumnId,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => void;
+  onResizeStep: (
+    columnId: ResizableBullpenTableColumnId,
+    step: number,
+  ) => void;
+  onReset: (columnId: ResizableBullpenTableColumnId) => void;
+}) {
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      onResizeStep(columnId, -16);
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      onResizeStep(columnId, 16);
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      onReset(columnId);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={`Resize ${label} column`}
+      title="Drag to resize. Double-click to reset."
+      onPointerDown={(event) => onResizeStart(columnId, event)}
+      onDoubleClick={() => onReset(columnId)}
+      onKeyDown={handleKeyDown}
+      className={cn(
+        "absolute inset-y-0 -right-1.5 z-10 flex w-3 cursor-col-resize touch-none items-stretch justify-center opacity-0 transition group-hover:opacity-100 focus:opacity-100",
+        isResizing && "opacity-100",
+      )}
+    >
+      <span
+        className={cn(
+          "my-2 w-px rounded-full bg-slate-300 transition",
+          isResizing ? "bg-slate-500" : "group-hover:bg-slate-400",
+        )}
+      />
+    </button>
+  );
+}
+
+function ResizableColumnHeader({
+  columnId,
+  label,
+  sortKey,
+  sortState,
+  onSortChange,
+  isResizing,
+  onResizeStart,
+  onResizeStep,
+  onReset,
+}: {
+  columnId: ResizableBullpenTableColumnId;
+  label: string;
+  sortKey: BullpenTableSortKey;
+  sortState: BullpenTableSortState;
+  onSortChange: (key: BullpenTableSortKey) => void;
+  isResizing: boolean;
+  onResizeStart: (
+    columnId: ResizableBullpenTableColumnId,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => void;
+  onResizeStep: (
+    columnId: ResizableBullpenTableColumnId,
+    step: number,
+  ) => void;
+  onReset: (columnId: ResizableBullpenTableColumnId) => void;
+}) {
+  return (
+    <th className="group relative px-4 py-3">
+      <SortButton
+        label={label}
+        sortKey={sortKey}
+        sortState={sortState}
+        onSortChange={onSortChange}
+      />
+      <ColumnResizeHandle
+        columnId={columnId}
+        label={label}
+        isResizing={isResizing}
+        onResizeStart={onResizeStart}
+        onResizeStep={onResizeStep}
+        onReset={onReset}
+      />
+    </th>
+  );
+}
+
 function getLlmOddsCellClass(value: number | null) {
   if (value === null) return "";
   if (value > 90) return "bg-lime-400 text-slate-950";
@@ -243,6 +378,12 @@ export function BullpenQuestionsTable({
 }) {
   const [breakdownQuestion, setBreakdownQuestion] =
     useState<BullpenQuestionRow | null>(null);
+  const [columnWidths, setColumnWidths] = useState<BullpenTableColumnWidths>(
+    readBullpenTableColumnWidthsFromStorage,
+  );
+  const [resizingColumnId, setResizingColumnId] =
+    useState<ResizableBullpenTableColumnId | null>(null);
+  const resizeStateRef = useRef<ResizeState | null>(null);
   const rows = snapshot ? sortQuestions(snapshot.questions, sortState) : [];
   const selectableRowCount = selectionEnabled ? rows.length : 0;
   const selectedVisibleCount = rows.filter((question) =>
@@ -250,14 +391,119 @@ export function BullpenQuestionsTable({
   ).length;
   const allVisibleSelected =
     selectableRowCount > 0 && selectedVisibleCount === selectableRowCount;
+  const tableWidth = getBullpenTableWidth(columnWidths);
+
+  const setColumnWidth = (
+    columnId: ResizableBullpenTableColumnId,
+    width: number,
+  ) => {
+    const nextWidth = clampBullpenTableColumnWidth(columnId, width);
+    setColumnWidths((current) =>
+      current[columnId] === nextWidth
+        ? current
+        : {
+            ...current,
+            [columnId]: nextWidth,
+          },
+    );
+  };
+
+  const handleResizeStart = (
+    columnId: ResizableBullpenTableColumnId,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    resizeStateRef.current = {
+      columnId,
+      startX: event.clientX,
+      startWidth: columnWidths[columnId],
+    };
+    setResizingColumnId(columnId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  const handleResizeStep = (
+    columnId: ResizableBullpenTableColumnId,
+    step: number,
+  ) => {
+    setColumnWidth(columnId, columnWidths[columnId] + step);
+  };
+
+  const resetColumnWidth = (columnId: ResizableBullpenTableColumnId) => {
+    setColumnWidth(columnId, DEFAULT_BULLPEN_TABLE_COLUMN_WIDTHS[columnId]);
+  };
+
+  useEffect(() => {
+    if (resizingColumnId) return;
+    writeBullpenTableColumnWidthsToStorage(columnWidths);
+  }, [columnWidths, resizingColumnId]);
+
+  const syncDraggedColumnWidth = useEffectEvent(
+    (columnId: ResizableBullpenTableColumnId, width: number) => {
+      const nextWidth = clampBullpenTableColumnWidth(columnId, width);
+      setColumnWidths((current) =>
+        current[columnId] === nextWidth
+          ? current
+          : {
+              ...current,
+              [columnId]: nextWidth,
+            },
+      );
+    },
+  );
+
+  useEffect(() => {
+    if (!resizingColumnId) return;
+
+    const stopResizing = () => {
+      resizeStateRef.current = null;
+      setResizingColumnId(null);
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeState = resizeStateRef.current;
+      if (!resizeState) return;
+      syncDraggedColumnWidth(
+        resizeState.columnId,
+        resizeState.startWidth + (event.clientX - resizeState.startX),
+      );
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResizing);
+    window.addEventListener("pointercancel", stopResizing);
+    window.addEventListener("blur", stopResizing);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResizing);
+      window.removeEventListener("pointercancel", stopResizing);
+      window.removeEventListener("blur", stopResizing);
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+    };
+  }, [resizingColumnId]);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200">
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
+        <table
+          className="min-w-full table-fixed divide-y divide-slate-200 text-sm"
+          suppressHydrationWarning
+          style={{ width: tableWidth }}
+        >
+          <colgroup>
+            {BULLPEN_TABLE_COLUMN_IDS.map((columnId) => (
+              <col key={columnId} style={{ width: columnWidths[columnId] }} />
+            ))}
+          </colgroup>
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="w-12 px-4 py-3">
+              <th className="px-4 py-3">
                 <input
                   type="checkbox"
                   checked={allVisibleSelected}
@@ -266,110 +512,149 @@ export function BullpenQuestionsTable({
                   className="h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Question"
-                  sortKey="question"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Closing time"
-                  sortKey="closeTime"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Days left"
-                  sortKey="daysUntilClose"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Category"
-                  sortKey="category"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Outcomes"
-                  sortKey="outcomes"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Current Yes odds %"
-                  sortKey="yesOdds"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Current No odds %"
-                  sortKey="noOdds"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="LLM Yes Odds"
-                  sortKey="llmYesOdds"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="LLM No Odds"
-                  sortKey="llmNoOdds"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Returns/day"
-                  sortKey="returnsPerDay"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Amount to be invested"
-                  sortKey="amountToBeInvested"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Volume"
-                  sortKey="volume"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
-              <th className="px-4 py-3">
-                <SortButton
-                  label="Liquidity"
-                  sortKey="liquidity"
-                  sortState={sortState}
-                  onSortChange={onSortChange}
-                />
-              </th>
+              <ResizableColumnHeader
+                columnId="question"
+                label="Question"
+                sortKey="question"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "question"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="closeTime"
+                label="Closing time"
+                sortKey="closeTime"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "closeTime"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="daysUntilClose"
+                label="Days left"
+                sortKey="daysUntilClose"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "daysUntilClose"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="category"
+                label="Category"
+                sortKey="category"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "category"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="outcomes"
+                label="Outcomes"
+                sortKey="outcomes"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "outcomes"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="yesOdds"
+                label="Current Yes odds %"
+                sortKey="yesOdds"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "yesOdds"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="noOdds"
+                label="Current No odds %"
+                sortKey="noOdds"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "noOdds"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="llmYesOdds"
+                label="LLM Yes Odds"
+                sortKey="llmYesOdds"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "llmYesOdds"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="llmNoOdds"
+                label="LLM No Odds"
+                sortKey="llmNoOdds"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "llmNoOdds"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="returnsPerDay"
+                label="Returns/day"
+                sortKey="returnsPerDay"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "returnsPerDay"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="amountToBeInvested"
+                label="Amount to be invested"
+                sortKey="amountToBeInvested"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "amountToBeInvested"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="volume"
+                label="Volume"
+                sortKey="volume"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "volume"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
+              <ResizableColumnHeader
+                columnId="liquidity"
+                label="Liquidity"
+                sortKey="liquidity"
+                sortState={sortState}
+                onSortChange={onSortChange}
+                isResizing={resizingColumnId === "liquidity"}
+                onResizeStart={handleResizeStart}
+                onResizeStep={handleResizeStep}
+                onReset={resetColumnWidth}
+              />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
@@ -385,7 +670,7 @@ export function BullpenQuestionsTable({
                       className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
                     />
                   </td>
-                  <td className="max-w-xl px-4 py-3 font-medium text-slate-900">
+                  <td className="px-4 py-3 font-medium text-slate-900">
                     <div>{question.question}</div>
                     {question.marketUrl ? (
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
