@@ -27,6 +27,7 @@ export type BullpenQuestionAnalysis = {
   llmModel: string | null;
   llmRunId: number | null;
   llmCompletedAt: string | null;
+  llmBreakdown: BullpenQuestionLlmBreakdownItem[];
 };
 
 export type BullpenQuestionRow = BullpenQuestion & BullpenQuestionAnalysis;
@@ -73,10 +74,22 @@ export type BullpenLlmAnalysisItem = {
   llmNoOdds: number | null;
   currentVsLlmOddsDifference: number | null;
   notes: string | null;
+  rationale: string | null;
 };
 
 export type BullpenLlmAnalysisPayload = {
   markets: BullpenLlmAnalysisItem[];
+};
+
+export type BullpenQuestionLlmBreakdownItem = {
+  provider: string;
+  model: string;
+  jobId: number | null;
+  runId: number | null;
+  timestamp: string | null;
+  llmYesOdds: number | null;
+  llmNoOdds: number | null;
+  rationale: string | null;
 };
 
 export const END_OF_MONTH_DATE = "2026-06-30";
@@ -126,7 +139,7 @@ Output requirements:
 - Do not use the % symbol.
 - If evidence is weak, still provide a calibrated estimate.
 - Avoid 0 or 100 unless the outcome is already resolved or mathematically certain.
-- Keep reasoning concise and under 240 characters.
+- Keep rationale concise and under 240 characters.
 
 JSON schema:
 {
@@ -137,7 +150,7 @@ JSON schema:
       "llm_yes_odds": 50.00,
       "llm_no_odds": 50.00,
       "confidence": "Low | Medium | High",
-      "reasoning": "short explanation"
+      "rationale": "short explanation"
     }
   ]
 }
@@ -301,18 +314,36 @@ export function createBullpenQuestionRow(
   question: BullpenQuestion | BullpenQuestionRow,
 ): BullpenQuestionRow {
   const analysisFields = question as Partial<BullpenQuestionAnalysis>;
+  const llmBreakdown = normalizeBullpenLlmBreakdown(
+    analysisFields.llmBreakdown,
+  );
+  const averageOdds =
+    llmBreakdown.length > 0
+      ? averageBullpenLlmOdds(llmBreakdown)
+      : { yes: null, no: null };
+  const latestCompletedAt =
+    [...llmBreakdown]
+      .map((entry) => entry.timestamp)
+      .filter((timestamp): timestamp is string => Boolean(timestamp))
+      .sort()
+      .at(-1) || null;
 
   return {
     ...question,
-    llmYesOdds: analysisFields.llmYesOdds ?? null,
-    llmNoOdds: analysisFields.llmNoOdds ?? null,
+    llmYesOdds: analysisFields.llmYesOdds ?? averageOdds.yes,
+    llmNoOdds: analysisFields.llmNoOdds ?? averageOdds.no,
     currentVsLlmOddsDifference:
       analysisFields.currentVsLlmOddsDifference ?? null,
-    llmNotes: analysisFields.llmNotes ?? null,
-    llmProvider: analysisFields.llmProvider ?? null,
-    llmModel: analysisFields.llmModel ?? null,
+    llmNotes: analysisFields.llmNotes ?? summarizeBullpenLlmNotes(llmBreakdown),
+    llmProvider:
+      analysisFields.llmProvider ??
+      (llmBreakdown.length === 1 ? llmBreakdown[0]?.provider || null : null),
+    llmModel:
+      analysisFields.llmModel ??
+      (llmBreakdown.length === 1 ? llmBreakdown[0]?.model || null : null),
     llmRunId: analysisFields.llmRunId ?? null,
-    llmCompletedAt: analysisFields.llmCompletedAt ?? null,
+    llmCompletedAt: analysisFields.llmCompletedAt ?? latestCompletedAt,
+    llmBreakdown,
   };
 }
 
@@ -399,6 +430,60 @@ function normalizeLooseQuestionLookupValue(value: string) {
 
 function readStringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeBullpenLlmBreakdown(
+  value: unknown,
+): BullpenQuestionLlmBreakdownItem[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const record = entry as Record<string, unknown>;
+      const provider = readStringValue(record.provider);
+      const model = readStringValue(record.model);
+      if (!provider || !model) return null;
+
+      return {
+        provider,
+        model,
+        jobId:
+          typeof record.jobId === "number" && Number.isFinite(record.jobId)
+            ? record.jobId
+            : typeof record.job_id === "number" && Number.isFinite(record.job_id)
+              ? record.job_id
+              : null,
+        runId:
+          typeof record.runId === "number" && Number.isFinite(record.runId)
+            ? record.runId
+            : typeof record.run_id === "number" && Number.isFinite(record.run_id)
+              ? record.run_id
+              : null,
+        timestamp:
+          readStringValue(record.timestamp) ||
+          readStringValue(record.completedAt) ||
+          readStringValue(record.completed_at) ||
+          null,
+        llmYesOdds: clampOddsValue(
+          extractNumber(record.llmYesOdds ?? record.llm_yes_odds),
+        ),
+        llmNoOdds: clampOddsValue(
+          extractNumber(record.llmNoOdds ?? record.llm_no_odds),
+        ),
+        rationale:
+          readStringValue(record.rationale) ||
+          readStringValue(record.reasoning) ||
+          readStringValue(record.notes) ||
+          readStringValue(record.note) ||
+          readStringValue(record.explanation) ||
+          readStringValue(record.summary) ||
+          null,
+      } satisfies BullpenQuestionLlmBreakdownItem;
+    })
+    .filter(
+      (entry): entry is BullpenQuestionLlmBreakdownItem => entry !== null,
+    );
 }
 
 function buildBullpenQuestionLookupMap(questions: BullpenQuestionRow[]) {
@@ -549,17 +634,13 @@ export function parseBullpenLlmAnalysisPayload(
       );
 
       const notes =
-        typeof record.notes === "string"
-          ? record.notes.trim()
-          : typeof record.note === "string"
-            ? record.note.trim()
-          : typeof record.reasoning === "string"
-            ? record.reasoning.trim()
-            : typeof record.explanation === "string"
-              ? record.explanation.trim()
-              : typeof record.summary === "string"
-                ? record.summary.trim()
-            : null;
+        readStringValue(record.rationale) ||
+        readStringValue(record.reasoning) ||
+        readStringValue(record.notes) ||
+        readStringValue(record.note) ||
+        readStringValue(record.explanation) ||
+        readStringValue(record.summary) ||
+        null;
 
       return {
         questionId,
@@ -567,6 +648,7 @@ export function parseBullpenLlmAnalysisPayload(
         llmNoOdds: normalizedOdds.no,
         currentVsLlmOddsDifference: null,
         notes: notes || null,
+        rationale: notes || null,
       };
     })
     .filter(
@@ -576,6 +658,36 @@ export function parseBullpenLlmAnalysisPayload(
   return {
     markets: normalizedMarkets,
   };
+}
+
+export function averageBullpenLlmOdds(
+  breakdown: BullpenQuestionLlmBreakdownItem[],
+) {
+  const yesValues = breakdown
+    .map((entry) => entry.llmYesOdds)
+    .filter((value): value is number => typeof value === "number");
+  const noValues = breakdown
+    .map((entry) => entry.llmNoOdds)
+    .filter((value): value is number => typeof value === "number");
+
+  const average = (values: number[]) =>
+    values.length === 0
+      ? null
+      : Number(
+          (
+            values.reduce((total, value) => total + value, 0) / values.length
+          ).toFixed(2),
+        );
+
+  return normalizeOddsPair(average(yesValues), average(noValues));
+}
+
+export function summarizeBullpenLlmNotes(
+  breakdown: BullpenQuestionLlmBreakdownItem[],
+) {
+  if (breakdown.length === 0) return null;
+  if (breakdown.length === 1) return breakdown[0]?.rationale || null;
+  return `${breakdown.length} LLM outputs available. Click the LLM odds to inspect the full breakdown.`;
 }
 
 function buildBullpenLlmQuestionPayload(questions: BullpenQuestionRow[]) {

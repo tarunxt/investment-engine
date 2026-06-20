@@ -22,6 +22,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  averageBullpenLlmOdds,
   archiveBullpenScanSnapshot,
   BULLPEN_SOURCE_URLS,
   buildBullpenLlmPrompt,
@@ -32,6 +33,7 @@ import {
   DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
   normalizeBullpenScanFilters,
   parseBullpenLlmAnalysisPayload,
+  summarizeBullpenLlmNotes,
   type BullpenQuestionRow,
   type BullpenScanFilters,
   type BullpenScanSnapshot,
@@ -41,7 +43,7 @@ import {
 } from "@/lib/bullpen-ai";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
-import type { ProviderModelTarget, RunResponse } from "@/types/api";
+import type { ProviderModelTarget } from "@/types/api";
 
 import {
   BullpenQuestionsTable,
@@ -249,37 +251,49 @@ function writeBullpenSnapshotsToStorage(
   }
 }
 
-function readLastLlmTargetFromStorage() {
-  if (typeof window === "undefined") return null;
-
-  try {
-    const raw = window.localStorage.getItem(BULLPEN_LAST_LLM_TARGET_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      typeof parsed.provider === "string" &&
-      typeof parsed.model === "string"
-    ) {
-      return {
-        provider: parsed.provider,
-        model: parsed.model,
-      } satisfies ProviderModelTarget;
-    }
-  } catch {
-    return null;
+function normalizeStoredTarget(
+  value: unknown,
+): ProviderModelTarget | null {
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof (value as Record<string, unknown>).provider === "string" &&
+    typeof (value as Record<string, unknown>).model === "string"
+  ) {
+    return {
+      provider: (value as Record<string, string>).provider,
+      model: (value as Record<string, string>).model,
+    };
   }
 
   return null;
 }
 
-function writeLastLlmTargetToStorage(target: ProviderModelTarget | null) {
-  if (typeof window === "undefined" || !target) return;
+function readLastLlmTargetsFromStorage() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(BULLPEN_LAST_LLM_TARGET_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => normalizeStoredTarget(item))
+        .filter((item): item is ProviderModelTarget => Boolean(item));
+    }
+    const singleTarget = normalizeStoredTarget(parsed);
+    return singleTarget ? [singleTarget] : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLastLlmTargetsToStorage(targets: ProviderModelTarget[]) {
+  if (typeof window === "undefined") return;
 
   try {
     window.localStorage.setItem(
       BULLPEN_LAST_LLM_TARGET_STORAGE_KEY,
-      JSON.stringify(target),
+      JSON.stringify(targets),
     );
   } catch {
     // Best effort only.
@@ -309,8 +323,29 @@ function writeBullpenLlmPromptToStorage(template: string) {
   }
 }
 
-function getDefaultBullpenLlmTarget(lastTarget: ProviderModelTarget | null) {
-  return lastTarget ?? { provider: "deepseek", model: "deepseek-v4-flash" };
+function getDefaultBullpenLlmTargets(lastTargets: ProviderModelTarget[]) {
+  if (lastTargets.length > 0) return lastTargets;
+  return [{ provider: "deepseek", model: "deepseek-v4-flash" }];
+}
+
+function formatTargetSummary(
+  targets: ProviderModelTarget[],
+  {
+    maxVisible = 2,
+  }: {
+    maxVisible?: number;
+  } = {},
+) {
+  if (targets.length === 0) return "the selected LLMs";
+
+  const visible = targets
+    .slice(0, maxVisible)
+    .map((target) => `${target.provider} / ${target.model}`);
+  const remaining = targets.length - visible.length;
+
+  return remaining > 0
+    ? `${visible.join(", ")} + ${remaining} more`
+    : visible.join(", ");
 }
 
 async function waitForBullpenRunCompletion(runId: number) {
@@ -324,18 +359,6 @@ async function waitForBullpenRunCompletion(runId: number) {
   }
 
   return apiService.getRun(runId);
-}
-
-function getBullpenRunJob(run: RunResponse, target: ProviderModelTarget) {
-  return (
-    run.run_jobs.find(
-      (runJob) =>
-        runJob.job.provider === target.provider &&
-        runJob.job.model === target.model,
-    )?.job ||
-    run.run_jobs[0]?.job ||
-    null
-  );
 }
 
 function FilterToggle({
@@ -406,8 +429,8 @@ export default function BullpenAiPage() {
   });
   const [scanningMode, setScanningMode] = useState<ScanMode | null>(null);
   const [llmRunningMode, setLlmRunningMode] = useState<ScanMode | null>(null);
-  const [lastLlmTarget, setLastLlmTarget] = useState<ProviderModelTarget | null>(
-    null,
+  const [lastLlmTargets, setLastLlmTargets] = useState<ProviderModelTarget[]>(
+    [],
   );
   const [bullpenLlmPromptTemplate, setBullpenLlmPromptTemplate] = useState(
     DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
@@ -417,7 +440,7 @@ export default function BullpenAiPage() {
 
   useEffect(() => {
     setSnapshotsByMode(readBullpenSnapshotsFromStorage());
-    setLastLlmTarget(readLastLlmTargetFromStorage());
+    setLastLlmTargets(readLastLlmTargetsFromStorage());
     setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
     setHasLoadedStorage(true);
   }, []);
@@ -594,11 +617,11 @@ export default function BullpenAiPage() {
     }
   }
 
-  async function runLlm(target: ProviderModelTarget | null) {
-    if (!target) {
+  async function runLlm(targets: ProviderModelTarget[]) {
+    if (targets.length === 0) {
       setLlmMessagesByMode((current) => ({
         ...current,
-        [activeMode]: "No configured LLM is available right now.",
+        [activeMode]: "Select at least one LLM before running analysis.",
       }));
       return;
     }
@@ -635,8 +658,8 @@ export default function BullpenAiPage() {
 
     setLlmRunningMode(activeMode);
     setLlmMessagesByMode((current) => ({ ...current, [activeMode]: null }));
-    setLastLlmTarget(target);
-    writeLastLlmTargetToStorage(target);
+    setLastLlmTargets(targets);
+    writeLastLlmTargetsToStorage(targets);
 
     try {
       const run = await apiService.createRun({
@@ -644,64 +667,132 @@ export default function BullpenAiPage() {
           selectedQuestions,
           bullpenLlmPromptTemplate,
         ),
-        targets: [target],
+        targets,
         allow_parallel: true,
       });
       const completedRun = await waitForBullpenRunCompletion(run.id);
-      const job = getBullpenRunJob(completedRun, target);
-
-      if (!job?.response) {
-        const detail = job?.error_message
-          ? job.error_message
-          : (completedRun.status || "").toLowerCase() === "failed"
-            ? `Run failed with status "${completedRun.status}".`
-            : `Run #${completedRun.id} is still processing.`;
-        throw new Error(detail || "The selected LLM did not return any output.");
-      }
-
-      const analysisPayload = parseBullpenLlmAnalysisPayload(
-        job.response,
-        selectedQuestions,
+      const targetOrder = new Map(
+        targets.map((target, index) => [
+          `${target.provider}::${target.model}`,
+          index,
+        ]),
       );
+      const selectedRunJobs = completedRun.run_jobs
+        .filter((runJob) =>
+          targetOrder.has(`${runJob.job.provider}::${runJob.job.model}`),
+        )
+        .sort(
+          (left, right) =>
+            (targetOrder.get(`${left.job.provider}::${left.job.model}`) ?? 0) -
+            (targetOrder.get(`${right.job.provider}::${right.job.model}`) ?? 0),
+        );
       const selectedQuestionIdsSet = new Set(
         selectedQuestions.map((question) => question.id),
       );
-      const analysisByQuestionId = new Map(
-        analysisPayload.markets
-          .filter((item) => selectedQuestionIdsSet.has(item.questionId))
-          .map((item) => [item.questionId, item] as const),
-      );
-      const matchedCount = analysisByQuestionId.size;
-      const rowsWithOddsCount = Array.from(analysisByQuestionId.values()).filter(
-        (item) => item.llmYesOdds !== null || item.llmNoOdds !== null,
+      const breakdownByQuestionId = new Map<
+        string,
+        BullpenQuestionRow["llmBreakdown"]
+      >();
+      const failedModels: string[] = [];
+      let successfulModelCount = 0;
+      let unmatchedCount = 0;
+
+      for (const runJob of selectedRunJobs) {
+        const label = `${runJob.job.provider} / ${runJob.job.model}`;
+        const responseText = runJob.job.response;
+
+        if (!responseText) {
+          failedModels.push(
+            `${label}: ${runJob.job.error_message || `job ${runJob.job.status.toLowerCase()}`}`,
+          );
+          continue;
+        }
+
+        try {
+          const analysisPayload = parseBullpenLlmAnalysisPayload(
+            responseText,
+            selectedQuestions,
+          );
+          const analysisByQuestionId = new Map(
+            analysisPayload.markets
+              .filter((item) => selectedQuestionIdsSet.has(item.questionId))
+              .map((item) => [item.questionId, item] as const),
+          );
+
+          unmatchedCount += Math.max(
+            0,
+            analysisPayload.markets.length - analysisByQuestionId.size,
+          );
+          successfulModelCount += 1;
+
+          analysisByQuestionId.forEach((item, questionId) => {
+            const currentBreakdown = breakdownByQuestionId.get(questionId) || [];
+            currentBreakdown.push({
+              provider: runJob.job.provider,
+              model: runJob.job.model,
+              jobId: runJob.job.id,
+              runId: completedRun.id,
+              timestamp: runJob.job.updated_at || completedRun.updated_at,
+              llmYesOdds: item.llmYesOdds,
+              llmNoOdds: item.llmNoOdds,
+              rationale: item.rationale || item.notes,
+            });
+            breakdownByQuestionId.set(questionId, currentBreakdown);
+          });
+        } catch (jobError) {
+          failedModels.push(`${label}: ${normalizeError(jobError)}`);
+        }
+      }
+
+      if (breakdownByQuestionId.size === 0) {
+        throw new Error(
+          failedModels.length > 0
+            ? failedModels.join(" | ")
+            : `Run #${completedRun.id} did not return any usable LLM output.`,
+        );
+      }
+
+      const matchedCount = breakdownByQuestionId.size;
+      const rowsWithOddsCount = Array.from(breakdownByQuestionId.values()).filter(
+        (llmBreakdown) => {
+          const averageOdds = averageBullpenLlmOdds(llmBreakdown);
+          return averageOdds.yes !== null || averageOdds.no !== null;
+        },
       ).length;
       const blankOddsCount = matchedCount - rowsWithOddsCount;
-      const unmatchedCount = Math.max(
-        0,
-        analysisPayload.markets.length - matchedCount,
-      );
 
       setSnapshotsByMode((current) => {
         const currentSnapshot = current[activeMode].current;
         if (!currentSnapshot) return current;
 
         const nextQuestions = currentSnapshot.questions.map((question) => {
-          const analysis = analysisByQuestionId.get(question.id);
-          if (!analysis) return question;
+          const llmBreakdown = breakdownByQuestionId.get(question.id);
+          if (!llmBreakdown || llmBreakdown.length === 0) return question;
+
+          const averageOdds = averageBullpenLlmOdds(llmBreakdown);
+          const completedAt =
+            [...llmBreakdown]
+              .map((entry) => entry.timestamp)
+              .filter((timestamp): timestamp is string => Boolean(timestamp))
+              .sort()
+              .at(-1) || new Date().toISOString();
 
           return createBullpenQuestionRow({
             ...question,
-            llmYesOdds: analysis.llmYesOdds,
-            llmNoOdds: analysis.llmNoOdds,
+            llmYesOdds: averageOdds.yes,
+            llmNoOdds: averageOdds.no,
             currentVsLlmOddsDifference:
-              analysis.llmYesOdds === null || question.yesOdds === null
+              averageOdds.yes === null || question.yesOdds === null
                 ? null
-                : Number((question.yesOdds - analysis.llmYesOdds).toFixed(2)),
-            llmNotes: analysis.notes,
-            llmProvider: target.provider,
-            llmModel: target.model,
+                : Number((question.yesOdds - averageOdds.yes).toFixed(2)),
+            llmNotes: summarizeBullpenLlmNotes(llmBreakdown),
+            llmProvider:
+              llmBreakdown.length === 1 ? llmBreakdown[0]?.provider || null : null,
+            llmModel:
+              llmBreakdown.length === 1 ? llmBreakdown[0]?.model || null : null,
             llmRunId: completedRun.id,
-            llmCompletedAt: new Date().toISOString(),
+            llmCompletedAt: completedAt,
+            llmBreakdown,
           });
         });
 
@@ -718,32 +809,44 @@ export default function BullpenAiPage() {
       });
 
       const summaryParts = [
-        `LLM finished with ${target.provider} / ${target.model}.`,
+        `LLM finished with ${targets.length} selected model${targets.length === 1 ? "" : "s"}.`,
       ];
 
       if (rowsWithOddsCount > 0) {
         summaryParts.push(
-          `Filled odds for ${formatCountLabel(rowsWithOddsCount, "selected question")}.`,
+          `Averaged odds for ${formatCountLabel(rowsWithOddsCount, "selected question")}.`,
         );
       } else if (matchedCount > 0) {
         summaryParts.push(
-          `Matched ${formatCountLabel(matchedCount, "selected row")} back to the table, but the model left their odds blank.`,
+          `Matched ${formatCountLabel(matchedCount, "selected row")} back to the table, but the returned models left their odds blank.`,
         );
       } else {
         summaryParts.push(
-          "The model returned results, but none could be matched back to the selected table rows, so the LLM odds columns stayed unchanged.",
+          "The returned models produced output, but none of it could be matched back to the selected table rows, so the LLM odds columns stayed unchanged.",
         );
       }
 
       if (blankOddsCount > 0) {
         summaryParts.push(
-          `${formatCountLabel(blankOddsCount, "matched row")} came back with insufficient evidence, so those LLM odds stayed blank.`,
+          `${formatCountLabel(blankOddsCount, "matched row")} came back without usable odds after averaging, so those LLM odds stayed blank.`,
         );
       }
 
       if (unmatchedCount > 0) {
         summaryParts.push(
           `${formatCountLabel(unmatchedCount, "returned row")} could not be matched back to the selected questions.`,
+        );
+      }
+
+      if (successfulModelCount > 0) {
+        summaryParts.push(
+          `${formatCountLabel(successfulModelCount, "model")} returned usable JSON.`,
+        );
+      }
+
+      if (failedModels.length > 0) {
+        summaryParts.push(
+          `${formatCountLabel(failedModels.length, "model")} failed or returned unusable output: ${failedModels.join(" | ")}.`,
         );
       }
 
@@ -928,13 +1031,14 @@ export default function BullpenAiPage() {
                   <EventScanRunControls
                     buttonLabel="Run LLM"
                     containerClassName="gap-0"
-                    defaultTarget={getDefaultBullpenLlmTarget(lastLlmTarget)}
+                    defaultTargets={getDefaultBullpenLlmTargets(lastLlmTargets)}
                     disabled={
                       !activeCurrentSnapshot ||
                       isViewingHistory ||
                       selectedQuestionCount === 0
                     }
-                    onRun={runLlm}
+                    selectionMode="multiple"
+                    onRunMultiple={runLlm}
                     pickerDialogLabel="Select LLM"
                     pickerIcon={<Menu className="size-4" />}
                     running={isRunningLlm}
@@ -948,11 +1052,10 @@ export default function BullpenAiPage() {
                 </p>
                 {isRunningLlm ? (
                   <p className="text-xs leading-5 text-slate-600">
-                    Running {lastLlmTarget?.provider || "the selected LLM"} /{" "}
-                    {lastLlmTarget?.model || "selected model"} on the selected
+                    Running {formatTargetSummary(lastLlmTargets)} on the selected
                     questions now. When it finishes, we&apos;ll say how many
-                    table rows were updated and whether any LLM odds stayed
-                    blank.
+                    table rows were updated, how many model outputs were usable,
+                    and whether any averaged LLM odds stayed blank.
                   </p>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
@@ -1108,9 +1211,9 @@ export default function BullpenAiPage() {
                   ? `${selectedQuestionCount} question${selectedQuestionCount === 1 ? "" : "s"} selected for LLM analysis.`
                   : "History view is read-only; switch back to Current to select questions."}
               </span>
-              {lastLlmTarget ? (
+              {lastLlmTargets.length > 0 ? (
                 <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                  Last LLM: {lastLlmTarget.provider} / {lastLlmTarget.model}
+                  Last LLMs: {formatTargetSummary(lastLlmTargets)}
                 </span>
               ) : null}
             </div>

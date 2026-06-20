@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 
 import type {
   BullpenQuestionRow,
   BullpenScanSnapshot,
 } from "@/lib/bullpen-ai";
+import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
 
 export type BullpenTableSortKey =
   | "question"
@@ -216,6 +218,8 @@ export function BullpenQuestionsTable({
   onToggleQuestion: (questionId: string) => void;
   onToggleSelectAll: () => void;
 }) {
+  const [breakdownQuestion, setBreakdownQuestion] =
+    useState<BullpenQuestionRow | null>(null);
   const rows = snapshot ? sortQuestions(snapshot.questions, sortState) : [];
   const selectableRowCount = selectionEnabled ? rows.length : 0;
   const selectedVisibleCount = rows.filter((question) =>
@@ -393,10 +397,30 @@ export function BullpenQuestionsTable({
                     {formatOdds(question.noOdds)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 font-semibold text-indigo-700">
-                    {formatOdds(question.llmYesOdds)}
+                    {question.llmBreakdown.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setBreakdownQuestion(question)}
+                        className="rounded-md underline decoration-indigo-300 underline-offset-4 transition hover:text-indigo-900"
+                      >
+                        {formatOdds(question.llmYesOdds)}
+                      </button>
+                    ) : (
+                      formatOdds(question.llmYesOdds)
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 font-semibold text-violet-700">
-                    {formatOdds(question.llmNoOdds)}
+                    {question.llmBreakdown.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setBreakdownQuestion(question)}
+                        className="rounded-md underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
+                      >
+                        {formatOdds(question.llmNoOdds)}
+                      </button>
+                    ) : (
+                      formatOdds(question.llmNoOdds)
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
                     {formatDifference(question.currentVsLlmOddsDifference)}
@@ -422,6 +446,12 @@ export function BullpenQuestionsTable({
           </tbody>
         </table>
       </div>
+      {breakdownQuestion ? (
+        <BullpenLlmBreakdownDialog
+          question={breakdownQuestion}
+          onClose={() => setBreakdownQuestion(null)}
+        />
+      ) : null}
     </div>
   );
 }

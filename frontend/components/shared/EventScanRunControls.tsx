@@ -25,19 +25,36 @@ type SavedModelMix = {
   updated_at?: string;
 };
 
-interface EventScanRunControlsProps {
+interface EventScanRunControlsBaseProps {
   buttonClassName?: string;
   buttonLabel?: string;
   containerClassName?: string;
   defaultTarget?: ProviderModelTarget | null;
   disabled?: boolean;
   historicalEstimatedCostInrByTarget?: Record<string, number>;
-  onRun: (target: ProviderModelTarget | null) => void | Promise<void>;
   pickerButtonClassName?: string;
   pickerDialogLabel?: string;
   pickerIcon?: ReactNode;
   running?: boolean;
 }
+
+type EventScanRunControlsSingleProps = EventScanRunControlsBaseProps & {
+  selectionMode?: "single";
+  onRun: (target: ProviderModelTarget | null) => void | Promise<void>;
+  onRunMultiple?: never;
+  defaultTargets?: never;
+};
+
+type EventScanRunControlsMultipleProps = EventScanRunControlsBaseProps & {
+  selectionMode: "multiple";
+  onRunMultiple: (targets: ProviderModelTarget[]) => void | Promise<void>;
+  onRun?: never;
+  defaultTargets?: ProviderModelTarget[] | null;
+};
+
+type EventScanRunControlsProps =
+  | EventScanRunControlsSingleProps
+  | EventScanRunControlsMultipleProps;
 
 interface PickerPosition {
   top: number;
@@ -145,18 +162,77 @@ function getPreferredTarget(
   return getFirstCompatibleTarget(providers);
 }
 
+function getPreferredTargets(
+  providers: ProviderInfo[],
+  {
+    defaultTarget,
+    defaultTargets,
+  }: {
+    defaultTarget?: ProviderModelTarget | null;
+    defaultTargets?: ProviderModelTarget[] | null;
+  },
+) {
+  const compatibleTargets: ProviderModelTarget[] = [];
+  const seenKeys = new Set<string>();
+  const candidates = [
+    ...(defaultTargets || []),
+    ...(defaultTarget ? [defaultTarget] : []),
+  ];
+
+  for (const candidate of candidates) {
+    const key = targetKey(candidate);
+    if (!candidate || !key || seenKeys.has(key)) continue;
+    if (isSelectableTarget(providers, candidate)) {
+      compatibleTargets.push(candidate);
+      seenKeys.add(key);
+    }
+  }
+
+  if (compatibleTargets.length > 0) {
+    return compatibleTargets;
+  }
+
+  const firstCompatibleTarget = getPreferredTarget(providers, defaultTarget);
+  return firstCompatibleTarget ? [firstCompatibleTarget] : [];
+}
+
+function getTargetsFromKeys(
+  providers: ProviderInfo[],
+  selectedKeys: Set<string>,
+) {
+  const targets: ProviderModelTarget[] = [];
+
+  for (const provider of providers) {
+    if (!provider.configured) continue;
+
+    for (const model of provider.models) {
+      const key = `${provider.name}::${model}`;
+      if (
+        selectedKeys.has(key) &&
+        provider.model_compatibility?.[model]?.compatible !== false
+      ) {
+        targets.push({ provider: provider.name, model });
+      }
+    }
+  }
+
+  return targets;
+}
+
 export function EventScanRunControls({
   buttonClassName,
   buttonLabel = "Run Events Scan",
   containerClassName,
   defaultTarget,
+  defaultTargets,
   disabled,
   historicalEstimatedCostInrByTarget,
-  onRun,
   pickerButtonClassName,
   pickerDialogLabel = "Choose LLM model",
   pickerIcon,
   running,
+  selectionMode = "single",
+  ...runProps
 }: EventScanRunControlsProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pickerPanelRef = useRef<HTMLDivElement | null>(null);
@@ -167,8 +243,8 @@ export function EventScanRunControls({
   const [pickerPosition, setPickerPosition] = useState<PickerPosition | null>(
     null,
   );
-  const [selectedTarget, setSelectedTarget] =
-    useState<ProviderModelTarget | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [hasTouchedSelection, setHasTouchedSelection] = useState(false);
   const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
     readSavedModelMixes(),
   );
@@ -278,13 +354,40 @@ export function EventScanRunControls({
 
   const activeTarget =
     providers.length > 0
-      ? isSelectableTarget(providers, selectedTarget)
-        ? selectedTarget
-        : getPreferredTarget(providers, defaultTarget)
+      ? getPreferredTarget(providers, defaultTarget)
       : null;
+  const compatibleTargets = new Set(
+    providers.flatMap((provider) =>
+      provider.models
+        .filter(
+          (model) =>
+            provider.configured &&
+            provider.model_compatibility?.[model]?.compatible !== false,
+        )
+        .map((model) => `${provider.name}::${model}`),
+    ),
+  );
+  const compatibleSelectedKeys = new Set(
+    Array.from(selectedKeys).filter((key) => compatibleTargets.has(key)),
+  );
+  const defaultSelectedKeys = new Set(
+    getPreferredTargets(providers, { defaultTarget, defaultTargets })
+      .map((target) => targetKey(target))
+      .filter((key): key is string => Boolean(key)),
+  );
+  const effectiveSelectedKeys =
+    selectionMode === "multiple"
+      ? hasTouchedSelection
+        ? compatibleSelectedKeys
+        : defaultSelectedKeys
+      : compatibleSelectedKeys.size > 0
+        ? compatibleSelectedKeys
+        : defaultSelectedKeys;
+  const activeTargets = getTargetsFromKeys(providers, effectiveSelectedKeys);
+  const activeSingleTarget = activeTargets[0] ?? activeTarget;
 
   const selectedProvider = providers.find(
-    (provider) => provider.name === activeTarget?.provider,
+    (provider) => provider.name === activeSingleTarget?.provider,
   );
   const getEstimatedCostInr = useCallback(
     (providerName: string, model: string) => {
@@ -300,18 +403,6 @@ export function EventScanRunControls({
     },
     [historicalEstimatedCostInrByTarget, providers, selectedProvider],
   );
-  const compatibleTargets = new Set(
-    providers.flatMap((provider) =>
-      provider.models
-        .filter(
-          (model) =>
-            provider.configured &&
-            provider.model_compatibility?.[model]?.compatible !== false,
-        )
-        .map((model) => `${provider.name}::${model}`),
-    ),
-  );
-  const activeTargetKey = targetKey(activeTarget);
   const modelMixControls = (
     <LlmModelMixControls
       mixes={savedMixes}
@@ -326,29 +417,39 @@ export function EventScanRunControls({
         const compatibleMixTargets = mix.targets.filter((target) =>
           compatibleTargets.has(target),
         );
-        const [firstTarget] = compatibleMixTargets;
-        if (!firstTarget) {
+        if (compatibleMixTargets.length === 0) {
           window.alert(
             "No models in this mix are compatible with current API access.",
           );
           return;
         }
         if (
-          compatibleMixTargets.length < mix.targets.length ||
-          compatibleMixTargets.length > 1
+          selectionMode === "single" &&
+          (compatibleMixTargets.length < mix.targets.length ||
+            compatibleMixTargets.length > 1)
         ) {
           window.alert(
             "This chooser runs one LLM at a time, so the first compatible model in the mix was selected.",
           );
         }
-        const [provider, model] = firstTarget.split("::");
-        if (!provider || !model) return;
-        setSelectedTarget({ provider, model });
+        setHasTouchedSelection(true);
+        setSelectedKeys(
+          new Set(
+            selectionMode === "multiple"
+              ? compatibleMixTargets
+              : compatibleMixTargets.slice(0, 1),
+          ),
+        );
         setSelectedMixId(id);
       }}
       onSave={() => {
-        if (!activeTargetKey) {
-          window.alert("Select a model before saving a mix.");
+        const targetsToSave = Array.from(effectiveSelectedKeys);
+        if (targetsToSave.length === 0) {
+          window.alert(
+            selectionMode === "multiple"
+              ? "Select at least one model before saving a mix."
+              : "Select a model before saving a mix.",
+          );
           return;
         }
         const name = window.prompt("Name this model mix:");
@@ -356,7 +457,7 @@ export function EventScanRunControls({
         const cleaned = name.trim();
         if (!cleaned) return;
         const now = new Date().toISOString();
-        const targets = [activeTargetKey];
+        const targets = targetsToSave;
         const existing = savedMixes.find(
           (mix) => mix.name.toLowerCase() === cleaned.toLowerCase(),
         );
@@ -428,7 +529,15 @@ export function EventScanRunControls({
       className={cn("relative flex items-center gap-2", containerClassName)}
     >
       <Button
-        onClick={() => void onRun(activeTarget)}
+        onClick={() => {
+          if (selectionMode === "multiple" && "onRunMultiple" in runProps) {
+            void runProps.onRunMultiple?.(activeTargets);
+            return;
+          }
+          if ("onRun" in runProps) {
+            void runProps.onRun?.(activeSingleTarget);
+          }
+        }}
         disabled={runButtonDisabled}
         aria-busy={runButtonLoading}
         className={buttonClassName}
@@ -485,23 +594,70 @@ export function EventScanRunControls({
                 <div className="mt-4">
                   <LlmModelSelectionPanel
                     providers={providers}
-                    selectedKeys={
-                      activeTarget
-                        ? new Set([
-                            `${activeTarget.provider}::${activeTarget.model}`,
-                          ])
-                        : new Set()
-                    }
-                    selectionMode="single"
+                    selectedKeys={effectiveSelectedKeys}
+                    selectionMode={selectionMode}
                     loading={loadingProviders}
                     emptyMessage="No configured LLM models are available for this analysis yet."
-                    showBulkActions={false}
+                    showBulkActions={selectionMode === "multiple"}
                     modelMixControls={modelMixControls}
                     onToggle={(key) => {
-                      const [provider, model] = key.split("::");
-                      if (!provider || !model) return;
-                      setSelectedTarget({ provider, model });
+                      setHasTouchedSelection(true);
+                      if (selectionMode === "multiple") {
+                        setSelectedKeys((current) => {
+                          const next = new Set(current);
+                          if (next.has(key)) {
+                            next.delete(key);
+                          } else {
+                            next.add(key);
+                          }
+                          return next;
+                        });
+                        return;
+                      }
+                      setSelectedKeys(new Set([key]));
                     }}
+                    onSelectAll={
+                      selectionMode === "multiple"
+                        ? () => {
+                            setHasTouchedSelection(true);
+                            setSelectedKeys(new Set(compatibleTargets));
+                          }
+                        : undefined
+                    }
+                    onClear={
+                      selectionMode === "multiple"
+                        ? () => {
+                            setHasTouchedSelection(true);
+                            setSelectedKeys(new Set());
+                          }
+                        : undefined
+                    }
+                    onToggleProvider={
+                      selectionMode === "multiple"
+                        ? (providerName, models) => {
+                            setHasTouchedSelection(true);
+                            setSelectedKeys((current) => {
+                              const next = new Set(current);
+                              const providerKeys = models.map(
+                                (model) => `${providerName}::${model}`,
+                              );
+                              const allSelected =
+                                providerKeys.length > 0 &&
+                                providerKeys.every((key) => next.has(key));
+
+                              providerKeys.forEach((providerKey) => {
+                                if (allSelected) {
+                                  next.delete(providerKey);
+                                } else {
+                                  next.add(providerKey);
+                                }
+                              });
+
+                              return next;
+                            });
+                          }
+                        : undefined
+                    }
                     getEstimatedCostInr={getEstimatedCostInr}
                   />
                 </div>
