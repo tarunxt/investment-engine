@@ -22,16 +22,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  averageBullpenLlmOdds,
   archiveBullpenScanSnapshot,
   BULLPEN_SOURCE_URLS,
   buildBullpenLlmPrompt,
   buildBullpenScanQueryParams,
+  computeBullpenLlmConsensus,
   createBullpenQuestionRow,
   createBullpenScanFilters,
   createBullpenScanSnapshot,
   DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
   isBullpenQuestionInvestmentCandidate,
+  LEGACY_BULLPEN_LLM_PROMPT_TEMPLATES,
   normalizeBullpenScanFilters,
   parseBullpenLlmAnalysisPayload,
   summarizeBullpenLlmNotes,
@@ -513,7 +514,14 @@ function readBullpenLlmPromptFromStorage() {
 
   try {
     const stored = window.localStorage.getItem(BULLPEN_LLM_PROMPT_STORAGE_KEY);
-    return stored?.trim() || DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE;
+    const normalizedStored = stored?.trim();
+    if (!normalizedStored) {
+      return DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE;
+    }
+    if (LEGACY_BULLPEN_LLM_PROMPT_TEMPLATES.includes(normalizedStored)) {
+      return DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE;
+    }
+    return normalizedStored;
   } catch {
     return DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE;
   }
@@ -1425,6 +1433,14 @@ export default function BullpenAiPage() {
               timestamp: runJob.job.updated_at || completedRun.updated_at,
               llmYesOdds: item.llmYesOdds,
               llmNoOdds: item.llmNoOdds,
+              yesDefinition: item.yesDefinition,
+              deadlineEt: item.deadlineEt,
+              hoursRemaining: item.hoursRemaining,
+              evidenceStatus: item.evidenceStatus,
+              eventState: item.eventState,
+              confidence: item.confidence,
+              keyEvidence: item.keyEvidence,
+              redFlags: item.redFlags,
               rationale: item.rationale || item.notes,
             });
             breakdownByQuestionId.set(questionId, currentBreakdown);
@@ -1445,8 +1461,11 @@ export default function BullpenAiPage() {
       const matchedCount = breakdownByQuestionId.size;
       const rowsWithOddsCount = Array.from(breakdownByQuestionId.values()).filter(
         (llmBreakdown) => {
-          const averageOdds = averageBullpenLlmOdds(llmBreakdown);
-          return averageOdds.yes !== null || averageOdds.no !== null;
+          const consensus = computeBullpenLlmConsensus(llmBreakdown);
+          return (
+            consensus.consensusYesOdds !== null ||
+            consensus.consensusNoOdds !== null
+          );
         },
       ).length;
       const blankOddsCount = matchedCount - rowsWithOddsCount;
@@ -1459,7 +1478,7 @@ export default function BullpenAiPage() {
           const llmBreakdown = breakdownByQuestionId.get(question.id);
           if (!llmBreakdown || llmBreakdown.length === 0) return question;
 
-          const averageOdds = averageBullpenLlmOdds(llmBreakdown);
+          const consensus = computeBullpenLlmConsensus(llmBreakdown);
           const completedAt =
             [...llmBreakdown]
               .map((entry) => entry.timestamp)
@@ -1469,12 +1488,8 @@ export default function BullpenAiPage() {
 
           return createBullpenQuestionRow({
             ...question,
-            llmYesOdds: averageOdds.yes,
-            llmNoOdds: averageOdds.no,
-            currentVsLlmOddsDifference:
-              averageOdds.yes === null || question.yesOdds === null
-                ? null
-                : Number((question.yesOdds - averageOdds.yes).toFixed(2)),
+            llmYesOdds: consensus.consensusYesOdds,
+            llmNoOdds: consensus.consensusNoOdds,
             llmNotes: summarizeBullpenLlmNotes(llmBreakdown),
             llmProvider:
               llmBreakdown.length === 1 ? llmBreakdown[0]?.provider || null : null,
@@ -1504,7 +1519,7 @@ export default function BullpenAiPage() {
           const llmBreakdown = breakdownByQuestionId.get(question.id);
           if (!llmBreakdown || llmBreakdown.length === 0) return question;
 
-          const averageOdds = averageBullpenLlmOdds(llmBreakdown);
+          const consensus = computeBullpenLlmConsensus(llmBreakdown);
           const completedAt =
             [...llmBreakdown]
               .map((entry) => entry.timestamp)
@@ -1514,12 +1529,8 @@ export default function BullpenAiPage() {
 
           return createBullpenQuestionRow({
             ...question,
-            llmYesOdds: averageOdds.yes,
-            llmNoOdds: averageOdds.no,
-            currentVsLlmOddsDifference:
-              averageOdds.yes === null || question.yesOdds === null
-                ? null
-                : Number((question.yesOdds - averageOdds.yes).toFixed(2)),
+            llmYesOdds: consensus.consensusYesOdds,
+            llmNoOdds: consensus.consensusNoOdds,
             llmNotes: summarizeBullpenLlmNotes(llmBreakdown),
             llmProvider:
               llmBreakdown.length === 1 ? llmBreakdown[0]?.provider || null : null,
@@ -1551,7 +1562,7 @@ export default function BullpenAiPage() {
 
       if (rowsWithOddsCount > 0) {
         summaryParts.push(
-          `Averaged odds for ${formatCountLabel(rowsWithOddsCount, "selected question")}.`,
+          `Computed consensus odds for ${formatCountLabel(rowsWithOddsCount, "selected question")}.`,
         );
       } else if (matchedCount > 0) {
         summaryParts.push(
@@ -1565,7 +1576,7 @@ export default function BullpenAiPage() {
 
       if (blankOddsCount > 0) {
         summaryParts.push(
-          `${formatCountLabel(blankOddsCount, "matched row")} came back without usable odds after averaging, so those LLM odds stayed blank.`,
+          `${formatCountLabel(blankOddsCount, "matched row")} came back without usable odds after consensus calculation, so those LLM odds stayed blank.`,
         );
       }
 
@@ -2221,7 +2232,7 @@ export default function BullpenAiPage() {
                     Running {formatTargetSummary(lastLlmTargets)} on the selected
                     questions now. When it finishes, we&apos;ll say how many
                     table rows were updated, how many model outputs were usable,
-                    and whether any averaged LLM odds stayed blank.
+                    and whether any consensus LLM odds stayed blank.
                   </p>
                 ) : null}
                 <div className="flex flex-wrap gap-2">

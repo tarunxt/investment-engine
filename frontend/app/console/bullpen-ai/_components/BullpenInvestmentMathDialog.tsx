@@ -108,7 +108,7 @@ export function BullpenInvestmentMathDialog({
       {returnsBreakdown.result === null ? (
         <p className="text-sm leading-6 text-slate-600">
           This value is only available when the row has current Yes and No odds,
-          averaged LLM Yes odds, and a positive number of days until close.
+          consensus LLM Yes odds, and a positive number of days until close.
         </p>
       ) : (
         <>

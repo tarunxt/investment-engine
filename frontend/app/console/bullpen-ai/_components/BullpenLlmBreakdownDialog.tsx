@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 
 import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
 
@@ -24,6 +24,42 @@ function formatOdds(value: number | null) {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
 }
 
+function formatRange(minValue: number | null, maxValue: number | null) {
+  if (minValue === null || maxValue === null) return "—";
+  return `${formatOdds(minValue)} / ${formatOdds(maxValue)}`;
+}
+
+function formatSpread(value: number | null) {
+  if (value === null) return "—";
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} pts`;
+}
+
+function formatDisagreementLabel(value: string | null) {
+  if (!value) return "—";
+  return value
+    .split(/[_\s]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function StatCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
+    </div>
+  );
+}
+
 export function BullpenLlmBreakdownDialog({
   question,
   onClose,
@@ -39,18 +75,67 @@ export function BullpenLlmBreakdownDialog({
             <h2 className="max-w-4xl text-xl font-semibold text-slate-950">
               {question.question}
             </h2>
-            <div className="flex flex-wrap gap-3 text-sm text-slate-600">
-              <span>Average Yes: {formatOdds(question.llmYesOdds)}</span>
-              <span>Average No: {formatOdds(question.llmNoOdds)}</span>
-              <span>
-                Current Yes vs LLM:{" "}
-                {question.currentVsLlmOddsDifference === null
-                  ? "—"
-                  : question.currentVsLlmOddsDifference.toLocaleString(undefined, {
-                      maximumFractionDigits: 2,
-                    })}
-              </span>
-              <span>{question.llmBreakdown.length} model outputs</span>
+            <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
+              <StatCard
+                label="Consensus Yes"
+                value={formatOdds(question.llmYesOdds)}
+              />
+              <StatCard
+                label="Consensus No"
+                value={formatOdds(question.llmNoOdds)}
+              />
+              <StatCard
+                label="Average Yes"
+                value={formatOdds(question.llmAverageYesOdds)}
+              />
+              <StatCard
+                label="Median Yes"
+                value={formatOdds(question.llmMedianYesOdds)}
+              />
+              <StatCard
+                label="Trimmed Mean Yes"
+                value={formatOdds(question.llmTrimmedMeanYesOdds)}
+              />
+              <StatCard
+                label="Min / Max Yes"
+                value={formatRange(
+                  question.llmMinYesOdds,
+                  question.llmMaxYesOdds,
+                )}
+              />
+              <StatCard
+                label="Spread"
+                value={formatSpread(question.llmSpreadYesOdds)}
+              />
+              <StatCard
+                label="Disagreement Level"
+                value={question.llmDisagreementLevel || "—"}
+              />
+              <StatCard
+                label="Current Yes vs Consensus"
+                value={
+                  question.currentVsLlmOddsDifference === null
+                    ? "—"
+                    : question.currentVsLlmOddsDifference.toLocaleString(
+                        undefined,
+                        {
+                          maximumFractionDigits: 2,
+                        },
+                      )
+                }
+              />
+              <StatCard
+                label="Model Outputs"
+                value={question.llmBreakdown.length.toLocaleString()}
+              />
+              <StatCard
+                label="Evidence Status"
+                value={formatDisagreementLabel(question.evidenceStatus)}
+              />
+              <StatCard
+                label="Event State"
+                value={formatDisagreementLabel(question.eventState)}
+              />
             </div>
           </div>
           <button
@@ -64,6 +149,15 @@ export function BullpenLlmBreakdownDialog({
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-5">
+          {question.adjudicationRequired ? (
+            <div className="mb-4 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                High LLM disagreement — do not rely on simple average.
+                Manual/adjudicator review needed.
+              </p>
+            </div>
+          ) : null}
           {question.llmBreakdown.length > 0 ? (
             <div className="overflow-hidden rounded-2xl border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200 text-sm">
