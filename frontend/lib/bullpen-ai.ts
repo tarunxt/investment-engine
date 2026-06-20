@@ -87,6 +87,64 @@ export const BULLPEN_SOURCE_URLS: Record<ScanMode, string> = {
     "https://app.bullpen.fi/predictions/trending?primaryMode=calendar&ref=intrepid-crane-3",
 };
 
+export const BULLPEN_LLM_PROMPT_PLACEHOLDER = "{{SELECTED_QUESTIONS}}";
+
+export const DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE = `[ENABLE_WEB_SEARCH]
+You are an independent probability estimation engine for prediction-market events.
+
+Analyze every selected Polymarket question provided in the input and return independent YES/NO probability estimates.
+
+You must produce one result for every input question.
+
+Input fields may include:
+question_ref, question_id, question, slug, market_url, closing_time, category, outcomes, current_yes_odds, current_no_odds.
+
+Use current public developments, credible recent information, official sources, base rates, time remaining, and the market's resolution criteria to estimate the true probability of YES.
+
+Do not copy the market odds. The current market odds are only a weak reference signal.
+
+For each question:
+1. Determine what YES means under the market wording.
+2. Assess the latest relevant developments.
+3. Consider the deadline/resolution window.
+4. Estimate the probability of YES.
+5. Set NO = 100 - YES.
+
+Output requirements:
+- Return strict JSON only.
+- Return an object with a top-level "markets" array.
+- Return exactly one object per input question.
+- Do not skip any question.
+- Do not include markdown.
+- Do not include commentary outside JSON.
+- Copy each question_ref exactly from the input.
+- question should echo the input question text.
+- llm_yes_odds must be a number from 0.00 to 100.00.
+- llm_no_odds must be a number from 0.00 to 100.00.
+- llm_yes_odds + llm_no_odds must equal exactly 100.00.
+- Use two decimal places.
+- Do not use the % symbol.
+- If evidence is weak, still provide a calibrated estimate.
+- Avoid 0 or 100 unless the outcome is already resolved or mathematically certain.
+- Keep reasoning concise and under 240 characters.
+
+JSON schema:
+{
+  "markets": [
+    {
+      "question_ref": "Q1",
+      "question": "string",
+      "llm_yes_odds": 50.00,
+      "llm_no_odds": 50.00,
+      "confidence": "Low | Medium | High",
+      "reasoning": "short explanation"
+    }
+  ]
+}
+
+Selected questions:
+${BULLPEN_LLM_PROMPT_PLACEHOLDER}`;
+
 export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
   ScanMode,
   BullpenScanFilters
@@ -520,45 +578,38 @@ export function parseBullpenLlmAnalysisPayload(
   };
 }
 
-export function buildBullpenLlmPrompt(questions: BullpenQuestionRow[]) {
-  return `You are analyzing live prediction-market questions. You must use live internet search before estimating odds.
-
-Return ONLY valid JSON in this exact shape:
-{
-  "markets": [
-    {
-      "question_ref": "Q1",
-      "llm_yes_odds": 0,
-      "llm_no_odds": 0,
-      "notes": "short explanation"
-    }
-  ]
+function buildBullpenLlmQuestionPayload(questions: BullpenQuestionRow[]) {
+  return questions.map((question, index) => ({
+    question_ref: getBullpenQuestionRef(index),
+    question_id: question.id,
+    question: question.question,
+    closing_time: question.closeTime,
+    category: question.category,
+    outcomes: question.outcomeLabels,
+    current_yes_odds: question.yesOdds,
+    current_no_odds: question.noOdds,
+    market_url: question.marketUrl,
+    slug: question.slug,
+  }));
 }
 
-Rules:
-- Analyze every provided question independently using live web research.
-- The provided current market odds are context only. Do not anchor blindly to them.
-- Copy each "question_ref" exactly as provided for the matching market.
-- Use numbers from 0 to 100 with up to 2 decimals.
-- If both yes and no odds are present, they must sum to 100.
-- If evidence is insufficient, return null for both odds and explain briefly in notes.
-- Do not add markdown, prose, code fences, or extra keys outside the required JSON shape.
-
-Questions:
-${JSON.stringify(
-    questions.map((question, index) => ({
-      question_ref: getBullpenQuestionRef(index),
-      question_id: question.id,
-      question: question.question,
-      closing_time: question.closeTime,
-      category: question.category,
-      outcomes: question.outcomeLabels,
-      current_yes_odds: question.yesOdds,
-      current_no_odds: question.noOdds,
-      market_url: question.marketUrl,
-      slug: question.slug,
-    })),
+export function buildBullpenLlmPrompt(
+  questions: BullpenQuestionRow[],
+  template = DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
+) {
+  const selectedQuestionsJson = JSON.stringify(
+    buildBullpenLlmQuestionPayload(questions),
     null,
     2,
-  )}`;
+  );
+  const normalizedTemplate = template.trim();
+
+  if (normalizedTemplate.includes(BULLPEN_LLM_PROMPT_PLACEHOLDER)) {
+    return normalizedTemplate.replace(
+      BULLPEN_LLM_PROMPT_PLACEHOLDER,
+      selectedQuestionsJson,
+    );
+  }
+
+  return `${normalizedTemplate}\n\nSelected questions:\n${selectedQuestionsJson}`;
 }

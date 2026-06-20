@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from types import SimpleNamespace
@@ -145,6 +146,53 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(result.tokens_in, 100_000)
         self.assertEqual(result.tokens_out, 20_000)
         self.assertEqual(result.cost, 0.022076)
+
+    @patch("app.domains.ai_providers.deepseek.OpenAI")
+    def test_generate_preserves_valid_json_output_without_table_rewrite(
+        self, openai_cls_mock
+    ):
+        payload = {
+            "markets": [
+                {
+                    "question_ref": "Q1",
+                    "question": "Will France beat Iraq?",
+                    "llm_yes_odds": 64.25,
+                    "llm_no_odds": 35.75,
+                    "confidence": "Medium",
+                    "reasoning": "France is favored but the match is not certain.",
+                }
+            ]
+        }
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=240, completion_tokens=90),
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=json.dumps(payload),
+                        tool_calls=None,
+                    )
+                )
+            ],
+        )
+        openai_cls_mock.return_value = mock_client
+
+        provider = DeepSeekProvider()
+        result = provider.generate(
+            prompt=(
+                "Return strict JSON only.\n"
+                'Return an object with a top-level "markets" array.\n'
+                "Do not include markdown.\n"
+                "JSON schema:\n"
+                '{"markets":[{"question_ref":"Q1","question":"string","llm_yes_odds":50.00,"llm_no_odds":50.00,"confidence":"Low | Medium | High","reasoning":"short explanation"}]}'
+            ),
+            model="deepseek-v4-flash",
+        )
+
+        self.assertEqual(json.loads(result.content), payload)
+        self.assertEqual(result.tokens_in, 240)
+        self.assertEqual(result.tokens_out, 90)
+        mock_client.chat.completions.create.assert_called_once()
 
     def test_token_usage_treats_missing_cache_breakdown_as_cache_miss(self):
         token_usage = DeepSeekProvider._token_usage_from_response_usage(

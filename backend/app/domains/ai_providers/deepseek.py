@@ -77,6 +77,83 @@ def _looks_like_valid_markdown_table(text: str) -> bool:
     return has_separator
 
 
+def _requires_markdown_table_output(prompt: str) -> bool:
+    text = (prompt or "").lower()
+    return (
+        "return only one markdown table" in text
+        or "return a valid markdown table" in text
+        or "return only a markdown table" in text
+        or "table columns:" in text
+    )
+
+
+def _requires_json_output(prompt: str) -> bool:
+    text = (prompt or "").lower()
+    json_markers = (
+        "return strict json",
+        "return only valid json",
+        "return valid json",
+        "return json only",
+        "return strict json only",
+        "json schema",
+        "top-level \"markets\"",
+        "do not include markdown",
+    )
+    return any(marker in text for marker in json_markers)
+
+
+def _determine_output_kind(prompt: str) -> str:
+    if _requires_json_output(prompt):
+        return "json"
+    if _requires_markdown_table_output(prompt):
+        return "markdown_table"
+    return "plain"
+
+
+def _extract_json_value_from_text(text: str) -> object | None:
+    trimmed = (text or "").strip()
+    if not trimmed:
+        return None
+
+    candidates: list[str] = []
+
+    def register(candidate: str | None) -> None:
+        if not candidate:
+            return
+        normalized = candidate.strip()
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", trimmed, flags=re.IGNORECASE):
+        register(match.group(1))
+    register(trimmed)
+
+    object_start = trimmed.find("{")
+    object_end = trimmed.rfind("}")
+    if object_start >= 0 and object_end > object_start:
+        register(trimmed[object_start : object_end + 1])
+
+    array_start = trimmed.find("[")
+    array_end = trimmed.rfind("]")
+    if array_start >= 0 and array_end > array_start:
+        register(trimmed[array_start : array_end + 1])
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+
+    return None
+
+
+def _normalize_json_output_text(text: str) -> str | None:
+    parsed = _extract_json_value_from_text(text)
+    if parsed is None:
+        return None
+    return json.dumps(parsed, ensure_ascii=False)
+
+
 def _extract_dsml_web_search_calls(text: str) -> list[dict[str, int | str]]:
     calls: list[dict[str, int | str]] = []
     segments = re.findall(
@@ -132,6 +209,7 @@ class DeepSeekProvider(BaseAIProvider):
         prompt: str,
         tool_trace: str,
         model: str,
+        output_kind: str,
     ) -> tuple[str, dict[str, int]]:
         empty_token_usage = self._token_usage_from_response_usage(None)
         search_calls = _extract_dsml_web_search_calls(tool_trace)
@@ -165,6 +243,20 @@ class DeepSeekProvider(BaseAIProvider):
         if not search_payloads:
             return tool_trace, empty_token_usage
 
+        if output_kind == "json":
+            recovery_instruction = (
+                "Return ONLY valid JSON in the exact schema and shape requested by the user."
+            )
+        elif output_kind == "markdown_table":
+            recovery_instruction = (
+                "Return ONLY one valid markdown table with a header row, separator row, "
+                "and at least 5 data rows in the exact format requested by the user."
+            )
+        else:
+            recovery_instruction = (
+                "Return the clean final answer immediately in the exact format requested by the user."
+            )
+
         recovery_response = self.client.chat.completions.create(
             model=model,
             messages=[
@@ -173,8 +265,7 @@ class DeepSeekProvider(BaseAIProvider):
                     "content": (
                         "You are given live web-search results already collected for the user. "
                         "Do not call tools. Do not output XML, DSML, or tool traces. "
-                        "Return ONLY one valid markdown table with a header row, separator row, "
-                        "and at least 5 data rows in the exact format requested by the user."
+                        f"{recovery_instruction}"
                     ),
                 },
                 {
@@ -206,6 +297,7 @@ class DeepSeekProvider(BaseAIProvider):
 
         SYSTEM_MESSAGE = _SYSTEM_MESSAGE.copy()
         # SYSTEM_MESSAGE["content"] = _SYSTEM_MESSAGE["content"].replace("{{current_date}}", current_date).replace("{{model}}", model)
+        output_kind = _determine_output_kind(prompt)
 
         messages: list[dict] = [
             SYSTEM_MESSAGE,
@@ -324,6 +416,7 @@ class DeepSeekProvider(BaseAIProvider):
                 prompt=prompt,
                 tool_trace=cleaned,
                 model=model,
+                output_kind=output_kind,
             )
             cleaned = recovered.strip()
             total_tokens_in += recovered_token_usage["tokens_in"]
@@ -331,10 +424,74 @@ class DeepSeekProvider(BaseAIProvider):
             total_cache_hit_tokens += recovered_token_usage["cache_hit_tokens"]
             total_cache_miss_tokens += recovered_token_usage["cache_miss_tokens"]
 
-        needs_rewrite = _looks_like_tool_trace(
-            cleaned
-        ) or not _looks_like_valid_markdown_table(cleaned)
-        if needs_rewrite:
+        if output_kind == "json":
+            normalized_json = _normalize_json_output_text(cleaned)
+            if normalized_json is not None:
+                cleaned = normalized_json
+
+            needs_rewrite = _looks_like_tool_trace(cleaned) or normalized_json is None
+            if needs_rewrite:
+                rewrite_response = self.client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Convert the following assistant output into a clean final answer. "
+                                "Return ONLY valid JSON that matches the user's requested schema. "
+                                "No tool traces, no XML/DSML tags, no markdown, and no extra commentary."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": cleaned},
+                    ],
+                    tool_choice="none",
+                )
+                rewrite_usage = getattr(rewrite_response, "usage", None)
+                rewrite_token_usage = self._token_usage_from_response_usage(rewrite_usage)
+                total_tokens_in += rewrite_token_usage["tokens_in"]
+                total_tokens_out += rewrite_token_usage["tokens_out"]
+                total_cache_hit_tokens += rewrite_token_usage["cache_hit_tokens"]
+                total_cache_miss_tokens += rewrite_token_usage["cache_miss_tokens"]
+                rewrite_choices = getattr(rewrite_response, "choices", []) or []
+                if rewrite_choices:
+                    rewritten = (
+                        getattr(rewrite_choices[0].message, "content", "") or ""
+                    ).strip()
+                    cleaned = _normalize_json_output_text(rewritten) or rewritten
+        elif output_kind == "markdown_table":
+            needs_rewrite = _looks_like_tool_trace(
+                cleaned
+            ) or not _looks_like_valid_markdown_table(cleaned)
+            if needs_rewrite:
+                rewrite_response = self.client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Convert the following assistant output into a clean final answer. "
+                                "Return ONLY a valid markdown table with proper header row, separator row, and 5 data rows. "
+                                "No tool traces, no XML/DSML tags, no extra commentary."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": cleaned},
+                    ],
+                    tool_choice="none",
+                )
+                rewrite_usage = getattr(rewrite_response, "usage", None)
+                rewrite_token_usage = self._token_usage_from_response_usage(rewrite_usage)
+                total_tokens_in += rewrite_token_usage["tokens_in"]
+                total_tokens_out += rewrite_token_usage["tokens_out"]
+                total_cache_hit_tokens += rewrite_token_usage["cache_hit_tokens"]
+                total_cache_miss_tokens += rewrite_token_usage["cache_miss_tokens"]
+                rewrite_choices = getattr(rewrite_response, "choices", []) or []
+                if rewrite_choices:
+                    cleaned = (
+                        getattr(rewrite_choices[0].message, "content", "") or ""
+                    ).strip()
+        elif _looks_like_tool_trace(cleaned):
             rewrite_response = self.client.chat.completions.create(
                 model=model,
                 messages=[
@@ -342,8 +499,8 @@ class DeepSeekProvider(BaseAIProvider):
                         "role": "system",
                         "content": (
                             "Convert the following assistant output into a clean final answer. "
-                            "Return ONLY a valid markdown table with proper header row, separator row, and 5 data rows. "
-                            "No tool traces, no XML/DSML tags, no extra commentary."
+                            "Follow the original user request exactly. "
+                            "No tool traces, no XML/DSML tags, and no extra commentary."
                         ),
                     },
                     {"role": "user", "content": prompt},

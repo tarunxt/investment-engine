@@ -3,7 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, ExternalLink, Loader2, Menu, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Menu,
+  RefreshCw,
+} from "lucide-react";
 
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import { Button } from "@/components/ui/button";
@@ -22,6 +29,7 @@ import {
   createBullpenQuestionRow,
   createBullpenScanFilters,
   createBullpenScanSnapshot,
+  DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
   normalizeBullpenScanFilters,
   parseBullpenLlmAnalysisPayload,
   type BullpenQuestionRow,
@@ -40,6 +48,7 @@ import {
   type BullpenTableSortKey,
   type BullpenTableSortState,
 } from "./_components/BullpenQuestionsTable";
+import { BullpenPromptEditorDialog } from "./_components/BullpenPromptEditorDialog";
 
 const TABS: {
   mode: ScanMode;
@@ -61,6 +70,8 @@ const TABS: {
 const BULLPEN_SNAPSHOT_STORAGE_KEY = "investor:bullpen-ai:snapshots:v1";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investor:bullpen-ai:last-llm-target:v1";
+const BULLPEN_LLM_PROMPT_STORAGE_KEY =
+  "investor:bullpen-ai:llm-prompt-template:v1";
 const MAX_BULLPEN_SNAPSHOT_HISTORY = 10;
 const RUN_POLL_INTERVAL_MS = 4_000;
 const MAX_RUN_POLLS = 90;
@@ -275,6 +286,29 @@ function writeLastLlmTargetToStorage(target: ProviderModelTarget | null) {
   }
 }
 
+function readBullpenLlmPromptFromStorage() {
+  if (typeof window === "undefined") {
+    return DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(BULLPEN_LLM_PROMPT_STORAGE_KEY);
+    return stored?.trim() || DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE;
+  } catch {
+    return DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE;
+  }
+}
+
+function writeBullpenLlmPromptToStorage(template: string) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(BULLPEN_LLM_PROMPT_STORAGE_KEY, template);
+  } catch {
+    // Best effort only.
+  }
+}
+
 function getDefaultBullpenLlmTarget(lastTarget: ProviderModelTarget | null) {
   return lastTarget ?? { provider: "deepseek", model: "deepseek-v4-flash" };
 }
@@ -375,11 +409,16 @@ export default function BullpenAiPage() {
   const [lastLlmTarget, setLastLlmTarget] = useState<ProviderModelTarget | null>(
     null,
   );
+  const [bullpenLlmPromptTemplate, setBullpenLlmPromptTemplate] = useState(
+    DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
+  );
+  const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
 
   useEffect(() => {
     setSnapshotsByMode(readBullpenSnapshotsFromStorage());
     setLastLlmTarget(readLastLlmTargetFromStorage());
+    setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
     setHasLoadedStorage(true);
   }, []);
 
@@ -601,7 +640,10 @@ export default function BullpenAiPage() {
 
     try {
       const run = await apiService.createRun({
-        prompt: buildBullpenLlmPrompt(selectedQuestions),
+        prompt: buildBullpenLlmPrompt(
+          selectedQuestions,
+          bullpenLlmPromptTemplate,
+        ),
         targets: [target],
         allow_parallel: true,
       });
@@ -724,6 +766,11 @@ export default function BullpenAiPage() {
     : activeVisibleSnapshot
       ? "No saved questions are available in this snapshot."
       : "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions.";
+
+  function handlePromptTemplateSave(template: string) {
+    setBullpenLlmPromptTemplate(template);
+    writeBullpenLlmPromptToStorage(template);
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
@@ -868,20 +915,37 @@ export default function BullpenAiPage() {
                   )}
                   Run Bullpen Scan
                 </Button>
-                <EventScanRunControls
-                  buttonLabel="Run LLM"
-                  containerClassName="gap-0"
-                  defaultTarget={getDefaultBullpenLlmTarget(lastLlmTarget)}
-                  disabled={
-                    !activeCurrentSnapshot || isViewingHistory || selectedQuestionCount === 0
-                  }
-                  onRun={runLlm}
-                  pickerDialogLabel="Select LLM"
-                  pickerIcon={<Menu className="size-4" />}
-                  running={isRunningLlm}
-                  buttonClassName="rounded-r-none"
-                  pickerButtonClassName="h-10 w-10 rounded-l-none rounded-r-none border border-l-0 border-transparent bg-primary text-primary-foreground hover:bg-primary/80 focus:outline-none focus:ring-2 focus:ring-ring/30"
-                />
+                <div className="flex items-center gap-0">
+                  <Button
+                    size="icon"
+                    className="h-10 w-10 border-r border-primary-foreground/15"
+                    onClick={() => setIsPromptEditorOpen(true)}
+                    title="Open Bullpen LLM prompt"
+                    aria-label="Open Bullpen LLM prompt"
+                  >
+                    <FileText className="h-4 w-4" />
+                  </Button>
+                  <EventScanRunControls
+                    buttonLabel="Run LLM"
+                    containerClassName="gap-0"
+                    defaultTarget={getDefaultBullpenLlmTarget(lastLlmTarget)}
+                    disabled={
+                      !activeCurrentSnapshot ||
+                      isViewingHistory ||
+                      selectedQuestionCount === 0
+                    }
+                    onRun={runLlm}
+                    pickerDialogLabel="Select LLM"
+                    pickerIcon={<Menu className="size-4" />}
+                    running={isRunningLlm}
+                    buttonClassName="rounded-none"
+                    pickerButtonClassName="h-10 w-10 rounded-none border border-l-0 border-transparent bg-primary text-primary-foreground hover:bg-primary/80 focus:outline-none focus:ring-2 focus:ring-ring/30"
+                  />
+                </div>
+                <p className="text-xs leading-5 text-slate-500">
+                  Open the prompt from the left icon to inspect or edit the LLM
+                  instructions. Saved edits persist on this device.
+                </p>
                 {isRunningLlm ? (
                   <p className="text-xs leading-5 text-slate-600">
                     Running {lastLlmTarget?.provider || "the selected LLM"} /{" "}
@@ -1065,6 +1129,14 @@ export default function BullpenAiPage() {
           />
         </CardContent>
       </Card>
+
+      {isPromptEditorOpen ? (
+        <BullpenPromptEditorDialog
+          value={bullpenLlmPromptTemplate}
+          onClose={() => setIsPromptEditorOpen(false)}
+          onSave={handlePromptTemplateSave}
+        />
+      ) : null}
     </div>
   );
 }
