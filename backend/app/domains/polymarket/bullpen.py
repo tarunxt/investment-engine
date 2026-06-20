@@ -234,6 +234,7 @@ def bullpen_candidate_paths() -> list[str]:
             os.path.expanduser("~/.bullpen/bin/bullpen"),
             "/home/appuser/.bullpen/bin/bullpen",
             "/home/investor/.bullpen/bin/bullpen",
+            "/opt/homebrew/bin/bullpen",
             "/usr/local/bin/bullpen",
         ]
     )
@@ -272,7 +273,8 @@ def _bullpen_install_hint() -> str:
     return (
         "Bullpen CLI executable was not found. Install Bullpen in the backend runtime, "
         "place it at <backend>/.runtime-tools/bullpen, <backend>/runtime-tools/bullpen, "
-        "/usr/local/bin/bullpen, ~/.bullpen/bin/bullpen, or set BULLPEN_BIN to an executable path. "
+        "/opt/homebrew/bin/bullpen, /usr/local/bin/bullpen, ~/.bullpen/bin/bullpen, "
+        "or set BULLPEN_BIN to an executable path. "
         f"Checked: {attempted}"
     )
 

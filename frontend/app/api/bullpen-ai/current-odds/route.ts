@@ -3,6 +3,11 @@ import { promisify } from "node:util";
 
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  BULLPEN_BIN_CANDIDATES,
+  buildBullpenProcessEnv,
+  parseBullpenJsonOutput,
+} from "../_lib/bullpenCli";
 import { buildPolymarketEventUrl } from "../_lib/polymarketMarketUrls";
 import { resolvePolymarketMarkets } from "../_lib/polymarketMarketUrls";
 
@@ -10,13 +15,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const execFileAsync = promisify(execFile);
-const BULLPEN_BIN_CANDIDATES = [
-  process.env.BULLPEN_BIN,
-  "/usr/local/bin/bullpen",
-  "/home/investor/.bullpen/bin/bullpen",
-  "/home/appuser/.bullpen/bin/bullpen",
-  "bullpen",
-].filter((candidate): candidate is string => Boolean(candidate));
 
 type LookupQuestion = {
   id: string;
@@ -50,15 +48,6 @@ function normalizeLookupQuestion(value: unknown): LookupQuestion | null {
   };
 }
 
-function parseBullpenJsonOutput(stdout: string) {
-  const sanitized = stdout
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.startsWith("Update available:"))
-    .join("\n");
-
-  return JSON.parse(sanitized);
-}
-
 function normalizeQuestionText(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -72,11 +61,7 @@ async function searchBullpenMarketByQuestion(question: string) {
         candidate,
         ["polymarket", "search", question, "--output", "json"],
         {
-          env: {
-            ...process.env,
-            BULLPEN_READ_ONLY: "true",
-            BULLPEN_NON_INTERACTIVE: "true",
-          },
+          env: buildBullpenProcessEnv({ readOnly: true }),
           timeout: 20_000,
           maxBuffer: 5 * 1024 * 1024,
         },

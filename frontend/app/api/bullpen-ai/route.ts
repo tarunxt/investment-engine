@@ -9,6 +9,11 @@ import {
   getCanonicalPolymarketEventSlug,
 } from "./_lib/polymarketMarketUrls";
 import {
+  BULLPEN_BIN_CANDIDATES,
+  buildBullpenProcessEnv,
+  parseBullpenJsonOutput,
+} from "./_lib/bullpenCli";
+import {
   BULLPEN_SOURCE_URLS,
   normalizeBullpenScanFilters,
   type BullpenQuestion,
@@ -194,14 +199,6 @@ const MONTH_NAMES = [
 const MONTH_INDEX_BY_NAME = Object.fromEntries(
   MONTH_NAMES.map((month, index) => [month, index]),
 ) as Record<string, number>;
-const BULLPEN_BIN_CANDIDATES = [
-  process.env.BULLPEN_BIN,
-  "/usr/local/bin/bullpen",
-  "/home/investor/.bullpen/bin/bullpen",
-  "/home/appuser/.bullpen/bin/bullpen",
-  "bullpen",
-].filter((candidate): candidate is string => Boolean(candidate));
-
 function toArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -786,25 +783,6 @@ function sourceHasFutureCandidates(candidates: BullpenQuestion[]) {
   });
 }
 
-function parseBullpenJsonOutput(stdout: string) {
-  const sanitized = stdout
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.startsWith("Update available:"))
-    .join("\n");
-
-  return JSON.parse(sanitized);
-}
-
-function bullpenProcessEnv() {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    BULLPEN_READ_ONLY: "true",
-    BULLPEN_NON_INTERACTIVE: "true",
-  };
-  if (process.env.BULLPEN_HOME) env.HOME = process.env.BULLPEN_HOME;
-  return env;
-}
-
 async function runBullpenDiscover() {
   const errors: string[] = [];
   const commandVariants = [
@@ -836,7 +814,7 @@ async function runBullpenDiscover() {
     for (const args of commandVariants) {
       try {
         const { stdout } = await execFileAsync(candidate, args, {
-          env: bullpenProcessEnv(),
+          env: buildBullpenProcessEnv({ readOnly: true }),
           timeout: 25_000,
           maxBuffer: 10 * 1024 * 1024,
         });

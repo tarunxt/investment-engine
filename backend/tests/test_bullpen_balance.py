@@ -165,6 +165,7 @@ def test_bullpen_candidate_paths_include_systemd_and_home_locations(
     assert str(tmp_path / "app" / ".runtime-tools" / "bullpen") in candidates
     assert str(tmp_path / "backend" / "runtime-tools" / "bullpen") in candidates
     assert "/home/investor/.bullpen/bin/bullpen" in candidates
+    assert "/opt/homebrew/bin/bullpen" in candidates
     assert "/usr/local/bin/bullpen" in candidates
 
 

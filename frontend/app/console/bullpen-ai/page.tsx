@@ -1601,8 +1601,8 @@ export default function BullpenAiPage() {
     }
   }
 
-  async function refreshSelectedCurrentOdds({
-    questionIds = selectedInvestmentQuestionIds,
+  async function refreshCurrentOdds({
+    questionIds,
     announceResult = true,
     showLoadingState = true,
   }: {
@@ -1616,13 +1616,20 @@ export default function BullpenAiPage() {
       );
     }
 
-    const selectedQuestionIdSet = new Set(questionIds);
+    const questionIdsToRefresh =
+      questionIds ?? activeCurrentSnapshot.questions.map((question) => question.id);
+    const refreshesVisibleQuestions = questionIds === undefined;
+    const selectedQuestionIdSet = new Set(questionIdsToRefresh);
     const questionsToRefresh = activeCurrentSnapshot.questions.filter((question) =>
       selectedQuestionIdSet.has(question.id),
     );
 
     if (questionsToRefresh.length === 0) {
-      throw new Error("Select at least one pink event before refreshing Current %.");
+      throw new Error(
+        refreshesVisibleQuestions
+          ? "No visible questions are available to refresh Current %."
+          : "Select at least one pink event before refreshing Current %.",
+      );
     }
 
     if (showLoadingState) {
@@ -1630,7 +1637,10 @@ export default function BullpenAiPage() {
     }
     setInvestmentProgressByMode((current) => ({
       ...current,
-      [activeMode]: `Refreshing latest Polymarket odds for ${formatCountLabel(questionsToRefresh.length, "selected event")}...`,
+      [activeMode]: `Refreshing latest Polymarket odds for ${formatCountLabel(
+        questionsToRefresh.length,
+        refreshesVisibleQuestions ? "visible question" : "selected event",
+      )}...`,
     }));
 
     try {
@@ -1687,11 +1697,17 @@ export default function BullpenAiPage() {
 
       if (announceResult) {
         const summaryParts = [
-          `Refreshed Current % for ${formatCountLabel(refreshedQuestionIds.size, "selected event")}.`,
+          `Refreshed Current % for ${formatCountLabel(
+            refreshedQuestionIds.size,
+            refreshesVisibleQuestions ? "visible question" : "selected event",
+          )}.`,
         ];
         if (unresolvedCount > 0) {
           summaryParts.push(
-            `${formatCountLabel(unresolvedCount, "selected event")} could not be refreshed from Polymarket.`,
+            `${formatCountLabel(
+              unresolvedCount,
+              refreshesVisibleQuestions ? "visible question" : "selected event",
+            )} could not be refreshed from Polymarket.`,
           );
         }
         setInvestmentMessagesByMode((current) => ({
@@ -1770,7 +1786,8 @@ export default function BullpenAiPage() {
 
     try {
       const { refreshedQuestions, refreshedCount, unresolvedCount } =
-        await refreshSelectedCurrentOdds({
+        await refreshCurrentOdds({
+          questionIds: selectedInvestmentQuestionIds,
           announceResult: false,
           showLoadingState: false,
         });
@@ -1876,7 +1893,7 @@ export default function BullpenAiPage() {
 
   async function handleRefreshCurrentOdds() {
     try {
-      await refreshSelectedCurrentOdds();
+      await refreshCurrentOdds();
     } catch (error) {
       setInvestmentMessagesByMode((current) => ({
         ...current,

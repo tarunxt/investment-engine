@@ -3,19 +3,17 @@ import { promisify } from "node:util";
 
 import { NextResponse } from "next/server";
 
+import {
+  BULLPEN_BIN_CANDIDATES,
+  buildBullpenProcessEnv,
+  parseBullpenJsonOutput,
+} from "../_lib/bullpenCli";
 import { buildPolymarketEventUrl } from "../_lib/polymarketMarketUrls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const execFileAsync = promisify(execFile);
-const BULLPEN_BIN_CANDIDATES = [
-  process.env.BULLPEN_BIN,
-  "/usr/local/bin/bullpen",
-  "/home/investor/.bullpen/bin/bullpen",
-  "/home/appuser/.bullpen/bin/bullpen",
-  "bullpen",
-].filter((candidate): candidate is string => Boolean(candidate));
 
 type BullpenCliPosition = {
   avg_price?: unknown;
@@ -37,15 +35,6 @@ type BullpenCliPositionsPayload = {
   positions?: unknown;
   summary?: Record<string, unknown> | null;
 };
-
-function parseBullpenJsonOutput(stdout: string) {
-  const sanitized = stdout
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.startsWith("Update available:"))
-    .join("\n");
-
-  return JSON.parse(sanitized);
-}
 
 function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -119,11 +108,7 @@ export async function GET() {
         candidate,
         ["polymarket", "positions", "--output", "json"],
         {
-          env: {
-            ...process.env,
-            BULLPEN_READ_ONLY: "true",
-            BULLPEN_NON_INTERACTIVE: "true",
-          },
+          env: buildBullpenProcessEnv({ readOnly: true }),
           timeout: 30_000,
           maxBuffer: 10 * 1024 * 1024,
         },

@@ -148,7 +148,8 @@ export function BullpenInvestmentsSection({
                     variant="outline"
                     size="sm"
                     onClick={onRefreshCurrentOdds}
-                    disabled={selectedCount === 0 || isInvesting || isRefreshingCurrentOdds}
+                    disabled={isInvesting || isRefreshingCurrentOdds}
+                    className="border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100 hover:text-sky-900"
                   >
                     {isRefreshingCurrentOdds ? (
                       <>
