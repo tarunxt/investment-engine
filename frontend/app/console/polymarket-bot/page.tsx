@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   Activity,
@@ -46,38 +46,72 @@ import type {
 } from "@/types/api";
 
 import type { MetricItem } from "./_components/MetricGrid";
+import {
+  PolymarketBotMetricGridSkeleton,
+  PolymarketBotPageSkeleton,
+  PolymarketBotTableSkeleton,
+} from "./_components/PolymarketBotPageSkeleton";
 import type { TrackedAccountDraft } from "./_components/TraderTables";
 
 const MetricGrid = dynamic(
   () => import("./_components/MetricGrid").then((mod) => mod.MetricGrid),
   {
-    loading: () => (
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <div
-            key={index}
-            className="h-28 animate-pulse rounded-[22px] border border-slate-200 bg-slate-100/80"
-          />
-        ))}
-      </div>
-    ),
+    loading: () => <PolymarketBotMetricGridSkeleton />,
   },
 );
 const ManualWalletsTable = dynamic(
   () =>
     import("./_components/TraderTables").then((mod) => mod.ManualWalletsTable),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => <PolymarketBotTableSkeleton rows={4} columns={3} />,
+  },
 );
 const TrackedAccountsTable = dynamic(
   () =>
     import("./_components/TraderTables").then((mod) => mod.TrackedAccountsTable),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => <PolymarketBotTableSkeleton rows={6} columns={5} />,
+  },
 );
 const TrackedTradersTable = dynamic(
   () =>
     import("./_components/TraderTables").then((mod) => mod.TrackedTradersTable),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => <PolymarketBotTableSkeleton rows={5} columns={6} />,
+  },
 );
+
+const COPIED_ACTIVE_STATUSES = new Set(["executed", "confirmed"]);
+const COPIED_HISTORY_FILTER_OPTIONS: {
+  key: CopiedHistoryFilter;
+  label: string;
+}[] = [
+  { key: "all", label: "All" },
+  { key: "executed", label: "Executed" },
+  { key: "skipped", label: "Skipped" },
+  { key: "failed", label: "Failed" },
+  { key: "buy", label: "Buy" },
+  { key: "sell", label: "Sell" },
+  { key: "redeem", label: "Redeem" },
+  { key: "rewards", label: "Rewards" },
+  { key: "deposits", label: "Deposits" },
+  { key: "withdrawals", label: "Withdrawals" },
+];
+const COPIED_POSITION_PNL_FILTER_OPTIONS: {
+  key: CopiedPositionPnlFilter;
+  label: string;
+}[] = [
+  { key: "all", label: "All" },
+  { key: "winning", label: "Winning" },
+  { key: "losing", label: "Losing" },
+];
+const DEFERRED_CARD_STYLE = {
+  contentVisibility: "auto" as const,
+  containIntrinsicSize: "640px",
+};
 
 function stringifyErrorDetail(detail: unknown): string | null {
   if (!detail) return null;
@@ -2007,13 +2041,150 @@ export default function PolymarketBotPage() {
     }
   }
 
+  const thresholdEligibleRecentDecisions = useMemo(
+    () =>
+      state
+        ? state.live.recent_decisions.filter(
+            (trade) =>
+              !isBelowTrackedNetWorthThreshold(trade, state.tracked_accounts),
+          )
+        : [],
+    [state],
+  );
+  const bullpenOpenPositionKeys = useMemo(
+    () =>
+      state
+        ? new Set(state.open_positions.map(getBullpenPositionKey))
+        : new Set<string>(),
+    [state],
+  );
+  const executedLiveTrades = useMemo(
+    () =>
+      thresholdEligibleRecentDecisions.filter(
+        (trade) =>
+          COPIED_ACTIVE_STATUSES.has(trade.status) &&
+          bullpenOpenPositionKeys.has(getCopiedTradePositionKey(trade)),
+      ),
+    [thresholdEligibleRecentDecisions, bullpenOpenPositionKeys],
+  );
+  const copiedPositionTrades = useMemo(
+    () =>
+      thresholdEligibleRecentDecisions.filter((trade) =>
+        copiedPositionStatus === "active"
+          ? COPIED_ACTIVE_STATUSES.has(trade.status) &&
+            bullpenOpenPositionKeys.has(getCopiedTradePositionKey(trade))
+          : !COPIED_ACTIVE_STATUSES.has(trade.status),
+      ),
+    [
+      thresholdEligibleRecentDecisions,
+      copiedPositionStatus,
+      bullpenOpenPositionKeys,
+    ],
+  );
+  const copiedHistoryTrades = thresholdEligibleRecentDecisions;
+  const copiedFilteredHistoryTrades = useMemo(
+    () =>
+      copiedHistoryTrades.filter((trade) => {
+        if (copiedHistoryFilter === "all") return true;
+        if (["executed", "skipped", "failed"].includes(copiedHistoryFilter)) {
+          return trade.status === copiedHistoryFilter;
+        }
+        if (copiedHistoryFilter === "buy" || copiedHistoryFilter === "sell") {
+          return trade.side.toLowerCase() === copiedHistoryFilter;
+        }
+        const searchable =
+          `${trade.command || ""} ${trade.reason || ""} ${trade.status || ""}`.toLowerCase();
+        return searchable.includes(copiedHistoryFilter);
+      }),
+    [copiedHistoryFilter, copiedHistoryTrades],
+  );
+  const copiedVisibleTrades =
+    copiedPositionsTab === "positions"
+      ? copiedPositionTrades
+      : copiedFilteredHistoryTrades;
+  const normalizedCopiedSearchQuery = useMemo(
+    () => deferredCopiedSearchQuery.trim().toLowerCase(),
+    [deferredCopiedSearchQuery],
+  );
+  const copiedEventGroups = useMemo(
+    () =>
+      buildCopiedEventGroups(copiedVisibleTrades)
+        .filter((event) => {
+          if (!normalizedCopiedSearchQuery) return true;
+          return `${event.marketTitle} ${event.outcome}`
+            .toLowerCase()
+            .includes(normalizedCopiedSearchQuery);
+        })
+        .filter((event) => {
+          if (
+            copiedPositionsTab !== "positions" ||
+            copiedPositionStatus !== "active" ||
+            copiedPositionPnlFilter === "all"
+          ) {
+            return true;
+          }
+          return copiedPositionPnlFilter === "winning"
+            ? event.currentPnl > 0
+            : event.currentPnl < 0;
+        })
+        .sort((left, right) =>
+          compareCopiedEventGroups(left, right, copiedSort),
+        ),
+    [
+      copiedPositionPnlFilter,
+      copiedPositionStatus,
+      copiedPositionsTab,
+      copiedSort,
+      copiedVisibleTrades,
+      normalizedCopiedSearchQuery,
+    ],
+  );
+  const activeCopiedEventGroups = useMemo(
+    () => buildCopiedEventGroups(executedLiveTrades),
+    [executedLiveTrades],
+  );
+  const copiedPositionEventCount = useMemo(
+    () => buildCopiedEventGroups(copiedPositionTrades).length,
+    [copiedPositionTrades],
+  );
+  const redeemedTradeRows = useMemo(
+    () => (state ? buildRedeemedTradeRows(state) : []),
+    [state],
+  );
+  const claimPendingTradeRows = useMemo(
+    () => redeemedTradeRows.filter((row) => row.status === "claimable"),
+    [redeemedTradeRows],
+  );
+  const previouslyRedeemedTradeRows = useMemo(
+    () => redeemedTradeRows.filter((row) => row.status !== "claimable"),
+    [redeemedTradeRows],
+  );
+  const analysisTradeRows = useMemo(
+    () =>
+      state && activeScreen === "analysis" ? buildAnalysisTradeRows(state) : [],
+    [activeScreen, state],
+  );
+  const wonAnalysisTrades = useMemo(
+    () => analysisTradeRows.filter((trade) => trade.pnl >= 0),
+    [analysisTradeRows],
+  );
+  const lostAnalysisTrades = useMemo(
+    () => analysisTradeRows.filter((trade) => trade.pnl < 0),
+    [analysisTradeRows],
+  );
+  const copiedTraderAnalysisRows = useMemo(
+    () =>
+      state && activeScreen === "analysis"
+        ? buildCopiedTraderAnalysisRows(
+            analysisTradeRows,
+            state.tracked_accounts,
+          )
+        : [],
+    [activeScreen, analysisTradeRows, state],
+  );
+
   if (loading && !state) {
-    return (
-      <div className="flex items-center gap-3 text-sm text-slate-500">
-        <Loader2 className="size-4 animate-spin" />
-        Loading Polymarket Copy Bot…
-      </div>
-    );
+    return <PolymarketBotPageSkeleton />;
   }
 
   if (!state) {
@@ -2113,88 +2284,6 @@ export default function PolymarketBotPage() {
     (balanceLoginRequired && !bullpenDoctorSessionActive);
   const balanceLoginMessageSuperseded =
     balanceLoginRequired && bullpenDoctorSessionActive;
-  const copiedActiveStatuses = new Set(["executed", "confirmed"]);
-  const thresholdEligibleRecentDecisions = state.live.recent_decisions.filter(
-    (trade) => !isBelowTrackedNetWorthThreshold(trade, state.tracked_accounts),
-  );
-  const bullpenOpenPositionKeys = new Set(
-    state.open_positions.map(getBullpenPositionKey),
-  );
-  const executedLiveTrades = thresholdEligibleRecentDecisions.filter(
-    (trade) =>
-      copiedActiveStatuses.has(trade.status) &&
-      bullpenOpenPositionKeys.has(getCopiedTradePositionKey(trade)),
-  );
-  const copiedPositionTrades = thresholdEligibleRecentDecisions.filter(
-    (trade) =>
-      copiedPositionStatus === "active"
-        ? copiedActiveStatuses.has(trade.status) &&
-          bullpenOpenPositionKeys.has(getCopiedTradePositionKey(trade))
-        : !copiedActiveStatuses.has(trade.status),
-  );
-  const copiedHistoryTrades = thresholdEligibleRecentDecisions;
-  const copiedHistoryFilterOptions: {
-    key: CopiedHistoryFilter;
-    label: string;
-  }[] = [
-    { key: "all", label: "All" },
-    { key: "executed", label: "Executed" },
-    { key: "skipped", label: "Skipped" },
-    { key: "failed", label: "Failed" },
-    { key: "buy", label: "Buy" },
-    { key: "sell", label: "Sell" },
-    { key: "redeem", label: "Redeem" },
-    { key: "rewards", label: "Rewards" },
-    { key: "deposits", label: "Deposits" },
-    { key: "withdrawals", label: "Withdrawals" },
-  ];
-  const copiedFilteredHistoryTrades = copiedHistoryTrades.filter((trade) => {
-    if (copiedHistoryFilter === "all") return true;
-    if (["executed", "skipped", "failed"].includes(copiedHistoryFilter)) {
-      return trade.status === copiedHistoryFilter;
-    }
-    if (copiedHistoryFilter === "buy" || copiedHistoryFilter === "sell") {
-      return trade.side.toLowerCase() === copiedHistoryFilter;
-    }
-    const searchable =
-      `${trade.command || ""} ${trade.reason || ""} ${trade.status || ""}`.toLowerCase();
-    return searchable.includes(copiedHistoryFilter);
-  });
-  const copiedVisibleTrades =
-    copiedPositionsTab === "positions"
-      ? copiedPositionTrades
-      : copiedFilteredHistoryTrades;
-  const copiedPositionPnlFilterOptions: {
-    key: CopiedPositionPnlFilter;
-    label: string;
-  }[] = [
-    { key: "all", label: "All" },
-    { key: "winning", label: "Winning" },
-    { key: "losing", label: "Losing" },
-  ];
-  const normalizedCopiedSearchQuery = deferredCopiedSearchQuery
-    .trim()
-    .toLowerCase();
-  const copiedEventGroups = buildCopiedEventGroups(copiedVisibleTrades)
-    .filter((event) => {
-      if (!normalizedCopiedSearchQuery) return true;
-      return `${event.marketTitle} ${event.outcome}`
-        .toLowerCase()
-        .includes(normalizedCopiedSearchQuery);
-    })
-    .filter((event) => {
-      if (
-        copiedPositionsTab !== "positions" ||
-        copiedPositionStatus !== "active" ||
-        copiedPositionPnlFilter === "all"
-      ) {
-        return true;
-      }
-      return copiedPositionPnlFilter === "winning"
-        ? event.currentPnl > 0
-        : event.currentPnl < 0;
-    })
-    .sort((left, right) => compareCopiedEventGroups(left, right, copiedSort));
   const copiedPageCount = Math.max(
     1,
     Math.ceil(copiedEventGroups.length / TABLE_PAGE_SIZE),
@@ -2204,26 +2293,10 @@ export default function PolymarketBotPage() {
     (safeCopiedPage - 1) * TABLE_PAGE_SIZE,
     safeCopiedPage * TABLE_PAGE_SIZE,
   );
-  const activeCopiedEventGroups = buildCopiedEventGroups(executedLiveTrades);
-  const copiedPositionEventCount =
-    buildCopiedEventGroups(copiedPositionTrades).length;
-  const redeemedTradeRows = buildRedeemedTradeRows(state);
-  const claimPendingTradeRows = redeemedTradeRows.filter(
-    (row) => row.status === "claimable",
-  );
-  const previouslyRedeemedTradeRows = redeemedTradeRows.filter(
-    (row) => row.status !== "claimable",
-  );
   const visibleRedeemedTradeRows =
     redeemedTradesTab === "claim-pending"
       ? claimPendingTradeRows
       : previouslyRedeemedTradeRows;
-  const analysisTradeRows =
-    activeScreen === "analysis"
-      ? buildAnalysisTradeRows(state)
-      : [];
-  const wonAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl >= 0);
-  const lostAnalysisTrades = analysisTradeRows.filter((trade) => trade.pnl < 0);
   const pastAnalysisTrades =
     pastTradesTab === "won" ? wonAnalysisTrades : lostAnalysisTrades;
   const pastTradesPage =
@@ -2244,10 +2317,6 @@ export default function PolymarketBotPage() {
   );
   const setPastTradesPage =
     pastTradesTab === "won" ? setWonPastTradesPage : setLostPastTradesPage;
-  const copiedTraderAnalysisRows =
-    activeScreen === "analysis"
-      ? buildCopiedTraderAnalysisRows(analysisTradeRows, state.tracked_accounts)
-      : [];
   const copiedTraderAnalysisPageCount = Math.max(
     1,
     Math.ceil(
@@ -3253,7 +3322,10 @@ export default function PolymarketBotPage() {
                 </div>
               ) : null}
 
-              <Card className="border border-slate-200 bg-white py-6">
+              <Card
+                className="border border-slate-200 bg-white py-6"
+                style={DEFERRED_CARD_STYLE}
+              >
                 <CardHeader className="pb-0">
                   <CardTitle className="text-base tracking-[0.18em] text-slate-950">
                     Copied Bullpen Positions
@@ -3358,7 +3430,7 @@ export default function PolymarketBotPage() {
                       role="tablist"
                       aria-label="Active copied positions profit and loss filters"
                     >
-                      {copiedPositionPnlFilterOptions.map((option) => (
+                      {COPIED_POSITION_PNL_FILTER_OPTIONS.map((option) => (
                         <button
                           key={option.key}
                           type="button"
@@ -3382,7 +3454,7 @@ export default function PolymarketBotPage() {
 
                   {copiedPositionsTab === "history" ? (
                     <div className="mb-4 flex flex-wrap gap-2">
-                      {copiedHistoryFilterOptions.map((option) => (
+                      {COPIED_HISTORY_FILTER_OPTIONS.map((option) => (
                         <button
                           key={option.key}
                           type="button"
@@ -3612,7 +3684,10 @@ export default function PolymarketBotPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border border-slate-200 bg-white py-6">
+              <Card
+                className="border border-slate-200 bg-white py-6"
+                style={DEFERRED_CARD_STYLE}
+              >
                 <CardHeader className="pb-0">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
@@ -3826,7 +3901,10 @@ export default function PolymarketBotPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border border-slate-200 bg-white py-6">
+              <Card
+                className="border border-slate-200 bg-white py-6"
+                style={DEFERRED_CARD_STYLE}
+              >
                 <CardHeader className="pb-0">
                   <CardTitle className="text-base tracking-[0.18em] text-slate-950">
                     Top Tracked Traders
@@ -3846,7 +3924,10 @@ export default function PolymarketBotPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border border-slate-200 bg-white py-6">
+              <Card
+                className="border border-slate-200 bg-white py-6"
+                style={DEFERRED_CARD_STYLE}
+              >
                 <CardHeader className="pb-0">
                   <CardTitle className="text-base tracking-[0.18em] text-slate-950">
                     Recent Bullpen Activity
@@ -3888,7 +3969,10 @@ export default function PolymarketBotPage() {
             </>
           ) : activeScreen === "analysis" ? (
             <>
-              <Card className="border border-slate-200 bg-white py-6">
+              <Card
+                className="border border-slate-200 bg-white py-6"
+                style={DEFERRED_CARD_STYLE}
+              >
                 <CardHeader className="pb-0">
                   <CardTitle className="text-base tracking-[0.18em] text-slate-950">
                     Past Trades
@@ -4006,7 +4090,10 @@ export default function PolymarketBotPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border border-slate-200 bg-white py-6">
+              <Card
+                className="border border-slate-200 bg-white py-6"
+                style={DEFERRED_CARD_STYLE}
+              >
                 <CardHeader className="pb-0">
                   <CardTitle className="text-base tracking-[0.18em] text-slate-950">
                     Copied Traders
