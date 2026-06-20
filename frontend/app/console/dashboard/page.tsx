@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Eye,
@@ -27,16 +28,19 @@ import type {
   ZerodhaThreatAnalysis,
 } from "@/types/api";
 
-import { DashboardFinalActionablesTables } from "@/app/console/_components/FinalActionablesConsole";
+import {
+  DashboardFinalActionablesSkeleton,
+  DashboardHeroSkeleton,
+  DashboardMarketCardSkeleton,
+  DashboardThreatCardSkeleton,
+  DashboardWorkflowSkeleton,
+} from "./_components/DashboardSkeletons";
 import {
   MarketPortfolioCard,
   type PortfolioCardTopHolding,
 } from "./_components/MarketPortfolioCard";
 import { ThreatMarketCard } from "./_components/ThreatMarketCard";
-import {
-  RebalanceWorkflowSections,
-  ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
-} from "./_components/RebalanceWorkflowSections";
+import { ZERODHA_DASHBOARD_SYNC_NOW_EVENT } from "./_components/RebalanceWorkflowSections";
 import {
   countThreatSeverities,
   extractUrgentActionRows,
@@ -68,6 +72,116 @@ const INITIAL_STATE: DashboardState = {
   indmoneyThreat: null,
   polymarketState: null,
 };
+
+const DASHBOARD_OVERVIEW_CACHE_KEY = "investor:dashboard-overview-cache:v1";
+const DASHBOARD_OVERVIEW_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const DASHBOARD_SECTION_KEYS = [
+  "zerodhaStatus",
+  "zerodhaOverview",
+  "zerodhaThreat",
+  "indmoneyOverview",
+  "indmoneyThreat",
+  "polymarketState",
+] as const;
+const DASHBOARD_CRITICAL_KEYS = [
+  "zerodhaStatus",
+  "zerodhaOverview",
+  "indmoneyOverview",
+  "polymarketState",
+] as const;
+
+type DashboardSectionKey = (typeof DASHBOARD_SECTION_KEYS)[number];
+type DashboardPendingState = Record<DashboardSectionKey, boolean>;
+type DashboardErrorsState = Partial<Record<DashboardSectionKey, string>>;
+type DashboardOverviewCachePayload = {
+  cachedAt: string;
+  zerodhaStatus: ZerodhaStatusResponse | null;
+  zerodhaOverview: ZerodhaPortfolioOverviewResponse | null;
+  indmoneyOverview: IndMoneyUsPortfolioOverviewResponse | null;
+  polymarketState: PolymarketBotState | null;
+};
+
+const DeferredRebalanceWorkflowSections = dynamic(
+  () =>
+    import("./_components/RebalanceWorkflowSections").then(
+      (mod) => mod.RebalanceWorkflowSections,
+    ),
+  {
+    loading: () => <DashboardWorkflowSkeleton />,
+    ssr: false,
+  },
+);
+
+const DeferredDashboardFinalActionablesTables = dynamic(
+  () =>
+    import("@/app/console/_components/FinalActionablesConsole").then(
+      (mod) => mod.DashboardFinalActionablesTables,
+    ),
+  {
+    loading: () => <DashboardFinalActionablesSkeleton />,
+    ssr: false,
+  },
+);
+
+function createPendingSectionsState(isPending: boolean): DashboardPendingState {
+  return {
+    zerodhaStatus: isPending,
+    zerodhaOverview: isPending,
+    zerodhaThreat: isPending,
+    indmoneyOverview: isPending,
+    indmoneyThreat: isPending,
+    polymarketState: isPending,
+  };
+}
+
+function readDashboardOverviewCache(): Partial<DashboardState> | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_OVERVIEW_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<DashboardOverviewCachePayload>;
+    const cachedAtMs = Date.parse(parsed.cachedAt ?? "");
+    if (!Number.isFinite(cachedAtMs)) return null;
+    if (Date.now() - cachedAtMs > DASHBOARD_OVERVIEW_CACHE_MAX_AGE_MS) {
+      return null;
+    }
+
+    return {
+      zerodhaStatus: parsed.zerodhaStatus ?? null,
+      zerodhaOverview: parsed.zerodhaOverview ?? null,
+      indmoneyOverview: parsed.indmoneyOverview ?? null,
+      polymarketState: parsed.polymarketState ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeDashboardOverviewCache(state: DashboardState) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const payload: DashboardOverviewCachePayload = {
+      cachedAt: new Date().toISOString(),
+      zerodhaStatus: state.zerodhaStatus,
+      zerodhaOverview: state.zerodhaOverview,
+      indmoneyOverview: state.indmoneyOverview,
+      polymarketState: state.polymarketState,
+    };
+    window.localStorage.setItem(
+      DASHBOARD_OVERVIEW_CACHE_KEY,
+      JSON.stringify(payload),
+    );
+  } catch {
+    // Keep rendering fresh data even if local storage is unavailable.
+  }
+}
+
+function hasCriticalDashboardContent(state: DashboardState) {
+  return DASHBOARD_CRITICAL_KEYS.some((key) => state[key] !== null);
+}
 
 function buildIndiaTopHoldings(
   overview: ZerodhaPortfolioOverviewResponse | null,
@@ -747,82 +861,130 @@ function parseBullpenAccountValueUsd(message?: string | null) {
 }
 
 export default function DashboardPage() {
-  const [dashboard, setDashboard] = useState<DashboardState>(INITIAL_STATE);
-  const [loading, setLoading] = useState(true);
+  const [dashboard, setDashboard] = useState<DashboardState>(() => {
+    const cachedOverview = readDashboardOverviewCache();
+    return cachedOverview ? { ...INITIAL_STATE, ...cachedOverview } : INITIAL_STATE;
+  });
+  const [pendingSections, setPendingSections] = useState<DashboardPendingState>(
+    () => createPendingSectionsState(true),
+  );
   const [refreshing, setRefreshing] = useState(false);
-  const [errors, setErrors] = useState<string[]>([]);
+  const [errorsBySection, setErrorsBySection] = useState<DashboardErrorsState>(
+    {},
+  );
   const usdInrRate = useUsdInrRate();
+  const requestIdRef = useRef(0);
 
-  const loadDashboard = useCallback(async (initialLoad = false) => {
-    if (initialLoad) {
-      setLoading(true);
-    } else {
+  const errors = useMemo(
+    () =>
+      DASHBOARD_SECTION_KEYS.flatMap((key) =>
+        errorsBySection[key] ? [errorsBySection[key] as string] : [],
+      ),
+    [errorsBySection],
+  );
+
+  const loadDashboard = useCallback((initialLoad = false) => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    setPendingSections(createPendingSectionsState(true));
+    setErrorsBySection({});
+    if (!initialLoad) {
       setRefreshing(true);
     }
 
-    const results = await Promise.allSettled([
-      apiService.zerodhaStatus(),
-      apiService.zerodhaPortfolioOverview(),
-      apiService.zerodhaThreatsLatest(),
-      apiService.indmoneyUsPortfolioOverview(),
-      apiService.indmoneyUsThreatsLatest(),
-      apiService.polymarketState(),
-    ] as const);
+    let remainingSections = DASHBOARD_SECTION_KEYS.length;
 
-    const nextErrors: string[] = [];
+    const finishSection = (key: DashboardSectionKey) => {
+      if (requestId !== requestIdRef.current) return;
 
-    setDashboard((current) => {
-      const nextState = { ...current };
+      remainingSections -= 1;
+      setPendingSections((current) => ({ ...current, [key]: false }));
 
-      if (results[0].status === "fulfilled") {
-        nextState.zerodhaStatus = results[0].value;
-      } else {
-        nextErrors.push(
-          `India connection status: ${normalizeError(results[0].reason)}`,
-        );
+      if (remainingSections === 0) {
+        setRefreshing(false);
       }
+    };
 
-      if (results[1].status === "fulfilled") {
-        nextState.zerodhaOverview = results[1].value;
-      } else {
-        nextErrors.push(
-          `India portfolio: ${normalizeError(results[1].reason)}`,
-        );
-      }
+    const runRequest = <T,>(
+      key: DashboardSectionKey,
+      label: string,
+      loader: () => Promise<T>,
+      toValue: (value: T) => DashboardState[DashboardSectionKey],
+    ) => {
+      return loader()
+        .then((value) => {
+          if (requestId !== requestIdRef.current) return;
 
-      if (results[2].status === "fulfilled") {
-        nextState.zerodhaThreat = results[2].value.analysis;
-      } else {
-        nextErrors.push(`India threats: ${normalizeError(results[2].reason)}`);
-      }
+          setDashboard((current) => {
+            const nextState = {
+              ...current,
+              [key]: toValue(value),
+            };
+            writeDashboardOverviewCache(nextState);
+            return nextState;
+          });
 
-      if (results[3].status === "fulfilled") {
-        nextState.indmoneyOverview = results[3].value;
-      } else {
-        nextErrors.push(`US portfolio: ${normalizeError(results[3].reason)}`);
-      }
+          setErrorsBySection((current) => {
+            if (!current[key]) return current;
+            const nextErrors = { ...current };
+            delete nextErrors[key];
+            return nextErrors;
+          });
+        })
+        .catch((error) => {
+          if (requestId !== requestIdRef.current) return;
 
-      if (results[4].status === "fulfilled") {
-        nextState.indmoneyThreat = results[4].value.analysis;
-      } else {
-        nextErrors.push(`US threats: ${normalizeError(results[4].reason)}`);
-      }
+          setErrorsBySection((current) => ({
+            ...current,
+            [key]: `${label}: ${normalizeError(error)}`,
+          }));
+        })
+        .finally(() => {
+          finishSection(key);
+        });
+    };
 
-      if (results[5].status === "fulfilled") {
-        nextState.polymarketState = results[5].value;
-      } else {
-        nextErrors.push(`Bullpen account: ${normalizeError(results[5].reason)}`);
-      }
+    const requests = [
+      runRequest(
+      "zerodhaStatus",
+      "India connection status",
+      () => apiService.zerodhaStatus(),
+      (value) => value,
+      ),
+      runRequest(
+      "zerodhaOverview",
+      "India portfolio",
+      () => apiService.zerodhaPortfolioOverview(),
+      (value) => value,
+      ),
+      runRequest(
+      "indmoneyOverview",
+      "US portfolio",
+      () => apiService.indmoneyUsPortfolioOverview(),
+      (value) => value,
+      ),
+      runRequest(
+      "polymarketState",
+      "Bullpen account",
+      () => apiService.polymarketState(),
+      (value) => value,
+      ),
+      runRequest(
+      "zerodhaThreat",
+      "India threats",
+      () => apiService.zerodhaThreatsLatest(),
+      (value) => value.analysis,
+      ),
+      runRequest(
+      "indmoneyThreat",
+      "US threats",
+      () => apiService.indmoneyUsThreatsLatest(),
+      (value) => value.analysis,
+      ),
+    ];
 
-      return nextState;
-    });
-
-    setErrors(nextErrors);
-    if (initialLoad) {
-      setLoading(false);
-    } else {
-      setRefreshing(false);
-    }
+    return Promise.allSettled(requests).then(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -896,74 +1058,75 @@ export default function DashboardPage() {
     dashboard.indmoneyOverview?.history ?? [],
     usdInrRate,
   );
-  if (
-    loading &&
-    !indiaSnapshot &&
-    !usSnapshot &&
-    !dashboard.zerodhaThreat &&
-    !dashboard.indmoneyThreat
-  ) {
-    return (
-      <div className="flex items-center gap-3 text-sm text-slate-500">
-        <Loader2 className="size-4 animate-spin" />
-        Loading investor dashboard...
-      </div>
-    );
-  }
+  const showHeroSkeleton =
+    !hasCriticalDashboardContent(dashboard) &&
+    DASHBOARD_CRITICAL_KEYS.some((key) => pendingSections[key]);
+  const showIndiaPortfolioSkeleton =
+    !indiaSnapshot && pendingSections.zerodhaOverview;
+  const showUsPortfolioSkeleton =
+    !usSnapshot && pendingSections.indmoneyOverview;
+  const showIndiaThreatSkeleton =
+    !dashboard.zerodhaThreat && pendingSections.zerodhaThreat;
+  const showUsThreatSkeleton =
+    !dashboard.indmoneyThreat && pendingSections.indmoneyThreat;
 
   return (
     <div className="mx-auto flex flex-col gap-6">
-      <section className="relative overflow-hidden rounded-[36px] border border-slate-200 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.22),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.22),_transparent_35%)]" />
+      {showHeroSkeleton ? (
+        <DashboardHeroSkeleton />
+      ) : (
+        <section className="relative overflow-hidden rounded-[36px] border border-slate-200 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.22),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.22),_transparent_35%)]" />
 
-        <div className="relative grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.85fr)] lg:items-center lg:px-8 2xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.75fr)_minmax(430px,0.9fr)]">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
-              <Sparkles className="size-3.5" />
-              Investments Control Room
+          <div className="relative grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.85fr)] lg:items-center lg:px-8 2xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.75fr)_minmax(430px,0.9fr)]">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
+                <Sparkles className="size-3.5" />
+                Investments Control Room
+              </div>
+              <h1 className="mt-4 max-w-3xl font-serif text-3xl tracking-tight text-white md:text-4xl">
+                Portfolio Command Center
+              </h1>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Button
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT),
+                    );
+                    loadDashboard(false);
+                  }}
+                  disabled={refreshing}
+                  className="rounded-full bg-amber-400 text-slate-950 hover:bg-amber-300"
+                >
+                  {refreshing ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 size-4" />
+                  )}
+                  Refresh Board
+                </Button>
+              </div>
             </div>
-            <h1 className="mt-4 max-w-3xl font-serif text-3xl tracking-tight text-white md:text-4xl">
-              Portfolio Command Center
-            </h1>
-            <div className="mt-5 flex flex-wrap gap-3">
-              <Button
-                onClick={() => {
-                  window.dispatchEvent(
-                    new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT),
-                  );
-                  void loadDashboard(false);
-                }}
-                disabled={refreshing}
-                className="rounded-full bg-amber-400 text-slate-950 hover:bg-amber-300"
-              >
-                {refreshing ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 size-4" />
-                )}
-                Refresh Board
-              </Button>
-            </div>
+
+            <PortfolioCommandSummary
+              totalValue={totalCommandValue}
+              zerodhaValue={zerodhaCommandValue}
+              zerodhaPortfolioValue={indiaSnapshot?.holdings_market_value}
+              zerodhaMargin={zerodhaAvailableMargin}
+              indmoneyValue={indmoneyCommandValue}
+              indmoneyPortfolioValue={indmoneyPortfolioValueInr}
+              indmoneyFundsValue={indmoneyAvailableFundsValueInr}
+              bullpenValueInr={bullpenAccountValueInr}
+            />
+
+            <PortfolioCommandChart
+              profitLossValue={totalProfitLossValue}
+              dayChangeValue={totalDayChangeValue}
+              trendPoints={portfolioCommandTrend}
+            />
           </div>
-
-          <PortfolioCommandSummary
-            totalValue={totalCommandValue}
-            zerodhaValue={zerodhaCommandValue}
-            zerodhaPortfolioValue={indiaSnapshot?.holdings_market_value}
-            zerodhaMargin={zerodhaAvailableMargin}
-            indmoneyValue={indmoneyCommandValue}
-            indmoneyPortfolioValue={indmoneyPortfolioValueInr}
-            indmoneyFundsValue={indmoneyAvailableFundsValueInr}
-            bullpenValueInr={bullpenAccountValueInr}
-          />
-
-          <PortfolioCommandChart
-            profitLossValue={totalProfitLossValue}
-            dayChangeValue={totalDayChangeValue}
-            trendPoints={portfolioCommandTrend}
-          />
-        </div>
-      </section>
+        </section>
+      )}
 
       {errors.length > 0 ? (
         <div className="flex items-start gap-3 rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -974,241 +1137,257 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      <RebalanceWorkflowSections
+      <DeferredRebalanceWorkflowSections
         onDashboardRefresh={() => loadDashboard(false)}
       />
 
       <section className="grid gap-6 xl:grid-cols-2">
-        <MarketPortfolioCard
-          market="india"
-          title="Zerodha India"
-          description="Live broker-backed holdings, P&L, and top concentration pockets from your latest synced India book."
-          statusPills={[
-            {
-              label: "Connection",
-              value: dashboard.zerodhaStatus?.connected
-                ? "Connected"
-                : "Disconnected",
-              tone: dashboard.zerodhaStatus?.connected ? "success" : "danger",
-            },
-            {
-              label: "Snapshot",
-              value: indiaSnapshot
-                ? formatSnapshotDate(indiaSnapshot.snapshot_date)
-                : "Missing",
-              detail: indiaSnapshot
-                ? formatSnapshotTime(indiaSnapshot.captured_at)
-                : undefined,
-              tone: indiaSnapshot ? indiaSnapshotTone : "danger",
-            },
-          ]}
-          metrics={[
-            {
-              label: "Invested Amount",
-              value: formatInr(zerodhaInvestedValue),
-              detail: `Holdings value ${formatInr(indiaSnapshot?.holdings_market_value)}`,
-            },
-            {
-              label: "Unrealized P&L",
-              value: formatInr(indiaSnapshot?.holdings_pnl),
-              tone:
-                (indiaSnapshot?.holdings_pnl ?? 0) >= 0
-                  ? "positive"
-                  : "negative",
-            },
-            {
-              label: "Day Change",
-              value: formatInr(indiaSnapshot?.holdings_day_change_value),
-              tone:
-                (indiaSnapshot?.holdings_day_change_value ?? 0) >= 0
-                  ? "positive"
-                  : "negative",
-            },
-            {
-              label: "Available Margin",
-              value: formatInr(zerodhaAvailableMargin),
-              detail: indiaSnapshot
-                ? `Captured ${formatTs(indiaSnapshot.captured_at)}`
-                : "No synced snapshot yet",
-            },
-          ]}
-          topHoldings={buildIndiaTopHoldings(dashboard.zerodhaOverview)}
-          portfolioHref={URLs.routes.console.zerodha()}
-          threatsHref={URLs.routes.console.zerodhaThreats()}
-          actionLinks={[
-            {
-              label: "Portfolio",
-              href: URLs.routes.console.zerodha(),
-              primary: true,
-            },
-            {
-              label: "Threat Radar",
-              href: URLs.routes.console.zerodhaThreats(),
-            },
-            {
-              label: "Swing Trade",
-              href: URLs.routes.console.zerodhaSwingTrade(),
-            },
-            { label: "Events", href: URLs.routes.console.zerodhaEvents() },
-            {
-              label: "Rebalance",
-              href: URLs.routes.console.zerodhaRebalance(),
-            },
-            {
-              label: "Final Actionables",
-              href: URLs.routes.console.zerodhaFinalActionables(),
-            },
-          ]}
-          emptyMessage={
-            indiaSnapshot
-              ? null
-              : "Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here."
-          }
-        />
+        {showIndiaPortfolioSkeleton ? (
+          <DashboardMarketCardSkeleton />
+        ) : (
+          <MarketPortfolioCard
+            market="india"
+            title="Zerodha India"
+            description="Live broker-backed holdings, P&L, and top concentration pockets from your latest synced India book."
+            statusPills={[
+              {
+                label: "Connection",
+                value: dashboard.zerodhaStatus?.connected
+                  ? "Connected"
+                  : "Disconnected",
+                tone: dashboard.zerodhaStatus?.connected ? "success" : "danger",
+              },
+              {
+                label: "Snapshot",
+                value: indiaSnapshot
+                  ? formatSnapshotDate(indiaSnapshot.snapshot_date)
+                  : "Missing",
+                detail: indiaSnapshot
+                  ? formatSnapshotTime(indiaSnapshot.captured_at)
+                  : undefined,
+                tone: indiaSnapshot ? indiaSnapshotTone : "danger",
+              },
+            ]}
+            metrics={[
+              {
+                label: "Invested Amount",
+                value: formatInr(zerodhaInvestedValue),
+                detail: `Holdings value ${formatInr(indiaSnapshot?.holdings_market_value)}`,
+              },
+              {
+                label: "Unrealized P&L",
+                value: formatInr(indiaSnapshot?.holdings_pnl),
+                tone:
+                  (indiaSnapshot?.holdings_pnl ?? 0) >= 0
+                    ? "positive"
+                    : "negative",
+              },
+              {
+                label: "Day Change",
+                value: formatInr(indiaSnapshot?.holdings_day_change_value),
+                tone:
+                  (indiaSnapshot?.holdings_day_change_value ?? 0) >= 0
+                    ? "positive"
+                    : "negative",
+              },
+              {
+                label: "Available Margin",
+                value: formatInr(zerodhaAvailableMargin),
+                detail: indiaSnapshot
+                  ? `Captured ${formatTs(indiaSnapshot.captured_at)}`
+                  : "No synced snapshot yet",
+              },
+            ]}
+            topHoldings={buildIndiaTopHoldings(dashboard.zerodhaOverview)}
+            portfolioHref={URLs.routes.console.zerodha()}
+            threatsHref={URLs.routes.console.zerodhaThreats()}
+            actionLinks={[
+              {
+                label: "Portfolio",
+                href: URLs.routes.console.zerodha(),
+                primary: true,
+              },
+              {
+                label: "Threat Radar",
+                href: URLs.routes.console.zerodhaThreats(),
+              },
+              {
+                label: "Swing Trade",
+                href: URLs.routes.console.zerodhaSwingTrade(),
+              },
+              { label: "Events", href: URLs.routes.console.zerodhaEvents() },
+              {
+                label: "Rebalance",
+                href: URLs.routes.console.zerodhaRebalance(),
+              },
+              {
+                label: "Final Actionables",
+                href: URLs.routes.console.zerodhaFinalActionables(),
+              },
+            ]}
+            emptyMessage={
+              indiaSnapshot
+                ? null
+                : "Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here."
+            }
+          />
+        )}
 
-        <MarketPortfolioCard
-          market="us"
-          title="INDmoney US"
-          description="Manual US snapshot tracking, top allocations, and return posture for the INDmoney portfolio."
-          statusPills={[
-            {
-              label: "Parse",
-              value: usSnapshot?.parse_status ?? "Missing",
-              tone:
-                usSnapshot?.parse_status?.toLowerCase() === "parsed"
-                  ? "success"
-                  : "danger",
-            },
-            {
-              label: "Snapshot",
-              value: usSnapshot
-                ? formatSnapshotDate(usSnapshot.snapshot_date)
-                : "Missing",
-              detail: usSnapshot
-                ? formatSnapshotTime(usSnapshot.captured_at)
-                : undefined,
-              tone: usSnapshot ? usSnapshotTone : "danger",
-            },
-          ]}
-          metrics={[
-            {
-              label: "Invested Amount",
-              value: formatUsdValueAsInr(indmoneyInvestedValue, usdInrRate),
-              detail: `Current value ${formatUsdValueAsInr(
-                usSnapshot?.current_value,
-                usdInrRate,
-              )}`,
-            },
-            {
-              label: "Total Return",
-              value: formatUsdValueAsInr(
-                usSnapshot?.total_return_value,
-                usdInrRate,
-              ),
-              tone:
-                (usSnapshot?.total_return_value ?? 0) >= 0
-                  ? "positive"
-                  : "negative",
-            },
-            {
-              label: "Day Return",
-              value: formatUsdValueAsInr(
-                usSnapshot?.day_return_value,
-                usdInrRate,
-              ),
-              tone:
-                (usSnapshot?.day_return_value ?? 0) >= 0
-                  ? "positive"
-                  : "negative",
-            },
-            {
-              label: "Available Funds",
-              value: formatUsdValueAsInr(indmoneyAvailableFunds, usdInrRate),
-              detail: usSnapshot
-                ? `Captured ${formatTs(usSnapshot.captured_at)}`
-                : "No pasted snapshot yet",
-            },
-          ]}
-          topHoldings={buildUsTopHoldings(
-            dashboard.indmoneyOverview,
-            usdInrRate,
-          )}
-          portfolioHref={URLs.routes.console.indmoneyUs()}
-          threatsHref={URLs.routes.console.indmoneyUsThreats()}
-          actionLinks={[
-            {
-              label: "Portfolio",
-              href: URLs.routes.console.indmoneyUs(),
-              primary: true,
-            },
-            {
-              label: "Threat Radar",
-              href: URLs.routes.console.indmoneyUsThreats(),
-            },
-            {
-              label: "Swing Trade",
-              href: URLs.routes.console.indmoneyUsSwingTrade(),
-            },
-            { label: "Events", href: URLs.routes.console.indmoneyUsEvents() },
-            {
-              label: "Rebalance",
-              href: URLs.routes.console.indmoneyUsRebalance(),
-            },
-            {
-              label: "Final Actionables",
-              href: URLs.routes.console.indmoneyUsFinalActionables(),
-            },
-          ]}
-          emptyMessage={
-            usSnapshot
-              ? null
-              : "Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard."
-          }
-        />
+        {showUsPortfolioSkeleton ? (
+          <DashboardMarketCardSkeleton />
+        ) : (
+          <MarketPortfolioCard
+            market="us"
+            title="INDmoney US"
+            description="Manual US snapshot tracking, top allocations, and return posture for the INDmoney portfolio."
+            statusPills={[
+              {
+                label: "Parse",
+                value: usSnapshot?.parse_status ?? "Missing",
+                tone:
+                  usSnapshot?.parse_status?.toLowerCase() === "parsed"
+                    ? "success"
+                    : "danger",
+              },
+              {
+                label: "Snapshot",
+                value: usSnapshot
+                  ? formatSnapshotDate(usSnapshot.snapshot_date)
+                  : "Missing",
+                detail: usSnapshot
+                  ? formatSnapshotTime(usSnapshot.captured_at)
+                  : undefined,
+                tone: usSnapshot ? usSnapshotTone : "danger",
+              },
+            ]}
+            metrics={[
+              {
+                label: "Invested Amount",
+                value: formatUsdValueAsInr(indmoneyInvestedValue, usdInrRate),
+                detail: `Current value ${formatUsdValueAsInr(
+                  usSnapshot?.current_value,
+                  usdInrRate,
+                )}`,
+              },
+              {
+                label: "Total Return",
+                value: formatUsdValueAsInr(
+                  usSnapshot?.total_return_value,
+                  usdInrRate,
+                ),
+                tone:
+                  (usSnapshot?.total_return_value ?? 0) >= 0
+                    ? "positive"
+                    : "negative",
+              },
+              {
+                label: "Day Return",
+                value: formatUsdValueAsInr(
+                  usSnapshot?.day_return_value,
+                  usdInrRate,
+                ),
+                tone:
+                  (usSnapshot?.day_return_value ?? 0) >= 0
+                    ? "positive"
+                    : "negative",
+              },
+              {
+                label: "Available Funds",
+                value: formatUsdValueAsInr(indmoneyAvailableFunds, usdInrRate),
+                detail: usSnapshot
+                  ? `Captured ${formatTs(usSnapshot.captured_at)}`
+                  : "No pasted snapshot yet",
+              },
+            ]}
+            topHoldings={buildUsTopHoldings(
+              dashboard.indmoneyOverview,
+              usdInrRate,
+            )}
+            portfolioHref={URLs.routes.console.indmoneyUs()}
+            threatsHref={URLs.routes.console.indmoneyUsThreats()}
+            actionLinks={[
+              {
+                label: "Portfolio",
+                href: URLs.routes.console.indmoneyUs(),
+                primary: true,
+              },
+              {
+                label: "Threat Radar",
+                href: URLs.routes.console.indmoneyUsThreats(),
+              },
+              {
+                label: "Swing Trade",
+                href: URLs.routes.console.indmoneyUsSwingTrade(),
+              },
+              { label: "Events", href: URLs.routes.console.indmoneyUsEvents() },
+              {
+                label: "Rebalance",
+                href: URLs.routes.console.indmoneyUsRebalance(),
+              },
+              {
+                label: "Final Actionables",
+                href: URLs.routes.console.indmoneyUsFinalActionables(),
+              },
+            ]}
+            emptyMessage={
+              usSnapshot
+                ? null
+                : "Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard."
+            }
+          />
+        )}
       </section>
 
-      <DashboardFinalActionablesTables />
+      <DeferredDashboardFinalActionablesTables />
 
       <section className="grid gap-6 xl:grid-cols-2">
-        <ThreatMarketCard
-          market="india"
-          title="India Threat Pulse"
-          description="Summary of the most important downside signals, protection cues, and severity mix from the latest India threat scan."
-          summaryPoints={getThreatSummaryPoints(dashboard.zerodhaThreat)}
-          severityCounts={countThreatSeverities(
-            dashboard.zerodhaThreat?.report?.tables,
-          )}
-          urgentActionCount={indiaUrgentRows.length}
-          lastUpdated={formatTs(dashboard.zerodhaThreat?.updated_at)}
-          href={URLs.routes.console.zerodhaThreats()}
-          emptyMessage={
-            dashboard.zerodhaThreat?.report
-              ? null
-              : indiaSnapshot
-                ? "Run a Zerodha threat scan to populate Table 10 actionables and the India severity pulse."
-                : "Threat insights will appear here after your first India portfolio sync."
-          }
-        />
+        {showIndiaThreatSkeleton ? (
+          <DashboardThreatCardSkeleton />
+        ) : (
+          <ThreatMarketCard
+            market="india"
+            title="India Threat Pulse"
+            description="Summary of the most important downside signals, protection cues, and severity mix from the latest India threat scan."
+            summaryPoints={getThreatSummaryPoints(dashboard.zerodhaThreat)}
+            severityCounts={countThreatSeverities(
+              dashboard.zerodhaThreat?.report?.tables,
+            )}
+            urgentActionCount={indiaUrgentRows.length}
+            lastUpdated={formatTs(dashboard.zerodhaThreat?.updated_at)}
+            href={URLs.routes.console.zerodhaThreats()}
+            emptyMessage={
+              dashboard.zerodhaThreat?.report
+                ? null
+                : indiaSnapshot
+                  ? "Run a Zerodha threat scan to populate Table 10 actionables and the India severity pulse."
+                  : "Threat insights will appear here after your first India portfolio sync."
+            }
+          />
+        )}
 
-        <ThreatMarketCard
-          market="us"
-          title="US Threat Pulse"
-          description="Quick read on crowded winners, event risk, and capital-protection ideas from the latest INDmoney US threat radar."
-          summaryPoints={getThreatSummaryPoints(dashboard.indmoneyThreat)}
-          severityCounts={countThreatSeverities(
-            dashboard.indmoneyThreat?.report?.tables,
-          )}
-          urgentActionCount={usUrgentRows.length}
-          lastUpdated={formatTs(dashboard.indmoneyThreat?.updated_at)}
-          href={URLs.routes.console.indmoneyUsThreats()}
-          emptyMessage={
-            dashboard.indmoneyThreat?.report
-              ? null
-              : usSnapshot
-                ? "Run the INDmoney US threat scan to surface Table 10 actionables on the dashboard."
-                : "Threat insights will appear here after your first INDmoney US snapshot."
-          }
-        />
+        {showUsThreatSkeleton ? (
+          <DashboardThreatCardSkeleton />
+        ) : (
+          <ThreatMarketCard
+            market="us"
+            title="US Threat Pulse"
+            description="Quick read on crowded winners, event risk, and capital-protection ideas from the latest INDmoney US threat radar."
+            summaryPoints={getThreatSummaryPoints(dashboard.indmoneyThreat)}
+            severityCounts={countThreatSeverities(
+              dashboard.indmoneyThreat?.report?.tables,
+            )}
+            urgentActionCount={usUrgentRows.length}
+            lastUpdated={formatTs(dashboard.indmoneyThreat?.updated_at)}
+            href={URLs.routes.console.indmoneyUsThreats()}
+            emptyMessage={
+              dashboard.indmoneyThreat?.report
+                ? null
+                : usSnapshot
+                  ? "Run the INDmoney US threat scan to surface Table 10 actionables on the dashboard."
+                  : "Threat insights will appear here after your first INDmoney US snapshot."
+            }
+          />
+        )}
       </section>
     </div>
   );

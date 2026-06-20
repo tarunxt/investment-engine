@@ -11,8 +11,11 @@ import {
 import { URLs } from '@/lib/urls';
 import { BRAND_ACRONYM, getBrandExpansionLines } from '@/lib/brand';
 import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
-import { FullLoader } from '@/components/shared/Loader';
 import { SidebarNavigation } from './_components/SidebarNavigation';
+import {
+    ConsoleLoadingBanner,
+    ConsoleShellSkeleton,
+} from './_components/ConsoleShellSkeleton';
 
 export default function DashboardLayout({
     children,
@@ -50,29 +53,22 @@ export default function DashboardLayout({
     }, [hasRedirectToParam, pathname, router, searchParamString]);
     if (loading) {
         return (
-            <div className='flex min-h-screen w-full items-center justify-center bg-background px-4 text-foreground'>
-                <div className='flex max-w-md flex-col items-center gap-4 text-center'>
-                    <FullLoader
-                        text="Loading console..."
-                        size="lg"
-                        textPosition="bottom"
-                    />
-                    {authLoadTimedOut ? (
-                        <div className='rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900'>
-                            Authentication is taking longer than expected. Refresh the page or open the login page if this does not clear.
-                            <div className='mt-3'>
-                                <button
-                                    type='button'
-                                    onClick={() => window.location.reload()}
-                                    className='rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700'
-                                >
-                                    Reload page
-                                </button>
-                            </div>
+            <ConsoleShellSkeleton>
+                <ConsoleLoadingBanner timedOut={authLoadTimedOut} />
+                {authLoadTimedOut ? (
+                    <div className='max-w-md rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900'>
+                        <div className='mt-3'>
+                            <button
+                                type='button'
+                                onClick={() => window.location.reload()}
+                                className='rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700'
+                            >
+                                Reload page
+                            </button>
                         </div>
-                    ) : null}
-                </div>
-            </div>
+                    </div>
+                ) : null}
+            </ConsoleShellSkeleton>
         )
     }
 
