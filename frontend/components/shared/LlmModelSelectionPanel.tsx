@@ -24,13 +24,19 @@ interface LlmModelSelectionPanelProps {
     providerName: string,
     model: string,
   ) => number | undefined;
+  getHistoricalCostInr?: (
+    providerName: string,
+    model: string,
+  ) => number | undefined;
   costSummaryLabel?: string;
   costSummaryValue?: string;
+  historicalCostSummaryLabel?: string;
 }
 
 type ProviderCostSummary = {
   selectedCount: number;
   estimatedCostInr: number;
+  historicalCostInr: number;
 };
 
 function getModelKey(providerName: string, model: string) {
@@ -55,6 +61,10 @@ function formatInrCost(cost: number) {
   return `₹${cost.toFixed(2)}`;
 }
 
+function hasKnownCost(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
 function getModelEstimatedCostInr(
   provider: ProviderInfo,
   model: string,
@@ -72,6 +82,18 @@ function getModelEstimatedCostInr(
     : 0;
 }
 
+function getModelHistoricalCostInr(
+  provider: ProviderInfo,
+  model: string,
+  getHistoricalCostInr?: (
+    providerName: string,
+    model: string,
+  ) => number | undefined,
+) {
+  const historical = getHistoricalCostInr?.(provider.name, model);
+  return hasKnownCost(historical) ? historical : null;
+}
+
 export function LlmModelSelectionPanel({
   providers,
   selectedKeys,
@@ -87,8 +109,10 @@ export function LlmModelSelectionPanel({
   onClear,
   onToggleProvider,
   getEstimatedCostInr,
+  getHistoricalCostInr,
   costSummaryLabel = "Estimated selected total",
   costSummaryValue,
+  historicalCostSummaryLabel = "Previous selected total",
 }: LlmModelSelectionPanelProps) {
   const totalModelCount = providers.reduce(
     (total, provider) => total + provider.models.length,
@@ -101,14 +125,21 @@ export function LlmModelSelectionPanel({
           const key = getModelKey(provider.name, model);
           if (!selectedKeys.has(key)) return summary;
 
+          const historicalCostInr = getModelHistoricalCostInr(
+            provider,
+            model,
+            getHistoricalCostInr,
+          );
           return {
             selectedCount: summary.selectedCount + 1,
             estimatedCostInr:
               summary.estimatedCostInr +
               getModelEstimatedCostInr(provider, model, getEstimatedCostInr),
+            historicalCostInr:
+              summary.historicalCostInr + (historicalCostInr ?? 0),
           };
         },
-        { selectedCount: 0, estimatedCostInr: 0 },
+        { selectedCount: 0, estimatedCostInr: 0, historicalCostInr: 0 },
       );
 
       return summaries;
@@ -117,6 +148,10 @@ export function LlmModelSelectionPanel({
   );
   const selectedEstimatedCostInr = Object.values(providerCostSummaries).reduce(
     (total, summary) => total + summary.estimatedCostInr,
+    0,
+  );
+  const selectedHistoricalCostInr = Object.values(providerCostSummaries).reduce(
+    (total, summary) => total + summary.historicalCostInr,
     0,
   );
   const canBulkSelect = selectionMode === "multiple" && Boolean(onSelectAll);
@@ -141,6 +176,11 @@ export function LlmModelSelectionPanel({
           <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
             {costSummaryLabel}: {costSummaryValue ?? formatInrCost(selectedEstimatedCostInr)}
           </span>
+          {selectedHistoricalCostInr > 0 ? (
+            <span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700 ring-1 ring-amber-100">
+              {historicalCostSummaryLabel}: {formatInrCost(selectedHistoricalCostInr)}
+            </span>
+          ) : null}
           {showBulkActions && canBulkSelect ? (
             <button
               type="button"
@@ -200,6 +240,7 @@ export function LlmModelSelectionPanel({
             const providerCostSummary = providerCostSummaries[provider.name] ?? {
               selectedCount: 0,
               estimatedCostInr: 0,
+              historicalCostInr: 0,
             };
 
             return (
@@ -253,6 +294,11 @@ export function LlmModelSelectionPanel({
                     <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
                       Selected estimate: {formatInrCost(providerCostSummary.estimatedCostInr)}
                     </span>
+                    {providerCostSummary.historicalCostInr > 0 ? (
+                      <span className="rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700 ring-1 ring-amber-100">
+                        Previous cost: {formatInrCost(providerCostSummary.historicalCostInr)}
+                      </span>
+                    ) : null}
                     <span className="text-slate-500">
                       {selectedProviderCount} / {provider.models.length}
                     </span>
@@ -270,7 +316,11 @@ export function LlmModelSelectionPanel({
                         model,
                         getEstimatedCostInr,
                       );
-                      const costLabel = ` · Est. ${formatInrCost(estimated)}`;
+                      const historicalCost = getModelHistoricalCostInr(
+                        provider,
+                        model,
+                        getHistoricalCostInr,
+                      );
 
                       return (
                         <label
@@ -304,13 +354,33 @@ export function LlmModelSelectionPanel({
                           />
                           <span
                             className={cn(
-                              "min-w-0 flex-1 truncate text-sm",
+                              "min-w-0 flex-1",
                               compatible ? "text-slate-700" : "text-slate-400",
-                              selected && "font-medium text-slate-800",
                             )}
                           >
-                            {model}
-                            {costLabel}
+                            <span
+                              className={cn(
+                                "block truncate text-sm",
+                                selected ? "font-medium text-slate-800" : "",
+                              )}
+                            >
+                              {model}
+                            </span>
+                            <span className="mt-0.5 flex flex-wrap items-center gap-2 text-xs">
+                              <span
+                                className={cn(
+                                  compatible ? "text-slate-500" : "text-slate-400",
+                                  selected && compatible ? "text-slate-600" : "",
+                                )}
+                              >
+                                Est. {formatInrCost(estimated)}
+                              </span>
+                              {historicalCost !== null ? (
+                                <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-100">
+                                  Prev. {formatInrCost(historicalCost)}
+                                </span>
+                              ) : null}
+                            </span>
                           </span>
                           {selected ? (
                             <Check className="size-3.5 shrink-0 text-indigo-600" />

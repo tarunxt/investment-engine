@@ -10,11 +10,12 @@ export type BullpenActivePositionView = {
   marketTitle: string;
   outcome: string;
   shares: number;
-  averagePrice: number;
+  averagePrice: number | null;
   costBasis: number;
-  currentOdds: number | null;
+  currentPrice: number | null;
   currentValue: number | null;
   unrealizedPnl: number | null;
+  unrealizedPnlPercent: number | null;
   marketUrl: string | null;
   closeTime: string | null;
 };
@@ -49,6 +50,13 @@ function formatPrice(value: number | null) {
     minimumFractionDigits: value * 100 < 10 ? 1 : 0,
     maximumFractionDigits: 2,
   })}c`;
+}
+
+function formatPercent(value: number | null) {
+  if (value === null) return null;
+  return `${Math.abs(value).toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  })}%`;
 }
 
 function formatShares(value: number) {
@@ -96,8 +104,8 @@ export function BullpenPositionsDialog({
               Positions ({positions.length})
             </h2>
             <p className="text-sm text-slate-600">
-              Current holdings from the Bullpen wallet with refreshed odds, value,
-              and unrealized PnL.
+              Current holdings mirrored from the live Bullpen wallet with
+              price, value, and unrealized PnL.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -149,7 +157,7 @@ export function BullpenPositionsDialog({
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Market</th>
-                  <th className="px-4 py-3">Close</th>
+                  <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3">Average</th>
                   <th className="px-4 py-3">Current</th>
                   <th className="px-4 py-3">Value</th>
@@ -187,7 +195,7 @@ export function BullpenPositionsDialog({
                         {formatPrice(position.averagePrice)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                        {formatPrice(position.currentOdds === null ? null : position.currentOdds / 100)}
+                        {formatPrice(position.currentPrice)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <div className="font-semibold text-slate-950">
@@ -206,7 +214,11 @@ export function BullpenPositionsDialog({
                             ? `${formatMoney(position.costBasis)} cost basis`
                             : `${position.unrealizedPnl >= 0 ? "+" : "-"}${formatMoney(
                                 Math.abs(position.unrealizedPnl),
-                              )} vs cost basis`}
+                              )}${
+                                position.unrealizedPnlPercent === null
+                                  ? ""
+                                  : ` (${formatPercent(position.unrealizedPnlPercent)})`
+                              } vs cost basis`}
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
@@ -217,7 +229,7 @@ export function BullpenPositionsDialog({
                             rel="noreferrer"
                             className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                           >
-                            Open
+                            Open market
                             <ExternalLink className="h-3.5 w-3.5" />
                           </a>
                         ) : (

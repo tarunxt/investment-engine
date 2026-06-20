@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bot, Loader2, Sparkles } from "lucide-react";
+import { Bot, Loader2, Sparkles, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -228,7 +228,7 @@ export function EventScanRunControls({
   disabled,
   historicalEstimatedCostInrByTarget,
   pickerButtonClassName,
-  pickerDialogLabel = "Choose LLM model",
+  pickerDialogLabel = "Select LLMs",
   pickerIcon,
   running,
   selectionMode = "single",
@@ -262,7 +262,10 @@ export function EventScanRunControls({
 
     const rect = containerRef.current.getBoundingClientRect();
     const viewportPadding = 16;
-    const width = Math.min(window.innerWidth - viewportPadding * 2, 896);
+    const width = Math.min(
+      window.innerWidth - viewportPadding * 2,
+      selectionMode === "multiple" ? 760 : 680,
+    );
     const maxLeft = Math.max(
       viewportPadding,
       window.innerWidth - width - viewportPadding,
@@ -277,7 +280,7 @@ export function EventScanRunControls({
       width,
       maxHeight,
     });
-  }, []);
+  }, [selectionMode]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -386,22 +389,21 @@ export function EventScanRunControls({
   const activeTargets = getTargetsFromKeys(providers, effectiveSelectedKeys);
   const activeSingleTarget = activeTargets[0] ?? activeTarget;
 
-  const selectedProvider = providers.find(
-    (provider) => provider.name === activeSingleTarget?.provider,
-  );
   const getEstimatedCostInr = useCallback(
+    (providerName: string, model: string) =>
+      providers.find((provider) => provider.name === providerName)
+        ?.model_estimated_cost_inr?.[model],
+    [providers],
+  );
+  const getHistoricalCostInr = useCallback(
     (providerName: string, model: string) => {
-      const override =
+      const value =
         historicalEstimatedCostInrByTarget?.[`${providerName}::${model}`];
-      if (typeof override === "number" && Number.isFinite(override)) {
-        return override;
-      }
-      return selectedProvider?.name === providerName
-        ? selectedProvider.model_estimated_cost_inr?.[model]
-        : providers.find((provider) => provider.name === providerName)
-            ?.model_estimated_cost_inr?.[model];
+      return typeof value === "number" && Number.isFinite(value)
+        ? value
+        : undefined;
     },
-    [historicalEstimatedCostInrByTarget, providers, selectedProvider],
+    [historicalEstimatedCostInrByTarget],
   );
   const modelMixControls = (
     <LlmModelMixControls
@@ -585,13 +587,33 @@ export function EventScanRunControls({
                 maxHeight: pickerPosition.maxHeight,
               }}
             >
-              <div className="max-h-full overflow-y-auto p-4">
-                {providerError ? (
-                  <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {providerError}
+              <div className="flex max-h-full flex-col">
+                <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-semibold text-slate-950">
+                      {pickerDialogLabel}
+                    </h2>
+                    <p className="text-sm text-slate-500">
+                      {selectionMode === "multiple"
+                        ? "Choose one or more models for this run."
+                        : "Choose the model for this run."}
+                    </p>
                   </div>
-                ) : null}
-                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(false)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                    aria-label="Close LLM selector"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <div className="max-h-full overflow-y-auto px-4 pb-4 pt-4">
+                  {providerError ? (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {providerError}
+                    </div>
+                  ) : null}
                   <LlmModelSelectionPanel
                     providers={providers}
                     selectedKeys={effectiveSelectedKeys}
@@ -659,6 +681,7 @@ export function EventScanRunControls({
                         : undefined
                     }
                     getEstimatedCostInr={getEstimatedCostInr}
+                    getHistoricalCostInr={getHistoricalCostInr}
                   />
                 </div>
               </div>

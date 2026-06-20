@@ -42,6 +42,7 @@ import {
   type ScanMode,
   type ScanResult,
 } from "@/lib/bullpen-ai";
+import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
@@ -50,6 +51,7 @@ import type {
   PolymarketManualInvestOrderRequest,
   PolymarketManualInvestResponse,
   ProviderModelTarget,
+  RunResponse,
 } from "@/types/api";
 
 import {
@@ -103,6 +105,12 @@ type PolymarketMarketRefresh = {
 type BullpenCurrentOddsRefreshResponse = {
   markets?: Record<string, PolymarketMarketRefresh>;
   unresolvedQuestionIds?: string[];
+  error?: string;
+};
+
+type BullpenPositionsResponse = {
+  positions?: BullpenActivePositionView[];
+  fetchedAt?: string;
   error?: string;
 };
 
@@ -214,6 +222,64 @@ function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
   if (error instanceof Error) return error.message;
   return "Something went wrong.";
+}
+
+function parseTimestampMs(value: string | null | undefined) {
+  if (!value) return 0;
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function hasKnownUsdCost(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function toHistoricalCostKey(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+) {
+  return provider && model ? `${provider}::${model}` : null;
+}
+
+function toRoundedInrCost(usdCost: number, usdInrRate: number) {
+  return Math.round(usdCost * usdInrRate * 100) / 100;
+}
+
+function isBullpenLlmRun(run: RunResponse) {
+  const prompt = run.prompt || "";
+  return (
+    prompt.includes("Selected questions:") &&
+    prompt.includes('"question_ref"') &&
+    prompt.includes('"current_yes_odds"') &&
+    prompt.includes('"current_no_odds"')
+  );
+}
+
+function buildBullpenHistoricalCostMapInr(
+  runs: RunResponse[],
+  usdInrRate: number,
+) {
+  const costs: Record<string, number> = {};
+
+  runs
+    .filter((run) => isBullpenLlmRun(run))
+    .slice()
+    .sort(
+      (left, right) =>
+        parseTimestampMs(right.updated_at ?? right.created_at) -
+        parseTimestampMs(left.updated_at ?? left.created_at),
+    )
+    .forEach((run) => {
+      for (const link of run.run_jobs || []) {
+        const job = link.job;
+        const key = toHistoricalCostKey(job?.provider, job?.model);
+        if (!job || !key || costs[key] !== undefined) continue;
+        if (!hasKnownUsdCost(job.estimated_cost)) continue;
+        costs[key] = toRoundedInrCost(job.estimated_cost, usdInrRate);
+      }
+    });
+
+  return costs;
 }
 
 function buildBullpenManualInvestOrder(
@@ -541,6 +607,7 @@ function FilterToggle({
 
 export default function BullpenAiPage() {
   const searchParams = useSearchParams();
+  const usdInrRate = useUsdInrRate();
   const activeMode: ScanMode =
     searchParams.get("tab") === "end-of-month" ? "end-of-month" : "30-days";
   const activeTab = TABS.find((tab) => tab.mode === activeMode) || TABS[0];
@@ -608,6 +675,9 @@ export default function BullpenAiPage() {
   const [lastLlmTargets, setLastLlmTargets] = useState<ProviderModelTarget[]>(
     [],
   );
+  const [historicalCostInrByTarget, setHistoricalCostInrByTarget] = useState<
+    Record<string, number>
+  >({});
   const [bullpenLlmPromptTemplate, setBullpenLlmPromptTemplate] = useState(
     DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
   );
@@ -664,6 +734,43 @@ export default function BullpenAiPage() {
     void refreshBullpenPositions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadHistoricalCosts = async () => {
+      try {
+        const firstPage = await apiService.getFullRuns({ page: 1, limit: 100 });
+        const maxPages = Math.min(firstPage.pages, 3);
+        const remainingPages = Array.from(
+          { length: Math.max(0, maxPages - 1) },
+          (_, index) => index + 2,
+        );
+        const remainingResults = await Promise.all(
+          remainingPages.map((page) =>
+            apiService.getFullRuns({ page, limit: 100 }),
+          ),
+        );
+        const runs = [
+          ...firstPage.items,
+          ...remainingResults.flatMap((page) => page.items),
+        ];
+        if (cancelled) return;
+        setHistoricalCostInrByTarget(
+          buildBullpenHistoricalCostMapInr(runs, usdInrRate),
+        );
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Failed to load Bullpen LLM cost history:", error);
+        }
+      }
+    };
+
+    void loadHistoricalCosts();
+    return () => {
+      cancelled = true;
+    };
+  }, [usdInrRate]);
 
   const activeFilters = filtersByMode[activeMode];
   const activeSnapshots = snapshotsByMode[activeMode];
@@ -989,20 +1096,28 @@ export default function BullpenAiPage() {
       .map((position) => {
         const marketUpdate = marketUpdates[position.key];
         const normalizedOutcome = position.outcome.trim().toLowerCase();
-        const currentOdds =
+        const currentPrice =
           normalizedOutcome === "yes"
-            ? marketUpdate?.yesOdds ?? null
+            ? marketUpdate?.yesOdds === null || marketUpdate?.yesOdds === undefined
+              ? null
+              : Number((marketUpdate.yesOdds / 100).toFixed(4))
             : normalizedOutcome === "no"
-              ? marketUpdate?.noOdds ?? null
+              ? marketUpdate?.noOdds === null || marketUpdate?.noOdds === undefined
+                ? null
+                : Number((marketUpdate.noOdds / 100).toFixed(4))
               : null;
         const currentValue =
-          currentOdds === null
+          currentPrice === null
             ? null
-            : Number(((position.shares * currentOdds) / 100).toFixed(2));
+            : Number((position.shares * currentPrice).toFixed(2));
         const unrealizedPnl =
           currentValue === null
             ? null
             : Number((currentValue - position.cost_basis).toFixed(2));
+        const unrealizedPnlPercent =
+          unrealizedPnl === null || position.cost_basis <= 0
+            ? null
+            : Number(((unrealizedPnl / position.cost_basis) * 100).toFixed(2));
 
         return {
           key: position.key,
@@ -1010,11 +1125,12 @@ export default function BullpenAiPage() {
           marketTitle: position.market_title,
           outcome: position.outcome,
           shares: position.shares,
-          averagePrice: position.average_price,
+          averagePrice: Number(position.average_price.toFixed(4)),
           costBasis: position.cost_basis,
-          currentOdds,
+          currentPrice,
           currentValue,
           unrealizedPnl,
+          unrealizedPnlPercent,
           marketUrl: marketUpdate?.marketUrl ?? null,
           closeTime: resolvePositionCloseTime(position.market_title),
         } satisfies BullpenActivePositionView;
@@ -1026,46 +1142,84 @@ export default function BullpenAiPage() {
     setPositionsError(null);
 
     try {
-      const state = stateOverride ?? (await apiService.polymarketState());
-      const openPositions = state.open_positions.filter(
-        (position) => position.shares > 0,
-      );
+      const livePositionsResponse = await fetch("/api/bullpen-ai/positions", {
+        cache: "no-store",
+      });
+      const livePositionsPayload =
+        (await livePositionsResponse.json()) as BullpenPositionsResponse;
+      if (!livePositionsResponse.ok) {
+        throw new Error(
+          livePositionsPayload.error ||
+            "Failed to refresh active Bullpen wallet positions.",
+        );
+      }
 
-      if (openPositions.length === 0) {
-        setActivePositions([]);
+      setActivePositions(livePositionsPayload.positions || []);
+      setHasLoadedPositions(true);
+      setPositionsLastUpdatedAt(
+        livePositionsPayload.fetchedAt || new Date().toISOString(),
+      );
+    } catch (livePositionsError) {
+      try {
+        const state = stateOverride ?? (await apiService.polymarketState());
+        const openPositions = state.open_positions.filter(
+          (position) => position.shares > 0,
+        );
+
+        if (openPositions.length === 0) {
+          setActivePositions([]);
+          setHasLoadedPositions(true);
+          setPositionsLastUpdatedAt(new Date().toISOString());
+          setPositionsError(
+            `Live Bullpen wallet positions are unavailable right now, so the dashboard is showing the tracked-position fallback: ${normalizeError(
+              livePositionsError,
+            )}`,
+          );
+          return;
+        }
+
+        const response = await fetch("/api/bullpen-ai/current-odds", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          cache: "no-store",
+          body: JSON.stringify({
+            questions: openPositions.map((position) => ({
+              id: position.key,
+              slug: position.market_id,
+              marketUrl: null,
+              question: position.market_title,
+            })),
+          }),
+        });
+        const payload = (await response.json()) as BullpenCurrentOddsRefreshResponse;
+        if (!response.ok) {
+          throw new Error(
+            payload.error || "Failed to refresh active Bullpen positions.",
+          );
+        }
+
+        setActivePositions(
+          buildActivePositionViews(openPositions, payload.markets || {}),
+        );
         setHasLoadedPositions(true);
         setPositionsLastUpdatedAt(new Date().toISOString());
-        return;
+        setPositionsError(
+          `Live Bullpen wallet positions are unavailable right now, so the dashboard is showing the tracked-position fallback: ${normalizeError(
+            livePositionsError,
+          )}`,
+        );
+      } catch (fallbackError) {
+        setHasLoadedPositions(true);
+        setPositionsError(
+          `Failed to load live Bullpen wallet positions (${normalizeError(
+            livePositionsError,
+          )}) and the tracked-position fallback also failed (${normalizeError(
+            fallbackError,
+          )}).`,
+        );
       }
-
-      const response = await fetch("/api/bullpen-ai/current-odds", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        cache: "no-store",
-        body: JSON.stringify({
-          questions: openPositions.map((position) => ({
-            id: position.key,
-            slug: position.market_id,
-            marketUrl: null,
-            question: position.market_title,
-          })),
-        }),
-      });
-      const payload = (await response.json()) as BullpenCurrentOddsRefreshResponse;
-      if (!response.ok) {
-        throw new Error(payload.error || "Failed to refresh active Bullpen positions.");
-      }
-
-      setActivePositions(
-        buildActivePositionViews(openPositions, payload.markets || {}),
-      );
-      setHasLoadedPositions(true);
-      setPositionsLastUpdatedAt(new Date().toISOString());
-    } catch (error) {
-      setHasLoadedPositions(true);
-      setPositionsError(normalizeError(error));
     } finally {
       setIsLoadingPositions(false);
     }
@@ -1210,6 +1364,18 @@ export default function BullpenAiPage() {
             (targetOrder.get(`${left.job.provider}::${left.job.model}`) ?? 0) -
             (targetOrder.get(`${right.job.provider}::${right.job.model}`) ?? 0),
         );
+      setHistoricalCostInrByTarget((current) => {
+        const next = { ...current };
+        for (const runJob of selectedRunJobs) {
+          const key = toHistoricalCostKey(
+            runJob.job.provider,
+            runJob.job.model,
+          );
+          if (!key || !hasKnownUsdCost(runJob.job.estimated_cost)) continue;
+          next[key] = toRoundedInrCost(runJob.job.estimated_cost, usdInrRate);
+        }
+        return next;
+      });
       const selectedQuestionIdsSet = new Set(
         selectedQuestions.map((question) => question.id),
       );
@@ -2023,7 +2189,10 @@ export default function BullpenAiPage() {
                     }
                     selectionMode="multiple"
                     onRunMultiple={runLlm}
-                    pickerDialogLabel="Select LLM"
+                    historicalEstimatedCostInrByTarget={
+                      historicalCostInrByTarget
+                    }
+                    pickerDialogLabel="Select LLMs"
                     pickerIcon={<Menu className="size-4" />}
                     running={isRunningLlm}
                     buttonClassName="rounded-none"
