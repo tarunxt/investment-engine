@@ -95,6 +95,23 @@ export type BullpenQuestionLlmBreakdownItem = {
   rationale: string | null;
 };
 
+export type BullpenReturnsPerDayBreakdown = {
+  currentOdds: number | null;
+  currentSide: "Yes" | "No" | null;
+  daysUntilClose: number | null;
+  llmYesOdds: number | null;
+  result: number | null;
+};
+
+export type BullpenAmountToBeInvestedBreakdown = {
+  llmNoOdds: number | null;
+  llmNoOddsAboveThreshold: number | null;
+  returnsPerDay: number | null;
+  threshold: number;
+  multiplier: number;
+  result: number | null;
+};
+
 export const END_OF_MONTH_DATE = "2026-06-30";
 
 export const BULLPEN_SOURCE_URLS: Record<ScanMode, string> = {
@@ -322,18 +339,12 @@ function calculateBullpenReturnsPerDay({
   BullpenQuestionRow,
   "yesOdds" | "noOdds" | "llmYesOdds" | "daysUntilClose"
 >) {
-  if (
-    yesOdds === null ||
-    noOdds === null ||
-    llmYesOdds === null ||
-    daysUntilClose === null ||
-    daysUntilClose <= 0
-  ) {
-    return null;
-  }
-
-  const currentOdds = llmYesOdds > 50 ? yesOdds : noOdds;
-  return Number(((100 - currentOdds) / daysUntilClose).toFixed(2));
+  return getBullpenReturnsPerDayBreakdown({
+    yesOdds,
+    noOdds,
+    llmYesOdds,
+    daysUntilClose,
+  }).result;
 }
 
 function calculateCurrentVsLlmOddsDifference({
@@ -348,8 +359,80 @@ function calculateBullpenAmountToBeInvested({
   llmNoOdds,
   returnsPerDay,
 }: Pick<BullpenQuestionRow, "llmNoOdds" | "returnsPerDay">) {
-  if (llmNoOdds === null || returnsPerDay === null) return null;
-  return Number(((5 * (llmNoOdds - 80) * returnsPerDay) / 100).toFixed(2));
+  return getBullpenAmountToBeInvestedBreakdown({
+    llmNoOdds,
+    returnsPerDay,
+  }).result;
+}
+
+export function getBullpenReturnsPerDayBreakdown({
+  yesOdds,
+  noOdds,
+  llmYesOdds,
+  daysUntilClose,
+}: Pick<
+  BullpenQuestionRow,
+  "yesOdds" | "noOdds" | "llmYesOdds" | "daysUntilClose"
+>): BullpenReturnsPerDayBreakdown {
+  if (
+    yesOdds === null ||
+    noOdds === null ||
+    llmYesOdds === null ||
+    daysUntilClose === null ||
+    daysUntilClose <= 0
+  ) {
+    return {
+      currentOdds: null,
+      currentSide: null,
+      daysUntilClose,
+      llmYesOdds,
+      result: null,
+    };
+  }
+
+  const currentSide = llmYesOdds > 50 ? "Yes" : "No";
+  const currentOdds = currentSide === "Yes" ? yesOdds : noOdds;
+
+  return {
+    currentOdds,
+    currentSide,
+    daysUntilClose,
+    llmYesOdds,
+    result:
+      currentOdds === null
+        ? null
+        : Number(((100 - currentOdds) / daysUntilClose).toFixed(2)),
+  };
+}
+
+export function getBullpenAmountToBeInvestedBreakdown({
+  llmNoOdds,
+  returnsPerDay,
+}: Pick<
+  BullpenQuestionRow,
+  "llmNoOdds" | "returnsPerDay"
+>): BullpenAmountToBeInvestedBreakdown {
+  const threshold = 80;
+  const multiplier = 5;
+  const llmNoOddsAboveThreshold =
+    llmNoOdds === null ? null : Number((llmNoOdds - threshold).toFixed(2));
+
+  return {
+    llmNoOdds,
+    llmNoOddsAboveThreshold,
+    returnsPerDay,
+    threshold,
+    multiplier,
+    result:
+      llmNoOdds === null || returnsPerDay === null
+        ? null
+        : Number(
+            (
+              (multiplier * (llmNoOdds - threshold) * returnsPerDay) /
+              100
+            ).toFixed(2),
+          ),
+  };
 }
 
 export function isBullpenQuestionInvestmentCandidate(

@@ -46,6 +46,7 @@ import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type {
+  PolymarketBotState,
   PolymarketManualInvestOrderRequest,
   PolymarketManualInvestResponse,
   ProviderModelTarget,
@@ -57,6 +58,7 @@ import {
   type BullpenTableSortState,
 } from "./_components/BullpenQuestionsTable";
 import { BullpenInvestmentsSection } from "./_components/BullpenInvestmentsSection";
+import type { BullpenActivePositionView } from "./_components/BullpenPositionsDialog";
 import { BullpenPromptEditorDialog } from "./_components/BullpenPromptEditorDialog";
 
 const TABS: {
@@ -103,6 +105,21 @@ type BullpenCurrentOddsRefreshResponse = {
   unresolvedQuestionIds?: string[];
   error?: string;
 };
+
+function normalizeQuestionTitle(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function extractCloseTimeFromMarketTitle(value: string) {
+  const matchedDate =
+    value.match(
+      /\b(?:by|on|before|after|through|until)\s+([A-Z][a-z]+ \d{1,2}, \d{4})\b/i,
+    )?.[1] || value.match(/\b([A-Z][a-z]+ \d{1,2}, \d{4})\b/)?.[1];
+  if (!matchedDate) return null;
+
+  const parsed = new Date(matchedDate);
+  return Number.isNaN(parsed.getTime()) ? matchedDate : parsed.toISOString();
+}
 
 function createEmptySnapshotHistory(): Record<ScanMode, BullpenSnapshotHistory> {
   return {
@@ -573,6 +590,15 @@ export default function BullpenAiPage() {
     "30-days": null,
     "end-of-month": null,
   });
+  const [activePositions, setActivePositions] = useState<
+    BullpenActivePositionView[]
+  >([]);
+  const [hasLoadedPositions, setHasLoadedPositions] = useState(false);
+  const [isLoadingPositions, setIsLoadingPositions] = useState(false);
+  const [positionsError, setPositionsError] = useState<string | null>(null);
+  const [positionsLastUpdatedAt, setPositionsLastUpdatedAt] = useState<
+    string | null
+  >(null);
   const [scanningMode, setScanningMode] = useState<ScanMode | null>(null);
   const [llmRunningMode, setLlmRunningMode] = useState<ScanMode | null>(null);
   const [investingMode, setInvestingMode] = useState<ScanMode | null>(null);
@@ -633,6 +659,11 @@ export default function BullpenAiPage() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isScanFiltersOpen]);
+
+  useEffect(() => {
+    void refreshBullpenPositions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const activeFilters = filtersByMode[activeMode];
   const activeSnapshots = snapshotsByMode[activeMode];
@@ -924,6 +955,120 @@ export default function BullpenAiPage() {
       ...current,
       [activeMode]: [],
     }));
+  }
+
+  function resolvePositionCloseTime(marketTitle: string) {
+    const normalizedMarketTitle = normalizeQuestionTitle(marketTitle);
+
+    for (const mode of ["30-days", "end-of-month"] as const) {
+      const snapshots = [
+        snapshotsByMode[mode].current,
+        ...snapshotsByMode[mode].history,
+      ].filter((snapshot): snapshot is BullpenScanSnapshot => Boolean(snapshot));
+
+      for (const snapshot of snapshots) {
+        const matchedQuestion = snapshot.questions.find(
+          (question) =>
+            normalizeQuestionTitle(question.question) === normalizedMarketTitle,
+        );
+        if (matchedQuestion?.closeTime) {
+          return matchedQuestion.closeTime;
+        }
+      }
+    }
+
+    return extractCloseTimeFromMarketTitle(marketTitle);
+  }
+
+  function buildActivePositionViews(
+    openPositions: PolymarketBotState["open_positions"],
+    marketUpdates: Record<string, PolymarketMarketRefresh>,
+  ) {
+    return openPositions
+      .filter((position) => position.shares > 0)
+      .map((position) => {
+        const marketUpdate = marketUpdates[position.key];
+        const normalizedOutcome = position.outcome.trim().toLowerCase();
+        const currentOdds =
+          normalizedOutcome === "yes"
+            ? marketUpdate?.yesOdds ?? null
+            : normalizedOutcome === "no"
+              ? marketUpdate?.noOdds ?? null
+              : null;
+        const currentValue =
+          currentOdds === null
+            ? null
+            : Number(((position.shares * currentOdds) / 100).toFixed(2));
+        const unrealizedPnl =
+          currentValue === null
+            ? null
+            : Number((currentValue - position.cost_basis).toFixed(2));
+
+        return {
+          key: position.key,
+          marketId: position.market_id,
+          marketTitle: position.market_title,
+          outcome: position.outcome,
+          shares: position.shares,
+          averagePrice: position.average_price,
+          costBasis: position.cost_basis,
+          currentOdds,
+          currentValue,
+          unrealizedPnl,
+          marketUrl: marketUpdate?.marketUrl ?? null,
+          closeTime: resolvePositionCloseTime(position.market_title),
+        } satisfies BullpenActivePositionView;
+      });
+  }
+
+  async function refreshBullpenPositions(stateOverride?: PolymarketBotState) {
+    setIsLoadingPositions(true);
+    setPositionsError(null);
+
+    try {
+      const state = stateOverride ?? (await apiService.polymarketState());
+      const openPositions = state.open_positions.filter(
+        (position) => position.shares > 0,
+      );
+
+      if (openPositions.length === 0) {
+        setActivePositions([]);
+        setHasLoadedPositions(true);
+        setPositionsLastUpdatedAt(new Date().toISOString());
+        return;
+      }
+
+      const response = await fetch("/api/bullpen-ai/current-odds", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        cache: "no-store",
+        body: JSON.stringify({
+          questions: openPositions.map((position) => ({
+            id: position.key,
+            slug: position.market_id,
+            marketUrl: null,
+            question: position.market_title,
+          })),
+        }),
+      });
+      const payload = (await response.json()) as BullpenCurrentOddsRefreshResponse;
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to refresh active Bullpen positions.");
+      }
+
+      setActivePositions(
+        buildActivePositionViews(openPositions, payload.markets || {}),
+      );
+      setHasLoadedPositions(true);
+      setPositionsLastUpdatedAt(new Date().toISOString());
+    } catch (error) {
+      setHasLoadedPositions(true);
+      setPositionsError(normalizeError(error));
+    } finally {
+      setIsLoadingPositions(false);
+    }
   }
 
   async function runScan() {
@@ -1501,6 +1646,7 @@ export default function BullpenAiPage() {
         await apiService.polymarketManualInvest({
           orders: selectedOrders,
         });
+      void refreshBullpenPositions(response.state);
       const executedOrders = response.orders.filter(
         (order) => order.status === "executed",
       );
@@ -2005,16 +2151,24 @@ export default function BullpenAiPage() {
 
           {activeVisibleSnapshot ? (
             <BullpenInvestmentsSection
+              activePositions={activePositions}
+              activePositionsCount={hasLoadedPositions ? activePositions.length : null}
               candidates={activeInvestmentCandidates}
               emptyMessage={investmentEmptyMessage}
               isHistoryView={isViewingHistory}
               isInvesting={isInvesting}
+              isLoadingPositions={isLoadingPositions}
               isRefreshingCurrentOdds={isRefreshingCurrentOdds}
               onInvest={investInSelectedEvents}
+              onRefreshPositions={() => {
+                void refreshBullpenPositions();
+              }}
               onRefreshCurrentOdds={handleRefreshCurrentOdds}
               onToggleQuestion={toggleInvestmentSelection}
               onSelectAll={selectAllInvestmentCandidates}
               onClearAll={clearInvestmentCandidates}
+              positionsError={positionsError}
+              positionsLastUpdatedAt={positionsLastUpdatedAt}
               progressMessage={investmentProgress}
               selectedQuestionIds={selectedInvestmentQuestionIdSet}
             />
