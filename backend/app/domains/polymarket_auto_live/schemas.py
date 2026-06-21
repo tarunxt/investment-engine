@@ -10,10 +10,10 @@ AutoLiveGuardrailStatus = Literal["pass", "watch", "fail"]
 AutoLiveDecisionAction = Literal["BUY_NEW", "ADD_MORE", "HOLD", "TRIM", "EXIT", "SKIP"]
 AutoLiveRiskStatus = Literal["Ready", "Watch", "Blocked"]
 AutoLiveRunStatus = Literal["running", "completed", "failed", "skipped"]
-AutoLiveStageStatus = Literal["pending", "completed", "failed", "skipped"]
+AutoLiveStageStatus = Literal["pass", "fail", "warning", "skipped"]
 AutoLiveRuntimeStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 AutoLiveRuntimeMode = Literal["dry-run", "analysis-only", "live-trading"]
-AutoLiveOrderPlanStatus = Literal["planned", "submitted", "skipped", "cancelled"]
+AutoLiveOrderPlanStatus = Literal["planned", "submitted", "skipped", "cancelled", "failed"]
 AutoLiveOrderAction = Literal["buy", "sell", "hold"]
 AutoLiveOutcomeSide = Literal["YES", "NO"]
 AutoLiveTriggeredBy = Literal["manual", "scheduler", "start", "resume"]
@@ -32,6 +32,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     min_cash_reserve_pct_bankroll: float = Field(default=40, ge=0, le=100)
     min_order_usd: float = Field(default=1, gt=0)
     max_order_usd: float = Field(default=25, gt=0)
+    min_liquidity_usd: float = Field(default=1_000, ge=0)
 
     min_independent_active_markets: int = Field(default=10, ge=1)
     target_active_markets: int = Field(default=15, ge=1)
@@ -113,6 +114,8 @@ class BullpenAutoLiveSettingsBase(BaseModel):
             raise ValueError(
                 "allow_live_execution cannot be enabled when limit_orders_only is false"
             )
+        if self.half_size_llm_spread_pp > self.max_llm_spread_pp:
+            raise ValueError("half_size_llm_spread_pp cannot exceed max_llm_spread_pp")
         return self
 
 
@@ -130,6 +133,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     min_cash_reserve_pct_bankroll: float | None = Field(default=None, ge=0, le=100)
     min_order_usd: float | None = Field(default=None, gt=0)
     max_order_usd: float | None = Field(default=None, gt=0)
+    min_liquidity_usd: float | None = Field(default=None, ge=0)
 
     min_independent_active_markets: int | None = Field(default=None, ge=1)
     target_active_markets: int | None = Field(default=None, ge=1)
@@ -190,6 +194,21 @@ class BullpenAutoLiveGuardrailCheck(BaseModel):
     checked_at: str
 
 
+class BullpenAutoLiveLlmOutput(BaseModel):
+    provider: str
+    model: str
+    llm_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_no_odds: float | None = Field(default=None, ge=0, le=100)
+    confidence: str | None = None
+    evidence_status: str | None = None
+    event_state: str | None = None
+    key_evidence: list[str] = Field(default_factory=list)
+    red_flags: list[str] = Field(default_factory=list)
+    rationale: str | None = None
+    error: str | None = None
+    completed_at: str | None = None
+
+
 class BullpenAutoLiveOrderPlan(BaseModel):
     id: str
     action: AutoLiveOrderAction
@@ -199,20 +218,28 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     market_id: str
     market_title: str
     order_size_usd: float = Field(ge=0)
+    shares: float = Field(default=0, ge=0)
     limit_price_cents: float = Field(ge=0, le=100)
+    refreshed_market_price_cents: float | None = Field(default=None, ge=0, le=100)
     max_slippage_cents: float = Field(ge=0)
     dry_run: bool = True
     detail: str
+    execution_response: str | None = None
     created_at: str
+    executed_at: str | None = None
 
 
 class BullpenAutoLiveStageResult(BaseModel):
-    stage: str
+    stage_number: int = Field(ge=1, le=7)
+    stage_name: str
     status: AutoLiveStageStatus
-    detail: str
+    reason: str
+    inputs: dict[str, object] = Field(default_factory=dict)
+    outputs: dict[str, object] = Field(default_factory=dict)
+    guardrails_checked: list[BullpenAutoLiveGuardrailCheck] = Field(default_factory=list)
+    hard_block: bool = False
     started_at: str
     completed_at: str | None = None
-    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class BullpenAutoLiveDecision(BaseModel):
@@ -222,20 +249,38 @@ class BullpenAutoLiveDecision(BaseModel):
     updated_at: str
     market_id: str
     market_title: str
+    market_url: str | None = None
+    slug: str | None = None
+    close_time: str | None = None
     theme: str
     side: AutoLiveOutcomeSide
     decision: AutoLiveDecisionAction
     risk_status: AutoLiveRiskStatus
     price_cents: float = Field(ge=0, le=100)
+    current_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    current_no_odds: float | None = Field(default=None, ge=0, le=100)
     fair_probability_pct: float = Field(ge=0, le=100)
+    fair_yes_probability_pct: float | None = Field(default=None, ge=0, le=100)
+    fair_no_probability_pct: float | None = Field(default=None, ge=0, le=100)
     edge_pp: float
     score: float
     confidence: AutoLiveConfidence
     evidence_status: AutoLiveEvidenceStatus
+    event_state: str | None = None
     adjudication_required: bool = False
+    disagreement_level: str | None = None
+    current_exposure_usd: float = Field(default=0, ge=0)
+    target_exposure_usd: float = Field(default=0, ge=0)
+    realized_pnl_usd: float | None = None
+    hours_remaining: float | None = None
+    key_evidence: list[str] = Field(default_factory=list)
+    red_flags: list[str] = Field(default_factory=list)
+    rationale: str | None = None
     reason: str
     summary: str
     order_plan: BullpenAutoLiveOrderPlan | None = None
+    llm_outputs: list[BullpenAutoLiveLlmOutput] = Field(default_factory=list)
+    stage_results: list[BullpenAutoLiveStageResult] = Field(default_factory=list)
     guardrail_checks: list[BullpenAutoLiveGuardrailCheck] = Field(default_factory=list)
 
 
@@ -261,12 +306,17 @@ class BullpenAutoLiveRun(BaseModel):
 class BullpenAutoLiveState(BaseModel):
     running: bool = False
     paused: bool = False
+    dry_run: bool = True
+    live_armed: bool = False
+    live_execution_allowed: bool = False
+    emergency_stopped: bool = False
     status: AutoLiveRuntimeStatus = "not-configured"
     mode: AutoLiveRuntimeMode = "dry-run"
     server_now: str | None = None
     started_at: str | None = None
     stopped_at: str | None = None
     last_run_at: str | None = None
+    last_execution_at: str | None = None
     next_run_at: str | None = None
     last_scan_at: str | None = None
     last_llm_run_at: str | None = None
@@ -286,6 +336,8 @@ class BullpenAutoLiveState(BaseModel):
     active_positions: int = Field(default=0, ge=0)
     trades_today: int = Field(default=0, ge=0)
     consecutive_failed_orders: int = Field(default=0, ge=0)
+    today_executed_orders: int = Field(default=0, ge=0)
+    today_skipped_orders: int = Field(default=0, ge=0)
     doctor_status: AutoLiveGuardrailStatus = "watch"
     balance_status: AutoLiveGuardrailStatus = "watch"
 

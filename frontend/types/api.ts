@@ -1408,6 +1408,24 @@ export interface PolymarketDiscoveryDebugReport {
 export type BullpenAutoLiveEvidenceStatus = "Low" | "Moderate" | "Strong";
 export type BullpenAutoLiveConfidence = "Low" | "Medium" | "High";
 export type BullpenAutoLiveGuardrailStatus = "pass" | "watch" | "fail";
+export type BullpenAutoLiveDecisionAction =
+  | "BUY_NEW"
+  | "ADD_MORE"
+  | "HOLD"
+  | "TRIM"
+  | "EXIT"
+  | "SKIP";
+export type BullpenAutoLiveRiskStatus = "Ready" | "Watch" | "Blocked";
+export type BullpenAutoLiveRunStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped";
+export type BullpenAutoLiveStageStatus =
+  | "pass"
+  | "fail"
+  | "warning"
+  | "skipped";
 export type BullpenAutoLiveRuntimeStatus =
   | "running"
   | "paused"
@@ -1418,6 +1436,19 @@ export type BullpenAutoLiveRuntimeMode =
   | "dry-run"
   | "analysis-only"
   | "live-trading";
+export type BullpenAutoLiveOrderPlanStatus =
+  | "planned"
+  | "submitted"
+  | "skipped"
+  | "cancelled"
+  | "failed";
+export type BullpenAutoLiveOrderAction = "buy" | "sell" | "hold";
+export type BullpenAutoLiveOutcomeSide = "YES" | "NO";
+export type BullpenAutoLiveTriggeredBy =
+  | "manual"
+  | "scheduler"
+  | "start"
+  | "resume";
 
 export interface BullpenAutoLiveSettings {
   bankroll_usd: number;
@@ -1429,6 +1460,7 @@ export interface BullpenAutoLiveSettings {
   min_cash_reserve_pct_bankroll: number;
   min_order_usd: number;
   max_order_usd: number;
+  min_liquidity_usd: number;
   min_independent_active_markets: number;
   target_active_markets: number;
   max_active_markets: number;
@@ -1483,15 +1515,129 @@ export interface BullpenAutoLiveGuardrailCheck {
   checked_at: string;
 }
 
+export interface BullpenAutoLiveLlmOutput {
+  provider: string;
+  model: string;
+  llm_yes_odds?: number | null;
+  llm_no_odds?: number | null;
+  confidence?: BullpenAutoLiveConfidence | string | null;
+  evidence_status?: BullpenAutoLiveEvidenceStatus | string | null;
+  event_state?: string | null;
+  key_evidence: string[];
+  red_flags: string[];
+  rationale?: string | null;
+  error?: string | null;
+  completed_at?: string | null;
+}
+
+export interface BullpenAutoLiveOrderPlan {
+  id: string;
+  action: BullpenAutoLiveOrderAction;
+  side: BullpenAutoLiveOutcomeSide;
+  order_type: "limit";
+  status: BullpenAutoLiveOrderPlanStatus;
+  market_id: string;
+  market_title: string;
+  order_size_usd: number;
+  shares: number;
+  limit_price_cents: number;
+  refreshed_market_price_cents?: number | null;
+  max_slippage_cents: number;
+  dry_run: boolean;
+  detail: string;
+  execution_response?: string | null;
+  created_at: string;
+  executed_at?: string | null;
+}
+
+export interface BullpenAutoLiveStageResult {
+  stage_number: number;
+  stage_name: string;
+  status: BullpenAutoLiveStageStatus;
+  reason: string;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  guardrails_checked: BullpenAutoLiveGuardrailCheck[];
+  hard_block: boolean;
+  started_at: string;
+  completed_at?: string | null;
+}
+
+export interface BullpenAutoLiveDecision {
+  id: string;
+  run_id: string;
+  created_at: string;
+  updated_at: string;
+  market_id: string;
+  market_title: string;
+  market_url?: string | null;
+  slug?: string | null;
+  close_time?: string | null;
+  theme: string;
+  side: BullpenAutoLiveOutcomeSide;
+  decision: BullpenAutoLiveDecisionAction;
+  risk_status: BullpenAutoLiveRiskStatus;
+  price_cents: number;
+  current_yes_odds?: number | null;
+  current_no_odds?: number | null;
+  fair_probability_pct: number;
+  fair_yes_probability_pct?: number | null;
+  fair_no_probability_pct?: number | null;
+  edge_pp: number;
+  score: number;
+  confidence: BullpenAutoLiveConfidence;
+  evidence_status: BullpenAutoLiveEvidenceStatus;
+  event_state?: string | null;
+  adjudication_required: boolean;
+  disagreement_level?: string | null;
+  current_exposure_usd: number;
+  target_exposure_usd: number;
+  realized_pnl_usd?: number | null;
+  hours_remaining?: number | null;
+  key_evidence: string[];
+  red_flags: string[];
+  rationale?: string | null;
+  reason: string;
+  summary: string;
+  order_plan?: BullpenAutoLiveOrderPlan | null;
+  llm_outputs: BullpenAutoLiveLlmOutput[];
+  stage_results: BullpenAutoLiveStageResult[];
+  guardrail_checks: BullpenAutoLiveGuardrailCheck[];
+}
+
+export interface BullpenAutoLiveRun {
+  id: string;
+  triggered_by: BullpenAutoLiveTriggeredBy;
+  status: BullpenAutoLiveRunStatus;
+  dry_run: boolean;
+  started_at: string;
+  completed_at?: string | null;
+  summary: string;
+  live_execution_requested: boolean;
+  live_execution_attempted: boolean;
+  decisions_count: number;
+  orders_planned: number;
+  orders_submitted: number;
+  error_message?: string | null;
+  stage_results: BullpenAutoLiveStageResult[];
+  guardrail_checks: BullpenAutoLiveGuardrailCheck[];
+  decision_ids: string[];
+}
+
 export interface BullpenAutoLiveState {
   running: boolean;
   paused: boolean;
+  dry_run: boolean;
+  live_armed: boolean;
+  live_execution_allowed: boolean;
+  emergency_stopped: boolean;
   status: BullpenAutoLiveRuntimeStatus;
   mode: BullpenAutoLiveRuntimeMode;
   server_now?: string | null;
   started_at?: string | null;
   stopped_at?: string | null;
   last_run_at?: string | null;
+  last_execution_at?: string | null;
   next_run_at?: string | null;
   last_scan_at?: string | null;
   last_llm_run_at?: string | null;
@@ -1509,14 +1655,10 @@ export interface BullpenAutoLiveState {
   active_positions: number;
   trades_today: number;
   consecutive_failed_orders: number;
+  today_executed_orders: number;
+  today_skipped_orders: number;
   doctor_status: BullpenAutoLiveGuardrailStatus;
   balance_status: BullpenAutoLiveGuardrailStatus;
-}
-
-export interface BullpenAutoLiveSummaryResponse {
-  state: BullpenAutoLiveState;
-  settings: BullpenAutoLiveSettings;
-  latest_guardrail_checks: BullpenAutoLiveGuardrailCheck[];
 }
 
 export type TradingBotStatus =
@@ -1539,17 +1681,47 @@ export type TradingBotGuardrailTone =
   | "warning"
   | "critical";
 
-export type TradingBotSummaryId =
-  | "bullpen-x-polymarket"
-  | "polymarket-direct"
-  | "bullpen-x-ai"
-  | "bullpen-ai-auto-live";
-
 export interface TradingBotGuardrail {
   label: string;
   value: string;
   tone?: TradingBotGuardrailTone;
 }
+
+export interface BullpenAutoLiveBotCardSummary {
+  id: "bullpen-ai-auto-live";
+  name: string;
+  route: string;
+  status: TradingBotStatus;
+  mode: TradingBotMode;
+  invested_usd?: number | null;
+  current_value_usd?: number | null;
+  pnl_usd?: number | null;
+  return_pct?: number | null;
+  active_positions?: number | null;
+  trades_today?: number | null;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  guardrails_summary: string;
+  strategy_summary: string;
+  risk_summary: string;
+  guardrails: TradingBotGuardrail[];
+}
+
+export interface BullpenAutoLiveSummaryResponse {
+  state: BullpenAutoLiveState;
+  settings: BullpenAutoLiveSettings;
+  bot_card: BullpenAutoLiveBotCardSummary;
+  latest_run?: BullpenAutoLiveRun | null;
+  recent_runs: BullpenAutoLiveRun[];
+  recent_decisions: BullpenAutoLiveDecision[];
+  latest_guardrail_checks: BullpenAutoLiveGuardrailCheck[];
+}
+
+export type TradingBotSummaryId =
+  | "bullpen-x-polymarket"
+  | "polymarket-direct"
+  | "bullpen-x-ai"
+  | "bullpen-ai-auto-live";
 
 export interface TradingBotSummary {
   id: TradingBotSummaryId;

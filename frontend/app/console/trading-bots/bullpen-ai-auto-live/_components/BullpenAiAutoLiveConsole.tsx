@@ -1,9 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  Loader2,
+  PauseCircle,
+  PlayCircle,
+  RefreshCcw,
+  Settings2,
+  ShieldAlert,
+  Square,
+  Zap,
+} from "lucide-react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,174 +28,103 @@ import { formatUnknownError } from "@/lib/apiErrors";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { APIError, apiService } from "@/services/api";
-import type { BullpenAutoLiveSummaryResponse } from "@/types/api";
+import type {
+  BullpenAutoLiveDecision,
+  BullpenAutoLiveGuardrailCheck,
+  BullpenAutoLiveRun,
+  BullpenAutoLiveStageResult,
+  BullpenAutoLiveSummaryResponse,
+} from "@/types/api";
 
-import {
-  AUTO_LIVE_ACTIVE_ROWS,
-  AUTO_LIVE_CANDIDATE_ROWS,
-  AUTO_LIVE_STAGE_FLOW,
-  type AutoLiveCheckStatus,
-  type AutoLiveDecision,
-  type AutoLiveRiskStatus,
-} from "./bullpenAiAutoLiveData";
 import { BullpenAiAutoLiveRiskGuardrailsDrawer } from "./BullpenAiAutoLiveRiskGuardrailsDrawer";
-import {
-  BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS,
-} from "./bullpenAiAutoLiveRiskGuardrails";
 
-type ReadinessKey =
-  | "autoLiveEnabled"
-  | "dryRun"
-  | "liveExecutionEnv"
-  | "doctorPasses"
-  | "balanceReady"
-  | "riskSettingsValid"
-  | "emergencyStop";
+type ActionKey = "run-once" | "start" | "pause" | "resume" | "stop";
 
-type ControlState = {
-  autoLiveEnabled: boolean;
-  dryRun: boolean;
-  liveExecutionEnv: boolean;
-  doctorPasses: boolean;
-  balanceReady: boolean;
-  riskSettingsValid: boolean;
-  emergencyStop: boolean;
-  paused: boolean;
-  liveTrading: boolean;
-  lastAction: string;
-  lastScan: string | null;
-  lastLlmRun: string | null;
-  lastRebalance: string | null;
-  nextScan: string | null;
-  nextLlmRun: string | null;
-  nextRebalance: string | null;
-};
+function normalizeError(error: unknown) {
+  if (error instanceof APIError) return error.message;
+  return formatUnknownError(error);
+}
 
-type StatusTone = "default" | "positive" | "warning" | "critical";
-
-type EmptyStateDescriptor = {
-  title: string;
-  description: string;
-  tone: StatusTone;
-};
-
-const READINESS_FIELDS: {
-  key: ReadinessKey;
-  label: string;
-  helper: string;
-}[] = [
-  {
-    key: "autoLiveEnabled",
-    label: "Auto-live enabled",
-    helper: "Master toggle for the automation engine.",
-  },
-  {
-    key: "dryRun",
-    label: "Dry run",
-    helper: "Keeps scans and sizing live while blocking execution.",
-  },
-  {
-    key: "liveExecutionEnv",
-    label: "Live execution env",
-    helper: "Requires the backend execution flag before live orders can route.",
-  },
-  {
-    key: "doctorPasses",
-    label: "Doctor passes",
-    helper: "Execution doctor must validate auth, quotes, and venue health.",
-  },
-  {
-    key: "balanceReady",
-    label: "Balance ready",
-    helper: "Wallet balance must be refreshed before trading.",
-  },
-  {
-    key: "riskSettingsValid",
-    label: "Risk settings valid",
-    helper: "Guardrail config has to be complete and internally consistent.",
-  },
-  {
-    key: "emergencyStop",
-    label: "Emergency stop",
-    helper: "Hard block for all live order submission.",
-  },
-];
-
-function formatMoney(value: number) {
+function formatMoney(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: value >= 1000 ? 0 : 2,
+    minimumFractionDigits: Math.abs(value) >= 1000 ? 0 : 2,
     maximumFractionDigits: 2,
   }).format(value);
 }
 
-function formatPercent(value: number) {
+function formatPercent(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
   return `${value.toFixed(1)}%`;
 }
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(value);
+function formatHours(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
+  return `${value.toFixed(1)}h`;
 }
 
-function formatDateTime(value: string | null) {
-  if (!value) return "—";
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
+  return date.toLocaleString(undefined, {
     year: "numeric",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-    timeZoneName: "short",
   });
 }
 
-function createTimelineSnapshot(now = new Date()) {
-  return {
-    lastScan: new Date(now.getTime() - 12 * 60_000).toISOString(),
-    lastLlmRun: new Date(now.getTime() - 8 * 60_000).toISOString(),
-    lastRebalance: new Date(now.getTime() - 34 * 60_000).toISOString(),
-    nextScan: new Date(now.getTime() + 7 * 60_000).toISOString(),
-    nextLlmRun: new Date(now.getTime() + 15 * 60_000).toISOString(),
-    nextRebalance: new Date(now.getTime() + 38 * 60_000).toISOString(),
-  };
+function labelize(value: string) {
+  return value.replace(/[_-]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function getStatusClass(status: AutoLiveCheckStatus) {
+function getGuardrailClass(status: string) {
   switch (status) {
     case "pass":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
     case "fail":
       return "border-rose-200 bg-rose-50 text-rose-700";
+    case "warning":
     case "watch":
-    default:
       return "border-amber-200 bg-amber-50 text-amber-800";
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-700";
   }
 }
 
-function getDecisionClass(decision: AutoLiveDecision) {
+function getDecisionClass(decision: string) {
   switch (decision) {
     case "BUY_NEW":
     case "ADD_MORE":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "HOLD":
-      return "border-slate-200 bg-slate-100 text-slate-700";
     case "TRIM":
       return "border-amber-200 bg-amber-50 text-amber-800";
     case "EXIT":
     case "SKIP":
-    default:
       return "border-rose-200 bg-rose-50 text-rose-700";
+    case "HOLD":
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-700";
   }
 }
 
-function getRiskStatusClass(status: AutoLiveRiskStatus) {
+function getModeClass(mode: string) {
+  switch (mode) {
+    case "live-trading":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "analysis-only":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "dry-run":
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-700";
+  }
+}
+
+function getRiskClass(status: string) {
   switch (status) {
     case "Ready":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
@@ -195,1347 +136,1041 @@ function getRiskStatusClass(status: AutoLiveRiskStatus) {
   }
 }
 
-function getToneClass(tone: StatusTone) {
-  switch (tone) {
-    case "positive":
-      return "border-emerald-200 bg-emerald-50/80 text-emerald-900";
-    case "warning":
-      return "border-amber-200 bg-amber-50/80 text-amber-900";
-    case "critical":
-      return "border-rose-200 bg-rose-50/80 text-rose-900";
-    case "default":
-    default:
-      return "border-slate-200 bg-slate-50/80 text-slate-900";
+function renderJson(value: unknown) {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value as Record<string, unknown>).length === 0) ||
+    (Array.isArray(value) && value.length === 0)
+  ) {
+    return "-";
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
   }
 }
 
-function normalizeError(error: unknown) {
-  if (error instanceof APIError) return error.message;
-  return formatUnknownError(error);
+function MetricCard({
+  eyebrow,
+  title,
+  value,
+  detail,
+}: {
+  eyebrow: string;
+  title: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <Card className="border-slate-200 bg-white/90 shadow-sm">
+      <CardHeader className="pb-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+          {eyebrow}
+        </p>
+        <CardTitle className="text-base text-slate-950">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-semibold tracking-tight text-slate-950">
+          {value}
+        </div>
+        <p className="mt-2 text-sm leading-6 text-slate-600">{detail}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function GuardrailPill({ check }: { check: BullpenAutoLiveGuardrailCheck }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-950">{check.label}</p>
+          <p className="mt-1 text-sm leading-6 text-slate-600">{check.detail}</p>
+        </div>
+        <span
+          className={cn(
+            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
+            getGuardrailClass(check.status),
+          )}
+        >
+          {check.status}
+        </span>
+      </div>
+      {check.value ? (
+        <p className="mt-3 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+          Value: {check.value}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function StageAuditCard({ stage }: { stage: BullpenAutoLiveStageResult }) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+            Stage {stage.stage_number}
+          </p>
+          <h4 className="mt-1 text-base font-semibold text-slate-950">
+            {stage.stage_name}
+          </h4>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{stage.reason}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
+              getGuardrailClass(stage.status),
+            )}
+          >
+            {stage.status}
+          </span>
+          {stage.hard_block ? (
+            <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">
+              Hard Block
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {stage.guardrails_checked.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {stage.guardrails_checked.map((check) => (
+            <span
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-xs font-medium",
+                getGuardrailClass(check.status),
+              )}
+              key={check.id}
+            >
+              {check.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <details className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-3">
+        <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
+          Inputs and outputs
+        </summary>
+        <div className="mt-3 grid gap-3 xl:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Inputs
+            </p>
+            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700">
+              {renderJson(stage.inputs)}
+            </pre>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Outputs
+            </p>
+            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700">
+              {renderJson(stage.outputs)}
+            </pre>
+          </div>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function DecisionAuditCard({
+  decision,
+  defaultOpen,
+}: {
+  decision: BullpenAutoLiveDecision;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details
+      className="rounded-[28px] border border-slate-200 bg-white shadow-sm"
+      open={defaultOpen}
+    >
+      <summary className="cursor-pointer list-none px-5 py-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
+                  getDecisionClass(decision.decision),
+                )}
+              >
+                {decision.decision}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+                {decision.side}
+              </span>
+              <span
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
+                  getRiskClass(decision.risk_status),
+                )}
+              >
+                {decision.risk_status}
+              </span>
+            </div>
+            <h3 className="mt-3 text-lg font-semibold tracking-tight text-slate-950">
+              {decision.market_title}
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              {decision.summary}
+            </p>
+          </div>
+          <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 xl:min-w-[360px]">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Price / Fair
+              </p>
+              <p className="mt-1 font-medium text-slate-950">
+                {formatPercent(decision.price_cents)} / {formatPercent(decision.fair_probability_pct)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Edge / Score
+              </p>
+              <p className="mt-1 font-medium text-slate-950">
+                {formatPercent(decision.edge_pp)} / {decision.score.toFixed(2)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Exposure
+              </p>
+              <p className="mt-1 font-medium text-slate-950">
+                {formatMoney(decision.current_exposure_usd)} to {formatMoney(decision.target_exposure_usd)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Evidence / Confidence
+              </p>
+              <p className="mt-1 font-medium text-slate-950">
+                {decision.evidence_status} / {decision.confidence}
+              </p>
+            </div>
+          </div>
+        </div>
+      </summary>
+
+      <div className="border-t border-slate-200 px-5 py-5">
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            eyebrow="Timing"
+            title="Hours Remaining"
+            value={formatHours(decision.hours_remaining)}
+            detail={`Updated ${formatDateTime(decision.updated_at)}`}
+          />
+          <MetricCard
+            eyebrow="Probability"
+            title="YES / NO Fair"
+            value={`${formatPercent(decision.fair_yes_probability_pct)} / ${formatPercent(decision.fair_no_probability_pct)}`}
+            detail={decision.disagreement_level ? `Disagreement: ${decision.disagreement_level}` : "Consensus spread stayed within the stored audit trail."}
+          />
+          <MetricCard
+            eyebrow="Event"
+            title="Event State"
+            value={decision.event_state || "Unknown"}
+            detail={decision.adjudication_required ? "Adjudication required before confidence is considered settled." : "No adjudication flag was raised in the persisted decision record."}
+          />
+          <MetricCard
+            eyebrow="PnL"
+            title="Realized PnL"
+            value={formatMoney(decision.realized_pnl_usd)}
+            detail={decision.reason}
+          />
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          {decision.market_url ? (
+            <a
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              href={decision.market_url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Open market
+              <ExternalLink className="size-4" />
+            </a>
+          ) : null}
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
+            Theme: {decision.theme}
+          </span>
+          {decision.slug ? (
+            <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
+              Slug: {decision.slug}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+          <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Key Evidence
+            </p>
+            {decision.key_evidence.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {decision.key_evidence.map((item, index) => (
+                  <p className="text-sm leading-6 text-slate-700" key={`${decision.id}-evidence-${index}`}>
+                    {item}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-slate-500">No key evidence was persisted for this decision.</p>
+            )}
+          </div>
+          <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Red Flags
+            </p>
+            {decision.red_flags.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {decision.red_flags.map((item, index) => (
+                  <p className="text-sm leading-6 text-slate-700" key={`${decision.id}-red-flag-${index}`}>
+                    {item}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-slate-500">No red flags were persisted for this decision.</p>
+            )}
+          </div>
+        </div>
+
+        {decision.rationale ? (
+          <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Rationale
+            </p>
+            <p className="mt-3 text-sm leading-6 text-slate-700">{decision.rationale}</p>
+          </div>
+        ) : null}
+
+        {decision.order_plan ? (
+          <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Order Plan
+              </span>
+              <span
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
+                  getGuardrailClass(decision.order_plan.status),
+                )}
+              >
+                {decision.order_plan.status}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold text-slate-950">Action:</span> {labelize(decision.order_plan.action)}
+              </p>
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold text-slate-950">Order Size:</span> {formatMoney(decision.order_plan.order_size_usd)}
+              </p>
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold text-slate-950">Limit Price:</span> {decision.order_plan.limit_price_cents.toFixed(1)}c
+              </p>
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold text-slate-950">Dry Run:</span> {decision.order_plan.dry_run ? "Yes" : "No"}
+              </p>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-600">{decision.order_plan.detail}</p>
+          </div>
+        ) : null}
+
+        {decision.llm_outputs.length > 0 ? (
+          <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              LLM Consensus Inputs
+            </p>
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              {decision.llm_outputs.map((output, index) => (
+                <div
+                  className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4"
+                  key={`${decision.id}-llm-${index}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">
+                        {output.provider}
+                      </p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                        {output.model}
+                      </p>
+                    </div>
+                    {output.error ? (
+                      <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">
+                        Error
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+                    <p>YES: {formatPercent(output.llm_yes_odds)}</p>
+                    <p>NO: {formatPercent(output.llm_no_odds)}</p>
+                    <p>Confidence: {output.confidence || "-"}</p>
+                    <p>Evidence: {output.evidence_status || "-"}</p>
+                  </div>
+                  {output.rationale ? (
+                    <p className="mt-3 text-sm leading-6 text-slate-600">{output.rationale}</p>
+                  ) : null}
+                  {output.error ? (
+                    <p className="mt-3 text-sm leading-6 text-rose-700">{output.error}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {decision.guardrail_checks.length > 0 ? (
+          <div className="mt-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Guardrails Checked
+            </p>
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              {decision.guardrail_checks.map((check) => (
+                <GuardrailPill check={check} key={check.id} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {decision.stage_results.length > 0 ? (
+          <div className="mt-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Stage Audit Trail
+            </p>
+            <div className="mt-3 space-y-3">
+              {decision.stage_results.map((stage) => (
+                <StageAuditCard
+                  key={`${decision.id}-stage-${stage.stage_number}-${stage.stage_name}`}
+                  stage={stage}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function RunAuditCard({
+  run,
+  defaultOpen,
+}: {
+  run: BullpenAutoLiveRun;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details
+      className="rounded-[28px] border border-slate-200 bg-white shadow-sm"
+      open={defaultOpen}
+    >
+      <summary className="cursor-pointer list-none px-5 py-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
+                  getGuardrailClass(run.status),
+                )}
+              >
+                {run.status}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+                {labelize(run.triggered_by)}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+                {run.dry_run ? "Dry Run" : "Live Path"}
+              </span>
+            </div>
+            <h3 className="mt-3 text-lg font-semibold tracking-tight text-slate-950">
+              {run.summary}
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Started {formatDateTime(run.started_at)}
+              {run.completed_at ? ` | Completed ${formatDateTime(run.completed_at)}` : ""}
+            </p>
+          </div>
+          <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 xl:min-w-[320px]">
+            <p>
+              <span className="font-semibold text-slate-950">Decisions:</span> {run.decisions_count}
+            </p>
+            <p>
+              <span className="font-semibold text-slate-950">Orders planned:</span> {run.orders_planned}
+            </p>
+            <p>
+              <span className="font-semibold text-slate-950">Orders submitted:</span> {run.orders_submitted}
+            </p>
+            <p>
+              <span className="font-semibold text-slate-950">Execution requested:</span> {run.live_execution_requested ? "Yes" : "No"}
+            </p>
+          </div>
+        </div>
+      </summary>
+
+      <div className="border-t border-slate-200 px-5 py-5">
+        {run.error_message ? (
+          <Alert className="border-rose-200 bg-rose-50 text-rose-900">
+            <AlertTriangle className="size-4" />
+            <AlertTitle>Run error</AlertTitle>
+            <AlertDescription>{run.error_message}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {run.guardrail_checks.length > 0 ? (
+          <div className="mt-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Run Guardrails
+            </p>
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              {run.guardrail_checks.map((check) => (
+                <GuardrailPill check={check} key={`${run.id}-${check.id}`} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {run.stage_results.length > 0 ? (
+          <div className="mt-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Stage Audit Trail
+            </p>
+            <div className="mt-3 space-y-3">
+              {run.stage_results.map((stage) => (
+                <StageAuditCard
+                  key={`${run.id}-stage-${stage.stage_number}-${stage.stage_name}`}
+                  stage={stage}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {run.decision_ids.length > 0 ? (
+          <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50/80 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Decision IDs
+            </p>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700">
+              {renderJson(run.decision_ids)}
+            </pre>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+async function requestDashboard(): Promise<BullpenAutoLiveSummaryResponse> {
+  const [summary, runs, decisions] = await Promise.all([
+    apiService.bullpenAiAutoLiveSummary(),
+    apiService.bullpenAiAutoLiveRuns(),
+    apiService.bullpenAiAutoLiveDecisions(),
+  ]);
+
+  return {
+    ...summary,
+    recent_runs: runs,
+    recent_decisions: decisions,
+  };
 }
 
 export function BullpenAiAutoLiveConsole() {
-  const [autoLiveSummary, setAutoLiveSummary] =
-    useState<BullpenAutoLiveSummaryResponse | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(true);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState<ActionKey | null>(null);
   const [guardrailsDrawerOpen, setGuardrailsDrawerOpen] = useState(false);
-  const [localControlState, setControlState] = useState<ControlState>(() => ({
-    autoLiveEnabled: true,
-    dryRun: false,
-    liveExecutionEnv: true,
-    doctorPasses: true,
-    balanceReady: true,
-    riskSettingsValid: true,
-    emergencyStop: false,
-    paused: false,
-    liveTrading: false,
-    lastAction:
-      "Auto-Live is armed. Live orders still require an explicit rebalance trigger.",
-    ...createTimelineSnapshot(),
-  }));
-  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({
-    "iran-fifa-2026": true,
-  });
+
+  async function reloadDashboard() {
+    setRefreshing(true);
+    try {
+      const nextSummary = await requestDashboard();
+      setSummary(nextSummary);
+      setError(null);
+      return nextSummary;
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+      return null;
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
 
-    async function hydrateAutoLiveSummary() {
+    async function loadInitialDashboard() {
+      setLoading(true);
       try {
-        const summary = await apiService.bullpenAiAutoLiveSummary();
+        const nextSummary = await requestDashboard();
         if (cancelled) return;
-        setAutoLiveSummary(summary);
-        setSummaryError(null);
-      } catch (error) {
+        setSummary(nextSummary);
+        setError(null);
+      } catch (nextError) {
         if (cancelled) return;
-        setSummaryError(normalizeError(error));
+        setError(normalizeError(nextError));
       } finally {
         if (!cancelled) {
-          setSummaryLoading(false);
+          setLoading(false);
         }
       }
     }
 
-    void hydrateAutoLiveSummary();
+    void loadInitialDashboard();
 
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const loadAutoLiveSummary = useCallback(async () => {
-    setSummaryLoading(true);
+  async function handleAction(action: ActionKey) {
+    setActionBusy(action);
     try {
-      const summary = await apiService.bullpenAiAutoLiveSummary();
-      setAutoLiveSummary(summary);
-      setSummaryError(null);
-      return summary;
-    } catch (error) {
-      setSummaryError(normalizeError(error));
-      return null;
+      if (action === "run-once") {
+        await apiService.bullpenAiAutoLiveRunOnce();
+      } else if (action === "start") {
+        await apiService.bullpenAiAutoLiveStart();
+      } else if (action === "pause") {
+        await apiService.bullpenAiAutoLivePause();
+      } else if (action === "resume") {
+        await apiService.bullpenAiAutoLiveResume();
+      } else if (action === "stop") {
+        await apiService.bullpenAiAutoLiveStop();
+      }
+
+      await reloadDashboard();
+    } catch (nextError) {
+      setError(normalizeError(nextError));
     } finally {
-      setSummaryLoading(false);
+      setActionBusy(null);
     }
-  }, []);
+  }
 
-  const persistedSettings =
-    autoLiveSummary?.settings ?? BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS;
-  const controlState = useMemo(() => {
-    if (!autoLiveSummary) {
-      return localControlState;
-    }
+  const state = summary?.state;
+  const settings = summary?.settings;
+  const latestRun = summary?.latest_run ?? summary?.recent_runs?.[0] ?? null;
+  const recentRuns = summary?.recent_runs ?? [];
+  const recentDecisions = summary?.recent_decisions ?? [];
+  const botCard = summary?.bot_card;
+  const latestGuardrails = summary?.latest_guardrail_checks ?? [];
 
-    return {
-      ...localControlState,
-      autoLiveEnabled: autoLiveSummary.settings.auto_live_enabled,
-      dryRun: autoLiveSummary.settings.dry_run,
-      liveExecutionEnv: autoLiveSummary.settings.allow_live_execution,
-      doctorPasses: autoLiveSummary.state.doctor_status !== "fail",
-      balanceReady: autoLiveSummary.state.balance_status !== "fail",
-      riskSettingsValid: autoLiveSummary.latest_guardrail_checks.every(
-        (check) => check.status !== "fail",
-      ),
-      emergencyStop: autoLiveSummary.settings.emergency_stop,
-      paused: autoLiveSummary.state.paused,
-      liveTrading: autoLiveSummary.state.mode === "live-trading",
-      lastAction:
-        autoLiveSummary.state.last_action?.trim() || localControlState.lastAction,
-      lastScan: autoLiveSummary.state.last_scan_at ?? localControlState.lastScan,
-      lastLlmRun:
-        autoLiveSummary.state.last_llm_run_at ?? localControlState.lastLlmRun,
-      lastRebalance:
-        autoLiveSummary.state.last_rebalance_at ?? localControlState.lastRebalance,
-      nextScan: autoLiveSummary.state.next_scan_at ?? localControlState.nextScan,
-      nextLlmRun:
-        autoLiveSummary.state.next_llm_run_at ?? localControlState.nextLlmRun,
-      nextRebalance:
-        autoLiveSummary.state.next_rebalance_at ??
-        localControlState.nextRebalance,
-    };
-  }, [autoLiveSummary, localControlState]);
-  const latestGuardrailChecks = autoLiveSummary?.latest_guardrail_checks;
-  const bankrollUsd = persistedSettings.bankroll_usd;
-  const cashReserveUsd =
-    (bankrollUsd * persistedSettings.min_cash_reserve_pct_bankroll) / 100;
-
-  const canRunLiveRebalance =
-    controlState.autoLiveEnabled &&
-    !controlState.dryRun &&
-    controlState.liveExecutionEnv &&
-    !controlState.emergencyStop &&
-    controlState.doctorPasses &&
-    controlState.balanceReady &&
-    controlState.riskSettingsValid;
-
-  const liveBlockers = [
-    !controlState.autoLiveEnabled ? "auto-live is disabled" : null,
-    controlState.dryRun ? "dry-run is still enabled" : null,
-    !controlState.liveExecutionEnv ? "live execution env flag is off" : null,
-    controlState.emergencyStop ? "emergency stop is active" : null,
-    !controlState.doctorPasses ? "doctor failed" : null,
-    !controlState.balanceReady ? "balance is unavailable" : null,
-    !controlState.riskSettingsValid ? "risk settings are invalid" : null,
-  ].filter(Boolean) as string[];
-
-  const activeRows = useMemo(() => {
-    if (!controlState.autoLiveEnabled || controlState.dryRun) return [];
-    return AUTO_LIVE_ACTIVE_ROWS;
-  }, [controlState.autoLiveEnabled, controlState.dryRun]);
-
-  const candidateRows = useMemo(() => {
-    if (!controlState.autoLiveEnabled || controlState.paused) return [];
-    return AUTO_LIVE_CANDIDATE_ROWS;
-  }, [controlState.autoLiveEnabled, controlState.paused]);
-
-  const displayRows = useMemo(
-    () => [...activeRows, ...candidateRows],
-    [activeRows, candidateRows],
-  );
-
-  const openExposure = activeRows.reduce(
-    (total, row) => total + row.currentExposure,
-    0,
-  );
-  const availableCash = Math.max(0, bankrollUsd - cashReserveUsd - openExposure);
-  const dailyPnl =
-    !controlState.autoLiveEnabled
-      ? 0
-      : controlState.liveTrading
-        ? 286
-        : controlState.dryRun
-          ? 42
-          : 173;
-  const weeklyPnl =
-    !controlState.autoLiveEnabled
-      ? 0
-      : controlState.liveTrading
-        ? 834
-        : controlState.dryRun
-          ? 154
-          : 612;
-  const tradesToday = autoLiveSummary?.state.trades_today ?? (
-    !controlState.autoLiveEnabled
-      ? 0
-      : controlState.liveTrading
-        ? 8
-        : controlState.dryRun
-          ? 3
-          : 5
-  );
-
-  const emptyStates = useMemo(() => {
-    const states: EmptyStateDescriptor[] = [];
-
-    if (!controlState.autoLiveEnabled) {
-      states.push({
-        title: "Bot not configured",
-        description:
-          "Auto-live is disabled, so this console is holding position and candidate rows until the bot is armed again.",
-        tone: "default",
-      });
-      return states;
-    }
-
-    if (controlState.dryRun) {
-      states.push({
-        title: "Dry run only",
-        description:
-          "Scans, evidence refreshes, and sizing still run, but no active live positions are surfaced for execution.",
-        tone: "warning",
-      });
-    }
-
-    if (!canRunLiveRebalance && !controlState.dryRun) {
-      states.push({
-        title: "Live blocked due to guardrails",
-        description: `Live rebalance remains disabled because ${liveBlockers.join(
-          ", ",
-        )}.`,
-        tone: "critical",
-      });
-    }
-
-    if (activeRows.length === 0) {
-      states.push({
-        title: "No active positions yet",
-        description:
-          "This board is waiting for live execution to create or sync current Auto-Live positions.",
-        tone: controlState.dryRun ? "warning" : "default",
-      });
-    }
-
-    if (candidateRows.length === 0) {
-      states.push({
-        title: "No candidates yet",
-        description:
-          "New candidate markets will appear after the next successful scan and LLM consensus cycle.",
-        tone: controlState.paused ? "warning" : "default",
-      });
-    }
-
-    return states;
-  }, [
-    activeRows.length,
-    candidateRows.length,
-    canRunLiveRebalance,
-    controlState.autoLiveEnabled,
-    controlState.dryRun,
-    controlState.paused,
-    liveBlockers,
-  ]);
-
-  const guardrailItems = useMemo(() => {
-    const backendGuardrailChecks = latestGuardrailChecks ?? [];
-
-    if (backendGuardrailChecks.length > 0) {
-      return backendGuardrailChecks.map((check) => ({
-        label: check.label,
-        value: check.value || check.detail,
-        status: check.status,
-      }));
-    }
-
-    const maxThemeExposure = 4_500;
-    const macroThemeExposure = activeRows
-      .filter((row) => row.category.includes("Macro"))
-      .reduce((total, row) => total + row.targetExposure, 0);
-    const hasWideDisagreement = displayRows.some(
-      (row) => row.llmConsensus.spread > 11,
+  if (loading && !summary) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.10),_transparent_35%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] px-6">
+        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-600 shadow-sm">
+          <Loader2 className="size-4 animate-spin" />
+          Loading Bullpen AI Auto-Live audit trail...
+        </div>
+      </div>
     );
-
-    return [
-      {
-        label: "Max single trade",
-        value: "$1,250 cap",
-        status: "pass" as const,
-      },
-      {
-        label: "Max market exposure",
-        value: "$3,000 / market",
-        status: "pass" as const,
-      },
-      {
-        label: "Max theme exposure",
-        value: `${formatMoney(macroThemeExposure)} of ${formatMoney(maxThemeExposure)}`,
-        status: macroThemeExposure > maxThemeExposure ? ("fail" as const) : ("pass" as const),
-      },
-      {
-        label: "Max open exposure",
-        value: `${formatMoney(openExposure)} live`,
-        status:
-          openExposure > 10_000
-            ? ("fail" as const)
-            : openExposure > 8_000
-              ? ("watch" as const)
-              : ("pass" as const),
-      },
-      {
-        label: "Cash reserve",
-        value: `${formatMoney(availableCash)} free after reserve`,
-        status:
-          controlState.balanceReady && availableCash >= 0
-            ? ("pass" as const)
-            : ("fail" as const),
-      },
-      {
-        label: "Min edge",
-        value: ">= 6 pts",
-        status: displayRows.some((row) => row.edge < 6) ? ("watch" as const) : ("pass" as const),
-      },
-      {
-        label: "Max LLM disagreement",
-        value: hasWideDisagreement ? "Breached on 1 candidate" : "<= 11 pts spread",
-        status: hasWideDisagreement ? ("watch" as const) : ("pass" as const),
-      },
-      {
-        label: "Evidence requirement",
-        value: "3 fresh shared sources",
-        status: controlState.riskSettingsValid ? ("pass" as const) : ("fail" as const),
-      },
-      {
-        label: "Daily/weekly loss stop",
-        value: `${formatMoney(dailyPnl)} / ${formatMoney(weeklyPnl)}`,
-        status: dailyPnl < -600 || weeklyPnl < -1500 ? ("fail" as const) : ("pass" as const),
-      },
-      {
-        label: "Limit orders only",
-        value: "Enabled",
-        status: "pass" as const,
-      },
-      {
-        label: "Emergency stop status",
-        value: controlState.emergencyStop ? "Active" : "Clear",
-        status: controlState.emergencyStop ? ("fail" as const) : ("pass" as const),
-      },
-    ];
-  }, [
-    activeRows,
-    availableCash,
-    controlState.balanceReady,
-    controlState.emergencyStop,
-    controlState.riskSettingsValid,
-    dailyPnl,
-    displayRows,
-    latestGuardrailChecks,
-    openExposure,
-    weeklyPnl,
-  ]);
-
-  const metricItems = [
-    {
-      label: "Bankroll",
-      value: formatMoney(bankrollUsd),
-      helper: "Configured bot bankroll",
-    },
-    {
-      label: "Available cash",
-      value: formatMoney(availableCash),
-      helper: "Free cash after reserve",
-    },
-    {
-      label: "Open exposure",
-      value: formatMoney(openExposure),
-      helper: "Current live position exposure",
-    },
-    {
-      label: "Cash reserve",
-      value: formatMoney(cashReserveUsd),
-      helper: "Protected reserve floor",
-    },
-    {
-      label: "Daily P&L",
-      value: formatMoney(dailyPnl),
-      helper: "Session contribution",
-      tone: dailyPnl >= 0 ? "positive" : "negative",
-    },
-    {
-      label: "Weekly P&L",
-      value: formatMoney(weeklyPnl),
-      helper: "Rolling 7-day contribution",
-      tone: weeklyPnl >= 0 ? "positive" : "negative",
-    },
-    {
-      label: "Active positions",
-      value: formatNumber(activeRows.length),
-      helper: "Live rows on-book",
-    },
-    {
-      label: "Trades today",
-      value: formatNumber(tradesToday),
-      helper: "Executed or staged decisions",
-    },
-    {
-      label: "Last scan",
-      value: formatDateTime(controlState.lastScan),
-      helper: "Market inventory refresh",
-    },
-    {
-      label: "Last LLM run",
-      value: formatDateTime(controlState.lastLlmRun),
-      helper: "Consensus pipeline refresh",
-    },
-    {
-      label: "Last rebalance",
-      value: formatDateTime(controlState.lastRebalance),
-      helper: "Most recent live or staged rebalance",
-    },
-    {
-      label: "Next scan",
-      value: formatDateTime(controlState.nextScan),
-      helper: "Upcoming scan schedule",
-    },
-    {
-      label: "Next LLM run",
-      value: formatDateTime(controlState.nextLlmRun),
-      helper: "Upcoming consensus refresh",
-    },
-    {
-      label: "Next rebalance",
-      value: formatDateTime(controlState.nextRebalance),
-      helper: "Next live execution window",
-    },
-  ];
-
-  const modeBadges = [
-    {
-      label: "Dry Run",
-      active: controlState.dryRun,
-      activeClass: "border-amber-200 bg-amber-50 text-amber-800",
-    },
-    {
-      label: "Live Armed",
-      active:
-        controlState.autoLiveEnabled &&
-        !controlState.dryRun &&
-        !controlState.liveTrading &&
-        !controlState.paused &&
-        !controlState.emergencyStop &&
-        controlState.liveExecutionEnv &&
-        controlState.doctorPasses &&
-        controlState.balanceReady &&
-        controlState.riskSettingsValid,
-      activeClass: "border-sky-200 bg-sky-50 text-sky-700",
-    },
-    {
-      label: "Live Trading",
-      active: controlState.liveTrading,
-      activeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    },
-    {
-      label: "Paused",
-      active: controlState.paused,
-      activeClass: "border-slate-300 bg-slate-100 text-slate-700",
-    },
-    {
-      label: "Emergency Stopped",
-      active: controlState.emergencyStop,
-      activeClass: "border-rose-200 bg-rose-50 text-rose-700",
-    },
-    {
-      label: "Doctor Failed",
-      active: !controlState.doctorPasses,
-      activeClass: "border-rose-200 bg-rose-50 text-rose-700",
-    },
-    {
-      label: "Balance Unavailable",
-      active: !controlState.balanceReady,
-      activeClass: "border-amber-200 bg-amber-50 text-amber-800",
-    },
-  ];
-
-  function setLastAction(message: string, updates?: Partial<ControlState>) {
-    setControlState((current) => ({
-      ...current,
-      ...updates,
-      lastAction: message,
-    }));
-  }
-
-  function toggleReadiness(key: ReadinessKey) {
-    setControlState((current) => {
-      const nextValue = !current[key];
-      const nextState: ControlState = {
-        ...current,
-        [key]: nextValue,
-      };
-
-      if (key === "dryRun" && nextValue) {
-        nextState.liveTrading = false;
-      }
-
-      if (
-        key === "emergencyStop" &&
-        nextValue
-      ) {
-        nextState.liveTrading = false;
-        nextState.paused = false;
-      }
-
-      if (
-        (key === "doctorPasses" ||
-          key === "balanceReady" ||
-          key === "riskSettingsValid" ||
-          key === "liveExecutionEnv") &&
-        !nextValue
-      ) {
-        nextState.liveTrading = false;
-      }
-
-      if (key === "autoLiveEnabled" && !nextValue) {
-        nextState.liveTrading = false;
-        nextState.paused = false;
-      }
-
-      return {
-        ...nextState,
-        lastAction: `${READINESS_FIELDS.find((field) => field.key === key)?.label ?? "Readiness"} switched ${nextValue ? "on" : "off"}.`,
-      };
-    });
-  }
-
-  function handleStartBot() {
-    const timeline = createTimelineSnapshot();
-    setLastAction("Auto-Live bot started. The engine is armed and waiting on the next cycle.", {
-      autoLiveEnabled: true,
-      paused: false,
-      liveTrading: false,
-      nextScan: timeline.nextScan,
-      nextLlmRun: timeline.nextLlmRun,
-      nextRebalance: timeline.nextRebalance,
-    });
-  }
-
-  function handleStopBot() {
-    setLastAction("Auto-Live bot stopped. Scans and live rebalances are now idle.", {
-      autoLiveEnabled: false,
-      liveTrading: false,
-      paused: false,
-      nextScan: null,
-      nextLlmRun: null,
-      nextRebalance: null,
-    });
-  }
-
-  function handlePause() {
-    setLastAction("Auto-Live paused. Existing positions remain visible while new candidate scans are held.", {
-      paused: true,
-      liveTrading: false,
-    });
-  }
-
-  function handleResume() {
-    const resumeMessage =
-      canRunLiveRebalance && !controlState.dryRun
-        ? "Auto-Live resumed and re-armed for the next live rebalance window."
-        : "Auto-Live resumed, but live execution is still gated by the current readiness checks.";
-
-    setLastAction(resumeMessage, {
-      paused: false,
-      liveTrading: canRunLiveRebalance && !controlState.dryRun,
-    });
-  }
-
-  function handleRunDryRun() {
-    const timeline = createTimelineSnapshot();
-    setLastAction(
-      "Dry-run cycle completed. Scan, evidence, and consensus were refreshed without routing live orders.",
-      {
-        autoLiveEnabled: true,
-        dryRun: true,
-        liveTrading: false,
-        paused: false,
-        lastScan: timeline.lastScan,
-        lastLlmRun: timeline.lastLlmRun,
-        nextScan: timeline.nextScan,
-        nextLlmRun: timeline.nextLlmRun,
-      },
-    );
-  }
-
-  function handleRunLiveRebalance() {
-    if (!canRunLiveRebalance) return;
-    const timeline = createTimelineSnapshot();
-
-    setLastAction(
-      "Live rebalance submitted. Limit orders are staged against target exposure deltas.",
-      {
-        autoLiveEnabled: true,
-        dryRun: false,
-        paused: false,
-        liveTrading: true,
-        lastScan: timeline.lastScan,
-        lastLlmRun: timeline.lastLlmRun,
-        lastRebalance: new Date().toISOString(),
-        nextScan: timeline.nextScan,
-        nextLlmRun: timeline.nextLlmRun,
-        nextRebalance: timeline.nextRebalance,
-      },
-    );
-  }
-
-  async function handleEmergencyStop() {
-    try {
-      await apiService.bullpenAiAutoLiveEmergencyStop();
-      await loadAutoLiveSummary();
-      setLastAction(
-        "Emergency stop activated. All live order submission is blocked until the stop is cleared.",
-        {
-          emergencyStop: true,
-          liveTrading: false,
-          paused: true,
-        },
-      );
-    } catch (error) {
-      setLastAction(normalizeError(error));
-    }
-  }
-
-  function toggleExpanded(rowId: string) {
-    setExpandedRows((current) => ({
-      ...current,
-      [rowId]: !current[rowId],
-    }));
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-6 pb-8">
-      <div className="space-y-3">
-        <div className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Trading Bots
-        </div>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-950">
-            Bullpen AI Auto-Live
-          </h1>
-          <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-            Automated Bullpen trading using market rules, shared evidence, LLM
-            consensus, portfolio guardrails, and live limit-order execution.
-          </p>
-        </div>
-      </div>
-
-      {summaryError ? (
-        <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-4 py-4 text-sm leading-6 text-rose-900">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">
-            Backend Guardrails Sync Failed
-          </p>
-          <p className="mt-2">
-            The console is still showing local scaffold data, but the editable
-            Risk Guardrails drawer may be stale until backend sync succeeds.
-          </p>
-          <p className="mt-2 text-rose-700">{summaryError}</p>
-        </div>
-      ) : null}
-
-      <Card className="gap-0 rounded-[28px] border border-slate-200 bg-white py-0 shadow-sm">
-        <CardHeader className="gap-4 border-b border-slate-100 px-6 py-6 sm:px-7">
-          <div className="flex flex-wrap items-center gap-2">
-            {modeBadges.map((badge) => (
-              <span
-                key={badge.label}
-                className={cn(
-                  "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
-                  badge.active
-                    ? badge.activeClass
-                    : "border-slate-200 bg-white text-slate-400",
-                )}
-              >
-                {badge.label}
-              </span>
-            ))}
-          </div>
-          <div>
-            <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-              Automation Console
-            </CardTitle>
-            <CardDescription className="mt-2 max-w-5xl text-sm text-slate-600">
-              Auto-Live sits beside Bullpen x AI rather than replacing it. The
-              manual page stays focused on analysis and odds work, while this
-              console owns scanning, guardrails, rebalancing, and live execution
-              controls.
-            </CardDescription>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              className="rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
-              onClick={handleStartBot}
-              disabled={
-                controlState.autoLiveEnabled &&
-                !controlState.paused &&
-                !controlState.liveTrading
-              }
-            >
-              Start Bot
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="rounded-full border-slate-300 px-5"
-              onClick={handleStopBot}
-              disabled={
-                !controlState.autoLiveEnabled &&
-                !controlState.liveTrading &&
-                !controlState.paused
-              }
-            >
-              Stop Bot
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="rounded-full border-slate-300 px-5"
-              onClick={handlePause}
-              disabled={!controlState.autoLiveEnabled || controlState.paused}
-            >
-              Pause
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="rounded-full border-slate-300 px-5"
-              onClick={handleResume}
-              disabled={!controlState.paused || !controlState.autoLiveEnabled}
-            >
-              Resume
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="rounded-full border-slate-300 px-5"
-              onClick={handleRunDryRun}
-            >
-              Run Dry-Run Now
-            </Button>
-            <Button
-              size="sm"
-              className="rounded-full bg-emerald-600 px-5 text-white hover:bg-emerald-500"
-              onClick={handleRunLiveRebalance}
-              disabled={!canRunLiveRebalance}
-            >
-              Run Live Rebalance Now
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              className="rounded-full px-5"
-              onClick={handleEmergencyStop}
-              disabled={controlState.emergencyStop}
-            >
-              Emergency Stop
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="rounded-full border-slate-300 px-5"
-              onClick={() => setGuardrailsDrawerOpen(true)}
-            >
-              {summaryLoading ? <Loader2 className="size-4 animate-spin" /> : null}
-              Risk Guardrails
-            </Button>
-            <Button
-              asChild
-              size="sm"
-              variant="outline"
-              className="rounded-full border-slate-300 px-5"
-            >
-              <a href="#seven-stage-flow">View 7-Stage Flow</a>
-            </Button>
-          </div>
-          <div
-            className={cn(
-              "rounded-2xl border px-4 py-3 text-sm leading-6",
-              canRunLiveRebalance
-                ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
-                : "border-amber-200 bg-amber-50/80 text-amber-900",
-            )}
-          >
-            {canRunLiveRebalance
-              ? "Run Live Rebalance Now is unlocked. Every required execution gate is currently green."
-              : `Run Live Rebalance Now stays disabled until ${liveBlockers.join(
-                  ", ",
-                )}.`}
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-5 px-6 py-6 sm:px-7 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.95fr)]">
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Live state
-              </p>
-              <p className="mt-2 text-sm leading-6 text-slate-700">
-                {controlState.lastAction}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Operator handoff
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button
-                  asChild
-                  size="sm"
-                  className="rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
-                >
-                  <Link href={URLs.routes.console.tradingBots()}>
-                    Open Trading Bots Overview
-                  </Link>
-                </Button>
-                <Button
-                  asChild
-                  size="sm"
-                  variant="outline"
-                  className="rounded-full border-slate-300 px-5"
-                >
-                  <Link href={URLs.routes.console.bullpenAi()}>
-                    Open Bullpen x AI
-                  </Link>
-                </Button>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                Bullpen x AI remains the manual analysis surface. Auto-Live
-                focuses on scans, guardrails, and live execution state.
-              </p>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Execution readiness
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {READINESS_FIELDS.map((field) => {
-                const isEnabled = controlState[field.key];
-                return (
-                  <button
-                    key={field.key}
-                    type="button"
-                    onClick={() => toggleReadiness(field.key)}
-                    className={cn(
-                      "rounded-2xl border px-4 py-3 text-left shadow-sm transition",
-                      isEnabled
-                        ? "border-slate-300 bg-slate-50 hover:border-sky-300 hover:bg-sky-50"
-                        : "border-slate-200 bg-white hover:border-amber-300 hover:bg-amber-50/60",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                        {field.label}
+    <>
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.12),_transparent_28%),radial-gradient(circle_at_right,_rgba(16,185,129,0.10),_transparent_30%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)]">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <div className="space-y-6">
+            <Card className="overflow-hidden border-slate-200 bg-white/90 shadow-sm backdrop-blur">
+              <div className="border-b border-slate-200 bg-[linear-gradient(135deg,_rgba(15,23,42,0.03),_rgba(251,191,36,0.10))] px-6 py-6">
+                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="max-w-3xl">
+                    <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">
+                      Separate Auto-Live Service
+                    </div>
+                    <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">
+                      Bullpen AI Auto-Live
+                    </h1>
+                    <p className="mt-3 text-sm leading-7 text-slate-600 sm:text-base">
+                      A standalone 7-stage decision engine that scans candidate
+                      markets, parses rules, builds shared evidence, runs LLM
+                      consensus, sizes positions, rebalances exposure, and only
+                      executes limit orders when every hard guardrail passes.
+                    </p>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                      Bullpen x AI remains the manual analysis surface.
+                      Auto-Live uses its own persisted runs, decisions, and
+                      stage-by-stage audit trail.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span
+                        className={cn(
+                          "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em]",
+                          getGuardrailClass(state?.status || "watch"),
+                        )}
+                      >
+                        {state ? labelize(state.status) : "Unknown Status"}
                       </span>
                       <span
                         className={cn(
-                          "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
-                          isEnabled
-                            ? field.key === "emergencyStop"
-                              ? "border-rose-200 bg-rose-50 text-rose-700"
-                              : "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-white text-slate-500",
+                          "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em]",
+                          getModeClass(state?.mode || "dry-run"),
                         )}
                       >
-                        {isEnabled ? (field.key === "emergencyStop" ? "Active" : "On") : "Off"}
+                        {state ? labelize(state.mode) : "Dry Run"}
+                      </span>
+                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700">
+                        {state?.live_armed ? "Live Armed" : "Simulation Only"}
+                      </span>
+                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700">
+                        {state?.dry_run ? "Dry Run On" : "Dry Run Off"}
                       </span>
                     </div>
-                    <p className="mt-2 text-sm leading-6 text-slate-700">
-                      {field.helper}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+                  </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {metricItems.map((item) => (
-          <div
-            key={item.label}
-            className="rounded-[24px] border border-slate-200 bg-slate-50/80 px-4 py-3 shadow-sm"
-          >
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              {item.label}
-            </div>
-            <div
-              className={cn(
-                "mt-2 text-sm font-semibold",
-                item.tone === "positive"
-                  ? "text-emerald-700"
-                  : item.tone === "negative"
-                    ? "text-rose-700"
-                    : "text-slate-950",
-              )}
-            >
-              {item.value}
-            </div>
-            <div className="mt-1 text-xs leading-5 text-slate-500">
-              {item.helper}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <Card
-          id="risk-guardrails"
-          className="rounded-[28px] border border-slate-200 bg-white shadow-sm"
-        >
-          <CardHeader>
-            <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-              Risk Guardrails
-            </CardTitle>
-            <CardDescription className="text-sm text-slate-600">
-              Live orders only unlock when capital, evidence, and execution
-              guardrails all remain in-policy.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
-            {guardrailItems.map((item) => (
-              <div
-                key={item.label}
-                className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    {item.label}
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
-                      getStatusClass(item.status),
-                    )}
-                  >
-                    {item.status}
-                  </span>
-                </div>
-                <p className="mt-2 text-sm leading-6 text-slate-700">
-                  {item.value}
-                </p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card
-          id="seven-stage-flow"
-          className="rounded-[28px] border border-slate-200 bg-white shadow-sm"
-        >
-          <CardHeader>
-            <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-              7-Stage Flow
-            </CardTitle>
-            <CardDescription className="text-sm text-slate-600">
-              Every market runs through the same audit chain before it can reach
-              live limit-order execution.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {AUTO_LIVE_STAGE_FLOW.map((stage, index) => (
-              <div
-                key={stage.label}
-                className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3"
-              >
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  Stage {index + 1}
-                </p>
-                <p className="mt-2 text-sm font-semibold text-slate-950">
-                  {stage.label}
-                </p>
-                <p className="mt-1 text-sm leading-6 text-slate-600">
-                  {stage.description}
-                </p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
-        <CardHeader className="gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-base tracking-[0.18em] text-slate-950">
-                Live Positions And Candidates
-              </CardTitle>
-              <CardDescription className="mt-2 text-sm text-slate-600">
-                Active positions and new candidates share one board so the
-                rebalance engine can compare current exposure versus target
-                exposure in a single place.
-              </CardDescription>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
-                {formatNumber(activeRows.length)} active positions
-              </span>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
-                {formatNumber(candidateRows.length)} new candidates
-              </span>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {emptyStates.length > 0 ? (
-            <div className="grid gap-3 lg:grid-cols-2">
-              {emptyStates.map((state) => (
-                <div
-                  key={state.title}
-                  className={cn(
-                    "rounded-2xl border px-4 py-4",
-                    getToneClass(state.tone),
-                  )}
-                >
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em]">
-                    {state.title}
-                  </p>
-                  <p className="mt-2 text-sm leading-6">{state.description}</p>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {displayRows.length === 0 ? (
-            <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center">
-              <p className="text-sm font-semibold text-slate-900">
-                Bot not configured
-              </p>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                Turn Auto-Live back on to repopulate the combined positions and
-                candidates board.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-[24px] border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50/90 text-left">
-                  <tr className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    <th className="px-4 py-3">Market</th>
-                    <th className="px-4 py-3">Category/theme</th>
-                    <th className="px-4 py-3">Side</th>
-                    <th className="px-4 py-3">Current price</th>
-                    <th className="px-4 py-3">LLM fair probability</th>
-                    <th className="px-4 py-3">Edge</th>
-                    <th className="px-4 py-3">Score</th>
-                    <th className="px-4 py-3">Current exposure</th>
-                    <th className="px-4 py-3">Target exposure</th>
-                    <th className="px-4 py-3">Proposed order</th>
-                    <th className="px-4 py-3">Decision</th>
-                    <th className="px-4 py-3">Risk status</th>
-                    <th className="px-4 py-3">Reason</th>
-                    <th className="px-4 py-3">Last updated</th>
-                  </tr>
-                </thead>
-                {displayRows.map((row) => {
-                  const isExpanded = Boolean(expandedRows[row.id]);
-                  return (
-                    <tbody
-                      key={row.id}
-                      className="divide-y divide-slate-200 bg-white"
+                  <div className="flex flex-wrap gap-3 xl:justify-end">
+                    <Button
+                      className="rounded-full"
+                      disabled={refreshing || Boolean(actionBusy)}
+                      onClick={() => {
+                        void reloadDashboard();
+                      }}
+                      variant="outline"
                     >
-                      <tr className="align-top text-sm text-slate-700">
-                        <td className="px-4 py-4">
-                          <button
-                            type="button"
-                            onClick={() => toggleExpanded(row.id)}
-                            className="flex items-start gap-3 text-left"
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="mt-0.5 size-4 text-slate-400" />
-                            ) : (
-                              <ChevronRight className="mt-0.5 size-4 text-slate-400" />
-                            )}
-                            <div>
-                              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                {row.kind === "active" ? "Active position" : "New candidate"}
-                              </span>
-                              <p className="mt-2 font-semibold text-slate-950">
-                                {row.market}
-                              </p>
-                            </div>
-                          </button>
-                        </td>
-                        <td className="px-4 py-4">{row.category}</td>
-                        <td className="px-4 py-4">
-                          <span
-                            className={cn(
-                              "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
-                              row.side === "YES"
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-rose-200 bg-rose-50 text-rose-700",
-                            )}
-                          >
-                            {row.side}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4">{formatPercent(row.currentPrice)}</td>
-                        <td className="px-4 py-4">
-                          {formatPercent(row.fairProbability)}
-                        </td>
-                        <td
-                          className={cn(
-                            "px-4 py-4 font-semibold",
-                            row.edge >= 0 ? "text-emerald-700" : "text-rose-700",
-                          )}
-                        >
-                          {row.edge >= 0 ? "+" : ""}
-                          {formatPercent(row.edge)}
-                        </td>
-                        <td className="px-4 py-4">{row.score}</td>
-                        <td className="px-4 py-4">
-                          {formatMoney(row.currentExposure)}
-                        </td>
-                        <td className="px-4 py-4">
-                          {formatMoney(row.targetExposure)}
-                        </td>
-                        <td className="px-4 py-4">{row.proposedOrder}</td>
-                        <td className="px-4 py-4">
-                          <span
-                            className={cn(
-                              "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
-                              getDecisionClass(row.decision),
-                            )}
-                          >
-                            {row.decision}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span
-                            className={cn(
-                              "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
-                              getRiskStatusClass(row.riskStatus),
-                            )}
-                          >
-                            {row.riskStatus}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-slate-600">{row.reason}</td>
-                        <td className="px-4 py-4 whitespace-nowrap text-slate-500">
-                          {formatDateTime(row.lastUpdated)}
-                        </td>
-                      </tr>
-                      {isExpanded ? (
-                        <tr>
-                          <td colSpan={14} className="bg-slate-50/60 px-4 py-4">
-                            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-                              <div className="space-y-4">
-                                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                    7-stage audit trail
-                                  </p>
-                                  <div className="mt-3 space-y-3">
-                                    {row.stageAudit.map((entry) => (
-                                      <div
-                                        key={`${row.id}-${entry.label}`}
-                                        className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3"
-                                      >
-                                        <div className="flex items-center justify-between gap-3">
-                                          <p className="text-sm font-semibold text-slate-950">
-                                            {entry.label}
-                                          </p>
-                                          <span
-                                            className={cn(
-                                              "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
-                                              getStatusClass(entry.status),
-                                            )}
-                                          >
-                                            {entry.status}
-                                          </span>
-                                        </div>
-                                        <p className="mt-2 text-sm leading-6 text-slate-600">
-                                          {entry.detail}
-                                        </p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
+                      {refreshing ? (
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="mr-2 size-4" />
+                      )}
+                      Refresh
+                    </Button>
+                    <Button
+                      className="rounded-full bg-slate-950 text-white hover:bg-slate-800"
+                      disabled={refreshing || Boolean(actionBusy)}
+                      onClick={() => {
+                        void handleAction("run-once");
+                      }}
+                    >
+                      {actionBusy === "run-once" ? (
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                      ) : (
+                        <Zap className="mr-2 size-4" />
+                      )}
+                      Run Now
+                    </Button>
+                    {state?.paused ? (
+                      <Button
+                        className="rounded-full"
+                        disabled={refreshing || Boolean(actionBusy)}
+                        onClick={() => {
+                          void handleAction("resume");
+                        }}
+                        variant="outline"
+                      >
+                        {actionBusy === "resume" ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <PlayCircle className="mr-2 size-4" />
+                        )}
+                        Resume
+                      </Button>
+                    ) : state?.running ? (
+                      <Button
+                        className="rounded-full"
+                        disabled={refreshing || Boolean(actionBusy)}
+                        onClick={() => {
+                          void handleAction("pause");
+                        }}
+                        variant="outline"
+                      >
+                        {actionBusy === "pause" ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <PauseCircle className="mr-2 size-4" />
+                        )}
+                        Pause
+                      </Button>
+                    ) : (
+                      <Button
+                        className="rounded-full"
+                        disabled={refreshing || Boolean(actionBusy)}
+                        onClick={() => {
+                          void handleAction("start");
+                        }}
+                        variant="outline"
+                      >
+                        {actionBusy === "start" ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <PlayCircle className="mr-2 size-4" />
+                        )}
+                        Start Scheduler
+                      </Button>
+                    )}
+                    {(state?.running || state?.paused) ? (
+                      <Button
+                        className="rounded-full"
+                        disabled={refreshing || Boolean(actionBusy)}
+                        onClick={() => {
+                          void handleAction("stop");
+                        }}
+                        variant="outline"
+                      >
+                        {actionBusy === "stop" ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <Square className="mr-2 size-4" />
+                        )}
+                        Stop
+                      </Button>
+                    ) : null}
+                    <Button
+                      className="rounded-full"
+                      onClick={() => setGuardrailsDrawerOpen(true)}
+                      variant="outline"
+                    >
+                      <Settings2 className="mr-2 size-4" />
+                      Risk Guardrails
+                    </Button>
+                  </div>
+                </div>
 
-                                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                    Evidence summary
-                                  </p>
-                                  <div className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
-                                    {row.evidenceSummary.map((item) => (
-                                      <p key={item}>{item}</p>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
+                <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                  <span>
+                    Last action: <span className="font-medium text-slate-900">{state?.last_action || "-"}</span>
+                  </span>
+                  <span className="hidden text-slate-300 sm:inline">|</span>
+                  <span>
+                    Manual analysis page:{" "}
+                    <Link
+                      className="font-medium text-slate-900 underline decoration-amber-300 underline-offset-4"
+                      href={URLs.routes.console.bullpenAi()}
+                    >
+                      Open Bullpen x AI
+                    </Link>
+                  </span>
+                </div>
+              </div>
 
-                              <div className="space-y-4">
-                                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                    Guardrails checked
-                                  </p>
-                                  <div className="mt-3 space-y-3">
-                                    {row.guardrailsChecked.map((item) => (
-                                      <div key={`${row.id}-${item.label}`}>
-                                        <div className="flex items-center justify-between gap-3">
-                                          <p className="text-sm font-semibold text-slate-950">
-                                            {item.label}
-                                          </p>
-                                          <span
-                                            className={cn(
-                                              "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
-                                              getStatusClass(item.status),
-                                            )}
-                                          >
-                                            {item.status}
-                                          </span>
-                                        </div>
-                                        <p className="mt-1 text-sm leading-6 text-slate-600">
-                                          {item.detail}
-                                        </p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
+              <CardContent className="space-y-5 px-6 py-6">
+                {state?.emergency_stopped ? (
+                  <Alert className="border-rose-300 bg-rose-50 text-rose-900">
+                    <ShieldAlert className="size-4" />
+                    <AlertTitle>Emergency stop is active</AlertTitle>
+                    <AlertDescription>
+                      New live actions are blocked until the emergency stop is
+                      cleared from the risk guardrails drawer.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
 
-                                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                    LLM consensus stats
-                                  </p>
-                                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3">
-                                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                        Models
-                                      </p>
-                                      <p className="mt-2 text-sm font-semibold text-slate-950">
-                                        {row.llmConsensus.models}
-                                      </p>
-                                    </div>
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3">
-                                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                        Agreement
-                                      </p>
-                                      <p className="mt-2 text-sm font-semibold text-slate-950">
-                                        {formatPercent(row.llmConsensus.agreementPct)}
-                                      </p>
-                                    </div>
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3">
-                                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                        Median fair prob
-                                      </p>
-                                      <p className="mt-2 text-sm font-semibold text-slate-950">
-                                        {formatPercent(row.llmConsensus.medianProbability)}
-                                      </p>
-                                    </div>
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3">
-                                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                        Spread
-                                      </p>
-                                      <p className="mt-2 text-sm font-semibold text-slate-950">
-                                        {formatPercent(row.llmConsensus.spread)}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <p className="mt-3 text-sm leading-6 text-slate-600">
-                                    {row.llmConsensus.dissentSummary}
-                                  </p>
-                                </div>
+                {error ? (
+                  <Alert className="border-amber-300 bg-amber-50 text-amber-900">
+                    <AlertTriangle className="size-4" />
+                    <AlertTitle>Console refresh needs attention</AlertTitle>
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                ) : null}
 
-                                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                    Sizing calculation
-                                  </p>
-                                  <div className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
-                                    <p>
-                                      <span className="font-semibold text-slate-950">
-                                        Stake:
-                                      </span>{" "}
-                                      {formatMoney(row.sizing.stakeUsd)}
-                                    </p>
-                                    <p>
-                                      <span className="font-semibold text-slate-950">
-                                        Bankroll share:
-                                      </span>{" "}
-                                      {formatPercent(row.sizing.bankrollPct)}
-                                    </p>
-                                    <p>
-                                      <span className="font-semibold text-slate-950">
-                                        Max loss:
-                                      </span>{" "}
-                                      {formatMoney(row.sizing.maxLossUsd)}
-                                    </p>
-                                    <p>
-                                      <span className="font-semibold text-slate-950">
-                                        Reserve after trade:
-                                      </span>{" "}
-                                      {formatMoney(row.sizing.reserveAfterTradeUsd)}
-                                    </p>
-                                    <p>{row.sizing.explanation}</p>
-                                  </div>
-                                </div>
+                <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                  <MetricCard
+                    eyebrow="Capital"
+                    title="Invested"
+                    value={formatMoney(state?.invested_usd)}
+                    detail={`Current value ${formatMoney(state?.current_value_usd)}`}
+                  />
+                  <MetricCard
+                    eyebrow="PnL"
+                    title="Net Profit / Loss"
+                    value={formatMoney(state?.pnl_usd)}
+                    detail={`${state?.active_positions ?? 0} active positions | ${state?.today_executed_orders ?? state?.trades_today ?? 0} executed today`}
+                  />
+                  <MetricCard
+                    eyebrow="Latest Run"
+                    title={latestRun ? labelize(latestRun.status) : "No runs yet"}
+                    value={latestRun ? formatDateTime(latestRun.started_at) : "-"}
+                    detail={latestRun ? `${latestRun.decisions_count} decisions | ${latestRun.orders_planned} orders planned` : "Run the engine once to create the first persisted audit entry."}
+                  />
+                  <MetricCard
+                    eyebrow="Scheduler"
+                    title={state?.running ? "Active" : state?.paused ? "Paused" : "Stopped"}
+                    value={formatDateTime(state?.next_run_at)}
+                    detail={`Scan ${formatDateTime(state?.next_scan_at)} | Rebalance ${formatDateTime(state?.next_rebalance_at)}`}
+                  />
+                </div>
 
-                                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                    Execution / pre-trade status
-                                  </p>
-                                  <div className="mt-3 space-y-3">
-                                    {row.executionChecks.map((item) => (
-                                      <div key={`${row.id}-${item.label}`}>
-                                        <div className="flex items-center justify-between gap-3">
-                                          <p className="text-sm font-semibold text-slate-950">
-                                            {item.label}
-                                          </p>
-                                          <span
-                                            className={cn(
-                                              "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]",
-                                              getStatusClass(item.status),
-                                            )}
-                                          >
-                                            {item.status}
-                                          </span>
-                                        </div>
-                                        <p className="mt-1 text-sm leading-6 text-slate-600">
-                                          {item.detail}
-                                        </p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  );
-                })}
-              </table>
+                <div className="grid gap-4 xl:grid-cols-[1.5fr,1fr]">
+                  <Card className="border-slate-200 bg-slate-50/70">
+                    <CardHeader>
+                      <CardTitle className="text-lg text-slate-950">Strategy posture</CardTitle>
+                      <CardDescription>
+                        The bot card summarizes the standalone service status that also feeds the broader trading-bots overview.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                          Guardrails Summary
+                        </p>
+                        <p className="mt-3 text-sm leading-6 text-slate-700">
+                          {botCard?.guardrails_summary || "No guardrail summary is available yet."}
+                        </p>
+                      </div>
+                      <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                          Strategy Summary
+                        </p>
+                        <p className="mt-3 text-sm leading-6 text-slate-700">
+                          {botCard?.strategy_summary || "Strategy summary unavailable."}
+                        </p>
+                      </div>
+                      <div className="rounded-3xl border border-slate-200 bg-white p-4 md:col-span-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                          Risk Summary
+                        </p>
+                        <p className="mt-3 text-sm leading-6 text-slate-700">
+                          {botCard?.risk_summary || "Risk summary unavailable."}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-slate-200 bg-slate-50/70">
+                    <CardHeader>
+                      <CardTitle className="text-lg text-slate-950">Execution readiness</CardTitle>
+                      <CardDescription>
+                        Live execution still requires runtime, environment, and market guardrails to line up at stage 7.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <span className="text-sm font-medium text-slate-700">Live armed</span>
+                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass(state?.live_armed ? "pass" : "watch"))}>
+                          {state?.live_armed ? "Armed" : "Simulation"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <span className="text-sm font-medium text-slate-700">Live execution allowed</span>
+                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass(state?.live_execution_allowed ? "pass" : "watch"))}>
+                          {state?.live_execution_allowed ? "Ready" : "Blocked"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <span className="text-sm font-medium text-slate-700">Dry run</span>
+                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass(state?.dry_run ? "warning" : "pass"))}>
+                          {state?.dry_run ? "On" : "Off"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <span className="text-sm font-medium text-slate-700">Executed / skipped today</span>
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+                          {state?.today_executed_orders ?? 0} / {state?.today_skipped_orders ?? 0}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <span className="text-sm font-medium text-slate-700">Consecutive failed orders</span>
+                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass((state?.consecutive_failed_orders ?? 0) > 0 ? "warning" : "pass"))}>
+                          {state?.consecutive_failed_orders ?? 0}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-slate-200 bg-white/90 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-xl text-slate-950">Latest guardrails</CardTitle>
+                <CardDescription>
+                  Every run and decision persists its own checks, and these are the most recent top-level runtime gates.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {latestGuardrails.length > 0 ? (
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {latestGuardrails.map((check) => (
+                      <GuardrailPill check={check} key={check.id} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50/80 px-5 py-8 text-sm text-slate-500">
+                    No runtime guardrails have been persisted yet.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-6 xl:grid-cols-[1.05fr,1fr]">
+              <Card className="border-slate-200 bg-white/90 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-xl text-slate-950">Runs audit trail</CardTitle>
+                  <CardDescription>
+                    Full engine runs persist stage-level status, reasons, inputs, outputs, and hard blocks.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {recentRuns.length > 0 ? (
+                    <div className="space-y-4">
+                      {recentRuns.map((run, index) => (
+                        <RunAuditCard
+                          defaultOpen={index === 0}
+                          key={run.id}
+                          run={run}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50/80 px-5 py-8 text-sm text-slate-500">
+                      No runs have been persisted yet. Use <span className="font-medium text-slate-700">Run Now</span> to seed the audit trail.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="border-slate-200 bg-white/90 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-xl text-slate-950">Decision audit trail</CardTitle>
+                  <CardDescription>
+                    Each candidate decision stores stage outputs, guardrails checked, LLM consensus data, and order-planning details.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {recentDecisions.length > 0 ? (
+                    <div className="space-y-4">
+                      {recentDecisions.map((decision, index) => (
+                        <DecisionAuditCard
+                          decision={decision}
+                          defaultOpen={index === 0}
+                          key={decision.id}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50/80 px-5 py-8 text-sm text-slate-500">
+                      No decisions have been persisted yet. Once stage 1 produces candidates, this pane will show the full audit trail per decision.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        </div>
+      </div>
 
-      {guardrailsDrawerOpen ? (
-        <BullpenAiAutoLiveRiskGuardrailsDrawer
-          key={JSON.stringify(autoLiveSummary?.settings ?? null)}
-          onClose={() => setGuardrailsDrawerOpen(false)}
-          onSummaryReload={loadAutoLiveSummary}
-          open={guardrailsDrawerOpen}
-          settings={autoLiveSummary?.settings ?? null}
-          settingsLoading={summaryLoading}
-        />
-      ) : null}
-    </div>
+      <BullpenAiAutoLiveRiskGuardrailsDrawer
+        onClose={() => setGuardrailsDrawerOpen(false)}
+        onSummaryReload={reloadDashboard}
+        open={guardrailsDrawerOpen}
+        settings={summary?.settings ?? null}
+        settingsLoading={loading && !summary}
+      />
+    </>
   );
 }

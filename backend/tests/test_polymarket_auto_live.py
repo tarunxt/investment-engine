@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 os.environ.setdefault(
@@ -10,17 +11,24 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 import pytest
 from pydantic import ValidationError
 
-from app.domains.polymarket_auto_live.bot import BullpenAutoLiveBot
+from app.domains.polymarket_auto_live.config import auto_live_backend_allows_execution
+from app.domains.polymarket_auto_live.engine import (
+    BullpenAutoLiveEngine,
+    PositionSnapshot,
+)
+from app.domains.polymarket_auto_live.rules import evaluate_market_rules
+from app.domains.polymarket_auto_live.scanner import (
+    ScannedMarket,
+    _evaluate_filter_reasons,
+)
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveBotCardSummary,
-    BullpenAutoLiveDecision,
+    BullpenAutoLiveLlmOutput,
     BullpenAutoLiveRun,
     BullpenAutoLiveSettings,
-    BullpenAutoLiveSettingsUpdate,
     BullpenAutoLiveState,
     BullpenAutoLiveSummary,
 )
-from app.domains.polymarket_auto_live.storage import JsonModelStore, JsonObjectStore
 from app.domains.trading_bots.service import (
     build_trading_bots_overview,
     build_trading_bots_summary,
@@ -41,84 +49,78 @@ def test_auto_live_settings_enforce_cross_field_validation():
         )
 
 
-@pytest.mark.anyio
-async def test_auto_live_bot_persists_settings_runs_and_state(tmp_path):
-    settings_store = JsonObjectStore(
-        tmp_path / "polymarket-auto-live-settings.json",
-        BullpenAutoLiveSettings,
+def test_auto_live_backend_execution_flag_defaults_false(monkeypatch):
+    monkeypatch.delenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", raising=False)
+    assert auto_live_backend_allows_execution() is False
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
+    assert auto_live_backend_allows_execution() is True
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "FALSE")
+    assert auto_live_backend_allows_execution() is False
+
+
+def test_market_rules_extract_resolution_criteria_and_deadline():
+    market = _market(
+        description=(
+            'This market will resolve to "Yes" if candidate X wins the election '
+            "by November 6, 2026, 11:59 PM ET. Otherwise, it resolves to No."
+        ),
+        close_time="2026-11-07T05:00:00+00:00",
     )
-    state_store = JsonObjectStore(
-        tmp_path / "polymarket-auto-live-state.json",
-        BullpenAutoLiveState,
-    )
-    run_store = JsonModelStore(
-        tmp_path / "polymarket-auto-live-runs.json",
-        BullpenAutoLiveRun,
-    )
-    decision_store = JsonModelStore(
-        tmp_path / "polymarket-auto-live-decisions.json",
-        BullpenAutoLiveDecision,
+
+    result = evaluate_market_rules(
+        market,
+        now=datetime(2026, 11, 1, 12, 0, tzinfo=UTC),
     )
 
-    bot = BullpenAutoLiveBot(
-        settings_store=settings_store,
-        state_store=state_store,
-        run_store=run_store,
-        decision_store=decision_store,
+    assert result.fail_reason is None
+    assert result.outcome_clear is True
+    assert result.ambiguous is False
+    assert result.expired is False
+    assert result.yes_definition == "candidate X wins the election by November 6, 2026, 11:59 PM ET"
+    assert result.deadline_et == "2026-11-06 11:59:00 PM ET"
+    assert result.hours_remaining is not None
+    assert result.hours_remaining > 0
+
+
+def test_market_rules_fail_without_resolution_criteria():
+    result = evaluate_market_rules(
+        _market(description=None),
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
     )
-    await bot.init()
 
-    initial_state = await bot.get_state()
-    assert initial_state.status == "not-configured"
-    assert initial_state.running is False
+    assert result.outcome_clear is False
+    assert result.ambiguous is True
+    assert result.fail_reason == "Resolution criteria are unavailable."
 
-    updated = await bot.update_settings(
-        BullpenAutoLiveSettingsUpdate(
-            bankroll_usd=250,
-            auto_live_enabled=True,
-            dry_run=True,
-        )
+
+def test_candidate_filter_reasons_block_sports_and_low_liquidity():
+    market = _market(
+        question="Will the Lakers win the NBA Finals?",
+        theme="Sports",
+        liquidity_usd=250,
     )
-    assert updated.bankroll_usd == 250
-    assert updated.auto_live_enabled is True
 
-    started = await bot.start()
-    assert started.running is True
-    assert started.next_run_at is not None
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=1_000)
 
-    run = await bot.run_once()
-    assert run.status == "completed"
-    assert run.decisions_count == 1
+    assert "Excluded sports market." in reasons
+    assert any("Excluded low-liquidity market" in reason for reason in reasons)
 
-    decisions = await bot.list_decisions()
-    assert len(decisions) == 1
-    assert decisions[0].run_id == run.id
 
-    emergency = await bot.emergency_stop()
-    assert emergency.paused is True
-    assert emergency.status == "paused"
-
-    await bot.shutdown()
-
-    reloaded_bot = BullpenAutoLiveBot(
-        settings_store=settings_store,
-        state_store=state_store,
-        run_store=run_store,
-        decision_store=decision_store,
+def test_candidate_filter_reasons_block_unclear_social_count_market():
+    market = _market(
+        question="How many tweets will candidate X post this week?",
+        slug="candidate-x-10-tweets",
+        outcome_labels=["0-10", "11-20", "21+"],
+        current_yes_odds=None,
+        current_no_odds=None,
     )
-    await reloaded_bot.init()
 
-    reloaded_settings = await reloaded_bot.get_settings()
-    reloaded_state = await reloaded_bot.get_state()
-    reloaded_runs = await reloaded_bot.list_runs()
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
 
-    assert reloaded_settings.bankroll_usd == 250
-    assert reloaded_settings.emergency_stop is True
-    assert reloaded_state.running is False
-    assert reloaded_state.paused is True
-    assert reloaded_runs[0].id == run.id
-
-    await reloaded_bot.shutdown()
+    assert "Excluded tweet-count or social-post-count market." in reasons
+    assert "Excluded unclear non-binary market." in reasons
 
 
 @pytest.mark.anyio
@@ -157,7 +159,7 @@ async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
             trades_today=0,
             last_run_at="2026-06-21T10:00:00+00:00",
             next_run_at="2026-06-21T10:01:00+00:00",
-            guardrails_summary="Max single trade: 2.00% • Cash reserve: 40.00%",
+            guardrails_summary="Max single trade: 2.00% | Cash reserve: 40.00%",
             strategy_summary="Auto-Live strategy",
             risk_summary="Auto-Live risk",
         ),
@@ -215,6 +217,41 @@ async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
     assert overview.bots[3].next_scheduled_run == "2026-06-21T10:01:00+00:00"
 
 
+def _market(
+    *,
+    question: str = "Will candidate X win?",
+    description: str | None = (
+        'This market will resolve to "Yes" if candidate X wins. Otherwise, it resolves to No.'
+    ),
+    close_time: str | None = "2026-06-30T23:59:00+00:00",
+    theme: str = "Politics",
+    liquidity_usd: float | None = 5_000,
+    slug: str | None = "candidate-x-win",
+    outcome_labels: list[str] | None = None,
+    current_yes_odds: float | None = 54,
+    current_no_odds: float | None = 46,
+) -> ScannedMarket:
+    return ScannedMarket(
+        market_id=slug or "market-1",
+        question=question,
+        market_url="https://polymarket.com/event/test-market",
+        slug=slug,
+        close_time=close_time,
+        theme=theme,
+        current_yes_odds=current_yes_odds,
+        current_no_odds=current_no_odds,
+        volume_usd=10_000,
+        liquidity_usd=liquidity_usd,
+        description=description,
+        outcome_labels=outcome_labels or ["Yes", "No"],
+        event_slug="test-market",
+        best_bid_cents=53,
+        best_ask_cents=55,
+        spread_cents=2,
+        raw={},
+    )
+
+
 def _fake_polymarket_state(
     *,
     running: bool = True,
@@ -261,3 +298,257 @@ def _fake_polymarket_state(
             recent_decisions=[],
         ),
     )
+
+
+def _fake_evidence_packet():
+    return SimpleNamespace(
+        built_at="2026-06-21T10:00:00+00:00",
+        queries=["candidate x"],
+        warnings=[],
+        results=[],
+    )
+
+
+def _fake_llm_consensus(
+    *,
+    fair_yes: float = 72,
+    fair_no: float = 28,
+    provider_error_rate: float = 0,
+):
+    outputs = [
+        BullpenAutoLiveLlmOutput(
+            provider="openai",
+            model="gpt-4o-mini",
+            llm_yes_odds=fair_yes,
+            llm_no_odds=fair_no,
+            confidence="High",
+            evidence_status="Strong",
+            event_state="scheduled_not_occurred",
+            key_evidence=["Confirmed evidence"],
+            red_flags=[],
+            rationale="Strong enough to test Auto-Live execution wiring.",
+            completed_at="2026-06-21T10:00:00+00:00",
+        )
+    ]
+    consensus = SimpleNamespace(
+        fair_yes_probability_pct=fair_yes,
+        fair_no_probability_pct=fair_no,
+        average_yes=fair_yes,
+        median_yes=fair_yes,
+        trimmed_mean_yes=fair_yes,
+        min_yes=fair_yes,
+        max_yes=fair_yes,
+        spread_yes=0,
+        disagreement_level="Low",
+        adjudication_required=False,
+        confidence="High",
+        evidence_status="Strong",
+        event_state="scheduled_not_occurred",
+        provider_error_rate=provider_error_rate,
+    )
+    return outputs, consensus
+
+
+def _run_snapshot(*, dry_run: bool = True) -> BullpenAutoLiveRun:
+    return BullpenAutoLiveRun(
+        id="run-1",
+        triggered_by="manual",
+        status="running",
+        dry_run=dry_run,
+        started_at="2026-06-21T10:00:00+00:00",
+        summary="Queued",
+    )
+
+
+@pytest.mark.anyio
+async def test_auto_live_live_request_falls_back_to_simulation_when_env_blocks(monkeypatch):
+    market = _market(current_yes_odds=54, current_no_odds=46)
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "false")
+
+    async def fake_scan_candidate_markets(**kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[market],
+            rejected=[],
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_candidate_markets",
+        fake_scan_candidate_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(),
+    )
+    async def fake_refresh_execution_quote(**kwargs):
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=54,
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            auto_live_enabled=True,
+            dry_run=False,
+            allow_live_execution=True,
+            require_manual_confirmation=False,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(dry_run=False),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    assert result.run.dry_run is True
+    assert result.run.live_execution_requested is True
+    assert result.run.orders_submitted == 0
+    assert result.state.dry_run is True
+    assert result.state.live_armed is False
+    assert result.state.live_execution_allowed is False
+    assert result.decisions[0].order_plan is not None
+    assert result.decisions[0].order_plan.status == "skipped"
+    assert "simulation only" in result.decisions[0].order_plan.detail.lower()
+
+
+@pytest.mark.anyio
+async def test_auto_live_exit_sells_the_held_side_not_the_new_signal_side(monkeypatch):
+    market = _market(current_yes_odds=70, current_no_odds=30)
+    now = datetime(2026, 6, 21, 10, 0, tzinfo=UTC)
+
+    async def fake_scan_candidate_markets(**kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[market],
+            rejected=[],
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_candidate_markets",
+        fake_scan_candidate_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=82, fair_no=18),
+    )
+    async def fake_refresh_execution_quote(**kwargs):
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=30,
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[
+            PositionSnapshot(
+                market_id=market.market_id,
+                slug=market.slug,
+                market_title=market.question,
+                market_url=market.market_url,
+                theme=market.theme,
+                side="NO",
+                exposure_usd=12,
+                shares=20,
+                average_price_cents=40,
+                opened_at=now,
+                updated_at=now,
+            )
+        ],
+        historical_decisions=[],
+    )
+
+    assert result.decisions[0].decision == "EXIT"
+    assert result.decisions[0].order_plan is not None
+    assert result.decisions[0].order_plan.side == "NO"
+    assert result.decisions[0].order_plan.refreshed_market_price_cents == 30
+
+
+@pytest.mark.anyio
+async def test_auto_live_pauses_live_mode_when_bullpen_doctor_fails(monkeypatch):
+    market = _market()
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
+
+    async def fake_scan_candidate_markets(**kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[market],
+            rejected=[],
+        )
+
+    async def fake_refresh_live_controls(**kwargs):
+        return SimpleNamespace(
+            unlocked=True,
+            unlock_mode="manual",
+            locked_reason=None,
+            emergency_stopped=False,
+            doctor=SimpleNamespace(ok=False, message="Bullpen doctor failed"),
+            balance=SimpleNamespace(status="ready", message="Balance ready"),
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_candidate_markets",
+        fake_scan_candidate_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_live_controls",
+        fake_refresh_live_controls,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            auto_live_enabled=True,
+            dry_run=False,
+            allow_live_execution=True,
+            require_manual_confirmation=False,
+            pause_if_doctor_fails=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(dry_run=False),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    assert result.run.status == "failed"
+    assert result.state.paused is True
+    assert result.state.doctor_status == "fail"
+    assert result.state.live_execution_allowed is False
+    assert result.decisions[0].order_plan is None
+    assert "doctor failed" in result.run.summary.lower()
