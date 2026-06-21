@@ -1,6 +1,7 @@
 import type { BullpenPositionsResponse } from "@/lib/bullpenPositions";
 import { URLs } from "@/lib/urls";
 import type {
+  BullpenAutoLiveSummaryResponse,
   PolymarketBotState,
   TradingBotGuardrail as ApiTradingBotGuardrail,
   TradingBotGuardrailTone,
@@ -597,6 +598,49 @@ export function buildBullpenAiTradingBotSummary(
     guardrails,
     note,
     source: errorMessage ? "placeholder" : "fallback",
+  };
+}
+
+export function buildBullpenAiAutoLiveTradingBotSummary(
+  payload?: BullpenAutoLiveSummaryResponse | null,
+  errorMessage?: string | null,
+): TradingBotSummary {
+  const base = getBaseTradingBotSummary("bullpen-ai-auto-live");
+  const botCard = payload?.bot_card;
+  const guardrails = normalizeGuardrails(botCard?.guardrails, base.guardrails);
+  const note =
+    errorMessage ||
+    payload?.state.last_error ||
+    payload?.latest_run?.error_message ||
+    payload?.state.last_action ||
+    base.note;
+
+  return {
+    ...base,
+    status: botCard?.status || payload?.state.status || base.status,
+    mode: botCard?.mode || payload?.state.mode || base.mode,
+    moneyInvested: botCard?.invested_usd ?? payload?.state.invested_usd ?? null,
+    currentValue:
+      botCard?.current_value_usd ?? payload?.state.current_value_usd ?? null,
+    profitLoss: botCard?.pnl_usd ?? payload?.state.pnl_usd ?? null,
+    returnPct: botCard?.return_pct ?? base.returnPct,
+    activePositionsCount:
+      botCard?.active_positions ?? payload?.state.active_positions ?? null,
+    tradesToday: botCard?.trades_today ?? payload?.state.trades_today ?? null,
+    lastRunTime:
+      botCard?.last_run_at ||
+      payload?.state.last_run_at ||
+      payload?.latest_run?.completed_at ||
+      payload?.latest_run?.started_at ||
+      null,
+    nextScheduledRun: botCard?.next_run_at || payload?.state.next_run_at || null,
+    guardrailsSummary:
+      botCard?.guardrails_summary || buildGuardrailsSummary(guardrails),
+    guardrails,
+    strategy: botCard?.strategy_summary || base.strategy,
+    riskWarning: botCard?.risk_summary || base.riskWarning,
+    note,
+    source: errorMessage ? "fallback" : "api",
   };
 }
 
