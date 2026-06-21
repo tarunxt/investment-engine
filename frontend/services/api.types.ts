@@ -57,6 +57,7 @@ import {
     BullpenAutoLiveDecision,
     BullpenAutoLiveState,
     BullpenAutoLiveSummaryResponse,
+    TradingBotsSummaryResponse,
     TradingBotsOverviewResponse,
     ZerodhaLoginUrlResponse,
     ZerodhaOrder,
@@ -187,6 +188,23 @@ export interface IApiService {
     polymarketUpdateTrackedAccount(accountId: string, data: PolymarketTrackedAccountUpdate): Promise<PolymarketBotState>;
     polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState>;
     polymarketDiscoveryDebug(data: PolymarketDiscoveryDebugRequest): Promise<PolymarketDiscoveryDebugReport>;
+    getBullpenAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse>;
+    getBullpenAutoLiveState(): Promise<BullpenAutoLiveState>;
+    getBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
+    updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
+    resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
+    getBullpenAutoLiveRuns(): Promise<BullpenAutoLiveRun[]>;
+    getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]>;
+    runBullpenAutoLiveOnce(): Promise<BullpenAutoLiveRun>;
+    startBullpenAutoLive(): Promise<BullpenAutoLiveState>;
+    stopBullpenAutoLive(): Promise<BullpenAutoLiveState>;
+    pauseBullpenAutoLive(): Promise<BullpenAutoLiveState>;
+    resumeBullpenAutoLive(): Promise<BullpenAutoLiveState>;
+    emergencyStopBullpenAutoLive(): Promise<BullpenAutoLiveState>;
+    clearEmergencyStopBullpenAutoLive(): Promise<BullpenAutoLiveState>;
+    getTradingBotsSummary(): Promise<TradingBotsSummaryResponse>;
+
+    // Legacy aliases kept for existing callers.
     bullpenAiAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse>;
     bullpenAiAutoLiveState(): Promise<BullpenAutoLiveState>;
     bullpenAiAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;

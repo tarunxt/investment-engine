@@ -43,6 +43,7 @@ import {
   PolymarketTrackedAccountUpdate,
   PolymarketDiscoveryDebugReport,
   PolymarketDiscoveryDebugRequest,
+  TradingBotsSummaryResponse,
   TradingBotsOverviewResponse,
   JobCreate,
   JobResponse,
@@ -926,62 +927,124 @@ class apiServiceClass implements IApiService {
     return this.post<PolymarketDiscoveryDebugReport>(URLs.polymarket.discoveryDebug(), data);
   }
 
+  getBullpenAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse> {
+    return this.get<BullpenAutoLiveSummaryResponse>(URLs.bullpenAutoLive.summary());
+  }
+
+  getBullpenAutoLiveState(): Promise<BullpenAutoLiveState> {
+    return this.get<BullpenAutoLiveState>(URLs.bullpenAutoLive.state());
+  }
+
+  getBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {
+    return this.get<BullpenAutoLiveSettings>(URLs.bullpenAutoLive.settings());
+  }
+
+  updateBullpenAutoLiveSettings(
+    data: BullpenAutoLiveSettingsUpdate,
+  ): Promise<BullpenAutoLiveSettings> {
+    return this.put<BullpenAutoLiveSettings>(URLs.bullpenAutoLive.settings(), data);
+  }
+
+  resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {
+    return this.post<BullpenAutoLiveSettings>(URLs.bullpenAutoLive.resetSettings());
+  }
+
+  getBullpenAutoLiveRuns(): Promise<BullpenAutoLiveRun[]> {
+    return this.get<BullpenAutoLiveRun[]>(URLs.bullpenAutoLive.runs());
+  }
+
+  getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]> {
+    return this.get<BullpenAutoLiveDecision[]>(URLs.bullpenAutoLive.decisions());
+  }
+
+  runBullpenAutoLiveOnce(): Promise<BullpenAutoLiveRun> {
+    return this.post<BullpenAutoLiveRun>(URLs.bullpenAutoLive.runOnce());
+  }
+
+  startBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.start());
+  }
+
+  stopBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.stop());
+  }
+
+  pauseBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.pause());
+  }
+
+  resumeBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.resume());
+  }
+
+  emergencyStopBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.emergencyStop());
+  }
+
+  clearEmergencyStopBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.clearEmergencyStop());
+  }
+
   bullpenAiAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse> {
-    return this.get<BullpenAutoLiveSummaryResponse>(URLs.polymarketAutoLive.summary());
+    return this.getBullpenAutoLiveSummary();
   }
 
   bullpenAiAutoLiveState(): Promise<BullpenAutoLiveState> {
-    return this.get<BullpenAutoLiveState>(URLs.polymarketAutoLive.state());
+    return this.getBullpenAutoLiveState();
   }
 
   bullpenAiAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {
-    return this.get<BullpenAutoLiveSettings>(URLs.polymarketAutoLive.settings());
+    return this.getBullpenAutoLiveSettings();
   }
 
   bullpenAiAutoLiveUpdateSettings(
     data: BullpenAutoLiveSettingsUpdate,
   ): Promise<BullpenAutoLiveSettings> {
-    return this.put<BullpenAutoLiveSettings>(URLs.polymarketAutoLive.settings(), data);
+    return this.updateBullpenAutoLiveSettings(data);
   }
 
   bullpenAiAutoLiveResetSettings(): Promise<BullpenAutoLiveSettings> {
-    return this.post<BullpenAutoLiveSettings>(URLs.polymarketAutoLive.resetSettings());
+    return this.resetBullpenAutoLiveSettings();
   }
 
   bullpenAiAutoLiveRuns(): Promise<BullpenAutoLiveRun[]> {
-    return this.get<BullpenAutoLiveRun[]>(URLs.polymarketAutoLive.runs());
+    return this.getBullpenAutoLiveRuns();
   }
 
   bullpenAiAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]> {
-    return this.get<BullpenAutoLiveDecision[]>(URLs.polymarketAutoLive.decisions());
+    return this.getBullpenAutoLiveDecisions();
   }
 
   bullpenAiAutoLiveRunOnce(): Promise<BullpenAutoLiveRun> {
-    return this.post<BullpenAutoLiveRun>(URLs.polymarketAutoLive.runOnce());
+    return this.runBullpenAutoLiveOnce();
   }
 
   bullpenAiAutoLiveStart(): Promise<BullpenAutoLiveState> {
-    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.start());
+    return this.startBullpenAutoLive();
   }
 
   bullpenAiAutoLiveStop(): Promise<BullpenAutoLiveState> {
-    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.stop());
+    return this.stopBullpenAutoLive();
   }
 
   bullpenAiAutoLivePause(): Promise<BullpenAutoLiveState> {
-    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.pause());
+    return this.pauseBullpenAutoLive();
   }
 
   bullpenAiAutoLiveResume(): Promise<BullpenAutoLiveState> {
-    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.resume());
+    return this.resumeBullpenAutoLive();
   }
 
   bullpenAiAutoLiveEmergencyStop(): Promise<BullpenAutoLiveState> {
-    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.emergencyStop());
+    return this.emergencyStopBullpenAutoLive();
   }
 
   bullpenAiAutoLiveClearEmergencyStop(): Promise<BullpenAutoLiveState> {
-    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.clearEmergencyStop());
+    return this.clearEmergencyStopBullpenAutoLive();
+  }
+
+  getTradingBotsSummary(): Promise<TradingBotsSummaryResponse> {
+    return this.get<TradingBotsSummaryResponse>(URLs.tradingBots.summary());
   }
 
   polymarketDirectState(): Promise<PolymarketBotState> {

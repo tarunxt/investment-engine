@@ -1680,6 +1680,10 @@ export type TradingBotGuardrailTone =
   | "positive"
   | "warning"
   | "critical";
+export type TradingBotSummaryCardSource =
+  | "api"
+  | "fallback"
+  | "placeholder";
 
 export interface TradingBotGuardrail {
   label: string;
@@ -1687,8 +1691,8 @@ export interface TradingBotGuardrail {
   tone?: TradingBotGuardrailTone;
 }
 
-export interface BullpenAutoLiveBotCardSummary {
-  id: "bullpen-ai-auto-live";
+export interface TradingBotSummaryCard {
+  id: TradingBotSummaryId;
   name: string;
   route: string;
   status: TradingBotStatus;
@@ -1705,6 +1709,13 @@ export interface BullpenAutoLiveBotCardSummary {
   strategy_summary: string;
   risk_summary: string;
   guardrails: TradingBotGuardrail[];
+  note?: string | null;
+  source?: TradingBotSummaryCardSource | null;
+}
+
+export interface BullpenAutoLiveBotCardSummary
+  extends Omit<TradingBotSummaryCard, "id" | "note" | "source"> {
+  id: "bullpen-ai-auto-live";
 }
 
 export interface BullpenAutoLiveSummaryResponse {
@@ -1722,6 +1733,11 @@ export type TradingBotSummaryId =
   | "polymarket-direct"
   | "bullpen-x-ai"
   | "bullpen-ai-auto-live";
+
+export interface TradingBotsSummaryResponse {
+  generated_at: string;
+  cards: TradingBotSummaryCard[];
+}
 
 export interface TradingBotSummary {
   id: TradingBotSummaryId;
@@ -1743,7 +1759,7 @@ export interface TradingBotSummary {
   strategy: string;
   risk_warning: string;
   note?: string | null;
-  source?: string | null;
+  source?: TradingBotSummaryCardSource | null;
 }
 
 export interface TradingBotsOverviewResponse {

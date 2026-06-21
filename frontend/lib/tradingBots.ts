@@ -7,9 +7,11 @@ import type {
   TradingBotGuardrailTone,
   TradingBotMode,
   TradingBotStatus,
-  TradingBotSummary as ApiTradingBotSummary,
+  TradingBotSummary as ApiTradingBotOverviewCard,
+  TradingBotSummaryCard as ApiTradingBotSummaryCard,
   TradingBotSummaryId,
   TradingBotsOverviewResponse as ApiTradingBotsOverviewResponse,
+  TradingBotsSummaryResponse as ApiTradingBotsSummaryResponse,
 } from "@/types/api";
 
 export type TradingBotSummarySource = "api" | "fallback" | "placeholder";
@@ -353,30 +355,57 @@ function normalizeGuardrails(
     }));
 }
 
-function normalizeSummary(summary: ApiTradingBotSummary): TradingBotSummary {
-  const base = getBaseTradingBotSummary(summary.id);
+function normalizeOverviewCard(card: ApiTradingBotOverviewCard): TradingBotSummary {
+  const base = getBaseTradingBotSummary(card.id);
 
   return {
     ...base,
-    name: summary.name || base.name,
-    href: summary.href || base.href,
-    detailsHref: summary.details_href || summary.href || base.detailsHref,
-    status: summary.status || base.status,
-    mode: summary.mode || base.mode,
-    moneyInvested: summary.money_invested,
-    currentValue: summary.current_value,
-    profitLoss: summary.profit_loss,
-    returnPct: summary.return_pct,
-    activePositionsCount: summary.active_positions_count,
-    tradesToday: summary.trades_today,
-    lastRunTime: summary.last_run_time,
-    nextScheduledRun: summary.next_scheduled_run,
-    guardrailsSummary: summary.guardrails_summary || base.guardrailsSummary,
-    guardrails: normalizeGuardrails(summary.guardrails, base.guardrails),
-    strategy: summary.strategy || base.strategy,
-    riskWarning: summary.risk_warning || base.riskWarning,
-    note: summary.note || base.note,
-    source: normalizeSource(summary.source),
+    name: card.name || base.name,
+    href: card.href || base.href,
+    detailsHref: card.details_href || card.href || base.detailsHref,
+    status: card.status || base.status,
+    mode: card.mode || base.mode,
+    moneyInvested: card.money_invested,
+    currentValue: card.current_value,
+    profitLoss: card.profit_loss,
+    returnPct: card.return_pct,
+    activePositionsCount: card.active_positions_count,
+    tradesToday: card.trades_today,
+    lastRunTime: card.last_run_time,
+    nextScheduledRun: card.next_scheduled_run,
+    guardrailsSummary: card.guardrails_summary || base.guardrailsSummary,
+    guardrails: normalizeGuardrails(card.guardrails, base.guardrails),
+    strategy: card.strategy || base.strategy,
+    riskWarning: card.risk_warning || base.riskWarning,
+    note: card.note || base.note,
+    source: normalizeSource(card.source),
+  };
+}
+
+function normalizeSummaryCard(card: ApiTradingBotSummaryCard): TradingBotSummary {
+  const base = getBaseTradingBotSummary(card.id);
+
+  return {
+    ...base,
+    name: card.name || base.name,
+    href: card.route || base.href,
+    detailsHref: card.route || base.detailsHref,
+    status: card.status || base.status,
+    mode: card.mode || base.mode,
+    moneyInvested: card.invested_usd ?? null,
+    currentValue: card.current_value_usd ?? null,
+    profitLoss: card.pnl_usd ?? null,
+    returnPct: card.return_pct ?? null,
+    activePositionsCount: card.active_positions ?? null,
+    tradesToday: card.trades_today ?? null,
+    lastRunTime: card.last_run_at ?? null,
+    nextScheduledRun: card.next_run_at ?? null,
+    guardrailsSummary: card.guardrails_summary || base.guardrailsSummary,
+    guardrails: normalizeGuardrails(card.guardrails, base.guardrails),
+    strategy: card.strategy_summary || base.strategy,
+    riskWarning: card.risk_summary || base.riskWarning,
+    note: card.note || base.note,
+    source: normalizeSource(card.source),
   };
 }
 
@@ -385,7 +414,16 @@ export function normalizeTradingBotsOverviewResponse(
 ): TradingBotsOverview {
   return {
     generatedAt: overview.generated_at || new Date().toISOString(),
-    bots: sortTradingBots(overview.bots.map((bot) => normalizeSummary(bot))),
+    bots: sortTradingBots(overview.bots.map((bot) => normalizeOverviewCard(bot))),
+  };
+}
+
+export function normalizeTradingBotsSummaryResponse(
+  summary: ApiTradingBotsSummaryResponse,
+): TradingBotsOverview {
+  return {
+    generatedAt: summary.generated_at || new Date().toISOString(),
+    bots: sortTradingBots(summary.cards.map((card) => normalizeSummaryCard(card))),
   };
 }
 

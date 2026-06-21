@@ -45,6 +45,7 @@ type ToastState = {
 } | null;
 
 type BullpenAiAutoLiveRiskGuardrailsDrawerProps = {
+  emergencyStopped: boolean;
   open: boolean;
   settings: BullpenAutoLiveSettings | null;
   settingsLoading: boolean;
@@ -64,6 +65,7 @@ function getInitialDraft(settings: BullpenAutoLiveSettings | null) {
 }
 
 export function BullpenAiAutoLiveRiskGuardrailsDrawer({
+  emergencyStopped,
   open,
   settings,
   settingsLoading,
@@ -74,6 +76,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
     getInitialDraft(settings),
   );
   const [enableLiveConfirmation, setEnableLiveConfirmation] = useState("");
+  const [resettingBackend, setResettingBackend] = useState(false);
   const [saving, setSaving] = useState(false);
   const [emergencyBusy, setEmergencyBusy] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
@@ -117,6 +120,8 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
   );
 
   const currentSettings = settings ?? BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS;
+  const currentEmergencyStop = settings?.emergency_stop ?? emergencyStopped;
+  const settingsUnavailable = !settingsLoading && !settings;
   const hasBlockingValidation = Object.keys(validation.fieldErrors).length > 0;
   const dangerousLiveEnable =
     draft.dry_run === false && draft.allow_live_execution === true;
@@ -190,6 +195,14 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
   }
 
   async function handleSave() {
+    if (settingsUnavailable) {
+      showToast(
+        "error",
+        "Backend settings are unavailable right now. Reload the console before saving.",
+      );
+      return;
+    }
+
     if (!validation.settings || hasBlockingValidation || !liveConfirmationValid) {
       showToast("error", "Fix the validation issues before saving.");
       return;
@@ -197,8 +210,9 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
 
     setSaving(true);
     try {
-      await apiService.bullpenAiAutoLiveUpdateSettings(validation.settings);
-      await onSummaryReload();
+      await apiService.updateBullpenAutoLiveSettings(validation.settings);
+      const nextSummary = await onSummaryReload();
+      setDraft(getInitialDraft(nextSummary?.settings ?? validation.settings));
       setEnableLiveConfirmation("");
       setLastImportedFileName(null);
       showToast("success", "Risk guardrails saved and reloaded from the backend.");
@@ -206,6 +220,22 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
       showToast("error", normalizeError(error));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleResetBackendDefaults() {
+    setResettingBackend(true);
+    try {
+      const nextSettings = await apiService.resetBullpenAutoLiveSettings();
+      const nextSummary = await onSummaryReload();
+      setDraft(getInitialDraft(nextSummary?.settings ?? nextSettings));
+      setEnableLiveConfirmation("");
+      setLastImportedFileName(null);
+      showToast("success", "Backend settings reset to safe defaults.");
+    } catch (error) {
+      showToast("error", normalizeError(error));
+    } finally {
+      setResettingBackend(false);
     }
   }
 
@@ -299,15 +329,15 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
   async function handleToggleEmergencyStop() {
     setEmergencyBusy(true);
     try {
-      if (currentSettings.emergency_stop) {
-        await apiService.bullpenAiAutoLiveClearEmergencyStop();
+      if (currentEmergencyStop) {
+        await apiService.clearEmergencyStopBullpenAutoLive();
       } else {
-        await apiService.bullpenAiAutoLiveEmergencyStop();
+        await apiService.emergencyStopBullpenAutoLive();
       }
       await onSummaryReload();
       showToast(
         "success",
-        currentSettings.emergency_stop
+        currentEmergencyStop
           ? "Emergency stop cleared."
           : "Emergency stop activated.",
       );
@@ -367,7 +397,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
             <div
               className={cn(
                 "rounded-[26px] border px-4 py-4",
-                currentSettings.emergency_stop
+                currentEmergencyStop
                   ? "border-rose-300 bg-rose-50"
                   : "border-slate-200 bg-slate-50/80",
               )}
@@ -378,7 +408,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
                     <ShieldAlert
                       className={cn(
                         "size-4",
-                        currentSettings.emergency_stop
+                        currentEmergencyStop
                           ? "text-rose-600"
                           : "text-slate-500",
                       )}
@@ -393,7 +423,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
                 <Button
                   className={cn(
                     "rounded-full px-5",
-                    currentSettings.emergency_stop
+                    currentEmergencyStop
                       ? "bg-white text-rose-700 hover:bg-rose-100"
                       : "bg-rose-600 text-white hover:bg-rose-500",
                   )}
@@ -402,7 +432,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
                 >
                   {emergencyBusy ? (
                     <Loader2 className="size-4 animate-spin" />
-                  ) : currentSettings.emergency_stop ? (
+                  ) : currentEmergencyStop ? (
                     "Clear Emergency Stop"
                   ) : (
                     "Activate Emergency Stop"
@@ -482,6 +512,17 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
             </div>
           ) : (
             <div className="space-y-6">
+              {settingsUnavailable ? (
+                <Alert className="border-amber-300 bg-amber-50 text-amber-900">
+                  <AlertTriangle className="size-4" />
+                  <AlertTitle>Showing draft defaults only</AlertTitle>
+                  <AlertDescription>
+                    Backend settings could not be loaded, so the editor is
+                    showing safe defaults. Saving is disabled until the backend
+                    settings reload successfully.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
               {BULLPEN_AI_AUTO_LIVE_GUARDRAIL_SECTIONS.map((section) => {
                 const sectionFields = BULLPEN_AI_AUTO_LIVE_GUARDRAIL_FIELDS.filter(
                   (field) => field.sectionIds.includes(section.id),
@@ -701,9 +742,19 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
               <Button
                 className="rounded-full border-slate-300 px-4"
                 onClick={handleResetSafeDefaults}
+                disabled={resettingBackend}
                 variant="outline"
               >
                 Reset Safe Defaults
+              </Button>
+              <Button
+                className="rounded-full border-slate-300 px-4"
+                disabled={resettingBackend || saving}
+                onClick={handleResetBackendDefaults}
+                variant="outline"
+              >
+                {resettingBackend ? <Loader2 className="size-4 animate-spin" /> : null}
+                Reset Backend Defaults
               </Button>
               <Button
                 className="rounded-full border-slate-300 px-4"
@@ -731,8 +782,10 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
               <Button
                 className="rounded-full bg-slate-950 px-5 text-white hover:bg-slate-800"
                 disabled={
+                  resettingBackend ||
                   saving ||
                   settingsLoading ||
+                  settingsUnavailable ||
                   hasBlockingValidation ||
                   !liveConfirmationValid
                 }

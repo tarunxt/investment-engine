@@ -28,14 +28,63 @@ import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { APIError, apiService } from "@/services/api";
 import type {
+  BullpenAutoLiveSettings,
+  BullpenAutoLiveState,
   BullpenAutoLiveGuardrailCheck,
   BullpenAutoLiveSummaryResponse,
 } from "@/types/api";
 
 import { BullpenAiAutoLiveDecisionsPanel } from "./BullpenAiAutoLiveDecisionsPanel";
 import { BullpenAiAutoLiveRiskGuardrailsDrawer } from "./BullpenAiAutoLiveRiskGuardrailsDrawer";
+import { BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS } from "./bullpenAiAutoLiveRiskGuardrails";
 
 type ActionKey = "run-once" | "start" | "pause" | "resume" | "stop";
+type DashboardRequestResult = {
+  summary: BullpenAutoLiveSummaryResponse | null;
+  issues: string[];
+  hasSettings: boolean;
+};
+
+const AUTO_LIVE_STRATEGY_SUMMARY =
+  "Runs the separate auto-live execution pipeline that scans markets, evaluates evidence, applies portfolio guardrails, and only submits live limit orders when every hard block passes.";
+const AUTO_LIVE_RISK_SUMMARY =
+  "Live execution stays gated until runtime health, evidence quality, disagreement checks, and portfolio risk controls are all green.";
+const EMPTY_AUTO_LIVE_STATE: BullpenAutoLiveState = {
+  running: false,
+  paused: false,
+  dry_run: true,
+  live_armed: false,
+  live_execution_allowed: false,
+  emergency_stopped: false,
+  status: "not-configured",
+  mode: "dry-run",
+  server_now: null,
+  started_at: null,
+  stopped_at: null,
+  last_run_at: null,
+  last_execution_at: null,
+  next_run_at: null,
+  last_scan_at: null,
+  last_llm_run_at: null,
+  last_rebalance_at: null,
+  next_scan_at: null,
+  next_llm_run_at: null,
+  next_rebalance_at: null,
+  last_error: null,
+  last_action: null,
+  last_run_id: null,
+  latest_guardrail_checks: [],
+  invested_usd: 0,
+  current_value_usd: 0,
+  pnl_usd: 0,
+  active_positions: 0,
+  trades_today: 0,
+  consecutive_failed_orders: 0,
+  today_executed_orders: 0,
+  today_skipped_orders: 0,
+  doctor_status: "watch",
+  balance_status: "watch",
+};
 
 function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
@@ -67,6 +116,106 @@ function formatDateTime(value: string | null | undefined) {
 
 function labelize(value: string) {
   return value.replace(/[_-]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatDashboardIssue(label: string, error: unknown) {
+  return `${label}: ${normalizeError(error)}`;
+}
+
+function mapGuardrailTone(
+  status: BullpenAutoLiveGuardrailCheck["status"],
+): "positive" | "warning" | "critical" {
+  if (status === "pass") return "positive";
+  if (status === "fail") return "critical";
+  return "warning";
+}
+
+function inferModeFromSettings(
+  settings?: BullpenAutoLiveSettings | null,
+): BullpenAutoLiveState["mode"] {
+  if (!settings) return "dry-run";
+  if (settings.dry_run) return "dry-run";
+  if (settings.allow_live_execution) return "live-trading";
+  return "analysis-only";
+}
+
+function buildFallbackState(
+  state?: BullpenAutoLiveState | null,
+  settings?: BullpenAutoLiveSettings | null,
+): BullpenAutoLiveState {
+  if (state) {
+    return state;
+  }
+
+  return {
+    ...EMPTY_AUTO_LIVE_STATE,
+    dry_run: settings?.dry_run ?? EMPTY_AUTO_LIVE_STATE.dry_run,
+    live_execution_allowed:
+      settings?.allow_live_execution ??
+      EMPTY_AUTO_LIVE_STATE.live_execution_allowed,
+    emergency_stopped:
+      settings?.emergency_stop ?? EMPTY_AUTO_LIVE_STATE.emergency_stopped,
+    mode: inferModeFromSettings(settings),
+  };
+}
+
+function buildFallbackBotCard(
+  state: BullpenAutoLiveState,
+  checks: BullpenAutoLiveGuardrailCheck[],
+): BullpenAutoLiveSummaryResponse["bot_card"] {
+  const guardrails = checks.slice(0, 6).map((check) => ({
+    label: check.label,
+    value: check.value || labelize(check.status),
+    tone: mapGuardrailTone(check.status),
+  }));
+  const returnPct =
+    state.invested_usd > 0
+      ? Number(((state.pnl_usd / state.invested_usd) * 100).toFixed(2))
+      : null;
+
+  return {
+    id: "bullpen-ai-auto-live",
+    name: "Bullpen AI Auto-Live",
+    route: URLs.routes.console.bullpenAiAutoLive(),
+    status: state.status,
+    mode: state.mode,
+    invested_usd: state.invested_usd || null,
+    current_value_usd: state.current_value_usd || null,
+    pnl_usd: state.pnl_usd || null,
+    return_pct: returnPct,
+    active_positions: state.active_positions || null,
+    trades_today: state.trades_today || null,
+    last_run_at: state.last_run_at,
+    next_run_at: state.next_run_at,
+    guardrails_summary:
+      guardrails.length > 0
+        ? guardrails
+            .slice(0, 4)
+            .map((guardrail) => `${guardrail.label}: ${guardrail.value}`)
+            .join(" • ")
+        : "Runtime guardrails will appear here once the auto-live service reports them.",
+    strategy_summary: AUTO_LIVE_STRATEGY_SUMMARY,
+    risk_summary: state.last_error || AUTO_LIVE_RISK_SUMMARY,
+    guardrails,
+  };
+}
+
+function buildPartialSummary(
+  state?: BullpenAutoLiveState | null,
+  settings?: BullpenAutoLiveSettings | null,
+): BullpenAutoLiveSummaryResponse {
+  const resolvedState = buildFallbackState(state, settings);
+  const latestGuardrailChecks = resolvedState.latest_guardrail_checks ?? [];
+
+  return {
+    state: resolvedState,
+    settings: settings ?? BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS,
+    bot_card: buildFallbackBotCard(resolvedState, latestGuardrailChecks),
+    latest_run: null,
+    recent_runs: [],
+    recent_decisions: [],
+    latest_guardrail_checks: latestGuardrailChecks,
+  };
 }
 
 function getGuardrailClass(status: string) {
@@ -150,22 +299,85 @@ function GuardrailPill({ check }: { check: BullpenAutoLiveGuardrailCheck }) {
   );
 }
 
-async function requestDashboard(): Promise<BullpenAutoLiveSummaryResponse> {
-  const [summary, runs, decisions] = await Promise.all([
-    apiService.bullpenAiAutoLiveSummary(),
-    apiService.bullpenAiAutoLiveRuns(),
-    apiService.bullpenAiAutoLiveDecisions(),
+async function requestDashboard(): Promise<DashboardRequestResult> {
+  const issues: string[] = [];
+  const [summaryResult, runsResult, decisionsResult] = await Promise.allSettled([
+    apiService.getBullpenAutoLiveSummary(),
+    apiService.getBullpenAutoLiveRuns(),
+    apiService.getBullpenAutoLiveDecisions(),
   ]);
+  let summary =
+    summaryResult.status === "fulfilled" ? summaryResult.value : null;
+  let hasSettings = summaryResult.status === "fulfilled";
+
+  if (summaryResult.status === "rejected") {
+    issues.push(formatDashboardIssue("Summary", summaryResult.reason));
+  }
+  if (runsResult.status === "rejected") {
+    issues.push(formatDashboardIssue("Runs", runsResult.reason));
+  }
+  if (decisionsResult.status === "rejected") {
+    issues.push(formatDashboardIssue("Decisions", decisionsResult.reason));
+  }
+
+  if (!summary) {
+    const [stateResult, settingsResult] = await Promise.allSettled([
+      apiService.getBullpenAutoLiveState(),
+      apiService.getBullpenAutoLiveSettings(),
+    ]);
+    const state = stateResult.status === "fulfilled" ? stateResult.value : null;
+    const settings =
+      settingsResult.status === "fulfilled" ? settingsResult.value : null;
+
+    if (stateResult.status === "rejected") {
+      issues.push(formatDashboardIssue("State", stateResult.reason));
+    }
+    if (settingsResult.status === "rejected") {
+      issues.push(formatDashboardIssue("Settings", settingsResult.reason));
+    }
+
+    hasSettings = settings != null;
+
+    if (state || settings) {
+      summary = buildPartialSummary(state, settings);
+    }
+  }
+
+  if (!summary) {
+    return {
+      summary: null,
+      issues,
+      hasSettings,
+    };
+  }
+
+  const recentRuns =
+    runsResult.status === "fulfilled" ? runsResult.value : summary.recent_runs;
+  const recentDecisions =
+    decisionsResult.status === "fulfilled"
+      ? decisionsResult.value
+      : summary.recent_decisions;
+  const latestGuardrails =
+    summary.latest_guardrail_checks.length > 0
+      ? summary.latest_guardrail_checks
+      : summary.state.latest_guardrail_checks;
 
   return {
-    ...summary,
-    recent_runs: runs,
-    recent_decisions: decisions,
+    summary: {
+      ...summary,
+      latest_run: summary.latest_run ?? recentRuns[0] ?? null,
+      recent_runs: recentRuns,
+      recent_decisions: recentDecisions,
+      latest_guardrail_checks: latestGuardrails,
+    },
+    issues,
+    hasSettings,
   };
 }
 
 export function BullpenAiAutoLiveConsole() {
   const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(null);
+  const [settingsAvailable, setSettingsAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -175,10 +387,19 @@ export function BullpenAiAutoLiveConsole() {
   async function reloadDashboard() {
     setRefreshing(true);
     try {
-      const nextSummary = await requestDashboard();
-      setSummary(nextSummary);
-      setError(null);
-      return nextSummary;
+      const result = await requestDashboard();
+      if (result.summary) {
+        setSummary(result.summary);
+      }
+      setSettingsAvailable(result.hasSettings);
+      setError(
+        result.issues.length > 0
+          ? result.issues.join(" • ")
+          : result.summary
+            ? null
+            : "No Bullpen AI Auto-Live data is available yet.",
+      );
+      return result.summary;
     } catch (nextError) {
       setError(normalizeError(nextError));
       return null;
@@ -193,10 +414,17 @@ export function BullpenAiAutoLiveConsole() {
     async function loadInitialDashboard() {
       setLoading(true);
       try {
-        const nextSummary = await requestDashboard();
+        const result = await requestDashboard();
         if (cancelled) return;
-        setSummary(nextSummary);
-        setError(null);
+        setSummary(result.summary);
+        setSettingsAvailable(result.hasSettings);
+        setError(
+          result.issues.length > 0
+            ? result.issues.join(" • ")
+            : result.summary
+              ? null
+              : "No Bullpen AI Auto-Live data is available yet.",
+        );
       } catch (nextError) {
         if (cancelled) return;
         setError(normalizeError(nextError));
@@ -218,15 +446,15 @@ export function BullpenAiAutoLiveConsole() {
     setActionBusy(action);
     try {
       if (action === "run-once") {
-        await apiService.bullpenAiAutoLiveRunOnce();
+        await apiService.runBullpenAutoLiveOnce();
       } else if (action === "start") {
-        await apiService.bullpenAiAutoLiveStart();
+        await apiService.startBullpenAutoLive();
       } else if (action === "pause") {
-        await apiService.bullpenAiAutoLivePause();
+        await apiService.pauseBullpenAutoLive();
       } else if (action === "resume") {
-        await apiService.bullpenAiAutoLiveResume();
+        await apiService.resumeBullpenAutoLive();
       } else if (action === "stop") {
-        await apiService.bullpenAiAutoLiveStop();
+        await apiService.stopBullpenAutoLive();
       }
 
       await reloadDashboard();
@@ -237,21 +465,69 @@ export function BullpenAiAutoLiveConsole() {
     }
   }
 
-  const state = summary?.state;
-  const latestGuardrails = summary?.latest_guardrail_checks ?? [];
-  const latestRun = summary?.latest_run ?? summary?.recent_runs?.[0] ?? null;
-  const botCard = summary?.bot_card;
-
   if (loading && !summary) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.10),_transparent_35%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] px-6">
         <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-600 shadow-sm">
           <Loader2 className="size-4 animate-spin" />
-          Loading Bullpen AI Auto-Live decisions...
+          Loading Bullpen AI Auto-Live state...
         </div>
       </div>
     );
   }
+
+  if (!summary) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.10),_transparent_35%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] px-6">
+        <Card className="w-full max-w-2xl border-slate-200 bg-white/95 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-xl text-slate-950">
+              Bullpen AI Auto-Live data is unavailable
+            </CardTitle>
+            <CardDescription>
+              The console could not load enough state to render the dashboard yet.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Alert className="border-amber-300 bg-amber-50 text-amber-900">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>Load failed</AlertTitle>
+              <AlertDescription>{error || "Unknown load error."}</AlertDescription>
+            </Alert>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                className="rounded-full"
+                disabled={refreshing}
+                onClick={() => {
+                  void reloadDashboard();
+                }}
+              >
+                {refreshing ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="mr-2 size-4" />
+                )}
+                Retry load
+              </Button>
+              <Button asChild className="rounded-full" variant="outline">
+                <Link href={URLs.routes.console.bullpenAi()}>
+                  Open Bullpen x AI
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const state = summary.state;
+  const latestGuardrails = summary.latest_guardrail_checks ?? [];
+  const latestRun = summary.latest_run ?? summary.recent_runs?.[0] ?? null;
+  const botCard = summary.bot_card;
+  const guardrailsDrawerKey = settingsAvailable
+    ? `${guardrailsDrawerOpen ? "open" : "closed"}:${JSON.stringify(summary.settings)}`
+    : `${guardrailsDrawerOpen ? "open" : "closed"}:settings-unavailable`;
 
   return (
     <>
@@ -283,24 +559,24 @@ export function BullpenAiAutoLiveConsole() {
                       <span
                         className={cn(
                           "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em]",
-                          getGuardrailClass(state?.status || "watch"),
+                          getGuardrailClass(state.status || "watch"),
                         )}
                       >
-                        {state ? labelize(state.status) : "Unknown status"}
+                        {labelize(state.status)}
                       </span>
                       <span
                         className={cn(
                           "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em]",
-                          getModeClass(state?.mode || "dry-run"),
+                          getModeClass(state.mode || "dry-run"),
                         )}
                       >
-                        {state ? labelize(state.mode) : "Dry run"}
+                        {labelize(state.mode)}
                       </span>
                       <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700">
-                        {state?.live_armed ? "Live armed" : "Simulation only"}
+                        {state.live_armed ? "Live armed" : "Simulation only"}
                       </span>
                       <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700">
-                        {state?.dry_run ? "Dry run on" : "Dry run off"}
+                        {state.dry_run ? "Dry run on" : "Dry run off"}
                       </span>
                     </div>
                   </div>
@@ -335,7 +611,7 @@ export function BullpenAiAutoLiveConsole() {
                       )}
                       Run now
                     </Button>
-                    {state?.paused ? (
+                    {state.paused ? (
                       <Button
                         className="rounded-full"
                         disabled={refreshing || Boolean(actionBusy)}
@@ -351,7 +627,7 @@ export function BullpenAiAutoLiveConsole() {
                         )}
                         Resume
                       </Button>
-                    ) : state?.running ? (
+                    ) : state.running ? (
                       <Button
                         className="rounded-full"
                         disabled={refreshing || Boolean(actionBusy)}
@@ -384,7 +660,7 @@ export function BullpenAiAutoLiveConsole() {
                         Start scheduler
                       </Button>
                     )}
-                    {state?.running || state?.paused ? (
+                    {state.running || state.paused ? (
                       <Button
                         className="rounded-full"
                         disabled={refreshing || Boolean(actionBusy)}
@@ -414,7 +690,7 @@ export function BullpenAiAutoLiveConsole() {
 
                 <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
                   <span>
-                    Last action: <span className="font-medium text-slate-900">{state?.last_action || "-"}</span>
+                    Last action: <span className="font-medium text-slate-900">{state.last_action || "-"}</span>
                   </span>
                   <span className="hidden text-slate-300 sm:inline">|</span>
                   <span>
@@ -430,7 +706,7 @@ export function BullpenAiAutoLiveConsole() {
               </div>
 
               <CardContent className="space-y-5 px-6 py-6">
-                {state?.emergency_stopped ? (
+                {state.emergency_stopped ? (
                   <Alert className="border-rose-300 bg-rose-50 text-rose-900">
                     <ShieldAlert className="size-4" />
                     <AlertTitle>Emergency stop is active</AlertTitle>
@@ -444,23 +720,23 @@ export function BullpenAiAutoLiveConsole() {
                 {error ? (
                   <Alert className="border-amber-300 bg-amber-50 text-amber-900">
                     <AlertTriangle className="size-4" />
-                    <AlertTitle>Console refresh needs attention</AlertTitle>
+                    <AlertTitle>Showing partial data</AlertTitle>
                     <AlertDescription>{error}</AlertDescription>
                   </Alert>
                 ) : null}
 
                 <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
                   <MetricCard
-                    detail={`Current value ${formatMoney(state?.current_value_usd)}`}
+                    detail={`Current value ${formatMoney(state.current_value_usd)}`}
                     eyebrow="Capital"
                     title="Invested"
-                    value={formatMoney(state?.invested_usd)}
+                    value={formatMoney(state.invested_usd)}
                   />
                   <MetricCard
-                    detail={`${state?.active_positions ?? 0} active positions | ${state?.today_executed_orders ?? state?.trades_today ?? 0} executed today`}
+                    detail={`${state.active_positions ?? 0} active positions | ${state.today_executed_orders ?? state.trades_today ?? 0} executed today`}
                     eyebrow="PnL"
                     title="Net Profit / Loss"
-                    value={formatMoney(state?.pnl_usd)}
+                    value={formatMoney(state.pnl_usd)}
                   />
                   <MetricCard
                     detail={
@@ -473,10 +749,10 @@ export function BullpenAiAutoLiveConsole() {
                     value={latestRun ? formatDateTime(latestRun.started_at) : "-"}
                   />
                   <MetricCard
-                    detail={`Scan ${formatDateTime(state?.next_scan_at)} | Rebalance ${formatDateTime(state?.next_rebalance_at)}`}
+                    detail={`Scan ${formatDateTime(state.next_scan_at)} | Rebalance ${formatDateTime(state.next_rebalance_at)}`}
                     eyebrow="Scheduler"
-                    title={state?.running ? "Active" : state?.paused ? "Paused" : "Stopped"}
-                    value={formatDateTime(state?.next_run_at)}
+                    title={state.running ? "Active" : state.paused ? "Paused" : "Stopped"}
+                    value={formatDateTime(state.next_run_at)}
                   />
                 </div>
 
@@ -526,32 +802,32 @@ export function BullpenAiAutoLiveConsole() {
                     <CardContent className="space-y-3">
                       <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                         <span className="text-sm font-medium text-slate-700">Live armed</span>
-                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass(state?.live_armed ? "pass" : "watch"))}>
-                          {state?.live_armed ? "Armed" : "Simulation"}
+                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass(state.live_armed ? "pass" : "watch"))}>
+                          {state.live_armed ? "Armed" : "Simulation"}
                         </span>
                       </div>
                       <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                         <span className="text-sm font-medium text-slate-700">Live execution allowed</span>
-                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass(state?.live_execution_allowed ? "pass" : "watch"))}>
-                          {state?.live_execution_allowed ? "Ready" : "Blocked"}
+                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass(state.live_execution_allowed ? "pass" : "watch"))}>
+                          {state.live_execution_allowed ? "Ready" : "Blocked"}
                         </span>
                       </div>
                       <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                         <span className="text-sm font-medium text-slate-700">Dry run</span>
-                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass(state?.dry_run ? "warning" : "pass"))}>
-                          {state?.dry_run ? "On" : "Off"}
+                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass(state.dry_run ? "warning" : "pass"))}>
+                          {state.dry_run ? "On" : "Off"}
                         </span>
                       </div>
                       <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                         <span className="text-sm font-medium text-slate-700">Executed / skipped today</span>
                         <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
-                          {state?.today_executed_orders ?? 0} / {state?.today_skipped_orders ?? 0}
+                          {state.today_executed_orders ?? 0} / {state.today_skipped_orders ?? 0}
                         </span>
                       </div>
                       <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                         <span className="text-sm font-medium text-slate-700">Consecutive failed orders</span>
-                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass((state?.consecutive_failed_orders ?? 0) > 0 ? "warning" : "pass"))}>
-                          {state?.consecutive_failed_orders ?? 0}
+                        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]", getGuardrailClass((state.consecutive_failed_orders ?? 0) > 0 ? "warning" : "pass"))}>
+                          {state.consecutive_failed_orders ?? 0}
                         </span>
                       </div>
                     </CardContent>
@@ -588,11 +864,13 @@ export function BullpenAiAutoLiveConsole() {
       </div>
 
       <BullpenAiAutoLiveRiskGuardrailsDrawer
+        emergencyStopped={state.emergency_stopped}
+        key={guardrailsDrawerKey}
         onClose={() => setGuardrailsDrawerOpen(false)}
         onSummaryReload={reloadDashboard}
         open={guardrailsDrawerOpen}
-        settings={summary?.settings ?? null}
-        settingsLoading={loading && !summary}
+        settings={settingsAvailable ? summary.settings : null}
+        settingsLoading={loading && !settingsAvailable}
       />
     </>
   );

@@ -156,6 +156,27 @@ function resolveWebSocketBaseUrl() {
   return (inferBrowserApiBaseUrl() || LOCAL_API_FALLBACK).replace(/^http/, "ws");
 }
 
+const bullpenAutoLiveApiUrls = {
+  summary: () => `${resolveApiBaseUrl()}/polymarket/auto-live/summary`,
+  state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
+  settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
+  runs: () => `${resolveApiBaseUrl()}/polymarket/auto-live/runs`,
+  decisions: () => `${resolveApiBaseUrl()}/polymarket/auto-live/decisions`,
+  runOnce: () => `${resolveApiBaseUrl()}/polymarket/auto-live/run-once`,
+  start: () => `${resolveApiBaseUrl()}/polymarket/auto-live/start`,
+  stop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/stop`,
+  pause: () => `${resolveApiBaseUrl()}/polymarket/auto-live/pause`,
+  resume: () => `${resolveApiBaseUrl()}/polymarket/auto-live/resume`,
+  resetSettings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings/reset`,
+  emergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/emergency-stop`,
+  clearEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/clear-emergency-stop`,
+};
+
+const tradingBotsApiUrls = {
+  summary: () => `${resolveApiBaseUrl()}/trading-bots/summary`,
+  overview: () => `${resolveApiBaseUrl()}/trading-bots/overview`,
+};
+
 /**
  * URL Resolver - Centralized API endpoint management
  */
@@ -314,25 +335,10 @@ export const URLs = {
     discoveryDebug: () => `${resolveApiBaseUrl()}/polymarket-direct/live/discovery/debug`,
   },
 
-  polymarketAutoLive: {
-    summary: () => `${resolveApiBaseUrl()}/polymarket/auto-live/summary`,
-    state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
-    settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
-    runs: () => `${resolveApiBaseUrl()}/polymarket/auto-live/runs`,
-    decisions: () => `${resolveApiBaseUrl()}/polymarket/auto-live/decisions`,
-    runOnce: () => `${resolveApiBaseUrl()}/polymarket/auto-live/run-once`,
-    start: () => `${resolveApiBaseUrl()}/polymarket/auto-live/start`,
-    stop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/stop`,
-    pause: () => `${resolveApiBaseUrl()}/polymarket/auto-live/pause`,
-    resume: () => `${resolveApiBaseUrl()}/polymarket/auto-live/resume`,
-    resetSettings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings/reset`,
-    emergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/emergency-stop`,
-    clearEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/clear-emergency-stop`,
-  },
+  bullpenAutoLive: bullpenAutoLiveApiUrls,
+  polymarketAutoLive: bullpenAutoLiveApiUrls,
 
-  tradingBots: {
-    overview: () => `${resolveApiBaseUrl()}/trading-bots/overview`,
-  },
+  tradingBots: tradingBotsApiUrls,
 
   // Google Sheets endpoints
   googleSheets: {

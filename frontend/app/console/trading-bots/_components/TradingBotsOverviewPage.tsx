@@ -25,7 +25,7 @@ import {
   buildPolymarketTradingBotSummary,
   buildTradingBotsOverviewShell,
   mergeTradingBotsOverview,
-  normalizeTradingBotsOverviewResponse,
+  normalizeTradingBotsSummaryResponse,
   type TradingBotGuardrail,
   type TradingBotSummary,
   type TradingBotsOverview,
@@ -796,12 +796,12 @@ export function TradingBotsOverviewPage() {
       setLoadError(null);
 
       const preferredOverviewPromise = withTimeout(
-        apiService.getTradingBotsOverview(),
+        apiService.getTradingBotsSummary(),
         PREFERRED_OVERVIEW_TIMEOUT_MS,
-        "Trading Bots overview",
+        "Trading Bots summary",
       )
         .then((response) => {
-          const normalized = normalizeTradingBotsOverviewResponse(response);
+          const normalized = normalizeTradingBotsSummaryResponse(response);
           startTransition(() => {
             setOverview((current) =>
               mergeTradingBotsOverview(normalized, current),
@@ -888,7 +888,7 @@ export function TradingBotsOverviewPage() {
             }
           }),
         withTimeout(
-          apiService.bullpenAiAutoLiveSummary(),
+          apiService.getBullpenAutoLiveSummary(),
           AUTO_LIVE_TIMEOUT_MS,
           "Bullpen AI Auto-Live summary",
         )
