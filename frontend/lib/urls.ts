@@ -314,6 +314,14 @@ export const URLs = {
     discoveryDebug: () => `${resolveApiBaseUrl()}/polymarket-direct/live/discovery/debug`,
   },
 
+  polymarketAutoLive: {
+    summary: () => `${resolveApiBaseUrl()}/polymarket/auto-live/summary`,
+    settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
+    resetSettings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings/reset`,
+    emergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/emergency-stop`,
+    clearEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/clear-emergency-stop`,
+  },
+
   tradingBots: {
     overview: () => `${resolveApiBaseUrl()}/trading-bots/overview`,
   },

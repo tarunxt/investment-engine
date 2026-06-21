@@ -1405,6 +1405,120 @@ export interface PolymarketDiscoveryDebugReport {
   errors: PolymarketDiscoveryDebugError[];
 }
 
+export type BullpenAutoLiveEvidenceStatus = "Low" | "Moderate" | "Strong";
+export type BullpenAutoLiveConfidence = "Low" | "Medium" | "High";
+export type BullpenAutoLiveGuardrailStatus = "pass" | "watch" | "fail";
+export type BullpenAutoLiveRuntimeStatus =
+  | "running"
+  | "paused"
+  | "stopped"
+  | "error"
+  | "not-configured";
+export type BullpenAutoLiveRuntimeMode =
+  | "dry-run"
+  | "analysis-only"
+  | "live-trading";
+
+export interface BullpenAutoLiveSettings {
+  bankroll_usd: number;
+  bankroll_source: "manual";
+  max_single_trade_pct_bankroll: number;
+  max_single_market_pct_bankroll: number;
+  max_theme_exposure_pct_bankroll: number;
+  max_open_exposure_pct_bankroll: number;
+  min_cash_reserve_pct_bankroll: number;
+  min_order_usd: number;
+  max_order_usd: number;
+  min_independent_active_markets: number;
+  target_active_markets: number;
+  max_active_markets: number;
+  max_new_markets_per_rebalance: number;
+  min_edge_pp: number;
+  min_score: number;
+  kelly_fraction: number;
+  initial_tranche_pct: number;
+  add_more_threshold_pct: number;
+  max_llm_spread_pp: number;
+  half_size_llm_spread_pp: number;
+  min_evidence_status: BullpenAutoLiveEvidenceStatus;
+  min_confidence: BullpenAutoLiveConfidence;
+  adjudication_required_blocks_trade: boolean;
+  limit_orders_only: boolean;
+  max_bid_ask_spread_cents: number;
+  max_slippage_cents: number;
+  trade_cooldown_hours_per_market: number;
+  max_reprice_attempts: number;
+  exit_edge_pp: number;
+  trim_edge_pp: number;
+  rebalance_interval_minutes: number;
+  no_new_trade_under_hours_to_deadline: number;
+  half_size_under_hours_to_deadline: number;
+  max_rebalance_churn_pct_bankroll: number;
+  max_daily_loss_pct_bankroll: number;
+  max_weekly_loss_pct_bankroll: number;
+  pause_after_consecutive_failed_orders: number;
+  pause_if_balance_unavailable: boolean;
+  pause_if_doctor_fails: boolean;
+  pause_if_llm_provider_error_rate_high: boolean;
+  emergency_stop: boolean;
+  active_price_refresh_seconds: number;
+  candidate_price_refresh_minutes: number;
+  new_scan_interval_minutes: number;
+  llm_rerun_interval_minutes: number;
+  auto_live_enabled: boolean;
+  dry_run: boolean;
+  require_manual_confirmation: boolean;
+  allow_live_execution: boolean;
+}
+
+export type BullpenAutoLiveSettingsUpdate = Partial<BullpenAutoLiveSettings>;
+
+export interface BullpenAutoLiveGuardrailCheck {
+  id: string;
+  label: string;
+  status: BullpenAutoLiveGuardrailStatus;
+  detail: string;
+  value?: string | null;
+  blocking: boolean;
+  checked_at: string;
+}
+
+export interface BullpenAutoLiveState {
+  running: boolean;
+  paused: boolean;
+  status: BullpenAutoLiveRuntimeStatus;
+  mode: BullpenAutoLiveRuntimeMode;
+  server_now?: string | null;
+  started_at?: string | null;
+  stopped_at?: string | null;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  last_scan_at?: string | null;
+  last_llm_run_at?: string | null;
+  last_rebalance_at?: string | null;
+  next_scan_at?: string | null;
+  next_llm_run_at?: string | null;
+  next_rebalance_at?: string | null;
+  last_error?: string | null;
+  last_action?: string | null;
+  last_run_id?: string | null;
+  latest_guardrail_checks: BullpenAutoLiveGuardrailCheck[];
+  invested_usd: number;
+  current_value_usd: number;
+  pnl_usd: number;
+  active_positions: number;
+  trades_today: number;
+  consecutive_failed_orders: number;
+  doctor_status: BullpenAutoLiveGuardrailStatus;
+  balance_status: BullpenAutoLiveGuardrailStatus;
+}
+
+export interface BullpenAutoLiveSummaryResponse {
+  state: BullpenAutoLiveState;
+  settings: BullpenAutoLiveSettings;
+  latest_guardrail_checks: BullpenAutoLiveGuardrailCheck[];
+}
+
 export type TradingBotStatus =
   | "running"
   | "paused"

@@ -51,6 +51,10 @@ import {
     PolymarketTrackedAccountUpdate,
     PolymarketDiscoveryDebugReport,
     PolymarketDiscoveryDebugRequest,
+    BullpenAutoLiveSettings,
+    BullpenAutoLiveSettingsUpdate,
+    BullpenAutoLiveState,
+    BullpenAutoLiveSummaryResponse,
     TradingBotsOverviewResponse,
     ZerodhaLoginUrlResponse,
     ZerodhaOrder,
@@ -181,6 +185,12 @@ export interface IApiService {
     polymarketUpdateTrackedAccount(accountId: string, data: PolymarketTrackedAccountUpdate): Promise<PolymarketBotState>;
     polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState>;
     polymarketDiscoveryDebug(data: PolymarketDiscoveryDebugRequest): Promise<PolymarketDiscoveryDebugReport>;
+    bullpenAiAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse>;
+    bullpenAiAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
+    bullpenAiAutoLiveUpdateSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
+    bullpenAiAutoLiveResetSettings(): Promise<BullpenAutoLiveSettings>;
+    bullpenAiAutoLiveEmergencyStop(): Promise<BullpenAutoLiveState>;
+    bullpenAiAutoLiveClearEmergencyStop(): Promise<BullpenAutoLiveState>;
     getTradingBotsOverview(): Promise<TradingBotsOverviewResponse>;
 }
 

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,8 +12,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { formatUnknownError } from "@/lib/apiErrors";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
+import { APIError, apiService } from "@/services/api";
+import type { BullpenAutoLiveSummaryResponse } from "@/types/api";
 
 import {
   AUTO_LIVE_ACTIVE_ROWS,
@@ -23,6 +26,10 @@ import {
   type AutoLiveDecision,
   type AutoLiveRiskStatus,
 } from "./bullpenAiAutoLiveData";
+import { BullpenAiAutoLiveRiskGuardrailsDrawer } from "./BullpenAiAutoLiveRiskGuardrailsDrawer";
+import {
+  BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS,
+} from "./bullpenAiAutoLiveRiskGuardrails";
 
 type ReadinessKey =
   | "autoLiveEnabled"
@@ -59,9 +66,6 @@ type EmptyStateDescriptor = {
   description: string;
   tone: StatusTone;
 };
-
-const BANKROLL_USD = 25_000;
-const CASH_RESERVE_USD = 5_000;
 
 const READINESS_FIELDS: {
   key: ReadinessKey;
@@ -205,8 +209,18 @@ function getToneClass(tone: StatusTone) {
   }
 }
 
+function normalizeError(error: unknown) {
+  if (error instanceof APIError) return error.message;
+  return formatUnknownError(error);
+}
+
 export function BullpenAiAutoLiveConsole() {
-  const [controlState, setControlState] = useState<ControlState>(() => ({
+  const [autoLiveSummary, setAutoLiveSummary] =
+    useState<BullpenAutoLiveSummaryResponse | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [guardrailsDrawerOpen, setGuardrailsDrawerOpen] = useState(false);
+  const [localControlState, setControlState] = useState<ControlState>(() => ({
     autoLiveEnabled: true,
     dryRun: false,
     liveExecutionEnv: true,
@@ -223,6 +237,87 @@ export function BullpenAiAutoLiveConsole() {
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({
     "iran-fifa-2026": true,
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateAutoLiveSummary() {
+      try {
+        const summary = await apiService.bullpenAiAutoLiveSummary();
+        if (cancelled) return;
+        setAutoLiveSummary(summary);
+        setSummaryError(null);
+      } catch (error) {
+        if (cancelled) return;
+        setSummaryError(normalizeError(error));
+      } finally {
+        if (!cancelled) {
+          setSummaryLoading(false);
+        }
+      }
+    }
+
+    void hydrateAutoLiveSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loadAutoLiveSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    try {
+      const summary = await apiService.bullpenAiAutoLiveSummary();
+      setAutoLiveSummary(summary);
+      setSummaryError(null);
+      return summary;
+    } catch (error) {
+      setSummaryError(normalizeError(error));
+      return null;
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, []);
+
+  const persistedSettings =
+    autoLiveSummary?.settings ?? BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS;
+  const controlState = useMemo(() => {
+    if (!autoLiveSummary) {
+      return localControlState;
+    }
+
+    return {
+      ...localControlState,
+      autoLiveEnabled: autoLiveSummary.settings.auto_live_enabled,
+      dryRun: autoLiveSummary.settings.dry_run,
+      liveExecutionEnv: autoLiveSummary.settings.allow_live_execution,
+      doctorPasses: autoLiveSummary.state.doctor_status !== "fail",
+      balanceReady: autoLiveSummary.state.balance_status !== "fail",
+      riskSettingsValid: autoLiveSummary.latest_guardrail_checks.every(
+        (check) => check.status !== "fail",
+      ),
+      emergencyStop: autoLiveSummary.settings.emergency_stop,
+      paused: autoLiveSummary.state.paused,
+      liveTrading: autoLiveSummary.state.mode === "live-trading",
+      lastAction:
+        autoLiveSummary.state.last_action?.trim() || localControlState.lastAction,
+      lastScan: autoLiveSummary.state.last_scan_at ?? localControlState.lastScan,
+      lastLlmRun:
+        autoLiveSummary.state.last_llm_run_at ?? localControlState.lastLlmRun,
+      lastRebalance:
+        autoLiveSummary.state.last_rebalance_at ?? localControlState.lastRebalance,
+      nextScan: autoLiveSummary.state.next_scan_at ?? localControlState.nextScan,
+      nextLlmRun:
+        autoLiveSummary.state.next_llm_run_at ?? localControlState.nextLlmRun,
+      nextRebalance:
+        autoLiveSummary.state.next_rebalance_at ??
+        localControlState.nextRebalance,
+    };
+  }, [autoLiveSummary, localControlState]);
+  const latestGuardrailChecks = autoLiveSummary?.latest_guardrail_checks;
+  const bankrollUsd = persistedSettings.bankroll_usd;
+  const cashReserveUsd =
+    (bankrollUsd * persistedSettings.min_cash_reserve_pct_bankroll) / 100;
 
   const canRunLiveRebalance =
     controlState.autoLiveEnabled &&
@@ -262,10 +357,7 @@ export function BullpenAiAutoLiveConsole() {
     (total, row) => total + row.currentExposure,
     0,
   );
-  const availableCash = Math.max(
-    0,
-    BANKROLL_USD - CASH_RESERVE_USD - openExposure,
-  );
+  const availableCash = Math.max(0, bankrollUsd - cashReserveUsd - openExposure);
   const dailyPnl =
     !controlState.autoLiveEnabled
       ? 0
@@ -282,14 +374,15 @@ export function BullpenAiAutoLiveConsole() {
         : controlState.dryRun
           ? 154
           : 612;
-  const tradesToday =
+  const tradesToday = autoLiveSummary?.state.trades_today ?? (
     !controlState.autoLiveEnabled
       ? 0
       : controlState.liveTrading
         ? 8
         : controlState.dryRun
           ? 3
-          : 5;
+          : 5
+  );
 
   const emptyStates = useMemo(() => {
     const states: EmptyStateDescriptor[] = [];
@@ -353,6 +446,16 @@ export function BullpenAiAutoLiveConsole() {
   ]);
 
   const guardrailItems = useMemo(() => {
+    const backendGuardrailChecks = latestGuardrailChecks ?? [];
+
+    if (backendGuardrailChecks.length > 0) {
+      return backendGuardrailChecks.map((check) => ({
+        label: check.label,
+        value: check.value || check.detail,
+        status: check.status,
+      }));
+    }
+
     const maxThemeExposure = 4_500;
     const macroThemeExposure = activeRows
       .filter((row) => row.category.includes("Macro"))
@@ -434,6 +537,7 @@ export function BullpenAiAutoLiveConsole() {
     controlState.riskSettingsValid,
     dailyPnl,
     displayRows,
+    latestGuardrailChecks,
     openExposure,
     weeklyPnl,
   ]);
@@ -441,7 +545,7 @@ export function BullpenAiAutoLiveConsole() {
   const metricItems = [
     {
       label: "Bankroll",
-      value: formatMoney(BANKROLL_USD),
+      value: formatMoney(bankrollUsd),
       helper: "Configured bot bankroll",
     },
     {
@@ -456,7 +560,7 @@ export function BullpenAiAutoLiveConsole() {
     },
     {
       label: "Cash reserve",
-      value: formatMoney(CASH_RESERVE_USD),
+      value: formatMoney(cashReserveUsd),
       helper: "Protected reserve floor",
     },
     {
@@ -690,15 +794,21 @@ export function BullpenAiAutoLiveConsole() {
     );
   }
 
-  function handleEmergencyStop() {
-    setLastAction(
-      "Emergency stop activated. All live order submission is blocked until the stop is cleared.",
-      {
-        emergencyStop: true,
-        liveTrading: false,
-        paused: false,
-      },
-    );
+  async function handleEmergencyStop() {
+    try {
+      await apiService.bullpenAiAutoLiveEmergencyStop();
+      await loadAutoLiveSummary();
+      setLastAction(
+        "Emergency stop activated. All live order submission is blocked until the stop is cleared.",
+        {
+          emergencyStop: true,
+          liveTrading: false,
+          paused: true,
+        },
+      );
+    } catch (error) {
+      setLastAction(normalizeError(error));
+    }
   }
 
   function toggleExpanded(rowId: string) {
@@ -724,6 +834,19 @@ export function BullpenAiAutoLiveConsole() {
           </p>
         </div>
       </div>
+
+      {summaryError ? (
+        <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-4 py-4 text-sm leading-6 text-rose-900">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">
+            Backend Guardrails Sync Failed
+          </p>
+          <p className="mt-2">
+            The console is still showing local scaffold data, but the editable
+            Risk Guardrails drawer may be stale until backend sync succeeds.
+          </p>
+          <p className="mt-2 text-rose-700">{summaryError}</p>
+        </div>
+      ) : null}
 
       <Card className="gap-0 rounded-[28px] border border-slate-200 bg-white py-0 shadow-sm">
         <CardHeader className="gap-4 border-b border-slate-100 px-6 py-6 sm:px-7">
@@ -823,12 +946,13 @@ export function BullpenAiAutoLiveConsole() {
               Emergency Stop
             </Button>
             <Button
-              asChild
               size="sm"
               variant="outline"
               className="rounded-full border-slate-300 px-5"
+              onClick={() => setGuardrailsDrawerOpen(true)}
             >
-              <a href="#risk-guardrails">Risk Guardrails</a>
+              {summaryLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+              Risk Guardrails
             </Button>
             <Button
               asChild
@@ -1401,6 +1525,17 @@ export function BullpenAiAutoLiveConsole() {
           )}
         </CardContent>
       </Card>
+
+      {guardrailsDrawerOpen ? (
+        <BullpenAiAutoLiveRiskGuardrailsDrawer
+          key={JSON.stringify(autoLiveSummary?.settings ?? null)}
+          onClose={() => setGuardrailsDrawerOpen(false)}
+          onSummaryReload={loadAutoLiveSummary}
+          open={guardrailsDrawerOpen}
+          settings={autoLiveSummary?.settings ?? null}
+          settingsLoading={summaryLoading}
+        />
+      ) : null}
     </div>
   );
 }

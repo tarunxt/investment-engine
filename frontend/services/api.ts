@@ -29,6 +29,10 @@ import {
   IndMoneyUsThreatHistoryResponse,
   IndMoneyUsThreatLatestResponse,
   IndMoneyUsThreatRunResponse,
+  BullpenAutoLiveSettings,
+  BullpenAutoLiveSettingsUpdate,
+  BullpenAutoLiveState,
+  BullpenAutoLiveSummaryResponse,
   PolymarketBotState,
   PolymarketManualInvestOrderRequest,
   PolymarketManualInvestResponse,
@@ -918,6 +922,32 @@ class apiServiceClass implements IApiService {
     data: PolymarketDiscoveryDebugRequest,
   ): Promise<PolymarketDiscoveryDebugReport> {
     return this.post<PolymarketDiscoveryDebugReport>(URLs.polymarket.discoveryDebug(), data);
+  }
+
+  bullpenAiAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse> {
+    return this.get<BullpenAutoLiveSummaryResponse>(URLs.polymarketAutoLive.summary());
+  }
+
+  bullpenAiAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {
+    return this.get<BullpenAutoLiveSettings>(URLs.polymarketAutoLive.settings());
+  }
+
+  bullpenAiAutoLiveUpdateSettings(
+    data: BullpenAutoLiveSettingsUpdate,
+  ): Promise<BullpenAutoLiveSettings> {
+    return this.put<BullpenAutoLiveSettings>(URLs.polymarketAutoLive.settings(), data);
+  }
+
+  bullpenAiAutoLiveResetSettings(): Promise<BullpenAutoLiveSettings> {
+    return this.post<BullpenAutoLiveSettings>(URLs.polymarketAutoLive.resetSettings());
+  }
+
+  bullpenAiAutoLiveEmergencyStop(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.emergencyStop());
+  }
+
+  bullpenAiAutoLiveClearEmergencyStop(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.clearEmergencyStop());
   }
 
   polymarketDirectState(): Promise<PolymarketBotState> {
