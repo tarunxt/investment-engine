@@ -24,11 +24,14 @@ from app.domains.jobs.router import router as jobs_router
 from app.domains.jobs.ws_router import router as jobs_ws_router
 from app.domains.polymarket.router import router as polymarket_router
 from app.domains.polymarket.service import polymarket_bot_manager
+from app.domains.polymarket_auto_live.router import router as polymarket_auto_live_router
+from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
 from app.domains.polymarket_direct.router import router as polymarket_direct_router
 from app.domains.polymarket_direct.service import polymarket_direct_bot_manager
 from app.domains.prompts.router import router as prompts_router
 from app.domains.runs.router import router as runs_router
 from app.domains.runs.ws_router import router as runs_ws_router
+from app.domains.trading_bots.router import router as trading_bots_router
 from app.domains.zerodha.router import router as zerodha_router
 from app.domains.zerodha.events_router import router as zerodha_events_router
 from app.domains.zerodha.threats_router import router as zerodha_threats_router
@@ -109,6 +112,7 @@ async def lifespan(app: FastAPI):
     yield
 
     await polymarket_bot_manager.shutdown()
+    await polymarket_auto_live_bot_manager.shutdown()
     await polymarket_direct_bot_manager.shutdown()
     await async_engine.dispose()
     logger.info("Shutdown complete")
@@ -211,12 +215,14 @@ app.include_router(indmoney_us_threats_router)
 app.include_router(jobs_router)
 app.include_router(jobs_ws_router)
 app.include_router(polymarket_router)
+app.include_router(polymarket_auto_live_router)
 app.include_router(polymarket_direct_router)
 app.include_router(prompts_router)
 app.include_router(providers_router)
 app.include_router(api_usage_router)
 app.include_router(runs_router)
 app.include_router(runs_ws_router)
+app.include_router(trading_bots_router)
 app.include_router(zerodha_events_router)
 app.include_router(zerodha_router)
 app.include_router(zerodha_threats_router)
