@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import {
   AlertTriangle,
   ChevronDown,
@@ -20,18 +20,24 @@ import {
 import { cn } from "@/lib/utils";
 import type { BullpenPositionsResponse } from "@/lib/bullpenPositions";
 import {
-  buildBullpenAiAutoLiveSummary,
   buildBullpenAiTradingBotSummary,
   buildPolymarketTradingBotSummary,
-  buildUnavailableTradingBotSummary,
+  buildTradingBotsOverviewShell,
   mergeTradingBotsOverview,
   normalizeTradingBotsOverviewResponse,
-  sortTradingBots,
   type TradingBotGuardrail,
   type TradingBotSummary,
   type TradingBotsOverview,
 } from "@/lib/tradingBots";
 import { APIError, apiService } from "@/services/api";
+
+const OVERVIEW_CACHE_KEY = "investor:trading-bots-overview:v1";
+const PREFERRED_OVERVIEW_TIMEOUT_MS = 2_000;
+const FAST_BOT_TIMEOUT_MS = 2_500;
+const BULLPEN_AI_TIMEOUT_MS = 2_000;
+const INITIAL_OVERVIEW = buildTradingBotsOverviewShell(
+  "Loading latest trading bot status in the background.",
+);
 
 const STATUS_LABELS: Record<TradingBotSummary["status"], string> = {
   running: "Running",
@@ -157,106 +163,129 @@ function getGuardrailToneClass(tone?: TradingBotGuardrail["tone"]) {
   }
 }
 
-async function fetchBullpenAiPositions() {
-  const response = await fetch("/api/bullpen-ai/positions", {
-    cache: "no-store",
-  });
-  const payload = (await response.json()) as BullpenPositionsResponse;
+function isTradingBotSummary(value: unknown): value is TradingBotSummary {
+  if (!value || typeof value !== "object") return false;
 
-  if (!response.ok) {
-    throw new Error(
-      payload.error || "Unable to load Bullpen x AI position data right now.",
-    );
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.name === "string" &&
+    typeof record.href === "string" &&
+    typeof record.detailsHref === "string"
+  );
+}
+
+function readCachedOverview() {
+  if (typeof window === "undefined") {
+    return null;
   }
 
-  return payload;
+  try {
+    const raw = window.sessionStorage.getItem(OVERVIEW_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as {
+      generatedAt?: unknown;
+      bots?: unknown;
+    };
+    if (
+      typeof parsed.generatedAt !== "string" ||
+      !Array.isArray(parsed.bots)
+    ) {
+      return null;
+    }
+
+    return mergeTradingBotsOverview(null, {
+      generatedAt: parsed.generatedAt,
+      bots: parsed.bots.filter(isTradingBotSummary),
+    } satisfies TradingBotsOverview);
+  } catch {
+    return null;
+  }
 }
 
-function buildFallbackOverviewFromError(error: string): TradingBotsOverview {
-  return {
-    generatedAt: new Date().toISOString(),
-    bots: sortTradingBots([
-      buildUnavailableTradingBotSummary("bullpen-x-polymarket", error),
-      buildUnavailableTradingBotSummary("polymarket-direct", error),
-      buildBullpenAiTradingBotSummary(null, error),
-      buildBullpenAiAutoLiveSummary(),
-    ]),
-  };
-}
+function writeCachedOverview(overview: TradingBotsOverview) {
+  if (typeof window === "undefined") {
+    return;
+  }
 
-async function loadFallbackOverview(): Promise<TradingBotsOverview> {
-  const [polymarketResult, directResult, bullpenAiResult] = await Promise.allSettled([
-    apiService.polymarketState(),
-    apiService.polymarketDirectState(),
-    fetchBullpenAiPositions(),
-  ]);
-
-  return {
-    generatedAt: new Date().toISOString(),
-    bots: sortTradingBots([
-      polymarketResult.status === "fulfilled"
-        ? buildPolymarketTradingBotSummary(
-            "bullpen-x-polymarket",
-            polymarketResult.value,
-          )
-        : buildUnavailableTradingBotSummary(
-            "bullpen-x-polymarket",
-            normalizeError(polymarketResult.reason),
-          ),
-      directResult.status === "fulfilled"
-        ? buildPolymarketTradingBotSummary(
-            "polymarket-direct",
-            directResult.value,
-          )
-        : buildUnavailableTradingBotSummary(
-            "polymarket-direct",
-            normalizeError(directResult.reason),
-          ),
-      bullpenAiResult.status === "fulfilled"
-        ? buildBullpenAiTradingBotSummary(bullpenAiResult.value)
-        : buildBullpenAiTradingBotSummary(
-            null,
-            normalizeError(bullpenAiResult.reason),
-          ),
-      buildBullpenAiAutoLiveSummary(),
-    ]),
-  };
-}
-
-async function loadTradingBotsOverview(): Promise<{
-  overview: TradingBotsOverview;
-  usingFallback: boolean;
-  error: string | null;
-}> {
-  const [preferredResult, fallbackResult] = await Promise.allSettled([
-    apiService.getTradingBotsOverview(),
-    loadFallbackOverview(),
-  ]);
-
-  const fallbackOverview =
-    fallbackResult.status === "fulfilled"
-      ? fallbackResult.value
-      : buildFallbackOverviewFromError(normalizeError(fallbackResult.reason));
-
-  const preferredOverview =
-    preferredResult.status === "fulfilled"
-      ? normalizeTradingBotsOverviewResponse(preferredResult.value)
-      : null;
-  const mergedOverview = mergeTradingBotsOverview(
-    preferredOverview,
-    fallbackOverview,
+  window.sessionStorage.setItem(
+    OVERVIEW_CACHE_KEY,
+    JSON.stringify(overview),
   );
+}
 
+function usesFallbackData(overview: TradingBotsOverview) {
+  return overview.bots.some((bot) => bot.source !== "api");
+}
+
+function upsertBotSummary(
+  overview: TradingBotsOverview,
+  nextBot: TradingBotSummary,
+): TradingBotsOverview {
   return {
-    overview: mergedOverview,
-    usingFallback: mergedOverview.bots.some((bot) => bot.source !== "api"),
-    error:
-      preferredResult.status === "rejected"
-        ? getDisplayableOverviewError(preferredResult.reason)
-        : fallbackResult.status === "rejected"
-          ? normalizeError(fallbackResult.reason)
-          : null,
+    generatedAt: new Date().toISOString(),
+    bots: overview.bots.map((bot) => (bot.id === nextBot.id ? nextBot : bot)),
   };
+}
+
+function isTimeoutError(error: unknown) {
+  return (
+    error instanceof Error &&
+    (/timed out/i.test(error.message) || error.name === "AbortError")
+  );
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timerId = window.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        window.clearTimeout(timerId);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timerId);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function fetchBullpenAiPositions(timeoutMs = BULLPEN_AI_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timerId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch("/api/bullpen-ai/positions", {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const payload = (await response.json()) as BullpenPositionsResponse;
+
+    if (!response.ok) {
+      throw new Error(
+        payload.error || "Unable to load Bullpen x AI position data right now.",
+      );
+    }
+
+    return payload;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Bullpen x AI positions timed out after ${timeoutMs}ms.`);
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timerId);
+  }
 }
 
 function TradingBotCard({
@@ -429,78 +458,150 @@ function TradingBotCard({
   );
 }
 
-function TradingBotCardSkeleton() {
-  return (
-    <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="h-5 w-48 animate-pulse rounded-full bg-slate-200" />
-      <div className="mt-4 h-4 w-4/5 animate-pulse rounded-full bg-slate-100" />
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 8 }).map((_, index) => (
-          <div
-            key={index}
-            className="h-20 animate-pulse rounded-2xl border border-slate-200 bg-slate-50"
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function TradingBotsOverviewPage() {
-  const [overview, setOverview] = useState<TradingBotsOverview | null>(null);
+  const [overview, setOverview] = useState<TradingBotsOverview>(INITIAL_OVERVIEW);
   const [expandedBots, setExpandedBots] = useState<Record<string, boolean>>({});
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [usingFallback, setUsingFallback] = useState(true);
+  const [isLoadingLatest, setIsLoadingLatest] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  async function refreshOverview({ silent = false }: { silent?: boolean } = {}) {
+  useEffect(() => {
+    writeCachedOverview(overview);
+  }, [overview]);
+
+  async function refreshOverview({
+    includeBullpenAiPositions = false,
+    silent = false,
+  }: {
+    includeBullpenAiPositions?: boolean;
+    silent?: boolean;
+  } = {}) {
     if (!silent) {
       setIsRefreshing(true);
     }
 
+    setIsLoadingLatest(true);
+
     try {
-      const next = await loadTradingBotsOverview();
-      setOverview(next.overview);
-      setUsingFallback(next.usingFallback);
-      setLoadError(next.error);
+      setLoadError(null);
+
+      try {
+        const preferredOverview = normalizeTradingBotsOverviewResponse(
+          await withTimeout(
+            apiService.getTradingBotsOverview(),
+            PREFERRED_OVERVIEW_TIMEOUT_MS,
+            "Trading Bots overview",
+          ),
+        );
+        startTransition(() => {
+          setOverview((current) =>
+            mergeTradingBotsOverview(preferredOverview, current),
+          );
+        });
+        return;
+      } catch (error) {
+        const displayableError = getDisplayableOverviewError(error);
+        if (displayableError && !isTimeoutError(error)) {
+          setLoadError(displayableError);
+        }
+      }
+
+      const errors: string[] = [];
+      const updates: Promise<void>[] = [
+        withTimeout(
+          apiService.polymarketState(),
+          FAST_BOT_TIMEOUT_MS,
+          "Bullpen x Polymarket state",
+        )
+          .then((state) => {
+            startTransition(() => {
+              setOverview((current) =>
+                upsertBotSummary(
+                  current,
+                  buildPolymarketTradingBotSummary(
+                    "bullpen-x-polymarket",
+                    state,
+                  ),
+                ),
+              );
+            });
+          })
+          .catch((error) => {
+            if (!isTimeoutError(error)) {
+              errors.push(normalizeError(error));
+            }
+          }),
+        withTimeout(
+          apiService.polymarketDirectState(),
+          FAST_BOT_TIMEOUT_MS,
+          "Polymarket Direct state",
+        )
+          .then((state) => {
+            startTransition(() => {
+              setOverview((current) =>
+                upsertBotSummary(
+                  current,
+                  buildPolymarketTradingBotSummary("polymarket-direct", state),
+                ),
+              );
+            });
+          })
+          .catch((error) => {
+            if (!isTimeoutError(error)) {
+              errors.push(normalizeError(error));
+            }
+          }),
+      ];
+
+      if (includeBullpenAiPositions) {
+        updates.push(
+          fetchBullpenAiPositions()
+            .then((payload) => {
+              startTransition(() => {
+                setOverview((current) =>
+                  upsertBotSummary(
+                    current,
+                    buildBullpenAiTradingBotSummary(payload),
+                  ),
+                );
+              });
+            })
+            .catch((error) => {
+              if (!isTimeoutError(error)) {
+                errors.push(normalizeError(error));
+              }
+            }),
+        );
+      }
+
+      await Promise.allSettled(updates);
+
+      if (errors.length > 0) {
+        setLoadError(errors.join(" • "));
+      }
     } finally {
-      setIsLoading(false);
+      setIsLoadingLatest(false);
       setIsRefreshing(false);
     }
   }
 
   useEffect(() => {
-    let cancelled = false;
+    const cachedOverview = readCachedOverview();
+    if (cachedOverview) {
+      startTransition(() => {
+        setOverview(cachedOverview);
+      });
+    }
 
-    (async () => {
-      try {
-        const next = await loadTradingBotsOverview();
-        if (cancelled) return;
+    const refreshTimer = window.setTimeout(() => {
+      void refreshOverview({ includeBullpenAiPositions: false, silent: true });
+    }, 0);
 
-        setOverview(next.overview);
-        setUsingFallback(next.usingFallback);
-        setLoadError(next.error);
-      } catch (error) {
-        if (cancelled) return;
-
-        const fallbackError = normalizeError(error);
-        setOverview(buildFallbackOverviewFromError(fallbackError));
-        setUsingFallback(true);
-        setLoadError(fallbackError);
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => window.clearTimeout(refreshTimer);
   }, []);
 
-  const bots = overview?.bots || [];
+  const bots = overview.bots;
+  const usingFallback = usesFallbackData(overview);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-8">
@@ -525,7 +626,9 @@ export function TradingBotsOverviewPage() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => void refreshOverview()}
+            onClick={() =>
+              void refreshOverview({ includeBullpenAiPositions: true })
+            }
             disabled={isRefreshing}
             className="rounded-full border-slate-300 px-5"
           >
@@ -542,35 +645,37 @@ export function TradingBotsOverviewPage() {
         <div className="flex items-start gap-3 rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           <p>
-            This overview is already wired for a shared backend summary endpoint. Until that endpoint is fully available, it blends the current bot state APIs with safe placeholders where needed.
+            This overview now renders immediately with cached or placeholder cards first, then fills in live bot data in the background or on refresh where available.
           </p>
         </div>
       ) : null}
 
-      {loadError && !isLoading ? (
+      {isLoadingLatest ? (
+        <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+          Loading the latest bot status in the background. The page stays interactive while slower bot sources catch up.
+        </div>
+      ) : null}
+
+      {loadError ? (
         <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
           Some bot summary data is unavailable right now: {loadError}
         </div>
       ) : null}
 
       <div className="grid gap-5">
-        {isLoading
-          ? Array.from({ length: 4 }).map((_, index) => (
-              <TradingBotCardSkeleton key={index} />
-            ))
-          : bots.map((bot) => (
-              <TradingBotCard
-                key={bot.id}
-                bot={bot}
-                expanded={Boolean(expandedBots[bot.id])}
-                onToggle={() =>
-                  setExpandedBots((current) => ({
-                    ...current,
-                    [bot.id]: !current[bot.id],
-                  }))
-                }
-              />
-            ))}
+        {bots.map((bot) => (
+          <TradingBotCard
+            key={bot.id}
+            bot={bot}
+            expanded={Boolean(expandedBots[bot.id])}
+            onToggle={() =>
+              setExpandedBots((current) => ({
+                ...current,
+                [bot.id]: !current[bot.id],
+              }))
+            }
+          />
+        ))}
       </div>
     </div>
   );

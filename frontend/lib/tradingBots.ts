@@ -394,6 +394,25 @@ export function sortTradingBots(bots: TradingBotSummary[]) {
   return TRADING_BOT_CARD_ORDER.map((id) => botById.get(id) || getBaseTradingBotSummary(id));
 }
 
+export function buildTradingBotsOverviewShell(note?: string): TradingBotsOverview {
+  return {
+    generatedAt: new Date().toISOString(),
+    bots: sortTradingBots(
+      TRADING_BOT_CARD_ORDER.map((id) => {
+        const base = getBaseTradingBotSummary(id);
+        if (!note || base.note) {
+          return base;
+        }
+
+        return {
+          ...base,
+          note,
+        };
+      }),
+    ),
+  };
+}
+
 export function mergeTradingBotsOverview(
   preferred: TradingBotsOverview | null,
   fallback: TradingBotsOverview,
