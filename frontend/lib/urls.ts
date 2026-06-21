@@ -410,7 +410,7 @@ export const URLs = {
       polymarketBot: () => "/console/polymarket-bot",
       polymarketDirectBot: () => "/console/polymarket-direct-bot",
       bullpenAi: () => "/console/bullpen-ai",
-      bullpenAiAutoLive: () => "/console/bullpen-ai-auto-live",
+      bullpenAiAutoLive: () => "/console/trading-bots/bullpen-ai-auto-live",
       bullpenAi30Days: () => "/console/bullpen-ai?tab=30-days",
       bullpenAiEndOfMonth: () => "/console/bullpen-ai?tab=end-of-month",
       googleSheets: () => "/console/google-sheets",
