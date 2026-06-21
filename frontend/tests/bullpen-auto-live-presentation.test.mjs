@@ -245,7 +245,9 @@ test("Auto-Live presentation derives row status, filters, and sorting", async ()
   const {
     buildAutoLiveDecisionRows,
     filterAutoLiveDecisionRows,
+    getEffectiveOpenAutoLiveDecisionRowIds,
     sortAutoLiveDecisionRows,
+    toggleAutoLiveDecisionRow,
   } = await loadAutoLivePresentationModule();
 
   const decisions = [
@@ -331,4 +333,57 @@ test("Auto-Live presentation derives row status, filters, and sorting", async ()
     sortAutoLiveDecisionRows(rows, "nearest-deadline").map((row) => row.id),
     ["skip", "buy-new"],
   );
+
+  assert.equal(rows[0].timeline.length, 7);
+  assert.equal(rows[0].timeline[6].label, "Execution");
+
+  const dryRunRows = buildAutoLiveDecisionRows({
+    decisions: [
+      createDecision({
+        id: "dry-run-buy",
+        decision: "BUY_NEW",
+        theme: "Politics",
+        currentExposureUsd: 0,
+        targetExposureUsd: 900,
+        updatedAt: "2026-06-21T10:20:00Z",
+        orderPlan: {
+          id: "dry-order-1",
+          action: "buy",
+          side: "YES",
+          status: "skipped",
+          order_size_usd: 200,
+          limit_price_cents: 43,
+          max_slippage_cents: 2,
+          dry_run: true,
+          detail: "Simulation only: Dry-run is enabled.",
+        },
+      }),
+    ],
+    settings: {
+      bankroll_usd: 10000,
+      kelly_fraction: 0.25,
+      no_new_trade_under_hours_to_deadline: 6,
+      half_size_under_hours_to_deadline: 48,
+      half_size_llm_spread_pp: 10,
+      max_slippage_cents: 2,
+    },
+    state: {
+      dry_run: true,
+      doctor_status: "watch",
+      balance_status: "watch",
+    },
+  });
+
+  assert.equal(dryRunRows[0].statusLabel, "DRY-RUN");
+  assert.equal(dryRunRows[0].executed, false);
+
+  assert.deepEqual(
+    getEffectiveOpenAutoLiveDecisionRowIds(
+      rows.map((row) => row.id),
+      [],
+    ),
+    ["buy-new"],
+  );
+  assert.deepEqual(toggleAutoLiveDecisionRow([], "skip"), ["skip"]);
+  assert.deepEqual(toggleAutoLiveDecisionRow(["skip"], "skip"), []);
 });

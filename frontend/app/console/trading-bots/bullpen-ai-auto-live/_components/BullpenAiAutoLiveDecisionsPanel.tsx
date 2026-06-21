@@ -36,9 +36,11 @@ import {
   buildAutoLiveDecisionRows,
   buildAutoLiveRunSummary,
   filterAutoLiveDecisionRows,
+  getEffectiveOpenAutoLiveDecisionRowIds,
   getAutoLiveFilterLabel,
   getAutoLiveSortLabel,
   sortAutoLiveDecisionRows,
+  toggleAutoLiveDecisionRow,
   type AutoLiveDecisionFilterKey,
   type AutoLiveDecisionRowView,
   type AutoLiveDecisionSectionValue,
@@ -453,26 +455,19 @@ export function BullpenAiAutoLiveDecisionsPanel({
   });
   const filteredRows = filterAutoLiveDecisionRows(rowViews, filterKey);
   const visibleRows = sortAutoLiveDecisionRows(filteredRows, sortKey);
+  const visibleRowIds = visibleRows.map((row) => row.id);
   const runSummary = buildAutoLiveRunSummary({
     decisions: latestRunDecisions,
     run: latestRun,
     settings: summary?.settings ?? null,
   });
-  const visibleRowIds = new Set(visibleRows.map((row) => row.id));
-  const visibleOpenRowIds = openRowIds.filter((id) => visibleRowIds.has(id));
-  const effectiveOpenRowIds =
-    visibleOpenRowIds.length > 0
-      ? visibleOpenRowIds
-      : visibleRows.length > 0
-        ? [visibleRows[0].id]
-        : [];
+  const effectiveOpenRowIds = getEffectiveOpenAutoLiveDecisionRowIds(
+    visibleRowIds,
+    openRowIds,
+  );
 
   function toggleRow(rowId: string) {
-    setOpenRowIds((currentIds) =>
-      currentIds.includes(rowId)
-        ? currentIds.filter((id) => id !== rowId)
-        : [...currentIds, rowId],
-    );
+    setOpenRowIds((currentIds) => toggleAutoLiveDecisionRow(currentIds, rowId));
   }
 
   const maxThemeExposureLabel = runSummary.maxThemeExposureUsed.theme

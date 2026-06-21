@@ -33,8 +33,10 @@ import {
   BULLPEN_AI_AUTO_LIVE_GUARDRAIL_FIELDS,
   BULLPEN_AI_AUTO_LIVE_GUARDRAIL_SECTIONS,
   BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS,
+  buildBullpenAiAutoLiveSafeDefaultDraft,
   bullpenAiAutoLiveSettingsToDraft,
   formatBullpenAiAutoLiveGuardrailValue,
+  serializeBullpenAiAutoLiveGuardrails,
   validateBullpenAiAutoLiveGuardrailDraft,
   type BullpenAiAutoLiveGuardrailDraft,
 } from "./bullpenAiAutoLiveRiskGuardrails";
@@ -52,6 +54,8 @@ type BullpenAiAutoLiveRiskGuardrailsDrawerProps = {
   onClose: () => void;
   onSummaryReload: () => Promise<BullpenAutoLiveSummaryResponse | null>;
 };
+const ENABLE_LIVE_CONFIRMATION_WARNING =
+  "Type ENABLE LIVE to confirm. This allows automated live orders subject to guardrails.";
 
 function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
@@ -59,9 +63,9 @@ function normalizeError(error: unknown) {
 }
 
 function getInitialDraft(settings: BullpenAutoLiveSettings | null) {
-  return bullpenAiAutoLiveSettingsToDraft(
-    settings ?? BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS,
-  );
+  return settings
+    ? bullpenAiAutoLiveSettingsToDraft(settings)
+    : buildBullpenAiAutoLiveSafeDefaultDraft();
 }
 
 export function BullpenAiAutoLiveRiskGuardrailsDrawer({
@@ -146,9 +150,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
     const errors = [...validation.formErrors];
 
     if (dangerousLiveEnable && !liveConfirmationValid) {
-      errors.push(
-        'Type "ENABLE LIVE" exactly before saving settings that disable dry-run and enable live execution.',
-      );
+      errors.push(ENABLE_LIVE_CONFIRMATION_WARNING);
     }
 
     return errors;
@@ -183,9 +185,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
   }
 
   function handleResetSafeDefaults() {
-    setDraft(
-      bullpenAiAutoLiveSettingsToDraft(BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS),
-    );
+    setDraft(buildBullpenAiAutoLiveSafeDefaultDraft());
     setEnableLiveConfirmation("");
     setLastImportedFileName(null);
     showToast(
@@ -246,7 +246,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
     }
 
     try {
-      const blob = new Blob([JSON.stringify(validation.settings, null, 2)], {
+      const blob = new Blob([serializeBullpenAiAutoLiveGuardrails(validation.settings)], {
         type: "application/json",
       });
       const url = window.URL.createObjectURL(blob);
@@ -472,10 +472,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
                   Typed Confirmation Required
                 </Label>
                 <p className="mt-2 text-sm leading-6 text-rose-900">
-                  You are saving settings with <span className="font-semibold">dry_run=false</span>{" "}
-                  and <span className="font-semibold">allow_live_execution=true</span>.
-                  Type <span className="font-semibold">ENABLE LIVE</span> exactly
-                  to unlock save.
+                  {ENABLE_LIVE_CONFIRMATION_WARNING}
                 </p>
                 <Input
                   className="mt-3"

@@ -853,6 +853,16 @@ export function bullpenAiAutoLiveSettingsToDraft(
   return draft;
 }
 
+export function buildBullpenAiAutoLiveSafeDefaultDraft() {
+  return bullpenAiAutoLiveSettingsToDraft(BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS);
+}
+
+export function serializeBullpenAiAutoLiveGuardrails(
+  settings: BullpenAutoLiveSettings,
+) {
+  return JSON.stringify(settings, null, 2);
+}
+
 function addFieldError(
   errors: Partial<Record<keyof BullpenAutoLiveSettings, string>>,
   key: keyof BullpenAutoLiveSettings,
@@ -1041,6 +1051,19 @@ export function validateBullpenAiAutoLiveGuardrailDraft(
         fieldErrors,
         "limit_orders_only",
         "Turning off limit orders only blocks live execution.",
+      );
+    }
+
+    if (settings.half_size_llm_spread_pp > settings.max_llm_spread_pp) {
+      addFieldError(
+        fieldErrors,
+        "half_size_llm_spread_pp",
+        "Half-size disagreement spread cannot exceed max LLM spread.",
+      );
+      addFieldError(
+        fieldErrors,
+        "max_llm_spread_pp",
+        "Max LLM spread must be greater than or equal to half-size disagreement spread.",
       );
     }
   }

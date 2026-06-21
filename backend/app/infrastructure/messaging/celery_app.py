@@ -22,6 +22,8 @@ celery.conf.task_routes = {
     "app.domains.jobs.tasks.*": {"queue": "ai"},
     "app.domains.auth.tasks.*": {"queue": "email"},
     "app.domains.runs.tasks.*": {"queue": "email"},
+    "app.domains.polymarket_auto_live.tasks.execute_polymarket_auto_live_run": {"queue": "ai"},
+    "app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs": {"queue": "beat"},
     "app.domains.zerodha.tasks.*": {"queue": "ai"},
     "app.infrastructure.database.outbox.tasks.*": {"queue": "beat"},
 }
@@ -39,6 +41,10 @@ celery.conf.beat_schedule = {
         "task": "app.domains.zerodha.tasks.enqueue_daily_portfolio_sync",
         "schedule": crontab(minute=40, hour=10),
     },
+    "polymarket-auto-live-due-run-scan": {
+        "task": "app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs",
+        "schedule": crontab(minute="*"),
+    },
 }
 
 # Retry failed tasks with exponential backoff + jitter
@@ -50,6 +56,7 @@ celery.autodiscover_tasks([
     "app.domains.auth",
     "app.domains.runs",
     "app.domains.google_sheets",
+    "app.domains.polymarket_auto_live",
     "app.domains.zerodha",
     "app.infrastructure.database.outbox",
 ])

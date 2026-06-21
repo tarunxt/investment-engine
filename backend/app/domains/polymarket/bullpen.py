@@ -229,8 +229,8 @@ def bullpen_candidate_paths() -> list[str]:
     return _unique_paths(
         [
             os.getenv("BULLPEN_BIN"),
-            shutil.which("bullpen"),
             *runtime_tool_paths,
+            shutil.which("bullpen"),
             os.path.expanduser("~/.bullpen/bin/bullpen"),
             "/home/appuser/.bullpen/bin/bullpen",
             "/home/investor/.bullpen/bin/bullpen",
@@ -448,42 +448,69 @@ class BullpenLiveExecutor:
                 return
             raise
 
-    async def execute(self, decision: PolymarketLiveTradeDecision) -> str:
-        if decision.side == "BUY":
-            max_price = buy_max_price_for_execution(decision.price)
-            args = [
-                "polymarket",
-                "buy",
-                decision.market_id,
-                decision.outcome,
-                f"{decision.amount:.2f}",
-                "--max-price",
-                f"{max_price:.4f}",
-                "--yes",
-                "--non-interactive",
-                "--output",
-                "json",
-            ]
-        else:
-            min_price = sell_min_price_for_execution(decision.price)
-            args = [
-                "polymarket",
-                "sell",
-                decision.market_id,
-                decision.outcome,
-                f"{decision.shares:.6f}",
-                "--min-price",
-                f"{min_price:.4f}",
-                "--yes",
-                "--non-interactive",
-                "--output",
-                "json",
-            ]
-        attempts_remaining = (
-            buy_max_price_retry_attempts() if decision.side == "BUY" else 1
+    async def buy_limit(
+        self,
+        *,
+        market_id: str,
+        outcome: str,
+        amount_usd: float,
+        max_price: float,
+    ) -> str:
+        return await self._execute_buy_with_limit(
+            market_id=market_id,
+            outcome=outcome,
+            amount_usd=amount_usd,
+            max_price=max_price,
         )
+
+    async def sell_limit(
+        self,
+        *,
+        market_id: str,
+        outcome: str,
+        shares: float,
+        min_price: float,
+    ) -> str:
+        args = [
+            "polymarket",
+            "sell",
+            market_id,
+            outcome,
+            f"{shares:.6f}",
+            "--min-price",
+            f"{_clamp_limit_price(min_price):.4f}",
+            "--yes",
+            "--non-interactive",
+            "--output",
+            "json",
+        ]
+        stdout = await run_bullpen(args, timeout_seconds=45, read_only=False)
+        return redact_secrets(stdout)
+
+    async def _execute_buy_with_limit(
+        self,
+        *,
+        market_id: str,
+        outcome: str,
+        amount_usd: float,
+        max_price: float,
+    ) -> str:
+        args = [
+            "polymarket",
+            "buy",
+            market_id,
+            outcome,
+            f"{amount_usd:.2f}",
+            "--max-price",
+            f"{_clamp_limit_price(max_price):.4f}",
+            "--yes",
+            "--non-interactive",
+            "--output",
+            "json",
+        ]
+        attempts_remaining = buy_max_price_retry_attempts()
         current_args = args
-        current_max_price = max_price if decision.side == "BUY" else None
+        current_max_price = _clamp_limit_price(max_price)
         redeemed_collateral = False
         wrapped_collateral = False
         while True:
@@ -493,8 +520,6 @@ class BullpenLiveExecutor:
                 )
                 return redact_secrets(stdout)
             except BullpenCommandError as exc:
-                if decision.side != "BUY":
-                    raise
                 error_message = str(exc)
                 collateral_needed = extract_bullpen_insufficient_collateral_amount(
                     error_message
@@ -506,7 +531,7 @@ class BullpenLiveExecutor:
 
                 if collateral_needed is not None and not wrapped_collateral:
                     wrapped_collateral = True
-                    wrap_amount = max(collateral_needed, decision.amount)
+                    wrap_amount = max(collateral_needed, amount_usd)
                     await run_bullpen(
                         [
                             "polymarket",
@@ -526,10 +551,7 @@ class BullpenLiveExecutor:
                 if fill_price is None or attempts_remaining <= 1:
                     raise
                 retry_max_price = buy_retry_max_price_for_execution(fill_price)
-                if (
-                    current_max_price is not None
-                    and retry_max_price <= current_max_price
-                ):
+                if retry_max_price <= current_max_price:
                     raise
                 attempts_remaining -= 1
                 current_max_price = retry_max_price
@@ -537,6 +559,21 @@ class BullpenLiveExecutor:
                 max_price_index = retry_args.index("--max-price") + 1
                 retry_args[max_price_index] = f"{retry_max_price:.4f}"
                 current_args = retry_args
+
+    async def execute(self, decision: PolymarketLiveTradeDecision) -> str:
+        if decision.side == "BUY":
+            return await self._execute_buy_with_limit(
+                market_id=decision.market_id,
+                outcome=decision.outcome,
+                amount_usd=decision.amount,
+                max_price=buy_max_price_for_execution(decision.price),
+            )
+        return await self.sell_limit(
+            market_id=decision.market_id,
+            outcome=decision.outcome,
+            shares=decision.shares,
+            min_price=sell_min_price_for_execution(decision.price),
+        )
 
 
 BALANCE_COMMAND_VARIANTS = [

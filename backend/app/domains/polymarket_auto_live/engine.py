@@ -192,6 +192,19 @@ def effective_dry_run(settings: BullpenAutoLiveSettings) -> bool:
     return not live_execution_armed(settings)
 
 
+def _decision_log_level(decision: BullpenAutoLiveDecision) -> str:
+    order_status = decision.order_plan.status if decision.order_plan else None
+    if decision.decision == "SKIP" or order_status in {"skipped", "failed", "cancelled"}:
+        return "warning"
+    return "info"
+
+
+def _decision_log_reason(decision: BullpenAutoLiveDecision) -> str:
+    if decision.order_plan and decision.order_plan.detail:
+        return decision.order_plan.detail
+    return decision.reason
+
+
 def _liquidity_weight(liquidity_usd: float | None, minimum: float) -> float:
     if liquidity_usd is None or minimum <= 0:
         return 0.8
@@ -752,6 +765,8 @@ class BullpenAutoLiveEngine:
                 stage4_blockers.append("Evidence is below the configured minimum.")
             if _confidence_below_minimum(candidate.confidence, settings):
                 stage4_blockers.append("Confidence is below the configured minimum.")
+            if candidate.event_state == "conflicting":
+                stage4_blockers.append("Evidence is conflicting, so trading is blocked.")
             if (
                 llm_consensus.spread_yes is not None
                 and llm_consensus.spread_yes > settings.max_llm_spread_pp
@@ -1501,6 +1516,19 @@ class BullpenAutoLiveEngine:
         state.consecutive_failed_orders = running_failed_orders
 
         decisions = [self._to_decision(run.id, candidate) for candidate in evaluated]
+        for decision in decisions:
+            log_method = getattr(logger, _decision_log_level(decision))
+            log_method(
+                "Auto-Live decision user=%s run=%s market=%s action=%s risk=%s order_status=%s dry_run=%s reason=%s",
+                user_id,
+                run.id,
+                decision.market_id,
+                decision.decision,
+                decision.risk_status,
+                decision.order_plan.status if decision.order_plan else "none",
+                decision.order_plan.dry_run if decision.order_plan else state.dry_run,
+                _decision_log_reason(decision),
+            )
         historical_and_current_decisions = [*historical_decisions, *decisions]
         (
             state.today_executed_orders,

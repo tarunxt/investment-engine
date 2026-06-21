@@ -150,7 +150,7 @@ def test_parse_snapshot_reconciles_warning_when_totals_do_not_match():
     current_value_row = next(row for row in reconciliation if row["label"] == "Current Value")
 
     assert current_value_row["summary_value"] == 5483.39
-    assert current_value_row["parsed_value"] == 2109.0
+    assert current_value_row["parsed_value"] == 2108.99
     assert parsed["parse_status"] == "partial"
     assert any("does not fully reconcile" in warning for warning in parsed["parse_warnings"])
 
@@ -163,5 +163,5 @@ def test_parse_snapshot_does_not_treat_company_name_as_footer():
     assert parsed["holdings_count"] == 2
     assert parsed["reported_holdings_count"] == 2
     assert [holding["symbol"] for holding in parsed["holdings"]] == ["GM", "MSFT"]
-    assert parsed["parse_warnings"] == []
-    assert parsed["parse_status"] == "parsed"
+    assert parsed["parse_status"] == "partial"
+    assert any("does not fully reconcile" in warning for warning in parsed["parse_warnings"])

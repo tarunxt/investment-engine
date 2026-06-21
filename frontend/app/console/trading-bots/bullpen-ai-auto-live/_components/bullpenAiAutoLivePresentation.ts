@@ -135,6 +135,24 @@ const SORT_LABELS: Record<AutoLiveDecisionSortKey, string> = {
   "latest-updated": "Latest updated",
 };
 
+export function toggleAutoLiveDecisionRow(openRowIds: string[], rowId: string) {
+  return openRowIds.includes(rowId)
+    ? openRowIds.filter((id) => id !== rowId)
+    : [...openRowIds, rowId];
+}
+
+export function getEffectiveOpenAutoLiveDecisionRowIds(
+  visibleRowIds: string[],
+  openRowIds: string[],
+) {
+  const visibleRowIdSet = new Set(visibleRowIds);
+  const visibleOpenRowIds = openRowIds.filter((id) => visibleRowIdSet.has(id));
+  if (visibleOpenRowIds.length > 0) {
+    return visibleOpenRowIds;
+  }
+  return visibleRowIds.length > 0 ? [visibleRowIds[0]] : [];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

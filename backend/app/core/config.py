@@ -1,12 +1,18 @@
 import os
 from datetime import datetime, timezone
-
-from pydantic_settings import BaseSettings
 from typing import Optional
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_TRUE_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
+_FALSE_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}
 
 
 class Settings(BaseSettings):
     """Application configuration from environment variables."""
+
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
     # Database
     database_url: str
@@ -62,9 +68,18 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    @field_validator("debug", mode="before")
+    @classmethod
+    def _coerce_debug_flag(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+
+        normalized = value.strip().lower()
+        if normalized in _TRUE_ENV_VALUES:
+            return True
+        if normalized in _FALSE_ENV_VALUES:
+            return False
+        return value
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")

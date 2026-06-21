@@ -35,15 +35,19 @@ import type {
 } from "@/types/api";
 
 import { BullpenAiAutoLiveDecisionsPanel } from "./BullpenAiAutoLiveDecisionsPanel";
+import { deriveBullpenAiAutoLiveRunControlState } from "./bullpenAiAutoLiveConsoleState";
 import { BullpenAiAutoLiveRiskGuardrailsDrawer } from "./BullpenAiAutoLiveRiskGuardrailsDrawer";
 import { BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS } from "./bullpenAiAutoLiveRiskGuardrails";
 
 type ActionKey = "run-once" | "start" | "pause" | "resume" | "stop";
+type EmergencyActionKey = "activate" | "clear";
 type DashboardRequestResult = {
   summary: BullpenAutoLiveSummaryResponse | null;
   issues: string[];
   hasSettings: boolean;
 };
+const AUTO_LIVE_TOP_WARNING =
+  "Live trading can lose money. This bot only executes when Auto-Live, live environment permission, Bullpen doctor, balance checks, and all guardrails pass. Keep Dry Run enabled until tested.";
 
 const AUTO_LIVE_STRATEGY_SUMMARY =
   "Runs the separate auto-live execution pipeline that scans markets, evaluates evidence, applies portfolio guardrails, and only submits live limit orders when every hard block passes.";
@@ -382,6 +386,7 @@ export function BullpenAiAutoLiveConsole() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<ActionKey | null>(null);
+  const [emergencyBusy, setEmergencyBusy] = useState<EmergencyActionKey | null>(null);
   const [guardrailsDrawerOpen, setGuardrailsDrawerOpen] = useState(false);
 
   async function reloadDashboard() {
@@ -465,6 +470,23 @@ export function BullpenAiAutoLiveConsole() {
     }
   }
 
+  async function handleEmergencyStopToggle(emergencyStopped: boolean) {
+    setEmergencyBusy(emergencyStopped ? "clear" : "activate");
+    try {
+      if (emergencyStopped) {
+        await apiService.clearEmergencyStopBullpenAutoLive();
+      } else {
+        await apiService.emergencyStopBullpenAutoLive();
+      }
+
+      await reloadDashboard();
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+    } finally {
+      setEmergencyBusy(null);
+    }
+  }
+
   if (loading && !summary) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.10),_transparent_35%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] px-6">
@@ -525,6 +547,11 @@ export function BullpenAiAutoLiveConsole() {
   const latestGuardrails = summary.latest_guardrail_checks ?? [];
   const latestRun = summary.latest_run ?? summary.recent_runs?.[0] ?? null;
   const botCard = summary.bot_card;
+  const runControl = deriveBullpenAiAutoLiveRunControlState({
+    settings: summary.settings,
+    state,
+  });
+  const liveSchedulerLocked = runControl.liveModeRequested && state.emergency_stopped;
   const guardrailsDrawerKey = settingsAvailable
     ? `${guardrailsDrawerOpen ? "open" : "closed"}:${JSON.stringify(summary.settings)}`
     : `${guardrailsDrawerOpen ? "open" : "closed"}:settings-unavailable`;
@@ -555,6 +582,27 @@ export function BullpenAiAutoLiveConsole() {
                       Auto-Live uses its own persisted runs, decisions, and
                       stage-by-stage audit trail.
                     </p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <div className="rounded-3xl border border-sky-200 bg-sky-50/80 px-4 py-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-700">
+                          Bullpen x AI = analysis
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-sky-950">
+                          Use the analysis console to scan ideas, compare LLM
+                          odds, and review markets before any human-directed
+                          trading decision.
+                        </p>
+                      </div>
+                      <div className="rounded-3xl border border-emerald-200 bg-emerald-50/80 px-4 py-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
+                          Bullpen AI Auto-Live = automated execution
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-emerald-950">
+                          Use this separate service to automate scans,
+                          rebalances, and guarded live limit-order submission.
+                        </p>
+                      </div>
+                    </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <span
                         className={cn(
@@ -599,22 +647,27 @@ export function BullpenAiAutoLiveConsole() {
                     </Button>
                     <Button
                       className="rounded-full bg-slate-950 text-white hover:bg-slate-800"
-                      disabled={refreshing || Boolean(actionBusy)}
+                      disabled={
+                        refreshing || Boolean(actionBusy) || runControl.disabled
+                      }
                       onClick={() => {
                         void handleAction("run-once");
                       }}
+                      title={runControl.reason || undefined}
                     >
                       {actionBusy === "run-once" ? (
                         <Loader2 className="mr-2 size-4 animate-spin" />
                       ) : (
                         <Zap className="mr-2 size-4" />
                       )}
-                      Run now
+                      {runControl.label}
                     </Button>
                     {state.paused ? (
                       <Button
                         className="rounded-full"
-                        disabled={refreshing || Boolean(actionBusy)}
+                        disabled={
+                          refreshing || Boolean(actionBusy) || liveSchedulerLocked
+                        }
                         onClick={() => {
                           void handleAction("resume");
                         }}
@@ -646,7 +699,9 @@ export function BullpenAiAutoLiveConsole() {
                     ) : (
                       <Button
                         className="rounded-full"
-                        disabled={refreshing || Boolean(actionBusy)}
+                        disabled={
+                          refreshing || Boolean(actionBusy) || liveSchedulerLocked
+                        }
                         onClick={() => {
                           void handleAction("start");
                         }}
@@ -678,6 +733,30 @@ export function BullpenAiAutoLiveConsole() {
                       </Button>
                     ) : null}
                     <Button
+                      className={cn(
+                        "rounded-full",
+                        state.emergency_stopped
+                          ? "border-rose-300 text-rose-700 hover:bg-rose-50"
+                          : "bg-rose-600 text-white hover:bg-rose-500",
+                      )}
+                      disabled={
+                        refreshing || Boolean(actionBusy) || Boolean(emergencyBusy)
+                      }
+                      onClick={() => {
+                        void handleEmergencyStopToggle(state.emergency_stopped);
+                      }}
+                      variant={state.emergency_stopped ? "outline" : "default"}
+                    >
+                      {emergencyBusy ? (
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                      ) : (
+                        <ShieldAlert className="mr-2 size-4" />
+                      )}
+                      {state.emergency_stopped
+                        ? "Clear Emergency Stop"
+                        : "Emergency Stop"}
+                    </Button>
+                    <Button
                       className="rounded-full"
                       onClick={() => setGuardrailsDrawerOpen(true)}
                       variant="outline"
@@ -706,13 +785,20 @@ export function BullpenAiAutoLiveConsole() {
               </div>
 
               <CardContent className="space-y-5 px-6 py-6">
+                <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+                  <AlertTriangle className="size-4" />
+                  <AlertTitle>Live trading risk warning</AlertTitle>
+                  <AlertDescription>{AUTO_LIVE_TOP_WARNING}</AlertDescription>
+                </Alert>
+
                 {state.emergency_stopped ? (
                   <Alert className="border-rose-300 bg-rose-50 text-rose-900">
                     <ShieldAlert className="size-4" />
                     <AlertTitle>Emergency stop is active</AlertTitle>
                     <AlertDescription>
                       New live actions are blocked until the emergency stop is
-                      cleared from the risk guardrails drawer.
+                      cleared from the emergency stop control or the risk
+                      guardrails drawer.
                     </AlertDescription>
                   </Alert>
                 ) : null}
