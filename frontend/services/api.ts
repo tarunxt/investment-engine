@@ -31,6 +31,8 @@ import {
   IndMoneyUsThreatRunResponse,
   BullpenAutoLiveSettings,
   BullpenAutoLiveSettingsUpdate,
+  BullpenAutoLiveRun,
+  BullpenAutoLiveDecision,
   BullpenAutoLiveState,
   BullpenAutoLiveSummaryResponse,
   PolymarketBotState,
@@ -928,6 +930,10 @@ class apiServiceClass implements IApiService {
     return this.get<BullpenAutoLiveSummaryResponse>(URLs.polymarketAutoLive.summary());
   }
 
+  bullpenAiAutoLiveState(): Promise<BullpenAutoLiveState> {
+    return this.get<BullpenAutoLiveState>(URLs.polymarketAutoLive.state());
+  }
+
   bullpenAiAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {
     return this.get<BullpenAutoLiveSettings>(URLs.polymarketAutoLive.settings());
   }
@@ -940,6 +946,34 @@ class apiServiceClass implements IApiService {
 
   bullpenAiAutoLiveResetSettings(): Promise<BullpenAutoLiveSettings> {
     return this.post<BullpenAutoLiveSettings>(URLs.polymarketAutoLive.resetSettings());
+  }
+
+  bullpenAiAutoLiveRuns(): Promise<BullpenAutoLiveRun[]> {
+    return this.get<BullpenAutoLiveRun[]>(URLs.polymarketAutoLive.runs());
+  }
+
+  bullpenAiAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]> {
+    return this.get<BullpenAutoLiveDecision[]>(URLs.polymarketAutoLive.decisions());
+  }
+
+  bullpenAiAutoLiveRunOnce(): Promise<BullpenAutoLiveRun> {
+    return this.post<BullpenAutoLiveRun>(URLs.polymarketAutoLive.runOnce());
+  }
+
+  bullpenAiAutoLiveStart(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.start());
+  }
+
+  bullpenAiAutoLiveStop(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.stop());
+  }
+
+  bullpenAiAutoLivePause(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.pause());
+  }
+
+  bullpenAiAutoLiveResume(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.polymarketAutoLive.resume());
   }
 
   bullpenAiAutoLiveEmergencyStop(): Promise<BullpenAutoLiveState> {

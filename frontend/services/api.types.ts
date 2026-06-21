@@ -53,6 +53,8 @@ import {
     PolymarketDiscoveryDebugRequest,
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
+    BullpenAutoLiveRun,
+    BullpenAutoLiveDecision,
     BullpenAutoLiveState,
     BullpenAutoLiveSummaryResponse,
     TradingBotsOverviewResponse,
@@ -186,9 +188,17 @@ export interface IApiService {
     polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState>;
     polymarketDiscoveryDebug(data: PolymarketDiscoveryDebugRequest): Promise<PolymarketDiscoveryDebugReport>;
     bullpenAiAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse>;
+    bullpenAiAutoLiveState(): Promise<BullpenAutoLiveState>;
     bullpenAiAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     bullpenAiAutoLiveUpdateSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
     bullpenAiAutoLiveResetSettings(): Promise<BullpenAutoLiveSettings>;
+    bullpenAiAutoLiveRuns(): Promise<BullpenAutoLiveRun[]>;
+    bullpenAiAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]>;
+    bullpenAiAutoLiveRunOnce(): Promise<BullpenAutoLiveRun>;
+    bullpenAiAutoLiveStart(): Promise<BullpenAutoLiveState>;
+    bullpenAiAutoLiveStop(): Promise<BullpenAutoLiveState>;
+    bullpenAiAutoLivePause(): Promise<BullpenAutoLiveState>;
+    bullpenAiAutoLiveResume(): Promise<BullpenAutoLiveState>;
     bullpenAiAutoLiveEmergencyStop(): Promise<BullpenAutoLiveState>;
     bullpenAiAutoLiveClearEmergencyStop(): Promise<BullpenAutoLiveState>;
     getTradingBotsOverview(): Promise<TradingBotsOverviewResponse>;
