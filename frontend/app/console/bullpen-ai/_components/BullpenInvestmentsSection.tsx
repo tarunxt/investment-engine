@@ -257,7 +257,8 @@ export function BullpenInvestmentsSection({
     useState<BullpenQuestionRow | null>(null);
   const [calculationDialog, setCalculationDialog] = useState<{
     focus: "returnsPerDay" | "amountToBeInvested";
-    question: BullpenQuestionRow;
+    question?: BullpenQuestionRow;
+    position?: BullpenActivePositionView;
   } | null>(null);
   const [isPositionsDialogOpen, setIsPositionsDialogOpen] = useState(false);
   const openActivePositions = activePositions.filter((position) => !position.isClaimable);
@@ -479,12 +480,34 @@ export function BullpenInvestmentsSection({
                       />
                       <MetricCard label="Returns/day">
                         <div className="font-semibold text-slate-900">
-                          {formatReturnsPerDay(position.returnsPerDay)}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCalculationDialog({
+                                focus: "returnsPerDay",
+                                position,
+                              })
+                            }
+                            className="rounded-md text-left underline decoration-slate-300 underline-offset-4 transition hover:text-slate-700"
+                          >
+                            {formatReturnsPerDay(position.returnsPerDay)}
+                          </button>
                         </div>
                       </MetricCard>
                       <MetricCard label="Capital" accent>
                         <div className="font-semibold">
-                          {formatMoney(position.currentValue ?? position.costBasis)}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCalculationDialog({
+                                focus: "amountToBeInvested",
+                                position,
+                              })
+                            }
+                            className="rounded-md text-left underline decoration-slate-900/30 underline-offset-4 transition hover:text-slate-800"
+                          >
+                            {formatMoney(position.currentValue ?? position.costBasis)}
+                          </button>
                         </div>
                         <div className="mt-1 text-[11px] font-medium text-slate-900/80">
                           Current value
@@ -611,6 +634,7 @@ export function BullpenInvestmentsSection({
         <BullpenInvestmentMathDialog
           focus={calculationDialog.focus}
           question={calculationDialog.question}
+          position={calculationDialog.position}
           onClose={() => setCalculationDialog(null)}
         />
       ) : null}
