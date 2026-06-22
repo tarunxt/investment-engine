@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 
 import type {
   BullpenQuestionRow,
@@ -353,6 +353,35 @@ function getLlmOddsCellClass(value: number | null) {
   if (value > 90) return "bg-lime-400 text-slate-950";
   if (value > 80) return "bg-green-500/75 text-slate-950";
   return "";
+}
+
+function hasHighLlmDisagreement(question: BullpenQuestionRow) {
+  return question.llmDisagreementLevel === "High" || question.adjudicationRequired;
+}
+
+function LlmOddsDisplay({
+  question,
+  value,
+}: {
+  question: BullpenQuestionRow;
+  value: number | null;
+}) {
+  const showWarning = value !== null && hasHighLlmDisagreement(question);
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span>{formatOdds(value)}</span>
+      {showWarning ? (
+        <AlertTriangle
+          aria-label="High LLM disagreement"
+          className="h-3.5 w-3.5 shrink-0 text-amber-600"
+          role="img"
+        >
+          <title>High LLM disagreement — review breakdown before relying on this odds value.</title>
+        </AlertTriangle>
+      ) : null}
+    </span>
+  );
 }
 
 export function BullpenQuestionsTable({
@@ -714,7 +743,7 @@ export function BullpenQuestionsTable({
                           getLlmOddsCellClass(question.llmYesOdds),
                         )}
                       >
-                        {formatOdds(question.llmYesOdds)}
+                        <LlmOddsDisplay question={question} value={question.llmYesOdds} />
                       </button>
                     ) : (
                       <span
@@ -723,7 +752,7 @@ export function BullpenQuestionsTable({
                           getLlmOddsCellClass(question.llmYesOdds),
                         )}
                       >
-                        {formatOdds(question.llmYesOdds)}
+                        <LlmOddsDisplay question={question} value={question.llmYesOdds} />
                       </span>
                     )}
                   </td>
@@ -737,7 +766,7 @@ export function BullpenQuestionsTable({
                           getLlmOddsCellClass(question.llmNoOdds),
                         )}
                       >
-                        {formatOdds(question.llmNoOdds)}
+                        <LlmOddsDisplay question={question} value={question.llmNoOdds} />
                       </button>
                     ) : (
                       <span
@@ -746,7 +775,7 @@ export function BullpenQuestionsTable({
                           getLlmOddsCellClass(question.llmNoOdds),
                         )}
                       >
-                        {formatOdds(question.llmNoOdds)}
+                        <LlmOddsDisplay question={question} value={question.llmNoOdds} />
                       </span>
                     )}
                   </td>
