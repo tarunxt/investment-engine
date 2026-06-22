@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
@@ -37,6 +37,29 @@ function formatMoney(value: number | null) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function hasHighLlmDisagreement(question: BullpenQuestionRow) {
+  return question.llmDisagreementLevel === "High" || question.adjudicationRequired;
+}
+
+function LlmNoOddsValue({ question }: { question: BullpenQuestionRow }) {
+  const showWarning = question.llmNoOdds !== null && hasHighLlmDisagreement(question);
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span>{formatOdds(question.llmNoOdds)}</span>
+      {showWarning ? (
+        <AlertTriangle
+          aria-label="High LLM disagreement"
+          className="h-3.5 w-3.5 shrink-0 text-amber-600"
+          role="img"
+        >
+          <title>High LLM disagreement — review breakdown before relying on this odds value.</title>
+        </AlertTriangle>
+      ) : null}
+    </span>
+  );
 }
 
 export function BullpenInvestmentsSection({
@@ -298,10 +321,10 @@ export function BullpenInvestmentsSection({
                               onClick={() => setBreakdownQuestion(question)}
                               className="rounded-md underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
                             >
-                              {formatOdds(question.llmNoOdds)}
+                              <LlmNoOddsValue question={question} />
                             </button>
                           ) : (
-                            formatOdds(question.llmNoOdds)
+                            <LlmNoOddsValue question={question} />
                           )}
                         </div>
                       </div>
