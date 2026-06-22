@@ -124,14 +124,14 @@ export function BullpenInvestmentMathDialog({
   const returnsCard = question ? (
     <CalculationCard
       title="Returns/day"
-      formula="(100 - current favored-side odds) / days until close"
+      formula="If LLM No > 50%, (100 - Current No) / days; otherwise (100 - Current Yes) / days"
       summary={formatPercent(returnsBreakdown!.result)}
       highlighted={focus === "returnsPerDay"}
     >
       {returnsBreakdown!.result === null ? (
         <p className="text-sm leading-6 text-slate-600">
           This value is only available when the row has current Yes and No odds,
-          consensus LLM Yes odds, and a positive number of days until close.
+          consensus LLM odds, and a positive number of days until close.
         </p>
       ) : (
         <>
@@ -140,11 +140,11 @@ export function BullpenInvestmentMathDialog({
           </div>
           <div className="mt-4">
             <MetricRow
-              label="LLM favored side"
+              label="Spreadsheet side"
               value={
                 returnsBreakdown!.currentSide
-                  ? `${returnsBreakdown!.currentSide} (LLM Yes ${formatOdds(
-                      returnsBreakdown!.llmYesOdds,
+                  ? `${returnsBreakdown!.currentSide} (LLM No ${formatOdds(
+                      returnsBreakdown!.llmNoOdds,
                     )})`
                   : "—"
               }
