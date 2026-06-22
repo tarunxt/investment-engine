@@ -44,6 +44,7 @@ import {
   type ScanResult,
 } from "@/lib/bullpen-ai";
 import {
+  buildBullpenLlmTargetId,
   buildBullpenLlmRunTargetSet,
   buildBullpenQuestionRowFromActivePosition,
   extractBullpenActivePositionLlmAnalysis,
@@ -99,10 +100,10 @@ const TABS: {
 const BULLPEN_SNAPSHOT_STORAGE_KEY = "investor:bullpen-ai:snapshots:v1";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investor:bullpen-ai:last-llm-target:v1";
-const BULLPEN_LLM_PROMPT_STORAGE_KEY =
-  "investor:bullpen-ai:llm-prompt-template:v1";
 const BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY =
   "investor:bullpen-ai:active-position-llm:v1";
+const BULLPEN_LLM_PROMPT_STORAGE_KEY =
+  "investor:bullpen-ai:llm-prompt-template:v1";
 const MAX_BULLPEN_SNAPSHOT_HISTORY = 10;
 const RUN_POLL_INTERVAL_MS = 4_000;
 const MAX_RUN_POLLS = 90;
@@ -190,6 +191,137 @@ function createEmptySnapshotViewMap(): Record<ScanMode, string | null> {
     "30-days": null,
     "end-of-month": null,
   };
+}
+
+function hasSavedBullpenActivePositionAnalysis(
+  analysis: BullpenActivePositionLlmAnalysis | null | undefined,
+) {
+  return Boolean(
+    analysis &&
+      (analysis.llmYesOdds !== null ||
+        analysis.llmNoOdds !== null ||
+        analysis.llmCompletedAt ||
+        analysis.llmBreakdown.length > 0),
+  );
+}
+
+function getBullpenActivePositionAnalysisCapturedAt(
+  analysis: Pick<
+    BullpenActivePositionLlmAnalysis,
+    "llmCompletedAt" | "llmBreakdown"
+  >,
+) {
+  if (analysis.llmCompletedAt) return analysis.llmCompletedAt;
+
+  return (
+    [...analysis.llmBreakdown]
+      .map((entry) => entry.timestamp)
+      .filter((timestamp): timestamp is string => Boolean(timestamp))
+      .sort()
+      .at(-1) || null
+  );
+}
+
+function getBullpenActivePositionAnalysisTimestampMs(
+  analysis: BullpenActivePositionLlmAnalysis | null | undefined,
+) {
+  if (!analysis) return 0;
+  const capturedAt = getBullpenActivePositionAnalysisCapturedAt(analysis);
+  if (!capturedAt) return 0;
+
+  const timestampMs = Date.parse(capturedAt);
+  return Number.isFinite(timestampMs) ? timestampMs : 0;
+}
+
+function pickNewerBullpenActivePositionAnalysis(
+  left: BullpenActivePositionLlmAnalysis | null | undefined,
+  right: BullpenActivePositionLlmAnalysis | null | undefined,
+) {
+  const normalizedLeft = hasSavedBullpenActivePositionAnalysis(left) ? left : null;
+  const normalizedRight = hasSavedBullpenActivePositionAnalysis(right)
+    ? right
+    : null;
+
+  if (!normalizedLeft) return normalizedRight;
+  if (!normalizedRight) return normalizedLeft;
+
+  return getBullpenActivePositionAnalysisTimestampMs(normalizedRight) >
+    getBullpenActivePositionAnalysisTimestampMs(normalizedLeft)
+    ? normalizedRight
+    : normalizedLeft;
+}
+
+function buildSnapshotBackfilledActivePositionAnalyses(
+  snapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>,
+) {
+  const analysesByTargetId = new Map<string, BullpenActivePositionLlmAnalysis>();
+
+  for (const mode of ["30-days", "end-of-month"] as const) {
+    const snapshots = [
+      snapshotsByMode[mode].current,
+      ...snapshotsByMode[mode].history,
+    ].filter((snapshot): snapshot is BullpenScanSnapshot => Boolean(snapshot));
+
+    for (const snapshot of snapshots) {
+      for (const question of snapshot.questions) {
+        const analysis = extractBullpenActivePositionLlmAnalysis(question);
+        if (!hasSavedBullpenActivePositionAnalysis(analysis)) continue;
+
+        const targetId = buildBullpenLlmTargetId(question);
+        const current = analysesByTargetId.get(targetId);
+        const newer = pickNewerBullpenActivePositionAnalysis(current, analysis);
+        if (newer) {
+          analysesByTargetId.set(targetId, newer);
+        }
+      }
+    }
+  }
+
+  return analysesByTargetId;
+}
+
+function buildMergedActivePositionAnalyses({
+  activePositions,
+  currentAnalyses,
+  snapshotsByMode,
+}: {
+  activePositions: BullpenActivePositionView[];
+  currentAnalyses: Record<string, BullpenActivePositionLlmAnalysis>;
+  snapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+}) {
+  const next: Record<string, BullpenActivePositionLlmAnalysis> = {};
+  const snapshotAnalysesByTargetId =
+    buildSnapshotBackfilledActivePositionAnalyses(snapshotsByMode);
+
+  for (const position of activePositions.filter((item) => !item.isClaimable)) {
+    const targetId = buildBullpenLlmTargetId(
+      buildBullpenQuestionRowFromActivePosition(position),
+    );
+    const merged = pickNewerBullpenActivePositionAnalysis(
+      currentAnalyses[position.key],
+      snapshotAnalysesByTargetId.get(targetId),
+    );
+    if (merged) {
+      next[position.key] = merged;
+    }
+  }
+
+  return next;
+}
+
+function activePositionAnalysesEqual(
+  left: Record<string, BullpenActivePositionLlmAnalysis>,
+  right: Record<string, BullpenActivePositionLlmAnalysis>,
+) {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+
+  return leftKeys.every(
+    (key, index) =>
+      key === rightKeys[index] &&
+      JSON.stringify(left[key]) === JSON.stringify(right[key]),
+  );
 }
 
 function formatDate(value: string | null) {
@@ -865,24 +997,19 @@ export default function BullpenAiPage() {
   }, [activePositionAnalysesByKey, hasLoadedStorage]);
 
   useEffect(() => {
-    const openPositionKeys = new Set(
-      activePositions
-        .filter((position) => !position.isClaimable)
-        .map((position) => position.key),
-    );
-
+    if (!hasLoadedPositions || !hasLoadedStorage) return;
     setActivePositionAnalysesByKey((current) => {
-      const nextEntries = Object.entries(current).filter(([key]) =>
-        openPositionKeys.has(key),
-      );
-
-      if (nextEntries.length === Object.keys(current).length) {
+      const next = buildMergedActivePositionAnalyses({
+        activePositions,
+        currentAnalyses: current,
+        snapshotsByMode,
+      });
+      if (activePositionAnalysesEqual(current, next)) {
         return current;
       }
-
-      return Object.fromEntries(nextEntries);
+      return next;
     });
-  }, [activePositions]);
+  }, [activePositions, hasLoadedPositions, hasLoadedStorage, snapshotsByMode]);
 
   useEffect(() => {
     setIsScanFiltersOpen(false);

@@ -50,6 +50,15 @@ function formatDate(value: string | null) {
   });
 }
 
+function formatIstTimestamp(value: string | null) {
+  return formatApiTimestamp(value, {
+    emptyValue: "—",
+    timeZone: "Asia/Kolkata",
+    timeZoneName: "short",
+    second: "2-digit",
+  });
+}
+
 function formatOdds(value: number | null) {
   if (value === null) return "—";
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
@@ -155,7 +164,7 @@ function OddsPairValue({
 }
 
 function LlmTimestamp({ completedAt }: { completedAt: string | null }) {
-  return <span>Last LLM: {formatDate(completedAt)}</span>;
+  return <span>Last LLM: {formatIstTimestamp(completedAt)}</span>;
 }
 
 function LlmOddsMetric({

@@ -171,8 +171,18 @@ test("Bullpen x AI active positions stay included in LLM runs and share the even
 
   assert.match(bullpenAiPageSource, /buildBullpenLlmRunTargetSet\(\{/);
   assert.match(bullpenAiPageSource, /activePositions: openActivePositions/);
+  assert.match(
+    bullpenAiPageSource,
+    /BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY/,
+  );
+  assert.match(
+    bullpenAiPageSource,
+    /buildSnapshotBackfilledActivePositionAnalyses/,
+  );
   assert.match(investmentsSectionSource, /activePositionQuestions:/);
   assert.match(investmentsSectionSource, /Current Yes \/ No/);
   assert.match(investmentsSectionSource, /LLM Yes \/ No/);
+  assert.match(investmentsSectionSource, /Last LLM:/);
+  assert.match(investmentsSectionSource, /Asia\/Kolkata/);
   assert.match(investmentsSectionSource, /CheckCircle2/);
 });
