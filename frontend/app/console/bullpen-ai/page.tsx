@@ -100,6 +100,8 @@ const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investor:bullpen-ai:last-llm-target:v1";
 const BULLPEN_LLM_PROMPT_STORAGE_KEY =
   "investor:bullpen-ai:llm-prompt-template:v1";
+const BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY =
+  "investor:bullpen-ai:active-position-llm:v1";
 const MAX_BULLPEN_SNAPSHOT_HISTORY = 10;
 const RUN_POLL_INTERVAL_MS = 4_000;
 const MAX_RUN_POLLS = 90;
@@ -557,6 +559,55 @@ function normalizeStoredTarget(
   return null;
 }
 
+function isStoredActivePositionLlmAnalysis(
+  value: unknown,
+): value is BullpenActivePositionLlmAnalysis {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      Array.isArray((value as Record<string, unknown>).llmBreakdown),
+  );
+}
+
+function readActivePositionAnalysesFromStorage() {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const raw = window.localStorage.getItem(
+      BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY,
+    );
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (entry): entry is [string, BullpenActivePositionLlmAnalysis] =>
+          typeof entry[0] === "string" &&
+          isStoredActivePositionLlmAnalysis(entry[1]),
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeActivePositionAnalysesToStorage(
+  analysesByKey: Record<string, BullpenActivePositionLlmAnalysis>,
+) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY,
+      JSON.stringify(analysesByKey),
+    );
+  } catch {
+    // Best effort only.
+  }
+}
+
 function readLastLlmTargetsFromStorage() {
   if (typeof window === "undefined") return [];
 
@@ -801,6 +852,7 @@ export default function BullpenAiPage() {
     setSnapshotsByMode(readBullpenSnapshotsFromStorage());
     setLastLlmTargets(readLastLlmTargetsFromStorage());
     setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
+    setActivePositionAnalysesByKey(readActivePositionAnalysesFromStorage());
     setHasLoadedStorage(true);
   }, []);
 
@@ -808,6 +860,11 @@ export default function BullpenAiPage() {
     if (!hasLoadedStorage) return;
     writeBullpenSnapshotsToStorage(snapshotsByMode);
   }, [hasLoadedStorage, snapshotsByMode]);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) return;
+    writeActivePositionAnalysesToStorage(activePositionAnalysesByKey);
+  }, [activePositionAnalysesByKey, hasLoadedStorage]);
 
   useEffect(() => {
     const openPositionKeys = new Set(
