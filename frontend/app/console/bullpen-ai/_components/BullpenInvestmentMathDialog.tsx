@@ -1,6 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
+
+import {
+  getBullpenPositionDaysUntilClose,
+  type BullpenActivePositionView,
+} from "@/lib/bullpenPositions";
 import { X } from "lucide-react";
 
 import {
@@ -11,7 +16,8 @@ import {
 
 type BullpenInvestmentMathDialogProps = {
   focus: "returnsPerDay" | "amountToBeInvested";
-  question: BullpenQuestionRow;
+  question?: BullpenQuestionRow;
+  position?: BullpenActivePositionView;
   onClose: () => void;
 };
 
@@ -93,19 +99,36 @@ function CalculationCard({
 export function BullpenInvestmentMathDialog({
   focus,
   question,
+  position,
   onClose,
 }: BullpenInvestmentMathDialogProps) {
-  const returnsBreakdown = getBullpenReturnsPerDayBreakdown(question);
-  const amountBreakdown = getBullpenAmountToBeInvestedBreakdown(question);
+  const returnsBreakdown = question
+    ? getBullpenReturnsPerDayBreakdown(question)
+    : null;
+  const amountBreakdown = question
+    ? getBullpenAmountToBeInvestedBreakdown(question)
+    : null;
+  const positionDaysUntilClose = position
+    ? getBullpenPositionDaysUntilClose(position.closeTime)
+    : null;
+  const positionPricePercent =
+    position?.currentPrice === null || position?.currentPrice === undefined
+      ? null
+      : position.currentPrice > 1 && position.currentPrice <= 100
+        ? position.currentPrice
+        : position.currentPrice * 100;
+  const positionCapital = position
+    ? (position.currentValue ?? position.costBasis)
+    : null;
 
-  const returnsCard = (
+  const returnsCard = question ? (
     <CalculationCard
       title="Returns/day"
       formula="(100 - current favored-side odds) / days until close"
-      summary={formatPercent(returnsBreakdown.result)}
+      summary={formatPercent(returnsBreakdown!.result)}
       highlighted={focus === "returnsPerDay"}
     >
-      {returnsBreakdown.result === null ? (
+      {returnsBreakdown!.result === null ? (
         <p className="text-sm leading-6 text-slate-600">
           This value is only available when the row has current Yes and No odds,
           consensus LLM Yes odds, and a positive number of days until close.
@@ -113,15 +136,15 @@ export function BullpenInvestmentMathDialog({
       ) : (
         <>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`(100 - ${returnsBreakdown.currentOdds?.toFixed(2) || "—"}) / ${returnsBreakdown.daysUntilClose?.toFixed(1) || "—"} = ${returnsBreakdown.result.toFixed(2)}% per day`}
+            {`(100 - ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"}) / ${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} = ${returnsBreakdown!.result.toFixed(2)}% per day`}
           </div>
           <div className="mt-4">
             <MetricRow
               label="LLM favored side"
               value={
-                returnsBreakdown.currentSide
-                  ? `${returnsBreakdown.currentSide} (LLM Yes ${formatOdds(
-                      returnsBreakdown.llmYesOdds,
+                returnsBreakdown!.currentSide
+                  ? `${returnsBreakdown!.currentSide} (LLM Yes ${formatOdds(
+                      returnsBreakdown!.llmYesOdds,
                     )})`
                   : "—"
               }
@@ -129,16 +152,47 @@ export function BullpenInvestmentMathDialog({
             <MetricRow
               label="Current odds used"
               value={
-                returnsBreakdown.currentSide
-                  ? `${returnsBreakdown.currentSide} ${formatOdds(
-                      returnsBreakdown.currentOdds,
+                returnsBreakdown!.currentSide
+                  ? `${returnsBreakdown!.currentSide} ${formatOdds(
+                      returnsBreakdown!.currentOdds,
                     )}`
                   : "—"
               }
             />
             <MetricRow
               label="Days until close"
-              value={formatDays(returnsBreakdown.daysUntilClose)}
+              value={formatDays(returnsBreakdown!.daysUntilClose)}
+            />
+          </div>
+        </>
+      )}
+    </CalculationCard>
+  ) : (
+    <CalculationCard
+      title="Returns/day"
+      formula="(100 - current position price) / days until close"
+      summary={formatPercent(position?.returnsPerDay ?? null)}
+      highlighted={focus === "returnsPerDay"}
+    >
+      {position?.returnsPerDay === null || position?.returnsPerDay === undefined ? (
+        <p className="text-sm leading-6 text-slate-600">
+          This value is only available when the active position has a current
+          price and a positive number of days until close.
+        </p>
+      ) : (
+        <>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
+            {`(100 - ${positionPricePercent?.toFixed(2) || "—"}) / ${positionDaysUntilClose?.toFixed(1) || "—"} = ${position.returnsPerDay.toFixed(2)}% per day`}
+          </div>
+          <div className="mt-4">
+            <MetricRow label="Held outcome" value={position.outcome || "—"} />
+            <MetricRow
+              label="Current position price"
+              value={formatOdds(positionPricePercent)}
+            />
+            <MetricRow
+              label="Days until close"
+              value={formatDays(positionDaysUntilClose)}
             />
           </div>
         </>
@@ -146,14 +200,14 @@ export function BullpenInvestmentMathDialog({
     </CalculationCard>
   );
 
-  const amountCard = (
+  const amountCard = question ? (
     <CalculationCard
-      title="Amount"
+      title="Capital"
       formula="5 x (LLM No - 80) x Returns/day / 100"
-      summary={formatMoney(amountBreakdown.result)}
+      summary={formatMoney(amountBreakdown!.result ?? null)}
       highlighted={focus === "amountToBeInvested"}
     >
-      {amountBreakdown.result === null ? (
+      {amountBreakdown!.result === null ? (
         <p className="text-sm leading-6 text-slate-600">
           This amount is only available after the row has both LLM No odds and a
           returns/day value.
@@ -161,20 +215,20 @@ export function BullpenInvestmentMathDialog({
       ) : (
         <>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`${amountBreakdown.multiplier} x (${amountBreakdown.llmNoOdds?.toFixed(2) || "—"} - ${amountBreakdown.threshold}) x ${amountBreakdown.returnsPerDay?.toFixed(2) || "—"} / 100 = ${amountBreakdown.result.toFixed(2)}`}
+            {`${amountBreakdown!.multiplier} x (${amountBreakdown!.llmNoOdds?.toFixed(2) || "—"} - ${amountBreakdown!.threshold}) x ${amountBreakdown!.returnsPerDay?.toFixed(2) || "—"} / 100 = ${amountBreakdown!.result?.toFixed(2) || "—"}`}
           </div>
           <div className="mt-4">
             <MetricRow
               label="LLM No odds"
-              value={formatOdds(amountBreakdown.llmNoOdds)}
+              value={formatOdds(amountBreakdown!.llmNoOdds ?? null)}
             />
             <MetricRow
-              label={`LLM No above ${amountBreakdown.threshold}%`}
-              value={formatOdds(amountBreakdown.llmNoOddsAboveThreshold)}
+              label={`LLM No above ${amountBreakdown!.threshold}%`}
+              value={formatOdds(amountBreakdown!.llmNoOddsAboveThreshold ?? null)}
             />
             <MetricRow
               label="Returns/day input"
-              value={formatPercent(amountBreakdown.returnsPerDay)}
+              value={formatPercent(amountBreakdown!.returnsPerDay ?? null)}
             />
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">
@@ -182,6 +236,31 @@ export function BullpenInvestmentMathDialog({
             and <span className="font-semibold">Returns/day &gt; 5%</span>.
           </p>
         </>
+      )}
+    </CalculationCard>
+  ) : (
+    <CalculationCard
+      title="Capital"
+      formula="shares x current price (falls back to cost basis when unavailable)"
+      summary={formatMoney(positionCapital)}
+      highlighted={focus === "amountToBeInvested"}
+    >
+      {position ? (
+        <>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
+            {position.currentValue === null
+              ? `Current value unavailable, using cost basis = ${formatMoney(position.costBasis)}`
+              : `${position.shares.toLocaleString()} shares x ${formatMoney(position.currentPrice)} current price = ${formatMoney(position.currentValue)}`}
+          </div>
+          <div className="mt-4">
+            <MetricRow label="Shares" value={position.shares.toLocaleString()} />
+            <MetricRow label="Current price" value={formatMoney(position.currentPrice)} />
+            <MetricRow label="Current value" value={formatMoney(position.currentValue)} />
+            <MetricRow label="Cost basis fallback" value={formatMoney(position.costBasis)} />
+          </div>
+        </>
+      ) : (
+        <p className="text-sm leading-6 text-slate-600">No capital data is available.</p>
       )}
     </CalculationCard>
   );
@@ -194,10 +273,10 @@ export function BullpenInvestmentMathDialog({
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               {focus === "returnsPerDay"
                 ? "Returns/day Calculation"
-                : "Amount Calculation"}
+                : "Capital Calculation"}
             </p>
             <h2 className="max-w-3xl text-xl font-semibold text-slate-950">
-              {question.question}
+              {question?.question ?? position?.marketTitle ?? "Investment calculation"}
             </h2>
           </div>
           <button
