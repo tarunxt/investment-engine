@@ -3,6 +3,11 @@ import type { BullpenQuestion } from "@/lib/bullpen-ai";
 const POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const MAX_GAMMA_LOOKUP_BATCH_SIZE = 25;
+const MAX_EVENT_DETAIL_BATCH_SIZE = 8;
+const MARKET_CONTEXT_CAPTURE_CHARS = 40_000;
+const MAX_MARKET_CONTEXT_UPDATES = 6;
+const POLYMARKET_MARKET_CONTEXT_LABEL =
+  "Experimental AI-generated summary referencing Polymarket data.";
 
 type CanonicalizableQuestion = Pick<BullpenQuestion, "id" | "slug" | "marketUrl">;
 
@@ -12,6 +17,13 @@ export type ResolvedPolymarketMarket = {
   marketUrl: string | null;
   yesOdds: number | null;
   noOdds: number | null;
+  rules: string | null;
+  marketContext: string | null;
+  resolutionSource: string | null;
+};
+
+type PolymarketEventSupplement = {
+  marketContext: string | null;
 };
 
 function toArray(value: unknown): unknown[] {
@@ -55,6 +67,10 @@ function normalizeOdds(value: number | null) {
   if (value === null || value < 0) return null;
   if (value <= 1) return Number((value * 100).toFixed(2));
   return Number(value.toFixed(2));
+}
+
+function normalizeText(value: string | null) {
+  return value ? value.replace(/\s+/g, " ").trim() : null;
 }
 
 function toRecord(value: unknown) {
@@ -160,6 +176,210 @@ function readOutcomeOdds(record: Record<string, unknown>) {
   };
 }
 
+function extractRulesText(record: Record<string, unknown>) {
+  return normalizeText(readString(record, ["description", "rules"]));
+}
+
+function extractResolutionSourceText(
+  record: Record<string, unknown>,
+  rulesText: string | null,
+) {
+  const direct = normalizeText(
+    readString(record, ["resolutionSource", "resolution_source"]),
+  );
+  if (direct) return direct;
+
+  const match = rulesText?.match(
+    /The resolution source for this market will be.+?(?:\.|$)/i,
+  );
+  return normalizeText(match?.[0] || null);
+}
+
+function decodeHtmlEntities(value: string) {
+  const namedEntities: Record<string, string> = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    lt: "<",
+    nbsp: " ",
+    quot: '"',
+  };
+
+  return value.replace(
+    /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
+    (entity, token: string) => {
+      const normalizedToken = token.toLowerCase();
+      if (normalizedToken.startsWith("#x")) {
+        const parsed = Number.parseInt(normalizedToken.slice(2), 16);
+        return Number.isFinite(parsed) ? String.fromCodePoint(parsed) : entity;
+      }
+      if (normalizedToken.startsWith("#")) {
+        const parsed = Number.parseInt(normalizedToken.slice(1), 10);
+        return Number.isFinite(parsed) ? String.fromCodePoint(parsed) : entity;
+      }
+      return namedEntities[normalizedToken] ?? entity;
+    },
+  );
+}
+
+function htmlToText(value: string | null) {
+  if (!value) return null;
+
+  const normalized = decodeHtmlEntities(
+    value
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|section|article|small|h[1-6]|li|ul|ol|time)>/gi, "\n")
+      .replace(/<li[^>]*>/gi, "- ")
+      .replace(/<[^>]+>/g, " "),
+  )
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return normalized || null;
+}
+
+function extractContextPanelSlice(html: string) {
+  const panelMatch = html.match(
+    /<(?:div|section)[^>]*\brole=["']tabpanel["'][^>]*\bid=["'][^"']*-panel-context["'][^>]*>/i,
+  );
+  if (panelMatch?.index !== undefined) {
+    return html.slice(
+      panelMatch.index,
+      panelMatch.index + MARKET_CONTEXT_CAPTURE_CHARS,
+    );
+  }
+
+  const labelIndex = html.indexOf(POLYMARKET_MARKET_CONTEXT_LABEL);
+  if (labelIndex >= 0) {
+    return html.slice(
+      Math.max(0, labelIndex - 5_000),
+      labelIndex + MARKET_CONTEXT_CAPTURE_CHARS,
+    );
+  }
+
+  return null;
+}
+
+function extractMarketContextTimeline(panelSlice: string) {
+  const timelineEntries: string[] = [];
+  const timelinePattern =
+    /<span[^>]*>(.*?)<\/span>\s*<p[^>]*>(.*?)<\/p>\s*<p[^>]*>(.*?)<\/p>\s*<p[^>]*>(.*?)<\/p>/gi;
+
+  for (const match of panelSlice.matchAll(timelinePattern)) {
+    const entry = [
+      htmlToText(match[1] || null),
+      htmlToText(match[2] || null),
+      htmlToText(match[3] || null),
+      htmlToText(match[4] || null),
+    ];
+    const [date, headline, oddsMove, detail] = entry;
+    if (!date || !headline || !detail) {
+      continue;
+    }
+    timelineEntries.push(
+      [
+        `${date}: ${headline}`,
+        oddsMove ? `odds: ${oddsMove}` : null,
+        detail,
+      ]
+        .filter(Boolean)
+        .join(" | "),
+    );
+    if (timelineEntries.length >= MAX_MARKET_CONTEXT_UPDATES) {
+      break;
+    }
+  }
+
+  return timelineEntries;
+}
+
+function extractMarketContextText(html: string) {
+  const panelSlice = extractContextPanelSlice(html);
+  if (!panelSlice) return null;
+
+  const articleStart = panelSlice.indexOf("<article>");
+  const articleSlice =
+    articleStart >= 0 ? panelSlice.slice(articleStart) : panelSlice;
+  const summary = htmlToText(
+    articleSlice.match(/<p[^>]*>([\s\S]*?)<\/p>/i)?.[1] || null,
+  );
+  const disclaimer = htmlToText(
+    articleSlice.match(/<small[^>]*>([\s\S]*?)<\/small>/i)?.[1] || null,
+  );
+  const timelineEntries = extractMarketContextTimeline(articleSlice);
+
+  const sections = [summary, disclaimer].filter(
+    (section): section is string => Boolean(section),
+  );
+  if (timelineEntries.length > 0) {
+    sections.push(`Timeline updates:\n- ${timelineEntries.join("\n- ")}`);
+  }
+  if (sections.length > 0) {
+    return sections.join("\n\n");
+  }
+
+  return htmlToText(articleSlice.slice(0, 12_000));
+}
+
+async function fetchPolymarketEventSupplement(
+  marketUrl: string,
+): Promise<PolymarketEventSupplement | null> {
+  const response = await fetch(marketUrl, {
+    cache: "no-store",
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "user-agent": "Mozilla/5.0 investor-bullpen-ai",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Polymarket event page returned HTTP ${response.status}`);
+  }
+
+  const html = await response.text();
+
+  return {
+    marketContext: extractMarketContextText(html),
+  };
+}
+
+async function fetchPolymarketEventSupplements(marketUrls: string[]) {
+  const supplementsByMarketUrl: Record<string, PolymarketEventSupplement> = {};
+
+  for (
+    let index = 0;
+    index < marketUrls.length;
+    index += MAX_EVENT_DETAIL_BATCH_SIZE
+  ) {
+    const batch = marketUrls.slice(index, index + MAX_EVENT_DETAIL_BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async (marketUrl) => {
+        try {
+          const supplement = await fetchPolymarketEventSupplement(marketUrl);
+          return supplement
+            ? ([marketUrl, supplement] as const)
+            : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    for (const result of results) {
+      if (!result) continue;
+      const [marketUrl, supplement] = result;
+      supplementsByMarketUrl[marketUrl] = supplement;
+    }
+  }
+
+  return supplementsByMarketUrl;
+}
+
 function normalizeResolvedMarket(
   record: Record<string, unknown>,
   fallbackSlug: string | null = null,
@@ -168,6 +388,7 @@ function normalizeResolvedMarket(
   const slug = getCanonicalPolymarketMarketSlug(record, fallbackSlug);
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
   const { yesOdds, noOdds } = readOutcomeOdds(record);
+  const rules = extractRulesText(record);
 
   if (!id) return null;
 
@@ -177,6 +398,9 @@ function normalizeResolvedMarket(
     marketUrl: buildPolymarketEventUrl(eventSlug),
     yesOdds,
     noOdds,
+    rules,
+    marketContext: null,
+    resolutionSource: extractResolutionSourceText(record, rules),
   };
 }
 
@@ -252,6 +476,8 @@ export async function resolvePolymarketMarkets<
     }
   }
 
+  const uniqueMarketUrls = new Set<string>();
+
   for (const question of questions) {
     const record =
       recordsById.get(question.id.trim()) ||
@@ -261,7 +487,27 @@ export async function resolvePolymarketMarkets<
     const resolved = normalizeResolvedMarket(record, question.slug?.trim() || null);
     if (resolved) {
       resolvedByQuestionId[question.id] = resolved;
+      if (resolved.marketUrl) {
+        uniqueMarketUrls.add(resolved.marketUrl);
+      }
     }
+  }
+
+  const supplementsByMarketUrl = await fetchPolymarketEventSupplements(
+    [...uniqueMarketUrls],
+  );
+
+  for (const questionId of Object.keys(resolvedByQuestionId)) {
+    const resolved = resolvedByQuestionId[questionId];
+    if (!resolved.marketUrl) continue;
+
+    const supplement = supplementsByMarketUrl[resolved.marketUrl];
+    if (!supplement) continue;
+
+    resolvedByQuestionId[questionId] = {
+      ...resolved,
+      marketContext: supplement.marketContext,
+    };
   }
 
   return resolvedByQuestionId;
@@ -282,7 +528,14 @@ export async function applyCanonicalPolymarketMarketUrls<
 
       if (
         resolved.marketUrl === question.marketUrl &&
-        resolved.slug === question.slug
+        resolved.slug === question.slug &&
+        ("rules" in question ? resolved.rules === question.rules : resolved.rules === null) &&
+        ("marketContext" in question
+          ? resolved.marketContext === question.marketContext
+          : resolved.marketContext === null) &&
+        ("resolutionSource" in question
+          ? resolved.resolutionSource === question.resolutionSource
+          : resolved.resolutionSource === null)
       ) {
         return question;
       }
@@ -292,7 +545,11 @@ export async function applyCanonicalPolymarketMarketUrls<
         ...question,
         slug: resolved.slug,
         marketUrl: resolved.marketUrl,
-      };
+        ...(question as Partial<BullpenQuestion>),
+        rules: resolved.rules,
+        marketContext: resolved.marketContext,
+        resolutionSource: resolved.resolutionSource,
+      } as T;
     });
 
     return changed ? nextQuestions : questions;

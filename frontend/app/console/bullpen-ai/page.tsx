@@ -119,6 +119,9 @@ type PolymarketMarketRefresh = {
   marketUrl: string | null;
   yesOdds: number | null;
   noOdds: number | null;
+  rules: string | null;
+  marketContext: string | null;
+  resolutionSource: string | null;
 };
 
 type BullpenCurrentOddsRefreshResponse = {
@@ -551,12 +554,25 @@ function applySnapshotMarketUpdates(
       marketUpdate.yesOdds === undefined ? question.yesOdds : marketUpdate.yesOdds;
     const nextNoOdds =
       marketUpdate.noOdds === undefined ? question.noOdds : marketUpdate.noOdds;
+    const nextRules =
+      marketUpdate.rules === undefined ? question.rules : marketUpdate.rules;
+    const nextMarketContext =
+      marketUpdate.marketContext === undefined
+        ? question.marketContext
+        : marketUpdate.marketContext;
+    const nextResolutionSource =
+      marketUpdate.resolutionSource === undefined
+        ? question.resolutionSource
+        : marketUpdate.resolutionSource;
 
     if (
       nextSlug === question.slug &&
       nextMarketUrl === question.marketUrl &&
       nextYesOdds === question.yesOdds &&
-      nextNoOdds === question.noOdds
+      nextNoOdds === question.noOdds &&
+      nextRules === question.rules &&
+      nextMarketContext === question.marketContext &&
+      nextResolutionSource === question.resolutionSource
     ) {
       return question;
     }
@@ -568,6 +584,9 @@ function applySnapshotMarketUpdates(
       marketUrl: nextMarketUrl,
       yesOdds: nextYesOdds,
       noOdds: nextNoOdds,
+      rules: nextRules,
+      marketContext: nextMarketContext,
+      resolutionSource: nextResolutionSource,
     });
   });
 
@@ -1495,6 +1514,9 @@ export default function BullpenAiPage() {
             closeTime,
             currentPrice: null,
           }),
+          rules: marketUpdate?.rules ?? null,
+          marketContext: marketUpdate?.marketContext ?? null,
+          resolutionSource: marketUpdate?.resolutionSource ?? null,
         } satisfies BullpenActivePositionView;
 
         return applyBullpenPositionMarketData(basePosition, marketUpdate || {});
@@ -2170,6 +2192,10 @@ export default function BullpenAiPage() {
           marketUrl: update.marketUrl ?? question.marketUrl,
           yesOdds: update.yesOdds ?? question.yesOdds,
           noOdds: update.noOdds ?? question.noOdds,
+          rules: update.rules ?? question.rules,
+          marketContext: update.marketContext ?? question.marketContext,
+          resolutionSource:
+            update.resolutionSource ?? question.resolutionSource,
         });
       });
       const refreshedQuestionIds = new Set(Object.keys(marketUpdates));

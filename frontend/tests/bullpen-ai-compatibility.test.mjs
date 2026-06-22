@@ -38,6 +38,10 @@ function createQuestionRow() {
     outcomeCount: 2,
     isBinaryYesNo: true,
     daysUntilClose: 9,
+    rules: 'This market resolves to "Yes" if candidate X wins.',
+    marketContext:
+      "Experimental AI-generated summary referencing Polymarket data. Candidate X has gained support.",
+    resolutionSource: "Official election results will decide this market.",
     llmYesOdds: 55,
     llmNoOdds: 45,
     llmAverageYesOdds: 55,
@@ -81,6 +85,19 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
   assert.match(defaultPrompt, /"question_ref": "Q1"/);
   assert.match(defaultPrompt, /"current_yes_odds": 44/);
   assert.match(defaultPrompt, /"current_no_odds": 56/);
+  assert.match(
+    defaultPrompt,
+    /"polymarket_rules": "This market resolves to \\"Yes\\" if candidate X wins\."/,
+  );
+  assert.match(
+    defaultPrompt,
+    /"polymarket_market_context": "Experimental AI-generated summary referencing Polymarket data\. Candidate X has gained support\."/,
+  );
+  assert.match(defaultPrompt, /polymarket_rules/);
+  assert.match(
+    defaultPrompt,
+    /Experimental AI-generated summary referencing Polymarket data\./,
+  );
   assert.notEqual(defaultPrompt, DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE.trim());
 
   assert.match(legacyPrompt, /Selected questions:/);

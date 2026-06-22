@@ -627,6 +627,9 @@ function normalizeGammaMarket(
           : null,
     isBinaryYesNo: isBinaryYesNoQuestion(outcomeLabels, yesOdds, noOdds),
     daysUntilClose: getDaysUntilClose(closeTime),
+    rules: null,
+    marketContext: null,
+    resolutionSource: null,
   };
 }
 
@@ -726,6 +729,9 @@ function normalizeQuestion(
           : null,
     isBinaryYesNo: isBinaryYesNoQuestion(outcomeLabels, yesOdds, noOdds),
     daysUntilClose: getDaysUntilClose(closeTime),
+    rules: null,
+    marketContext: null,
+    resolutionSource: null,
   };
 }
 

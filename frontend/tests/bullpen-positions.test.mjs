@@ -123,6 +123,12 @@ test("Bullpen positions refresh current odds and use end-of-day ET for returns/d
     const refreshed = applyBullpenPositionMarketData(position, {
       noOdds: 11.5,
       marketUrl: "https://polymarket.com/event/starmer-out-in-2025",
+      rules:
+        'This market will resolve to "Yes" if Keir Starmer ceases to be PM by June 26, 2026.',
+      marketContext:
+        "Experimental AI-generated summary referencing Polymarket data. Starmer is under mounting pressure.",
+      resolutionSource:
+        "The resolution source for this market will be the government of the UK.",
     });
 
     assert.equal(refreshed.yesOdds, 88.5);
@@ -135,6 +141,12 @@ test("Bullpen positions refresh current odds and use end-of-day ET for returns/d
       refreshed.marketUrl,
       "https://polymarket.com/event/starmer-out-in-2025",
     );
+    assert.match(refreshed.rules || "", /ceases to be PM/);
+    assert.match(
+      refreshed.marketContext || "",
+      /Experimental AI-generated summary referencing Polymarket data\./,
+    );
+    assert.match(refreshed.resolutionSource || "", /government of the UK/);
   } finally {
     Date.now = originalNow;
   }

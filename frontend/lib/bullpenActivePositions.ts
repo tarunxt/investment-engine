@@ -118,6 +118,9 @@ export function buildBullpenQuestionRowFromActivePosition(
     outcomeCount: 2,
     isBinaryYesNo: position.yesOdds !== null || position.noOdds !== null,
     daysUntilClose: getBullpenPositionDaysUntilClose(position.closeTime),
+    rules: position.rules,
+    marketContext: position.marketContext,
+    resolutionSource: position.resolutionSource,
     ...createEmptyBullpenActivePositionLlmAnalysis(),
     ...analysis,
   });

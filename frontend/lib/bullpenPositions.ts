@@ -17,6 +17,9 @@ export type BullpenActivePositionView = {
   isClaimable: boolean;
   claimableValue: number | null;
   returnsPerDay: number | null;
+  rules: string | null;
+  marketContext: string | null;
+  resolutionSource: string | null;
 };
 
 export type BullpenPositionsSummary = {
@@ -353,6 +356,9 @@ export function normalizeBullpenPosition(
       currentPrice,
       isClaimable,
     }),
+    rules: null,
+    marketContext: null,
+    resolutionSource: null,
   };
 }
 
@@ -362,6 +368,9 @@ export function applyBullpenPositionMarketData(
     yesOdds?: number | null;
     noOdds?: number | null;
     marketUrl?: string | null;
+    rules?: string | null;
+    marketContext?: string | null;
+    resolutionSource?: string | null;
   },
 ) {
   const currentPrice = toBullpenPositionCurrentPrice({
@@ -399,6 +408,10 @@ export function applyBullpenPositionMarketData(
       currentPrice,
       isClaimable: position.isClaimable,
     }),
+    rules: marketData.rules ?? position.rules,
+    marketContext: marketData.marketContext ?? position.marketContext,
+    resolutionSource:
+      marketData.resolutionSource ?? position.resolutionSource,
   } satisfies BullpenActivePositionView;
 }
 

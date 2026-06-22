@@ -104,13 +104,22 @@ async function searchBullpenMarketByQuestion(question: string) {
       const toPercent = (value: number | null | undefined) =>
         typeof value === "number" ? Number((value * 100).toFixed(2)) : null;
 
-      return {
+      const fallbackMarket = {
         id: matchedMarket.slug,
         slug: matchedMarket.slug,
         marketUrl: buildPolymarketEventUrl(matchedMarket.eventSlug || null),
         yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
         noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
+        rules: null,
+        marketContext: null,
+        resolutionSource: null,
       };
+      try {
+        const resolved = await resolvePolymarketMarkets([fallbackMarket]);
+        return resolved[fallbackMarket.id] || fallbackMarket;
+      } catch {
+        return fallbackMarket;
+      }
     } catch {
       continue;
     }
@@ -143,7 +152,9 @@ export async function POST(request: NextRequest) {
     );
     for (const question of unresolvedQuestions) {
       if (!question.question) continue;
-      const searchedMarket = await searchBullpenMarketByQuestion(question.question);
+      const searchedMarket = await searchBullpenMarketByQuestion(
+        question.question,
+      );
       if (searchedMarket) {
         resolvedByQuestionId[question.id] = searchedMarket;
       }

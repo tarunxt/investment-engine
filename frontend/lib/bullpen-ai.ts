@@ -16,6 +16,9 @@ export type BullpenQuestion = {
   outcomeCount: number | null;
   isBinaryYesNo: boolean;
   daysUntilClose: number | null;
+  rules: string | null;
+  marketContext: string | null;
+  resolutionSource: string | null;
 };
 
 export type BullpenLlmDisagreementLevel = "Low" | "Medium" | "High";
@@ -225,15 +228,26 @@ You are an independent probability estimation engine for Polymarket questions.
 
 Analyze every selected market and return one calibrated YES/NO estimate per question.
 
-You must use the exact market_url, the market's resolution criteria, and the current timestamps provided in the input.
+You must use the exact market_url when present, the supplied Polymarket rules, the supplied detailed Polymarket market context when present, and the current timestamps provided in the input.
 Do not reason from the market title alone.
-If the title, close time, and market_url rules appear inconsistent, the market_url rules win.
+If the title, close time, and market_url rules appear inconsistent, the supplied Polymarket rules win.
 
 Input fields may include:
-question_ref, question_id, question, slug, market_url, close_time, closing_time, close_time_et, current_time_utc, current_time_et, deadline_et, hours_remaining, deadline_source, title_date_hint, title_deadline_et_assumption, category, outcomes, current_yes_odds, current_no_odds.
+question_ref, question_id, question, slug, market_url, close_time, closing_time, close_time_et, current_time_utc, current_time_et, deadline_et, hours_remaining, deadline_source, title_date_hint, title_deadline_et_assumption, category, outcomes, current_yes_odds, current_no_odds, polymarket_rules, polymarket_market_context, polymarket_resolution_source.
+
+Each market may include:
+- polymarket_rules
+- polymarket_market_context
+- polymarket_resolution_source
+
+You MUST use polymarket_rules as the authoritative resolution criteria.
+You MUST read and consider polymarket_market_context when present.
+The Market Context may include the label "Experimental AI-generated summary referencing Polymarket data." Treat it as helpful context and evidence, not as the final resolution authority.
+If polymarket_rules conflict with polymarket_market_context, polymarket_rules win.
+If polymarket_rules say an announcement immediately resolves the market, then an already-confirmed announcement should be treated as criteria_likely_satisfied and already_occurred.
 
 For each question:
-1. Read and consider the exact market_url and its resolution criteria.
+1. Read and consider the exact market_url, polymarket_rules, polymarket_market_context, and polymarket_resolution_source.
 2. State what YES means under those exact rules in yes_definition.
 3. Use current_time_utc and current_time_et as the evaluation timestamp.
 4. Determine the operative deadline in ET.
@@ -249,6 +263,9 @@ For each question:
 8. Never convert scheduled, expected, planned, rumored, or preparatory activity into "already happened".
 9. Use current market odds only as a weak reference signal, not as the primary basis for the answer.
 10. Set llm_no_odds = 100 - llm_yes_odds.
+11. If the supplied rules plus current credible evidence show that the market has already resolved YES, return llm_yes_odds = 100.00 and llm_no_odds = 0.00.
+12. If the supplied rules plus current credible evidence show that the market has already resolved NO, return llm_yes_odds = 0.00 and llm_no_odds = 100.00.
+13. Do not hedge at 95 or 99 once the market's own rules are already satisfied.
 
 Use these labels when possible:
 - evidence_status: criteria_likely_satisfied | scheduled_not_occurred | preparatory_or_indirect_only | weak_or_rumour_only | no_reliable_evidence | conflicting_evidence
@@ -697,6 +714,9 @@ export function createBullpenQuestionRow(
     : topLevelOdds.no;
   const baseRow = {
     ...question,
+    rules: question.rules ?? null,
+    marketContext: question.marketContext ?? null,
+    resolutionSource: question.resolutionSource ?? null,
     llmYesOdds,
     llmNoOdds,
   } as BullpenQuestionRow;
@@ -717,6 +737,9 @@ export function createBullpenQuestionRow(
 
   return {
     ...question,
+    rules: question.rules ?? null,
+    marketContext: question.marketContext ?? null,
+    resolutionSource: question.resolutionSource ?? null,
     llmYesOdds,
     llmNoOdds,
     llmAverageYesOdds:
@@ -1416,6 +1439,9 @@ function buildBullpenLlmQuestionPayload(questions: BullpenQuestionRow[]) {
       current_no_odds: question.noOdds,
       market_url: question.marketUrl,
       slug: question.slug,
+      polymarket_rules: question.rules,
+      polymarket_market_context: question.marketContext,
+      polymarket_resolution_source: question.resolutionSource,
     };
   });
 }
