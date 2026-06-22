@@ -78,10 +78,12 @@ function MetricCard({
   label,
   accent = false,
   children,
+  footer,
 }: {
   label: string;
   accent?: boolean;
   children: ReactNode;
+  footer?: ReactNode;
 }) {
   return (
     <div
@@ -99,6 +101,18 @@ function MetricCard({
         {label}
       </div>
       <div className="mt-1">{children}</div>
+      {footer ? (
+        <div
+          className={cn(
+            "mt-2 border-t pt-2 text-[10px] font-medium leading-4",
+            accent
+              ? "border-slate-900/20 text-slate-900/80"
+              : "border-slate-200 text-slate-500",
+          )}
+        >
+          {footer}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -142,6 +156,46 @@ function OddsPairValue({
   );
 }
 
+function LlmTimestamp({ completedAt }: { completedAt: string | null }) {
+  return <span>Last LLM: {formatDate(completedAt)}</span>;
+}
+
+function LlmOddsMetric({
+  question,
+  onOpenBreakdown,
+}: {
+  question: BullpenQuestionRow | null | undefined;
+  onOpenBreakdown: (question: BullpenQuestionRow) => void;
+}) {
+  const odds = (
+    <OddsPairValue
+      yesOdds={question?.llmYesOdds ?? null}
+      noOdds={question?.llmNoOdds ?? null}
+      accentClassName="text-violet-700"
+      warning={question ? hasHighLlmDisagreement(question) : false}
+    />
+  );
+
+  return (
+    <MetricCard
+      label="LLM Yes / No"
+      footer={<LlmTimestamp completedAt={question?.llmCompletedAt ?? null} />}
+    >
+      {question && question.llmBreakdown.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => onOpenBreakdown(question)}
+          className="w-full rounded-md text-left underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
+        >
+          {odds}
+        </button>
+      ) : (
+        odds
+      )}
+    </MetricCard>
+  );
+}
+
 function RowShell({
   children,
   selected = false,
@@ -155,9 +209,11 @@ function RowShell({
     <div
       className={cn(
         "flex flex-col gap-4 rounded-2xl border px-4 py-4 transition md:flex-row md:items-start md:justify-between",
-        selected || active
-          ? "border-fuchsia-400 bg-fuchsia-50"
-          : "border-slate-200 bg-white hover:border-fuchsia-200",
+        active
+          ? "border-emerald-400 bg-emerald-50"
+          : selected
+            ? "border-fuchsia-400 bg-fuchsia-50"
+            : "border-slate-200 bg-white hover:border-fuchsia-200",
       )}
     >
       {children}
@@ -242,7 +298,8 @@ export function BullpenInvestmentsSection({
                 Events to invest in
               </p>
               <h3 className="mt-1 text-lg font-semibold text-slate-950">
-                Pink rows from the current Bullpen snapshot
+                Green rows from active positions and pink rows from the current
+                Bullpen snapshot
               </h3>
             </div>
             <p className="max-w-3xl text-sm text-slate-600">
@@ -253,7 +310,7 @@ export function BullpenInvestmentsSection({
             </p>
           </div>
           {!isHistoryView && hasRows ? (
-            <div className="flex flex-col items-start gap-2">
+            <div className="flex w-full flex-col items-start gap-2">
               <div className="flex w-full flex-wrap items-center gap-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
@@ -409,29 +466,10 @@ export function BullpenInvestmentsSection({
                           accentClassName="text-rose-700"
                         />
                       </MetricCard>
-                      <MetricCard label="LLM Yes / No">
-                        {question && question.llmBreakdown.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => setBreakdownQuestion(question)}
-                            className="w-full rounded-md text-left underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
-                          >
-                            <OddsPairValue
-                              yesOdds={question.llmYesOdds}
-                              noOdds={question.llmNoOdds}
-                              accentClassName="text-violet-700"
-                              warning={hasHighLlmDisagreement(question)}
-                            />
-                          </button>
-                        ) : (
-                          <OddsPairValue
-                            yesOdds={question?.llmYesOdds ?? null}
-                            noOdds={question?.llmNoOdds ?? null}
-                            accentClassName="text-violet-700"
-                            warning={question ? hasHighLlmDisagreement(question) : false}
-                          />
-                        )}
-                      </MetricCard>
+                      <LlmOddsMetric
+                        question={question}
+                        onOpenBreakdown={setBreakdownQuestion}
+                      />
                       <MetricCard label="Returns/day">
                         <div className="font-semibold text-slate-900">
                           {formatReturnsPerDay(position.returnsPerDay)}
@@ -499,29 +537,10 @@ export function BullpenInvestmentsSection({
                           accentClassName="text-rose-700"
                         />
                       </MetricCard>
-                      <MetricCard label="LLM Yes / No">
-                        {question.llmBreakdown.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => setBreakdownQuestion(question)}
-                            className="w-full rounded-md text-left underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
-                          >
-                            <OddsPairValue
-                              yesOdds={question.llmYesOdds}
-                              noOdds={question.llmNoOdds}
-                              accentClassName="text-violet-700"
-                              warning={hasHighLlmDisagreement(question)}
-                            />
-                          </button>
-                        ) : (
-                          <OddsPairValue
-                            yesOdds={question.llmYesOdds}
-                            noOdds={question.llmNoOdds}
-                            accentClassName="text-violet-700"
-                            warning={hasHighLlmDisagreement(question)}
-                          />
-                        )}
-                      </MetricCard>
+                      <LlmOddsMetric
+                        question={question}
+                        onOpenBreakdown={setBreakdownQuestion}
+                      />
                       <MetricCard label="Returns/day">
                         <div className="font-semibold text-slate-900">
                           {question.returnsPerDay === null ? (
