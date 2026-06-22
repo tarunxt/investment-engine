@@ -177,6 +177,40 @@ function formatCountLabel(count: number, singular: string, plural = `${singular}
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+type BullpenLlmFailedModelSummary = {
+  model: string;
+  issue: string;
+};
+
+type BullpenLlmRunSummary = {
+  selectedModels: number;
+  selectedQuestionsWithConsensusOdds: number;
+  usableJsonModels: number;
+  failedModels: BullpenLlmFailedModelSummary[];
+  matchedRowsWithoutUsableOdds: number;
+  unmatchedReturnedRows: number;
+  matchedRows: number;
+};
+
+function splitBullpenFailedModel(message: string): BullpenLlmFailedModelSummary {
+  const separatorIndex = message.indexOf(": ");
+  if (separatorIndex === -1) {
+    return { model: message, issue: "Failed or returned unusable output." };
+  }
+
+  return {
+    model: message.slice(0, separatorIndex),
+    issue: message.slice(separatorIndex + 2),
+  };
+}
+
+function formatElapsedTime(totalSeconds: number) {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 function getModeDescription(mode: ScanMode, filters: BullpenScanFilters) {
   if (mode === "end-of-month") {
     return `Bullpen questions ending exactly on ${formatDateOnly(filters.targetDate)}.`;
@@ -660,7 +694,7 @@ export default function BullpenAiPage() {
     "end-of-month": null,
   });
   const [llmMessagesByMode, setLlmMessagesByMode] = useState<
-    Record<ScanMode, string | null>
+    Record<ScanMode, BullpenLlmRunSummary | string | null>
   >({
     "30-days": null,
     "end-of-month": null,
@@ -695,6 +729,13 @@ export default function BullpenAiPage() {
   >(null);
   const [scanningMode, setScanningMode] = useState<ScanMode | null>(null);
   const [llmRunningMode, setLlmRunningMode] = useState<ScanMode | null>(null);
+  const [llmRunStartedAtByMode, setLlmRunStartedAtByMode] = useState<
+    Record<ScanMode, number | null>
+  >({
+    "30-days": null,
+    "end-of-month": null,
+  });
+  const [llmElapsedSeconds, setLlmElapsedSeconds] = useState(0);
   const [investingMode, setInvestingMode] = useState<ScanMode | null>(null);
   const [refreshingCurrentOddsMode, setRefreshingCurrentOddsMode] = useState<
     ScanMode | null
@@ -844,6 +885,7 @@ export default function BullpenAiPage() {
   const investmentProgress = investmentProgressByMode[activeMode];
   const isScanning = scanningMode === activeMode;
   const isRunningLlm = llmRunningMode === activeMode;
+  const llmRunStartedAt = llmRunStartedAtByMode[activeMode];
   const isInvesting = investingMode === activeMode;
   const isRefreshingCurrentOdds = refreshingCurrentOddsMode === activeMode;
   const selectionEnabled = Boolean(activeCurrentSnapshot && !isViewingHistory);
@@ -875,6 +917,26 @@ export default function BullpenAiPage() {
       (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
     ),
   );
+
+  useEffect(() => {
+    if (!isRunningLlm || !llmRunStartedAt) {
+      setLlmElapsedSeconds(0);
+      return;
+    }
+
+    const updateElapsed = () => {
+      setLlmElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - llmRunStartedAt) / 1000)),
+      );
+    };
+
+    updateElapsed();
+    const intervalId = window.setInterval(updateElapsed, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isRunningLlm, llmRunStartedAt]);
 
   useEffect(() => {
     if (!selectionEnabled || !activeCurrentSnapshot) return;
@@ -1461,6 +1523,10 @@ export default function BullpenAiPage() {
     }
 
     setLlmRunningMode(activeMode);
+    setLlmRunStartedAtByMode((current) => ({
+      ...current,
+      [activeMode]: Date.now(),
+    }));
     setLlmMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     setLastLlmTargets(targets);
@@ -1675,51 +1741,17 @@ export default function BullpenAiPage() {
         };
       });
 
-      const summaryParts = [
-        `LLM finished with ${targets.length} selected model${targets.length === 1 ? "" : "s"}.`,
-      ];
-
-      if (rowsWithOddsCount > 0) {
-        summaryParts.push(
-          `Computed consensus odds for ${formatCountLabel(rowsWithOddsCount, "selected question")}.`,
-        );
-      } else if (matchedCount > 0) {
-        summaryParts.push(
-          `Matched ${formatCountLabel(matchedCount, "selected row")} back to the table, but the returned models left their odds blank.`,
-        );
-      } else {
-        summaryParts.push(
-          "The returned models produced output, but none of it could be matched back to the selected table rows, so the LLM odds columns stayed unchanged.",
-        );
-      }
-
-      if (blankOddsCount > 0) {
-        summaryParts.push(
-          `${formatCountLabel(blankOddsCount, "matched row")} came back without usable odds after consensus calculation, so those LLM odds stayed blank.`,
-        );
-      }
-
-      if (unmatchedCount > 0) {
-        summaryParts.push(
-          `${formatCountLabel(unmatchedCount, "returned row")} could not be matched back to the selected questions.`,
-        );
-      }
-
-      if (successfulModelCount > 0) {
-        summaryParts.push(
-          `${formatCountLabel(successfulModelCount, "model")} returned usable JSON.`,
-        );
-      }
-
-      if (failedModels.length > 0) {
-        summaryParts.push(
-          `${formatCountLabel(failedModels.length, "model")} failed or returned unusable output: ${failedModels.join(" | ")}.`,
-        );
-      }
-
       setLlmMessagesByMode((current) => ({
         ...current,
-        [activeMode]: summaryParts.join(" "),
+        [activeMode]: {
+          selectedModels: targets.length,
+          selectedQuestionsWithConsensusOdds: rowsWithOddsCount,
+          usableJsonModels: successfulModelCount,
+          failedModels: failedModels.map(splitBullpenFailedModel),
+          matchedRowsWithoutUsableOdds: blankOddsCount,
+          unmatchedReturnedRows: unmatchedCount,
+          matchedRows: matchedCount,
+        },
       }));
     } catch (error) {
       setLlmMessagesByMode((current) => ({
@@ -1728,6 +1760,10 @@ export default function BullpenAiPage() {
       }));
     } finally {
       setLlmRunningMode(null);
+      setLlmRunStartedAtByMode((current) => ({
+        ...current,
+        [activeMode]: null,
+      }));
     }
   }
 
@@ -2347,12 +2383,21 @@ export default function BullpenAiPage() {
                   />
                 </div>
                 {isRunningLlm ? (
-                  <p className="text-xs leading-5 text-slate-600">
-                    Running {formatTargetSummary(lastLlmTargets)} on the selected
-                    questions now. When it finishes, we&apos;ll say how many
-                    table rows were updated, how many model outputs were usable,
-                    and whether any consensus LLM odds stayed blank.
-                  </p>
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-900">
+                    <div className="flex flex-wrap items-center gap-2 font-semibold">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>LLM running</span>
+                      <span className="rounded-full bg-white px-2 py-0.5 font-mono text-sky-950 shadow-sm">
+                        {formatElapsedTime(llmElapsedSeconds)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sky-800">
+                      Running {formatTargetSummary(lastLlmTargets)} on the selected
+                      questions now. When it finishes, we&apos;ll say how many
+                      table rows were updated, how many model outputs were usable,
+                      and whether any consensus LLM odds stayed blank.
+                    </p>
+                  </div>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -2390,7 +2435,89 @@ export default function BullpenAiPage() {
 
           {llmNotice ? (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-              {llmNotice}
+              {typeof llmNotice === "string" ? (
+                llmNotice
+              ) : (
+                <div className="space-y-4">
+                  <div className="overflow-hidden rounded-xl border border-sky-200 bg-white">
+                    <table className="w-full border-collapse text-left text-sm">
+                      <tbody className="divide-y divide-sky-100">
+                        <tr>
+                          <th className="w-64 bg-sky-50 px-3 py-2 font-semibold text-sky-950">
+                            Selected models
+                          </th>
+                          <td className="px-3 py-2">{llmNotice.selectedModels}</td>
+                        </tr>
+                        <tr>
+                          <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
+                            Questions with consensus odds
+                          </th>
+                          <td className="px-3 py-2">
+                            {llmNotice.selectedQuestionsWithConsensusOdds}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
+                            Models with usable JSON
+                          </th>
+                          <td className="px-3 py-2">{llmNotice.usableJsonModels}</td>
+                        </tr>
+                        <tr>
+                          <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
+                            Selected questions matched
+                          </th>
+                          <td className="px-3 py-2">{llmNotice.matchedRows}</td>
+                        </tr>
+                        {llmNotice.matchedRowsWithoutUsableOdds > 0 ? (
+                          <tr>
+                            <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
+                              Matched rows without usable odds
+                            </th>
+                            <td className="px-3 py-2">
+                              {llmNotice.matchedRowsWithoutUsableOdds}
+                            </td>
+                          </tr>
+                        ) : null}
+                        {llmNotice.unmatchedReturnedRows > 0 ? (
+                          <tr>
+                            <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
+                              Returned rows not matched
+                            </th>
+                            <td className="px-3 py-2">
+                              {llmNotice.unmatchedReturnedRows}
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {llmNotice.failedModels.length > 0 ? (
+                    <div className="overflow-hidden rounded-xl border border-sky-200 bg-white">
+                      <table className="w-full border-collapse text-left text-sm">
+                        <thead className="bg-sky-50 text-sky-950">
+                          <tr>
+                            <th className="w-64 px-3 py-2 font-semibold">Failed model</th>
+                            <th className="px-3 py-2 font-semibold">Issue</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-sky-100">
+                          {llmNotice.failedModels.map((failure) => (
+                            <tr key={`${failure.model}:${failure.issue}`}>
+                              <td className="px-3 py-2 font-medium text-sky-950">
+                                {failure.model}
+                              </td>
+                              <td className="break-words px-3 py-2 text-sky-900">
+                                {failure.issue}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           ) : null}
 
