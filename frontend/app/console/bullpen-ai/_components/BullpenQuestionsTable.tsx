@@ -7,8 +7,9 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Info, X } from "lucide-react";
 
 import type {
   BullpenQuestionRow,
@@ -311,12 +312,14 @@ function ResizableColumnHeader({
   onResizeStart,
   onResizeStep,
   onReset,
+  afterLabel,
 }: {
   columnId: ResizableBullpenTableColumnId;
   label: string;
   sortKey: BullpenTableSortKey;
   sortState: BullpenTableSortState;
   onSortChange: (key: BullpenTableSortKey) => void;
+  afterLabel?: ReactNode;
   isResizing: boolean;
   onResizeStart: (
     columnId: ResizableBullpenTableColumnId,
@@ -330,12 +333,15 @@ function ResizableColumnHeader({
 }) {
   return (
     <th className="group relative px-4 py-3">
-      <SortButton
-        label={label}
-        sortKey={sortKey}
-        sortState={sortState}
-        onSortChange={onSortChange}
-      />
+      <div className="inline-flex items-center gap-1">
+        <SortButton
+          label={label}
+          sortKey={sortKey}
+          sortState={sortState}
+          onSortChange={onSortChange}
+        />
+        {afterLabel}
+      </div>
       <ColumnResizeHandle
         columnId={columnId}
         label={label}
@@ -345,6 +351,60 @@ function ResizableColumnHeader({
         onReset={onReset}
       />
     </th>
+  );
+}
+
+
+function AmountHighlightConditionsDialog({
+  onClose,
+}: {
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+      <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-600">
+              Pink cell logic
+            </p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-950">
+              Amount to be invested highlight conditions
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close amount highlight conditions"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-4 px-6 py-5 text-sm leading-6 text-slate-600">
+          <p>
+            The amount cell turns pink only when the row qualifies as an invest candidate.
+          </p>
+          <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-fuchsia-700">
+              Highlight rule
+            </div>
+            <ul className="mt-3 list-disc space-y-2 pl-5 font-medium text-slate-800">
+              <li>LLM No Odds is greater than 80%.</li>
+              <li>Returns/day is greater than 5%.</li>
+            </ul>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Amount formula
+            </div>
+            <p className="mt-3 font-semibold text-slate-950">
+              5 × (LLM No Odds - 80) × Returns/day / 100
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -407,6 +467,8 @@ export function BullpenQuestionsTable({
 }) {
   const [breakdownQuestion, setBreakdownQuestion] =
     useState<BullpenQuestionRow | null>(null);
+  const [isAmountHighlightDialogOpen, setIsAmountHighlightDialogOpen] =
+    useState(false);
   const [columnWidths, setColumnWidths] = useState<BullpenTableColumnWidths>(
     readBullpenTableColumnWidthsFromStorage,
   );
@@ -661,6 +723,28 @@ export function BullpenQuestionsTable({
                 onResizeStart={handleResizeStart}
                 onResizeStep={handleResizeStep}
                 onReset={resetColumnWidth}
+                afterLabel={
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Show amount highlight conditions"
+                    title="Show pink cell highlight conditions"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setIsAmountHighlightDialogOpen(true);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setIsAmountHighlightDialogOpen(true);
+                      }
+                    }}
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400 text-slate-500 transition hover:border-fuchsia-500 hover:bg-fuchsia-50 hover:text-fuchsia-700 focus:outline-none focus:ring-2 focus:ring-fuchsia-300"
+                  >
+                    <Info className="h-3 w-3" />
+                  </span>
+                }
               />
               <ResizableColumnHeader
                 columnId="volume"
@@ -817,6 +901,11 @@ export function BullpenQuestionsTable({
         <BullpenLlmBreakdownDialog
           question={breakdownQuestion}
           onClose={() => setBreakdownQuestion(null)}
+        />
+      ) : null}
+      {isAmountHighlightDialogOpen ? (
+        <AmountHighlightConditionsDialog
+          onClose={() => setIsAmountHighlightDialogOpen(false)}
         />
       ) : null}
     </div>
