@@ -103,3 +103,26 @@ test("Bullpen x AI manual invest flow stays wired to the Polymarket manual-inves
   assert.match(urlsSource, /manualInvest: \(\) => `\$\{resolveApiBaseUrl\(\)\}\/polymarket\/manual-invest`/);
 });
 
+
+test("Bullpen x AI scan defaults exclude tweet counts", async () => {
+  const { DEFAULT_BULLPEN_SCAN_FILTERS } = await loadBullpenAiModule();
+
+  assert.equal(
+    DEFAULT_BULLPEN_SCAN_FILTERS["30-days"].excludeTweetCountQuestions,
+    true,
+  );
+  assert.equal(
+    DEFAULT_BULLPEN_SCAN_FILTERS["end-of-month"].excludeTweetCountQuestions,
+    true,
+  );
+});
+
+test("Bullpen x AI sports filter catches Games category markets", () => {
+  const routeSource = readFileSync(
+    new URL("../app/api/bullpen-ai/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(routeSource, /const SPORTS_KEYWORDS = \[[\s\S]*"games"/);
+  assert.match(routeSource, /question\.category/);
+});
