@@ -196,6 +196,14 @@ test("Bullpen x AI active positions stay included in LLM runs and share the even
     bullpenAiPageSource,
     /buildSnapshotBackfilledActivePositionAnalyses/,
   );
+  assert.match(
+    bullpenAiPageSource,
+    /mergeQuestionWithLatestActivePositionAnalysis/,
+  );
+  assert.match(
+    bullpenAiPageSource,
+    /activePositionQuestionByTargetId/,
+  );
   assert.match(investmentsSectionSource, /activePositionQuestions:/);
   assert.match(investmentsSectionSource, /Current Yes \/ No/);
   assert.match(investmentsSectionSource, /LLM Yes \/ No/);
