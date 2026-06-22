@@ -616,12 +616,17 @@ export function isBullpenQuestionInvestmentCandidate(
   question: Pick<
     BullpenQuestionRow,
     "llmNoOdds" | "returnsPerDay" | "amountToBeInvested"
-  >,
+  > &
+    Partial<
+      Pick<BullpenQuestionRow, "llmDisagreementLevel" | "adjudicationRequired">
+    >,
 ) {
   return (
     question.llmNoOdds !== null &&
     question.returnsPerDay !== null &&
     question.amountToBeInvested !== null &&
+    question.llmDisagreementLevel !== "High" &&
+    !question.adjudicationRequired &&
     question.llmNoOdds > 80 &&
     question.returnsPerDay > 5
   );
@@ -706,6 +711,8 @@ export function createBullpenQuestionRow(
     llmNoOdds,
     returnsPerDay,
     amountToBeInvested,
+    llmDisagreementLevel: llmConsensus.llmDisagreementLevel,
+    adjudicationRequired: llmConsensus.adjudicationRequired,
   });
 
   return {
