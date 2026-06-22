@@ -14,6 +14,7 @@ export type BullpenActivePositionView = {
   closeTime: string | null;
   isClaimable: boolean;
   claimableValue: number | null;
+  returnsPerDay: number | null;
 };
 
 export type BullpenPositionsSummary = {
@@ -72,6 +73,10 @@ export type BullpenCliPositionsPayload = {
   positions?: unknown;
   summary?: Record<string, unknown> | null;
 };
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const EASTERN_TIME_ZONE = "America/New_York";
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -134,6 +139,90 @@ function round(value: number, digits: number) {
   return Number(value.toFixed(digits));
 }
 
+function getEasternUtcOffset(value: Date) {
+  const timeZoneLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    timeZoneName: "longOffset",
+  })
+    .formatToParts(value)
+    .find((part) => part.type === "timeZoneName")?.value;
+
+  const match = timeZoneLabel?.match(/^GMT([+-])(\d{1,2})(?::?(\d{2}))?$/);
+  if (!match) return null;
+
+  const [, sign, hours, minutes = "00"] = match;
+  return `${sign}${hours.padStart(2, "0")}:${minutes.padStart(2, "0")}`;
+}
+
+export function buildBullpenCloseTimeFromDateOnly(value: string | null) {
+  if (!value || !DATE_ONLY_PATTERN.test(value)) return null;
+
+  const offset = getEasternUtcOffset(new Date(`${value}T12:00:00.000Z`));
+  const fallback = new Date(`${value}T23:59:59.999Z`);
+  if (!offset) {
+    return Number.isNaN(fallback.getTime()) ? null : fallback.toISOString();
+  }
+
+  const parsed = new Date(`${value}T23:59:59.999${offset}`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+export function getBullpenPositionDaysUntilClose(
+  closeTime: string | null,
+  nowMs = Date.now(),
+) {
+  if (!closeTime) return null;
+
+  const closeDate = new Date(closeTime);
+  if (Number.isNaN(closeDate.getTime())) return null;
+
+  return round((closeDate.getTime() - nowMs) / MILLISECONDS_PER_DAY, 1);
+}
+
+export function calculateBullpenPositionReturnsPerDay({
+  closeTime,
+  currentPrice,
+  isClaimable = false,
+  nowMs = Date.now(),
+}: {
+  closeTime: string | null;
+  currentPrice: number | null;
+  isClaimable?: boolean;
+  nowMs?: number;
+}) {
+  if (isClaimable || currentPrice === null) return null;
+
+  const daysUntilClose = getBullpenPositionDaysUntilClose(closeTime, nowMs);
+  if (daysUntilClose === null || daysUntilClose <= 0) return null;
+
+  const normalizedPrice =
+    currentPrice > 1 && currentPrice <= 100 ? currentPrice / 100 : currentPrice;
+
+  return round(((100 - normalizedPrice * 100) / daysUntilClose), 2);
+}
+
+function toBullpenPositionCurrentPrice({
+  currentPrice,
+  outcome,
+  yesOdds,
+  noOdds,
+}: {
+  currentPrice: number | null;
+  outcome: string;
+  yesOdds: number | null | undefined;
+  noOdds: number | null | undefined;
+}) {
+  const normalizedOutcome = outcome.trim().toLowerCase();
+  const refreshedOdds =
+    normalizedOutcome === "yes"
+      ? yesOdds ?? null
+      : normalizedOutcome === "no"
+        ? noOdds ?? null
+        : null;
+
+  return refreshedOdds === null ? currentPrice : round(refreshedOdds / 100, 4);
+}
+
 function extractClaimableStatus(value: BullpenCliPosition) {
   const flags = [
     value.redeemable,
@@ -185,6 +274,7 @@ export function normalizeBullpenPosition(
       : null);
   const eventSlug = readString(value.event_slug ?? value.eventSlug);
   const closeDate = readString(value.end_date ?? value.endDate);
+  const closeTime = buildBullpenCloseTimeFromDateOnly(closeDate);
   const isClaimable = extractClaimableStatus(value);
   const claimableValue =
     readNumber(value.claimableValue) ??
@@ -207,10 +297,53 @@ export function normalizeBullpenPosition(
     unrealizedPnlPercent:
       unrealizedPnlPercent === null ? null : round(unrealizedPnlPercent, 2),
     marketUrl: buildMarketUrl(eventSlug),
-    closeTime: closeDate ? `${closeDate}T00:00:00.000Z` : null,
+    closeTime,
     isClaimable,
     claimableValue: claimableValue === null ? null : round(claimableValue, 2),
+    returnsPerDay: calculateBullpenPositionReturnsPerDay({
+      closeTime,
+      currentPrice,
+      isClaimable,
+    }),
   };
+}
+
+export function applyBullpenPositionMarketData(
+  position: BullpenActivePositionView,
+  marketData: {
+    yesOdds?: number | null;
+    noOdds?: number | null;
+    marketUrl?: string | null;
+  },
+) {
+  const currentPrice = toBullpenPositionCurrentPrice({
+    currentPrice: position.currentPrice,
+    outcome: position.outcome,
+    yesOdds: marketData.yesOdds,
+    noOdds: marketData.noOdds,
+  });
+  const currentValue =
+    currentPrice === null ? null : round(position.shares * currentPrice, 2);
+  const unrealizedPnl =
+    currentValue === null ? null : round(currentValue - position.costBasis, 2);
+  const unrealizedPnlPercent =
+    unrealizedPnl === null || position.costBasis <= 0
+      ? null
+      : round((unrealizedPnl / position.costBasis) * 100, 2);
+
+  return {
+    ...position,
+    currentPrice,
+    currentValue,
+    unrealizedPnl,
+    unrealizedPnlPercent,
+    marketUrl: marketData.marketUrl ?? position.marketUrl,
+    returnsPerDay: calculateBullpenPositionReturnsPerDay({
+      closeTime: position.closeTime,
+      currentPrice,
+      isClaimable: position.isClaimable,
+    }),
+  } satisfies BullpenActivePositionView;
 }
 
 function sumCurrentPositionValue(positions: BullpenActivePositionView[]) {

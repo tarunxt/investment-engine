@@ -48,6 +48,13 @@ function formatPercent(value: number | null) {
   })}%`;
 }
 
+function formatReturnsPerDay(value: number | null) {
+  if (value === null) return "—";
+  return `${value.toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  })}%`;
+}
+
 function formatShares(value: number) {
   return value.toLocaleString(undefined, {
     minimumFractionDigits: value < 10 ? 2 : 0,
@@ -298,6 +305,7 @@ export function BullpenPositionsDialog({
                   <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3">Average</th>
                   <th className="px-4 py-3">Current</th>
+                  <th className="px-4 py-3">Returns/day</th>
                   <th className="px-4 py-3">Value</th>
                   <th className="px-4 py-3">Action</th>
                 </tr>
@@ -305,13 +313,13 @@ export function BullpenPositionsDialog({
               <tbody className="divide-y divide-slate-100 bg-white">
                 {isLoading && sortedPositions.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                    <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
                       Refreshing Bullpen positions...
                     </td>
                   </tr>
                 ) : activePositions.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                    <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
                       {claimablePositions.length > 0
                         ? "All visible Bullpen positions are resolved and ready to claim."
                         : "No active Bullpen positions are open right now."}
@@ -336,6 +344,9 @@ export function BullpenPositionsDialog({
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                         {formatPrice(position.currentPrice)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                        {formatReturnsPerDay(position.returnsPerDay)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <div className="font-semibold text-slate-950">

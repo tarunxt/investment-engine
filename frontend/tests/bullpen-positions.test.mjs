@@ -80,3 +80,56 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
     claimablePosition.key,
   );
 });
+
+test("Bullpen positions refresh current odds and use end-of-day ET for returns/day", async () => {
+  const {
+    applyBullpenPositionMarketData,
+    buildBullpenCloseTimeFromDateOnly,
+    normalizeBullpenPosition,
+  } = await loadBullpenPositionsModule();
+
+  assert.equal(
+    buildBullpenCloseTimeFromDateOnly("2026-06-26"),
+    "2026-06-27T03:59:59.999Z",
+  );
+
+  const originalNow = Date.now;
+  Date.now = () => Date.parse("2026-06-22T06:00:00.000Z");
+
+  try {
+    const position = normalizeBullpenPosition(
+      {
+        slug: "starmer-out-by-june-26-2026-959-792-935",
+        market: "Starmer out by June 26, 2026?",
+        outcome: "No",
+        shares: 13.2033,
+        avg_price: 0.5899,
+        current_price: 0.135,
+        current_value: 1.7824,
+        invested_usd: 7.7899,
+        end_date: "2026-06-26",
+        status: "open",
+      },
+      () => null,
+    );
+
+    assert.equal(position.closeTime, "2026-06-27T03:59:59.999Z");
+    assert.equal(position.returnsPerDay, 17.65);
+
+    const refreshed = applyBullpenPositionMarketData(position, {
+      noOdds: 11.5,
+      marketUrl: "https://polymarket.com/event/starmer-out-in-2025",
+    });
+
+    assert.equal(refreshed.currentPrice, 0.115);
+    assert.equal(refreshed.currentValue, 1.52);
+    assert.equal(refreshed.unrealizedPnl, -6.27);
+    assert.equal(refreshed.returnsPerDay, 18.06);
+    assert.equal(
+      refreshed.marketUrl,
+      "https://polymarket.com/event/starmer-out-in-2025",
+    );
+  } finally {
+    Date.now = originalNow;
+  }
+});

@@ -64,7 +64,10 @@ import {
 import { BullpenInvestmentsSection } from "./_components/BullpenInvestmentsSection";
 import { BullpenPromptEditorDialog } from "./_components/BullpenPromptEditorDialog";
 import {
+  applyBullpenPositionMarketData,
   buildClaimableBullpenSignature,
+  buildBullpenCloseTimeFromDateOnly,
+  calculateBullpenPositionReturnsPerDay,
   type BullpenActivePositionView,
   type BullpenPositionsResponse,
 } from "@/lib/bullpenPositions";
@@ -114,6 +117,21 @@ type BullpenCurrentOddsRefreshResponse = {
   error?: string;
 };
 
+const MONTH_INDEX_BY_NAME: Record<string, string> = {
+  january: "01",
+  february: "02",
+  march: "03",
+  april: "04",
+  may: "05",
+  june: "06",
+  july: "07",
+  august: "08",
+  september: "09",
+  october: "10",
+  november: "11",
+  december: "12",
+};
+
 function normalizeQuestionTitle(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -125,8 +143,16 @@ function extractCloseTimeFromMarketTitle(value: string) {
     )?.[1] || value.match(/\b([A-Z][a-z]+ \d{1,2}, \d{4})\b/)?.[1];
   if (!matchedDate) return null;
 
-  const parsed = new Date(matchedDate);
-  return Number.isNaN(parsed.getTime()) ? matchedDate : parsed.toISOString();
+  const match = matchedDate.match(
+    /^([A-Z][a-z]+)\s+(\d{1,2}),\s+(\d{4})$/,
+  );
+  const monthName = match?.[1] || null;
+  const day = match?.[2]?.padStart(2, "0");
+  const year = match?.[3] || null;
+  const month = monthName ? MONTH_INDEX_BY_NAME[monthName.toLowerCase()] : null;
+  if (!month || !day || !year) return matchedDate;
+
+  return buildBullpenCloseTimeFromDateOnly(`${year}-${month}-${day}`) || matchedDate;
 }
 
 function createEmptySnapshotHistory(): Record<ScanMode, BullpenSnapshotHistory> {
@@ -1196,6 +1222,25 @@ export default function BullpenAiPage() {
     return extractCloseTimeFromMarketTitle(marketTitle);
   }
 
+  function applyResolvedPositionCloseTime(position: BullpenActivePositionView) {
+    const resolvedCloseTime =
+      resolvePositionCloseTime(position.marketTitle) ?? position.closeTime;
+
+    if (resolvedCloseTime === position.closeTime) {
+      return position;
+    }
+
+    return {
+      ...position,
+      closeTime: resolvedCloseTime,
+      returnsPerDay: calculateBullpenPositionReturnsPerDay({
+        closeTime: resolvedCloseTime,
+        currentPrice: position.currentPrice,
+        isClaimable: position.isClaimable,
+      }),
+    } satisfies BullpenActivePositionView;
+  }
+
   function buildActivePositionViews(
     openPositions: PolymarketBotState["open_positions"],
     marketUpdates: Record<string, PolymarketMarketRefresh>,
@@ -1204,31 +1249,8 @@ export default function BullpenAiPage() {
       .filter((position) => position.shares > 0)
       .map((position) => {
         const marketUpdate = marketUpdates[position.key];
-        const normalizedOutcome = position.outcome.trim().toLowerCase();
-        const currentPrice =
-          normalizedOutcome === "yes"
-            ? marketUpdate?.yesOdds === null || marketUpdate?.yesOdds === undefined
-              ? null
-              : Number((marketUpdate.yesOdds / 100).toFixed(4))
-            : normalizedOutcome === "no"
-              ? marketUpdate?.noOdds === null || marketUpdate?.noOdds === undefined
-                ? null
-                : Number((marketUpdate.noOdds / 100).toFixed(4))
-              : null;
-        const currentValue =
-          currentPrice === null
-            ? null
-            : Number((position.shares * currentPrice).toFixed(2));
-        const unrealizedPnl =
-          currentValue === null
-            ? null
-            : Number((currentValue - position.cost_basis).toFixed(2));
-        const unrealizedPnlPercent =
-          unrealizedPnl === null || position.cost_basis <= 0
-            ? null
-            : Number(((unrealizedPnl / position.cost_basis) * 100).toFixed(2));
-
-        return {
+        const closeTime = resolvePositionCloseTime(position.market_title);
+        const basePosition = {
           key: position.key,
           marketId: position.market_id,
           marketTitle: position.market_title,
@@ -1236,15 +1258,21 @@ export default function BullpenAiPage() {
           shares: position.shares,
           averagePrice: Number(position.average_price.toFixed(4)),
           costBasis: position.cost_basis,
-          currentPrice,
-          currentValue,
-          unrealizedPnl,
-          unrealizedPnlPercent,
+          currentPrice: null,
+          currentValue: null,
+          unrealizedPnl: null,
+          unrealizedPnlPercent: null,
           marketUrl: marketUpdate?.marketUrl ?? null,
-          closeTime: resolvePositionCloseTime(position.market_title),
+          closeTime,
           isClaimable: false,
           claimableValue: null,
+          returnsPerDay: calculateBullpenPositionReturnsPerDay({
+            closeTime,
+            currentPrice: null,
+          }),
         } satisfies BullpenActivePositionView;
+
+        return applyBullpenPositionMarketData(basePosition, marketUpdate || {});
       });
   }
 
@@ -1327,7 +1355,9 @@ export default function BullpenAiPage() {
         );
       }
 
-      const livePositions = livePositionsPayload.positions || [];
+      const livePositions = (livePositionsPayload.positions || []).map(
+        applyResolvedPositionCloseTime,
+      );
       setActivePositions(livePositions);
       setHasLoadedPositions(true);
       setPositionsLastUpdatedAt(
@@ -1390,7 +1420,9 @@ export default function BullpenAiPage() {
 
         lastAutoClaimSignatureRef.current = null;
         setActivePositions(
-          buildActivePositionViews(openPositions, payload.markets || {}),
+          buildActivePositionViews(openPositions, payload.markets || {}).map(
+            applyResolvedPositionCloseTime,
+          ),
         );
         setHasLoadedPositions(true);
         setPositionsLastUpdatedAt(new Date().toISOString());
