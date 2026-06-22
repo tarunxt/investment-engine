@@ -327,6 +327,27 @@ function activePositionAnalysesEqual(
   );
 }
 
+function mergeQuestionWithLatestActivePositionAnalysis(
+  question: BullpenQuestionRow,
+  activePositionQuestionByTargetId: Map<string, BullpenQuestionRow>,
+) {
+  const matchingActivePositionQuestion = activePositionQuestionByTargetId.get(
+    buildBullpenLlmTargetId(question),
+  );
+  if (!matchingActivePositionQuestion) return question;
+
+  const latestAnalysis = pickNewerBullpenActivePositionAnalysis(
+    extractBullpenActivePositionLlmAnalysis(question),
+    extractBullpenActivePositionLlmAnalysis(matchingActivePositionQuestion),
+  );
+  if (!latestAnalysis) return question;
+
+  return createBullpenQuestionRow({
+    ...question,
+    ...latestAnalysis,
+  });
+}
+
 function formatDate(value: string | null) {
   return formatApiTimestamp(value, {
     emptyValue: "—",
@@ -1155,11 +1176,30 @@ export default function BullpenAiPage() {
   const selectedQuestionIdSet = new Set(selectedQuestionIds);
   const selectedQuestionCount = selectedQuestionIds.length;
   const activeFilterBadges = getFilterBadgeLabels(activeMode, activeFilters);
+  const openActivePositions = activePositions.filter((position) => !position.isClaimable);
+  const activePositionQuestionsForLlm = openActivePositions.map((position) =>
+    buildBullpenQuestionRowFromActivePosition(
+      position,
+      activePositionAnalysesByKey[position.key],
+    ),
+  );
+  const activePositionQuestionByTargetId = new Map(
+    activePositionQuestionsForLlm.map(
+      (question) => [buildBullpenLlmTargetId(question), question] as const,
+    ),
+  );
   const activeInvestmentCandidates =
     selectionEnabled && activeCurrentSnapshot
-      ? activeCurrentSnapshot.questions.filter((question) => {
-          return isBullpenQuestionInvestmentCandidate(question);
-        })
+      ? activeCurrentSnapshot.questions
+          .map((question) =>
+            mergeQuestionWithLatestActivePositionAnalysis(
+              question,
+              activePositionQuestionByTargetId,
+            ),
+          )
+          .filter((question) => {
+            return isBullpenQuestionInvestmentCandidate(question);
+          })
       : [];
   const activeInvestmentCandidateIds = new Set(
     activeInvestmentCandidates.map((question) => question.id),
@@ -1170,13 +1210,6 @@ export default function BullpenAiPage() {
       )
     : [];
   const selectedInvestmentQuestionIdSet = new Set(selectedInvestmentQuestionIds);
-  const openActivePositions = activePositions.filter((position) => !position.isClaimable);
-  const activePositionQuestionsForLlm = openActivePositions.map((position) =>
-    buildBullpenQuestionRowFromActivePosition(
-      position,
-      activePositionAnalysesByKey[position.key],
-    ),
-  );
   const activeHasAnyLlmOdds = Boolean(
     activePositionQuestionsForLlm.some(
       (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
