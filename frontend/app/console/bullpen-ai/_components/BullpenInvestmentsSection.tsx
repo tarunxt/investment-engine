@@ -10,6 +10,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
+import { formatApiTimestamp } from "@/lib/datetime";
 import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 import { cn } from "@/lib/utils";
 import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
@@ -43,12 +44,9 @@ type BullpenInvestmentsSectionProps = {
 };
 
 function formatDate(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
+  return formatApiTimestamp(value, {
+    emptyValue: "—",
+    second: undefined,
   });
 }
 

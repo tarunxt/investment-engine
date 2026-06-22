@@ -3,6 +3,7 @@
 import { AlertTriangle, X } from "lucide-react";
 
 import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
+import { formatApiTimestamp } from "@/lib/datetime";
 
 type BullpenLlmBreakdownDialogProps = {
   question: BullpenQuestionRow;
@@ -10,12 +11,9 @@ type BullpenLlmBreakdownDialogProps = {
 };
 
 function formatDate(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
+  return formatApiTimestamp(value, {
+    emptyValue: "—",
+    second: undefined,
   });
 }
 
