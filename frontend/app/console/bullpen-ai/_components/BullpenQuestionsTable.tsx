@@ -519,6 +519,9 @@ export function BullpenQuestionsTable({
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200">
+      <div className="border-b border-slate-200 bg-white px-4 py-3 text-left">
+        <h2 className="text-sm font-semibold text-slate-950">Bullpen questions</h2>
+      </div>
       <div className="overflow-x-auto">
         <table
           className="min-w-full table-fixed divide-y divide-slate-200 text-sm"
