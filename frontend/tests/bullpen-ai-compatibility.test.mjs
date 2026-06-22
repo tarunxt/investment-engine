@@ -117,6 +117,35 @@ test("Bullpen x AI scan defaults exclude tweet counts", async () => {
   );
 });
 
+test("Bullpen x AI investment candidates exclude new high-disagreement scan rows", async () => {
+  const { isBullpenQuestionInvestmentCandidate } = await loadBullpenAiModule();
+
+  assert.equal(isBullpenQuestionInvestmentCandidate(createQuestionRow()), false);
+
+  const eligibleQuestion = {
+    ...createQuestionRow(),
+    llmNoOdds: 85,
+    llmYesOdds: 15,
+    amountToBeInvested: 15.5,
+  };
+  assert.equal(isBullpenQuestionInvestmentCandidate(eligibleQuestion), true);
+
+  assert.equal(
+    isBullpenQuestionInvestmentCandidate({
+      ...eligibleQuestion,
+      llmDisagreementLevel: "High",
+    }),
+    false,
+  );
+  assert.equal(
+    isBullpenQuestionInvestmentCandidate({
+      ...eligibleQuestion,
+      adjudicationRequired: true,
+    }),
+    false,
+  );
+});
+
 test("Bullpen x AI sports filter catches Games category markets", () => {
   const routeSource = readFileSync(
     new URL("../app/api/bullpen-ai/route.ts", import.meta.url),
