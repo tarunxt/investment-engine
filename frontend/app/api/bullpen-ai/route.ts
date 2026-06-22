@@ -83,6 +83,9 @@ const OUTCOME_LABEL_KEYS = ["name", "label", "outcome", "title", "side"];
 const SPORTS_KEYWORDS = [
   "sports",
   "esports",
+  "games",
+  "match",
+  "tournament",
   "nba",
   "nfl",
   "mlb",
