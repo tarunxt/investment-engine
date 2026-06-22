@@ -60,6 +60,8 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
 
   assert.equal(openPosition.isClaimable, false);
   assert.equal(openPosition.claimableValue, null);
+  assert.equal(openPosition.yesOdds, 50);
+  assert.equal(openPosition.noOdds, 50);
   assert.equal(claimablePosition.isClaimable, true);
   assert.equal(claimablePosition.claimableValue, 3.33);
   assert.equal(
@@ -114,6 +116,8 @@ test("Bullpen positions refresh current odds and use end-of-day ET for returns/d
     );
 
     assert.equal(position.closeTime, "2026-06-27T03:59:59.999Z");
+    assert.equal(position.yesOdds, 86.5);
+    assert.equal(position.noOdds, 13.5);
     assert.equal(position.returnsPerDay, 17.65);
 
     const refreshed = applyBullpenPositionMarketData(position, {
@@ -121,6 +125,8 @@ test("Bullpen positions refresh current odds and use end-of-day ET for returns/d
       marketUrl: "https://polymarket.com/event/starmer-out-in-2025",
     });
 
+    assert.equal(refreshed.yesOdds, 88.5);
+    assert.equal(refreshed.noOdds, 11.5);
     assert.equal(refreshed.currentPrice, 0.115);
     assert.equal(refreshed.currentValue, 1.52);
     assert.equal(refreshed.unrealizedPnl, -6.27);

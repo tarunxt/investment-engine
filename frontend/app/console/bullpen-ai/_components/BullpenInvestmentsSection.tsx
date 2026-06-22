@@ -1,7 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
@@ -10,6 +15,32 @@ import { cn } from "@/lib/utils";
 import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
 import { BullpenPositionsDialog } from "./BullpenPositionsDialog";
+
+type BullpenInvestmentsSectionProps = {
+  activePositionsCount: number | null;
+  activePositions: BullpenActivePositionView[];
+  activePositionQuestions: BullpenQuestionRow[];
+  candidates: BullpenQuestionRow[];
+  claimError: string | null;
+  claimStatusMessage: string | null;
+  emptyMessage: string;
+  isHistoryView: boolean;
+  isClaimingPositions: boolean;
+  isInvesting: boolean;
+  isLoadingPositions: boolean;
+  isRefreshingCurrentOdds: boolean;
+  onClaimNow: () => void;
+  onInvest: () => void;
+  onRefreshPositions: () => void;
+  onRefreshCurrentOdds: () => void;
+  onToggleQuestion: (questionId: string) => void;
+  onSelectAll: () => void;
+  onClearAll: () => void;
+  positionsError: string | null;
+  positionsLastUpdatedAt: string | null;
+  progressMessage: string | null;
+  selectedQuestionIds: Set<string>;
+};
 
 function formatDate(value: string | null) {
   if (!value) return "—";
@@ -43,28 +74,101 @@ function hasHighLlmDisagreement(question: BullpenQuestionRow) {
   return question.llmDisagreementLevel === "High" || question.adjudicationRequired;
 }
 
-function LlmNoOddsValue({ question }: { question: BullpenQuestionRow }) {
-  const showWarning = question.llmNoOdds !== null && hasHighLlmDisagreement(question);
-
+function MetricCard({
+  label,
+  accent = false,
+  children,
+}: {
+  label: string;
+  accent?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <span className="inline-flex items-center gap-1">
-      <span>{formatOdds(question.llmNoOdds)}</span>
-      {showWarning ? (
-        <AlertTriangle
-          aria-label="High LLM disagreement"
-          className="h-3.5 w-3.5 shrink-0 text-amber-600"
-          role="img"
-        >
-          <title>High LLM disagreement — review breakdown before relying on this odds value.</title>
-        </AlertTriangle>
+    <div
+      className={cn(
+        "rounded-xl px-3 py-2",
+        accent ? "bg-fuchsia-500 text-slate-950" : "bg-slate-50",
+      )}
+    >
+      <div
+        className={cn(
+          "text-[11px] font-semibold uppercase tracking-[0.12em]",
+          accent ? "text-slate-900/80" : "text-slate-500",
+        )}
+      >
+        {label}
+      </div>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+function OddsPairValue({
+  yesOdds,
+  noOdds,
+  accentClassName = "text-slate-950",
+  warning = false,
+}: {
+  yesOdds: number | null;
+  noOdds: number | null;
+  accentClassName?: string;
+  warning?: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium uppercase tracking-[0.12em] text-slate-500">
+          Yes
+        </span>
+        <span className={cn("font-semibold", accentClassName)}>
+          {formatOdds(yesOdds)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium uppercase tracking-[0.12em] text-slate-500">
+          No
+        </span>
+        <span className={cn("font-semibold", accentClassName)}>
+          {formatOdds(noOdds)}
+        </span>
+      </div>
+      {warning ? (
+        <div className="flex items-center gap-1 text-[11px] font-medium text-amber-700">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          High disagreement
+        </div>
       ) : null}
-    </span>
+    </div>
+  );
+}
+
+function RowShell({
+  children,
+  selected = false,
+  active = false,
+}: {
+  children: ReactNode;
+  selected?: boolean;
+  active?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-4 rounded-2xl border px-4 py-4 transition md:flex-row md:items-start md:justify-between",
+        selected || active
+          ? "border-fuchsia-400 bg-fuchsia-50"
+          : "border-slate-200 bg-white hover:border-fuchsia-200",
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
 export function BullpenInvestmentsSection({
   activePositionsCount,
   activePositions,
+  activePositionQuestions,
   candidates,
   claimError,
   claimStatusMessage,
@@ -85,30 +189,7 @@ export function BullpenInvestmentsSection({
   positionsLastUpdatedAt,
   progressMessage,
   selectedQuestionIds,
-}: {
-  activePositionsCount: number | null;
-  activePositions: BullpenActivePositionView[];
-  candidates: BullpenQuestionRow[];
-  claimError: string | null;
-  claimStatusMessage: string | null;
-  emptyMessage: string;
-  isHistoryView: boolean;
-  isClaimingPositions: boolean;
-  isInvesting: boolean;
-  isLoadingPositions: boolean;
-  isRefreshingCurrentOdds: boolean;
-  onClaimNow: () => void;
-  onInvest: () => void;
-  onRefreshPositions: () => void;
-  onRefreshCurrentOdds: () => void;
-  onToggleQuestion: (questionId: string) => void;
-  onSelectAll: () => void;
-  onClearAll: () => void;
-  positionsError: string | null;
-  positionsLastUpdatedAt: string | null;
-  progressMessage: string | null;
-  selectedQuestionIds: Set<string>;
-}) {
+}: BullpenInvestmentsSectionProps) {
   const [breakdownQuestion, setBreakdownQuestion] =
     useState<BullpenQuestionRow | null>(null);
   const [calculationDialog, setCalculationDialog] = useState<{
@@ -117,6 +198,13 @@ export function BullpenInvestmentsSection({
   } | null>(null);
   const [isPositionsDialogOpen, setIsPositionsDialogOpen] = useState(false);
   const openActivePositions = activePositions.filter((position) => !position.isClaimable);
+  const activePositionQuestionByKey = useMemo(
+    () =>
+      new Map(
+        activePositionQuestions.map((question) => [question.id, question] as const),
+      ),
+    [activePositionQuestions],
+  );
   const sortedCandidates = [...candidates].sort((left, right) => {
     const leftHasWarning = hasHighLlmDisagreement(left);
     const rightHasWarning = hasHighLlmDisagreement(right);
@@ -142,6 +230,8 @@ export function BullpenInvestmentsSection({
     onRefreshPositions();
   }
 
+  const hasRows = candidates.length > 0 || openActivePositions.length > 0;
+
   return (
     <>
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -162,7 +252,7 @@ export function BullpenInvestmentsSection({
               calculated amount.
             </p>
           </div>
-          {!isHistoryView && (candidates.length > 0 || openActivePositions.length > 0) ? (
+          {!isHistoryView && hasRows ? (
             <div className="flex flex-col items-start gap-2">
               <div className="flex w-full flex-wrap items-center gap-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -197,11 +287,7 @@ export function BullpenInvestmentsSection({
                       "Refresh Current %"
                     )}
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleOpenPositions}
-                  >
+                  <Button variant="outline" size="sm" onClick={handleOpenPositions}>
                     {isLoadingPositions ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -242,7 +328,7 @@ export function BullpenInvestmentsSection({
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             Switch back to the current snapshot to select events and place Bullpen orders.
           </div>
-        ) : candidates.length === 0 && openActivePositions.length === 0 ? (
+        ) : !hasRows ? (
           <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
             {emptyMessage}
           </div>
@@ -250,103 +336,126 @@ export function BullpenInvestmentsSection({
           <>
             <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 rounded-2xl border border-fuchsia-100 bg-fuchsia-50/60 px-4 py-3 text-sm text-slate-700">
               <span>
-                <span className="font-semibold text-slate-950">{openActivePositions.length}</span> active
-                position{openActivePositions.length === 1 ? "" : "s"}
+                <span className="font-semibold text-slate-950">
+                  {openActivePositions.length}
+                </span>{" "}
+                active position{openActivePositions.length === 1 ? "" : "s"}
               </span>
               <span>
-                <span className="font-semibold text-slate-950">{candidates.length}</span> new
-                opportunit{candidates.length === 1 ? "y" : "ies"}
+                <span className="font-semibold text-slate-950">{candidates.length}</span>{" "}
+                new opportunit{candidates.length === 1 ? "y" : "ies"}
               </span>
               <span>
-                <span className="font-semibold text-slate-950">{selectedCount}</span> selected
+                <span className="font-semibold text-slate-950">{selectedCount}</span>{" "}
+                selected
               </span>
               <span>
                 Total selected amount:{" "}
-                <span className="font-semibold text-slate-950">{formatMoney(totalSelectedAmount)}</span>
+                <span className="font-semibold text-slate-950">
+                  {formatMoney(totalSelectedAmount)}
+                </span>
               </span>
             </div>
 
             <div className="mt-4 space-y-3">
-              {openActivePositions.map((position) => (
-                <div
-                  key={`active-position-${position.key}`}
-                  className="flex flex-col gap-4 rounded-2xl border border-fuchsia-400 bg-fuchsia-50 px-4 py-4 transition md:flex-row md:items-start md:justify-between"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1 rounded-full border border-fuchsia-300 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-fuchsia-800">
-                      Active
-                    </span>
-                    <div className="space-y-2">
-                      <div className="block font-medium text-slate-950">
-                        {position.marketTitle}
+              {openActivePositions.map((position) => {
+                const question = activePositionQuestionByKey.get(position.key);
+                return (
+                  <RowShell key={`active-position-${position.key}`} active>
+                    <div className="flex items-start gap-3">
+                      <span
+                        className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+                        aria-label="Active position"
+                        title="Active position"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                      </span>
+                      <div className="space-y-2">
+                        <div className="block font-medium text-slate-950">
+                          {position.marketTitle}
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                          <span>Close: {formatDate(position.closeTime)}</span>
+                          <span>Held outcome: {position.outcome || "—"}</span>
+                          <span>
+                            Avg price:{" "}
+                            {formatOdds(
+                              position.averagePrice === null
+                                ? null
+                                : position.averagePrice * 100,
+                            )}
+                          </span>
+                          <span>{position.shares.toLocaleString()} shares</span>
+                        </div>
+                        {position.marketUrl ? (
+                          <a
+                            href={position.marketUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 hover:text-purple-900"
+                          >
+                            Open market
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        ) : null}
                       </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                        <span>Close: {formatDate(position.closeTime)}</span>
-                        <span>Outcome: {position.outcome || "—"}</span>
-                        <span>{formatMoney(position.shares)} shares</span>
-                      </div>
-                      {position.marketUrl ? (
-                        <a
-                          href={position.marketUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 hover:text-purple-900"
-                        >
-                          Open market
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
-                      ) : null}
                     </div>
-                  </div>
 
-                  <div className="grid min-w-full gap-3 text-sm md:min-w-[25rem] md:grid-cols-4">
-                    <div className="rounded-xl bg-slate-50 px-3 py-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        Current Price
-                      </div>
-                      <div className="mt-1 font-semibold text-rose-700">
-                        {formatOdds(position.currentPrice === null ? null : position.currentPrice * 100)}
-                      </div>
+                    <div className="grid min-w-full gap-3 text-sm md:min-w-[36rem] md:grid-cols-4 xl:min-w-[44rem]">
+                      <MetricCard label="Current Yes / No">
+                        <OddsPairValue
+                          yesOdds={position.yesOdds}
+                          noOdds={position.noOdds}
+                          accentClassName="text-rose-700"
+                        />
+                      </MetricCard>
+                      <MetricCard label="LLM Yes / No">
+                        {question && question.llmBreakdown.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setBreakdownQuestion(question)}
+                            className="w-full rounded-md text-left underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
+                          >
+                            <OddsPairValue
+                              yesOdds={question.llmYesOdds}
+                              noOdds={question.llmNoOdds}
+                              accentClassName="text-violet-700"
+                              warning={hasHighLlmDisagreement(question)}
+                            />
+                          </button>
+                        ) : (
+                          <OddsPairValue
+                            yesOdds={question?.llmYesOdds ?? null}
+                            noOdds={question?.llmNoOdds ?? null}
+                            accentClassName="text-violet-700"
+                            warning={question ? hasHighLlmDisagreement(question) : false}
+                          />
+                        )}
+                      </MetricCard>
+                      <MetricCard label="Returns/day">
+                        <div className="font-semibold text-slate-900">
+                          {formatReturnsPerDay(position.returnsPerDay)}
+                        </div>
+                      </MetricCard>
+                      <MetricCard label="Capital" accent>
+                        <div className="font-semibold">
+                          {formatMoney(position.currentValue ?? position.costBasis)}
+                        </div>
+                        <div className="mt-1 text-[11px] font-medium text-slate-900/80">
+                          Current value
+                        </div>
+                      </MetricCard>
                     </div>
-                    <div className="rounded-xl bg-slate-50 px-3 py-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        Avg Price
-                      </div>
-                      <div className="mt-1 font-semibold text-violet-700">
-                        {formatOdds(position.averagePrice === null ? null : position.averagePrice * 100)}
-                      </div>
-                    </div>
-                    <div className="rounded-xl bg-slate-50 px-3 py-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        Returns/day
-                      </div>
-                      <div className="mt-1 font-semibold text-slate-900">
-                        {formatReturnsPerDay(position.returnsPerDay)}
-                      </div>
-                    </div>
-                    <div className="rounded-xl bg-fuchsia-500 px-3 py-2 text-slate-950">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-900/80">
-                        Value
-                      </div>
-                      <div className="mt-1 font-semibold">
-                        {formatMoney(position.currentValue ?? position.costBasis)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                  </RowShell>
+                );
+              })}
 
               {sortedCandidates.map((question) => {
                 const checkboxId = `bullpen-investment-${question.id}`;
                 return (
-                  <div
+                  <RowShell
                     key={question.id}
-                    className={cn(
-                      "flex flex-col gap-4 rounded-2xl border px-4 py-4 transition md:flex-row md:items-start md:justify-between",
-                      selectedQuestionIds.has(question.id)
-                        ? "border-fuchsia-400 bg-fuchsia-50"
-                        : "border-slate-200 bg-white hover:border-fuchsia-200",
-                    )}
+                    selected={selectedQuestionIds.has(question.id)}
                   >
                     <div className="flex items-start gap-3">
                       <input
@@ -382,38 +491,39 @@ export function BullpenInvestmentsSection({
                       </div>
                     </div>
 
-                    <div className="grid min-w-full gap-3 text-sm md:min-w-[25rem] md:grid-cols-4">
-                      <div className="rounded-xl bg-slate-50 px-3 py-2">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                          Current No
-                        </div>
-                        <div className="mt-1 font-semibold text-rose-700">
-                          {formatOdds(question.noOdds)}
-                        </div>
-                      </div>
-                      <div className="rounded-xl bg-slate-50 px-3 py-2">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                          LLM No
-                        </div>
-                        <div className="mt-1 font-semibold text-violet-700">
-                          {question.llmBreakdown.length > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() => setBreakdownQuestion(question)}
-                              className="rounded-md underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
-                            >
-                              <LlmNoOddsValue question={question} />
-                            </button>
-                          ) : (
-                            <LlmNoOddsValue question={question} />
-                          )}
-                        </div>
-                      </div>
-                      <div className="rounded-xl bg-slate-50 px-3 py-2">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                          Returns/day
-                        </div>
-                        <div className="mt-1 font-semibold text-slate-900">
+                    <div className="grid min-w-full gap-3 text-sm md:min-w-[36rem] md:grid-cols-4 xl:min-w-[44rem]">
+                      <MetricCard label="Current Yes / No">
+                        <OddsPairValue
+                          yesOdds={question.yesOdds}
+                          noOdds={question.noOdds}
+                          accentClassName="text-rose-700"
+                        />
+                      </MetricCard>
+                      <MetricCard label="LLM Yes / No">
+                        {question.llmBreakdown.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setBreakdownQuestion(question)}
+                            className="w-full rounded-md text-left underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
+                          >
+                            <OddsPairValue
+                              yesOdds={question.llmYesOdds}
+                              noOdds={question.llmNoOdds}
+                              accentClassName="text-violet-700"
+                              warning={hasHighLlmDisagreement(question)}
+                            />
+                          </button>
+                        ) : (
+                          <OddsPairValue
+                            yesOdds={question.llmYesOdds}
+                            noOdds={question.llmNoOdds}
+                            accentClassName="text-violet-700"
+                            warning={hasHighLlmDisagreement(question)}
+                          />
+                        )}
+                      </MetricCard>
+                      <MetricCard label="Returns/day">
+                        <div className="font-semibold text-slate-900">
                           {question.returnsPerDay === null ? (
                             formatReturnsPerDay(question.returnsPerDay)
                           ) : (
@@ -431,12 +541,9 @@ export function BullpenInvestmentsSection({
                             </button>
                           )}
                         </div>
-                      </div>
-                      <div className="rounded-xl bg-fuchsia-500 px-3 py-2 text-slate-950">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-900/80">
-                          Amount
-                        </div>
-                        <div className="mt-1 font-semibold">
+                      </MetricCard>
+                      <MetricCard label="Capital" accent>
+                        <div className="font-semibold">
                           {question.amountToBeInvested === null ? (
                             formatMoney(question.amountToBeInvested)
                           ) : (
@@ -454,9 +561,12 @@ export function BullpenInvestmentsSection({
                             </button>
                           )}
                         </div>
-                      </div>
+                        <div className="mt-1 text-[11px] font-medium text-slate-900/80">
+                          Buy amount
+                        </div>
+                      </MetricCard>
                     </div>
-                  </div>
+                  </RowShell>
                 );
               })}
             </div>

@@ -43,6 +43,12 @@ import {
   type ScanMode,
   type ScanResult,
 } from "@/lib/bullpen-ai";
+import {
+  buildBullpenLlmRunTargetSet,
+  buildBullpenQuestionRowFromActivePosition,
+  extractBullpenActivePositionLlmAnalysis,
+  type BullpenActivePositionLlmAnalysis,
+} from "@/lib/bullpenActivePositions";
 import { formatApiErrorSummary, formatUnknownError } from "@/lib/apiErrors";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { cn } from "@/lib/utils";
@@ -210,12 +216,15 @@ type BullpenLlmFailedModelSummary = {
 
 type BullpenLlmRunSummary = {
   selectedModels: number;
-  selectedQuestionsWithConsensusOdds: number;
+  uniqueQuestionsAnalyzed: number;
+  rowsWithConsensusOdds: number;
   usableJsonModels: number;
   failedModels: BullpenLlmFailedModelSummary[];
   matchedRowsWithoutUsableOdds: number;
   unmatchedReturnedRows: number;
   matchedRows: number;
+  activePositionsUpdated: number;
+  selectedScanQuestionsUpdated: number;
 };
 
 function splitBullpenFailedModel(message: string): BullpenLlmFailedModelSummary {
@@ -740,6 +749,8 @@ export default function BullpenAiPage() {
   const [activePositions, setActivePositions] = useState<
     BullpenActivePositionView[]
   >([]);
+  const [activePositionAnalysesByKey, setActivePositionAnalysesByKey] =
+    useState<Record<string, BullpenActivePositionLlmAnalysis>>({});
   const [hasLoadedPositions, setHasLoadedPositions] = useState(false);
   const [isLoadingPositions, setIsLoadingPositions] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
@@ -797,6 +808,26 @@ export default function BullpenAiPage() {
     if (!hasLoadedStorage) return;
     writeBullpenSnapshotsToStorage(snapshotsByMode);
   }, [hasLoadedStorage, snapshotsByMode]);
+
+  useEffect(() => {
+    const openPositionKeys = new Set(
+      activePositions
+        .filter((position) => !position.isClaimable)
+        .map((position) => position.key),
+    );
+
+    setActivePositionAnalysesByKey((current) => {
+      const nextEntries = Object.entries(current).filter(([key]) =>
+        openPositionKeys.has(key),
+      );
+
+      if (nextEntries.length === Object.keys(current).length) {
+        return current;
+      }
+
+      return Object.fromEntries(nextEntries);
+    });
+  }, [activePositions]);
 
   useEffect(() => {
     setIsScanFiltersOpen(false);
@@ -938,10 +969,20 @@ export default function BullpenAiPage() {
       )
     : [];
   const selectedInvestmentQuestionIdSet = new Set(selectedInvestmentQuestionIds);
-  const activeHasAnyLlmOdds = Boolean(
-    activeCurrentSnapshot?.questions.some(
-      (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
+  const openActivePositions = activePositions.filter((position) => !position.isClaimable);
+  const activePositionQuestionsForLlm = openActivePositions.map((position) =>
+    buildBullpenQuestionRowFromActivePosition(
+      position,
+      activePositionAnalysesByKey[position.key],
     ),
+  );
+  const activeHasAnyLlmOdds = Boolean(
+    activePositionQuestionsForLlm.some(
+      (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
+    ) ||
+      activeCurrentSnapshot?.questions.some(
+      (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
+      ),
   );
 
   useEffect(() => {
@@ -1258,6 +1299,8 @@ export default function BullpenAiPage() {
           shares: position.shares,
           averagePrice: Number(position.average_price.toFixed(4)),
           costBasis: position.cost_basis,
+          yesOdds: marketUpdate?.yesOdds ?? null,
+          noOdds: marketUpdate?.noOdds ?? null,
           currentPrice: null,
           currentValue: null,
           unrealizedPnl: null,
@@ -1544,12 +1587,18 @@ export default function BullpenAiPage() {
     const selectedQuestions = activeCurrentSnapshot.questions.filter((question) =>
       selectedQuestionIdSet.has(question.id),
     );
+    const llmTargetSet = buildBullpenLlmRunTargetSet({
+      activePositions: openActivePositions,
+      analysesByPositionKey: activePositionAnalysesByKey,
+      selectedQuestions,
+    });
+    const questionsToAnalyze = llmTargetSet.questions;
 
-    if (selectedQuestions.length === 0) {
+    if (questionsToAnalyze.length === 0) {
       setLlmMessagesByMode((current) => ({
         ...current,
         [activeMode]:
-          "Select at least one question from the table before running LLM analysis.",
+          "Select at least one Bullpen question or keep an active position open before running LLM analysis.",
       }));
       return;
     }
@@ -1567,7 +1616,7 @@ export default function BullpenAiPage() {
     try {
       const run = await apiService.createRun({
         prompt: buildBullpenLlmPrompt(
-          selectedQuestions,
+          questionsToAnalyze,
           bullpenLlmPromptTemplate,
         ),
         targets,
@@ -1601,8 +1650,8 @@ export default function BullpenAiPage() {
         }
         return next;
       });
-      const selectedQuestionIdsSet = new Set(
-        selectedQuestions.map((question) => question.id),
+      const questionIdsToAnalyze = new Set(
+        questionsToAnalyze.map((question) => question.id),
       );
       const breakdownByQuestionId = new Map<
         string,
@@ -1626,11 +1675,11 @@ export default function BullpenAiPage() {
         try {
           const analysisPayload = parseBullpenLlmAnalysisPayload(
             responseText,
-            selectedQuestions,
+            questionsToAnalyze,
           );
           const analysisByQuestionId = new Map(
             analysisPayload.markets
-              .filter((item) => selectedQuestionIdsSet.has(item.questionId))
+              .filter((item) => questionIdsToAnalyze.has(item.questionId))
               .map((item) => [item.questionId, item] as const),
           );
 
@@ -1675,7 +1724,29 @@ export default function BullpenAiPage() {
         );
       }
 
-      const matchedCount = breakdownByQuestionId.size;
+      const matchedQuestionCount = breakdownByQuestionId.size;
+      const analysisBySnapshotQuestionId = new Map<
+        string,
+        BullpenQuestionRow["llmBreakdown"]
+      >();
+      const analysisByPositionKey = new Map<
+        string,
+        BullpenQuestionRow["llmBreakdown"]
+      >();
+
+      for (const [questionId, llmBreakdown] of breakdownByQuestionId.entries()) {
+        const links = llmTargetSet.linksByQuestionId[questionId] || [];
+        for (const link of links) {
+          if (link.kind === "snapshot") {
+            analysisBySnapshotQuestionId.set(link.questionId, llmBreakdown);
+          } else {
+            analysisByPositionKey.set(link.positionKey, llmBreakdown);
+          }
+        }
+      }
+
+      const matchedCount =
+        analysisBySnapshotQuestionId.size + analysisByPositionKey.size;
       const rowsWithOddsCount = Array.from(breakdownByQuestionId.values()).filter(
         (llmBreakdown) => {
           const consensus = computeBullpenLlmConsensus(llmBreakdown);
@@ -1685,14 +1756,14 @@ export default function BullpenAiPage() {
           );
         },
       ).length;
-      const blankOddsCount = matchedCount - rowsWithOddsCount;
+      const blankOddsCount = matchedQuestionCount - rowsWithOddsCount;
 
       setSnapshotsByMode((current) => {
         const currentSnapshot = current[activeMode].current;
         if (!currentSnapshot) return current;
 
         const nextQuestions = currentSnapshot.questions.map((question) => {
-          const llmBreakdown = breakdownByQuestionId.get(question.id);
+          const llmBreakdown = analysisBySnapshotQuestionId.get(question.id);
           if (!llmBreakdown || llmBreakdown.length === 0) return question;
 
           const consensus = computeBullpenLlmConsensus(llmBreakdown);
@@ -1733,7 +1804,7 @@ export default function BullpenAiPage() {
         const currentSnapshot = snapshotsByMode[activeMode].current;
         const sourceQuestions = currentSnapshot?.questions || [];
         const nextQuestions = sourceQuestions.map((question) => {
-          const llmBreakdown = breakdownByQuestionId.get(question.id);
+          const llmBreakdown = analysisBySnapshotQuestionId.get(question.id);
           if (!llmBreakdown || llmBreakdown.length === 0) return question;
 
           const consensus = computeBullpenLlmConsensus(llmBreakdown);
@@ -1772,17 +1843,59 @@ export default function BullpenAiPage() {
           [activeMode]: eligibleIds,
         };
       });
+      setActivePositionAnalysesByKey((current) => {
+        const next = { ...current };
+        const activePositionLookup = new Map(
+          openActivePositions.map((position) => [position.key, position] as const),
+        );
+
+        for (const [positionKey, llmBreakdown] of analysisByPositionKey.entries()) {
+          const position = activePositionLookup.get(positionKey);
+          if (!position || llmBreakdown.length === 0) continue;
+
+          const consensus = computeBullpenLlmConsensus(llmBreakdown);
+          const completedAt =
+            [...llmBreakdown]
+              .map((entry) => entry.timestamp)
+              .filter((timestamp): timestamp is string => Boolean(timestamp))
+              .sort()
+              .at(-1) || new Date().toISOString();
+          const analyzedPosition = buildBullpenQuestionRowFromActivePosition(
+            position,
+            {
+              llmYesOdds: consensus.consensusYesOdds,
+              llmNoOdds: consensus.consensusNoOdds,
+              llmNotes: summarizeBullpenLlmNotes(llmBreakdown),
+              llmProvider:
+                llmBreakdown.length === 1 ? llmBreakdown[0]?.provider || null : null,
+              llmModel:
+                llmBreakdown.length === 1 ? llmBreakdown[0]?.model || null : null,
+              llmRunId: completedRun.id,
+              llmCompletedAt: completedAt,
+              llmBreakdown,
+            },
+          );
+          next[positionKey] = extractBullpenActivePositionLlmAnalysis(
+            analyzedPosition,
+          );
+        }
+
+        return next;
+      });
 
       setLlmMessagesByMode((current) => ({
         ...current,
         [activeMode]: {
           selectedModels: targets.length,
-          selectedQuestionsWithConsensusOdds: rowsWithOddsCount,
+          uniqueQuestionsAnalyzed: questionsToAnalyze.length,
+          rowsWithConsensusOdds: rowsWithOddsCount,
           usableJsonModels: successfulModelCount,
           failedModels: failedModels.map(splitBullpenFailedModel),
           matchedRowsWithoutUsableOdds: blankOddsCount,
           unmatchedReturnedRows: unmatchedCount,
           matchedRows: matchedCount,
+          activePositionsUpdated: analysisByPositionKey.size,
+          selectedScanQuestionsUpdated: analysisBySnapshotQuestionId.size,
         },
       }));
     } catch (error) {
@@ -2400,7 +2513,7 @@ export default function BullpenAiPage() {
                     disabled={
                       !activeCurrentSnapshot ||
                       isViewingHistory ||
-                      selectedQuestionCount === 0
+                      (selectedQuestionCount === 0 && openActivePositions.length === 0)
                     }
                     selectionMode="multiple"
                     onRunMultiple={runLlm}
@@ -2424,10 +2537,20 @@ export default function BullpenAiPage() {
                       </span>
                     </div>
                     <p className="mt-1 text-sky-800">
-                      Running {formatTargetSummary(lastLlmTargets)} on the selected
-                      questions now. When it finishes, we&apos;ll say how many
-                      table rows were updated, how many model outputs were usable,
-                      and whether any consensus LLM odds stayed blank.
+                      Running {formatTargetSummary(lastLlmTargets)} on{" "}
+                      {[
+                        openActivePositions.length > 0
+                          ? formatCountLabel(openActivePositions.length, "active position")
+                          : null,
+                        selectedQuestionCount > 0
+                          ? formatCountLabel(selectedQuestionCount, "selected scan question")
+                          : null,
+                      ]
+                        .filter((value): value is string => Boolean(value))
+                        .join(" and ")}{" "}
+                      now. When it finishes, we&apos;ll say how many rows were
+                      updated, how many model outputs were usable, and whether any
+                      consensus LLM odds stayed blank.
                     </p>
                   </div>
                 ) : null}
@@ -2482,10 +2605,10 @@ export default function BullpenAiPage() {
                         </tr>
                         <tr>
                           <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
-                            Questions with consensus odds
+                            Unique questions analyzed
                           </th>
                           <td className="px-3 py-2">
-                            {llmNotice.selectedQuestionsWithConsensusOdds}
+                            {llmNotice.uniqueQuestionsAnalyzed}
                           </td>
                         </tr>
                         <tr>
@@ -2496,9 +2619,33 @@ export default function BullpenAiPage() {
                         </tr>
                         <tr>
                           <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
-                            Selected questions matched
+                            Rows with consensus odds
+                          </th>
+                          <td className="px-3 py-2">
+                            {llmNotice.rowsWithConsensusOdds}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
+                            Linked rows updated
                           </th>
                           <td className="px-3 py-2">{llmNotice.matchedRows}</td>
+                        </tr>
+                        <tr>
+                          <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
+                            Active positions updated
+                          </th>
+                          <td className="px-3 py-2">
+                            {llmNotice.activePositionsUpdated}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th className="bg-sky-50 px-3 py-2 font-semibold text-sky-950">
+                            Selected scan questions updated
+                          </th>
+                          <td className="px-3 py-2">
+                            {llmNotice.selectedScanQuestionsUpdated}
+                          </td>
                         </tr>
                         {llmNotice.matchedRowsWithoutUsableOdds > 0 ? (
                           <tr>
@@ -2627,6 +2774,7 @@ export default function BullpenAiPage() {
           {activeVisibleSnapshot ? (
             <BullpenInvestmentsSection
               activePositions={activePositions}
+              activePositionQuestions={activePositionQuestionsForLlm}
               activePositionsCount={hasLoadedPositions ? activePositions.length : null}
               candidates={activeInvestmentCandidates}
               claimError={claimPositionsError}
@@ -2659,7 +2807,7 @@ export default function BullpenAiPage() {
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
               <span>
                 {selectionEnabled
-                  ? `${selectedQuestionCount} question${selectedQuestionCount === 1 ? "" : "s"} selected for LLM analysis.`
+                  ? `${formatCountLabel(openActivePositions.length, "active position")} auto-included and ${formatCountLabel(selectedQuestionCount, "scan question")} selected for LLM analysis.`
                   : "History view is read-only; switch back to Current to select questions."}
               </span>
               {lastLlmTargets.length > 0 ? (

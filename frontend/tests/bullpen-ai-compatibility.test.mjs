@@ -126,3 +126,24 @@ test("Bullpen x AI sports filter catches Games category markets", () => {
   assert.match(routeSource, /const SPORTS_KEYWORDS = \[[\s\S]*"games"/);
   assert.match(routeSource, /question\.category/);
 });
+
+test("Bullpen x AI active positions stay included in LLM runs and share the events-table layout", () => {
+  const bullpenAiPageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const investmentsSectionSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenInvestmentsSection.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(bullpenAiPageSource, /buildBullpenLlmRunTargetSet\(\{/);
+  assert.match(bullpenAiPageSource, /activePositions: openActivePositions/);
+  assert.match(investmentsSectionSource, /activePositionQuestions:/);
+  assert.match(investmentsSectionSource, /Current Yes \/ No/);
+  assert.match(investmentsSectionSource, /LLM Yes \/ No/);
+  assert.match(investmentsSectionSource, /CheckCircle2/);
+});

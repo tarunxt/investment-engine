@@ -6,6 +6,8 @@ export type BullpenActivePositionView = {
   shares: number;
   averagePrice: number | null;
   costBasis: number;
+  yesOdds: number | null;
+  noOdds: number | null;
   currentPrice: number | null;
   currentValue: number | null;
   unrealizedPnl: number | null;
@@ -223,6 +225,46 @@ function toBullpenPositionCurrentPrice({
   return refreshedOdds === null ? currentPrice : round(refreshedOdds / 100, 4);
 }
 
+function deriveBullpenPositionOddsPair({
+  outcome,
+  currentPrice,
+}: {
+  outcome: string;
+  currentPrice: number | null;
+}) {
+  if (currentPrice === null) {
+    return {
+      yesOdds: null,
+      noOdds: null,
+    };
+  }
+
+  const normalizedOutcome = outcome.trim().toLowerCase();
+  const normalizedPrice =
+    currentPrice > 1 && currentPrice <= 100 ? currentPrice / 100 : currentPrice;
+  const heldSideOdds = round(normalizedPrice * 100, 2);
+  const oppositeSideOdds = round(100 - heldSideOdds, 2);
+
+  if (normalizedOutcome === "yes") {
+    return {
+      yesOdds: heldSideOdds,
+      noOdds: oppositeSideOdds,
+    };
+  }
+
+  if (normalizedOutcome === "no") {
+    return {
+      yesOdds: oppositeSideOdds,
+      noOdds: heldSideOdds,
+    };
+  }
+
+  return {
+    yesOdds: null,
+    noOdds: null,
+  };
+}
+
 function extractClaimableStatus(value: BullpenCliPosition) {
   const flags = [
     value.redeemable,
@@ -276,6 +318,10 @@ export function normalizeBullpenPosition(
   const closeDate = readString(value.end_date ?? value.endDate);
   const closeTime = buildBullpenCloseTimeFromDateOnly(closeDate);
   const isClaimable = extractClaimableStatus(value);
+  const { yesOdds, noOdds } = deriveBullpenPositionOddsPair({
+    outcome,
+    currentPrice,
+  });
   const claimableValue =
     readNumber(value.claimableValue) ??
     readNumber(value.claimable_value) ??
@@ -291,6 +337,8 @@ export function normalizeBullpenPosition(
     shares: round(shares, 4),
     averagePrice: averagePrice === null ? null : round(averagePrice, 4),
     costBasis: round(costBasis, 2),
+    yesOdds,
+    noOdds,
     currentPrice: currentPrice === null ? null : round(currentPrice, 4),
     currentValue: currentValue === null ? null : round(currentValue, 2),
     unrealizedPnl: unrealizedPnl === null ? null : round(unrealizedPnl, 2),
@@ -322,6 +370,12 @@ export function applyBullpenPositionMarketData(
     yesOdds: marketData.yesOdds,
     noOdds: marketData.noOdds,
   });
+  const derivedOdds = deriveBullpenPositionOddsPair({
+    outcome: position.outcome,
+    currentPrice,
+  });
+  const yesOdds = marketData.yesOdds ?? derivedOdds.yesOdds ?? position.yesOdds;
+  const noOdds = marketData.noOdds ?? derivedOdds.noOdds ?? position.noOdds;
   const currentValue =
     currentPrice === null ? null : round(position.shares * currentPrice, 2);
   const unrealizedPnl =
@@ -333,6 +387,8 @@ export function applyBullpenPositionMarketData(
 
   return {
     ...position,
+    yesOdds,
+    noOdds,
     currentPrice,
     currentValue,
     unrealizedPnl,
