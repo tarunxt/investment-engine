@@ -51,6 +51,7 @@ import {
 } from "@/lib/bullpenActivePositions";
 import { formatApiErrorSummary, formatUnknownError } from "@/lib/apiErrors";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
+import { formatApiTimestamp } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
@@ -192,12 +193,9 @@ function createEmptySnapshotViewMap(): Record<ScanMode, string | null> {
 }
 
 function formatDate(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
+  return formatApiTimestamp(value, {
+    emptyValue: "—",
+    second: undefined,
   });
 }
 

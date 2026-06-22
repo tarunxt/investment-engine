@@ -4,6 +4,7 @@ import { ExternalLink, Loader2, RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
+import { formatApiTimestamp } from "@/lib/datetime";
 
 type BullpenPositionsDialogProps = {
   claimError: string | null;
@@ -63,13 +64,11 @@ function formatShares(value: number) {
 }
 
 function formatTimestamp(value: string | null) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
+  const timestamp = formatApiTimestamp(value, {
+    emptyValue: null,
+    second: undefined,
   });
+  return timestamp || null;
 }
 
 function sortPositions(

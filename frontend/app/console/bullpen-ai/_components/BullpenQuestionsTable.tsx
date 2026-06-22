@@ -15,6 +15,7 @@ import type {
   BullpenQuestionRow,
   BullpenScanSnapshot,
 } from "@/lib/bullpen-ai";
+import { formatApiTimestamp } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import {
   BULLPEN_TABLE_COLUMN_IDS,
@@ -60,12 +61,9 @@ type ResizeState = {
 };
 
 function formatDate(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
+  return formatApiTimestamp(value, {
+    emptyValue: "—",
+    second: undefined,
   });
 }
 
