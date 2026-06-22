@@ -236,6 +236,7 @@ if [[ "$SCOPE" == "full" ]]; then
     source '$FRONTEND_ENV_FILE'
     set +a
     npm run build
+    node '$APP_ROOT/deploy/no-docker/repair-next-runtime-artifacts.mjs' '$APP_ROOT/frontend'
   "
 fi
 
