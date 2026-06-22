@@ -116,6 +116,14 @@ export function BullpenInvestmentsSection({
     question: BullpenQuestionRow;
   } | null>(null);
   const [isPositionsDialogOpen, setIsPositionsDialogOpen] = useState(false);
+  const openActivePositions = activePositions.filter((position) => !position.isClaimable);
+  const sortedCandidates = [...candidates].sort((left, right) => {
+    const leftHasWarning = hasHighLlmDisagreement(left);
+    const rightHasWarning = hasHighLlmDisagreement(right);
+
+    if (leftHasWarning !== rightHasWarning) return leftHasWarning ? 1 : -1;
+    return 0;
+  });
   const selectedCount = candidates.filter((question) =>
     selectedQuestionIds.has(question.id),
   ).length;
@@ -154,7 +162,7 @@ export function BullpenInvestmentsSection({
               calculated amount.
             </p>
           </div>
-          {!isHistoryView && candidates.length > 0 ? (
+          {!isHistoryView && (candidates.length > 0 || openActivePositions.length > 0) ? (
             <div className="flex flex-col items-start gap-2">
               <div className="flex w-full flex-wrap items-center gap-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -234,7 +242,7 @@ export function BullpenInvestmentsSection({
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             Switch back to the current snapshot to select events and place Bullpen orders.
           </div>
-        ) : candidates.length === 0 ? (
+        ) : candidates.length === 0 && openActivePositions.length === 0 ? (
           <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
             {emptyMessage}
           </div>
@@ -242,8 +250,12 @@ export function BullpenInvestmentsSection({
           <>
             <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 rounded-2xl border border-fuchsia-100 bg-fuchsia-50/60 px-4 py-3 text-sm text-slate-700">
               <span>
-                <span className="font-semibold text-slate-950">{candidates.length}</span> investable
-                event{candidates.length === 1 ? "" : "s"}
+                <span className="font-semibold text-slate-950">{openActivePositions.length}</span> active
+                position{openActivePositions.length === 1 ? "" : "s"}
+              </span>
+              <span>
+                <span className="font-semibold text-slate-950">{candidates.length}</span> new
+                opportunit{candidates.length === 1 ? "y" : "ies"}
               </span>
               <span>
                 <span className="font-semibold text-slate-950">{selectedCount}</span> selected
@@ -255,7 +267,76 @@ export function BullpenInvestmentsSection({
             </div>
 
             <div className="mt-4 space-y-3">
-              {candidates.map((question) => {
+              {openActivePositions.map((position) => (
+                <div
+                  key={`active-position-${position.key}`}
+                  className="flex flex-col gap-4 rounded-2xl border border-fuchsia-400 bg-fuchsia-50 px-4 py-4 transition md:flex-row md:items-start md:justify-between"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="mt-1 rounded-full border border-fuchsia-300 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-fuchsia-800">
+                      Active
+                    </span>
+                    <div className="space-y-2">
+                      <div className="block font-medium text-slate-950">
+                        {position.marketTitle}
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                        <span>Close: {formatDate(position.closeTime)}</span>
+                        <span>Outcome: {position.outcome || "—"}</span>
+                        <span>{formatMoney(position.shares)} shares</span>
+                      </div>
+                      {position.marketUrl ? (
+                        <a
+                          href={position.marketUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 hover:text-purple-900"
+                        >
+                          Open market
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="grid min-w-full gap-3 text-sm md:min-w-[25rem] md:grid-cols-4">
+                    <div className="rounded-xl bg-slate-50 px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        Current Price
+                      </div>
+                      <div className="mt-1 font-semibold text-rose-700">
+                        {formatOdds(position.currentPrice === null ? null : position.currentPrice * 100)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        Avg Price
+                      </div>
+                      <div className="mt-1 font-semibold text-violet-700">
+                        {formatOdds(position.averagePrice === null ? null : position.averagePrice * 100)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        Returns/day
+                      </div>
+                      <div className="mt-1 font-semibold text-slate-900">
+                        {formatReturnsPerDay(position.returnsPerDay)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-fuchsia-500 px-3 py-2 text-slate-950">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-900/80">
+                        Value
+                      </div>
+                      <div className="mt-1 font-semibold">
+                        {formatMoney(position.currentValue ?? position.costBasis)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {sortedCandidates.map((question) => {
                 const checkboxId = `bullpen-investment-${question.id}`;
                 return (
                   <div
