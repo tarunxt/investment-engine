@@ -145,6 +145,7 @@ export type BullpenReturnsPerDayBreakdown = {
   currentSide: "Yes" | "No" | null;
   daysUntilClose: number | null;
   llmYesOdds: number | null;
+  llmNoOdds: number | null;
   result: number | null;
 };
 
@@ -528,15 +529,17 @@ function calculateBullpenReturnsPerDay({
   yesOdds,
   noOdds,
   llmYesOdds,
+  llmNoOdds,
   daysUntilClose,
 }: Pick<
   BullpenQuestionRow,
-  "yesOdds" | "noOdds" | "llmYesOdds" | "daysUntilClose"
+  "yesOdds" | "noOdds" | "llmYesOdds" | "llmNoOdds" | "daysUntilClose"
 >) {
   return getBullpenReturnsPerDayBreakdown({
     yesOdds,
     noOdds,
     llmYesOdds,
+    llmNoOdds,
     daysUntilClose,
   }).result;
 }
@@ -563,15 +566,17 @@ export function getBullpenReturnsPerDayBreakdown({
   yesOdds,
   noOdds,
   llmYesOdds,
+  llmNoOdds,
   daysUntilClose,
 }: Pick<
   BullpenQuestionRow,
-  "yesOdds" | "noOdds" | "llmYesOdds" | "daysUntilClose"
+  "yesOdds" | "noOdds" | "llmYesOdds" | "llmNoOdds" | "daysUntilClose"
 >): BullpenReturnsPerDayBreakdown {
   if (
     yesOdds === null ||
     noOdds === null ||
     llmYesOdds === null ||
+    llmNoOdds === null ||
     daysUntilClose === null ||
     daysUntilClose <= 0
   ) {
@@ -580,22 +585,23 @@ export function getBullpenReturnsPerDayBreakdown({
       currentSide: null,
       daysUntilClose,
       llmYesOdds,
+      llmNoOdds,
       result: null,
     };
   }
 
-  const currentSide = llmYesOdds > 50 ? "Yes" : "No";
-  const currentOdds = currentSide === "Yes" ? yesOdds : noOdds;
+  // Match spreadsheet column O:
+  // =IF(LLM No Odds > 50%, (100 - Current No Odds) / Days, (100 - Current Yes Odds) / Days)
+  const currentSide = llmNoOdds > 50 ? "No" : "Yes";
+  const currentOdds = currentSide === "No" ? noOdds : yesOdds;
 
   return {
     currentOdds,
     currentSide,
     daysUntilClose,
     llmYesOdds,
-    result:
-      currentOdds === null
-        ? null
-        : Number(((100 - currentOdds) / daysUntilClose).toFixed(2)),
+    llmNoOdds,
+    result: Number(((100 - currentOdds) / daysUntilClose).toFixed(2)),
   };
 }
 

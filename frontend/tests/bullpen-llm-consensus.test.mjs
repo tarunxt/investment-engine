@@ -56,3 +56,44 @@ test("computeBullpenLlmConsensus flags high disagreement and avoids simple-avera
   assert.equal(consensus.consensusYesOdds, 55);
   assert.equal(consensus.consensusNoOdds, 45);
 });
+
+
+test("getBullpenReturnsPerDayBreakdown matches spreadsheet column O", async () => {
+  const { getBullpenReturnsPerDayBreakdown } = await loadBullpenAiModule();
+
+  assert.deepEqual(
+    getBullpenReturnsPerDayBreakdown({
+      yesOdds: 19.5,
+      noOdds: 80.5,
+      llmYesOdds: 12.5,
+      llmNoOdds: 87.5,
+      daysUntilClose: 1.7,
+    }),
+    {
+      currentOdds: 80.5,
+      currentSide: "No",
+      daysUntilClose: 1.7,
+      llmYesOdds: 12.5,
+      llmNoOdds: 87.5,
+      result: 11.47,
+    },
+  );
+
+  assert.deepEqual(
+    getBullpenReturnsPerDayBreakdown({
+      yesOdds: 77.5,
+      noOdds: 22.5,
+      llmYesOdds: 60,
+      llmNoOdds: 40,
+      daysUntilClose: 1.7,
+    }),
+    {
+      currentOdds: 77.5,
+      currentSide: "Yes",
+      daysUntilClose: 1.7,
+      llmYesOdds: 60,
+      llmNoOdds: 40,
+      result: 13.24,
+    },
+  );
+});
