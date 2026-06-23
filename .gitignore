@@ -43,6 +43,7 @@ coverage/
 # Temporary
 tmp/
 temp/
+.runtime/
 backend/.runtime-tools/
 frontend/.runtime/
 

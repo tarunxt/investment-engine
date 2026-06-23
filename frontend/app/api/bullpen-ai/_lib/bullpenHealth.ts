@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import {
@@ -30,9 +29,6 @@ import {
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
-const DEFAULT_STATE_DIR = fileURLToPath(
-  new URL("../../../../.runtime/bullpen-ai", import.meta.url),
-);
 const SNAPSHOT_FILE_NAME = "last-successful-live-snapshot.json";
 const HEALTH_FILE_NAME = "bullpen-health.json";
 
@@ -58,7 +54,15 @@ export type BullpenHealthReport = {
 
 function getBullpenStateDir() {
   const configured = process.env.BULLPEN_HEALTH_STATE_DIR?.trim();
-  return configured || DEFAULT_STATE_DIR;
+  if (configured) {
+    return configured;
+  }
+
+  return path.join(
+    /* turbopackIgnore: true */ process.cwd(),
+    ".runtime",
+    "bullpen-ai",
+  );
 }
 
 function getBullpenStatePaths() {
