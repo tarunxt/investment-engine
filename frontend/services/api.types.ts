@@ -176,7 +176,7 @@ export interface IApiService {
     polymarketLiveLock(): Promise<PolymarketBotState>;
     polymarketLiveDoctor(): Promise<PolymarketBotState>;
     polymarketLiveBalanceRefresh(): Promise<PolymarketBotState>;
-    polymarketLiveRedeem(): Promise<PolymarketBotState>;
+    polymarketLiveRedeem(data?: { conditionIds?: string[] }): Promise<PolymarketBotState>;
     polymarketLiveEmergencyStop(): Promise<PolymarketBotState>;
     polymarketLiveResetEmergencyStop(): Promise<PolymarketBotState>;
     polymarketUpdateLiveLimits(data: PolymarketLiveLimitUpdate): Promise<PolymarketBotState>;

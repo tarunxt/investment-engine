@@ -1,6 +1,7 @@
 export type BullpenActivePositionView = {
   key: string;
   marketId: string;
+  conditionId: string | null;
   marketTitle: string;
   outcome: string;
   shares: number;
@@ -93,6 +94,7 @@ export type BullpenCliPosition = {
   claimable?: unknown;
   claimableValue?: unknown;
   claimable_value?: unknown;
+  conditionId?: unknown;
   condition_id?: unknown;
   currentPrice?: unknown;
   current_price?: unknown;
@@ -148,6 +150,7 @@ export type BullpenTrackedMarketRefresh = {
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const EASTERN_TIME_ZONE = "America/New_York";
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const CONDITION_ID_PATTERN = /^0x[a-f0-9]{64}$/i;
 const MONTH_INDEX_BY_NAME: Record<string, string> = {
   january: "01",
   february: "02",
@@ -391,11 +394,14 @@ export function normalizeBullpenPosition(
   value: BullpenCliPosition,
   buildMarketUrl: (eventSlug: string | null) => string | null,
 ): BullpenActivePositionView {
+  const rawConditionId = readString(value.condition_id ?? value.conditionId);
   const marketId =
     readString(value.slug) ||
-    readString(value.condition_id) ||
+    rawConditionId ||
     readString(value.market) ||
     "unknown-market";
+  const conditionId =
+    rawConditionId || (CONDITION_ID_PATTERN.test(marketId) ? marketId : null);
   const marketTitle =
     readString(value.market) || readString(value.title) || marketId;
   const outcome = readString(value.outcome) || "—";
@@ -434,6 +440,7 @@ export function normalizeBullpenPosition(
   return {
     key: `${marketId}::${outcome}`,
     marketId,
+    conditionId,
     marketTitle,
     outcome,
     shares: round(shares, 4),
@@ -528,6 +535,7 @@ export function buildTrackedBullpenPositionViews(
       const basePosition = {
         key: position.key,
         marketId: position.market_id,
+        conditionId: null,
         marketTitle: position.market_title,
         outcome: position.outcome,
         shares: position.shares,

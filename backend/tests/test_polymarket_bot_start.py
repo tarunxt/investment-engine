@@ -919,6 +919,7 @@ class RedeemTrackingExecutor:
     def __init__(self, redeem_error: Exception | None = None):
         self.redeem_calls = 0
         self.claim_calls = 0
+        self.redeem_condition_ids: list[str] | None = None
         self.redeem_error = redeem_error
 
     async def doctor(self):
@@ -926,8 +927,9 @@ class RedeemTrackingExecutor:
 
         return PolymarketDoctorStatus(ok=True, message="ok")
 
-    async def redeem(self, *, dry_run: bool):
+    async def redeem(self, *, dry_run: bool, condition_ids: list[str] | None = None):
         self.redeem_calls += 1
+        self.redeem_condition_ids = condition_ids
         if self.redeem_error:
             raise self.redeem_error
         return "{}"
@@ -1539,7 +1541,7 @@ async def test_manual_live_redeem_treats_gamma_condition_miss_as_non_fatal(tmp_p
     await bot.redeem_live_positions()
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 1
+    assert executor.claim_calls == 0
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
     assert bot.recent_activity[0].message == (
         "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
@@ -1575,7 +1577,7 @@ async def test_startup_balance_refresh_runs_auto_redeem(tmp_path):
     await bot._refresh_startup_balance_background()
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 1
+    assert executor.claim_calls == 0
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
 
 
@@ -1605,10 +1607,11 @@ async def test_manual_live_redeem_submits_and_refreshes_balance(tmp_path):
         logger=logger,
     )
 
-    await bot.redeem_live_positions()
+    await bot.redeem_live_positions(["0xaaa", "0xbbb"])
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 1
+    assert executor.claim_calls == 0
+    assert executor.redeem_condition_ids == ["0xaaa", "0xbbb"]
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
     assert bot.recent_activity[0].message == (
         "Manual Bullpen redeem/claim submitted for all resolved positions."
@@ -1648,7 +1651,7 @@ async def test_forced_redeem_claim_runs_even_when_auto_redeem_disabled(tmp_path)
     await bot._force_redeem_claim_background()
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 1
+    assert executor.claim_calls == 0
     assert bot.recent_activity[0].message == (
         "Forced redeem/claim checked completed Bullpen positions."
     )

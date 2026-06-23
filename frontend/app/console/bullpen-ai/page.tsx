@@ -1566,7 +1566,22 @@ export default function BullpenAiPage() {
       );
 
       try {
-        await apiService.polymarketLiveRedeem();
+        const canTargetSpecificConditions = claimablePositions.every((position) =>
+          Boolean(position.conditionId?.trim()),
+        );
+        const conditionIds = canTargetSpecificConditions
+          ? Array.from(
+              new Set(
+                claimablePositions
+                  .map((position) => position.conditionId?.trim() || null)
+                  .filter((value): value is string => Boolean(value)),
+              ),
+            )
+          : [];
+
+        await apiService.polymarketLiveRedeem(
+          canTargetSpecificConditions ? { conditionIds } : undefined,
+        );
         setClaimPositionsStatus(
           "Bullpen redeem/claim submitted. Refreshing the popup with the latest wallet data.",
         );

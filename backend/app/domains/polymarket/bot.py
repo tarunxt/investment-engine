@@ -15,7 +15,6 @@ from app.domains.polymarket.bullpen import (
     BullpenLiveExecutor,
     BullpenRedeemedTradesReader,
     LiveTradeGuard,
-    is_claim_command_unavailable_warning,
     is_redeem_metadata_lookup_warning,
     live_position_key,
     utc_now,
@@ -315,9 +314,13 @@ class PolymarketPaperCopyBot:
         )
         await self._manual_balance_refresh_task
 
-    async def redeem_live_positions(self) -> None:
+    async def redeem_live_positions(
+        self, condition_ids: list[str] | None = None
+    ) -> None:
         async with self._lock:
-            await self._redeem_live_positions_unlocked()
+            await self._redeem_live_positions_unlocked(
+                condition_ids=condition_ids
+            )
 
     async def emergency_stop(self) -> None:
         async with self._lock:
@@ -1458,11 +1461,15 @@ class PolymarketPaperCopyBot:
                 f"Auto-redeem failed and bot kept looping: {redact_secrets(str(exc))}"
             )
 
-    async def _redeem_and_claim_completed_positions(self) -> bool:
+    async def _redeem_and_claim_completed_positions(
+        self, *, condition_ids: list[str] | None = None
+    ) -> bool:
         had_redeem_metadata_warning = False
         async with self._redeem_claim_lock:
             try:
-                await self.live_executor.redeem(dry_run=False)
+                await self.live_executor.redeem(
+                    dry_run=False, condition_ids=condition_ids
+                )
             except BullpenCommandError as exc:
                 message = redact_secrets(str(exc))
                 if not is_redeem_metadata_lookup_warning(message):
@@ -1475,31 +1482,23 @@ class PolymarketPaperCopyBot:
                 self._add_activity(
                     "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
                 )
-
-            claim = getattr(self.live_executor, "claim", None)
-            if claim is None:
-                return had_redeem_metadata_warning
-            try:
-                await claim(dry_run=False)
-            except BullpenCommandError as exc:
-                message = redact_secrets(str(exc))
-                if is_claim_command_unavailable_warning(message):
-                    await self.logger.warn(
-                        "Bullpen claim command is unavailable in this runtime; redeem completed: "
-                        f"{message}"
-                    )
-                    return had_redeem_metadata_warning
-                raise
             return had_redeem_metadata_warning
 
-    async def _redeem_live_positions_unlocked(self, *, automatic: bool = False) -> None:
+    async def _redeem_live_positions_unlocked(
+        self,
+        *,
+        automatic: bool = False,
+        condition_ids: list[str] | None = None,
+    ) -> None:
         if not self._wants_live_execution():
             raise RuntimeError(
                 "Live execution is disabled; Bullpen redeem is unavailable."
             )
         try:
             had_redeem_metadata_warning = (
-                await self._redeem_and_claim_completed_positions()
+                await self._redeem_and_claim_completed_positions(
+                    condition_ids=condition_ids
+                )
             )
         except BullpenCommandError as exc:
             message = redact_secrets(str(exc))

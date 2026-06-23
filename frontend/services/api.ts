@@ -865,8 +865,22 @@ class apiServiceClass implements IApiService {
     return this.post<PolymarketBotState>(URLs.polymarket.liveBalanceRefresh());
   }
 
-  polymarketLiveRedeem(): Promise<PolymarketBotState> {
-    return this.post<PolymarketBotState>(URLs.polymarket.liveRedeem());
+  polymarketLiveRedeem(data?: {
+    conditionIds?: string[];
+  }): Promise<PolymarketBotState> {
+    const conditionIds = Array.isArray(data?.conditionIds)
+      ? Array.from(
+          new Set(
+            data.conditionIds
+              .map((value) => value.trim())
+              .filter((value) => value.length > 0),
+          ),
+        )
+      : [];
+    return this.post<PolymarketBotState>(
+      URLs.polymarket.liveRedeem(),
+      conditionIds.length > 0 ? { condition_ids: conditionIds } : undefined,
+    );
   }
 
   polymarketLiveEmergencyStop(): Promise<PolymarketBotState> {

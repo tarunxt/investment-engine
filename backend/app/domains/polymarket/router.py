@@ -8,6 +8,7 @@ from app.domains.polymarket.schemas import (
     PolymarketBotState,
     PolymarketDiscoveryDebugReport,
     PolymarketDiscoveryDebugRequest,
+    PolymarketLiveRedeemRequest,
     PolymarketManualInvestRequest,
     PolymarketManualInvestResponse,
     PolymarketLiveLimitUpdate,
@@ -100,11 +101,12 @@ async def refresh_polymarket_balance(current_user: User = Depends(get_current_us
 
 @router.post("/live/redeem", response_model=PolymarketBotState)
 async def redeem_polymarket_live_positions(
+    request: PolymarketLiveRedeemRequest | None = None,
     current_user: User = Depends(get_current_user),
 ):
     bot = await _get_bot(current_user)
     try:
-        await bot.redeem_live_positions()
+        await bot.redeem_live_positions(request.condition_ids if request else None)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
     return await bot.get_state()

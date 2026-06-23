@@ -45,6 +45,8 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
   const claimablePosition = normalizeBullpenPosition(
     {
       slug: "resolved-market",
+      condition_id:
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
       event_slug: "resolved-market",
       market: "Resolved market",
       outcome: "OG",
@@ -64,6 +66,10 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
   assert.equal(openPosition.noOdds, 50);
   assert.equal(claimablePosition.isClaimable, true);
   assert.equal(claimablePosition.claimableValue, 3.33);
+  assert.equal(
+    claimablePosition.conditionId,
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+  );
   assert.equal(
     claimablePosition.marketUrl,
     "https://example.com/resolved-market",

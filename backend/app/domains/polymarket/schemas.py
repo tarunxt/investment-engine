@@ -60,6 +60,29 @@ class PolymarketLiveLimitUpdate(BaseModel):
     max_live_exposure_per_market: float = Field(default=5, gt=0)
 
 
+class PolymarketLiveRedeemRequest(BaseModel):
+    condition_ids: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("condition_ids")
+    @classmethod
+    def normalize_condition_ids(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            item = value.strip()
+            if not item:
+                continue
+            if len(item) > 500:
+                raise ValueError(
+                    "condition_ids entries must be 500 characters or fewer"
+                )
+            if item in seen:
+                continue
+            seen.add(item)
+            normalized.append(item)
+        return normalized
+
+
 class PolymarketManualInvestOrderRequest(BaseModel):
     question_id: str = Field(min_length=1, max_length=200)
     market_id: str = Field(min_length=1, max_length=500)

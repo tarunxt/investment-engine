@@ -418,8 +418,15 @@ class BullpenLiveExecutor:
             **session,
         )
 
-    async def redeem(self, *, dry_run: bool) -> str:
+    async def redeem(
+        self,
+        *,
+        dry_run: bool,
+        condition_ids: list[str] | None = None,
+    ) -> str:
         args = ["polymarket", "redeem"]
+        if condition_ids:
+            args.extend(["--condition-ids", ",".join(condition_ids)])
         if dry_run:
             args.extend(["--dry-run", "--output", "json"])
         else:
