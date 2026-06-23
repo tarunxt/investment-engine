@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { Bot, Loader2, Sparkles, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { getWebCapableModelKeys } from "@/lib/llmInternetAccess";
 import { cn } from "@/lib/utils";
 import { apiService, APIError } from "@/services/api";
 import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
@@ -373,6 +374,9 @@ export function EventScanRunControls({
   const compatibleSelectedKeys = new Set(
     Array.from(selectedKeys).filter((key) => compatibleTargets.has(key)),
   );
+  const webCapableCompatibleTargets = new Set(
+    getWebCapableModelKeys(providers).filter((key) => compatibleTargets.has(key)),
+  );
   const defaultSelectedKeys = new Set(
     getPreferredTargets(providers, { defaultTarget, defaultTargets })
       .map((target) => targetKey(target))
@@ -651,6 +655,14 @@ export function EventScanRunControls({
                         ? () => {
                             setHasTouchedSelection(true);
                             setSelectedKeys(new Set());
+                          }
+                        : undefined
+                    }
+                    onSelectWebCapable={
+                      selectionMode === "multiple"
+                        ? () => {
+                            setHasTouchedSelection(true);
+                            setSelectedKeys(new Set(webCapableCompatibleTargets));
                           }
                         : undefined
                     }

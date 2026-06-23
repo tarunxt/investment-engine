@@ -3,6 +3,12 @@
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
+import {
+  countSelectedWebCapableModels,
+  getInternetAccessBadgeText,
+  getInternetAccessTooltipText,
+  getResolvedProviderInternetAccess,
+} from "@/lib/llmInternetAccess";
 import { cn } from "@/lib/utils";
 import type { ProviderInfo } from "@/types/api";
 
@@ -19,6 +25,7 @@ interface LlmModelSelectionPanelProps {
   onToggle: (key: string) => void;
   onSelectAll?: () => void;
   onClear?: () => void;
+  onSelectWebCapable?: () => void;
   onToggleProvider?: (providerName: string, models: string[]) => void;
   getEstimatedCostInr?: (
     providerName: string,
@@ -107,6 +114,7 @@ export function LlmModelSelectionPanel({
   onToggle,
   onSelectAll,
   onClear,
+  onSelectWebCapable,
   onToggleProvider,
   getEstimatedCostInr,
   getHistoricalCostInr,
@@ -154,6 +162,10 @@ export function LlmModelSelectionPanel({
     (total, summary) => total + summary.historicalCostInr,
     0,
   );
+  const selectedWebCapableCount = countSelectedWebCapableModels(
+    providers,
+    selectedKeys,
+  );
   const canBulkSelect = selectionMode === "multiple" && Boolean(onSelectAll);
   const canBulkClear = Boolean(onClear);
 
@@ -173,6 +185,9 @@ export function LlmModelSelectionPanel({
           <span className="rounded-full bg-indigo-50 px-3 py-1 font-semibold text-indigo-700">
             {selectedKeys.size} / {totalModelCount}
           </span>
+          <span className="rounded-full bg-sky-50 px-3 py-1 font-semibold text-sky-700 ring-1 ring-sky-100">
+            Web-capable selected: {selectedWebCapableCount} / {selectedKeys.size}
+          </span>
           <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
             {costSummaryLabel}: {costSummaryValue ?? formatInrCost(selectedEstimatedCostInr)}
           </span>
@@ -191,6 +206,16 @@ export function LlmModelSelectionPanel({
               className="font-medium text-indigo-600 hover:text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400"
             >
               Select all
+            </button>
+          ) : null}
+          {showBulkActions && selectionMode === "multiple" && onSelectWebCapable ? (
+            <button
+              type="button"
+              onClick={onSelectWebCapable}
+              disabled={providers.length === 0}
+              className="font-medium text-sky-700 hover:text-sky-800 disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              Select web-capable only
             </button>
           ) : null}
           {showBulkActions && canBulkClear ? (
@@ -311,6 +336,14 @@ export function LlmModelSelectionPanel({
                       const key = getModelKey(provider.name, model);
                       const selected = selectedKeys.has(key);
                       const compatible = isCompatible(provider, model);
+                      const internetAccess = getResolvedProviderInternetAccess(
+                        provider.name,
+                        provider.internet_access,
+                      );
+                      const lastRunWebUsed =
+                        provider.model_last_run_web_search_used?.[model] ?? null;
+                      const lastRunWebSources =
+                        provider.model_last_run_web_sources?.[model] ?? [];
                       const estimated = getModelEstimatedCostInr(
                         provider,
                         model,
@@ -365,6 +398,31 @@ export function LlmModelSelectionPanel({
                               )}
                             >
                               {model}
+                            </span>
+                            <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                              <span
+                                title={getInternetAccessTooltipText(internetAccess)}
+                                className="rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700 ring-1 ring-sky-100"
+                              >
+                                {getInternetAccessBadgeText(internetAccess)}
+                              </span>
+                              {lastRunWebUsed ? (
+                                <span
+                                  title="The most recent completed run for this model executed at least one live web/search call."
+                                  className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 ring-1 ring-emerald-100"
+                                >
+                                  ✅ Used web last run
+                                </span>
+                              ) : null}
+                              {lastRunWebUsed &&
+                              lastRunWebSources.length === 0 ? (
+                                <span
+                                  title="The most recent completed run used web/search, but no evidence or source URLs were saved."
+                                  className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-100"
+                                >
+                                  ⚠️ No sources last run
+                                </span>
+                              ) : null}
                             </span>
                             <span className="mt-0.5 flex flex-wrap items-center gap-2 text-xs">
                               <span

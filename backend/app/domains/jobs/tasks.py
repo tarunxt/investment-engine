@@ -11,6 +11,7 @@ from app.infrastructure.database.sync_session import SyncSessionLocal
 import app.infrastructure.database.all_models  # noqa: F401 — registers all ORM models with the mapper
 from app.core.config import settings
 from app.core.logging import WorkerLogHelper, get_logger
+from app.domains.ai_providers.web_metadata import merge_web_metadata
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
 from app.shared.types import JobStatus
@@ -630,6 +631,9 @@ def _publish_job_update(job: Job) -> None:
             "tokens_in": job.tokens_in,
             "tokens_out": job.tokens_out,
             "estimated_cost": job.estimated_cost,
+            "web_search_used": job.web_search_used,
+            "web_search_queries": job.web_search_queries,
+            "web_sources": job.web_sources,
             "export_status": job.export_status,
             "export_error": job.export_error,
             "exported_at": job.exported_at.isoformat() if job.exported_at else None,
@@ -1049,6 +1053,9 @@ def _mark_failed(
     tokens_in: int | None = None,
     tokens_out: int | None = None,
     estimated_cost: float | None = None,
+    web_search_used: bool | None = None,
+    web_search_queries: list[str] | None = None,
+    web_sources: list[str] | None = None,
 ) -> None:
     try:
         db.rollback()
@@ -1062,6 +1069,9 @@ def _mark_failed(
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 estimated_cost=estimated_cost,
+                web_search_used=web_search_used,
+                web_search_queries=web_search_queries,
+                web_sources=web_sources,
             )
             _publish_job_update(job)
             _refresh_run_status(db, job_id)
@@ -1088,6 +1098,9 @@ def execute_ai_job(self, job_id: int) -> None:
     tokens_in: int | None = None
     tokens_out: int | None = None
     estimated_cost: float | None = None
+    web_search_used: bool | None = None
+    web_search_queries: list[str] | None = None
+    web_sources: list[str] | None = None
 
     try:
         job = repo.get(job_id)
@@ -1108,6 +1121,14 @@ def execute_ai_job(self, job_id: int) -> None:
         tokens_in = result.tokens_in
         tokens_out = result.tokens_out
         estimated_cost = result.cost
+        web_search_used, web_search_queries, web_sources = merge_web_metadata(
+            web_search_used,
+            web_search_queries,
+            web_sources,
+            response_used=result.web_search_used,
+            response_queries=result.web_search_queries,
+            response_sources=result.web_sources,
+        )
         content = (result.content or "").strip()
         if not content:
             raise RuntimeError(
@@ -1137,6 +1158,14 @@ def execute_ai_job(self, job_id: int) -> None:
                     tokens_in = (tokens_in or 0) + repair_result.tokens_in
                     tokens_out = (tokens_out or 0) + repair_result.tokens_out
                     estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
+                    web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                        web_search_used,
+                        web_search_queries,
+                        web_sources,
+                        response_used=repair_result.web_search_used,
+                        response_queries=repair_result.web_search_queries,
+                        response_sources=repair_result.web_sources,
+                    )
                     repaired_content = (repair_result.content or "").strip()
                     if repaired_content:
                         content = repaired_content
@@ -1159,6 +1188,9 @@ def execute_ai_job(self, job_id: int) -> None:
                             tokens_in=tokens_in,
                             tokens_out=tokens_out,
                             estimated_cost=estimated_cost,
+                            web_search_used=web_search_used,
+                            web_search_queries=web_search_queries,
+                            web_sources=web_sources,
                         )
                         _publish_job_update(job)
                         _refresh_run_status(db, job_id)
@@ -1203,6 +1235,14 @@ def execute_ai_job(self, job_id: int) -> None:
                     tokens_in = (tokens_in or 0) + repair_result.tokens_in
                     tokens_out = (tokens_out or 0) + repair_result.tokens_out
                     estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
+                    web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                        web_search_used,
+                        web_search_queries,
+                        web_sources,
+                        response_used=repair_result.web_search_used,
+                        response_queries=repair_result.web_search_queries,
+                        response_sources=repair_result.web_sources,
+                    )
                     repaired_content = (repair_result.content or "").strip()
                     if repaired_content:
                         if use_top_up_prompt:
@@ -1223,6 +1263,9 @@ def execute_ai_job(self, job_id: int) -> None:
                             tokens_in=tokens_in,
                             tokens_out=tokens_out,
                             estimated_cost=estimated_cost,
+                            web_search_used=web_search_used,
+                            web_search_queries=web_search_queries,
+                            web_sources=web_sources,
                         )
                         _publish_job_update(job)
                         _refresh_run_status(db, job_id)
@@ -1249,6 +1292,14 @@ def execute_ai_job(self, job_id: int) -> None:
                 tokens_in = (tokens_in or 0) + repair_result.tokens_in
                 tokens_out = (tokens_out or 0) + repair_result.tokens_out
                 estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=repair_result.web_search_used,
+                    response_queries=repair_result.web_search_queries,
+                    response_sources=repair_result.web_sources,
+                )
                 repaired_content = (repair_result.content or "").strip()
                 if repaired_content:
                     content = _sanitize_portfolio_event_content(job.prompt, repaired_content)
@@ -1264,6 +1315,9 @@ def execute_ai_job(self, job_id: int) -> None:
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             estimated_cost=estimated_cost,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
         )
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
@@ -1281,6 +1335,9 @@ def execute_ai_job(self, job_id: int) -> None:
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             estimated_cost=estimated_cost,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
         )
         logger.error("Job %s exhausted all retries", job_id)
 
@@ -1300,6 +1357,9 @@ def execute_ai_job(self, job_id: int) -> None:
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 estimated_cost=estimated_cost,
+                web_search_used=web_search_used,
+                web_search_queries=web_search_queries,
+                web_sources=web_sources,
             )
             return
 
@@ -1315,6 +1375,9 @@ def execute_ai_job(self, job_id: int) -> None:
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 estimated_cost=estimated_cost,
+                web_search_used=web_search_used,
+                web_search_queries=web_search_queries,
+                web_sources=web_sources,
             )
             logger.error("Job %s exhausted all retries after: %s", job_id, exc)
 

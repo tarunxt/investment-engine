@@ -43,6 +43,7 @@ import {
   type BullpenSnapshotHistory,
   type ScanMode,
   type ScanResult,
+  validateBullpenStaleFacts,
 } from "@/lib/bullpen-ai";
 import {
   buildBullpenLlmTargetId,
@@ -1883,6 +1884,12 @@ export default function BullpenAiPage() {
 
           analysisByQuestionId.forEach((item, questionId) => {
             const currentBreakdown = breakdownByQuestionId.get(questionId) || [];
+            const preflightEvidenceBlock =
+              promptInputs.preflightEvidenceBlocksByQuestionId[questionId] || null;
+            const staleFactValidation = validateBullpenStaleFacts(
+              preflightEvidenceBlock,
+              item.rationale || item.notes,
+            );
             currentBreakdown.push({
               provider: runJob.job.provider,
               model: runJob.job.model,
@@ -1900,6 +1907,11 @@ export default function BullpenAiPage() {
               keyEvidence: item.keyEvidence,
               redFlags: item.redFlags,
               rationale: item.rationale || item.notes,
+              webSearchUsed: runJob.job.web_search_used ?? null,
+              webSearchQueries: runJob.job.web_search_queries ?? [],
+              webSources: runJob.job.web_sources ?? [],
+              invalidStaleFact: staleFactValidation.invalidStaleFact,
+              staleFactReason: staleFactValidation.staleFactReason,
             });
             breakdownByQuestionId.set(questionId, currentBreakdown);
           });

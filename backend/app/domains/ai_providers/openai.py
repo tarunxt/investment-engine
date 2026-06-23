@@ -13,6 +13,10 @@ from app.domains.ai_providers.base import (
     BaseAIProvider,
 )
 from app.domains.ai_providers.tools import web_search as web_search_tool
+from app.domains.ai_providers.web_metadata import (
+    extract_web_search_sources,
+    merge_web_metadata,
+)
 
 MODEL_PRICING_PER_1M_TOKENS = {
     "gpt-4o-mini": {
@@ -119,6 +123,9 @@ class OpenAIProvider(BaseAIProvider):
             ),
             provider=self.provider_name,
             model=model,
+            web_search_used=False,
+            web_search_queries=[],
+            web_sources=[],
         )
 
     def _generate_with_tools(
@@ -151,6 +158,9 @@ class OpenAIProvider(BaseAIProvider):
         tokens_in = 0
         tokens_out = 0
         content = ""
+        web_search_used = False
+        web_search_queries: list[str] = []
+        web_sources: list[str] = []
 
         for _round in range(self._max_tool_rounds):
             response = self.client.chat.completions.create(
@@ -194,6 +204,15 @@ class OpenAIProvider(BaseAIProvider):
             for tool_call in tool_calls:
                 arguments = self._safe_tool_arguments(tool_call.function.arguments)
                 result = web_search_tool.execute(tool_call.function.name, arguments)
+                query = arguments.get("query")
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=True,
+                    response_queries=[query] if isinstance(query, str) and query.strip() else None,
+                    response_sources=extract_web_search_sources(result),
+                )
                 messages.append(
                     {
                         "role": "tool",
@@ -238,6 +257,9 @@ class OpenAIProvider(BaseAIProvider):
             ),
             provider=self.provider_name,
             model=model,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
         )
 
     @staticmethod

@@ -59,6 +59,22 @@ def _coerce_cost(value: object) -> float | None:
         return None
 
 
+def _normalize_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        candidate = item.strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        normalized.append(candidate)
+    return normalized
+
+
 def _resolve_recent_model_costs(
     rows: list[tuple[object, str | None, str | None, int]],
     *,
@@ -112,6 +128,9 @@ async def list_providers(
         compatible_models: list[str] = []
         model_estimated_cost_inr: dict[str, float] = {}
         model_estimated_cost_usd: dict[str, float] = {}
+        model_last_run_web_search_used: dict[str, bool | None] = {}
+        model_last_run_web_search_queries: dict[str, list[str]] = {}
+        model_last_run_web_sources: dict[str, list[str]] = {}
         provider_recent_costs: list[float] = []
 
         # Provider-level fallback from recent successful runs to avoid ₹0.00 for
@@ -174,6 +193,30 @@ async def list_providers(
                 prompt_text=prompt_text,
                 current_user_id=current_user.id,
             )
+            latest_web_stmt = (
+                select(Job.web_search_used, Job.web_search_queries, Job.web_sources)
+                .where(
+                    and_(
+                        Job.provider == provider["name"],
+                        Job.model == model,
+                        Job.status == JobStatus.COMPLETED,
+                    )
+                )
+                .order_by(desc(Job.id))
+                .limit(1)
+            )
+            latest_web_row = (await db.execute(latest_web_stmt)).first()
+            if latest_web_row is not None:
+                web_search_used, web_search_queries, web_sources = latest_web_row
+                model_last_run_web_search_used[model] = (
+                    bool(web_search_used) if web_search_used is not None else None
+                )
+                model_last_run_web_search_queries[model] = _normalize_string_list(
+                    web_search_queries
+                )
+                model_last_run_web_sources[model] = _normalize_string_list(
+                    web_sources
+                )
 
             if exact_prompt_cost is not None:
                 usd = exact_prompt_cost
@@ -193,4 +236,7 @@ async def list_providers(
         provider["model_estimated_cost_inr"] = model_estimated_cost_inr
         provider["model_compatibility"] = compatibility
         provider["compatible_models"] = compatible_models
+        provider["model_last_run_web_search_used"] = model_last_run_web_search_used
+        provider["model_last_run_web_search_queries"] = model_last_run_web_search_queries
+        provider["model_last_run_web_sources"] = model_last_run_web_sources
     return base

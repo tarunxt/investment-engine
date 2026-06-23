@@ -118,14 +118,31 @@ export interface PromptUpdate {
 
 // ==================== Provider Types ====================
 
+export type ProviderInternetAccessMode =
+  | "always_enabled"
+  | "tool_auto"
+  | "conditional"
+  | "none";
+
+export interface ProviderInternetAccess {
+  mode: ProviderInternetAccessMode;
+  label: string;
+  force_token?: string | null;
+  caveat?: string | null;
+}
+
 export interface ProviderInfo {
   name: string;
   models: string[];
   configured: boolean;
+  internet_access: ProviderInternetAccess;
   model_estimated_cost_usd?: Record<string, number>;
   model_estimated_cost_inr?: Record<string, number>;
   model_compatibility?: Record<string, { compatible: boolean; reason?: string | null }>;
   compatible_models?: string[];
+  model_last_run_web_search_used?: Record<string, boolean | null>;
+  model_last_run_web_search_queries?: Record<string, string[]>;
+  model_last_run_web_sources?: Record<string, string[]>;
 }
 
 export interface ProviderModelTarget {
@@ -284,6 +301,9 @@ export interface JobResponse {
   tokens_in?: number | null;
   tokens_out?: number | null;
   estimated_cost?: number | null;
+  web_search_used?: boolean | null;
+  web_search_queries?: string[] | null;
+  web_sources?: string[] | null;
   export_status?: string | null;
   export_error?: string | null;
   exported_at?: string | null;

@@ -257,6 +257,28 @@ test("Bullpen x AI LLM breakdown dialog shows the preflight evidence block", () 
     "utf8",
   );
 
-  assert.match(dialogSource, /Preflight Evidence Block/);
+  assert.match(dialogSource, /Preflight Evidence Block:/);
   assert.match(dialogSource, /buildBullpenQuestionPreflightEvidenceBlock/);
+  assert.match(dialogSource, /Web used:/);
+  assert.match(dialogSource, /Sources count:/);
+});
+
+test("Bullpen x AI stale fact validation excludes contradictory public-listing claims", async () => {
+  const { validateBullpenStaleFacts } = await loadBullpenAiModule();
+
+  const validation = validateBullpenStaleFacts(
+    [
+      "Preflight Evidence Block:",
+      "Verified current facts:",
+      "- detailed market context: SpaceX started trading on Nasdaq under ticker SPACEX on June 1, 2026.",
+      "- resolution source: Official exchange listings confirm the ticker is active.",
+      "",
+      "Instruction:",
+      "These facts are authoritative. Do not contradict them.",
+    ].join("\n"),
+    "SpaceX is still private and there is no IPO yet.",
+  );
+
+  assert.equal(validation.invalidStaleFact, true);
+  assert.match(validation.staleFactReason, /already confirmed the company is public/i);
 });

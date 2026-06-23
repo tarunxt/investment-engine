@@ -24,6 +24,9 @@ class JobResponse(BaseModel):
     tokens_in: Optional[int] = None
     tokens_out: Optional[int] = None
     estimated_cost: Optional[float] = None
+    web_search_used: Optional[bool] = None
+    web_search_queries: Optional[list[str]] = None
+    web_sources: Optional[list[str]] = None
     export_status: Optional[str] = None
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None

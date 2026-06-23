@@ -125,6 +125,11 @@ export type BullpenQuestionLlmBreakdownItem = {
   keyEvidence: string[];
   redFlags: string[];
   rationale: string | null;
+  webSearchUsed: boolean | null;
+  webSearchQueries: string[];
+  webSources: string[];
+  invalidStaleFact: boolean;
+  staleFactReason: string | null;
 };
 
 type BullpenLlmPromptQuestionPayload = {
@@ -736,6 +741,9 @@ export function createBullpenQuestionRow(
   const llmBreakdown = normalizeBullpenLlmBreakdown(
     analysisFields.llmBreakdown,
   );
+  const validLlmBreakdown = llmBreakdown.filter(
+    (entry) => !entry.invalidStaleFact,
+  );
   const topLevelOdds = normalizeOddsPair(
     analysisFields.llmYesOdds ?? null,
     analysisFields.llmNoOdds ?? null,
@@ -810,13 +818,13 @@ export function createBullpenQuestionRow(
     evidenceStatus:
       analysisFields.evidenceStatus ??
       pickBullpenConsensusLabel(
-        llmBreakdown.map((entry) => entry.evidenceStatus),
+        validLlmBreakdown.map((entry) => entry.evidenceStatus),
         "conflicting_evidence",
       ),
     eventState:
       analysisFields.eventState ??
       pickBullpenConsensusLabel(
-        llmBreakdown.map((entry) => entry.eventState),
+        validLlmBreakdown.map((entry) => entry.eventState),
         "conflicting",
       ),
     currentVsLlmOddsDifference,
@@ -922,6 +930,16 @@ function readStringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function readBooleanValue(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return null;
+}
+
 function readStringArrayValue(value: unknown) {
   if (Array.isArray(value)) {
     return value
@@ -931,6 +949,89 @@ function readStringArrayValue(value: unknown) {
 
   const directValue = readStringValue(value);
   return directValue ? [directValue] : [];
+}
+
+function extractBullpenPreflightFactMap(
+  preflightEvidenceBlock: string | null | undefined,
+) {
+  const block = readStringValue(preflightEvidenceBlock);
+  if (!block) return {} as Record<string, string>;
+
+  const factsSection = block
+    .split(/Verified current facts:\s*/i)[1]
+    ?.split(/\n\s*Instruction:\s*/i)[0];
+  if (!factsSection) return {} as Record<string, string>;
+
+  const factMap: Record<string, string> = {};
+  factsSection.split("\n").forEach((line) => {
+    const match = line.trim().match(/^- ([^:]+):\s*(.+)$/);
+    if (!match) return;
+    const key = normalizeQuestionLookupValue(match[1] || "");
+    const value = (match[2] || "").trim();
+    if (!key || !value || value === "Not supplied" || value === "Unknown") {
+      return;
+    }
+    factMap[key] = value;
+  });
+
+  return factMap;
+}
+
+const BULLPEN_STALE_FACT_RULES = [
+  {
+    id: "public_listing_already_confirmed",
+    factPattern:
+      /\b(went public|has gone public|is publicly traded|started trading|began trading|listed on|trades on (nasdaq|nyse|amex|tsx|lse|euronext|otc)|public ticker)\b/i,
+    contradictionPattern:
+      /\b(has not gone public|hasn't gone public|no ipo yet|still private|is still private|remains private|not publicly traded|no public ticker)\b/i,
+    reason:
+      "Rationale contradicted authoritative preflight facts that already confirmed the company is public.",
+  },
+] as const;
+
+export function validateBullpenStaleFacts(
+  preflightEvidenceBlock: string | null | undefined,
+  rationale: string | null | undefined,
+) {
+  const rationaleText = readStringValue(rationale);
+  if (!rationaleText) {
+    return {
+      invalidStaleFact: false,
+      staleFactReason: null,
+    };
+  }
+
+  const factMap = extractBullpenPreflightFactMap(preflightEvidenceBlock);
+  const authoritativeContext = [
+    factMap["detailed market context"],
+    factMap["resolution source"],
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
+
+  if (!authoritativeContext) {
+    return {
+      invalidStaleFact: false,
+      staleFactReason: null,
+    };
+  }
+
+  for (const rule of BULLPEN_STALE_FACT_RULES) {
+    if (
+      rule.factPattern.test(authoritativeContext) &&
+      rule.contradictionPattern.test(rationaleText)
+    ) {
+      return {
+        invalidStaleFact: true,
+        staleFactReason: rule.reason,
+      };
+    }
+  }
+
+  return {
+    invalidStaleFact: false,
+    staleFactReason: null,
+  };
 }
 
 function normalizeBullpenLlmBreakdown(
@@ -1003,6 +1104,23 @@ function normalizeBullpenLlmBreakdown(
           readStringValue(record.note) ||
           readStringValue(record.explanation) ||
           readStringValue(record.summary) ||
+          null,
+        webSearchUsed: readBooleanValue(
+          record.webSearchUsed ?? record.web_search_used,
+        ),
+        webSearchQueries: readStringArrayValue(
+          record.webSearchQueries ?? record.web_search_queries,
+        ),
+        webSources: readStringArrayValue(
+          record.webSources ?? record.web_sources,
+        ),
+        invalidStaleFact:
+          readBooleanValue(
+            record.invalidStaleFact ?? record.invalid_stale_fact,
+          ) ?? false,
+        staleFactReason:
+          readStringValue(record.staleFactReason) ||
+          readStringValue(record.stale_fact_reason) ||
           null,
       } satisfies BullpenQuestionLlmBreakdownItem;
     })
@@ -1222,6 +1340,7 @@ export function computeBullpenLlmConsensus(
   breakdown: BullpenQuestionLlmBreakdownItem[],
 ): BullpenLlmConsensus {
   const yesValues = breakdown
+    .filter((entry) => !entry.invalidStaleFact)
     .map((entry) => entry.llmYesOdds)
     .filter((value): value is number => typeof value === "number");
 
@@ -1298,13 +1417,26 @@ export function summarizeBullpenLlmNotes(
   breakdown: BullpenQuestionLlmBreakdownItem[],
 ) {
   if (breakdown.length === 0) return null;
-  if (breakdown.length === 1) return breakdown[0]?.rationale || null;
+  if (breakdown.length === 1) {
+    if (breakdown[0]?.invalidStaleFact) {
+      return (
+        breakdown[0].staleFactReason ||
+        "This model output was excluded from consensus because it contradicted authoritative preflight facts."
+      );
+    }
+    return breakdown[0]?.rationale || null;
+  }
   const consensus = computeBullpenLlmConsensus(breakdown);
+  const invalidCount = breakdown.filter((entry) => entry.invalidStaleFact).length;
   const disagreementNote =
     consensus.adjudicationRequired && consensus.llmSpreadYesOdds !== null
       ? ` High disagreement detected (${consensus.llmSpreadYesOdds.toFixed(2)}-point spread).`
       : "";
-  return `${breakdown.length} LLM outputs available.${disagreementNote} Click the LLM odds to inspect the full breakdown.`;
+  const invalidNote =
+    invalidCount > 0
+      ? ` ${invalidCount} output${invalidCount === 1 ? "" : "s"} excluded for stale-fact contradiction.`
+      : "";
+  return `${breakdown.length} LLM outputs available.${invalidNote}${disagreementNote} Click the LLM odds to inspect the full breakdown.`;
 }
 
 function formatBullpenDateTimeInTimeZone(date: Date, timeZone: string) {

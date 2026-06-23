@@ -29,6 +29,9 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertEqual(result.content, "clean response")
         self.assertEqual(result.tokens_in, 123)
         self.assertEqual(result.tokens_out, 45)
+        self.assertEqual(result.web_search_used, False)
+        self.assertEqual(result.web_search_queries, [])
+        self.assertEqual(result.web_sources, [])
         mock_client.responses.create.assert_called_once()
         mock_client.chat.completions.create.assert_not_called()
 
@@ -73,7 +76,7 @@ class OpenAIProviderTests(unittest.TestCase):
             ),
         ]
         openai_cls_mock.return_value = mock_client
-        web_search_execute_mock.return_value = '{"query":"NIFTY 50 live price today","results":[]}'
+        web_search_execute_mock.return_value = '{"query":"NIFTY 50 live price today","results":[{"title":"NSE","url":"https://www.nseindia.com"}]}'
 
         provider = OpenAIProvider()
         result = provider.generate(
@@ -84,6 +87,9 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertIn("## Summary", result.content)
         self.assertEqual(result.tokens_in, 380)
         self.assertEqual(result.tokens_out, 150)
+        self.assertEqual(result.web_search_used, True)
+        self.assertEqual(result.web_search_queries, ["NIFTY 50 live price today"])
+        self.assertEqual(result.web_sources, ["https://www.nseindia.com"])
         web_search_execute_mock.assert_called_once_with(
             "web_search",
             {"query": "NIFTY 50 live price today", "max_results": 3},
