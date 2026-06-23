@@ -2395,10 +2395,16 @@ export default function BullpenAiPage() {
       }));
 
       const summaryParts: string[] = [];
-      if (executedOrders.length > 0) {
+      if (executedOrders.length > 0 && failedOrders.length === 0) {
         summaryParts.push(
-          `Placed ${executedOrders.length} Bullpen order${executedOrders.length === 1 ? "" : "s"}.`,
+          `Investing was successful. Placed ${executedOrders.length} Bullpen order${executedOrders.length === 1 ? "" : "s"}.`,
         );
+      } else if (executedOrders.length > 0) {
+        summaryParts.push(
+          `Investing was partially successful. Placed ${executedOrders.length} Bullpen order${executedOrders.length === 1 ? "" : "s"}.`,
+        );
+      } else {
+        summaryParts.push("Investing was not successful. No Bullpen orders were placed.");
       }
       if (failedOrders.length > 0) {
         summaryParts.push(
@@ -2417,9 +2423,6 @@ export default function BullpenAiPage() {
           `${formatCountLabel(noLongerQualifiedCount, "selected event")} was skipped because the refreshed odds no longer met the pink-row thresholds.`,
         );
       }
-      if (summaryParts.length === 0) {
-        summaryParts.push("No Bullpen orders were placed.");
-      }
 
       setInvestmentMessagesByMode((current) => ({
         ...current,
@@ -2428,7 +2431,7 @@ export default function BullpenAiPage() {
     } catch (error) {
       setInvestmentMessagesByMode((current) => ({
         ...current,
-        [activeMode]: normalizeError(error),
+        [activeMode]: `Investing was not successful. ${normalizeError(error)}`,
       }));
     } finally {
       stopProgressPolling = true;
@@ -2941,12 +2944,6 @@ export default function BullpenAiPage() {
             </div>
           ) : null}
 
-          {investmentNotice ? (
-            <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 px-4 py-3 text-sm text-fuchsia-950">
-              {investmentNotice}
-            </div>
-          ) : null}
-
           {hasStaleResult ? (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
               Filters changed for this tab after the last saved scan. The table
@@ -3040,6 +3037,7 @@ export default function BullpenAiPage() {
               positionsError={positionsError}
               positionsLastUpdatedAt={positionsLastUpdatedAt}
               progressMessage={investmentProgress}
+              resultMessage={investmentNotice}
               selectedQuestionIds={selectedInvestmentQuestionIdSet}
             />
           ) : null}
