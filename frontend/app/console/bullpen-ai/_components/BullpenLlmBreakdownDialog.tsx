@@ -8,6 +8,12 @@ import {
   type BullpenQuestionRow,
 } from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
+import {
+  getInternetAccessBadgeText,
+  getInternetAccessTooltipText,
+  getResolvedProviderInternetAccess,
+  isWebCapableInternetAccess,
+} from "@/lib/llmInternetAccess";
 
 type BullpenLlmBreakdownDialogProps = {
   question: BullpenQuestionRow;
@@ -43,6 +49,16 @@ function formatDisagreementLabel(value: string | null) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function formatYesNo(value: boolean | null | undefined) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "—";
+}
+
+function isLikelyUrl(value: string) {
+  return /^https?:\/\//i.test(value);
 }
 
 function StatCard({
@@ -274,7 +290,7 @@ export function BullpenLlmBreakdownDialog({
           ) : null}
           <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Preflight Evidence Block
+              Preflight Evidence Block:
             </p>
             <p className="mt-2 text-xs leading-5 text-slate-500">
               This is the event evidence package sent into the latest Bullpen
@@ -316,7 +332,99 @@ export function BullpenLlmBreakdownDialog({
                         {formatDate(entry.timestamp)}
                       </td>
                       <td className="min-w-[320px] px-4 py-3 leading-6 text-slate-700">
-                        {entry.rationale || "—"}
+                        {(() => {
+                          const internetAccess = getResolvedProviderInternetAccess(
+                            entry.provider,
+                          );
+                          const webCapable =
+                            isWebCapableInternetAccess(internetAccess);
+                          const showNoSearchWarning =
+                            webCapable && entry.webSearchUsed === false;
+                          const showNoSourcesWarning =
+                            entry.webSearchUsed === true &&
+                            (entry.webSources?.length || 0) === 0;
+
+                          return (
+                            <div className="space-y-2">
+                              <p>{entry.rationale || "—"}</p>
+                              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span
+                                    title={getInternetAccessTooltipText(
+                                      internetAccess,
+                                    )}
+                                    className="rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700 ring-1 ring-sky-100"
+                                  >
+                                    {getInternetAccessBadgeText(internetAccess)}
+                                  </span>
+                                  {entry.invalidStaleFact ? (
+                                    <span className="rounded-full bg-rose-50 px-2 py-0.5 font-medium text-rose-700 ring-1 ring-rose-100">
+                                      Invalid stale fact
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div>Web used: {formatYesNo(entry.webSearchUsed)}</div>
+                                <div>
+                                  Sources count:{" "}
+                                  {(entry.webSources || []).length.toLocaleString()}
+                                </div>
+                                {entry.webSearchQueries.length > 0 ? (
+                                  <div>
+                                    Search queries:{" "}
+                                    {entry.webSearchQueries.join(" | ")}
+                                  </div>
+                                ) : null}
+                                {entry.webSources.length > 0 ? (
+                                  <div className="space-y-1">
+                                    <div>Sources:</div>
+                                    {entry.webSources.slice(0, 4).map((source) =>
+                                      isLikelyUrl(source) ? (
+                                        <a
+                                          key={source}
+                                          href={source}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="block break-all text-sky-700 underline decoration-sky-300 underline-offset-2"
+                                        >
+                                          {source}
+                                        </a>
+                                      ) : (
+                                        <div key={source} className="break-words">
+                                          {source}
+                                        </div>
+                                      ),
+                                    )}
+                                    {entry.webSources.length > 4 ? (
+                                      <div>
+                                        +{entry.webSources.length - 4} more source
+                                        {entry.webSources.length - 4 === 1
+                                          ? ""
+                                          : "s"}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {showNoSearchWarning ? (
+                                  <div className="font-medium text-amber-700">
+                                    Warning: This model can use live web data, but no
+                                    search was actually used in this run.
+                                  </div>
+                                ) : null}
+                                {showNoSourcesWarning ? (
+                                  <div className="font-medium text-amber-700">
+                                    Warning: Live web/search ran, but no sources were
+                                    returned or saved.
+                                  </div>
+                                ) : null}
+                                {entry.invalidStaleFact && entry.staleFactReason ? (
+                                  <div className="font-medium text-rose-700">
+                                    Excluded from consensus: {entry.staleFactReason}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}

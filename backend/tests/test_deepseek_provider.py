@@ -78,7 +78,7 @@ class DeepSeekProviderTests(unittest.TestCase):
             ),
         ]
         openai_cls_mock.return_value = mock_client
-        web_search_execute_mock.return_value = '{"query":"Indian stocks bullish breakout February 2025 brokerage upgrade","results":[]}'
+        web_search_execute_mock.return_value = '{"query":"Indian stocks bullish breakout February 2025 brokerage upgrade","results":[{"title":"Moneycontrol","url":"https://www.moneycontrol.com"}]}'
 
         provider = DeepSeekProvider()
         result = provider.generate(
@@ -93,6 +93,12 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(result.tokens_in, 300)
         self.assertEqual(result.tokens_out, 160)
         self.assertEqual(result.cost, 0.000087)
+        self.assertEqual(result.web_search_used, True)
+        self.assertEqual(
+            result.web_search_queries,
+            ["Indian stocks bullish breakout February 2025 brokerage upgrade"],
+        )
+        self.assertEqual(result.web_sources, ["https://www.moneycontrol.com"])
         web_search_execute_mock.assert_called_once_with(
             "web_search",
             {

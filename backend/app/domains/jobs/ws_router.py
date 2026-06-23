@@ -64,6 +64,9 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
                         "tokens_in": job.tokens_in,
                         "tokens_out": job.tokens_out,
                         "estimated_cost": job.estimated_cost,
+                        "web_search_used": job.web_search_used,
+                        "web_search_queries": job.web_search_queries,
+                        "web_sources": job.web_sources,
                         "updated_at": job.updated_at.isoformat() if job.updated_at else None,
                     }
                 )

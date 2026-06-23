@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+from typing import Literal, TypedDict
+
 from app.domains.ai_providers.anthropic import AnthropicProvider
 from app.domains.ai_providers.base import BaseAIProvider
 from app.domains.ai_providers.deepseek import DeepSeekProvider
 from app.domains.ai_providers.gemini import GeminiProvider
 from app.domains.ai_providers.openai import OpenAIProvider
+
+
+InternetAccessMode = Literal["always_enabled", "tool_auto", "conditional", "none"]
+
+
+class InternetAccessInfo(TypedDict, total=False):
+    mode: InternetAccessMode
+    label: str
+    force_token: str
+    caveat: str
 
 
 class ProviderFactory:
@@ -19,6 +31,41 @@ class ProviderFactory:
         GeminiProvider.provider_name: GeminiProvider,
         OpenAIProvider.provider_name: OpenAIProvider,
         DeepSeekProvider.provider_name: DeepSeekProvider,
+    }
+    _provider_internet_access: dict[str, InternetAccessInfo] = {
+        "openai": {
+            "mode": "conditional",
+            "label": "Web if forced",
+            "force_token": "[ENABLE_WEB_SEARCH]",
+            "caveat": (
+                "The OpenAI adapter only enables live web tools when the prompt asks for "
+                "current context or explicitly includes [ENABLE_WEB_SEARCH]."
+            ),
+        },
+        "gemini": {
+            "mode": "always_enabled",
+            "label": "Live web",
+            "caveat": (
+                "The Gemini adapter attaches Google Search by default for normal runs. "
+                "Repair prompts disable search to keep output formatting deterministic."
+            ),
+        },
+        "deepseek": {
+            "mode": "tool_auto",
+            "label": "Web tool available",
+            "caveat": (
+                "The DeepSeek adapter exposes a custom web_search tool with tool_choice=auto. "
+                "Whether search actually ran must be verified from the saved run metadata."
+            ),
+        },
+        "anthropic": {
+            "mode": "none",
+            "label": "No live web",
+            "caveat": (
+                "The Anthropic adapter currently sends plain messages.create requests "
+                "without any web or search tools."
+            ),
+        },
     }
     # Runtime compatibility snapshot for currently configured upstream APIs.
     # Models not listed here are treated as compatible by default.
@@ -78,9 +125,23 @@ class ProviderFactory:
                 "name": name,
                 "models": provider_class.supported_models,
                 "configured": provider_class.is_configured(),
+                "internet_access": cls.get_provider_internet_access(name),
             }
             for name, provider_class in cls._providers.items()
         ]
+
+    @classmethod
+    def get_provider_internet_access(cls, provider_name: str) -> InternetAccessInfo:
+        key = provider_name.strip().lower()
+        access = cls._provider_internet_access.get(
+            key,
+            {
+                "mode": "none",
+                "label": "No live web",
+                "caveat": "No live web metadata is configured for this provider.",
+            },
+        )
+        return dict(access)
 
     @classmethod
     def model_compatibility(cls, provider_name: str, model: str) -> tuple[bool, str | None]:

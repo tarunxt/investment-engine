@@ -11,6 +11,10 @@ from openai import OpenAI
 from app.core.config import settings
 from app.domains.ai_providers.base import AIProviderResponse, BaseAIProvider
 from app.domains.ai_providers.tools import web_search as web_search_tool
+from app.domains.ai_providers.web_metadata import (
+    extract_web_search_sources,
+    merge_web_metadata,
+)
 
 logger = logging.getLogger("app")
 
@@ -210,13 +214,15 @@ class DeepSeekProvider(BaseAIProvider):
         tool_trace: str,
         model: str,
         output_kind: str,
-    ) -> tuple[str, dict[str, int]]:
+    ) -> tuple[str, dict[str, int], list[str], list[str]]:
         empty_token_usage = self._token_usage_from_response_usage(None)
         search_calls = _extract_dsml_web_search_calls(tool_trace)
         if not search_calls:
-            return tool_trace, empty_token_usage
+            return tool_trace, empty_token_usage, [], []
 
         search_payloads: list[dict[str, str | int]] = []
+        search_queries: list[str] = []
+        search_sources: list[str] = []
         seen_queries: set[str] = set()
         for call in search_calls:
             query = str(call["query"]).strip()
@@ -230,6 +236,8 @@ class DeepSeekProvider(BaseAIProvider):
                     "max_results": int(call["max_results"]),
                 },
             )
+            search_queries.append(query)
+            search_sources.extend(extract_web_search_sources(result))
             search_payloads.append(
                 {
                     "query": query,
@@ -241,7 +249,7 @@ class DeepSeekProvider(BaseAIProvider):
                 break
 
         if not search_payloads:
-            return tool_trace, empty_token_usage
+            return tool_trace, empty_token_usage, [], []
 
         if output_kind == "json":
             recovery_instruction = (
@@ -289,7 +297,7 @@ class DeepSeekProvider(BaseAIProvider):
             recovered = (
                 getattr(choices[0].message, "content", "") or ""
             ).strip() or tool_trace
-        return recovered, token_usage
+        return recovered, token_usage, search_queries, search_sources
 
     def generate(self, *, prompt: str, model: str) -> AIProviderResponse:
         if model not in self.supported_models:
@@ -315,6 +323,9 @@ class DeepSeekProvider(BaseAIProvider):
         total_cache_hit_tokens = 0
         total_cache_miss_tokens = 0
         content = ""
+        web_search_used = False
+        web_search_queries: list[str] = []
+        web_sources: list[str] = []
 
         logger.info(f"DeepSeek request with kwargs: {kwargs}")
         for round_num in range(_MAX_TOOL_ROUNDS):
@@ -373,6 +384,15 @@ class DeepSeekProvider(BaseAIProvider):
                 except json.JSONDecodeError:
                     args = {}
                 result = web_search_tool.execute(tc.function.name, args)
+                query = args.get("query")
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=True,
+                    response_queries=[query] if isinstance(query, str) and query.strip() else None,
+                    response_sources=extract_web_search_sources(result),
+                )
                 messages.append(
                     {
                         "role": "tool",
@@ -412,7 +432,12 @@ class DeepSeekProvider(BaseAIProvider):
 
         cleaned = content.strip()
         if _looks_like_tool_trace(cleaned):
-            recovered, recovered_token_usage = self._recover_from_dsml_tool_trace(
+            (
+                recovered,
+                recovered_token_usage,
+                recovered_queries,
+                recovered_sources,
+            ) = self._recover_from_dsml_tool_trace(
                 prompt=prompt,
                 tool_trace=cleaned,
                 model=model,
@@ -423,6 +448,14 @@ class DeepSeekProvider(BaseAIProvider):
             total_tokens_out += recovered_token_usage["tokens_out"]
             total_cache_hit_tokens += recovered_token_usage["cache_hit_tokens"]
             total_cache_miss_tokens += recovered_token_usage["cache_miss_tokens"]
+            web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                web_search_used,
+                web_search_queries,
+                web_sources,
+                response_used=bool(recovered_queries or recovered_sources),
+                response_queries=recovered_queries,
+                response_sources=recovered_sources,
+            )
 
         if output_kind == "json":
             normalized_json = _normalize_json_output_text(cleaned)
@@ -533,6 +566,9 @@ class DeepSeekProvider(BaseAIProvider):
             ),
             provider=self.provider_name,
             model=model,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
         )
 
     @staticmethod

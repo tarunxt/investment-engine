@@ -53,6 +53,9 @@ class FakeRepo:
         tokens_in=None,
         tokens_out=None,
         estimated_cost=None,
+        web_search_used=None,
+        web_search_queries=None,
+        web_sources=None,
     ):
         job.status = status
         if response is not None:
@@ -65,6 +68,12 @@ class FakeRepo:
             job.tokens_out = tokens_out
         if estimated_cost is not None:
             job.estimated_cost = estimated_cost
+        if web_search_used is not None:
+            job.web_search_used = web_search_used
+        if web_search_queries is not None:
+            job.web_search_queries = web_search_queries
+        if web_sources is not None:
+            job.web_sources = web_sources
 
 
 class ProviderFactoryTests(unittest.TestCase):
@@ -126,6 +135,19 @@ class ProviderFactoryTests(unittest.TestCase):
         target = ProviderFactory.resolve_default_target("openai", "gpt-4o-mini")
 
         self.assertEqual(target, ("openai", "gpt-4o-mini"))
+
+    def test_list_providers_includes_internet_access_metadata(self):
+        providers = {item["name"]: item for item in ProviderFactory.list_providers()}
+
+        self.assertEqual(providers["openai"]["internet_access"]["mode"], "conditional")
+        self.assertEqual(providers["gemini"]["internet_access"]["mode"], "always_enabled")
+        self.assertEqual(providers["deepseek"]["internet_access"]["mode"], "tool_auto")
+        self.assertEqual(providers["anthropic"]["internet_access"]["mode"], "none")
+
+    def test_get_provider_internet_access_returns_force_token_for_openai(self):
+        internet_access = ProviderFactory.get_provider_internet_access("openai")
+
+        self.assertEqual(internet_access["force_token"], "[ENABLE_WEB_SEARCH]")
 
 
 class ProviderCostSelectionTests(unittest.TestCase):
@@ -229,6 +251,48 @@ class GeminiProviderConfigTests(unittest.TestCase):
         config = stream_mock.call_args.kwargs["config"]
         self.assertIsNone(config.tools)
 
+    def test_generate_captures_grounded_web_metadata(self):
+        provider = GeminiProvider()
+        stream_mock = MagicMock(
+            return_value=[
+                SimpleNamespace(
+                    text="Spain won Euro 2024.",
+                    usage_metadata=SimpleNamespace(
+                        prompt_token_count=120,
+                        candidates_token_count=40,
+                        tool_use_prompt_token_count=18,
+                    ),
+                    candidates=[
+                        SimpleNamespace(
+                            grounding_metadata=SimpleNamespace(
+                                web_search_queries=["UEFA Euro 2024 winner"],
+                                grounding_chunks=[
+                                    SimpleNamespace(
+                                        web=SimpleNamespace(
+                                            uri="https://www.uefa.com/euro2024/",
+                                            title="UEFA",
+                                        )
+                                    )
+                                ],
+                            )
+                        )
+                    ],
+                )
+            ]
+        )
+        provider.client = SimpleNamespace(
+            models=SimpleNamespace(generate_content_stream=stream_mock),
+        )
+
+        result = provider._generate_once(
+            prompt="Who won Euro 2024?",
+            model="gemini-2.5-flash",
+        )
+
+        self.assertEqual(result.web_search_used, True)
+        self.assertEqual(result.web_search_queries, ["UEFA Euro 2024 winner"])
+        self.assertEqual(result.web_sources, ["https://www.uefa.com/euro2024/"])
+
 
 class ExecuteAIJobTests(unittest.TestCase):
     @patch("app.domains.jobs.tasks._refresh_run_status")
@@ -255,6 +319,9 @@ class ExecuteAIJobTests(unittest.TestCase):
             tokens_in=None,
             tokens_out=None,
             estimated_cost=None,
+            web_search_used=None,
+            web_search_queries=None,
+            web_sources=None,
         )
         fake_db = FakeDB()
         fake_repo = FakeRepo(job)
@@ -270,6 +337,9 @@ class ExecuteAIJobTests(unittest.TestCase):
             cost=0.000154,
             provider="openai",
             model="gpt-4o-mini",
+            web_search_used=True,
+            web_search_queries=["AAPL latest earnings date"],
+            web_sources=["https://investor.apple.com"],
         )
         provider_factory_create_mock.return_value = provider
 
@@ -280,6 +350,9 @@ class ExecuteAIJobTests(unittest.TestCase):
         self.assertEqual(job.tokens_in, 321)
         self.assertEqual(job.tokens_out, 123)
         self.assertEqual(job.estimated_cost, 0.000154)
+        self.assertEqual(job.web_search_used, True)
+        self.assertEqual(job.web_search_queries, ["AAPL latest earnings date"])
+        self.assertEqual(job.web_sources, ["https://investor.apple.com"])
         self.assertIsNone(job.error_message)
         self.assertTrue(fake_db.closed)
 
@@ -309,6 +382,9 @@ class ExecuteAIJobTests(unittest.TestCase):
             tokens_in=None,
             tokens_out=None,
             estimated_cost=None,
+            web_search_used=None,
+            web_search_queries=None,
+            web_sources=None,
         )
         fake_db = FakeDB()
         fake_repo = FakeRepo(job)

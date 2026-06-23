@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -12,6 +12,9 @@ class AIProviderResponse:
     cost: float
     provider: str
     model: str
+    web_search_used: bool = False
+    web_search_queries: list[str] = field(default_factory=list)
+    web_sources: list[str] = field(default_factory=list)
 
 
 class BaseAIProvider(ABC):

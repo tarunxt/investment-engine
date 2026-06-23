@@ -11,6 +11,10 @@ from app.domains.ai_providers.base import (
     AIProviderResponse,
     BaseAIProvider,
 )
+from app.domains.ai_providers.web_metadata import (
+    dedupe_strings,
+    merge_web_metadata,
+)
 
 MODEL_PRICING_PER_1M_TOKENS = {
     "gemini-2.5-flash": {
@@ -99,6 +103,31 @@ def _should_rotate_key(exc: Exception) -> bool:
     return any(marker in msg for marker in transient_markers)
 
 
+def _extract_grounding_web_metadata(chunk: object) -> tuple[list[str], list[str]]:
+    queries: list[str] = []
+    sources: list[str] = []
+
+    for candidate in getattr(chunk, "candidates", None) or []:
+        grounding_metadata = getattr(candidate, "grounding_metadata", None)
+        if grounding_metadata is None:
+            continue
+
+        queries.extend(getattr(grounding_metadata, "web_search_queries", None) or [])
+
+        for grounding_chunk in getattr(grounding_metadata, "grounding_chunks", None) or []:
+            web_chunk = getattr(grounding_chunk, "web", None)
+            if web_chunk is None:
+                continue
+            uri = getattr(web_chunk, "uri", None)
+            title = getattr(web_chunk, "title", None)
+            if isinstance(uri, str) and uri.strip():
+                sources.append(uri)
+            elif isinstance(title, str) and title.strip():
+                sources.append(title)
+
+    return dedupe_strings(queries), dedupe_strings(sources)
+
+
 class GeminiProvider(BaseAIProvider):
     provider_name = "gemini"
 
@@ -175,6 +204,9 @@ class GeminiProvider(BaseAIProvider):
         max_chars = MAX_RESPONSE_CHARS
 
         usage_metadata = None
+        web_search_used = False
+        web_search_queries: list[str] = []
+        web_sources: list[str] = []
 
         stream = self.client.models.generate_content_stream(
             model=model,
@@ -202,6 +234,16 @@ class GeminiProvider(BaseAIProvider):
             if metadata:
                 usage_metadata = metadata
 
+            chunk_queries, chunk_sources = _extract_grounding_web_metadata(chunk)
+            web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                web_search_used,
+                web_search_queries,
+                web_sources,
+                response_used=bool(chunk_queries or chunk_sources),
+                response_queries=chunk_queries,
+                response_sources=chunk_sources,
+            )
+
         full_text = "".join(full_text_parts)
 
         tokens_in = int(
@@ -221,6 +263,16 @@ class GeminiProvider(BaseAIProvider):
             )
             or 0
         )
+        tool_use_prompt_tokens = int(
+            getattr(
+                usage_metadata,
+                "tool_use_prompt_token_count",
+                0,
+            )
+            or 0
+        )
+        if tool_use_prompt_tokens > 0:
+            web_search_used = True
 
         return AIProviderResponse(
             content=full_text.strip(),
@@ -233,6 +285,9 @@ class GeminiProvider(BaseAIProvider):
             ),
             provider=self.provider_name,
             model=model,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
         )
 
     @staticmethod

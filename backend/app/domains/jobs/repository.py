@@ -31,6 +31,9 @@ class JobRepository(Protocol):
         tokens_in: int | None = None,
         tokens_out: int | None = None,
         estimated_cost: float | None = None,
+        web_search_used: bool | None = None,
+        web_search_queries: list[str] | None = None,
+        web_sources: list[str] | None = None,
     ) -> None: ...
 
 
@@ -91,6 +94,9 @@ class PostgresJobRepository:
         tokens_in: int | None = None,
         tokens_out: int | None = None,
         estimated_cost: float | None = None,
+        web_search_used: bool | None = None,
+        web_search_queries: list[str] | None = None,
+        web_sources: list[str] | None = None,
     ) -> None:
         job = await self.get(job_id)
         if not job:
@@ -106,6 +112,12 @@ class PostgresJobRepository:
             job.tokens_out = tokens_out
         if estimated_cost is not None:
             job.estimated_cost = estimated_cost
+        if web_search_used is not None:
+            job.web_search_used = web_search_used
+        if web_search_queries is not None:
+            job.web_search_queries = web_search_queries
+        if web_sources is not None:
+            job.web_sources = web_sources
         await self._session.flush()
 
 
@@ -130,6 +142,9 @@ class SyncJobRepository:
         tokens_in: int | None = None,
         tokens_out: int | None = None,
         estimated_cost: float | None = None,
+        web_search_used: bool | None = None,
+        web_search_queries: list[str] | None = None,
+        web_sources: list[str] | None = None,
     ) -> None:
         job.status = status
         if response is not None:
@@ -142,6 +157,12 @@ class SyncJobRepository:
             job.tokens_out = tokens_out
         if estimated_cost is not None:
             job.estimated_cost = estimated_cost
+        if web_search_used is not None:
+            job.web_search_used = web_search_used
+        if web_search_queries is not None:
+            job.web_search_queries = web_search_queries
+        if web_sources is not None:
+            job.web_sources = web_sources
         self._session.commit()
 
     def update_export_state(
