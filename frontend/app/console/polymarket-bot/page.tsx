@@ -566,7 +566,32 @@ const AWS_EC2_TERMINAL_URL =
 const DEFAULT_EC2_COMMANDS = [
   "sudo -u investor -H bullpen login",
   "bullpen status",
+  "cd /home/deploy/apps/myapp sudo docker compose --env-file .env.prod -f docker-compose.prod.yml exec frontend sh -lc 'HOME=/var/lib/credx/bullpen /usr/local/bin/bullpen login'",
 ];
+const EC2_COMMANDS_STORAGE_KEY = "polymarketBot.ec2Commands";
+
+function getInitialEc2Commands() {
+  if (typeof window === "undefined") return DEFAULT_EC2_COMMANDS;
+
+  try {
+    const savedCommands = window.localStorage.getItem(EC2_COMMANDS_STORAGE_KEY);
+    if (!savedCommands) return DEFAULT_EC2_COMMANDS;
+
+    const parsedCommands = JSON.parse(savedCommands);
+    if (!Array.isArray(parsedCommands)) return DEFAULT_EC2_COMMANDS;
+
+    const cleanedCommands = parsedCommands
+      .filter((command): command is string => typeof command === "string")
+      .map((command) => command.trim())
+      .filter(Boolean);
+
+    return Array.from(new Set([...DEFAULT_EC2_COMMANDS, ...cleanedCommands]));
+  } catch (error) {
+    console.warn("Unable to load saved EC2 commands", error);
+    return DEFAULT_EC2_COMMANDS;
+  }
+}
+
 const TABLE_PAGE_SIZE = 10;
 const STATE_REFRESH_INTERVAL_MS = 60_000;
 const COPIED_TRADERS_ANALYSIS_PAGE_SIZE = 10;
@@ -1496,7 +1521,7 @@ export default function PolymarketBotPage() {
     "main" | "analysis" | "settings"
   >("main");
   const [ec2CommandMenuOpen, setEc2CommandMenuOpen] = useState(false);
-  const [ec2Commands, setEc2Commands] = useState(DEFAULT_EC2_COMMANDS);
+  const [ec2Commands, setEc2Commands] = useState(getInitialEc2Commands);
   const [newEc2Command, setNewEc2Command] = useState("");
   const [editingEc2CommandIndex, setEditingEc2CommandIndex] = useState<
     number | null
@@ -1508,6 +1533,17 @@ export default function PolymarketBotPage() {
   const [lastStateRefreshAt, setLastStateRefreshAt] = useState<number>(() =>
     Date.now(),
   );
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        EC2_COMMANDS_STORAGE_KEY,
+        JSON.stringify(ec2Commands),
+      );
+    } catch (error) {
+      console.warn("Unable to save EC2 commands", error);
+    }
+  }, [ec2Commands]);
+
   const [accountDrafts, setAccountDrafts] = useState<
     Record<string, TrackedAccountDraft>
   >({});
