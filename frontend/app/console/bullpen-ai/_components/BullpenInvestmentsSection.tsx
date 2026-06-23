@@ -40,6 +40,7 @@ type BullpenInvestmentsSectionProps = {
   positionsError: string | null;
   positionsLastUpdatedAt: string | null;
   progressMessage: string | null;
+  resultMessage: string | null;
   selectedQuestionIds: Set<string>;
 };
 
@@ -251,6 +252,7 @@ export function BullpenInvestmentsSection({
   positionsError,
   positionsLastUpdatedAt,
   progressMessage,
+  resultMessage,
   selectedQuestionIds,
 }: BullpenInvestmentsSectionProps) {
   const [breakdownQuestion, setBreakdownQuestion] =
@@ -383,6 +385,11 @@ export function BullpenInvestmentsSection({
               {progressMessage ? (
                 <p className="max-w-xl text-xs leading-5 text-slate-600">
                   {progressMessage}
+                </p>
+              ) : null}
+              {!isInvesting && resultMessage ? (
+                <p className="max-w-3xl rounded-xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-xs font-semibold leading-5 text-fuchsia-950">
+                  {resultMessage}
                 </p>
               ) : null}
             </div>

@@ -121,6 +121,28 @@ test("Bullpen x AI manual invest flow stays wired to the Polymarket manual-inves
 });
 
 
+test("Bullpen x AI investment result is shown below the Invest button", () => {
+  const bullpenAiPageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const investmentsSectionSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenInvestmentsSection.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(bullpenAiPageSource, /Investing was successful/);
+  assert.match(bullpenAiPageSource, /Investing was partially successful/);
+  assert.match(bullpenAiPageSource, /Investing was not successful/);
+  assert.match(bullpenAiPageSource, /resultMessage=\{investmentNotice\}/);
+  assert.match(investmentsSectionSource, /resultMessage: string \| null/);
+  assert.match(investmentsSectionSource, /!isInvesting && resultMessage/);
+  assert.match(investmentsSectionSource, /\{resultMessage\}/);
+});
+
 test("Bullpen x AI scan defaults exclude tweet counts", async () => {
   const { DEFAULT_BULLPEN_SCAN_FILTERS } = await loadBullpenAiModule();
 
