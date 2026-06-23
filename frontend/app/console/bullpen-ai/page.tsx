@@ -57,7 +57,6 @@ import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type {
-  PolymarketBotState,
   PolymarketManualInvestOrderRequest,
   PolymarketManualInvestResponse,
   ProviderModelTarget,
@@ -72,12 +71,15 @@ import {
 import { BullpenInvestmentsSection } from "./_components/BullpenInvestmentsSection";
 import { BullpenPromptEditorDialog } from "./_components/BullpenPromptEditorDialog";
 import {
-  applyBullpenPositionMarketData,
   buildClaimableBullpenSignature,
   buildBullpenCloseTimeFromDateOnly,
   calculateBullpenPositionReturnsPerDay,
   type BullpenActivePositionView,
+  type BullpenLiveHealth,
+  type BullpenLiveSnapshot,
+  type BullpenPositionsFallback,
   type BullpenPositionsResponse,
+  type BullpenPositionsSource,
 } from "@/lib/bullpenPositions";
 
 const TABS: {
@@ -975,6 +977,10 @@ export default function BullpenAiPage() {
   const [hasLoadedPositions, setHasLoadedPositions] = useState(false);
   const [isLoadingPositions, setIsLoadingPositions] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
+  const [positionsFallback, setPositionsFallback] =
+    useState<BullpenPositionsFallback | null>(null);
+  const [positionsHealth, setPositionsHealth] =
+    useState<BullpenLiveHealth | null>(null);
   const [claimPositionsError, setClaimPositionsError] = useState<string | null>(
     null,
   );
@@ -985,6 +991,10 @@ export default function BullpenAiPage() {
   const [positionsLastUpdatedAt, setPositionsLastUpdatedAt] = useState<
     string | null
   >(null);
+  const [positionsSource, setPositionsSource] =
+    useState<BullpenPositionsSource | null>(null);
+  const [lastSuccessfulLiveSnapshot, setLastSuccessfulLiveSnapshot] =
+    useState<BullpenLiveSnapshot | null>(null);
   const [scanningMode, setScanningMode] = useState<ScanMode | null>(null);
   const [llmRunningMode, setLlmRunningMode] = useState<ScanMode | null>(null);
   const [llmRunStartedAtByMode, setLlmRunStartedAtByMode] = useState<
@@ -1516,44 +1526,15 @@ export default function BullpenAiPage() {
     } satisfies BullpenActivePositionView;
   }
 
-  function buildActivePositionViews(
-    openPositions: PolymarketBotState["open_positions"],
-    marketUpdates: Record<string, PolymarketMarketRefresh>,
+  function normalizeLiveSnapshot(
+    snapshot: BullpenLiveSnapshot | null | undefined,
   ) {
-    return openPositions
-      .filter((position) => position.shares > 0)
-      .map((position) => {
-        const marketUpdate = marketUpdates[position.key];
-        const closeTime = resolvePositionCloseTime(position.market_title);
-        const basePosition = {
-          key: position.key,
-          marketId: position.market_id,
-          marketTitle: position.market_title,
-          outcome: position.outcome,
-          shares: position.shares,
-          averagePrice: Number(position.average_price.toFixed(4)),
-          costBasis: position.cost_basis,
-          yesOdds: marketUpdate?.yesOdds ?? null,
-          noOdds: marketUpdate?.noOdds ?? null,
-          currentPrice: null,
-          currentValue: null,
-          unrealizedPnl: null,
-          unrealizedPnlPercent: null,
-          marketUrl: marketUpdate?.marketUrl ?? null,
-          closeTime,
-          isClaimable: false,
-          claimableValue: null,
-          returnsPerDay: calculateBullpenPositionReturnsPerDay({
-            closeTime,
-            currentPrice: null,
-          }),
-          rules: marketUpdate?.rules ?? null,
-          marketContext: marketUpdate?.marketContext ?? null,
-          resolutionSource: marketUpdate?.resolutionSource ?? null,
-        } satisfies BullpenActivePositionView;
+    if (!snapshot) return null;
 
-        return applyBullpenPositionMarketData(basePosition, marketUpdate || {});
-      });
+    return {
+      ...snapshot,
+      positions: snapshot.positions.map(applyResolvedPositionCloseTime),
+    } satisfies BullpenLiveSnapshot;
   }
 
   async function claimBullpenResolvedPositions({
@@ -1585,11 +1566,11 @@ export default function BullpenAiPage() {
       );
 
       try {
-        const state = await apiService.polymarketLiveRedeem();
+        await apiService.polymarketLiveRedeem();
         setClaimPositionsStatus(
           "Bullpen redeem/claim submitted. Refreshing the popup with the latest wallet data.",
         );
-        await refreshBullpenPositions(state, { suppressAutoClaim: true });
+        await refreshBullpenPositions({ suppressAutoClaim: true });
         setClaimPositionsStatus(
           automatic
             ? "Bullpen automatically submitted the resolved positions for claim."
@@ -1615,10 +1596,7 @@ export default function BullpenAiPage() {
     }
   }
 
-  async function refreshBullpenPositions(
-    stateOverride?: PolymarketBotState,
-    options?: { suppressAutoClaim?: boolean },
-  ) {
+  async function refreshBullpenPositions(options?: { suppressAutoClaim?: boolean }) {
     setIsLoadingPositions(true);
     setPositionsError(null);
 
@@ -1628,21 +1606,37 @@ export default function BullpenAiPage() {
       });
       const livePositionsPayload =
         (await livePositionsResponse.json()) as BullpenPositionsResponse;
-      if (!livePositionsResponse.ok) {
-        throw new Error(
-          livePositionsPayload.error ||
-            "Failed to refresh active Bullpen wallet positions.",
-        );
-      }
-
+      const normalizedLiveSnapshot = normalizeLiveSnapshot(
+        livePositionsPayload.lastSuccessfulLiveSnapshot,
+      );
       const livePositions = (livePositionsPayload.positions || []).map(
         applyResolvedPositionCloseTime,
       );
+
       setActivePositions(livePositions);
       setHasLoadedPositions(true);
+      setPositionsFallback(livePositionsPayload.fallback || null);
+      setPositionsHealth(livePositionsPayload.health || null);
+      setPositionsSource(livePositionsPayload.positionsSource || null);
+      setLastSuccessfulLiveSnapshot(normalizedLiveSnapshot);
       setPositionsLastUpdatedAt(
-        livePositionsPayload.fetchedAt || new Date().toISOString(),
+        livePositionsPayload.fetchedAt ||
+          normalizedLiveSnapshot?.fetchedAt ||
+          new Date().toISOString(),
       );
+      setPositionsError(
+        livePositionsPayload.error ||
+          (!livePositionsPayload.liveAvailable && livePositions.length === 0
+            ? livePositionsPayload.health?.message ||
+              "Live Bullpen wallet positions are unavailable right now."
+            : null),
+      );
+
+      if (!livePositionsPayload.liveAvailable) {
+        lastAutoClaimSignatureRef.current = null;
+        return;
+      }
+
       const claimableSignature = buildClaimableBullpenSignature(livePositions);
       if (!claimableSignature) {
         lastAutoClaimSignatureRef.current = null;
@@ -1656,71 +1650,14 @@ export default function BullpenAiPage() {
           positions: livePositions,
         });
       }
-    } catch (livePositionsError) {
-      try {
-        const state = stateOverride ?? (await apiService.polymarketState());
-        const openPositions = state.open_positions.filter(
-          (position) => position.shares > 0,
-        );
-
-        if (openPositions.length === 0) {
-          setActivePositions([]);
-          setHasLoadedPositions(true);
-          setPositionsLastUpdatedAt(new Date().toISOString());
-          lastAutoClaimSignatureRef.current = null;
-          setPositionsError(
-            `Live Bullpen wallet positions are unavailable right now, so the dashboard is showing the tracked-position fallback: ${normalizeError(
-              livePositionsError,
-            )}`,
-          );
-          return;
-        }
-
-        const response = await fetch("/api/bullpen-ai/current-odds", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          cache: "no-store",
-          body: JSON.stringify({
-            questions: openPositions.map((position) => ({
-              id: position.key,
-              slug: position.market_id,
-              marketUrl: null,
-              question: position.market_title,
-            })),
-          }),
-        });
-        const payload = (await response.json()) as BullpenCurrentOddsRefreshResponse;
-        if (!response.ok) {
-          throw new Error(
-            payload.error || "Failed to refresh active Bullpen positions.",
-          );
-        }
-
+      if (!livePositionsResponse.ok) {
         lastAutoClaimSignatureRef.current = null;
-        setActivePositions(
-          buildActivePositionViews(openPositions, payload.markets || {}).map(
-            applyResolvedPositionCloseTime,
-          ),
-        );
-        setHasLoadedPositions(true);
-        setPositionsLastUpdatedAt(new Date().toISOString());
-        setPositionsError(
-          `Live Bullpen wallet positions are unavailable right now, so the dashboard is showing the tracked-position fallback: ${normalizeError(
-              livePositionsError,
-          )}`,
-        );
-      } catch (fallbackError) {
-        setHasLoadedPositions(true);
-        setPositionsError(
-          `Failed to load live Bullpen wallet positions (${normalizeError(
-            livePositionsError,
-          )}) and the tracked-position fallback also failed (${normalizeError(
-            fallbackError,
-          )}).`,
-        );
       }
+    } catch (error) {
+      setHasLoadedPositions(true);
+      setPositionsError(
+        `Failed to load Bullpen wallet positions: ${normalizeError(error)}.`,
+      );
     } finally {
       setIsLoadingPositions(false);
     }
@@ -2381,7 +2318,7 @@ export default function BullpenAiPage() {
         await apiService.polymarketManualInvest({
           orders: selectedOrders,
         });
-      void refreshBullpenPositions(response.state);
+      void refreshBullpenPositions();
       const executedOrders = response.orders.filter(
         (order) => order.status === "executed",
       );
@@ -3023,6 +2960,7 @@ export default function BullpenAiPage() {
               isInvesting={isInvesting}
               isLoadingPositions={isLoadingPositions}
               isRefreshingCurrentOdds={isRefreshingCurrentOdds}
+              lastSuccessfulLiveSnapshot={lastSuccessfulLiveSnapshot}
               onClaimNow={() => {
                 void claimBullpenResolvedPositions();
               }}
@@ -3035,7 +2973,10 @@ export default function BullpenAiPage() {
               onSelectAll={selectAllInvestmentCandidates}
               onClearAll={clearInvestmentCandidates}
               positionsError={positionsError}
+              positionsFallback={positionsFallback}
+              positionsHealth={positionsHealth}
               positionsLastUpdatedAt={positionsLastUpdatedAt}
+              positionsSource={positionsSource}
               progressMessage={investmentProgress}
               resultMessage={investmentNotice}
               selectedQuestionIds={selectedInvestmentQuestionIdSet}

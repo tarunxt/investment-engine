@@ -11,7 +11,13 @@ import {
 import { Button } from "@/components/ui/button";
 import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
-import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
+import type {
+  BullpenActivePositionView,
+  BullpenLiveHealth,
+  BullpenLiveSnapshot,
+  BullpenPositionsFallback,
+  BullpenPositionsSource,
+} from "@/lib/bullpenPositions";
 import { cn } from "@/lib/utils";
 import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
@@ -30,6 +36,7 @@ type BullpenInvestmentsSectionProps = {
   isInvesting: boolean;
   isLoadingPositions: boolean;
   isRefreshingCurrentOdds: boolean;
+  lastSuccessfulLiveSnapshot: BullpenLiveSnapshot | null;
   onClaimNow: () => void;
   onInvest: () => void;
   onRefreshPositions: () => void;
@@ -38,7 +45,10 @@ type BullpenInvestmentsSectionProps = {
   onSelectAll: () => void;
   onClearAll: () => void;
   positionsError: string | null;
+  positionsFallback: BullpenPositionsFallback | null;
+  positionsHealth: BullpenLiveHealth | null;
   positionsLastUpdatedAt: string | null;
+  positionsSource: BullpenPositionsSource | null;
   progressMessage: string | null;
   resultMessage: string | null;
   selectedQuestionIds: Set<string>;
@@ -242,6 +252,7 @@ export function BullpenInvestmentsSection({
   isInvesting,
   isLoadingPositions,
   isRefreshingCurrentOdds,
+  lastSuccessfulLiveSnapshot,
   onClaimNow,
   onInvest,
   onRefreshPositions,
@@ -250,7 +261,10 @@ export function BullpenInvestmentsSection({
   onSelectAll,
   onClearAll,
   positionsError,
+  positionsFallback,
+  positionsHealth,
   positionsLastUpdatedAt,
+  positionsSource,
   progressMessage,
   resultMessage,
   selectedQuestionIds,
@@ -653,11 +667,15 @@ export function BullpenInvestmentsSection({
           isClaiming={isClaimingPositions}
           isLoading={isLoadingPositions}
           lastUpdatedAt={positionsLastUpdatedAt}
+          lastSuccessfulLiveSnapshot={lastSuccessfulLiveSnapshot}
           onClaimNow={onClaimNow}
           onClose={() => setIsPositionsDialogOpen(false)}
           onRefresh={onRefreshPositions}
           positions={activePositions}
           positionsError={positionsError}
+          positionsFallback={positionsFallback}
+          positionsHealth={positionsHealth}
+          positionsSource={positionsSource}
         />
       ) : null}
     </>

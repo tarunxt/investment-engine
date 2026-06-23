@@ -44,6 +44,7 @@ coverage/
 tmp/
 temp/
 backend/.runtime-tools/
+frontend/.runtime/
 
 # Database
 *.sqlite3
@@ -53,5 +54,6 @@ backend/.runtime-tools/
 psql
 
 *.md
+!docs/*.md
 graphify-out
 .claude

@@ -618,11 +618,17 @@ export function buildBullpenAiTradingBotSummary(
   const note =
     errorMessage ||
     payload?.error ||
+    payload?.fallback?.message ||
+    payload?.health?.message ||
     "Overview is using Bullpen wallet positions until a dedicated bot summary endpoint is available.";
 
   return {
     ...base,
-    status: errorMessage ? "not-configured" : "running",
+    status: errorMessage
+      ? "not-configured"
+      : payload?.liveAvailable === false
+        ? "error"
+        : "running",
     mode: "analysis-only",
     moneyInvested,
     currentValue,
@@ -630,7 +636,8 @@ export function buildBullpenAiTradingBotSummary(
     returnPct,
     activePositionsCount: activeCount,
     tradesToday: null,
-    lastRunTime: payload?.fetchedAt || null,
+    lastRunTime:
+      payload?.fetchedAt || payload?.lastSuccessfulLiveSnapshot?.fetchedAt || null,
     nextScheduledRun: null,
     guardrailsSummary: buildGuardrailsSummary(guardrails),
     guardrails,

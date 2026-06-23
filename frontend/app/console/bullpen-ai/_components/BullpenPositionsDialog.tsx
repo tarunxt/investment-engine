@@ -3,8 +3,15 @@
 import { ExternalLink, Loader2, RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
+import type {
+  BullpenActivePositionView,
+  BullpenLiveHealth,
+  BullpenLiveSnapshot,
+  BullpenPositionsFallback,
+  BullpenPositionsSource,
+} from "@/lib/bullpenPositions";
 import { formatApiTimestamp } from "@/lib/datetime";
+import { cn } from "@/lib/utils";
 
 type BullpenPositionsDialogProps = {
   claimError: string | null;
@@ -12,11 +19,15 @@ type BullpenPositionsDialogProps = {
   isClaiming: boolean;
   isLoading: boolean;
   lastUpdatedAt: string | null;
+  lastSuccessfulLiveSnapshot: BullpenLiveSnapshot | null;
   onClaimNow: () => void;
   onClose: () => void;
   onRefresh: () => void;
   positions: BullpenActivePositionView[];
   positionsError: string | null;
+  positionsFallback: BullpenPositionsFallback | null;
+  positionsHealth: BullpenLiveHealth | null;
+  positionsSource: BullpenPositionsSource | null;
 };
 
 function formatDate(value: string | null) {
@@ -71,6 +82,98 @@ function formatTimestamp(value: string | null) {
   return timestamp || null;
 }
 
+function getLiveStatusLabel(health: BullpenLiveHealth | null, isLoading: boolean) {
+  if (!health) {
+    return isLoading ? "Checking..." : "Unknown";
+  }
+
+  if (health.ok) {
+    return "OK";
+  }
+
+  switch (health.classification) {
+    case "AUTH_EXPIRED":
+      return "Auth expired";
+    case "NETWORK_ERROR":
+      return "Network issue";
+    case "BINARY_MISSING":
+      return "CLI missing";
+    case "JSON_PARSE_ERROR":
+      return "Bad CLI JSON";
+    case "TIMEOUT":
+      return "Timed out";
+    default:
+      return "Unknown error";
+  }
+}
+
+function getSourceLabel(source: BullpenPositionsSource | null) {
+  switch (source) {
+    case "live-cli":
+      return "Live CLI";
+    case "last-successful-live-snapshot":
+      return "Cached live snapshot";
+    case "tracked-positions":
+      return "Tracked fallback";
+    default:
+      return "Unavailable";
+  }
+}
+
+function getStatusToneClass(health: BullpenLiveHealth | null) {
+  if (!health) {
+    return "border-slate-200 bg-slate-50 text-slate-800";
+  }
+
+  if (health.ok) {
+    return "border-emerald-200 bg-emerald-50 text-emerald-900";
+  }
+
+  switch (health.classification) {
+    case "AUTH_EXPIRED":
+      return "border-amber-200 bg-amber-50 text-amber-950";
+    case "NETWORK_ERROR":
+    case "TIMEOUT":
+      return "border-sky-200 bg-sky-50 text-sky-950";
+    case "BINARY_MISSING":
+    case "JSON_PARSE_ERROR":
+    case "UNKNOWN_ERROR":
+    default:
+      return "border-rose-200 bg-rose-50 text-rose-950";
+  }
+}
+
+function StatusCard({
+  label,
+  value,
+  detail,
+  toneClassName = "border-slate-200 bg-slate-50 text-slate-900",
+  compactValue = false,
+}: {
+  label: string;
+  value: string;
+  detail: string | null;
+  toneClassName?: string;
+  compactValue?: boolean;
+}) {
+  return (
+    <div className={cn("rounded-2xl border px-4 py-3", toneClassName)}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] opacity-75">
+        {label}
+      </p>
+      <p
+        className={cn(
+          "mt-2 font-semibold tracking-tight",
+          compactValue ? "break-all text-sm" : "text-lg",
+        )}
+      >
+        {value}
+      </p>
+      <p className="mt-2 text-xs leading-5 opacity-80">{detail || "—"}</p>
+    </div>
+  );
+}
+
 function sortPositions(
   left: BullpenActivePositionView,
   right: BullpenActivePositionView,
@@ -94,11 +197,15 @@ export function BullpenPositionsDialog({
   isClaiming,
   isLoading,
   lastUpdatedAt,
+  lastSuccessfulLiveSnapshot,
   onClaimNow,
   onClose,
   onRefresh,
   positions,
   positionsError,
+  positionsFallback,
+  positionsHealth,
+  positionsSource,
 }: BullpenPositionsDialogProps) {
   const sortedPositions = [...positions].sort(sortPositions);
   const claimablePositions = sortedPositions.filter((position) => position.isClaimable);
@@ -109,6 +216,19 @@ export function BullpenPositionsDialog({
     0,
   );
   const refreshedLabel = formatTimestamp(lastUpdatedAt);
+  const lastSuccessfulLiveRefreshLabel = formatTimestamp(
+    lastSuccessfulLiveSnapshot?.fetchedAt || null,
+  );
+  const liveStatusLabel = getLiveStatusLabel(positionsHealth, isLoading);
+  const sourceLabel = getSourceLabel(positionsSource);
+  const liveStatusToneClass = getStatusToneClass(positionsHealth);
+  const fallbackMessage = positionsFallback?.active
+    ? positionsFallback.message
+    : null;
+  const credentialHomeLabel = positionsHealth?.credentialHome || "—";
+  const actionNeededLabel =
+    positionsHealth?.actionNeeded ||
+    (positionsHealth?.ok ? "None" : "Refresh after restoring the live CLI.");
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
@@ -199,6 +319,61 @@ export function BullpenPositionsDialog({
               Last refreshed: {refreshedLabel}
             </p>
           ) : null}
+
+          <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <StatusCard
+              label="Live status"
+              value={liveStatusLabel}
+              detail={positionsHealth?.message || "Waiting for Bullpen live health."}
+              toneClassName={liveStatusToneClass}
+            />
+            <StatusCard
+              label="Showing"
+              value={sourceLabel}
+              detail={
+                positionsSource === "live-cli"
+                  ? "Freshly read from the Bullpen CLI."
+                  : positionsSource === "last-successful-live-snapshot"
+                    ? "Using the last successful live wallet snapshot."
+                    : positionsSource === "tracked-positions"
+                      ? "Using tracked positions only as a fallback."
+                      : "No Bullpen position source is available yet."
+              }
+            />
+            <StatusCard
+              label="Last successful live refresh"
+              value={lastSuccessfulLiveRefreshLabel || "—"}
+              detail="Latest known good Bullpen CLI wallet sync."
+            />
+            <StatusCard
+              label="Credential HOME"
+              value={credentialHomeLabel}
+              detail={
+                positionsHealth?.commandPath
+                  ? `CLI path: ${positionsHealth.commandPath}`
+                  : "Bullpen CLI path unavailable."
+              }
+              compactValue
+            />
+          </div>
+
+          {fallbackMessage ? (
+            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              {fallbackMessage}
+            </div>
+          ) : null}
+
+          <div
+            className={cn(
+              "mb-4 rounded-2xl border px-4 py-3 text-sm",
+              positionsHealth?.ok
+                ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                : "border-slate-200 bg-slate-50 text-slate-900",
+            )}
+          >
+            <span className="font-semibold">Action needed:</span>{" "}
+            {actionNeededLabel}
+          </div>
 
           {claimablePositions.length > 0 ? (
             <div className="mb-6 overflow-hidden rounded-2xl border border-emerald-200">

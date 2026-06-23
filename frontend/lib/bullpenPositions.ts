@@ -32,10 +32,57 @@ export type BullpenPositionsSummary = {
   walletValue: number | null;
 };
 
+export type BullpenLiveHealthClassification =
+  | "AUTH_EXPIRED"
+  | "NETWORK_ERROR"
+  | "BINARY_MISSING"
+  | "JSON_PARSE_ERROR"
+  | "TIMEOUT"
+  | "UNKNOWN_ERROR";
+
+export type BullpenPositionsSource =
+  | "live-cli"
+  | "last-successful-live-snapshot"
+  | "tracked-positions";
+
+export type BullpenLiveHealth = {
+  ok: boolean;
+  classification: BullpenLiveHealthClassification | null;
+  stdout: string | null;
+  stderr: string | null;
+  exitCode: number | null;
+  signal: string | null;
+  commandPath: string | null;
+  attemptedPaths?: string[];
+  timedOut: boolean;
+  timestamp: string;
+  credentialHome: string | null;
+  message: string;
+  actionNeeded: string | null;
+};
+
+export type BullpenLiveSnapshot = {
+  positions: BullpenActivePositionView[];
+  summary: BullpenPositionsSummary;
+  fetchedAt: string;
+  source: "live-cli";
+};
+
+export type BullpenPositionsFallback = {
+  active: boolean;
+  source: Exclude<BullpenPositionsSource, "live-cli"> | null;
+  message: string | null;
+};
+
 export type BullpenPositionsResponse = {
   positions?: BullpenActivePositionView[];
   summary?: BullpenPositionsSummary;
   fetchedAt?: string;
+  liveAvailable?: boolean;
+  positionsSource?: BullpenPositionsSource | null;
+  health?: BullpenLiveHealth | null;
+  lastSuccessfulLiveSnapshot?: BullpenLiveSnapshot | null;
+  fallback?: BullpenPositionsFallback | null;
   error?: string;
 };
 
@@ -79,9 +126,42 @@ export type BullpenCliPositionsPayload = {
   summary?: Record<string, unknown> | null;
 };
 
+export type BullpenTrackedPositionInput = {
+  key: string;
+  market_id: string;
+  market_title: string;
+  outcome: string;
+  shares: number;
+  average_price: number;
+  cost_basis: number;
+};
+
+export type BullpenTrackedMarketRefresh = {
+  yesOdds?: number | null;
+  noOdds?: number | null;
+  marketUrl?: string | null;
+  rules?: string | null;
+  marketContext?: string | null;
+  resolutionSource?: string | null;
+};
+
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const EASTERN_TIME_ZONE = "America/New_York";
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const MONTH_INDEX_BY_NAME: Record<string, string> = {
+  january: "01",
+  february: "02",
+  march: "03",
+  april: "04",
+  may: "05",
+  june: "06",
+  july: "07",
+  august: "08",
+  september: "09",
+  october: "10",
+  november: "11",
+  december: "12",
+};
 
 function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -170,6 +250,25 @@ export function buildBullpenCloseTimeFromDateOnly(value: string | null) {
 
   const parsed = new Date(`${value}T23:59:59.999${offset}`);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+export function buildBullpenCloseTimeFromMarketTitle(value: string) {
+  const matchedDate =
+    value.match(
+      /\b(?:by|on|before|after|through|until)\s+([A-Z][a-z]+ \d{1,2}, \d{4})\b/i,
+    )?.[1] || value.match(/\b([A-Z][a-z]+ \d{1,2}, \d{4})\b/)?.[1];
+  if (!matchedDate) return null;
+
+  const match = matchedDate.match(
+    /^([A-Z][a-z]+)\s+(\d{1,2}),\s+(\d{4})$/,
+  );
+  const monthName = match?.[1] || null;
+  const day = match?.[2]?.padStart(2, "0");
+  const year = match?.[3] || null;
+  const month = monthName ? MONTH_INDEX_BY_NAME[monthName.toLowerCase()] : null;
+  if (!month || !day || !year) return matchedDate;
+
+  return buildBullpenCloseTimeFromDateOnly(`${year}-${month}-${day}`) || matchedDate;
 }
 
 export function getBullpenPositionDaysUntilClose(
@@ -413,6 +512,48 @@ export function applyBullpenPositionMarketData(
     resolutionSource:
       marketData.resolutionSource ?? position.resolutionSource,
   } satisfies BullpenActivePositionView;
+}
+
+export function buildTrackedBullpenPositionViews(
+  openPositions: BullpenTrackedPositionInput[],
+  marketUpdates: Record<string, BullpenTrackedMarketRefresh>,
+  resolveCloseTime: (marketTitle: string) => string | null = (marketTitle) =>
+    buildBullpenCloseTimeFromMarketTitle(marketTitle),
+) {
+  return openPositions
+    .filter((position) => position.shares > 0)
+    .map((position) => {
+      const marketUpdate = marketUpdates[position.key];
+      const closeTime = resolveCloseTime(position.market_title);
+      const basePosition = {
+        key: position.key,
+        marketId: position.market_id,
+        marketTitle: position.market_title,
+        outcome: position.outcome,
+        shares: position.shares,
+        averagePrice: round(position.average_price, 4),
+        costBasis: round(position.cost_basis, 2),
+        yesOdds: marketUpdate?.yesOdds ?? null,
+        noOdds: marketUpdate?.noOdds ?? null,
+        currentPrice: null,
+        currentValue: null,
+        unrealizedPnl: null,
+        unrealizedPnlPercent: null,
+        marketUrl: marketUpdate?.marketUrl ?? null,
+        closeTime,
+        isClaimable: false,
+        claimableValue: null,
+        returnsPerDay: calculateBullpenPositionReturnsPerDay({
+          closeTime,
+          currentPrice: null,
+        }),
+        rules: marketUpdate?.rules ?? null,
+        marketContext: marketUpdate?.marketContext ?? null,
+        resolutionSource: marketUpdate?.resolutionSource ?? null,
+      } satisfies BullpenActivePositionView;
+
+      return applyBullpenPositionMarketData(basePosition, marketUpdate || {});
+    });
 }
 
 function sumCurrentPositionValue(positions: BullpenActivePositionView[]) {

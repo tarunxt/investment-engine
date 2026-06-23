@@ -1,0 +1,138 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { parseBullpenJsonOutput } from "../app/api/bullpen-ai/_lib/bullpenCli.ts";
+
+const coreModulePromise = import(
+  new URL("../app/api/bullpen-ai/_lib/bullpenHealthCore.ts", import.meta.url)
+);
+
+function createExecError({
+  message,
+  stderr = "",
+  stdout = "",
+  code = 1,
+  signal = null,
+  killed = false,
+}) {
+  const error = new Error(message);
+  error.stderr = stderr;
+  error.stdout = stdout;
+  error.code = code;
+  error.signal = signal;
+  error.killed = killed;
+  return error;
+}
+
+function buildBaseOptions(execFileImpl) {
+  return {
+    commandCandidates: ["/usr/local/bin/bullpen"],
+    env: {
+      HOME: "/var/lib/credx/bullpen",
+    },
+    execFileImpl,
+    parseJsonOutput: JSON.parse,
+    now: () => "2026-06-23T12:00:00.000Z",
+  };
+}
+
+test("Bullpen CLI health classifies auth-expired stderr and redacts token-like values", async () => {
+  const { runBullpenCliHealthCheckWithExecutor } = await coreModulePromise;
+  const fakeJwt =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjcmVkLXgtdGVzdCJ9.signature123456789";
+
+  const result = await runBullpenCliHealthCheckWithExecutor(
+    buildBaseOptions(async () => {
+      throw createExecError({
+        message: "Bullpen login required",
+        stderr: `Bullpen login required. token=${fakeJwt}. Run: bullpen login`,
+      });
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.health.classification, "AUTH_EXPIRED");
+  assert.match(result.health.message, /HOME=\/var\/lib\/credx\/bullpen/);
+  assert.match(result.health.actionNeeded || "", /Re-login/i);
+  assert.doesNotMatch(result.health.stderr || "", new RegExp(fakeJwt.replace(/\./g, "\\.")));
+  assert.match(result.health.stderr || "", /\[REDACTED/i);
+});
+
+test("Bullpen CLI health reports binary missing after checking every candidate", async () => {
+  const { runBullpenCliHealthCheckWithExecutor } = await coreModulePromise;
+
+  const result = await runBullpenCliHealthCheckWithExecutor({
+    ...buildBaseOptions(async () => {
+      throw createExecError({
+        message: "spawn bullpen ENOENT",
+        code: "ENOENT",
+      });
+    }),
+    commandCandidates: ["/bad/bin/bullpen", "bullpen"],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.health.classification, "BINARY_MISSING");
+  assert.equal(result.health.commandPath, "bullpen");
+  assert.deepEqual(result.health.attemptedPaths, ["/bad/bin/bullpen", "bullpen"]);
+  assert.match(result.health.message, /Install Bullpen or fix BULLPEN_BIN/);
+});
+
+test("Bullpen CLI health classifies timeouts", async () => {
+  const { runBullpenCliHealthCheckWithExecutor } = await coreModulePromise;
+
+  const result = await runBullpenCliHealthCheckWithExecutor(
+    buildBaseOptions(async () => {
+      throw createExecError({
+        message: "Command timed out after 30000ms",
+        signal: "SIGTERM",
+        killed: true,
+      });
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.health.classification, "TIMEOUT");
+  assert.equal(result.health.timedOut, true);
+  assert.equal(result.health.signal, "SIGTERM");
+});
+
+test("Bullpen CLI health classifies malformed JSON output", async () => {
+  const { runBullpenCliHealthCheckWithExecutor } = await coreModulePromise;
+
+  const result = await runBullpenCliHealthCheckWithExecutor(
+    buildBaseOptions(async () => ({
+      stdout: "{bad json",
+      stderr: "",
+    })),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.health.classification, "JSON_PARSE_ERROR");
+  assert.equal(result.payload, null);
+});
+
+test("Bullpen CLI health accepts successful JSON output with updater noise", async () => {
+  const { parseBullpenCliJsonOutput, runBullpenCliHealthCheckWithExecutor } =
+    await coreModulePromise;
+
+  assert.deepEqual(
+    parseBullpenCliJsonOutput('Update available: 0.1.999\n{"positions":[],"summary":{}}'),
+    { positions: [], summary: {} },
+  );
+
+  const result = await runBullpenCliHealthCheckWithExecutor(
+    {
+      ...buildBaseOptions(async () => ({
+        stdout: 'Update available: 0.1.999\n{"positions":[],"summary":{}}',
+        stderr: "",
+      })),
+      parseJsonOutput: parseBullpenJsonOutput,
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.health.ok, true);
+  assert.equal(result.health.classification, null);
+  assert.deepEqual(result.payload, { positions: [], summary: {} });
+});

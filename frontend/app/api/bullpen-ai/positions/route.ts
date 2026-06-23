@@ -1,95 +1,203 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import {
-  BULLPEN_BIN_CANDIDATES,
-  buildBullpenProcessEnv,
-  parseBullpenJsonOutput,
-} from "../_lib/bullpenCli";
+  readLastSuccessfulBullpenLiveSnapshot,
+  syncBullpenLiveSnapshot,
+} from "../_lib/bullpenHealth";
+import { redactBullpenSensitiveText } from "../_lib/bullpenHealthCore.ts";
+import { resolvePolymarketMarkets } from "../_lib/polymarketMarketUrls";
 import {
-  buildPolymarketEventUrl,
-  resolvePolymarketMarkets,
-} from "../_lib/polymarketMarketUrls";
-import {
-  applyBullpenPositionMarketData,
-  normalizeBullpenPosition,
+  buildTrackedBullpenPositionViews,
   summarizeBullpenPositions,
-  type BullpenCliPosition,
-  type BullpenCliPositionsPayload,
+  type BullpenPositionsResponse,
 } from "@/lib/bullpenPositions";
+import type { PolymarketBotState } from "@/types/api";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const execFileAsync = promisify(execFile);
+type BullpenFallbackSource =
+  | "last-successful-live-snapshot"
+  | "tracked-positions"
+  | null;
 
-export async function GET() {
-  const errors: string[] = [];
-
-  for (const candidate of BULLPEN_BIN_CANDIDATES) {
-    try {
-      const { stdout } = await execFileAsync(
-        candidate,
-        ["polymarket", "positions", "--output", "json"],
-        {
-          env: buildBullpenProcessEnv({ readOnly: true }),
-          timeout: 30_000,
-          maxBuffer: 10 * 1024 * 1024,
-        },
-      );
-
-      const payload = parseBullpenJsonOutput(stdout) as BullpenCliPositionsPayload;
-      const rawPositions = Array.isArray(payload.positions)
-        ? (payload.positions as BullpenCliPosition[])
-        : [];
-      const positions = rawPositions.map((position) =>
-        normalizeBullpenPosition(position, buildPolymarketEventUrl),
-      );
-      let refreshedPositions = positions;
-
-      try {
-        const refreshedMarkets = await resolvePolymarketMarkets(
-          rawPositions.map((position, index) => ({
-            id: positions[index]?.key || `bullpen-position-${index + 1}`,
-            slug:
-              typeof position.slug === "string" && position.slug.trim()
-                ? position.slug.trim()
-                : null,
-            marketUrl: positions[index]?.marketUrl ?? null,
-          })),
-        );
-        refreshedPositions = positions.map((position) => {
-          const refreshedMarket = refreshedMarkets[position.key];
-          return refreshedMarket
-            ? applyBullpenPositionMarketData(position, refreshedMarket)
-            : position;
-        });
-      } catch {
-        // Fall back to Bullpen's wallet snapshot if Polymarket quote refresh fails.
-      }
-
-      return NextResponse.json({
-        positions: refreshedPositions,
-        summary: summarizeBullpenPositions(
-          refreshedPositions,
-          payload.summary || {},
-        ),
-        fetchedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      errors.push(
-        error instanceof Error ? error.message : "Unknown Bullpen CLI error.",
-      );
-    }
+function coerceErrorMessage(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return redactBullpenSensitiveText(value)?.trim() || null;
   }
 
-  return NextResponse.json(
-    {
-      error:
-        errors[0] || "Unable to load active Bullpen wallet positions right now.",
-    },
-    { status: 500 },
-  );
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return (
+      coerceErrorMessage(record.error) ||
+      coerceErrorMessage(record.message) ||
+      coerceErrorMessage(record.detail) ||
+      null
+    );
+  }
+
+  return null;
+}
+
+async function parseJsonResponse(response: Response) {
+  const text = await response.text();
+  if (!text.trim()) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+async function loadTrackedPositionsFallback(request: NextRequest) {
+  const backendStateUrl = new URL("/backend-api/polymarket/state", request.url);
+  const accessToken = request.cookies.get("app_access_token")?.value || null;
+  const response = await fetch(backendStateUrl, {
+    headers: accessToken
+      ? {
+          Authorization: `Bearer ${accessToken}`,
+        }
+      : undefined,
+    cache: "no-store",
+  });
+  const payload = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(
+      coerceErrorMessage(payload) ||
+        `Tracked-position fallback returned HTTP ${response.status}.`,
+    );
+  }
+
+  const state = payload as PolymarketBotState;
+  const openPositions = Array.isArray(state.open_positions)
+    ? state.open_positions.filter((position) => position.shares > 0)
+    : [];
+
+  if (openPositions.length === 0) {
+    return {
+      positions: [],
+      summary: summarizeBullpenPositions([], {}),
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  let marketUpdates = {};
+
+  try {
+    marketUpdates = await resolvePolymarketMarkets(
+      openPositions.map((position) => ({
+        id: position.key,
+        slug: position.market_id,
+        marketUrl: null,
+      })),
+    );
+  } catch {
+    // Keep the tracked-position fallback usable even if Polymarket enrichment fails.
+  }
+
+  const positions = buildTrackedBullpenPositionViews(openPositions, marketUpdates);
+  return {
+    positions,
+    summary: summarizeBullpenPositions(positions, {}),
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+function buildFallbackResponse({
+  source,
+  message,
+}: {
+  source: BullpenFallbackSource;
+  message: string | null;
+}) {
+  return {
+    active: Boolean(source),
+    source,
+    message,
+  } satisfies NonNullable<BullpenPositionsResponse["fallback"]>;
+}
+
+export async function GET(request: NextRequest) {
+  const liveResult = await syncBullpenLiveSnapshot();
+
+  if (liveResult.ok && liveResult.snapshot) {
+    return NextResponse.json({
+      positions: liveResult.snapshot.positions,
+      summary: liveResult.snapshot.summary,
+      fetchedAt: liveResult.snapshot.fetchedAt,
+      liveAvailable: true,
+      positionsSource: "live-cli",
+      health: liveResult.health,
+      lastSuccessfulLiveSnapshot: liveResult.snapshot,
+      fallback: buildFallbackResponse({
+        source: null,
+        message: null,
+      }),
+    } satisfies BullpenPositionsResponse);
+  }
+
+  const lastSuccessfulLiveSnapshot =
+    await readLastSuccessfulBullpenLiveSnapshot();
+
+  if (lastSuccessfulLiveSnapshot) {
+    return NextResponse.json({
+      positions: lastSuccessfulLiveSnapshot.positions,
+      summary: lastSuccessfulLiveSnapshot.summary,
+      fetchedAt: lastSuccessfulLiveSnapshot.fetchedAt,
+      liveAvailable: false,
+      positionsSource: "last-successful-live-snapshot",
+      health: liveResult.health,
+      lastSuccessfulLiveSnapshot,
+      fallback: buildFallbackResponse({
+        source: "last-successful-live-snapshot",
+        message:
+          "Live Bullpen CLI is unavailable, so Cred-X is showing the last successful live wallet snapshot. Do not auto-trade or auto-claim from stale fallback data.",
+      }),
+    } satisfies BullpenPositionsResponse);
+  }
+
+  try {
+    const trackedFallback = await loadTrackedPositionsFallback(request);
+    return NextResponse.json({
+      positions: trackedFallback.positions,
+      summary: trackedFallback.summary,
+      fetchedAt: trackedFallback.fetchedAt,
+      liveAvailable: false,
+      positionsSource: "tracked-positions",
+      health: liveResult.health,
+      lastSuccessfulLiveSnapshot: null,
+      fallback: buildFallbackResponse({
+        source: "tracked-positions",
+        message:
+          "Live Bullpen CLI is unavailable and no successful live snapshot is cached, so Cred-X is showing tracked positions only as a fallback. Do not auto-trade or auto-claim from fallback data.",
+      }),
+    } satisfies BullpenPositionsResponse);
+  } catch (fallbackError) {
+    const fallbackMessage =
+      redactBullpenSensitiveText(
+        fallbackError instanceof Error
+          ? fallbackError.message
+          : String(fallbackError),
+      ) || "Tracked-position fallback failed.";
+
+    return NextResponse.json(
+      {
+        positions: [],
+        summary: summarizeBullpenPositions([], {}),
+        fetchedAt: liveResult.health.timestamp,
+        liveAvailable: false,
+        positionsSource: null,
+        health: liveResult.health,
+        lastSuccessfulLiveSnapshot: null,
+        fallback: buildFallbackResponse({
+          source: null,
+          message: null,
+        }),
+        error: `${liveResult.health.message} Tracked-position fallback also failed: ${fallbackMessage}`,
+      } satisfies BullpenPositionsResponse,
+      { status: 503 },
+    );
+  }
 }

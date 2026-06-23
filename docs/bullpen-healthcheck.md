@@ -1,0 +1,112 @@
+# Bullpen Healthcheck Automation
+
+Cred-X now exposes:
+
+- `GET /api/bullpen-ai/health`
+- `GET /api/bullpen-ai/positions`
+- `scripts/bullpen-healthcheck.ts`
+
+The healthcheck script runs the Bullpen CLI in read-only mode, refreshes the last successful live wallet snapshot when the CLI succeeds, writes a JSON health report, and optionally posts the report to `BULLPEN_HEALTH_WEBHOOK_URL`.
+
+## Required env
+
+Configure these in the frontend runtime env on the server:
+
+```env
+BULLPEN_BIN=/usr/local/bin/bullpen
+BULLPEN_HOME=/var/lib/credx/bullpen
+BULLPEN_CREDENTIALS_HOME=/var/lib/credx/bullpen
+BULLPEN_HEALTH_STATE_DIR=/var/lib/credx/bullpen-health
+BULLPEN_HEALTH_WEBHOOK_URL=
+```
+
+`BULLPEN_HOME` / `BULLPEN_CREDENTIALS_HOME` should point at the same credential HOME used for the Bullpen login on the server.
+
+## Manual run
+
+Run the healthcheck from the repo root:
+
+```bash
+node scripts/bullpen-healthcheck.ts
+```
+
+The script writes:
+
+- `${BULLPEN_HEALTH_STATE_DIR}/bullpen-health.json`
+- `${BULLPEN_HEALTH_STATE_DIR}/last-successful-live-snapshot.json`
+
+If the live CLI check fails, the script exits non-zero so `systemd`, `cron`, or external monitoring can alert.
+
+## systemd every 5 minutes
+
+Create `/etc/systemd/system/credx-bullpen-healthcheck.service`:
+
+```ini
+[Unit]
+Description=Cred-X Bullpen live wallet healthcheck
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/investor
+EnvironmentFile=/srv/investor/deploy/no-docker/frontend.env
+ExecStart=/usr/bin/node /srv/investor/scripts/bullpen-healthcheck.ts
+User=investor
+Group=investor
+```
+
+Create `/etc/systemd/system/credx-bullpen-healthcheck.timer`:
+
+```ini
+[Unit]
+Description=Run Cred-X Bullpen healthcheck every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=credx-bullpen-healthcheck.service
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now credx-bullpen-healthcheck.timer
+sudo systemctl status credx-bullpen-healthcheck.timer
+```
+
+Inspect recent runs:
+
+```bash
+journalctl -u credx-bullpen-healthcheck.service -n 50 --no-pager
+```
+
+## cron every 5 minutes
+
+If you prefer cron, add:
+
+```cron
+*/5 * * * * cd /srv/investor && set -a && . /srv/investor/deploy/no-docker/frontend.env && set +a && /usr/bin/node scripts/bullpen-healthcheck.ts >> /var/log/credx-bullpen-healthcheck.log 2>&1
+```
+
+## Operator action
+
+The health endpoint and Bullpen popup will classify failures as:
+
+- `AUTH_EXPIRED`
+- `NETWORK_ERROR`
+- `BINARY_MISSING`
+- `JSON_PARSE_ERROR`
+- `TIMEOUT`
+- `UNKNOWN_ERROR`
+
+If the UI shows `AUTH_EXPIRED`, re-login on the server using the configured `HOME`:
+
+```bash
+HOME=/var/lib/credx/bullpen bullpen login
+```
+
+Do not trade or auto-claim based on tracked fallback data or a stale cached live snapshot.

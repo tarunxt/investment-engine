@@ -1,3 +1,5 @@
+import { parseBullpenCliJsonOutput } from "./bullpenHealthCore.ts";
+
 export const BULLPEN_BIN_CANDIDATES = Array.from(
   new Set(
     [
@@ -36,10 +38,5 @@ export function buildBullpenProcessEnv({
 }
 
 export function parseBullpenJsonOutput(stdout: string) {
-  const sanitized = stdout
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.startsWith("Update available:"))
-    .join("\n");
-
-  return JSON.parse(sanitized);
+  return parseBullpenCliJsonOutput(stdout);
 }
