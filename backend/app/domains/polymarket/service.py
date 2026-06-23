@@ -41,7 +41,7 @@ class PolymarketBotManager:
             persisted_config = await config_store.load()
             config_update = {"data_dir": str(user_data_dir)}
             if persisted_config:
-                config_update.update(persisted_config.model_dump())
+                config_update.update(persisted_config.model_dump(exclude_none=True))
             user_config = base_config.model_copy(update=config_update)
             mock_provider = MockProvider()
             read_provider = (

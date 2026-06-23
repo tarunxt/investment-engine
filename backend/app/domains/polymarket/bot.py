@@ -178,6 +178,17 @@ class PolymarketPaperCopyBot:
     def add_activity(self, message: str) -> None:
         self._add_activity(message)
 
+    async def _save_config_override_unlocked(self) -> None:
+        await self.config_store.save(
+            PolymarketUserConfigOverride(
+                max_live_trades_per_day=self.config.max_live_trades_per_day,
+                trader_invested_threshold_usd=self.config.trader_invested_threshold_usd,
+                max_live_exposure_per_market=self.config.max_live_exposure_per_market,
+                auto_start=self.config.auto_start,
+                paused=self.config.paused,
+            )
+        )
+
     async def shutdown(self) -> None:
         async with self._lock:
             if self.running and not self.stopped_at:
@@ -200,6 +211,7 @@ class PolymarketPaperCopyBot:
         async with self._lock:
             if self.running:
                 return
+            self.config.auto_start = True
             if self._wants_live_execution():
                 await self._refresh_doctor_for_start_unlocked()
                 await self._try_auto_unlock_live_unlocked("Start Bot")
@@ -237,6 +249,7 @@ class PolymarketPaperCopyBot:
             self.started_at = started_at
             self.stopped_at = None
             self.next_poll_at = started_at
+            await self._save_config_override_unlocked()
             await self.logger.info(f"Bot started. mode={self.active_mode}")
             self._add_activity(f"Bot started in {self.active_mode} mode.")
             self._ensure_poll_task(initial_delay=0)
@@ -246,21 +259,25 @@ class PolymarketPaperCopyBot:
             if self.running or not self.stopped_at:
                 self.stopped_at = utc_now()
             self.running = False
+            self.config.auto_start = False
             self.next_poll_at = None
             await self._cancel_task(self._poll_task)
             self._poll_task = None
+            await self._save_config_override_unlocked()
             await self.logger.info("Bot stopped.")
             self._add_activity("Bot stopped.")
 
     async def pause(self) -> None:
         async with self._lock:
             self.config.paused = True
+            await self._save_config_override_unlocked()
             await self.logger.info("Bot paused.")
             self._add_activity("Bot paused.")
 
     async def resume(self) -> None:
         async with self._lock:
             self.config.paused = False
+            await self._save_config_override_unlocked()
             await self.logger.info("Bot resumed.")
             self._add_activity("Bot resumed.")
 
@@ -491,13 +508,7 @@ class PolymarketPaperCopyBot:
             self.config.max_live_exposure_per_market = (
                 request.max_live_exposure_per_market
             )
-            await self.config_store.save(
-                PolymarketUserConfigOverride(
-                    max_live_trades_per_day=request.max_live_trades_per_day,
-                    trader_invested_threshold_usd=request.trader_invested_threshold_usd,
-                    max_live_exposure_per_market=request.max_live_exposure_per_market,
-                )
-            )
+            await self._save_config_override_unlocked()
             await self.logger.info(
                 "Updated live limits: "
                 f"max trades/day {request.max_live_trades_per_day}, "
@@ -1043,6 +1054,9 @@ class PolymarketPaperCopyBot:
         """Sell live positions when observed prices imply a near-certain win."""
         if not self.config.auto_redeem_live or not self._wants_live_execution():
             return
+        runtime_block_reason = self._automatic_execution_block_reason()
+        if runtime_block_reason:
+            return
 
         block_reason = self.live_guard.startup_block_reason(
             self.doctor_status,
@@ -1068,6 +1082,7 @@ class PolymarketPaperCopyBot:
                     decision,
                     "automatic favorable-price exit threshold reached",
                     bypass_trade_risk=True,
+                    require_active_runtime=True,
                 )
                 await self._redeem_and_claim_completed_positions()
                 self._add_activity(
@@ -1262,23 +1277,19 @@ class PolymarketPaperCopyBot:
             return
 
         decision = self._live_decision_from_source(source_trade)
+        runtime_block_reason = self._automatic_execution_block_reason()
         block_reason = self.live_guard.startup_block_reason(
             self.doctor_status,
             self.live_unlocked,
             self.emergency_stopped,
             self.live_manually_locked,
         )
-        if (
-            not self.running
-            or self.active_mode != "live-trading"
-            or self.config.paused
-            or block_reason
-        ):
+        if runtime_block_reason or block_reason:
             proposal_stats["skipped_by_limits"] = (
                 int(proposal_stats["skipped_by_limits"]) + 1
             )
             self._add_activity(
-                f"Live proposal skipped: {block_reason or 'proposals paused or stopped.'}"
+                f"Live proposal skipped: {block_reason or runtime_block_reason or 'proposals paused or stopped.'}"
             )
             return
 
@@ -1296,7 +1307,9 @@ class PolymarketPaperCopyBot:
         )
         try:
             await self._execute_live_trade_unlocked(
-                decision, "automatic live-read approval"
+                decision,
+                "automatic live-read approval",
+                require_active_runtime=True,
             )
         except Exception as exc:
             proposal_stats["skipped_by_limits"] = (
@@ -1312,9 +1325,23 @@ class PolymarketPaperCopyBot:
         confirmation_reason: str,
         *,
         bypass_trade_risk: bool = False,
+        require_active_runtime: bool = False,
         skip_dashboard_unlock: bool = False,
         skip_doctor_refresh: bool = False,
     ) -> None:
+        runtime_block_reason = (
+            self._automatic_execution_block_reason()
+            if require_active_runtime
+            else None
+        )
+        if runtime_block_reason:
+            trade.status = "skipped"
+            trade.reason = (
+                f"{trade.reason} Automatic live execution halted: {runtime_block_reason}"
+            )
+            trade.updated_at = utc_now()
+            await self._save_live_trades_unlocked()
+            raise RuntimeError(runtime_block_reason)
         if not skip_doctor_refresh:
             await self._refresh_doctor_unlocked()
         if skip_dashboard_unlock:
@@ -1610,6 +1637,15 @@ class PolymarketPaperCopyBot:
         self._add_activity(
             f"Live trading auto-unlocked after hard guards passed: {reason}."
         )
+
+    def _automatic_execution_block_reason(self) -> str | None:
+        if not self.running:
+            return "Bot is stopped."
+        if self.config.paused:
+            return "Bot proposals are paused."
+        if self.active_mode != "live-trading":
+            return "Live trading mode is inactive."
+        return None
 
     def _live_decision_from_source(
         self, source_trade: PolymarketSourceTrade

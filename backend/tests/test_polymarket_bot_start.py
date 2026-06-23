@@ -915,6 +915,32 @@ async def test_live_limit_update_persists_for_recreated_user_bot(tmp_path, monke
     await recreated_manager.shutdown()
 
 
+@pytest.mark.anyio
+async def test_pause_and_stop_persist_for_recreated_user_bot(tmp_path, monkeypatch):
+    from app.domains.polymarket.service import PolymarketBotManager
+
+    monkeypatch.setenv("POLYMARKET_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("POLYMARKET_AUTO_START", "false")
+    monkeypatch.setenv("LIVE_TRADING", "false")
+    monkeypatch.setenv("USE_LIVE_READS", "false")
+    monkeypatch.setenv("PAPER_TRADING", "true")
+
+    manager = PolymarketBotManager()
+    bot = await manager.get_bot(42)
+    await bot.start()
+    await bot.pause()
+    await bot.stop()
+    await manager.shutdown()
+
+    recreated_manager = PolymarketBotManager()
+    recreated_bot = await recreated_manager.get_bot(42)
+
+    assert recreated_bot.config.auto_start is False
+    assert recreated_bot.config.paused is True
+
+    await recreated_manager.shutdown()
+
+
 class RedeemTrackingExecutor:
     def __init__(self, redeem_error: Exception | None = None):
         self.redeem_calls = 0
@@ -1177,6 +1203,54 @@ async def test_live_read_trades_auto_approve_without_pending_confirmation_caps(
     ]
     assert bot._pending_live_trades() == []
     assert all("auto-approved" in trade.reason for trade in bot.live_trade_history)
+
+
+@pytest.mark.anyio
+async def test_automatic_live_execution_skips_when_bot_is_paused(tmp_path):
+    from app.domains.polymarket.schemas import (
+        PolymarketDoctorStatus,
+        PolymarketSourceTrade,
+    )
+
+    executor = ManualBatchExecutor()
+    bot = await build_live_bot(tmp_path, executor)
+    bot.running = True
+    bot.active_mode = "live-trading"
+    bot.live_unlocked = True
+    bot.config.paused = True
+    bot.doctor_status = PolymarketDoctorStatus(ok=True, message="ok")
+
+    trade = bot._live_decision_from_source(
+        PolymarketSourceTrade(
+            id="trade-1",
+            source_trade_key="live-read:wallet:trade-1",
+            trader_id="wallet",
+            trader_name="wallet",
+            trader_address="0xabc",
+            clean_trader_identity="0xabc",
+            market_id="market-1",
+            market_title="Tennis Match",
+            outcome="Player A",
+            side="BUY",
+            price=0.50,
+            size_usd=100,
+            timestamp="2026-06-12T10:00:00+00:00",
+            source="live-read",
+        )
+    )
+    await bot._record_live_trade_unlocked(trade)
+
+    with pytest.raises(RuntimeError, match="paused"):
+        await bot._execute_live_trade_unlocked(
+            trade,
+            "automatic live-read approval",
+            require_active_runtime=True,
+            skip_doctor_refresh=True,
+        )
+
+    assert executor.execute_calls == 0
+    assert bot.live_trade_history[0].status == "skipped"
+    assert "Automatic live execution halted" in bot.live_trade_history[0].reason
 
 
 @pytest.mark.anyio

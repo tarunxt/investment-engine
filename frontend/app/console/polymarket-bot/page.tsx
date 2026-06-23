@@ -3381,6 +3381,11 @@ export default function PolymarketBotPage() {
                     copies from multiple traders display as one Bullpen
                     exposure.
                   </CardDescription>
+                  <p className="text-xs text-slate-500">
+                    This table only shows positions created from Bullpen x
+                    Polymarket decisions saved by this bot. Positions opened
+                    elsewhere in the shared Bullpen wallet do not appear here.
+                  </p>
                 </CardHeader>
                 <CardContent className="pt-4">
                   <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
