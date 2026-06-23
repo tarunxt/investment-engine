@@ -25,6 +25,7 @@ import {
   archiveBullpenScanSnapshot,
   BULLPEN_SOURCE_URLS,
   buildBullpenLlmPrompt,
+  buildBullpenLlmPromptInputs,
   buildBullpenScanQueryParams,
   computeBullpenLlmConsensus,
   createBullpenQuestionRow,
@@ -1803,10 +1804,12 @@ export default function BullpenAiPage() {
     writeLastLlmTargetsToStorage(targets);
 
     try {
+      const promptInputs = buildBullpenLlmPromptInputs(questionsToAnalyze);
       const run = await apiService.createRun({
         prompt: buildBullpenLlmPrompt(
           questionsToAnalyze,
           bullpenLlmPromptTemplate,
+          promptInputs,
         ),
         targets,
         allow_parallel: true,
@@ -1918,18 +1921,34 @@ export default function BullpenAiPage() {
         string,
         BullpenQuestionRow["llmBreakdown"]
       >();
+      const preflightBySnapshotQuestionId = new Map<string, string>();
       const analysisByPositionKey = new Map<
         string,
         BullpenQuestionRow["llmBreakdown"]
       >();
+      const preflightByPositionKey = new Map<string, string>();
 
       for (const [questionId, llmBreakdown] of breakdownByQuestionId.entries()) {
         const links = llmTargetSet.linksByQuestionId[questionId] || [];
+        const preflightEvidenceBlock =
+          promptInputs.preflightEvidenceBlocksByQuestionId[questionId] || null;
         for (const link of links) {
           if (link.kind === "snapshot") {
             analysisBySnapshotQuestionId.set(link.questionId, llmBreakdown);
+            if (preflightEvidenceBlock) {
+              preflightBySnapshotQuestionId.set(
+                link.questionId,
+                preflightEvidenceBlock,
+              );
+            }
           } else {
             analysisByPositionKey.set(link.positionKey, llmBreakdown);
+            if (preflightEvidenceBlock) {
+              preflightByPositionKey.set(
+                link.positionKey,
+                preflightEvidenceBlock,
+              );
+            }
           }
         }
       }
@@ -1974,6 +1993,8 @@ export default function BullpenAiPage() {
               llmBreakdown.length === 1 ? llmBreakdown[0]?.model || null : null,
             llmRunId: completedRun.id,
             llmCompletedAt: completedAt,
+            preflightEvidenceBlock:
+              preflightBySnapshotQuestionId.get(question.id) ?? null,
             llmBreakdown,
           });
         });
@@ -2015,6 +2036,8 @@ export default function BullpenAiPage() {
               llmBreakdown.length === 1 ? llmBreakdown[0]?.model || null : null,
             llmRunId: completedRun.id,
             llmCompletedAt: completedAt,
+            preflightEvidenceBlock:
+              preflightBySnapshotQuestionId.get(question.id) ?? null,
             llmBreakdown,
           });
         });
@@ -2061,6 +2084,8 @@ export default function BullpenAiPage() {
                 llmBreakdown.length === 1 ? llmBreakdown[0]?.model || null : null,
               llmRunId: completedRun.id,
               llmCompletedAt: completedAt,
+              preflightEvidenceBlock:
+                preflightByPositionKey.get(positionKey) ?? null,
               llmBreakdown,
             },
           );

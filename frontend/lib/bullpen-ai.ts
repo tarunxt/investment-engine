@@ -45,6 +45,7 @@ export type BullpenQuestionAnalysis = {
   llmModel: string | null;
   llmRunId: number | null;
   llmCompletedAt: string | null;
+  preflightEvidenceBlock?: string | null;
   llmBreakdown: BullpenQuestionLlmBreakdownItem[];
 };
 
@@ -124,6 +125,37 @@ export type BullpenQuestionLlmBreakdownItem = {
   keyEvidence: string[];
   redFlags: string[];
   rationale: string | null;
+};
+
+type BullpenLlmPromptQuestionPayload = {
+  question_ref: string;
+  question_id: string;
+  question: string;
+  close_time: string | null;
+  closing_time: string | null;
+  close_time_et: string | null;
+  current_time_utc: string;
+  current_time_et: string;
+  deadline_et: string | null;
+  hours_remaining: number | null;
+  deadline_source: string | null;
+  title_date_hint: string | null;
+  title_deadline_et_assumption: string | null;
+  category: string;
+  outcomes: string[];
+  current_yes_odds: number | null;
+  current_no_odds: number | null;
+  market_url: string | null;
+  slug: string | null;
+  polymarket_rules: string | null;
+  polymarket_market_context: string | null;
+  polymarket_resolution_source: string | null;
+  preflight_evidence_block: string;
+};
+
+export type BullpenLlmPromptInputs = {
+  questionPayload: BullpenLlmPromptQuestionPayload[];
+  preflightEvidenceBlocksByQuestionId: Record<string, string>;
 };
 
 export type BullpenLlmConsensus = {
@@ -234,21 +266,26 @@ Do not reason from the market title alone.
 If the title, close time, and market_url rules appear inconsistent, the supplied Polymarket rules win.
 
 Input fields may include:
-question_ref, question_id, question, slug, market_url, close_time, closing_time, close_time_et, current_time_utc, current_time_et, deadline_et, hours_remaining, deadline_source, title_date_hint, title_deadline_et_assumption, category, outcomes, current_yes_odds, current_no_odds, polymarket_rules, polymarket_market_context, polymarket_resolution_source.
+question_ref, question_id, question, slug, market_url, close_time, closing_time, close_time_et, current_time_utc, current_time_et, deadline_et, hours_remaining, deadline_source, title_date_hint, title_deadline_et_assumption, category, outcomes, current_yes_odds, current_no_odds, polymarket_rules, polymarket_market_context, polymarket_resolution_source, preflight_evidence_block.
 
 Each market may include:
 - polymarket_rules
 - polymarket_market_context
 - polymarket_resolution_source
+- preflight_evidence_block
 
 You MUST use polymarket_rules as the authoritative resolution criteria.
 You MUST read and consider polymarket_market_context when present.
 The Market Context may include the label "Experimental AI-generated summary referencing Polymarket data." Treat it as helpful context and evidence, not as the final resolution authority.
 If polymarket_rules conflict with polymarket_market_context, polymarket_rules win.
+If preflight_evidence_block is present, treat every populated fact inside it as authoritative operator-supplied context for this run.
+Do not contradict populated facts in preflight_evidence_block.
+If a preflight_evidence_block field says "Not supplied" or "Unknown", that field is still unresolved and may require verification from current sources.
+Only estimate the unresolved condition that remains after accepting the authoritative facts and exact Polymarket rules.
 If polymarket_rules say an announcement immediately resolves the market, then an already-confirmed announcement should be treated as criteria_likely_satisfied and already_occurred.
 
 For each question:
-1. Read and consider the exact market_url, polymarket_rules, polymarket_market_context, and polymarket_resolution_source.
+1. Read and consider the exact market_url, polymarket_rules, polymarket_market_context, polymarket_resolution_source, and preflight_evidence_block.
 2. State what YES means under those exact rules in yes_definition.
 3. Use current_time_utc and current_time_et as the evaluation timestamp.
 4. Determine the operative deadline in ET.
@@ -795,6 +832,7 @@ export function createBullpenQuestionRow(
       (llmBreakdown.length === 1 ? llmBreakdown[0]?.model || null : null),
     llmRunId: analysisFields.llmRunId ?? null,
     llmCompletedAt: analysisFields.llmCompletedAt ?? latestCompletedAt,
+    preflightEvidenceBlock: analysisFields.preflightEvidenceBlock ?? null,
     llmBreakdown,
   };
 }
@@ -1414,18 +1452,94 @@ function buildBullpenDeadlineInfo(question: BullpenQuestionRow, now: Date) {
   };
 }
 
-function buildBullpenLlmQuestionPayload(questions: BullpenQuestionRow[]) {
-  const now = new Date();
-  const currentTimeUtc = now.toISOString();
+function formatBullpenPreflightText(
+  value: string | null | undefined,
+  fallback = "Not supplied",
+) {
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  return trimmed || fallback;
+}
+
+function formatBullpenPreflightOdds(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "Unknown";
+  }
+
+  return `${value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}%`;
+}
+
+function formatBullpenPreflightHours(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "Unknown";
+  }
+
+  return value.toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatBullpenPreflightOutcomes(question: BullpenQuestionRow) {
+  if (question.outcomeLabels.length > 0) {
+    return question.outcomeLabels.join(" / ");
+  }
+  if (question.isBinaryYesNo) return "Yes / No";
+  if (question.outcomeCount !== null) {
+    return `${question.outcomeCount.toLocaleString()} outcomes`;
+  }
+  return "Unknown";
+}
+
+function buildBullpenPreflightEvidenceBlock(
+  question: BullpenQuestionRow,
+  payload: Omit<BullpenLlmPromptQuestionPayload, "preflight_evidence_block">,
+) {
+  const lines = [
+    "Preflight Evidence Block:",
+    "Market:",
+    question.question,
+    "",
+    "Verified current facts:",
+    `- question_id: ${question.id}`,
+    `- category: ${formatBullpenPreflightText(payload.category, "Unknown")}`,
+    `- outcomes: ${formatBullpenPreflightOutcomes(question)}`,
+    `- current time (UTC): ${payload.current_time_utc}`,
+    `- current time (ET): ${payload.current_time_et}`,
+    `- close time: ${formatBullpenPreflightText(payload.close_time, "Unknown")}`,
+    `- close time (ET): ${formatBullpenPreflightText(payload.close_time_et, "Unknown")}`,
+    `- deadline (ET): ${formatBullpenPreflightText(payload.deadline_et, "Unknown")}`,
+    `- hours remaining: ${formatBullpenPreflightHours(payload.hours_remaining)}`,
+    `- current yes odds: ${formatBullpenPreflightOdds(payload.current_yes_odds)}`,
+    `- current no odds: ${formatBullpenPreflightOdds(payload.current_no_odds)}`,
+    `- market URL: ${formatBullpenPreflightText(payload.market_url, "Not supplied")}`,
+    `- slug: ${formatBullpenPreflightText(payload.slug, "Not supplied")}`,
+    `- Polymarket rules: ${formatBullpenPreflightText(payload.polymarket_rules)}`,
+    `- detailed market context: ${formatBullpenPreflightText(payload.polymarket_market_context)}`,
+    `- resolution source: ${formatBullpenPreflightText(payload.polymarket_resolution_source)}`,
+    "",
+    "Instruction:",
+    "These facts are authoritative. Do not contradict them. Only estimate the unresolved condition.",
+  ];
+
+  return lines.join("\n");
+}
+
+function buildBullpenLlmPromptQuestionPayload(
+  question: BullpenQuestionRow,
+  index: number,
+  referenceTime: Date,
+) {
+  const currentTimeUtc = referenceTime.toISOString();
   const currentTimeEt = formatBullpenDateTimeInTimeZone(
-    now,
+    referenceTime,
     BULLPEN_ET_TIME_ZONE,
   );
-
-  return questions.map((question, index) => {
-    const deadlineInfo = buildBullpenDeadlineInfo(question, now);
-
-    return {
+  const deadlineInfo = buildBullpenDeadlineInfo(question, referenceTime);
+  const basePayload: Omit<BullpenLlmPromptQuestionPayload, "preflight_evidence_block"> =
+    {
       question_ref: getBullpenQuestionRef(index),
       question_id: question.id,
       question: question.question,
@@ -1449,15 +1563,73 @@ function buildBullpenLlmQuestionPayload(questions: BullpenQuestionRow[]) {
       polymarket_market_context: question.marketContext,
       polymarket_resolution_source: question.resolutionSource,
     };
-  });
+  const preflightEvidenceBlock = buildBullpenPreflightEvidenceBlock(
+    question,
+    basePayload,
+  );
+
+  return {
+    questionPayload: {
+      ...basePayload,
+      preflight_evidence_block: preflightEvidenceBlock,
+    } satisfies BullpenLlmPromptQuestionPayload,
+    preflightEvidenceBlock,
+  };
+}
+
+function normalizeBullpenPromptReferenceTime(referenceTime: Date | undefined) {
+  if (referenceTime && !Number.isNaN(referenceTime.getTime())) {
+    return referenceTime;
+  }
+  return new Date();
+}
+
+export function buildBullpenQuestionPreflightEvidenceBlock(
+  question: BullpenQuestionRow,
+  referenceTime?: Date,
+) {
+  return buildBullpenLlmPromptQuestionPayload(
+    question,
+    0,
+    normalizeBullpenPromptReferenceTime(
+      referenceTime ??
+        (question.llmCompletedAt ? new Date(question.llmCompletedAt) : undefined),
+    ),
+  ).preflightEvidenceBlock;
+}
+
+export function buildBullpenLlmPromptInputs(
+  questions: BullpenQuestionRow[],
+  referenceTime = new Date(),
+): BullpenLlmPromptInputs {
+  const normalizedReferenceTime =
+    normalizeBullpenPromptReferenceTime(referenceTime);
+  const promptEntries = questions.map((question, index) =>
+    buildBullpenLlmPromptQuestionPayload(
+      question,
+      index,
+      normalizedReferenceTime,
+    ),
+  );
+
+  return {
+    questionPayload: promptEntries.map((entry) => entry.questionPayload),
+    preflightEvidenceBlocksByQuestionId: Object.fromEntries(
+      promptEntries.map((entry, index) => [
+        questions[index]?.id ?? getBullpenQuestionRef(index),
+        entry.preflightEvidenceBlock,
+      ]),
+    ),
+  };
 }
 
 export function buildBullpenLlmPrompt(
   questions: BullpenQuestionRow[],
   template = DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
+  promptInputs = buildBullpenLlmPromptInputs(questions),
 ) {
   const selectedQuestionsJson = JSON.stringify(
-    buildBullpenLlmQuestionPayload(questions),
+    promptInputs.questionPayload,
     null,
     2,
   );

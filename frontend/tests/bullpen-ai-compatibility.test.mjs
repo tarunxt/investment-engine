@@ -69,6 +69,7 @@ function createQuestionRow() {
 
 test("Bullpen x AI prompt builder still supports default and legacy prompt templates", async () => {
   const {
+    buildBullpenQuestionPreflightEvidenceBlock,
     buildBullpenLlmPrompt,
     DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
     LEGACY_BULLPEN_LLM_PROMPT_TEMPLATES,
@@ -80,11 +81,16 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
     [questionRow],
     LEGACY_BULLPEN_LLM_PROMPT_TEMPLATES[0],
   );
+  const preflightEvidenceBlock = buildBullpenQuestionPreflightEvidenceBlock(
+    questionRow,
+    new Date("2026-06-23T12:00:00.000Z"),
+  );
 
   assert.match(defaultPrompt, /Selected questions:/);
   assert.match(defaultPrompt, /"question_ref": "Q1"/);
   assert.match(defaultPrompt, /"current_yes_odds": 44/);
   assert.match(defaultPrompt, /"current_no_odds": 56/);
+  assert.match(defaultPrompt, /"preflight_evidence_block": "Preflight Evidence Block:/);
   assert.match(
     defaultPrompt,
     /"polymarket_rules": "This market resolves to \\"Yes\\" if candidate X wins\."/,
@@ -94,6 +100,7 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
     /"polymarket_market_context": "Experimental AI-generated summary referencing Polymarket data\. Candidate X has gained support\."/,
   );
   assert.match(defaultPrompt, /polymarket_rules/);
+  assert.match(defaultPrompt, /Do not contradict populated facts in preflight_evidence_block\./);
   assert.match(
     defaultPrompt,
     /Experimental AI-generated summary referencing Polymarket data\./,
@@ -103,6 +110,13 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
   assert.match(legacyPrompt, /Selected questions:/);
   assert.match(legacyPrompt, /"question_ref": "Q1"/);
   assert.match(legacyPrompt, /"llm_no_odds"/);
+  assert.match(preflightEvidenceBlock, /Preflight Evidence Block:/);
+  assert.match(preflightEvidenceBlock, /Market:\nWill candidate X win\?/);
+  assert.match(preflightEvidenceBlock, /Verified current facts:/);
+  assert.match(
+    preflightEvidenceBlock,
+    /These facts are authoritative\. Do not contradict them\. Only estimate the unresolved condition\./,
+  );
 });
 
 test("Bullpen x AI manual invest flow stays wired to the Polymarket manual-invest endpoint", () => {
@@ -232,4 +246,17 @@ test("Bullpen x AI active positions stay included in LLM runs and share the even
   assert.match(investmentsSectionSource, /Last LLM:/);
   assert.match(investmentsSectionSource, /Asia\/Kolkata/);
   assert.match(investmentsSectionSource, /CheckCircle2/);
+});
+
+test("Bullpen x AI LLM breakdown dialog shows the preflight evidence block", () => {
+  const dialogSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenLlmBreakdownDialog.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(dialogSource, /Preflight Evidence Block/);
+  assert.match(dialogSource, /buildBullpenQuestionPreflightEvidenceBlock/);
 });
