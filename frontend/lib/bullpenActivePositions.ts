@@ -27,6 +27,7 @@ export type BullpenActivePositionLlmAnalysis = Pick<
   | "llmModel"
   | "llmRunId"
   | "llmCompletedAt"
+  | "preflightEvidenceBlock"
   | "llmBreakdown"
 >;
 
@@ -94,6 +95,7 @@ function createEmptyBullpenActivePositionLlmAnalysis(): BullpenActivePositionLlm
     llmModel: null,
     llmRunId: null,
     llmCompletedAt: null,
+    preflightEvidenceBlock: null,
     llmBreakdown: [],
   };
 }
@@ -147,6 +149,7 @@ export function extractBullpenActivePositionLlmAnalysis(
     llmModel: question.llmModel,
     llmRunId: question.llmRunId,
     llmCompletedAt: question.llmCompletedAt,
+    preflightEvidenceBlock: question.preflightEvidenceBlock ?? null,
     llmBreakdown: question.llmBreakdown,
   };
 }

@@ -3,7 +3,10 @@
 import { AlertTriangle, X } from "lucide-react";
 import { useState } from "react";
 
-import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
+import {
+  buildBullpenQuestionPreflightEvidenceBlock,
+  type BullpenQuestionRow,
+} from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
 
 type BullpenLlmBreakdownDialogProps = {
@@ -157,6 +160,9 @@ export function BullpenLlmBreakdownDialog({
   onClose,
 }: BullpenLlmBreakdownDialogProps) {
   const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
+  const preflightEvidenceBlock =
+    question.preflightEvidenceBlock ||
+    buildBullpenQuestionPreflightEvidenceBlock(question);
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4">
@@ -266,6 +272,18 @@ export function BullpenLlmBreakdownDialog({
               </p>
             </div>
           ) : null}
+          <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Preflight Evidence Block
+            </p>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              This is the event evidence package sent into the latest Bullpen
+              LLM run.
+            </p>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-white px-4 py-4 font-mono text-xs leading-6 text-slate-700">
+              {preflightEvidenceBlock}
+            </pre>
+          </div>
           {question.llmBreakdown.length > 0 ? (
             <div className="overflow-hidden rounded-2xl border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200 text-sm">
