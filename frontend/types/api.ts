@@ -150,6 +150,74 @@ export interface ProviderModelTarget {
   model: string;
 }
 
+export interface PolymarketEventEvidenceOptions {
+  require_fresh_internet_evidence: boolean;
+  allow_evidence_grounded_non_web_models: boolean;
+}
+
+export interface PolymarketEventQuestionPayload {
+  question_ref: string;
+  question_id: string;
+  question: string;
+  close_time?: string | null;
+  closing_time?: string | null;
+  close_time_et?: string | null;
+  current_time_utc: string;
+  current_time_et: string;
+  deadline_et?: string | null;
+  hours_remaining?: number | null;
+  deadline_source?: string | null;
+  title_date_hint?: string | null;
+  title_deadline_et_assumption?: string | null;
+  category: string;
+  outcomes: string[];
+  current_yes_odds?: number | null;
+  current_no_odds?: number | null;
+  market_url?: string | null;
+  slug?: string | null;
+  polymarket_rules?: string | null;
+  polymarket_market_context?: string | null;
+  polymarket_resolution_source?: string | null;
+  preflight_evidence_block?: string | null;
+}
+
+export interface PolymarketEventRunContext {
+  kind: "polymarket_bullpen_event";
+  prompt_template: string;
+  question_payload: PolymarketEventQuestionPayload[];
+  evidence_options: PolymarketEventEvidenceOptions;
+}
+
+export interface PolymarketEventQuestionRuntimeMetadata {
+  question_ref?: string | null;
+  question_id?: string | null;
+  question?: string | null;
+  web_search_used?: boolean | null;
+  web_search_queries?: string[] | null;
+  web_sources?: string[] | null;
+  evidence_block_used?: boolean | null;
+  internet_verified?: boolean | null;
+  stale_fact_detected?: boolean | null;
+  invalid_reason?: string | null;
+  preflight_evidence_block?: string | null;
+}
+
+export interface PolymarketEventRuntimeMetadata {
+  kind?: string | null;
+  require_fresh_internet_evidence?: boolean | null;
+  allow_evidence_grounded_non_web_models?: boolean | null;
+  web_search_used?: boolean | null;
+  web_search_queries?: string[] | null;
+  web_sources?: string[] | null;
+  evidence_block_used?: boolean | null;
+  internet_verified?: boolean | null;
+  stale_fact_detected?: boolean | null;
+  invalid_reason?: string | null;
+  model_side_search_used?: boolean | null;
+  question_runtime?: Record<string, PolymarketEventQuestionRuntimeMetadata> | null;
+  warnings?: string[] | null;
+}
+
 export interface PortfolioEventRunRequest {
   provider?: string | null;
   model?: string | null;
@@ -304,6 +372,8 @@ export interface JobResponse {
   web_search_used?: boolean | null;
   web_search_queries?: string[] | null;
   web_sources?: string[] | null;
+  request_context_json?: PolymarketEventRunContext | Record<string, unknown> | null;
+  runtime_metadata_json?: PolymarketEventRuntimeMetadata | Record<string, unknown> | null;
   export_status?: string | null;
   export_error?: string | null;
   exported_at?: string | null;
@@ -345,6 +415,7 @@ export interface AutoRebalanceRunMetadata {
 export interface RunCreate {
   prompt: string;
   targets: RunModelTarget[];
+  polymarket_event_context?: PolymarketEventRunContext | null;
   prompt_id?: number | null;
   scheduled_at?: string | null;
   auto_export_enabled?: boolean;

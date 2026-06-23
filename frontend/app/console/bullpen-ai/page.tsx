@@ -32,9 +32,11 @@ import {
   createBullpenScanFilters,
   createBullpenScanSnapshot,
   DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
+  getBullpenQuestionRuntimeMetadata,
   isBullpenQuestionInvestmentCandidate,
   LEGACY_BULLPEN_LLM_PROMPT_TEMPLATES,
   normalizeBullpenScanFilters,
+  normalizePolymarketEventRuntimeMetadata,
   parseBullpenLlmAnalysisPayload,
   summarizeBullpenLlmNotes,
   type BullpenQuestionRow,
@@ -55,12 +57,15 @@ import {
 import { formatApiErrorSummary, formatUnknownError } from "@/lib/apiErrors";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { formatApiTimestamp } from "@/lib/datetime";
+import { getResolvedProviderInternetAccess } from "@/lib/llmInternetAccess";
 import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type {
+  PolymarketEventRunContext,
   PolymarketManualInvestOrderRequest,
   PolymarketManualInvestResponse,
+  ProviderInfo,
   ProviderModelTarget,
   RunResponse,
 } from "@/types/api";
@@ -108,6 +113,10 @@ const BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY =
   "investor:bullpen-ai:active-position-llm:v1";
 const BULLPEN_LLM_PROMPT_STORAGE_KEY =
   "investor:bullpen-ai:llm-prompt-template:v1";
+const BULLPEN_REQUIRE_FRESH_EVIDENCE_STORAGE_KEY =
+  "investor:bullpen-ai:require-fresh-evidence:v1";
+const BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY =
+  "investor:bullpen-ai:allow-non-web-evidence:v1";
 const MAX_BULLPEN_SNAPSHOT_HISTORY = 10;
 const RUN_POLL_INTERVAL_MS = 4_000;
 const MAX_RUN_POLLS = 90;
@@ -843,6 +852,27 @@ function writeBullpenLlmPromptToStorage(template: string) {
   }
 }
 
+function readStoredBoolean(key: string, fallback: boolean) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+  } catch {
+    // Best effort only.
+  }
+  return fallback;
+}
+
+function writeStoredBoolean(key: string, value: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, String(value));
+  } catch {
+    // Best effort only.
+  }
+}
+
 function getDefaultBullpenLlmTargets(lastTargets: ProviderModelTarget[]) {
   if (lastTargets.length > 0) return lastTargets;
   return [{ provider: "deepseek", model: "deepseek-v4-flash" }];
@@ -1019,6 +1049,12 @@ export default function BullpenAiPage() {
   const [bullpenLlmPromptTemplate, setBullpenLlmPromptTemplate] = useState(
     DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
   );
+  const [requireFreshInternetEvidence, setRequireFreshInternetEvidence] =
+    useState(true);
+  const [
+    allowEvidenceGroundedNonWebModels,
+    setAllowEvidenceGroundedNonWebModels,
+  ] = useState(false);
   const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
   const [isScanFiltersOpen, setIsScanFiltersOpen] = useState(false);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
@@ -1035,6 +1071,12 @@ export default function BullpenAiPage() {
     setLastLlmTargets(readLastLlmTargetsFromStorage());
     setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
     setActivePositionAnalysesByKey(readActivePositionAnalysesFromStorage());
+    setRequireFreshInternetEvidence(
+      readStoredBoolean(BULLPEN_REQUIRE_FRESH_EVIDENCE_STORAGE_KEY, true),
+    );
+    setAllowEvidenceGroundedNonWebModels(
+      readStoredBoolean(BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY, false),
+    );
     setHasLoadedStorage(true);
   }, []);
 
@@ -1042,6 +1084,22 @@ export default function BullpenAiPage() {
     if (!hasLoadedStorage) return;
     writeBullpenSnapshotsToStorage(snapshotsByMode);
   }, [hasLoadedStorage, snapshotsByMode]);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) return;
+    writeStoredBoolean(
+      BULLPEN_REQUIRE_FRESH_EVIDENCE_STORAGE_KEY,
+      requireFreshInternetEvidence,
+    );
+  }, [hasLoadedStorage, requireFreshInternetEvidence]);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) return;
+    writeStoredBoolean(
+      BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY,
+      allowEvidenceGroundedNonWebModels,
+    );
+  }, [hasLoadedStorage, allowEvidenceGroundedNonWebModels]);
 
   useEffect(() => {
     if (!hasLoadedStorage) return;
@@ -1189,6 +1247,46 @@ export default function BullpenAiPage() {
   const selectedQuestionCount = selectedQuestionIds.length;
   const activeFilterBadges = getFilterBadgeLabels(activeMode, activeFilters);
   const openActivePositions = activePositions.filter((position) => !position.isClaimable);
+  const getBullpenSelectionConstraint = (
+    provider: ProviderInfo,
+    _model: string,
+  ) => {
+    void _model;
+    if (
+      !requireFreshInternetEvidence ||
+      allowEvidenceGroundedNonWebModels
+    ) {
+      return { selectable: true };
+    }
+    const internetAccess = getResolvedProviderInternetAccess(
+      provider.name,
+      provider.internet_access,
+    );
+    if (internetAccess.mode === "none") {
+      return {
+        selectable: false,
+        reason:
+          "Fresh internet evidence is required for this Bullpen run. Turn on 'Allow evidence-grounded non-web models' to include models without model-side search.",
+      };
+    }
+    return { selectable: true };
+  };
+  const llmPickerHeaderContent = (
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+      <FilterToggle
+        checked={requireFreshInternetEvidence}
+        onChange={setRequireFreshInternetEvidence}
+        label="Require fresh internet evidence for every event"
+        description="Default on. The backend will refresh Polymarket facts, build a verified evidence block, and enforce web-grounded checks before consensus includes a model."
+      />
+      <FilterToggle
+        checked={allowEvidenceGroundedNonWebModels}
+        onChange={setAllowEvidenceGroundedNonWebModels}
+        label="Allow evidence-grounded non-web models"
+        description="When enabled, models without model-side search can still run if the backend verified evidence block is attached."
+      />
+    </div>
+  );
   const activePositionQuestionsForLlm = openActivePositions.map((position) =>
     buildBullpenQuestionRowFromActivePosition(
       position,
@@ -1806,6 +1904,16 @@ export default function BullpenAiPage() {
 
     try {
       const promptInputs = buildBullpenLlmPromptInputs(questionsToAnalyze);
+      const polymarketEventContext: PolymarketEventRunContext = {
+        kind: "polymarket_bullpen_event",
+        prompt_template: bullpenLlmPromptTemplate,
+        question_payload: promptInputs.questionPayload,
+        evidence_options: {
+          require_fresh_internet_evidence: requireFreshInternetEvidence,
+          allow_evidence_grounded_non_web_models:
+            allowEvidenceGroundedNonWebModels,
+        },
+      };
       const run = await apiService.createRun({
         prompt: buildBullpenLlmPrompt(
           questionsToAnalyze,
@@ -1814,6 +1922,7 @@ export default function BullpenAiPage() {
         ),
         targets,
         allow_parallel: true,
+        polymarket_event_context: polymarketEventContext,
       });
       const completedRun = await waitForBullpenRunCompletion(run.id);
       const targetOrder = new Map(
@@ -1857,6 +1966,9 @@ export default function BullpenAiPage() {
       for (const runJob of selectedRunJobs) {
         const label = `${runJob.job.provider} / ${runJob.job.model}`;
         const responseText = runJob.job.response;
+        const runtimeMetadata = normalizePolymarketEventRuntimeMetadata(
+          runJob.job.runtime_metadata_json,
+        );
 
         if (!responseText) {
           failedModels.push(
@@ -1884,12 +1996,29 @@ export default function BullpenAiPage() {
 
           analysisByQuestionId.forEach((item, questionId) => {
             const currentBreakdown = breakdownByQuestionId.get(questionId) || [];
+            const questionRuntimeMetadata = getBullpenQuestionRuntimeMetadata(
+              runJob.job.runtime_metadata_json,
+              questionId,
+            );
             const preflightEvidenceBlock =
-              promptInputs.preflightEvidenceBlocksByQuestionId[questionId] || null;
-            const staleFactValidation = validateBullpenStaleFacts(
+              questionRuntimeMetadata?.preflight_evidence_block ||
+              promptInputs.preflightEvidenceBlocksByQuestionId[questionId] ||
+              null;
+            const fallbackStaleFactValidation = validateBullpenStaleFacts(
               preflightEvidenceBlock,
               item.rationale || item.notes,
             );
+            const staleFactDetected =
+              questionRuntimeMetadata?.stale_fact_detected ??
+              fallbackStaleFactValidation.invalidStaleFact ??
+              false;
+            const invalidReason =
+              questionRuntimeMetadata?.invalid_reason ||
+              (staleFactDetected
+                ? fallbackStaleFactValidation.staleFactReason
+                : null) ||
+              runtimeMetadata?.invalid_reason ||
+              null;
             currentBreakdown.push({
               provider: runJob.job.provider,
               model: runJob.job.model,
@@ -1907,11 +2036,36 @@ export default function BullpenAiPage() {
               keyEvidence: item.keyEvidence,
               redFlags: item.redFlags,
               rationale: item.rationale || item.notes,
-              webSearchUsed: runJob.job.web_search_used ?? null,
-              webSearchQueries: runJob.job.web_search_queries ?? [],
-              webSources: runJob.job.web_sources ?? [],
-              invalidStaleFact: staleFactValidation.invalidStaleFact,
-              staleFactReason: staleFactValidation.staleFactReason,
+              webSearchUsed:
+                questionRuntimeMetadata?.web_search_used ??
+                runtimeMetadata?.web_search_used ??
+                runJob.job.web_search_used ??
+                null,
+              webSearchQueries:
+                questionRuntimeMetadata?.web_search_queries ||
+                runtimeMetadata?.web_search_queries ||
+                runJob.job.web_search_queries ||
+                [],
+              webSources:
+                questionRuntimeMetadata?.web_sources ||
+                runtimeMetadata?.web_sources ||
+                runJob.job.web_sources ||
+                [],
+              internetVerified:
+                questionRuntimeMetadata?.internet_verified ??
+                runtimeMetadata?.internet_verified ??
+                null,
+              evidenceBlockUsed:
+                questionRuntimeMetadata?.evidence_block_used ??
+                runtimeMetadata?.evidence_block_used ??
+                Boolean(preflightEvidenceBlock),
+              staleFactDetected,
+              invalidReason,
+              invalidStaleFact: staleFactDetected,
+              staleFactReason:
+                fallbackStaleFactValidation.staleFactReason ||
+                runtimeMetadata?.invalid_reason ||
+                null,
             });
             breakdownByQuestionId.set(questionId, currentBreakdown);
           });
@@ -2750,9 +2904,11 @@ export default function BullpenAiPage() {
                     }
                     selectionMode="multiple"
                     onRunMultiple={runLlm}
+                    getSelectionConstraint={getBullpenSelectionConstraint}
                     historicalEstimatedCostInrByTarget={
                       historicalCostInrByTarget
                     }
+                    pickerHeaderContent={llmPickerHeaderContent}
                     pickerDialogLabel="Select LLMs"
                     pickerIcon={<Menu className="size-4" />}
                     running={isRunningLlm}

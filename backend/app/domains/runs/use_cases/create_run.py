@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,7 @@ class CreateRunCommand:
     prompt: str
     targets: list[RunModelTarget]
     user_id: UserId
+    polymarket_event_context: dict[str, Any] | None = None
     prompt_id: int | None = None
     scheduled_at: datetime | None = None
     auto_export_enabled: bool = False
@@ -117,6 +119,7 @@ class CreateRunUseCase:
                         model=target.model,
                         user_id=cmd.user_id,
                         status=initial_status,
+                        request_context_json=cmd.polymarket_event_context,
                         scheduled_at=scheduled_at,
                         auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
                         auto_rebalance_sequence=cmd.auto_rebalance_sequence,

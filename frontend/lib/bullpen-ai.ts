@@ -1,3 +1,8 @@
+import type {
+  PolymarketEventQuestionRuntimeMetadata,
+  PolymarketEventRuntimeMetadata,
+} from "@/types/api";
+
 export type ScanMode = "30-days" | "end-of-month";
 
 export type BullpenQuestion = {
@@ -128,6 +133,10 @@ export type BullpenQuestionLlmBreakdownItem = {
   webSearchUsed: boolean | null;
   webSearchQueries: string[];
   webSources: string[];
+  internetVerified: boolean | null;
+  evidenceBlockUsed: boolean;
+  staleFactDetected: boolean;
+  invalidReason: string | null;
   invalidStaleFact: boolean;
   staleFactReason: string | null;
 };
@@ -742,7 +751,7 @@ export function createBullpenQuestionRow(
     analysisFields.llmBreakdown,
   );
   const validLlmBreakdown = llmBreakdown.filter(
-    (entry) => !entry.invalidStaleFact,
+    (entry) => !isBullpenBreakdownEntryInvalid(entry),
   );
   const topLevelOdds = normalizeOddsPair(
     analysisFields.llmYesOdds ?? null,
@@ -951,6 +960,91 @@ function readStringArrayValue(value: unknown) {
   return directValue ? [directValue] : [];
 }
 
+function isBullpenBreakdownEntryInvalid(
+  entry: Pick<BullpenQuestionLlmBreakdownItem, "invalidReason" | "invalidStaleFact">,
+) {
+  return Boolean(entry.invalidReason) || entry.invalidStaleFact;
+}
+
+function normalizePolymarketQuestionRuntimeMetadata(
+  value: unknown,
+): PolymarketEventQuestionRuntimeMetadata | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return {
+    question_ref: readStringValue(record.question_ref) || null,
+    question_id: readStringValue(record.question_id) || null,
+    question: readStringValue(record.question) || null,
+    web_search_used: readBooleanValue(record.web_search_used),
+    web_search_queries: readStringArrayValue(record.web_search_queries),
+    web_sources: readStringArrayValue(record.web_sources),
+    evidence_block_used: readBooleanValue(record.evidence_block_used),
+    internet_verified: readBooleanValue(record.internet_verified),
+    stale_fact_detected: readBooleanValue(record.stale_fact_detected),
+    invalid_reason: readStringValue(record.invalid_reason) || null,
+    preflight_evidence_block:
+      readStringValue(record.preflight_evidence_block) || null,
+  };
+}
+
+export function normalizePolymarketEventRuntimeMetadata(
+  value: unknown,
+): PolymarketEventRuntimeMetadata | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const questionRuntimeRecord =
+    record.question_runtime &&
+    typeof record.question_runtime === "object" &&
+    !Array.isArray(record.question_runtime)
+      ? (record.question_runtime as Record<string, unknown>)
+      : null;
+
+  return {
+    kind: readStringValue(record.kind) || null,
+    require_fresh_internet_evidence: readBooleanValue(
+      record.require_fresh_internet_evidence,
+    ),
+    allow_evidence_grounded_non_web_models: readBooleanValue(
+      record.allow_evidence_grounded_non_web_models,
+    ),
+    web_search_used: readBooleanValue(record.web_search_used),
+    web_search_queries: readStringArrayValue(record.web_search_queries),
+    web_sources: readStringArrayValue(record.web_sources),
+    evidence_block_used: readBooleanValue(record.evidence_block_used),
+    internet_verified: readBooleanValue(record.internet_verified),
+    stale_fact_detected: readBooleanValue(record.stale_fact_detected),
+    invalid_reason: readStringValue(record.invalid_reason) || null,
+    model_side_search_used: readBooleanValue(record.model_side_search_used),
+    question_runtime: questionRuntimeRecord
+      ? Object.fromEntries(
+          Object.entries(questionRuntimeRecord)
+            .map(([questionId, runtimeValue]) => [
+              questionId,
+              normalizePolymarketQuestionRuntimeMetadata(runtimeValue),
+            ])
+            .filter(
+              (
+                entry,
+              ): entry is [string, PolymarketEventQuestionRuntimeMetadata] =>
+                entry[1] !== null,
+            ),
+        )
+      : null,
+    warnings: readStringArrayValue(record.warnings),
+  };
+}
+
+export function getBullpenQuestionRuntimeMetadata(
+  runtimeMetadata: unknown,
+  questionId: string,
+) {
+  return (
+    normalizePolymarketEventRuntimeMetadata(runtimeMetadata)?.question_runtime?.[
+      questionId
+    ] || null
+  );
+}
+
 function extractBullpenPreflightFactMap(
   preflightEvidenceBlock: string | null | undefined,
 ) {
@@ -959,7 +1053,7 @@ function extractBullpenPreflightFactMap(
 
   const factsSection = block
     .split(/Verified current facts:\s*/i)[1]
-    ?.split(/\n\s*Instruction:\s*/i)[0];
+    ?.split(/\n\s*(?:Latest search results|Instruction):\s*/i)[0];
   if (!factsSection) return {} as Record<string, string>;
 
   const factMap: Record<string, string> = {};
@@ -1114,6 +1208,27 @@ function normalizeBullpenLlmBreakdown(
         webSources: readStringArrayValue(
           record.webSources ?? record.web_sources,
         ),
+        internetVerified: readBooleanValue(
+          record.internetVerified ?? record.internet_verified,
+        ),
+        evidenceBlockUsed:
+          readBooleanValue(
+            record.evidenceBlockUsed ?? record.evidence_block_used,
+          ) ?? false,
+        staleFactDetected:
+          readBooleanValue(
+            record.staleFactDetected ?? record.stale_fact_detected,
+          ) ??
+          readBooleanValue(
+            record.invalidStaleFact ?? record.invalid_stale_fact,
+          ) ??
+          false,
+        invalidReason:
+          readStringValue(record.invalidReason) ||
+          readStringValue(record.invalid_reason) ||
+          readStringValue(record.staleFactReason) ||
+          readStringValue(record.stale_fact_reason) ||
+          null,
         invalidStaleFact:
           readBooleanValue(
             record.invalidStaleFact ?? record.invalid_stale_fact,
@@ -1340,7 +1455,7 @@ export function computeBullpenLlmConsensus(
   breakdown: BullpenQuestionLlmBreakdownItem[],
 ): BullpenLlmConsensus {
   const yesValues = breakdown
-    .filter((entry) => !entry.invalidStaleFact)
+    .filter((entry) => !isBullpenBreakdownEntryInvalid(entry))
     .map((entry) => entry.llmYesOdds)
     .filter((value): value is number => typeof value === "number");
 
@@ -1418,23 +1533,26 @@ export function summarizeBullpenLlmNotes(
 ) {
   if (breakdown.length === 0) return null;
   if (breakdown.length === 1) {
-    if (breakdown[0]?.invalidStaleFact) {
+    if (isBullpenBreakdownEntryInvalid(breakdown[0])) {
       return (
+        breakdown[0].invalidReason ||
         breakdown[0].staleFactReason ||
-        "This model output was excluded from consensus because it contradicted authoritative preflight facts."
+        "This model output was excluded from consensus because it contradicted verified evidence or missed the required internet-evidence checks."
       );
     }
     return breakdown[0]?.rationale || null;
   }
   const consensus = computeBullpenLlmConsensus(breakdown);
-  const invalidCount = breakdown.filter((entry) => entry.invalidStaleFact).length;
+  const invalidCount = breakdown.filter((entry) =>
+    isBullpenBreakdownEntryInvalid(entry),
+  ).length;
   const disagreementNote =
     consensus.adjudicationRequired && consensus.llmSpreadYesOdds !== null
       ? ` High disagreement detected (${consensus.llmSpreadYesOdds.toFixed(2)}-point spread).`
       : "";
   const invalidNote =
     invalidCount > 0
-      ? ` ${invalidCount} output${invalidCount === 1 ? "" : "s"} excluded for stale-fact contradiction.`
+      ? ` ${invalidCount} output${invalidCount === 1 ? "" : "s"} excluded for invalid or stale evidence handling.`
       : "";
   return `${breakdown.length} LLM outputs available.${invalidNote}${disagreementNote} Click the LLM odds to inspect the full breakdown.`;
 }

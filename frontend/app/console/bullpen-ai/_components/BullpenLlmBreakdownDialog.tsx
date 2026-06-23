@@ -338,6 +338,15 @@ export function BullpenLlmBreakdownDialog({
                           );
                           const webCapable =
                             isWebCapableInternetAccess(internetAccess);
+                          const internetVerified =
+                            entry.internetVerified ??
+                            entry.webSearchUsed ??
+                            entry.evidenceBlockUsed;
+                          const invalidWarning =
+                            entry.invalidReason ||
+                            (entry.staleFactDetected
+                              ? entry.staleFactReason
+                              : null);
                           const showNoSearchWarning =
                             webCapable && entry.webSearchUsed === false;
                           const showNoSourcesWarning =
@@ -357,13 +366,25 @@ export function BullpenLlmBreakdownDialog({
                                   >
                                     {getInternetAccessBadgeText(internetAccess)}
                                   </span>
-                                  {entry.invalidStaleFact ? (
+                                  {entry.staleFactDetected ? (
                                     <span className="rounded-full bg-rose-50 px-2 py-0.5 font-medium text-rose-700 ring-1 ring-rose-100">
                                       Invalid stale fact
                                     </span>
                                   ) : null}
+                                  {entry.invalidReason &&
+                                  !entry.staleFactDetected ? (
+                                    <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-100">
+                                      Excluded from consensus
+                                    </span>
+                                  ) : null}
                                 </div>
-                                <div>Web used: {formatYesNo(entry.webSearchUsed)}</div>
+                                <div>
+                                  Internet verified: {formatYesNo(internetVerified)}
+                                </div>
+                                <div>
+                                  Evidence block used:{" "}
+                                  {formatYesNo(entry.evidenceBlockUsed)}
+                                </div>
                                 <div>
                                   Sources count:{" "}
                                   {(entry.webSources || []).length.toLocaleString()}
@@ -416,9 +437,9 @@ export function BullpenLlmBreakdownDialog({
                                     returned or saved.
                                   </div>
                                 ) : null}
-                                {entry.invalidStaleFact && entry.staleFactReason ? (
+                                {invalidWarning ? (
                                   <div className="font-medium text-rose-700">
-                                    Excluded from consensus: {entry.staleFactReason}
+                                    Invalid/stale warning: {invalidWarning}
                                   </div>
                                 ) : null}
                               </div>

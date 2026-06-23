@@ -20,26 +20,26 @@ type ProviderLike = {
 const FALLBACK_PROVIDER_INTERNET_ACCESS: Record<string, ProviderInternetAccess> = {
   openai: {
     mode: "conditional",
-    label: "Web if forced",
-    force_token: "[ENABLE_WEB_SEARCH]",
+    label: "Search only if forced",
+    force_token: "[enable_web_search]",
     caveat:
-      "Uses live web tools only when the prompt asks for current context or explicitly includes [ENABLE_WEB_SEARCH].",
+      "Uses live web tools only when the prompt asks for current context or explicitly includes [enable_web_search].",
   },
   gemini: {
     mode: "always_enabled",
-    label: "Live web",
+    label: "Search attached",
     caveat:
       "Google Search grounding is attached by default for normal runs. Repair prompts disable search to keep output formatting stable.",
   },
   deepseek: {
     mode: "tool_auto",
-    label: "Web tool available",
+    label: "Can search, not guaranteed",
     caveat:
       "The web_search tool is available with automatic tool choice. Actual usage has to be confirmed from the saved run metadata.",
   },
   anthropic: {
     mode: "none",
-    label: "No live web",
+    label: "No model-side search",
     caveat:
       "The current Anthropic adapter sends plain API calls without any live web or search tool.",
   },
@@ -80,13 +80,13 @@ export function getInternetAccessBadgeText(
 ) {
   switch (internetAccess?.mode) {
     case "always_enabled":
-      return "🌐 Live web";
+      return "Search attached";
     case "tool_auto":
-      return "🌐 Web tool available";
+      return "Can search, not guaranteed";
     case "conditional":
-      return "🟡 Web if forced";
+      return "Search only if forced";
     default:
-      return "⚪ No live web";
+      return "No model-side search";
   }
 }
 

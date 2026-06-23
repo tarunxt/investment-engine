@@ -103,6 +103,11 @@ def _preview_prompt(prompt: str) -> str:
     return f"{normalized[:RUN_PROMPT_PREVIEW_CHARS].rstrip()}..."
 
 
+def _provider_uses_model_side_search(provider_name: str) -> bool:
+    access = ProviderFactory.get_provider_internet_access(provider_name)
+    return access.get("mode") != "none"
+
+
 def _serialize_run_list_item(run) -> RunListItem:
     return RunListItem(
         id=run.id,
@@ -165,6 +170,19 @@ async def create_run(
                     f"{reason or ''}".strip()
                 ),
             )
+        if (
+            body.polymarket_event_context is not None
+            and body.polymarket_event_context.evidence_options.require_fresh_internet_evidence
+            and not body.polymarket_event_context.evidence_options.allow_evidence_grounded_non_web_models
+            and not _provider_uses_model_side_search(t.provider)
+        ):
+            raise HTTPException(
+                400,
+                detail=(
+                    f"Model '{t.model}' for provider '{t.provider}' has no model-side search. "
+                    "Enable 'Allow evidence-grounded non-web models' or choose a searchable model."
+                ),
+            )
 
     redis = _get_redis()
     uc = CreateRunUseCase(session=db, lock=RedisLock(redis))
@@ -174,6 +192,11 @@ async def create_run(
                 prompt=body.prompt,
                 targets=[RunModelTarget(provider=t.provider, model=t.model) for t in body.targets],
                 user_id=UserId(current_user.id),
+                polymarket_event_context=(
+                    body.polymarket_event_context.model_dump(mode="json")
+                    if body.polymarket_event_context is not None
+                    else None
+                ),
                 prompt_id=body.prompt_id,
                 scheduled_at=body.scheduled_at,
                 auto_export_enabled=body.auto_export_enabled,
