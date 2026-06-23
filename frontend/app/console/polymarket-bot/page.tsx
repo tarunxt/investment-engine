@@ -570,6 +570,14 @@ const DEFAULT_EC2_COMMANDS = [
 ];
 const EC2_COMMANDS_STORAGE_KEY = "polymarketBot.ec2Commands";
 
+function normalizeEc2Commands(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((command): command is string => typeof command === "string")
+    .map((command) => command.trim())
+    .filter(Boolean);
+}
+
 function getInitialEc2Commands() {
   if (typeof window === "undefined") return DEFAULT_EC2_COMMANDS;
 
@@ -578,14 +586,7 @@ function getInitialEc2Commands() {
     if (!savedCommands) return DEFAULT_EC2_COMMANDS;
 
     const parsedCommands = JSON.parse(savedCommands);
-    if (!Array.isArray(parsedCommands)) return DEFAULT_EC2_COMMANDS;
-
-    const cleanedCommands = parsedCommands
-      .filter((command): command is string => typeof command === "string")
-      .map((command) => command.trim())
-      .filter(Boolean);
-
-    return Array.from(new Set([...DEFAULT_EC2_COMMANDS, ...cleanedCommands]));
+    return normalizeEc2Commands(parsedCommands) ?? DEFAULT_EC2_COMMANDS;
   } catch (error) {
     console.warn("Unable to load saved EC2 commands", error);
     return DEFAULT_EC2_COMMANDS;
@@ -1849,6 +1850,20 @@ export default function PolymarketBotPage() {
     ).then(() => setSelectedNetWorthTrader(null));
   }
 
+  function handleDeleteEc2Command(index: number) {
+    setEc2Commands((commands) =>
+      commands.filter((_, itemIndex) => itemIndex !== index),
+    );
+    setEditingEc2CommandIndex((current) => {
+      if (current == null) return null;
+      if (current === index) {
+        setEditingEc2Command("");
+        return null;
+      }
+      return current > index ? current - 1 : current;
+    });
+  }
+
   const balanceRefreshDisabled = pendingAction !== null;
 
   function handleBalanceRefresh() {
@@ -2691,6 +2706,11 @@ export default function PolymarketBotPage() {
                     </p>
                   </div>
                   <div className="space-y-2">
+                    {ec2Commands.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-xs text-slate-500">
+                        No saved commands yet. Add one below.
+                      </div>
+                    ) : null}
                     {ec2Commands.map((command, index) => {
                       const isEditing = editingEc2CommandIndex === index;
 
@@ -2781,17 +2801,7 @@ export default function PolymarketBotPage() {
                                   className="rounded-lg p-1.5 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600"
                                   aria-label={`Delete command: ${command}`}
                                   title="Delete command"
-                                  onClick={() => {
-                                    setEc2Commands((commands) =>
-                                      commands.filter(
-                                        (_, itemIndex) => itemIndex !== index,
-                                      ),
-                                    );
-                                    if (editingEc2CommandIndex === index) {
-                                      setEditingEc2CommandIndex(null);
-                                      setEditingEc2Command("");
-                                    }
-                                  }}
+                                  onClick={() => handleDeleteEc2Command(index)}
                                 >
                                   <Trash2
                                     className="size-3.5"
