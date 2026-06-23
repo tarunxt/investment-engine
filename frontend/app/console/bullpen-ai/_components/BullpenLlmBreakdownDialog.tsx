@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, X } from "lucide-react";
+import { useState } from "react";
 
 import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
@@ -58,10 +59,105 @@ function StatCard({
   );
 }
 
+function getHighDisagreementReason(question: BullpenQuestionRow) {
+  const spread = formatSpread(question.llmSpreadYesOdds);
+  const minYes = formatOdds(question.llmMinYesOdds);
+  const maxYes = formatOdds(question.llmMaxYesOdds);
+  const modelCount = question.llmBreakdown.length.toLocaleString();
+
+  if (question.llmSpreadYesOdds === null) {
+    return `This event is marked for adjudication, but the per-model spread is not available. ${modelCount} model outputs were received.`;
+  }
+
+  return `This event has a ${spread} gap between the lowest Yes estimate (${minYes}) and highest Yes estimate (${maxYes}) across ${modelCount} model outputs. That is above the 30-point high-disagreement threshold.`;
+}
+
+function HighDisagreementCriteriaDialog({
+  question,
+  onClose,
+}: {
+  question: BullpenQuestionRow;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/40 p-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_70px_-24px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
+              High LLM Disagreement Criteria
+            </p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-950">
+              Why this event needs manual review
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close high disagreement criteria"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-5 px-6 py-5 text-sm leading-6 text-slate-700">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
+            {getHighDisagreementReason(question)}
+          </div>
+          <div>
+            <h4 className="font-semibold text-slate-950">Criteria used</h4>
+            <ul className="mt-2 list-disc space-y-2 pl-5">
+              <li>
+                Calculate each model&apos;s normalized Yes odds, then compare the
+                minimum and maximum Yes estimates.
+              </li>
+              <li>
+                <span className="font-semibold text-slate-950">Low:</span> spread is
+                15 points or less.
+              </li>
+              <li>
+                <span className="font-semibold text-slate-950">Medium:</span> spread
+                is greater than 15 points and up to 30 points.
+              </li>
+              <li>
+                <span className="font-semibold text-slate-950">High:</span> spread is
+                greater than 30 points. High disagreement also sets
+                adjudicationRequired and switches consensus odds to the median
+                instead of the simple average.
+              </li>
+            </ul>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard
+              label="This Event Spread"
+              value={formatSpread(question.llmSpreadYesOdds)}
+            />
+            <StatCard
+              label="Min / Max Yes"
+              value={formatRange(
+                question.llmMinYesOdds,
+                question.llmMaxYesOdds,
+              )}
+            />
+            <StatCard
+              label="Consensus Method"
+              value={
+                question.llmDisagreementLevel === "High" ? "Median" : "Average"
+              }
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BullpenLlmBreakdownDialog({
   question,
   onClose,
 }: BullpenLlmBreakdownDialogProps) {
+  const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
+
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
@@ -149,10 +245,24 @@ export function BullpenLlmBreakdownDialog({
         <div className="flex-1 overflow-auto px-6 py-5">
           {question.adjudicationRequired ? (
             <div className="mb-4 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <button
+                type="button"
+                onClick={() => setIsCriteriaOpen(true)}
+                className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-amber-800 transition hover:bg-amber-100 hover:text-amber-950 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                aria-label="Open high LLM disagreement criteria"
+                title="Open high LLM disagreement criteria"
+              >
+                <AlertTriangle className="h-4 w-4" />
+              </button>
               <p>
-                High LLM disagreement — do not rely on simple average.
-                Manual/adjudicator review needed.
+                <button
+                  type="button"
+                  onClick={() => setIsCriteriaOpen(true)}
+                  className="font-semibold underline decoration-amber-500/60 underline-offset-4 transition hover:text-amber-950"
+                >
+                  High LLM disagreement
+                </button>{" "}
+                — do not rely on simple average. Manual/adjudicator review needed.
               </p>
             </div>
           ) : null}
@@ -202,6 +312,12 @@ export function BullpenLlmBreakdownDialog({
           )}
         </div>
       </div>
+      {isCriteriaOpen ? (
+        <HighDisagreementCriteriaDialog
+          question={question}
+          onClose={() => setIsCriteriaOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
