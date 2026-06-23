@@ -34,6 +34,7 @@ class JobRepository(Protocol):
         web_search_used: bool | None = None,
         web_search_queries: list[str] | None = None,
         web_sources: list[str] | None = None,
+        runtime_metadata_json: dict | None = None,
     ) -> None: ...
 
 
@@ -97,6 +98,7 @@ class PostgresJobRepository:
         web_search_used: bool | None = None,
         web_search_queries: list[str] | None = None,
         web_sources: list[str] | None = None,
+        runtime_metadata_json: dict | None = None,
     ) -> None:
         job = await self.get(job_id)
         if not job:
@@ -118,6 +120,8 @@ class PostgresJobRepository:
             job.web_search_queries = web_search_queries
         if web_sources is not None:
             job.web_sources = web_sources
+        if runtime_metadata_json is not None:
+            job.runtime_metadata_json = runtime_metadata_json
         await self._session.flush()
 
 
@@ -145,6 +149,7 @@ class SyncJobRepository:
         web_search_used: bool | None = None,
         web_search_queries: list[str] | None = None,
         web_sources: list[str] | None = None,
+        runtime_metadata_json: dict | None = None,
     ) -> None:
         job.status = status
         if response is not None:
@@ -163,6 +168,8 @@ class SyncJobRepository:
             job.web_search_queries = web_search_queries
         if web_sources is not None:
             job.web_sources = web_sources
+        if runtime_metadata_json is not None:
+            job.runtime_metadata_json = runtime_metadata_json
         self._session.commit()
 
     def update_export_state(

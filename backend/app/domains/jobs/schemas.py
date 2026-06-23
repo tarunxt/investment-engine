@@ -27,6 +27,8 @@ class JobResponse(BaseModel):
     web_search_used: Optional[bool] = None
     web_search_queries: Optional[list[str]] = None
     web_sources: Optional[list[str]] = None
+    request_context_json: Optional[dict] = None
+    runtime_metadata_json: Optional[dict] = None
     export_status: Optional[str] = None
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None

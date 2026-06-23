@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Literal
 
 from app.domains.jobs.schemas import JobResponse
 from app.shared.types import JobStatus
@@ -10,6 +11,46 @@ from app.shared.types import JobStatus
 class RunModelTarget(BaseModel):
     provider: str
     model: str
+
+
+class PolymarketEventEvidenceOptions(BaseModel):
+    require_fresh_internet_evidence: bool = True
+    allow_evidence_grounded_non_web_models: bool = False
+
+
+class PolymarketEventQuestionPayload(BaseModel):
+    question_ref: str
+    question_id: str
+    question: str
+    close_time: str | None = None
+    closing_time: str | None = None
+    close_time_et: str | None = None
+    current_time_utc: str
+    current_time_et: str
+    deadline_et: str | None = None
+    hours_remaining: float | None = None
+    deadline_source: str | None = None
+    title_date_hint: str | None = None
+    title_deadline_et_assumption: str | None = None
+    category: str
+    outcomes: list[str] = Field(default_factory=list)
+    current_yes_odds: float | None = None
+    current_no_odds: float | None = None
+    market_url: str | None = None
+    slug: str | None = None
+    polymarket_rules: str | None = None
+    polymarket_market_context: str | None = None
+    polymarket_resolution_source: str | None = None
+    preflight_evidence_block: str | None = None
+
+
+class PolymarketEventRunContext(BaseModel):
+    kind: Literal["polymarket_bullpen_event"] = "polymarket_bullpen_event"
+    prompt_template: str
+    question_payload: list[PolymarketEventQuestionPayload]
+    evidence_options: PolymarketEventEvidenceOptions = Field(
+        default_factory=PolymarketEventEvidenceOptions
+    )
 
 
 class AutoRebalanceRunReservationRequest(BaseModel):
@@ -33,6 +74,7 @@ class AutoRebalanceRunReservationResponse(BaseModel):
 class RunCreate(BaseModel):
     prompt: str
     targets: list[RunModelTarget]
+    polymarket_event_context: PolymarketEventRunContext | None = None
     prompt_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
     # Auto-export settings

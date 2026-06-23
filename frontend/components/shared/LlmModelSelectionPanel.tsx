@@ -27,6 +27,13 @@ interface LlmModelSelectionPanelProps {
   onClear?: () => void;
   onSelectWebCapable?: () => void;
   onToggleProvider?: (providerName: string, models: string[]) => void;
+  getSelectionConstraint?: (
+    provider: ProviderInfo,
+    model: string,
+  ) => {
+    selectable: boolean;
+    reason?: string | null;
+  } | null | undefined;
   getEstimatedCostInr?: (
     providerName: string,
     model: string,
@@ -57,8 +64,22 @@ function isCompatible(provider: ProviderInfo, model: string) {
   );
 }
 
-function getCompatibilityReason(provider: ProviderInfo, model: string) {
+function getCompatibilityReason(
+  provider: ProviderInfo,
+  model: string,
+  getSelectionConstraint?: (
+    provider: ProviderInfo,
+    model: string,
+  ) => {
+    selectable: boolean;
+    reason?: string | null;
+  } | null | undefined,
+) {
   if (!provider.configured) return "Provider is not configured.";
+  const selectionConstraint = getSelectionConstraint?.(provider, model);
+  if (selectionConstraint?.selectable === false) {
+    return selectionConstraint.reason || "Currently unavailable.";
+  }
   return (
     provider.model_compatibility?.[model]?.reason || "Currently unavailable."
   );
@@ -116,6 +137,7 @@ export function LlmModelSelectionPanel({
   onClear,
   onSelectWebCapable,
   onToggleProvider,
+  getSelectionConstraint,
   getEstimatedCostInr,
   getHistoricalCostInr,
   costSummaryLabel = "Estimated selected total",
@@ -126,6 +148,16 @@ export function LlmModelSelectionPanel({
     (total, provider) => total + provider.models.length,
     0,
   );
+  const totalSelectableModelCount = providers.reduce((total, provider) => {
+    return (
+      total +
+      provider.models.filter((model) => {
+        if (!isCompatible(provider, model)) return false;
+        const selectionConstraint = getSelectionConstraint?.(provider, model);
+        return selectionConstraint?.selectable !== false;
+      }).length
+    );
+  }, 0);
   const providerCostSummaries = providers.reduce<Record<string, ProviderCostSummary>>(
     (summaries, provider) => {
       summaries[provider.name] = provider.models.reduce<ProviderCostSummary>(
@@ -183,7 +215,7 @@ export function LlmModelSelectionPanel({
         </h3>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="rounded-full bg-indigo-50 px-3 py-1 font-semibold text-indigo-700">
-            {selectedKeys.size} / {totalModelCount}
+            {selectedKeys.size} / {totalSelectableModelCount || totalModelCount}
           </span>
           <span className="rounded-full bg-sky-50 px-3 py-1 font-semibold text-sky-700 ring-1 ring-sky-100">
             Web-capable selected: {selectedWebCapableCount} / {selectedKeys.size}
@@ -201,7 +233,8 @@ export function LlmModelSelectionPanel({
               type="button"
               onClick={onSelectAll}
               disabled={
-                totalModelCount === 0 || selectedKeys.size === totalModelCount
+                totalSelectableModelCount === 0 ||
+                selectedKeys.size === totalSelectableModelCount
               }
               className="font-medium text-indigo-600 hover:text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400"
             >
@@ -253,9 +286,14 @@ export function LlmModelSelectionPanel({
             const selectedProviderCount = providerKeys.filter((key) =>
               selectedKeys.has(key),
             ).length;
-            const compatibleModels = provider.models.filter((model) =>
-              isCompatible(provider, model),
-            );
+            const compatibleModels = provider.models.filter((model) => {
+              if (!isCompatible(provider, model)) return false;
+              const selectionConstraint = getSelectionConstraint?.(
+                provider,
+                model,
+              );
+              return selectionConstraint?.selectable !== false;
+            });
             const allCompatibleChecked =
               compatibleModels.length > 0 &&
               compatibleModels.every((model) =>
@@ -335,7 +373,13 @@ export function LlmModelSelectionPanel({
                     {provider.models.map((model) => {
                       const key = getModelKey(provider.name, model);
                       const selected = selectedKeys.has(key);
-                      const compatible = isCompatible(provider, model);
+                      const selectionConstraint = getSelectionConstraint?.(
+                        provider,
+                        model,
+                      );
+                      const compatible =
+                        isCompatible(provider, model) &&
+                        selectionConstraint?.selectable !== false;
                       const internetAccess = getResolvedProviderInternetAccess(
                         provider.name,
                         provider.internet_access,
@@ -360,7 +404,11 @@ export function LlmModelSelectionPanel({
                           key={key}
                           title={
                             !compatible
-                              ? getCompatibilityReason(provider, model)
+                              ? getCompatibilityReason(
+                                  provider,
+                                  model,
+                                  getSelectionConstraint,
+                                )
                               : undefined
                           }
                           className={cn(

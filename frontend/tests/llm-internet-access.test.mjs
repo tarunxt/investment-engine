@@ -58,19 +58,19 @@ test("LLM internet access helper maps provider modes and web-capable filtering",
   );
   assert.equal(
     getInternetAccessBadgeText(getResolvedProviderInternetAccess("openai")),
-    "🟡 Web if forced",
+    "Search only if forced",
   );
   assert.equal(
     getInternetAccessBadgeText(getResolvedProviderInternetAccess("gemini")),
-    "🌐 Live web",
+    "Search attached",
   );
   assert.equal(
     getInternetAccessBadgeText(getResolvedProviderInternetAccess("deepseek")),
-    "🌐 Web tool available",
+    "Can search, not guaranteed",
   );
   assert.equal(
     getInternetAccessBadgeText(getResolvedProviderInternetAccess("anthropic")),
-    "⚪ No live web",
+    "No model-side search",
   );
 
   assert.deepEqual(getWebCapableModelKeys(providers), [

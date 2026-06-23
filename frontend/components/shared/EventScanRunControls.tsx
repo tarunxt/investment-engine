@@ -32,7 +32,15 @@ interface EventScanRunControlsBaseProps {
   containerClassName?: string;
   defaultTarget?: ProviderModelTarget | null;
   disabled?: boolean;
+  getSelectionConstraint?: (
+    provider: ProviderInfo,
+    model: string,
+  ) => {
+    selectable: boolean;
+    reason?: string | null;
+  } | null | undefined;
   historicalEstimatedCostInrByTarget?: Record<string, number>;
+  pickerHeaderContent?: ReactNode;
   pickerButtonClassName?: string;
   pickerDialogLabel?: string;
   pickerIcon?: ReactNode;
@@ -116,9 +124,32 @@ function isCompatibleModel(provider: ProviderInfo, model: string) {
   return provider.model_compatibility?.[model]?.compatible !== false;
 }
 
+function isSelectableModel(
+  provider: ProviderInfo,
+  model: string,
+  getSelectionConstraint?: (
+    provider: ProviderInfo,
+    model: string,
+  ) => {
+    selectable: boolean;
+    reason?: string | null;
+  } | null | undefined,
+) {
+  if (!isCompatibleModel(provider, model)) return false;
+  const selectionConstraint = getSelectionConstraint?.(provider, model);
+  return selectionConstraint?.selectable !== false;
+}
+
 function isSelectableTarget(
   providers: ProviderInfo[],
   target: ProviderModelTarget | null | undefined,
+  getSelectionConstraint?: (
+    provider: ProviderInfo,
+    model: string,
+  ) => {
+    selectable: boolean;
+    reason?: string | null;
+  } | null | undefined,
 ) {
   const key = targetKey(target);
   if (!key) return false;
@@ -129,17 +160,26 @@ function isSelectableTarget(
     }
     return (
       provider.models.includes(target.model) &&
-      isCompatibleModel(provider, target.model)
+      isSelectableModel(provider, target.model, getSelectionConstraint)
     );
   });
 }
 
-function getFirstCompatibleTarget(providers: ProviderInfo[]) {
+function getFirstCompatibleTarget(
+  providers: ProviderInfo[],
+  getSelectionConstraint?: (
+    provider: ProviderInfo,
+    model: string,
+  ) => {
+    selectable: boolean;
+    reason?: string | null;
+  } | null | undefined,
+) {
   for (const provider of providers) {
     if (!provider.configured) continue;
 
     for (const model of provider.models) {
-      if (isCompatibleModel(provider, model)) {
+      if (isSelectableModel(provider, model, getSelectionConstraint)) {
         return {
           provider: provider.name,
           model,
@@ -153,14 +193,24 @@ function getFirstCompatibleTarget(providers: ProviderInfo[]) {
 function getPreferredTarget(
   providers: ProviderInfo[],
   defaultTarget: ProviderModelTarget | null | undefined,
+  getSelectionConstraint?: (
+    provider: ProviderInfo,
+    model: string,
+  ) => {
+    selectable: boolean;
+    reason?: string | null;
+  } | null | undefined,
 ) {
   const candidates = [defaultTarget, DEFAULT_EVENT_TARGET];
   for (const candidate of candidates) {
-    if (candidate && isSelectableTarget(providers, candidate)) {
+    if (
+      candidate &&
+      isSelectableTarget(providers, candidate, getSelectionConstraint)
+    ) {
       return candidate;
     }
   }
-  return getFirstCompatibleTarget(providers);
+  return getFirstCompatibleTarget(providers, getSelectionConstraint);
 }
 
 function getPreferredTargets(
@@ -172,6 +222,13 @@ function getPreferredTargets(
     defaultTarget?: ProviderModelTarget | null;
     defaultTargets?: ProviderModelTarget[] | null;
   },
+  getSelectionConstraint?: (
+    provider: ProviderInfo,
+    model: string,
+  ) => {
+    selectable: boolean;
+    reason?: string | null;
+  } | null | undefined,
 ) {
   const compatibleTargets: ProviderModelTarget[] = [];
   const seenKeys = new Set<string>();
@@ -183,7 +240,7 @@ function getPreferredTargets(
   for (const candidate of candidates) {
     const key = targetKey(candidate);
     if (!candidate || !key || seenKeys.has(key)) continue;
-    if (isSelectableTarget(providers, candidate)) {
+    if (isSelectableTarget(providers, candidate, getSelectionConstraint)) {
       compatibleTargets.push(candidate);
       seenKeys.add(key);
     }
@@ -193,13 +250,24 @@ function getPreferredTargets(
     return compatibleTargets;
   }
 
-  const firstCompatibleTarget = getPreferredTarget(providers, defaultTarget);
+  const firstCompatibleTarget = getPreferredTarget(
+    providers,
+    defaultTarget,
+    getSelectionConstraint,
+  );
   return firstCompatibleTarget ? [firstCompatibleTarget] : [];
 }
 
 function getTargetsFromKeys(
   providers: ProviderInfo[],
   selectedKeys: Set<string>,
+  getSelectionConstraint?: (
+    provider: ProviderInfo,
+    model: string,
+  ) => {
+    selectable: boolean;
+    reason?: string | null;
+  } | null | undefined,
 ) {
   const targets: ProviderModelTarget[] = [];
 
@@ -210,7 +278,7 @@ function getTargetsFromKeys(
       const key = `${provider.name}::${model}`;
       if (
         selectedKeys.has(key) &&
-        provider.model_compatibility?.[model]?.compatible !== false
+        isSelectableModel(provider, model, getSelectionConstraint)
       ) {
         targets.push({ provider: provider.name, model });
       }
@@ -227,7 +295,9 @@ export function EventScanRunControls({
   defaultTarget,
   defaultTargets,
   disabled,
+  getSelectionConstraint,
   historicalEstimatedCostInrByTarget,
+  pickerHeaderContent,
   pickerButtonClassName,
   pickerDialogLabel = "Select LLMs",
   pickerIcon,
@@ -358,7 +428,7 @@ export function EventScanRunControls({
 
   const activeTarget =
     providers.length > 0
-      ? getPreferredTarget(providers, defaultTarget)
+      ? getPreferredTarget(providers, defaultTarget, getSelectionConstraint)
       : null;
   const compatibleTargets = new Set(
     providers.flatMap((provider) =>
@@ -366,7 +436,7 @@ export function EventScanRunControls({
         .filter(
           (model) =>
             provider.configured &&
-            provider.model_compatibility?.[model]?.compatible !== false,
+            isSelectableModel(provider, model, getSelectionConstraint),
         )
         .map((model) => `${provider.name}::${model}`),
     ),
@@ -378,7 +448,11 @@ export function EventScanRunControls({
     getWebCapableModelKeys(providers).filter((key) => compatibleTargets.has(key)),
   );
   const defaultSelectedKeys = new Set(
-    getPreferredTargets(providers, { defaultTarget, defaultTargets })
+    getPreferredTargets(
+      providers,
+      { defaultTarget, defaultTargets },
+      getSelectionConstraint,
+    )
       .map((target) => targetKey(target))
       .filter((key): key is string => Boolean(key)),
   );
@@ -390,7 +464,11 @@ export function EventScanRunControls({
       : compatibleSelectedKeys.size > 0
         ? compatibleSelectedKeys
         : defaultSelectedKeys;
-  const activeTargets = getTargetsFromKeys(providers, effectiveSelectedKeys);
+  const activeTargets = getTargetsFromKeys(
+    providers,
+    effectiveSelectedKeys,
+    getSelectionConstraint,
+  );
   const activeSingleTarget = activeTargets[0] ?? activeTarget;
 
   const getEstimatedCostInr = useCallback(
@@ -618,6 +696,9 @@ export function EventScanRunControls({
                       {providerError}
                     </div>
                   ) : null}
+                  {pickerHeaderContent ? (
+                    <div className="mb-4">{pickerHeaderContent}</div>
+                  ) : null}
                   <LlmModelSelectionPanel
                     providers={providers}
                     selectedKeys={effectiveSelectedKeys}
@@ -626,6 +707,7 @@ export function EventScanRunControls({
                     emptyMessage="No configured LLM models are available for this analysis yet."
                     showBulkActions={selectionMode === "multiple"}
                     modelMixControls={modelMixControls}
+                    getSelectionConstraint={getSelectionConstraint}
                     onToggle={(key) => {
                       setHasTouchedSelection(true);
                       if (selectionMode === "multiple") {

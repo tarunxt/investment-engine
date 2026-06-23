@@ -14,6 +14,11 @@ from app.core.logging import WorkerLogHelper, get_logger
 from app.domains.ai_providers.web_metadata import merge_web_metadata
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
+from app.domains.polymarket.event_preflight import (
+    build_polymarket_event_prompt_and_metadata,
+    finalize_polymarket_event_runtime_metadata,
+)
+from app.domains.runs.schemas import PolymarketEventRunContext
 from app.shared.types import JobStatus
 
 logger = get_logger("app.domains.jobs.tasks")
@@ -634,6 +639,7 @@ def _publish_job_update(job: Job) -> None:
             "web_search_used": job.web_search_used,
             "web_search_queries": job.web_search_queries,
             "web_sources": job.web_sources,
+            "runtime_metadata_json": job.runtime_metadata_json,
             "export_status": job.export_status,
             "export_error": job.export_error,
             "exported_at": job.exported_at.isoformat() if job.exported_at else None,
@@ -1056,6 +1062,7 @@ def _mark_failed(
     web_search_used: bool | None = None,
     web_search_queries: list[str] | None = None,
     web_sources: list[str] | None = None,
+    runtime_metadata_json: dict | None = None,
 ) -> None:
     try:
         db.rollback()
@@ -1072,6 +1079,7 @@ def _mark_failed(
                 web_search_used=web_search_used,
                 web_search_queries=web_search_queries,
                 web_sources=web_sources,
+                runtime_metadata_json=runtime_metadata_json,
             )
             _publish_job_update(job)
             _refresh_run_status(db, job_id)
@@ -1101,6 +1109,7 @@ def execute_ai_job(self, job_id: int) -> None:
     web_search_used: bool | None = None
     web_search_queries: list[str] | None = None
     web_sources: list[str] | None = None
+    runtime_metadata_json: dict | None = None
 
     try:
         job = repo.get(job_id)
@@ -1116,8 +1125,31 @@ def execute_ai_job(self, job_id: int) -> None:
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
 
+        prompt_to_execute = job.prompt
+        polymarket_event_context: PolymarketEventRunContext | None = None
+        if isinstance(job.request_context_json, dict):
+            request_kind = str(job.request_context_json.get("kind") or "").strip()
+            if request_kind == "polymarket_bullpen_event":
+                polymarket_event_context = PolymarketEventRunContext.model_validate(
+                    job.request_context_json
+                )
+                prompt_to_execute, runtime_metadata_json = (
+                    build_polymarket_event_prompt_and_metadata(
+                        polymarket_event_context,
+                        provider_name=job.provider.strip().lower(),
+                    )
+                )
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=runtime_metadata_json.get("web_search_used"),
+                    response_queries=runtime_metadata_json.get("web_search_queries"),
+                    response_sources=runtime_metadata_json.get("web_sources"),
+                )
+
         provider = ProviderFactory.create(job.provider)
-        result = provider.generate(prompt=job.prompt, model=job.model)
+        result = provider.generate(prompt=prompt_to_execute, model=job.model)
         tokens_in = result.tokens_in
         tokens_out = result.tokens_out
         estimated_cost = result.cost
@@ -1303,6 +1335,16 @@ def execute_ai_job(self, job_id: int) -> None:
                 repaired_content = (repair_result.content or "").strip()
                 if repaired_content:
                     content = _sanitize_portfolio_event_content(job.prompt, repaired_content)
+        if polymarket_event_context is not None and runtime_metadata_json is not None:
+            runtime_metadata_json = finalize_polymarket_event_runtime_metadata(
+                polymarket_event_context,
+                provider_name=job.provider.strip().lower(),
+                content=content,
+                model_web_search_used=bool(result.web_search_used),
+                model_web_search_queries=result.web_search_queries,
+                model_web_sources=result.web_sources,
+                runtime_metadata=runtime_metadata_json,
+            )
         latest = repo.get(job_id)
         if latest and latest.status == JobStatus.FAILED and (latest.error_message or "").lower().find("cancelled") >= 0:
             logger.info("Skipping completion update for cancelled job %s", job_id)
@@ -1318,6 +1360,7 @@ def execute_ai_job(self, job_id: int) -> None:
             web_search_used=web_search_used,
             web_search_queries=web_search_queries,
             web_sources=web_sources,
+            runtime_metadata_json=runtime_metadata_json,
         )
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
@@ -1338,6 +1381,7 @@ def execute_ai_job(self, job_id: int) -> None:
             web_search_used=web_search_used,
             web_search_queries=web_search_queries,
             web_sources=web_sources,
+            runtime_metadata_json=runtime_metadata_json,
         )
         logger.error("Job %s exhausted all retries", job_id)
 
@@ -1360,6 +1404,7 @@ def execute_ai_job(self, job_id: int) -> None:
                 web_search_used=web_search_used,
                 web_search_queries=web_search_queries,
                 web_sources=web_sources,
+                runtime_metadata_json=runtime_metadata_json,
             )
             return
 
@@ -1378,6 +1423,7 @@ def execute_ai_job(self, job_id: int) -> None:
                 web_search_used=web_search_used,
                 web_search_queries=web_search_queries,
                 web_sources=web_sources,
+                runtime_metadata_json=runtime_metadata_json,
             )
             logger.error("Job %s exhausted all retries after: %s", job_id, exc)
 

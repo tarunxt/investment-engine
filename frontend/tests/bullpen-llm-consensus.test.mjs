@@ -57,6 +57,57 @@ test("computeBullpenLlmConsensus flags high disagreement and avoids simple-avera
   assert.equal(consensus.consensusNoOdds, 45);
 });
 
+test("computeBullpenLlmConsensus excludes entries flagged with invalid reasons", async () => {
+  const { computeBullpenLlmConsensus } = await loadBullpenAiModule();
+  const breakdown = [
+    {
+      provider: "test-provider",
+      model: "model-a",
+      jobId: null,
+      runId: null,
+      timestamp: null,
+      llmYesOdds: 70,
+      llmNoOdds: 30,
+      yesDefinition: null,
+      deadlineEt: null,
+      hoursRemaining: null,
+      evidenceStatus: null,
+      eventState: null,
+      confidence: null,
+      keyEvidence: [],
+      redFlags: [],
+      rationale: null,
+      invalidReason: "Required model-side search/tool usage did not run before the final answer.",
+    },
+    {
+      provider: "test-provider",
+      model: "model-b",
+      jobId: null,
+      runId: null,
+      timestamp: null,
+      llmYesOdds: 40,
+      llmNoOdds: 60,
+      yesDefinition: null,
+      deadlineEt: null,
+      hoursRemaining: null,
+      evidenceStatus: null,
+      eventState: null,
+      confidence: null,
+      keyEvidence: [],
+      redFlags: [],
+      rationale: null,
+      invalidReason: null,
+    },
+  ];
+
+  const consensus = computeBullpenLlmConsensus(breakdown);
+
+  assert.equal(consensus.consensusYesOdds, 40);
+  assert.equal(consensus.consensusNoOdds, 60);
+  assert.equal(consensus.llmAverageYesOdds, 40);
+  assert.equal(consensus.llmSpreadYesOdds, 0);
+});
+
 
 test("getBullpenReturnsPerDayBreakdown matches spreadsheet column O", async () => {
   const { getBullpenReturnsPerDayBreakdown } = await loadBullpenAiModule();

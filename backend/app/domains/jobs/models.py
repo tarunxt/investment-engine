@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -61,6 +61,8 @@ class Job(Base, TimestampMixin):
     web_search_used: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     web_search_queries: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     web_sources: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    request_context_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    runtime_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     export_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     export_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

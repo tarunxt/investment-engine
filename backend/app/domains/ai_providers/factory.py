@@ -35,16 +35,16 @@ class ProviderFactory:
     _provider_internet_access: dict[str, InternetAccessInfo] = {
         "openai": {
             "mode": "conditional",
-            "label": "Web if forced",
-            "force_token": "[ENABLE_WEB_SEARCH]",
+            "label": "Search only if forced",
+            "force_token": "[enable_web_search]",
             "caveat": (
-                "The OpenAI adapter only enables live web tools when the prompt asks for "
-                "current context or explicitly includes [ENABLE_WEB_SEARCH]."
+                "The OpenAI adapter enables live web tools when the prompt asks for "
+                "current context or explicitly includes [enable_web_search]."
             ),
         },
         "gemini": {
             "mode": "always_enabled",
-            "label": "Live web",
+            "label": "Search attached",
             "caveat": (
                 "The Gemini adapter attaches Google Search by default for normal runs. "
                 "Repair prompts disable search to keep output formatting deterministic."
@@ -52,7 +52,7 @@ class ProviderFactory:
         },
         "deepseek": {
             "mode": "tool_auto",
-            "label": "Web tool available",
+            "label": "Can search, not guaranteed",
             "caveat": (
                 "The DeepSeek adapter exposes a custom web_search tool with tool_choice=auto. "
                 "Whether search actually ran must be verified from the saved run metadata."
@@ -60,7 +60,7 @@ class ProviderFactory:
         },
         "anthropic": {
             "mode": "none",
-            "label": "No live web",
+            "label": "No model-side search",
             "caveat": (
                 "The Anthropic adapter currently sends plain messages.create requests "
                 "without any web or search tools."
