@@ -40,6 +40,10 @@ from app.domains.polymarket_auto_live.llm import (
     CONFIDENCE_RANK,
     run_llm_consensus,
 )
+from app.domains.polymarket_auto_live.normalization import (
+    normalize_auto_live_confidence,
+    normalize_auto_live_evidence_status,
+)
 from app.domains.polymarket_auto_live.rules import RuleEvaluation, evaluate_market_rules
 from app.domains.polymarket_auto_live.scanner import (
     ScanRejectedMarket,
@@ -612,8 +616,8 @@ def _manual_console_consensus(
         adjudication_required=row.adjudication_required,
         consensus_method="manual-console-selection",
         rationale_mismatch_count=0,
-        confidence=row.confidence,
-        evidence_status=row.evidence_status,
+        confidence=normalize_auto_live_confidence(row.confidence),
+        evidence_status=normalize_auto_live_evidence_status(row.evidence_status),
         event_state=row.event_state,
         provider_error_rate=0,
     )
@@ -784,8 +788,12 @@ class BullpenAutoLiveEngine:
             llm_outputs, llm_consensus = run_llm_consensus(market, rules, evidence_packet)
             candidate.llm_outputs = llm_outputs
             candidate.llm_consensus = llm_consensus
-            candidate.confidence = llm_consensus.confidence or "Low"
-            candidate.evidence_status = llm_consensus.evidence_status or "Low"
+            candidate.confidence = normalize_auto_live_confidence(
+                llm_consensus.confidence,
+            )
+            candidate.evidence_status = normalize_auto_live_evidence_status(
+                llm_consensus.evidence_status,
+            )
             candidate.event_state = llm_consensus.event_state
             candidate.disagreement_level = llm_consensus.disagreement_level
             candidate.disagreement_category = llm_consensus.disagreement_category
@@ -2275,11 +2283,11 @@ class BullpenAutoLiveEngine:
                 market,
                 current_position.side if current_position else "NO",
             )
-            confidence = (llm_consensus.confidence if llm_consensus and llm_consensus.confidence else "Low")
-            evidence_status = (
-                llm_consensus.evidence_status
-                if llm_consensus and llm_consensus.evidence_status
-                else "Moderate"
+            confidence = normalize_auto_live_confidence(
+                llm_consensus.confidence if llm_consensus else None,
+            )
+            evidence_status = normalize_auto_live_evidence_status(
+                llm_consensus.evidence_status if llm_consensus else None,
             )
             side = (
                 "NO"
@@ -2338,8 +2346,8 @@ class BullpenAutoLiveEngine:
                     order_usd if decision_action == "BUY_NEW" else current_exposure_usd,
                     2,
                 ),
-                confidence=confidence,  # type: ignore[arg-type]
-                evidence_status=evidence_status,  # type: ignore[arg-type]
+                confidence=confidence,
+                evidence_status=evidence_status,
                 event_state=llm_consensus.event_state if llm_consensus else None,
                 adjudication_required=llm_consensus.adjudication_required if llm_consensus else False,
                 disagreement_level=llm_consensus.disagreement_level if llm_consensus else None,
@@ -2934,8 +2942,8 @@ class BullpenAutoLiveEngine:
             ),
             edge_pp=round(candidate.edge_pp, 2),
             score=round(candidate.score, 2),
-            confidence=candidate.confidence,  # type: ignore[arg-type]
-            evidence_status=candidate.evidence_status,  # type: ignore[arg-type]
+            confidence=normalize_auto_live_confidence(candidate.confidence),
+            evidence_status=normalize_auto_live_evidence_status(candidate.evidence_status),
             event_state=candidate.event_state,
             adjudication_required=(
                 candidate.llm_consensus.adjudication_required if candidate.llm_consensus else False

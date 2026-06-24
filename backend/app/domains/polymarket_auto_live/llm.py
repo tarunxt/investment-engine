@@ -7,6 +7,10 @@ from datetime import UTC, datetime
 
 from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.polymarket_auto_live.evidence import EvidencePacket
+from app.domains.polymarket_auto_live.normalization import (
+    normalize_auto_live_confidence,
+    normalize_auto_live_evidence_status,
+)
 from app.domains.polymarket_auto_live.rules import RuleEvaluation
 from app.domains.polymarket_auto_live.scanner import ScannedMarket
 from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveLlmOutput
@@ -215,13 +219,23 @@ def _parse_single_output(
             or record.get("prob_no")
         ),
     )
+    confidence = _read_str(record, "confidence")
+    evidence_status = _read_str(record, "evidence_status", "evidenceStatus")
     return BullpenAutoLiveLlmOutput(
         provider=provider,
         model=model,
         llm_yes_odds=yes,
         llm_no_odds=no,
-        confidence=_read_str(record, "confidence"),
-        evidence_status=_read_str(record, "evidence_status", "evidenceStatus"),
+        confidence=(
+            normalize_auto_live_confidence(confidence)
+            if confidence is not None
+            else None
+        ),
+        evidence_status=(
+            normalize_auto_live_evidence_status(evidence_status)
+            if evidence_status is not None
+            else None
+        ),
         event_state=_read_str(record, "event_state", "eventState"),
         key_evidence=_read_str_list(record, "key_evidence", "keyEvidence"),
         red_flags=_read_str_list(record, "red_flags", "redFlags"),
@@ -721,12 +735,24 @@ def run_llm_consensus(
         [signal for signal in model_signals if signal.rationale_odds_mismatch]
     )
     confidence = _pick_consensus_label(
-        [output.confidence for output in outputs if output.error is None],
+        [
+            normalize_auto_live_confidence(output.confidence)
+            if output.confidence is not None
+            else None
+            for output in outputs
+            if output.error is None
+        ],
         tie_breaker="Low",
         rank_map=CONFIDENCE_RANK,
     )
     evidence_status = _pick_consensus_label(
-        [output.evidence_status for output in outputs if output.error is None],
+        [
+            normalize_auto_live_evidence_status(output.evidence_status)
+            if output.evidence_status is not None
+            else None
+            for output in outputs
+            if output.error is None
+        ],
         tie_breaker="Low",
         rank_map=EVIDENCE_RANK,
     )

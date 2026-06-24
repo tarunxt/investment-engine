@@ -25,6 +25,10 @@ from app.domains.polymarket_auto_live.engine import (
     PositionSnapshot,
 )
 from app.domains.polymarket_auto_live.llm import run_llm_consensus
+from app.domains.polymarket_auto_live.normalization import (
+    normalize_auto_live_confidence,
+    normalize_auto_live_evidence_status,
+)
 from app.domains.polymarket_auto_live.rules import RuleEvaluation, evaluate_market_rules
 from app.domains.polymarket_auto_live.scanner import (
     ScannedMarket,
@@ -84,6 +88,15 @@ def test_console_schedule_uses_fixed_ist_slots():
     assert next_console_schedule_time(
         datetime(2026, 6, 24, 18, 29, tzinfo=UTC)
     ) == datetime(2026, 6, 24, 18, 30, tzinfo=UTC)
+
+
+def test_auto_live_normalization_maps_raw_labels_to_strict_buckets():
+    assert normalize_auto_live_evidence_status("conflicting_evidence") == "Moderate"
+    assert normalize_auto_live_evidence_status("official") == "Strong"
+    assert normalize_auto_live_evidence_status(None) == "Low"
+    assert normalize_auto_live_confidence("very_high") == "High"
+    assert normalize_auto_live_confidence("moderate") == "Medium"
+    assert normalize_auto_live_confidence(None) == "Low"
 
 
 @pytest.mark.anyio
@@ -352,6 +365,8 @@ def _manual_console_candidate_row(
     llm_no_odds: float,
     returns_per_day: float,
     selected: bool,
+    confidence: str = "High",
+    evidence_status: str = "Strong",
 ) -> BullpenAutoLiveConsoleCandidateInput:
     return BullpenAutoLiveConsoleCandidateInput(
         question_id=question_id,
@@ -370,8 +385,8 @@ def _manual_console_candidate_row(
         llm_disagreement_level="Low",
         llm_disagreement_category="CONSENSUS",
         adjudication_required=False,
-        confidence="High",
-        evidence_status="Strong",
+        confidence=confidence,
+        evidence_status=evidence_status,
         event_state="scheduled_not_occurred",
         rules='This market will resolve to "Yes" if candidate X wins. Otherwise, it resolves to "No".',
         selected=selected,
@@ -381,8 +396,8 @@ def _manual_console_candidate_row(
                 model="gpt-4o-mini",
                 llm_yes_odds=llm_yes_odds,
                 llm_no_odds=llm_no_odds,
-                confidence="High",
-                evidence_status="Strong",
+                confidence=confidence,
+                evidence_status=evidence_status,
                 event_state="scheduled_not_occurred",
                 key_evidence=["Momentum remains against the Yes case."],
                 red_flags=[],
@@ -762,6 +777,101 @@ async def test_console_profile_buys_fixed_five_dollar_top10_and_exits_lower_rank
 
 
 @pytest.mark.anyio
+async def test_console_profile_manual_row_with_conflicting_evidence_normalizes_and_plans_buy_new(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_row = _manual_console_candidate_row(
+        market_id="candidate-market-1",
+        question_id="candidate-market-1",
+        market_title="Candidate market 1",
+        slug="candidate-market-1",
+        current_yes_odds=18,
+        current_no_odds=82,
+        llm_yes_odds=8,
+        llm_no_odds=92,
+        returns_per_day=9.5,
+        selected=True,
+        confidence="very_high",
+        evidence_status="conflicting_evidence",
+    )
+    market_lookup = {
+        manual_row.slug: _market(
+            question=manual_row.market_title,
+            slug=manual_row.slug,
+            close_time=manual_row.close_time,
+            current_yes_odds=manual_row.current_yes_odds,
+            current_no_odds=manual_row.current_no_odds,
+        )
+    }
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=1,
+                    candidate_rows=[manual_row],
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+
+    assert len(buy_decisions) == 1
+    assert buy_decisions[0].evidence_status == "Moderate"
+    assert buy_decisions[0].confidence == "High"
+    assert buy_decisions[0].order_plan is not None
+    assert buy_decisions[0].order_plan.order_size_usd == 5
+    assert buy_decisions[0].order_plan.status == "skipped"
+    assert buy_decisions[0].stage_results[2].outputs["evidence_status"] == "Moderate"
+    assert result.run.orders_planned == 1
+    assert result.run.decisions_count == 1
+
+
+@pytest.mark.anyio
 async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisions(
     monkeypatch,
 ):
@@ -790,6 +900,7 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
             llm_no_odds=89,
             returns_per_day=7.2,
             selected=True,
+            evidence_status="conflicting_evidence",
         ),
     ]
     market_lookup = {
@@ -863,6 +974,10 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
     assert all(decision.order_plan is not None for decision in buy_decisions)
     assert all(decision.order_plan.order_size_usd == 5 for decision in buy_decisions)
     assert all(decision.order_plan.side == "NO" for decision in buy_decisions)
+    assert sorted(decision.evidence_status for decision in buy_decisions) == [
+        "Moderate",
+        "Strong",
+    ]
     assert result.run.decisions_count == 2
     assert result.run.diagnostics.qualified_candidate_rows == 2
     assert sorted(result.run.diagnostics.top_candidate_market_ids) == [
