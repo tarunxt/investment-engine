@@ -389,8 +389,7 @@ function AmountHighlightConditionsDialog({
               Highlight rule
             </div>
             <ul className="mt-3 list-disc space-y-2 pl-5 font-medium text-slate-800">
-              <li>LLM No Odds is greater than 80%.</li>
-              <li>Returns/day is greater than 5%.</li>
+              <li>LLM Yes or No Odds is greater than 80%.</li>
             </ul>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -398,7 +397,7 @@ function AmountHighlightConditionsDialog({
               Amount formula
             </div>
             <p className="mt-3 font-semibold text-slate-950">
-              5 × (LLM No Odds - 80) × Returns/day / 100
+              5 × (strongest LLM odds - 80) × Returns/day / 100
             </p>
           </div>
         </div>

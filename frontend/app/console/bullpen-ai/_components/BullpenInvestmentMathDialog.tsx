@@ -203,7 +203,7 @@ export function BullpenInvestmentMathDialog({
   const amountCard = question ? (
     <CalculationCard
       title="Capital"
-      formula="5 x (LLM No - 80) x Returns/day / 100"
+      formula="5 x (strongest LLM odds - 80) x Returns/day / 100"
       summary={formatMoney(amountBreakdown!.result ?? null)}
       highlighted={focus === "amountToBeInvested"}
     >
@@ -232,8 +232,7 @@ export function BullpenInvestmentMathDialog({
             />
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">
-            Pink invest rows require both <span className="font-semibold">LLM No &gt; 80%</span>{" "}
-            and <span className="font-semibold">Returns/day &gt; 5%</span>.
+            Pink invest rows require <span className="font-semibold">LLM Yes or No &gt; 80%</span>.
           </p>
         </>
       )}
