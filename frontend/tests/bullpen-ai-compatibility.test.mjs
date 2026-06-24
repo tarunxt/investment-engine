@@ -176,6 +176,9 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.match(autoRunCardSource, /12:00 PM IST/);
   assert.match(autoRunCardSource, /6:00 PM IST/);
   assert.match(autoRunCardSource, /12:00 AM IST/);
+  assert.match(autoRunCardSource, /Background execution monitor/);
+  assert.match(autoRunCardSource, /Worker stages/);
+  assert.match(autoRunCardSource, /refreshes every 4 seconds/);
 });
 
 test("Bullpen x AI scan defaults exclude tweet counts", async () => {
