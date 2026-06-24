@@ -31,6 +31,7 @@ type ActionState = "enable" | "run-now" | "stop" | null;
 
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
 const POLL_INTERVAL_MS = 4_000;
+const RUN_TIMER_INTERVAL_MS = 1_000;
 const AUTO_RUN_TIMINGS = [
   "6:00 AM IST",
   "12:00 PM IST",
@@ -92,6 +93,24 @@ function modeLabel(summary: BullpenAutoLiveSummaryResponse | null) {
   return "Dry run";
 }
 
+function formatElapsedRunTime(startedAt: string | null, nowMs: number) {
+  if (!startedAt) return "0:00";
+
+  const startedAtMs = Date.parse(startedAt);
+  if (Number.isNaN(startedAtMs)) return "0:00";
+
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
+  const hours = Math.floor(elapsedSeconds / 3600);
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+  const seconds = elapsedSeconds % 60;
+  const paddedMinutes = hours > 0 ? String(minutes).padStart(2, "0") : String(minutes);
+  const paddedSeconds = String(seconds).padStart(2, "0");
+
+  return hours > 0
+    ? `${hours}:${paddedMinutes}:${paddedSeconds}`
+    : `${paddedMinutes}:${paddedSeconds}`;
+}
+
 function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
   if (status === "running") return "Running";
   if (status === "completed") return "Completed";
@@ -128,6 +147,8 @@ export function BullpenAutoRunScheduleCard({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingRunId, setPendingRunId] = useState<string | null>(null);
+  const [runNowStartedAt, setRunNowStartedAt] = useState<string | null>(null);
+  const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
 
   async function loadSummary(options?: { preserveLoading?: boolean }) {
     if (!options?.preserveLoading) {
@@ -172,6 +193,7 @@ export function BullpenAutoRunScheduleCard({
     }
 
     setPendingRunId(null);
+    setRunNowStartedAt(null);
     setAction(null);
     setNotice(matchingRun.summary);
     if (onRunCompleted) {
@@ -234,6 +256,8 @@ export function BullpenAutoRunScheduleCard({
 
   async function handleRunNow() {
     setAction("run-now");
+    setRunNowStartedAt(new Date().toISOString());
+    setTimerNowMs(Date.now());
     setNotice(null);
     setError(null);
 
@@ -242,6 +266,7 @@ export function BullpenAutoRunScheduleCard({
       await apiService.updateBullpenAutoLiveSettings(buildConsoleSettingsUpdate());
       const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
       setPendingRunId(run.id);
+      setRunNowStartedAt(run.started_at ?? new Date().toISOString());
       setNotice(
         runNowRequest
           ? "Bullpen Scan + LLM + Invest flow queued with the current Bullpen x AI table rows. Waiting for completion..."
@@ -252,6 +277,7 @@ export function BullpenAutoRunScheduleCard({
       setError(normalizeError(nextError));
       setAction(null);
       setPendingRunId(null);
+      setRunNowStartedAt(null);
     }
   }
 
@@ -263,6 +289,21 @@ export function BullpenAutoRunScheduleCard({
   const latestVisibleStage = visibleRunStages.at(-1);
   const visibleGuardrailChecks = visibleRun?.guardrail_checks ?? summary?.latest_guardrail_checks ?? [];
   const visibleGuardrailFailures = visibleGuardrailChecks.filter((check) => check.status === "fail").length;
+  const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
+  const showRunTimer = action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
+  const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
+
+  useEffect(() => {
+    if (!showRunTimer) return;
+
+    const intervalId = window.setInterval(() => {
+      setTimerNowMs(Date.now());
+    }, RUN_TIMER_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [showRunTimer, runTimerStartedAt]);
 
   return (
     <Card className="border-fuchsia-200 bg-[linear-gradient(135deg,rgba(253,242,248,0.98),rgba(239,246,255,0.98))] shadow-sm">
@@ -328,24 +369,31 @@ export function BullpenAutoRunScheduleCard({
                 )}
               </Button>
             )}
-            <Button
-              variant="outline"
-              onClick={handleRunNow}
-              disabled={action !== null || pendingRunId !== null}
-              className="border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
-            >
-              {action === "run-now" || pendingRunId ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Running...
-                </>
-              ) : (
-                <>
-                  <Zap className="mr-2 h-4 w-4" />
-                  Run Scans and Invest Now
-                </>
-              )}
-            </Button>
+            <div className="flex flex-col items-stretch gap-1">
+              <Button
+                variant="outline"
+                onClick={handleRunNow}
+                disabled={action !== null || pendingRunId !== null}
+                className="border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
+              >
+                {action === "run-now" || pendingRunId ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Running...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-2 h-4 w-4" />
+                    Run Scans and Invest Now
+                  </>
+                )}
+              </Button>
+              {showRunTimer ? (
+                <div className="text-center text-xs font-semibold tabular-nums text-sky-800" aria-live="polite">
+                  {elapsedRunTime}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
 
