@@ -318,9 +318,24 @@ export function BullpenInvestmentsSection({
       .filter((row) => row.kind === "active")
       .map((row) => row.key),
   );
-  const activePositionsOutsideTopTen = openActivePositions.filter(
-    (position) => !topActivePositionKeys.has(position.key),
-  );
+  const activePositionsNeedingAttention = openActivePositions
+    .map((position) => {
+      const question = activePositionQuestionByKey.get(position.key);
+      const hasStrongLlmOdds =
+        (question?.llmYesOdds !== null &&
+          question?.llmYesOdds !== undefined &&
+          question.llmYesOdds > 80) ||
+        (question?.llmNoOdds !== null &&
+          question?.llmNoOdds !== undefined &&
+          question.llmNoOdds > 80);
+      const reasons = [
+        !topActivePositionKeys.has(position.key) ? "not in the top 10 by returns/day" : null,
+        !hasStrongLlmOdds ? "LLM Yes/No odds are not above 80%" : null,
+      ].filter((reason): reason is string => Boolean(reason));
+
+      return { position, question, reasons };
+    })
+    .filter((entry) => entry.reasons.length > 0);
   const selectedCount = candidates.filter((question) =>
     selectedQuestionIds.has(question.id),
   ).length;
@@ -356,11 +371,10 @@ export function BullpenInvestmentsSection({
               </h3>
             </div>
             <p className="max-w-3xl text-sm text-slate-600">
-              Rows appear here when <span className="font-semibold">LLM No Odds &gt; 80%</span> and{" "}
-              <span className="font-semibold">Returns/day &gt; 5%</span>. The Invest action
-              buys the <span className="font-semibold">No</span> side in Bullpen with a fixed{" "}
-              <span className="font-semibold">$5</span> order per new opportunity. The
-              combined table ranks active positions and new opportunities by{" "}
+              Rows appear here when either <span className="font-semibold">LLM Yes Odds &gt; 80%</span>{" "}
+              or <span className="font-semibold">LLM No Odds &gt; 80%</span>. The Invest action
+              buys the stronger LLM side in Bullpen with a fixed <span className="font-semibold">$5</span>{" "}
+              order per new opportunity. The combined table shows at most 10 rows ranked by{" "}
               <span className="font-semibold">returns/day</span>.
             </p>
           </div>
@@ -681,13 +695,12 @@ export function BullpenInvestmentsSection({
                 );
               })}
 
-              {activePositionsOutsideTopTen.length > 0 ? (
+              {activePositionsNeedingAttention.length > 0 ? (
                 <div className="space-y-3 pt-2">
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-900">
-                    Active positions below did not make the top 10 by returns/day.
+                    Active positions below need attention because they are outside the top 10 by returns/day or do not have LLM Yes/No odds above 80%.
                   </div>
-                  {activePositionsOutsideTopTen.map((position) => {
-                    const question = activePositionQuestionByKey.get(position.key);
+                  {activePositionsNeedingAttention.map(({ position, question, reasons }) => {
                     return (
                       <RowShell key={`active-position-outside-top-${position.key}`} attention>
                         <div className="flex items-start gap-3">
@@ -710,6 +723,10 @@ export function BullpenInvestmentsSection({
                               </span>
                               <span>{position.shares.toLocaleString()} shares</span>
                             </div>
+                            <div className="rounded-xl border border-red-200 bg-white/70 px-3 py-2 text-xs font-semibold text-red-800">
+                              Attention: {reasons.join("; ")}
+                            </div>
+
                           </div>
                         </div>
 

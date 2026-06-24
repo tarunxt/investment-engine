@@ -209,8 +209,8 @@ export function BullpenInvestmentMathDialog({
     >
       {amountBreakdown!.result === null ? (
         <p className="text-sm leading-6 text-slate-600">
-          This amount is only available after the row has both LLM No odds and a
-          returns/day value and clears the minimum thresholds.
+          This amount is only available after the row has a returns/day value and
+          either LLM Yes or LLM No odds clear the minimum threshold.
         </p>
       ) : (
         <>
@@ -219,20 +219,16 @@ export function BullpenInvestmentMathDialog({
           </div>
           <div className="mt-4">
             <MetricRow
-              label="LLM No odds"
-              value={formatOdds(amountBreakdown!.llmNoOdds ?? null)}
+              label="Strongest LLM odds"
+              value={formatOdds(amountBreakdown!.strongestLlmOdds ?? null)}
             />
             <MetricRow
-              label={`Minimum LLM No odds`}
-              value={formatOdds(amountBreakdown!.minLlmNoOdds)}
+              label={`Minimum LLM Yes/No odds`}
+              value={formatOdds(amountBreakdown!.minStrongestLlmOdds)}
             />
             <MetricRow
               label="Returns/day input"
               value={formatPercent(amountBreakdown!.returnsPerDay ?? null)}
-            />
-            <MetricRow
-              label="Minimum Returns/day"
-              value={formatPercent(amountBreakdown!.minReturnsPerDay)}
             />
             <MetricRow
               label="Qualification"
@@ -240,9 +236,9 @@ export function BullpenInvestmentMathDialog({
             />
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">
-            Pink invest rows require both <span className="font-semibold">LLM No &gt; 80%</span>{" "}
-            and <span className="font-semibold">Returns/day &gt; 5%</span>. Once both pass,
-            the table uses a fixed <span className="font-semibold">$5</span> buy amount.
+            Pink invest rows require either <span className="font-semibold">LLM Yes &gt; 80%</span>{" "}
+            or <span className="font-semibold">LLM No &gt; 80%</span>. Returns/day is used for ranking,
+            and qualified rows receive a fixed <span className="font-semibold">$5</span> buy amount.
           </p>
         </>
       )}
