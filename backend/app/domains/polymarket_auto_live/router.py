@@ -7,6 +7,7 @@ from app.domains.auth.models import User
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveRun,
+    BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
     BullpenAutoLiveState,
@@ -77,10 +78,13 @@ async def list_auto_live_decisions(current_user: User = Depends(get_current_user
 
 
 @router.post("/run-once", response_model=BullpenAutoLiveRun)
-async def run_auto_live_once(current_user: User = Depends(get_current_user)):
+async def run_auto_live_once(
+    request: BullpenAutoLiveRunOnceRequest | None = None,
+    current_user: User = Depends(get_current_user),
+):
     bot = await _get_bot(current_user)
     try:
-        return await bot.run_once(triggered_by="manual")
+        return await bot.run_once(triggered_by="manual", request=request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
 

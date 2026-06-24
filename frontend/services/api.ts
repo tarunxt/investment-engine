@@ -971,8 +971,10 @@ class apiServiceClass implements IApiService {
     return this.get<BullpenAutoLiveDecision[]>(URLs.bullpenAutoLive.decisions());
   }
 
-  runBullpenAutoLiveOnce(): Promise<BullpenAutoLiveRun> {
-    return this.post<BullpenAutoLiveRun>(URLs.bullpenAutoLive.runOnce());
+  runBullpenAutoLiveOnce(
+    data?: Record<string, unknown>,
+  ): Promise<BullpenAutoLiveRun> {
+    return this.post<BullpenAutoLiveRun>(URLs.bullpenAutoLive.runOnce(), data);
   }
 
   startBullpenAutoLive(): Promise<BullpenAutoLiveState> {
@@ -1029,8 +1031,10 @@ class apiServiceClass implements IApiService {
     return this.getBullpenAutoLiveDecisions();
   }
 
-  bullpenAiAutoLiveRunOnce(): Promise<BullpenAutoLiveRun> {
-    return this.runBullpenAutoLiveOnce();
+  bullpenAiAutoLiveRunOnce(
+    data?: Record<string, unknown>,
+  ): Promise<BullpenAutoLiveRun> {
+    return this.runBullpenAutoLiveOnce(data);
   }
 
   bullpenAiAutoLiveStart(): Promise<BullpenAutoLiveState> {

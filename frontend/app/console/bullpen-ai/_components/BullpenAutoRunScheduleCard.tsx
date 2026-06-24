@@ -22,6 +22,7 @@ import type { BullpenAutoLiveSummaryResponse } from "@/types/api";
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
+  buildRunNowRequest?: () => Record<string, unknown> | null;
 };
 
 type ActionState = "enable" | "run-now" | "stop" | null;
@@ -91,6 +92,7 @@ function modeLabel(summary: BullpenAutoLiveSummaryResponse | null) {
 
 export function BullpenAutoRunScheduleCard({
   onRunCompleted,
+  buildRunNowRequest,
 }: BullpenAutoRunScheduleCardProps) {
   const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -208,10 +210,15 @@ export function BullpenAutoRunScheduleCard({
     setError(null);
 
     try {
+      const runNowRequest = buildRunNowRequest?.() ?? undefined;
       await apiService.updateBullpenAutoLiveSettings(buildConsoleSettingsUpdate());
-      const run = await apiService.runBullpenAutoLiveOnce();
+      const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
       setPendingRunId(run.id);
-      setNotice("Bullpen Scan + LLM + Invest flow queued. Waiting for completion...");
+      setNotice(
+        runNowRequest
+          ? "Bullpen Scan + LLM + Invest flow queued with the current Bullpen x AI table rows. Waiting for completion..."
+          : "Bullpen Scan + LLM + Invest flow queued. Waiting for completion...",
+      );
       await loadSummary({ preserveLoading: true });
     } catch (nextError) {
       setError(normalizeError(nextError));

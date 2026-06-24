@@ -611,6 +611,7 @@ def _collect_bullpen_rows(value: object) -> list[dict[str, object]]:
             "rows",
             "data",
             "items",
+            "positions",
             "activities",
             "activity",
             "history",

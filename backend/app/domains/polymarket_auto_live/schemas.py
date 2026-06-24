@@ -216,6 +216,72 @@ class BullpenAutoLiveLlmOutput(BaseModel):
     completed_at: str | None = None
 
 
+class BullpenAutoLiveConsoleCandidateInput(BaseModel):
+    question_id: str
+    market_id: str
+    market_title: str
+    slug: str | None = None
+    market_url: str | None = None
+    close_time: str | None = None
+    theme: str = "Uncategorized"
+    current_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    current_no_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_no_odds: float | None = Field(default=None, ge=0, le=100)
+    returns_per_day: float | None = None
+    amount_to_be_invested: float | None = Field(default=None, ge=0)
+    llm_disagreement_level: str | None = None
+    llm_disagreement_category: str | None = None
+    adjudication_required: bool = False
+    confidence: str | None = None
+    evidence_status: str | None = None
+    event_state: str | None = None
+    rules: str | None = None
+    selected: bool = False
+    llm_outputs: list[BullpenAutoLiveLlmOutput] = Field(default_factory=list)
+
+
+class BullpenAutoLiveConsoleRunContext(BaseModel):
+    source_label: str | None = None
+    source_url: str | None = None
+    scanned_at: str | None = None
+    snapshot_id: str | None = None
+    mode: str | None = None
+    total_candidates: int = Field(default=0, ge=0)
+    candidate_rows: list[BullpenAutoLiveConsoleCandidateInput] = Field(
+        default_factory=list
+    )
+
+
+class BullpenAutoLiveRunOnceRequest(BaseModel):
+    console_profile: BullpenAutoLiveConsoleRunContext | None = None
+
+
+class BullpenAutoLiveRejectedCandidateDiagnostic(BaseModel):
+    market_id: str
+    market_title: str
+    slug: str | None = None
+    market_url: str | None = None
+    reasons: list[str] = Field(default_factory=list)
+
+
+class BullpenAutoLiveRunDiagnostics(BaseModel):
+    live_wallet_positions: int = Field(default=0, ge=0)
+    active_wallet_positions: int = Field(default=0, ge=0)
+    scanned_candidates: int = Field(default=0, ge=0)
+    candidate_rows_before_llm: int = Field(default=0, ge=0)
+    llm_candidate_count: int = Field(default=0, ge=0)
+    qualified_candidate_rows: int = Field(default=0, ge=0)
+    top_candidate_market_ids: list[str] = Field(default_factory=list)
+    rejected_candidates: list[BullpenAutoLiveRejectedCandidateDiagnostic] = Field(
+        default_factory=list
+    )
+    scan_source_label: str | None = None
+    scan_source_url: str | None = None
+    used_manual_console_rows: bool = False
+    selected_manual_candidate_ids: list[str] = Field(default_factory=list)
+
+
 class BullpenAutoLiveOrderPlan(BaseModel):
     id: str
     action: AutoLiveOrderAction
@@ -309,6 +375,8 @@ class BullpenAutoLiveRun(BaseModel):
     stage_results: list[BullpenAutoLiveStageResult] = Field(default_factory=list)
     guardrail_checks: list[BullpenAutoLiveGuardrailCheck] = Field(default_factory=list)
     decision_ids: list[str] = Field(default_factory=list)
+    diagnostics: BullpenAutoLiveRunDiagnostics = Field(default_factory=BullpenAutoLiveRunDiagnostics)
+    request_context: BullpenAutoLiveRunOnceRequest | None = None
 
 
 class BullpenAutoLiveState(BaseModel):
