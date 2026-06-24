@@ -536,12 +536,20 @@ function buildBullpenHistoricalCostMapInr(
 function buildBullpenManualInvestOrder(
   question: BullpenQuestionRow,
 ): PolymarketManualInvestOrderRequest | null {
+  const outcome =
+    question.llmYesOdds !== null &&
+    question.llmYesOdds > 80 &&
+    (question.llmNoOdds === null || question.llmYesOdds >= question.llmNoOdds)
+      ? "Yes"
+      : "No";
+  const outcomeOdds = outcome === "Yes" ? question.yesOdds : question.noOdds;
+
   if (
     question.amountToBeInvested === null ||
     question.amountToBeInvested <= 0 ||
-    question.noOdds === null ||
-    question.noOdds <= 0 ||
-    question.noOdds >= 100
+    outcomeOdds === null ||
+    outcomeOdds <= 0 ||
+    outcomeOdds >= 100
   ) {
     return null;
   }
@@ -556,9 +564,9 @@ function buildBullpenManualInvestOrder(
     question_id: question.id,
     market_id: marketId,
     market_title: question.question,
-    outcome: "No",
+    outcome,
     amount: Number(question.amountToBeInvested.toFixed(2)),
-    price: Number((question.noOdds / 100).toFixed(4)),
+    price: Number((outcomeOdds / 100).toFixed(4)),
     event_end_at: question.closeTime,
     market_url: question.marketUrl,
   };
@@ -2563,7 +2571,7 @@ export default function BullpenAiPage() {
       }
       if (noLongerQualifiedCount > 0) {
         summaryParts.push(
-          `${formatCountLabel(noLongerQualifiedCount, "selected event")} was skipped because the refreshed odds no longer met the pink-row thresholds.`,
+          `${formatCountLabel(noLongerQualifiedCount, "selected event")} was skipped because the refreshed odds no longer met the pink-row threshold.`,
         );
       }
 
@@ -2608,8 +2616,8 @@ export default function BullpenAiPage() {
   const investmentEmptyMessage = !activeCurrentSnapshot
     ? "Run Bullpen Scan first to load the current questions table."
     : !activeHasAnyLlmOdds
-      ? "Run LLM analysis first. Pink invest rows appear after LLM No Odds and Returns/day qualify."
-      : "No rows are currently pink. Rows appear here when LLM No Odds is above 80% and Returns/day is above 5%.";
+      ? "Run LLM analysis first. Pink invest rows appear after LLM Yes or No Odds qualify."
+      : "No rows are currently pink. Rows appear here when LLM Yes or No Odds is above 80%.";
 
   function handlePromptTemplateSave(template: string) {
     setBullpenLlmPromptTemplate(template);

@@ -226,20 +226,24 @@ function RowShell({
   children,
   selected = false,
   active = false,
+  attention = false,
 }: {
   children: ReactNode;
   selected?: boolean;
   active?: boolean;
+  attention?: boolean;
 }) {
   return (
     <div
       className={cn(
         "flex flex-col gap-4 rounded-2xl border px-4 py-4 transition md:flex-row md:items-start md:justify-between",
-        active
-          ? "border-emerald-400 bg-emerald-50"
-          : selected
-            ? "border-fuchsia-400 bg-fuchsia-50"
-            : "border-slate-200 bg-white hover:border-fuchsia-200",
+        attention
+          ? "border-red-400 bg-red-50"
+          : active
+            ? "border-emerald-400 bg-emerald-50"
+            : selected
+              ? "border-fuchsia-400 bg-fuchsia-50"
+              : "border-slate-200 bg-white hover:border-fuchsia-200",
       )}
     >
       {children}
@@ -293,13 +297,30 @@ export function BullpenInvestmentsSection({
       ),
     [activePositionQuestions],
   );
-  const sortedCandidates = [...candidates].sort((left, right) => {
-    const leftHasWarning = getBullpenLlmReviewState(left)?.tone === "high";
-    const rightHasWarning = getBullpenLlmReviewState(right)?.tone === "high";
-
-    if (leftHasWarning !== rightHasWarning) return leftHasWarning ? 1 : -1;
-    return 0;
-  });
+  const topInvestmentRows = [
+    ...openActivePositions.map((position) => ({
+      kind: "active" as const,
+      key: position.key,
+      returnsPerDay: position.returnsPerDay,
+      position,
+    })),
+    ...candidates.map((question) => ({
+      kind: "candidate" as const,
+      key: question.id,
+      returnsPerDay: question.returnsPerDay,
+      question,
+    })),
+  ]
+    .sort((left, right) => (right.returnsPerDay ?? -Infinity) - (left.returnsPerDay ?? -Infinity))
+    .slice(0, 10);
+  const topActivePositionKeys = new Set(
+    topInvestmentRows
+      .filter((row) => row.kind === "active")
+      .map((row) => row.key),
+  );
+  const activePositionsOutsideTopTen = openActivePositions.filter(
+    (position) => !topActivePositionKeys.has(position.key),
+  );
   const selectedCount = candidates.filter((question) =>
     selectedQuestionIds.has(question.id),
   ).length;
@@ -335,10 +356,8 @@ export function BullpenInvestmentsSection({
               </h3>
             </div>
             <p className="max-w-3xl text-sm text-slate-600">
-              Rows appear here when <span className="font-semibold">LLM No Odds &gt; 80%</span> and{" "}
-              <span className="font-semibold">Returns/day &gt; 5%</span>. The Invest action
-              buys the <span className="font-semibold">No</span> side in Bullpen using the
-              calculated amount.
+              Rows appear here when <span className="font-semibold">LLM Yes or No Odds &gt; 80%</span>.
+              The top 10 rows are sorted by returns/day across active positions and new opportunities.
             </p>
           </div>
           {!isHistoryView && hasRows ? (
@@ -452,7 +471,9 @@ export function BullpenInvestmentsSection({
             </div>
 
             <div className="mt-4 space-y-3">
-              {openActivePositions.map((position) => {
+              {topInvestmentRows.map((row) => {
+                if (row.kind === "candidate") return null;
+                const position = row.position;
                 const question = activePositionQuestionByKey.get(position.key);
                 return (
                   <RowShell key={`active-position-${position.key}`} active>
@@ -547,8 +568,16 @@ export function BullpenInvestmentsSection({
                 );
               })}
 
-              {sortedCandidates.map((question) => {
+              {topInvestmentRows.map((row) => {
+                if (row.kind === "active") return null;
+                const question = row.question;
                 const checkboxId = `bullpen-investment-${question.id}`;
+                const investOutcome =
+                  question.llmYesOdds !== null &&
+                  question.llmYesOdds > 80 &&
+                  (question.llmNoOdds === null || question.llmYesOdds >= question.llmNoOdds)
+                    ? "Yes"
+                    : "No";
                 return (
                   <RowShell
                     key={question.id}
@@ -572,7 +601,7 @@ export function BullpenInvestmentsSection({
                         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                           <span>Close: {formatDate(question.closeTime)}</span>
                           <span>Category: {question.category || "—"}</span>
-                          <span>Outcome: Buy No</span>
+                          <span>Outcome: Buy {investOutcome}</span>
                         </div>
                         {question.marketUrl ? (
                           <a
@@ -647,6 +676,57 @@ export function BullpenInvestmentsSection({
                   </RowShell>
                 );
               })}
+
+              {activePositionsOutsideTopTen.length > 0 ? (
+                <div className="space-y-3 pt-2">
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-900">
+                    Active positions below did not make the top 10 by returns/day.
+                  </div>
+                  {activePositionsOutsideTopTen.map((position) => {
+                    const question = activePositionQuestionByKey.get(position.key);
+                    return (
+                      <RowShell key={`active-position-outside-top-${position.key}`} attention>
+                        <div className="flex items-start gap-3">
+                          <span
+                            className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-red-100 text-red-700"
+                            aria-label="Active position outside top 10"
+                            title="Active position outside top 10"
+                          >
+                            <AlertTriangle className="h-4 w-4" />
+                          </span>
+                          <div className="space-y-2">
+                            <div className="block font-medium text-slate-950">
+                              {position.marketTitle}
+                            </div>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                              <span>Close: {formatDate(position.closeTime)}</span>
+                              <span>Held outcome: {position.outcome || "—"}</span>
+                              <span>
+                                Avg price: {formatOdds(position.averagePrice === null ? null : position.averagePrice * 100)}
+                              </span>
+                              <span>{position.shares.toLocaleString()} shares</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid min-w-full gap-3 text-sm md:min-w-[36rem] md:grid-cols-4 xl:min-w-[44rem]">
+                          <MetricCard label="Current Yes / No">
+                            <OddsPairValue yesOdds={position.yesOdds} noOdds={position.noOdds} accentClassName="text-rose-700" />
+                          </MetricCard>
+                          <LlmOddsMetric question={question} onOpenBreakdown={setBreakdownQuestion} />
+                          <MetricCard label="Returns/day">
+                            <div className="font-semibold text-slate-900">{formatReturnsPerDay(position.returnsPerDay)}</div>
+                          </MetricCard>
+                          <MetricCard label="Capital" accent>
+                            <div className="font-semibold">{formatMoney(position.currentValue ?? position.costBasis)}</div>
+                            <div className="mt-1 text-[11px] font-medium text-slate-900/80">Current value</div>
+                          </MetricCard>
+                        </div>
+                      </RowShell>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
           </>
         )}
