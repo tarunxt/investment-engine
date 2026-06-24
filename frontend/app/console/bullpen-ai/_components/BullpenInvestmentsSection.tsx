@@ -356,8 +356,12 @@ export function BullpenInvestmentsSection({
               </h3>
             </div>
             <p className="max-w-3xl text-sm text-slate-600">
-              Rows appear here when <span className="font-semibold">LLM Yes or No Odds &gt; 80%</span>.
-              The top 10 rows are sorted by returns/day across active positions and new opportunities.
+              Rows appear here when <span className="font-semibold">LLM No Odds &gt; 80%</span> and{" "}
+              <span className="font-semibold">Returns/day &gt; 5%</span>. The Invest action
+              buys the <span className="font-semibold">No</span> side in Bullpen with a fixed{" "}
+              <span className="font-semibold">$5</span> order per new opportunity. The
+              combined table ranks active positions and new opportunities by{" "}
+              <span className="font-semibold">returns/day</span>.
             </p>
           </div>
           {!isHistoryView && hasRows ? (

@@ -5,6 +5,22 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.logging import get_logger
 from app.domains.polymarket import bullpen as bullpen_module
+from app.domains.polymarket_auto_live.console_profile import (
+    CONSOLE_FIXED_ORDER_USD,
+    CONSOLE_LLM_CANDIDATE_LIMIT,
+    CONSOLE_MIN_LLM_NO_ODDS,
+    CONSOLE_MIN_MARKET_ODDS,
+    CONSOLE_MIN_RETURNS_PER_DAY,
+    CONSOLE_PROFILE_ID,
+    CONSOLE_RANKED_EVENT_LIMIT,
+    CONSOLE_SCHEDULE_HOURS,
+    CONSOLE_SCAN_WINDOW_DAYS,
+    apply_scanned_market_to_position,
+    candidate_returns_per_day,
+    next_console_schedule_time,
+    position_returns_per_day,
+    read_console_wallet_positions,
+)
 from app.domains.polymarket_auto_live.config import auto_live_backend_allows_execution
 from app.domains.polymarket_auto_live.evidence import EvidencePacket, build_evidence_packet
 from app.domains.polymarket_auto_live.execution import (
@@ -31,6 +47,7 @@ from app.domains.polymarket_auto_live.scanner import (
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveGuardrailCheck,
+    BullpenAutoLiveLlmOutput,
     BullpenAutoLiveOrderPlan,
     BullpenAutoLiveRun,
     BullpenAutoLiveSettings,
@@ -135,6 +152,9 @@ class PositionSnapshot:
     average_price_cents: float
     opened_at: datetime
     updated_at: datetime
+    close_time: str | None = None
+    current_price_cents: float | None = None
+    condition_id: str | None = None
 
 
 @dataclass
@@ -541,6 +561,16 @@ class BullpenAutoLiveEngine:
         state.consecutive_failed_orders = _count_consecutive_failed_orders(historical_decisions)
         global_guardrails = _run_guardrails(settings, state)
         state.latest_guardrail_checks = global_guardrails
+        if settings.strategy_profile == CONSOLE_PROFILE_ID:
+            return await self._execute_console_top10(
+                user_id=user_id,
+                settings=settings,
+                state=state,
+                run=run,
+                historical_decisions=historical_decisions,
+                global_guardrails=global_guardrails,
+                now=now,
+            )
         daily_loss_stop_hit, weekly_loss_stop_hit = _daily_weekly_loss_stops(
             historical_decisions,
             settings.bankroll_usd,
@@ -1614,6 +1644,849 @@ class BullpenAutoLiveEngine:
 
         return EngineResult(run=run, decisions=decisions, state=state, positions=new_positions)
 
+    async def _execute_console_top10(
+        self,
+        *,
+        user_id: int,
+        settings: BullpenAutoLiveSettings,
+        state: BullpenAutoLiveState,
+        run: BullpenAutoLiveRun,
+        historical_decisions: list[BullpenAutoLiveDecision],
+        global_guardrails: list[BullpenAutoLiveGuardrailCheck],
+        now: datetime,
+    ) -> EngineResult:
+        live_wallet_positions = await read_console_wallet_positions()
+        scanned = await scan_candidate_markets(
+            min_liquidity_usd=settings.min_liquidity_usd,
+            existing_position_slugs={position.slug for position in live_wallet_positions if position.slug},
+        )
+        market_by_slug = {market.slug: market for market in scanned.accepted if market.slug}
+        market_by_id = {market.market_id: market for market in scanned.accepted}
+
+        enriched_wallet_positions = [
+            apply_scanned_market_to_position(
+                position,
+                market_by_slug.get(position.slug) or market_by_id.get(position.market_id),
+            )
+            for position in live_wallet_positions
+        ]
+        position_snapshots = [
+            PositionSnapshot(
+                market_id=position.market_id,
+                slug=position.slug,
+                market_title=position.market_title,
+                market_url=position.market_url,
+                theme=position.theme,
+                side=position.side,
+                exposure_usd=position.exposure_usd,
+                shares=position.shares,
+                average_price_cents=position.average_price_cents,
+                opened_at=now,
+                updated_at=now,
+                close_time=position.close_time,
+                current_price_cents=position.current_price_cents,
+                condition_id=position.condition_id,
+            )
+            for position in enriched_wallet_positions
+            if not position.is_claimable
+        ]
+
+        run.stage_results.append(
+            build_stage_result(
+                stage_number=1,
+                status="pass",
+                reason="Bullpen console profile synced live wallet positions and scanned upcoming markets.",
+                outputs={
+                    "live_wallet_positions": len(enriched_wallet_positions),
+                    "active_wallet_positions": len(position_snapshots),
+                    "scanned_candidates": len(scanned.accepted),
+                    "rejected_candidates": len(scanned.rejected),
+                    "fixed_schedule_timezone": "Asia/Kolkata",
+                    "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
+                },
+                guardrails_checked=global_guardrails,
+            )
+        )
+
+        positioned_market_ids = {position.market_id for position in position_snapshots}
+        candidate_rows: list[tuple[ScannedMarket, float]] = []
+        for market in scanned.accepted:
+            if market.market_id in positioned_market_ids:
+                continue
+            if market.current_yes_odds is None or market.current_no_odds is None:
+                continue
+            if (
+                market.current_yes_odds < CONSOLE_MIN_MARKET_ODDS
+                or market.current_no_odds < CONSOLE_MIN_MARKET_ODDS
+            ):
+                continue
+            returns_per_day = candidate_returns_per_day(market, now=now)
+            if returns_per_day is None or returns_per_day <= CONSOLE_MIN_RETURNS_PER_DAY:
+                continue
+            if not market.close_time:
+                continue
+            try:
+                close_time = datetime.fromisoformat(market.close_time.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            days_until_close = (close_time - now).total_seconds() / 86_400
+            if days_until_close <= 0 or days_until_close > CONSOLE_SCAN_WINDOW_DAYS:
+                continue
+            candidate_rows.append((market, returns_per_day))
+        candidate_rows.sort(
+            key=lambda item: (
+                -item[1],
+                item[0].close_time or "",
+                item[0].question,
+            )
+        )
+
+        candidate_contexts: list[dict[str, object]] = []
+        llm_markets = candidate_rows[:CONSOLE_LLM_CANDIDATE_LIMIT]
+        for market, returns_per_day in llm_markets:
+            stage_results = [
+                build_stage_result(
+                    stage_number=1,
+                    status="pass",
+                    reason="Candidate passed the console scan filters.",
+                    outputs={
+                        "question": market.question,
+                        "market_url": market.market_url,
+                        "slug": market.slug,
+                        "close_time": market.close_time,
+                        "current_no_odds": market.current_no_odds,
+                        "returns_per_day": returns_per_day,
+                    },
+                )
+            ]
+            rules = evaluate_market_rules(market, now=now)
+            if rules.fail_reason:
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=2,
+                        status="fail",
+                        reason=rules.fail_reason,
+                        outputs={"close_time": market.close_time},
+                        hard_block=True,
+                    )
+                )
+                candidate_contexts.append(
+                    {
+                        "market": market,
+                        "returns_per_day": returns_per_day,
+                        "rules": rules,
+                        "llm_outputs": [],
+                        "llm_consensus": None,
+                        "stage_results": stage_results,
+                        "qualified": False,
+                        "reason": rules.fail_reason,
+                    }
+                )
+                continue
+
+            stage_results.append(
+                build_stage_result(
+                    stage_number=2,
+                    status="pass",
+                    reason="Resolution criteria and deadline were parsed successfully.",
+                    outputs={
+                        "yes_definition": rules.yes_definition,
+                        "deadline_et": rules.deadline_et,
+                        "hours_remaining": rules.hours_remaining,
+                    },
+                )
+            )
+
+            evidence_packet = build_evidence_packet(market, rules, built_at=utc_now_iso())
+            llm_outputs, llm_consensus = run_llm_consensus(market, rules, evidence_packet)
+            fair_no = llm_consensus.fair_no_probability_pct
+            qualified = bool(
+                fair_no is not None
+                and fair_no > CONSOLE_MIN_LLM_NO_ODDS
+                and llm_consensus.disagreement_level != "High"
+                and not llm_consensus.adjudication_required
+                and returns_per_day > CONSOLE_MIN_RETURNS_PER_DAY
+            )
+            stage_results.append(
+                build_stage_result(
+                    stage_number=3,
+                    status="warning"
+                    if llm_consensus.disagreement_level in {"Medium", "High"}
+                    else "pass",
+                    reason="LLM consensus completed for the candidate market.",
+                    outputs={
+                        "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
+                        "fair_no_probability_pct": fair_no,
+                        "disagreement_level": llm_consensus.disagreement_level,
+                        "adjudication_required": llm_consensus.adjudication_required,
+                        "confidence": llm_consensus.confidence,
+                        "evidence_status": llm_consensus.evidence_status,
+                    },
+                )
+            )
+            stage_results.append(
+                build_stage_result(
+                    stage_number=4,
+                    status="pass" if qualified else "warning",
+                    reason=(
+                        "Candidate qualifies for the Events to invest in table."
+                        if qualified
+                        else "Candidate did not pass the fixed Bullpen No-odds thresholds."
+                    ),
+                    outputs={
+                        "returns_per_day": returns_per_day,
+                        "min_returns_per_day": CONSOLE_MIN_RETURNS_PER_DAY,
+                        "fair_no_probability_pct": fair_no,
+                        "min_llm_no_odds": CONSOLE_MIN_LLM_NO_ODDS,
+                    },
+                    hard_block=not qualified,
+                )
+            )
+            candidate_contexts.append(
+                {
+                    "market": market,
+                    "returns_per_day": returns_per_day,
+                    "rules": rules,
+                    "llm_outputs": llm_outputs,
+                    "llm_consensus": llm_consensus,
+                    "stage_results": stage_results,
+                    "qualified": qualified,
+                    "reason": (
+                        "Candidate qualifies for the fixed $5 No-side flow."
+                        if qualified
+                        else "Candidate failed the fixed Bullpen table thresholds."
+                    ),
+                }
+            )
+
+        qualifying_candidates = [
+            context
+            for context in candidate_contexts
+            if bool(context["qualified"])
+        ]
+        active_rank_rows = []
+        for position in enriched_wallet_positions:
+            if position.is_claimable:
+                continue
+            returns_per_day = position_returns_per_day(position, now=now)
+            if returns_per_day is None:
+                continue
+            active_rank_rows.append(
+                {
+                    "kind": "active",
+                    "key": f"{position.market_id}::{position.side}",
+                    "market_id": position.market_id,
+                    "returns_per_day": returns_per_day,
+                    "position": position,
+                }
+            )
+        candidate_rank_rows = [
+            {
+                "kind": "candidate",
+                "key": context["market"].market_id,
+                "market_id": context["market"].market_id,
+                "returns_per_day": context["returns_per_day"],
+                "context": context,
+            }
+            for context in qualifying_candidates
+        ]
+        combined_rank_rows = sorted(
+            [*active_rank_rows, *candidate_rank_rows],
+            key=lambda row: (
+                -float(row["returns_per_day"]),
+                row["market_id"],
+            ),
+        )
+        top_rows = combined_rank_rows[:CONSOLE_RANKED_EVENT_LIMIT]
+        top_active_keys = {
+            str(row["key"])
+            for row in top_rows
+            if row["kind"] == "active"
+        }
+        top_candidate_market_ids = {
+            str(row["market_id"])
+            for row in top_rows
+            if row["kind"] == "candidate"
+        }
+
+        run.stage_results.append(
+            build_stage_result(
+                stage_number=6,
+                status="pass",
+                reason="Ranked active positions and new No-side candidates into the fixed top-10 table.",
+                outputs={
+                    "top_table_size": len(top_rows),
+                    "active_rows_ranked": len(active_rank_rows),
+                    "qualified_candidate_rows": len(candidate_rank_rows),
+                    "top_candidate_market_ids": sorted(top_candidate_market_ids),
+                    "top_active_keys": sorted(top_active_keys),
+                },
+            )
+        )
+
+        decisions: list[BullpenAutoLiveDecision] = []
+
+        def _build_decision(
+            *,
+            market: ScannedMarket,
+            decision_action: str,
+            reason: str,
+            stage_results: list[BullpenAutoLiveStageResult],
+            current_position: PositionSnapshot | None = None,
+            current_exposure_usd: float = 0,
+            target_exposure_usd: float = 0,
+            order_usd: float = 0,
+            order_shares: float = 0,
+            llm_outputs: list[BullpenAutoLiveLlmOutput] | None = None,
+            llm_consensus: LlmConsensus | None = None,
+        ) -> BullpenAutoLiveDecision:
+            fair_no = llm_consensus.fair_no_probability_pct if llm_consensus else None
+            fair_yes = llm_consensus.fair_yes_probability_pct if llm_consensus else None
+            price_cents = market.current_no_odds if decision_action == "BUY_NEW" else _current_price_for_side(
+                market,
+                current_position.side if current_position else "NO",
+            )
+            confidence = (llm_consensus.confidence if llm_consensus and llm_consensus.confidence else "Low")
+            evidence_status = (
+                llm_consensus.evidence_status
+                if llm_consensus and llm_consensus.evidence_status
+                else "Moderate"
+            )
+            side = (
+                "NO"
+                if decision_action == "BUY_NEW"
+                else current_position.side
+                if current_position is not None
+                else "NO"
+            )
+            order_plan = None
+            if decision_action in {"BUY_NEW", "EXIT"}:
+                order_plan = BullpenAutoLiveOrderPlan(
+                    id=f"order-{run.id}-{market.market_id}-{decision_action.lower()}",
+                    action="buy" if decision_action == "BUY_NEW" else "sell",
+                    side=side,  # type: ignore[arg-type]
+                    market_id=market.market_id,
+                    market_title=market.question,
+                    order_size_usd=round(order_usd, 2),
+                    shares=round(order_shares, 6),
+                    limit_price_cents=round(price_cents or 0, 2),
+                    max_slippage_cents=settings.max_slippage_cents,
+                    dry_run=state.dry_run,
+                    detail="Order planned but not executed yet.",
+                    created_at=utc_now_iso(),
+                )
+
+            return BullpenAutoLiveDecision(
+                id=f"decision-{run.id}-{market.market_id}-{decision_action.lower()}",
+                run_id=run.id,
+                created_at=utc_now_iso(),
+                updated_at=utc_now_iso(),
+                market_id=market.market_id,
+                market_title=market.question,
+                market_url=market.market_url,
+                slug=market.slug,
+                close_time=market.close_time,
+                theme=market.theme,
+                side=side,  # type: ignore[arg-type]
+                decision=decision_action,  # type: ignore[arg-type]
+                risk_status="Ready" if decision_action in {"BUY_NEW", "EXIT"} else "Watch",
+                price_cents=round(price_cents or 0, 2),
+                current_yes_odds=market.current_yes_odds,
+                current_no_odds=market.current_no_odds,
+                fair_probability_pct=round(
+                    fair_no if decision_action == "BUY_NEW" else fair_yes or fair_no or 0,
+                    2,
+                ),
+                fair_yes_probability_pct=fair_yes,
+                fair_no_probability_pct=fair_no,
+                edge_pp=round(
+                    ((fair_no or 0) - (market.current_no_odds or 0))
+                    if decision_action == "BUY_NEW"
+                    else 0,
+                    2,
+                ),
+                score=round(
+                    order_usd if decision_action == "BUY_NEW" else current_exposure_usd,
+                    2,
+                ),
+                confidence=confidence,  # type: ignore[arg-type]
+                evidence_status=evidence_status,  # type: ignore[arg-type]
+                event_state=llm_consensus.event_state if llm_consensus else None,
+                adjudication_required=llm_consensus.adjudication_required if llm_consensus else False,
+                disagreement_level=llm_consensus.disagreement_level if llm_consensus else None,
+                disagreement_category=llm_consensus.disagreement_category if llm_consensus else None,
+                current_exposure_usd=round(current_exposure_usd, 2),
+                target_exposure_usd=round(target_exposure_usd, 2),
+                realized_pnl_usd=None,
+                hours_remaining=None,
+                key_evidence=[
+                    item
+                    for output in (llm_outputs or [])
+                    for item in output.key_evidence[:2]
+                ][:4],
+                red_flags=[
+                    item
+                    for output in (llm_outputs or [])
+                    for item in output.red_flags[:2]
+                ][:4],
+                rationale=next(
+                    (output.rationale for output in (llm_outputs or []) if output.rationale),
+                    None,
+                ),
+                reason=reason,
+                summary=reason,
+                order_plan=order_plan,
+                llm_outputs=llm_outputs or [],
+                stage_results=stage_results,
+                guardrail_checks=global_guardrails,
+            )
+
+        for position in enriched_wallet_positions:
+            if position.is_claimable:
+                continue
+            returns_per_day = position_returns_per_day(position, now=now)
+            matched_market = market_by_slug.get(position.slug) or market_by_id.get(position.market_id)
+            market = matched_market or ScannedMarket(
+                market_id=position.market_id,
+                question=position.market_title,
+                market_url=position.market_url,
+                slug=position.slug,
+                close_time=position.close_time,
+                theme=position.theme,
+                current_yes_odds=position.current_yes_odds,
+                current_no_odds=position.current_no_odds,
+                volume_usd=None,
+                liquidity_usd=None,
+                description=None,
+                outcome_labels=["Yes", "No"],
+                event_slug=None,
+                best_bid_cents=None,
+                best_ask_cents=None,
+                spread_cents=None,
+                force_include=True,
+                raw=None,
+            )
+            stage_results = [
+                build_stage_result(
+                    stage_number=1,
+                    status="pass",
+                    reason="Live wallet position was included in the top-10 ranking review.",
+                    outputs={
+                        "side": position.side,
+                        "shares": position.shares,
+                        "close_time": position.close_time,
+                        "returns_per_day": returns_per_day,
+                    },
+                )
+            ]
+            current_position = next(
+                (
+                    snapshot
+                    for snapshot in position_snapshots
+                    if snapshot.market_id == position.market_id and snapshot.side == position.side
+                ),
+                None,
+            )
+            if returns_per_day is None or current_position is None:
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason="Position was left untouched because returns/day could not be computed safely.",
+                    )
+                )
+                decisions.append(
+                    _build_decision(
+                        market=market,
+                        decision_action="HOLD",
+                        reason="Position was left untouched because returns/day could not be computed safely.",
+                        stage_results=stage_results,
+                        current_position=current_position,
+                        current_exposure_usd=position.exposure_usd,
+                        target_exposure_usd=position.exposure_usd,
+                    )
+                )
+                continue
+            key = f"{position.market_id}::{position.side}"
+            if key in top_active_keys:
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="pass",
+                        reason="Active position remains inside the top-10 returns/day table.",
+                        outputs={"returns_per_day": returns_per_day},
+                    )
+                )
+                decisions.append(
+                    _build_decision(
+                        market=market,
+                        decision_action="HOLD",
+                        reason="Active position remains inside the top-10 returns/day table.",
+                        stage_results=stage_results,
+                        current_position=current_position,
+                        current_exposure_usd=position.exposure_usd,
+                        target_exposure_usd=position.exposure_usd,
+                    )
+                )
+                continue
+            stage_results.append(
+                build_stage_result(
+                    stage_number=6,
+                    status="warning",
+                    reason="Active position fell outside the top-10 returns/day table and will be exited.",
+                    outputs={"returns_per_day": returns_per_day},
+                )
+            )
+            decisions.append(
+                _build_decision(
+                    market=market,
+                    decision_action="EXIT",
+                    reason="Active position fell outside the top-10 returns/day table and will be exited.",
+                    stage_results=stage_results,
+                    current_position=current_position,
+                    current_exposure_usd=position.exposure_usd,
+                    target_exposure_usd=0,
+                    order_usd=position.exposure_usd,
+                    order_shares=position.shares,
+                )
+            )
+
+        for context in candidate_contexts:
+            market = context["market"]
+            returns_per_day = float(context["returns_per_day"])
+            stage_results = list(context["stage_results"])
+            llm_outputs = context["llm_outputs"]
+            llm_consensus = context["llm_consensus"]
+            if not context["qualified"]:
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason=str(context["reason"]),
+                        hard_block=True,
+                    )
+                )
+                decisions.append(
+                    _build_decision(
+                        market=market,
+                        decision_action="SKIP",
+                        reason=str(context["reason"]),
+                        stage_results=stage_results,
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                    )
+                )
+                continue
+            if market.market_id not in top_candidate_market_ids:
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason="Candidate qualified but did not make the top-10 returns/day table.",
+                        outputs={"returns_per_day": returns_per_day},
+                        hard_block=True,
+                    )
+                )
+                decisions.append(
+                    _build_decision(
+                        market=market,
+                        decision_action="SKIP",
+                        reason="Candidate qualified but did not make the top-10 returns/day table.",
+                        stage_results=stage_results,
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                    )
+                )
+                continue
+            stage_results.append(
+                build_stage_result(
+                    stage_number=5,
+                    status="pass",
+                    reason="New opportunity receives the fixed $5 order size.",
+                    outputs={"order_usd": CONSOLE_FIXED_ORDER_USD},
+                )
+            )
+            stage_results.append(
+                build_stage_result(
+                    stage_number=6,
+                    status="pass",
+                    reason="Qualified No-side candidate ranked inside the top-10 returns/day table.",
+                    outputs={"returns_per_day": returns_per_day},
+                )
+            )
+            decisions.append(
+                _build_decision(
+                    market=market,
+                    decision_action="BUY_NEW",
+                    reason="Qualified No-side candidate ranked inside the top-10 returns/day table.",
+                    stage_results=stage_results,
+                    current_exposure_usd=0,
+                    target_exposure_usd=CONSOLE_FIXED_ORDER_USD,
+                    order_usd=CONSOLE_FIXED_ORDER_USD,
+                    llm_outputs=llm_outputs,
+                    llm_consensus=llm_consensus,
+                )
+            )
+
+        actionable_decisions = [
+            decision
+            for decision in decisions
+            if decision.decision in {"BUY_NEW", "EXIT"}
+        ]
+        planned_orders = len(actionable_decisions)
+        submitted_orders = 0
+        execution_pause_reason: str | None = None
+        execution_block_reasons: list[str] = []
+        if actionable_decisions and not state.dry_run:
+            live_controls = await refresh_live_controls(user_id=user_id)
+            state.doctor_status = "pass" if live_controls.doctor.ok else "fail"
+            state.balance_status = "pass" if live_controls.balance.status == "ready" else "fail"
+            state.emergency_stopped = settings.emergency_stop or live_controls.emergency_stopped
+            if settings.emergency_stop or live_controls.emergency_stopped:
+                execution_block_reasons.append("Emergency stop is active.")
+            if not live_controls.unlocked:
+                execution_block_reasons.append(
+                    live_controls.locked_reason or "Live execution is locked."
+                )
+            if not live_controls.doctor.ok:
+                execution_block_reasons.append(
+                    live_controls.doctor.message or "Bullpen doctor failed."
+                )
+            if live_controls.balance.status != "ready":
+                execution_block_reasons.append(
+                    live_controls.balance.message or "Bullpen balance is unavailable."
+                )
+            if execution_block_reasons:
+                execution_pause_reason = "; ".join(execution_block_reasons)
+                if live_controls.balance.status != "ready" and settings.pause_if_balance_unavailable:
+                    state.paused = True
+                if not live_controls.doctor.ok and settings.pause_if_doctor_fails:
+                    state.paused = True
+
+        executor = bullpen_module.BullpenLiveExecutor()
+        simulation_reason = _simulation_reason(settings)
+        new_positions = position_snapshots[:]
+        running_failed_orders = state.consecutive_failed_orders
+
+        for decision in decisions:
+            order_plan = decision.order_plan
+            if order_plan is None:
+                decision.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status="skipped",
+                        reason="No execution was needed for this row.",
+                    )
+                )
+                continue
+            if execution_pause_reason and not state.dry_run:
+                order_plan.status = "failed"
+                order_plan.detail = execution_pause_reason
+                decision.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status="fail",
+                        reason=execution_pause_reason,
+                        outputs=order_plan.model_dump(mode="json"),
+                        hard_block=True,
+                    )
+                )
+                running_failed_orders += 1
+                continue
+
+            quote = await refresh_execution_quote(slug=decision.slug, side=order_plan.side)
+            quote_price_cents = quote.current_price_cents or order_plan.limit_price_cents
+            if quote.spread_cents is not None and quote.spread_cents > settings.max_bid_ask_spread_cents:
+                order_plan.status = "skipped"
+                order_plan.detail = "Bid/ask spread exceeds the configured maximum."
+                decision.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status="fail",
+                        reason=order_plan.detail,
+                        outputs=order_plan.model_dump(mode="json"),
+                        hard_block=True,
+                    )
+                )
+                running_failed_orders += 1
+                continue
+
+            if order_plan.action == "buy":
+                order_plan.limit_price_cents = buy_limit_price_cents(
+                    current_price_cents=quote_price_cents,
+                    original_price_cents=order_plan.limit_price_cents or quote_price_cents,
+                    max_slippage_cents=settings.max_slippage_cents,
+                )
+                order_plan.shares = round(
+                    order_plan.order_size_usd
+                    / max(0.01, cents_to_decimal(order_plan.limit_price_cents)),
+                    6,
+                )
+            else:
+                order_plan.limit_price_cents = sell_limit_price_cents(
+                    current_price_cents=quote_price_cents,
+                    original_price_cents=order_plan.limit_price_cents or quote_price_cents,
+                    max_slippage_cents=settings.max_slippage_cents,
+                )
+            order_plan.refreshed_market_price_cents = quote_price_cents
+
+            if state.dry_run:
+                order_plan.status = "skipped"
+                order_plan.detail = f"Simulation only: {simulation_reason}"
+                decision.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status="skipped",
+                        reason=order_plan.detail,
+                        outputs=order_plan.model_dump(mode="json"),
+                    )
+                )
+                continue
+
+            try:
+                market_id_for_execution = decision.slug or decision.market_id
+                if order_plan.action == "buy":
+                    order_plan.execution_response = await executor.buy_limit(
+                        market_id=market_id_for_execution,
+                        outcome="No",
+                        amount_usd=order_plan.order_size_usd,
+                        max_price=cents_to_decimal(order_plan.limit_price_cents),
+                    )
+                    new_positions.append(
+                        PositionSnapshot(
+                            market_id=decision.market_id,
+                            slug=decision.slug,
+                            market_title=decision.market_title,
+                            market_url=decision.market_url,
+                            theme=decision.theme,
+                            side="NO",
+                            exposure_usd=round(order_plan.order_size_usd, 2),
+                            shares=round(order_plan.shares, 6),
+                            average_price_cents=order_plan.limit_price_cents,
+                            opened_at=now,
+                            updated_at=now,
+                            close_time=decision.close_time,
+                            current_price_cents=order_plan.limit_price_cents,
+                        )
+                    )
+                else:
+                    order_plan.execution_response = await executor.sell_limit(
+                        market_id=market_id_for_execution,
+                        outcome="Yes" if order_plan.side == "YES" else "No",
+                        shares=order_plan.shares,
+                        min_price=cents_to_decimal(order_plan.limit_price_cents),
+                    )
+                    new_positions = [
+                        position
+                        for position in new_positions
+                        if not (
+                            position.market_id == decision.market_id
+                            and position.side == order_plan.side
+                        )
+                    ]
+                order_plan.status = "submitted"
+                order_plan.executed_at = utc_now_iso()
+                order_plan.detail = "Limit order submitted successfully."
+                decision.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status="pass",
+                        reason=order_plan.detail,
+                        outputs=order_plan.model_dump(mode="json"),
+                    )
+                )
+                submitted_orders += 1
+                running_failed_orders = 0
+            except Exception as exc:
+                order_plan.status = "failed"
+                order_plan.detail = str(exc)
+                decision.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status="fail",
+                        reason=order_plan.detail,
+                        outputs=order_plan.model_dump(mode="json"),
+                        hard_block=True,
+                    )
+                )
+                running_failed_orders += 1
+
+        state.consecutive_failed_orders = running_failed_orders
+        for decision in decisions:
+            log_method = getattr(logger, _decision_log_level(decision))
+            log_method(
+                "Auto-Live console-profile decision user=%s run=%s market=%s action=%s order_status=%s dry_run=%s reason=%s",
+                user_id,
+                run.id,
+                decision.market_id,
+                decision.decision,
+                decision.order_plan.status if decision.order_plan else "none",
+                decision.order_plan.dry_run if decision.order_plan else state.dry_run,
+                _decision_log_reason(decision),
+            )
+
+        historical_and_current_decisions = [*historical_decisions, *decisions]
+        (
+            state.today_executed_orders,
+            state.today_skipped_orders,
+        ) = _today_order_counts(historical_and_current_decisions, now=now)
+        state.last_execution_at = _latest_execution_at(historical_and_current_decisions)
+        run.decisions_count = len(decisions)
+        run.decision_ids = [decision.id for decision in decisions]
+        run.orders_planned = planned_orders
+        run.orders_submitted = submitted_orders
+        run.live_execution_requested = bool(
+            actionable_decisions and live_execution_requested(settings)
+        )
+        run.live_execution_attempted = bool(actionable_decisions and not state.dry_run)
+        run.completed_at = utc_now_iso()
+        run.status = "failed" if state.paused else "completed"
+        if state.dry_run:
+            run.summary = (
+                f"Console schedule simulated {len(decisions)} decisions with "
+                f"{planned_orders} planned orders. {simulation_reason}"
+            )
+        elif state.paused:
+            run.summary = execution_pause_reason or "Console schedule paused."
+        else:
+            run.summary = (
+                f"Console schedule completed with {len(decisions)} decisions, "
+                f"{planned_orders} planned orders, and {submitted_orders} submitted orders."
+            )
+
+        state.last_run_id = run.id
+        state.last_run_at = run.completed_at
+        state.last_scan_at = run.completed_at
+        state.last_llm_run_at = run.completed_at
+        state.last_rebalance_at = run.completed_at
+        state.last_error = None if run.status == "completed" else run.summary
+        state.last_action = run.summary
+        state.latest_guardrail_checks = global_guardrails
+        state.live_execution_allowed = not execution_block_reasons and not state.paused and not state.dry_run
+        if state.running:
+            next_run_at = next_console_schedule_time(now).isoformat()
+            state.next_run_at = next_run_at
+            state.next_scan_at = next_run_at
+            state.next_llm_run_at = next_run_at
+            state.next_rebalance_at = next_run_at
+        else:
+            state.next_run_at = None
+            state.next_scan_at = None
+            state.next_llm_run_at = None
+            state.next_rebalance_at = None
+        state.invested_usd = round(sum(position.exposure_usd for position in new_positions), 2)
+        state.current_value_usd = round(sum(position.exposure_usd for position in new_positions), 2)
+        state.pnl_usd = round(state.current_value_usd - state.invested_usd, 2)
+        state.active_positions = _active_market_count(new_positions)
+        state.trades_today = state.today_executed_orders
+
+        return EngineResult(
+            run=run,
+            decisions=decisions,
+            state=state,
+            positions=new_positions,
+        )
+
     def _apply_position_update(
         self,
         positions: list[PositionSnapshot],
@@ -1637,6 +2510,8 @@ class BullpenAutoLiveEngine:
                         average_price_cents=order_plan.limit_price_cents,
                         opened_at=now,
                         updated_at=now,
+                        close_time=candidate.market.close_time,
+                        current_price_cents=order_plan.limit_price_cents,
                     )
                 )
                 return
@@ -1653,6 +2528,8 @@ class BullpenAutoLiveEngine:
             existing.shares = round(total_shares, 6)
             existing.exposure_usd = round(total_cost, 2)
             existing.updated_at = now
+            existing.close_time = candidate.market.close_time or existing.close_time
+            existing.current_price_cents = order_plan.limit_price_cents
             return
 
         current = candidate.current_position

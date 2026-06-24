@@ -1540,8 +1540,12 @@ export type BullpenAutoLiveTriggeredBy =
   | "scheduler"
   | "start"
   | "resume";
+export type BullpenAutoLiveStrategyProfile =
+  | "guardrail_kelly"
+  | "bullpen_console_top10";
 
 export interface BullpenAutoLiveSettings {
+  strategy_profile: BullpenAutoLiveStrategyProfile;
   bankroll_usd: number;
   bankroll_source: "manual";
   max_single_trade_pct_bankroll: number;

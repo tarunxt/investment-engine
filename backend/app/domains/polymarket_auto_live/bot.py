@@ -3,6 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from app.domains.polymarket_auto_live.console_profile import (
+    CONSOLE_PROFILE_ID,
+    next_console_schedule_time,
+)
 from app.domains.polymarket_auto_live.config import auto_live_backend_allows_execution
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
@@ -34,6 +38,17 @@ AUTO_LIVE_RISK_SUMMARY = (
     "Full automation can compound model, evidence, and execution errors quickly "
     "once live trading is enabled."
 )
+CONSOLE_AUTO_LIVE_STRATEGY_SUMMARY = (
+    "Runs the Bullpen console top-10 profile on a fixed IST schedule. Each cycle "
+    "scans upcoming markets, runs LLM consensus, buys $5 of each new No-side "
+    "opportunity in the top-10 returns/day table, and exits active positions that "
+    "fall outside that top 10."
+)
+CONSOLE_AUTO_LIVE_RISK_SUMMARY = (
+    "The console profile still depends on Bullpen live session health, doctor "
+    "checks, balance availability, and limit-order guardrails before any live "
+    "orders are submitted."
+)
 
 
 def utc_now() -> str:
@@ -60,6 +75,18 @@ def live_execution_armed(settings: BullpenAutoLiveSettings) -> bool:
 
 def effective_dry_run(settings: BullpenAutoLiveSettings) -> bool:
     return not live_execution_armed(settings)
+
+
+def strategy_summary_for(settings: BullpenAutoLiveSettings) -> str:
+    if settings.strategy_profile == CONSOLE_PROFILE_ID:
+        return CONSOLE_AUTO_LIVE_STRATEGY_SUMMARY
+    return AUTO_LIVE_STRATEGY_SUMMARY
+
+
+def risk_summary_for(settings: BullpenAutoLiveSettings) -> str:
+    if settings.strategy_profile == CONSOLE_PROFILE_ID:
+        return CONSOLE_AUTO_LIVE_RISK_SUMMARY
+    return AUTO_LIVE_RISK_SUMMARY
 
 
 class BullpenAutoLiveBot:
@@ -420,6 +447,14 @@ class BullpenAutoLiveBot:
         *,
         reference_time: datetime,
     ) -> None:
+        if settings.strategy_profile == CONSOLE_PROFILE_ID:
+            next_run_at = next_console_schedule_time(reference_time).isoformat()
+            state.next_run_at = next_run_at
+            state.next_scan_at = next_run_at
+            state.next_llm_run_at = next_run_at
+            state.next_rebalance_at = next_run_at
+            return
+
         state.next_run_at = (
             reference_time + timedelta(seconds=settings.active_price_refresh_seconds)
         ).isoformat()
@@ -475,7 +510,7 @@ class BullpenAutoLiveBot:
             guardrails_summary=" • ".join(
                 f"{check.label}: {check.value or check.detail}" for check in latest_guardrails[:4]
             ),
-            strategy_summary=AUTO_LIVE_STRATEGY_SUMMARY,
-            risk_summary=AUTO_LIVE_RISK_SUMMARY,
+            strategy_summary=strategy_summary_for(settings),
+            risk_summary=risk_summary_for(settings),
             guardrails=guardrails,
         )

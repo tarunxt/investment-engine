@@ -37,6 +37,7 @@ def _utc_now() -> datetime:
 
 
 def _position_snapshot_from_record(record) -> PositionSnapshot:
+    payload = record.payload or {}
     return PositionSnapshot(
         market_id=record.market_id,
         slug=record.slug,
@@ -49,6 +50,13 @@ def _position_snapshot_from_record(record) -> PositionSnapshot:
         average_price_cents=float(record.average_price_cents),
         opened_at=record.opened_at.astimezone(UTC),
         updated_at=record.updated_at.astimezone(UTC),
+        close_time=payload.get("close_time") if isinstance(payload.get("close_time"), str) else None,
+        current_price_cents=(
+            float(payload["current_price_cents"])
+            if isinstance(payload.get("current_price_cents"), (int, float))
+            else None
+        ),
+        condition_id=payload.get("condition_id") if isinstance(payload.get("condition_id"), str) else None,
     )
 
 

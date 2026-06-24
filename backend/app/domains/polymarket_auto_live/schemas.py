@@ -17,12 +17,14 @@ AutoLiveOrderPlanStatus = Literal["planned", "submitted", "skipped", "cancelled"
 AutoLiveOrderAction = Literal["buy", "sell", "hold"]
 AutoLiveOutcomeSide = Literal["YES", "NO"]
 AutoLiveTriggeredBy = Literal["manual", "scheduler", "start", "resume"]
+AutoLiveStrategyProfile = Literal["guardrail_kelly", "bullpen_console_top10"]
 TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 TradingBotMode = Literal["paper", "live-read", "live-trading", "dry-run", "analysis-only"]
 TradingBotGuardrailTone = Literal["neutral", "positive", "warning", "critical"]
 
 
 class BullpenAutoLiveSettingsBase(BaseModel):
+    strategy_profile: AutoLiveStrategyProfile = "guardrail_kelly"
     bankroll_usd: float = Field(default=100, gt=0)
     bankroll_source: Literal["manual"] = "manual"
     max_single_trade_pct_bankroll: float = Field(default=2, gt=0, le=100)
@@ -124,6 +126,7 @@ class BullpenAutoLiveSettings(BullpenAutoLiveSettingsBase):
 
 
 class BullpenAutoLiveSettingsUpdate(BaseModel):
+    strategy_profile: AutoLiveStrategyProfile | None = None
     bankroll_usd: float | None = Field(default=None, gt=0)
     bankroll_source: Literal["manual"] | None = None
     max_single_trade_pct_bankroll: float | None = Field(default=None, gt=0, le=100)
