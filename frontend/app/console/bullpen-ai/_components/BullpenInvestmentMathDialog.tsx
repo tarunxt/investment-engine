@@ -203,19 +203,19 @@ export function BullpenInvestmentMathDialog({
   const amountCard = question ? (
     <CalculationCard
       title="Capital"
-      formula="5 x (strongest LLM odds - 80) x Returns/day / 100"
+      formula="Fixed $5 once the row qualifies"
       summary={formatMoney(amountBreakdown!.result ?? null)}
       highlighted={focus === "amountToBeInvested"}
     >
       {amountBreakdown!.result === null ? (
         <p className="text-sm leading-6 text-slate-600">
           This amount is only available after the row has both LLM No odds and a
-          returns/day value.
+          returns/day value and clears the minimum thresholds.
         </p>
       ) : (
         <>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`${amountBreakdown!.multiplier} x (${amountBreakdown!.llmNoOdds?.toFixed(2) || "—"} - ${amountBreakdown!.threshold}) x ${amountBreakdown!.returnsPerDay?.toFixed(2) || "—"} / 100 = ${amountBreakdown!.result?.toFixed(2) || "—"}`}
+            {`Qualified rows receive a fixed $${amountBreakdown!.fixedAmountUsd.toFixed(2)} order size.`}
           </div>
           <div className="mt-4">
             <MetricRow
@@ -223,16 +223,26 @@ export function BullpenInvestmentMathDialog({
               value={formatOdds(amountBreakdown!.llmNoOdds ?? null)}
             />
             <MetricRow
-              label={`LLM No above ${amountBreakdown!.threshold}%`}
-              value={formatOdds(amountBreakdown!.llmNoOddsAboveThreshold ?? null)}
+              label={`Minimum LLM No odds`}
+              value={formatOdds(amountBreakdown!.minLlmNoOdds)}
             />
             <MetricRow
               label="Returns/day input"
               value={formatPercent(amountBreakdown!.returnsPerDay ?? null)}
             />
+            <MetricRow
+              label="Minimum Returns/day"
+              value={formatPercent(amountBreakdown!.minReturnsPerDay)}
+            />
+            <MetricRow
+              label="Qualification"
+              value={amountBreakdown!.qualifies ? "Qualified" : "Not qualified"}
+            />
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">
-            Pink invest rows require <span className="font-semibold">LLM Yes or No &gt; 80%</span>.
+            Pink invest rows require both <span className="font-semibold">LLM No &gt; 80%</span>{" "}
+            and <span className="font-semibold">Returns/day &gt; 5%</span>. Once both pass,
+            the table uses a fixed <span className="font-semibold">$5</span> buy amount.
           </p>
         </>
       )}

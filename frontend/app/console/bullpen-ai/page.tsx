@@ -75,6 +75,7 @@ import {
   type BullpenTableSortKey,
   type BullpenTableSortState,
 } from "./_components/BullpenQuestionsTable";
+import { BullpenAutoRunScheduleCard } from "./_components/BullpenAutoRunScheduleCard";
 import { BullpenInvestmentsSection } from "./_components/BullpenInvestmentsSection";
 import { BullpenPromptEditorDialog } from "./_components/BullpenPromptEditorDialog";
 import {
@@ -2639,6 +2640,12 @@ export default function BullpenAiPage() {
           table that persists across refresh.
         </p>
       </div>
+
+      <BullpenAutoRunScheduleCard
+        onRunCompleted={() => {
+          void refreshBullpenPositions({ suppressAutoClaim: true });
+        }}
+      />
 
       <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
         {TABS.map((tab) => (

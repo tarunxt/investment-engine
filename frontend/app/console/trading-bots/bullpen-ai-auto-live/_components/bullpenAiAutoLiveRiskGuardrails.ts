@@ -61,6 +61,7 @@ export type BullpenAiAutoLiveGuardrailValidation = {
 };
 
 export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
+  strategy_profile: "guardrail_kelly",
   bankroll_usd: 100,
   bankroll_source: "manual",
   max_single_trade_pct_bankroll: 2,
@@ -843,6 +844,7 @@ export function bullpenAiAutoLiveSettingsToDraft(
   settings: BullpenAutoLiveSettings,
 ): BullpenAiAutoLiveGuardrailDraft {
   const draft = {} as BullpenAiAutoLiveGuardrailDraft;
+  draft.strategy_profile = settings.strategy_profile;
 
   for (const field of BULLPEN_AI_AUTO_LIVE_GUARDRAIL_FIELDS) {
     const value = settings[field.key];
@@ -877,7 +879,13 @@ export function validateBullpenAiAutoLiveGuardrailDraft(
   draft: BullpenAiAutoLiveGuardrailDraft,
 ): BullpenAiAutoLiveGuardrailValidation {
   const fieldErrors: Partial<Record<keyof BullpenAutoLiveSettings, string>> = {};
-  const settings = {} as BullpenAutoLiveSettings;
+  const settings = {
+    ...BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS,
+    strategy_profile:
+      draft.strategy_profile === "bullpen_console_top10"
+        ? "bullpen_console_top10"
+        : "guardrail_kelly",
+  } as BullpenAutoLiveSettings;
 
   for (const field of BULLPEN_AI_AUTO_LIVE_GUARDRAIL_FIELDS) {
     const rawValue = draft[field.key];

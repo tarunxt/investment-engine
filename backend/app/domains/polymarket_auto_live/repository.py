@@ -471,6 +471,7 @@ class SyncPolymarketAutoLiveRepository:
                     payload={
                         "market_id": position.market_id,
                         "slug": position.slug,
+                        "condition_id": position.condition_id,
                         "market_title": position.market_title,
                         "market_url": position.market_url,
                         "theme": position.theme,
@@ -478,6 +479,8 @@ class SyncPolymarketAutoLiveRepository:
                         "exposure_usd": position.exposure_usd,
                         "shares": position.shares,
                         "average_price_cents": position.average_price_cents,
+                        "close_time": position.close_time,
+                        "current_price_cents": position.current_price_cents,
                         "opened_at": position.opened_at.astimezone(UTC).isoformat(),
                         "updated_at": position.updated_at.astimezone(UTC).isoformat(),
                     },

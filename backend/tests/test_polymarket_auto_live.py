@@ -13,6 +13,11 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 import pytest
 from pydantic import ValidationError
 
+from app.domains.polymarket_auto_live.console_profile import (
+    CONSOLE_PROFILE_ID,
+    ConsoleWalletPosition,
+    next_console_schedule_time,
+)
 from app.domains.polymarket_auto_live.config import auto_live_backend_allows_execution
 from app.domains.polymarket_auto_live.engine import (
     BullpenAutoLiveEngine,
@@ -63,6 +68,18 @@ def test_auto_live_backend_execution_flag_defaults_false(monkeypatch):
 
     monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "FALSE")
     assert auto_live_backend_allows_execution() is False
+
+
+def test_console_schedule_uses_fixed_ist_slots():
+    assert next_console_schedule_time(
+        datetime(2026, 6, 24, 0, 29, tzinfo=UTC)
+    ) == datetime(2026, 6, 24, 0, 30, tzinfo=UTC)
+    assert next_console_schedule_time(
+        datetime(2026, 6, 24, 6, 31, tzinfo=UTC)
+    ) == datetime(2026, 6, 24, 12, 30, tzinfo=UTC)
+    assert next_console_schedule_time(
+        datetime(2026, 6, 24, 18, 29, tzinfo=UTC)
+    ) == datetime(2026, 6, 24, 18, 30, tzinfo=UTC)
 
 
 def test_market_rules_extract_resolution_criteria_and_deadline():
@@ -254,6 +271,36 @@ def _market(
         best_ask_cents=55,
         spread_cents=2,
         raw={},
+    )
+
+
+def _console_wallet_position(
+    *,
+    slug: str,
+    market_title: str,
+    current_price_cents: float,
+    shares: float = 10,
+    average_price_cents: float = 45,
+    exposure_usd: float = 4.5,
+    close_time: str = "2026-06-25T00:00:00+00:00",
+    side: str = "NO",
+) -> ConsoleWalletPosition:
+    return ConsoleWalletPosition(
+        market_id=slug,
+        slug=slug,
+        condition_id=None,
+        market_title=market_title,
+        market_url=f"https://polymarket.com/event/{slug}",
+        side=side,
+        shares=shares,
+        average_price_cents=average_price_cents,
+        exposure_usd=exposure_usd,
+        current_price_cents=current_price_cents,
+        current_yes_odds=round(100 - current_price_cents, 2),
+        current_no_odds=round(current_price_cents, 2),
+        close_time=close_time,
+        theme="Politics",
+        is_claimable=False,
     )
 
 
@@ -485,6 +532,143 @@ def _historical_decision(
         stage_results=[],
         guardrail_checks=[],
     )
+
+
+@pytest.mark.anyio
+async def test_console_profile_buys_fixed_five_dollar_top10_and_exits_lower_ranked_positions(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    active_high_slug = "active-high"
+    active_low_slug = "active-low"
+    active_high_market = _market(
+        question="Will the high-ranked active position resolve No?",
+        slug=active_high_slug,
+        close_time="2026-06-25T00:00:00+00:00",
+        current_yes_odds=65,
+        current_no_odds=35,
+    )
+    active_low_market = _market(
+        question="Will the lower-ranked active position resolve No?",
+        slug=active_low_slug,
+        close_time="2026-06-25T00:00:00+00:00",
+        current_yes_odds=21,
+        current_no_odds=79,
+    )
+    live_positions = [
+        _console_wallet_position(
+            slug=active_high_slug,
+            market_title=active_high_market.question,
+            current_price_cents=35,
+        ),
+        _console_wallet_position(
+            slug=active_low_slug,
+            market_title=active_low_market.question,
+            current_price_cents=79,
+        ),
+    ]
+    candidate_markets = [
+        _market(
+            question=f"Candidate market {index + 1}",
+            slug=f"candidate-market-{index + 1}",
+            close_time="2026-06-25T00:00:00+00:00",
+            current_yes_odds=60 - (index * 4),
+            current_no_odds=40 + (index * 4),
+        )
+        for index in range(10)
+    ]
+    market_lookup = {
+        market.slug: market
+        for market in [active_high_market, active_low_market, *candidate_markets]
+        if market.slug
+    }
+
+    async def fake_read_console_wallet_positions():
+        return live_positions
+
+    async def fake_scan_candidate_markets(**kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[active_high_market, active_low_market, *candidate_markets],
+            rejected=[],
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_candidate_markets",
+        fake_scan_candidate_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=10, fair_no=90),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+    exit_decisions = [decision for decision in result.decisions if decision.decision == "EXIT"]
+    hold_decisions = [decision for decision in result.decisions if decision.decision == "HOLD"]
+    skip_decisions = [decision for decision in result.decisions if decision.decision == "SKIP"]
+
+    assert len(buy_decisions) == 9
+    assert len(exit_decisions) == 1
+    assert len(hold_decisions) == 1
+    assert len(skip_decisions) == 1
+    assert exit_decisions[0].market_id == active_low_slug
+    assert hold_decisions[0].market_id == active_high_slug
+    assert skip_decisions[0].reason == "Candidate qualified but did not make the top-10 returns/day table."
+    assert all(decision.order_plan is not None for decision in buy_decisions)
+    assert all(decision.order_plan.order_size_usd == 5 for decision in buy_decisions)
+    assert all(decision.order_plan.side == "NO" for decision in buy_decisions)
+    assert all(decision.order_plan.status == "skipped" for decision in buy_decisions)
+    assert result.run.summary.startswith("Console schedule simulated")
+    assert result.run.orders_planned == 10
+    assert result.state.next_run_at == "2026-06-21T00:30:00+00:00"
 
 
 async def _execute_auto_live(
