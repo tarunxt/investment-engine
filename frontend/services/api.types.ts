@@ -195,7 +195,7 @@ export interface IApiService {
     resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     getBullpenAutoLiveRuns(): Promise<BullpenAutoLiveRun[]>;
     getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]>;
-    runBullpenAutoLiveOnce(): Promise<BullpenAutoLiveRun>;
+    runBullpenAutoLiveOnce(data?: Record<string, unknown>): Promise<BullpenAutoLiveRun>;
     startBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     stopBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     pauseBullpenAutoLive(): Promise<BullpenAutoLiveState>;
@@ -212,7 +212,7 @@ export interface IApiService {
     bullpenAiAutoLiveResetSettings(): Promise<BullpenAutoLiveSettings>;
     bullpenAiAutoLiveRuns(): Promise<BullpenAutoLiveRun[]>;
     bullpenAiAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]>;
-    bullpenAiAutoLiveRunOnce(): Promise<BullpenAutoLiveRun>;
+    bullpenAiAutoLiveRunOnce(data?: Record<string, unknown>): Promise<BullpenAutoLiveRun>;
     bullpenAiAutoLiveStart(): Promise<BullpenAutoLiveState>;
     bullpenAiAutoLiveStop(): Promise<BullpenAutoLiveState>;
     bullpenAiAutoLivePause(): Promise<BullpenAutoLiveState>;

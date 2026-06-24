@@ -39,6 +39,7 @@ import {
   normalizePolymarketEventRuntimeMetadata,
   parseBullpenLlmAnalysisPayload,
   summarizeBullpenLlmNotes,
+  type BullpenQuestionLlmBreakdownItem,
   type BullpenQuestionRow,
   type BullpenScanFilters,
   type BullpenScanSnapshot,
@@ -570,6 +571,77 @@ function buildBullpenManualInvestOrder(
     price: Number((outcomeOdds / 100).toFixed(4)),
     event_end_at: question.closeTime,
     market_url: question.marketUrl,
+  };
+}
+
+function buildBullpenAutoRunLlmOutputs(
+  breakdown: BullpenQuestionLlmBreakdownItem[],
+) {
+  return breakdown.map((entry) => ({
+    provider: entry.provider,
+    model: entry.model,
+    llm_yes_odds: entry.llmYesOdds,
+    llm_no_odds: entry.llmNoOdds,
+    confidence: entry.confidence,
+    evidence_status: entry.evidenceStatus,
+    event_state: entry.eventState,
+    key_evidence: entry.keyEvidence,
+    red_flags: entry.redFlags,
+    rationale: entry.rationale,
+    completed_at: entry.timestamp,
+  }));
+}
+
+function buildBullpenAutoRunRequest({
+  mode,
+  snapshot,
+  selectedQuestionIds,
+}: {
+  mode: ScanMode;
+  snapshot: BullpenScanSnapshot | null;
+  selectedQuestionIds: Set<string>;
+}) {
+  if (!snapshot || selectedQuestionIds.size === 0) {
+    return null;
+  }
+
+  return {
+    console_profile: {
+      source_label: snapshot.sourceLabel,
+      source_url: snapshot.sourceUrl,
+      scanned_at: snapshot.scannedAt,
+      snapshot_id: snapshot.snapshotId,
+      mode,
+      total_candidates: snapshot.totalCandidates,
+      candidate_rows: snapshot.questions.map((question) => ({
+        question_id: question.id,
+        market_id:
+          typeof question.slug === "string" && question.slug.trim()
+            ? question.slug.trim()
+            : question.id,
+        market_title: question.question,
+        slug: question.slug,
+        market_url: question.marketUrl,
+        close_time: question.closeTime,
+        theme: question.category || "Uncategorized",
+        current_yes_odds: question.yesOdds,
+        current_no_odds: question.noOdds,
+        llm_yes_odds: question.llmYesOdds,
+        llm_no_odds: question.llmNoOdds,
+        returns_per_day: question.returnsPerDay,
+        amount_to_be_invested: question.amountToBeInvested,
+        llm_disagreement_level: question.llmDisagreementLevel,
+        llm_disagreement_category: question.llmDisagreementCategory,
+        adjudication_required: question.adjudicationRequired,
+        confidence:
+          question.llmBreakdown.find((entry) => entry.confidence)?.confidence ?? null,
+        evidence_status: question.evidenceStatus,
+        event_state: question.eventState,
+        rules: question.rules,
+        selected: selectedQuestionIds.has(question.id),
+        llm_outputs: buildBullpenAutoRunLlmOutputs(question.llmBreakdown),
+      })),
+    },
   };
 }
 
@@ -1337,6 +1409,12 @@ export default function BullpenAiPage() {
       (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
       ),
   );
+  const buildRunNowRequest = () =>
+    buildBullpenAutoRunRequest({
+      mode: activeMode,
+      snapshot: selectionEnabled ? activeCurrentSnapshot : null,
+      selectedQuestionIds: selectedInvestmentQuestionIdSet,
+    });
 
   useEffect(() => {
     if (!isRunningLlm || !llmRunStartedAt) {
@@ -2642,6 +2720,7 @@ export default function BullpenAiPage() {
       </div>
 
       <BullpenAutoRunScheduleCard
+        buildRunNowRequest={buildRunNowRequest}
         onRunCompleted={() => {
           void refreshBullpenPositions({ suppressAutoClaim: true });
         }}

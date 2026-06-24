@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.domains.polymarket.bullpen import _collect_bullpen_rows, run_first_bullpen_json
-from app.domains.polymarket_auto_live.scanner import ScannedMarket
+from app.domains.polymarket_auto_live.scanner import (
+    MARKET_PREDICTION_KEYWORDS,
+    SPORTS_KEYWORDS,
+    TWEET_COUNT_KEYWORDS,
+    TWEET_COUNT_PATTERNS,
+    WEATHER_KEYWORDS,
+    ScanRejectedMarket,
+    ScannedMarket,
+    scan_candidate_markets,
+)
 
 CONSOLE_PROFILE_ID = "bullpen_console_top10"
 CONSOLE_SCHEDULE_TIMEZONE = ZoneInfo("Asia/Kolkata")
@@ -21,7 +32,61 @@ CONSOLE_MIN_MARKET_ODDS = 5.0
 _POSITIONS_COMMAND_VARIANTS = [
     ["polymarket", "positions", "--output", "json"],
 ]
+_DISCOVER_COMMAND_VARIANTS = [
+    [
+        "polymarket",
+        "discover",
+        "--status",
+        "active",
+        "--limit",
+        "1000",
+        "--output",
+        "json",
+    ],
+    [
+        "polymarket",
+        "discover",
+        "--status",
+        "active",
+        "--sort",
+        "newest",
+        "--limit",
+        "1000",
+        "--output",
+        "json",
+    ],
+]
+CONSOLE_CLI_SOURCE_LABEL = "Bullpen CLI"
+CONSOLE_CLI_SOURCE_URL = "https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3"
+CONSOLE_GAMMA_SOURCE_LABEL = "Polymarket Gamma API"
 _EASTERN_TIMEZONE = ZoneInfo("America/New_York")
+_OUTCOME_LABEL_KEYS = ("name", "label", "outcome", "title", "side")
+_QUESTION_KEYS = ("question", "title", "name", "eventTitle", "marketQuestion")
+_CATEGORY_KEYS = (
+    "category",
+    "categorySlug",
+    "type",
+    "topic",
+    "primaryCategory",
+    "categoryName",
+    "group",
+    "tag",
+)
+_MARKET_SLUG_KEYS = ("slug", "marketSlug", "questionSlug")
+_CLOSE_TIME_KEYS = (
+    "closeTime",
+    "closingTime",
+    "endDate",
+    "end_date",
+    "endTime",
+    "resolutionDate",
+    "endDateIso",
+    "endDateISO",
+    "closesAt",
+    "closedAt",
+    "deadline",
+    "expiry",
+)
 
 
 @dataclass
@@ -41,6 +106,18 @@ class ConsoleWalletPosition:
     close_time: str | None
     theme: str
     is_claimable: bool
+
+
+@dataclass
+class ConsoleScanResult:
+    source_label: str
+    source_url: str
+    scanned_at: str
+    accepted: list[ScannedMarket]
+    rejected: list[ScanRejectedMarket]
+    total_candidates: int
+    warning: str | None = None
+    details: str | None = None
 
 
 def next_console_schedule_time(reference_time: datetime) -> datetime:
@@ -154,6 +231,377 @@ def _build_market_url(event_slug: str | None) -> str | None:
     if not event_slug:
         return None
     return f"https://polymarket.com/event/{event_slug}"
+
+
+def _parse_json_list(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _iter_list_like(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    return _parse_json_list(value)
+
+
+def _read_nested_number(record: dict[str, object], keys: tuple[str, ...]) -> float | None:
+    for key in keys:
+        parsed = _read_number(record.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _normalize_console_odds(value: object) -> float | None:
+    parsed = _read_number(value)
+    if parsed is None:
+        return None
+    normalized = parsed * 100 if 0 <= parsed <= 1 else parsed
+    return round(min(100.0, max(0.0, normalized)), 2)
+
+
+def _normalize_text(value: str | None) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def _contains_keyword(text: str, keyword: str) -> bool:
+    return re.search(rf"(^|\W){re.escape(keyword)}(?=$|\W)", text, re.IGNORECASE) is not None
+
+
+def _includes_any(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(_contains_keyword(text, keyword) for keyword in keywords)
+
+
+def _read_outcome_labels(row: dict[str, object]) -> list[str]:
+    labels: list[str] = []
+    for collection_name in ("outcomes", "options", "tokens", "markets"):
+        for item in _iter_list_like(row.get(collection_name)):
+            if isinstance(item, str) and item.strip():
+                labels.append(item.strip())
+                continue
+            if not isinstance(item, dict):
+                continue
+            label = _read_string(item, _OUTCOME_LABEL_KEYS)
+            if label:
+                labels.append(label)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for label in labels:
+        normalized = _normalize_text(label)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(label.strip())
+    return deduped
+
+
+def _read_yes_no_prices(
+    row: dict[str, object], outcome_labels: list[str]
+) -> tuple[float | None, float | None]:
+    normalized_labels = [_normalize_text(label) for label in outcome_labels]
+    outcome_prices = [
+        _read_number(value) for value in _iter_list_like(row.get("outcomePrices"))
+    ]
+
+    yes_price = None
+    no_price = None
+    if "yes" in normalized_labels:
+        yes_index = normalized_labels.index("yes")
+        if yes_index < len(outcome_prices):
+            yes_price = outcome_prices[yes_index]
+    if "no" in normalized_labels:
+        no_index = normalized_labels.index("no")
+        if no_index < len(outcome_prices):
+            no_price = outcome_prices[no_index]
+
+    nested_price_keys = (
+        "odds",
+        "decimalOdds",
+        "price",
+        "lastPrice",
+        "bestAsk",
+        "bestBid",
+        "probability",
+        "probabilityValue",
+    )
+    if yes_price is None or no_price is None:
+        for collection_name in ("outcomes", "options", "tokens", "markets"):
+            for item in _iter_list_like(row.get(collection_name)):
+                if not isinstance(item, dict):
+                    continue
+                label = _read_string(item, _OUTCOME_LABEL_KEYS)
+                if not label:
+                    continue
+                normalized_label = _normalize_text(label)
+                if normalized_label == "yes" and yes_price is None:
+                    yes_price = _read_nested_number(item, nested_price_keys)
+                elif normalized_label == "no" and no_price is None:
+                    no_price = _read_nested_number(item, nested_price_keys)
+
+    if yes_price is None:
+        yes_price = _read_nested_number(
+            row,
+            (
+                "yesOdds",
+                "yes_odd",
+                "yesDecimalOdds",
+                "yesPrice",
+                "yes",
+                "bestYesOdds",
+                "probabilityYes",
+                "yesProbability",
+            ),
+        )
+    if no_price is None:
+        no_price = _read_nested_number(
+            row,
+            (
+                "noOdds",
+                "no_odd",
+                "noDecimalOdds",
+                "noPrice",
+                "no",
+                "bestNoOdds",
+                "probabilityNo",
+                "noProbability",
+            ),
+        )
+
+    return _normalize_console_odds(yes_price), _normalize_console_odds(no_price)
+
+
+def _is_binary_yes_no(
+    outcome_labels: list[str],
+    yes_odds: float | None,
+    no_odds: float | None,
+) -> bool:
+    if not outcome_labels:
+        return yes_odds is not None and no_odds is not None
+    normalized = {_normalize_text(label) for label in outcome_labels}
+    return len(normalized) == 2 and normalized == {"yes", "no"}
+
+
+def _console_search_text(market: ScannedMarket) -> str:
+    return " ".join(
+        filter(
+            None,
+            [
+                market.question,
+                market.theme,
+                market.slug,
+                " ".join(market.outcome_labels),
+            ],
+        )
+    ).lower()
+
+
+def _console_market_filter_reasons(
+    market: ScannedMarket,
+    *,
+    now: datetime,
+) -> list[str]:
+    reasons: list[str] = []
+    search_text = _console_search_text(market)
+    if _includes_any(search_text, SPORTS_KEYWORDS):
+        reasons.append("Excluded sports market.")
+    if _includes_any(search_text, WEATHER_KEYWORDS):
+        reasons.append("Excluded weather market.")
+    if _includes_any(search_text, MARKET_PREDICTION_KEYWORDS):
+        reasons.append("Excluded market-prediction or finance market.")
+    if _includes_any(search_text, TWEET_COUNT_KEYWORDS) and any(
+        pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS
+    ):
+        reasons.append("Excluded tweet-count or social-post-count market.")
+    if not _is_binary_yes_no(
+        market.outcome_labels,
+        market.current_yes_odds,
+        market.current_no_odds,
+    ):
+        reasons.append("Excluded unclear non-binary market.")
+    if market.current_yes_odds is None or market.current_no_odds is None:
+        reasons.append("Excluded market without both Yes and No odds.")
+    elif (
+        market.current_yes_odds < CONSOLE_MIN_MARKET_ODDS
+        or market.current_no_odds < CONSOLE_MIN_MARKET_ODDS
+    ):
+        reasons.append(
+            f"Excluded market below the {CONSOLE_MIN_MARKET_ODDS:.0f}% Yes/No odds floor."
+        )
+    if not market.close_time:
+        reasons.append("Excluded market without a close time.")
+    else:
+        try:
+            close_time = datetime.fromisoformat(market.close_time.replace("Z", "+00:00"))
+        except ValueError:
+            reasons.append("Excluded market with an invalid close time.")
+        else:
+            days_until_close = (close_time - now).total_seconds() / 86_400
+            if days_until_close <= 0:
+                reasons.append("Excluded market that is already closed.")
+            elif days_until_close > CONSOLE_SCAN_WINDOW_DAYS:
+                reasons.append(
+                    f"Excluded market outside the {CONSOLE_SCAN_WINDOW_DAYS}-day Bullpen window."
+                )
+    return reasons
+
+
+def _normalize_console_market(row: dict[str, object]) -> ScannedMarket | None:
+    question = _read_string(row, _QUESTION_KEYS)
+    if not question or len(question) < 8:
+        return None
+
+    market_id = (
+        _read_string(row, ("id", *_MARKET_SLUG_KEYS, "marketId", "conditionId"))
+        or question
+    )
+    outcome_labels = _read_outcome_labels(row)
+    current_yes_odds, current_no_odds = _read_yes_no_prices(row, outcome_labels)
+
+    event_slug = None
+    events = row.get("events")
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            candidate_slug = _read_string(event, ("slug",))
+            if candidate_slug:
+                event_slug = candidate_slug
+                break
+    event_slug = event_slug or _read_string(row, ("eventSlug", "urlSlug"))
+    close_time = _read_string(row, _CLOSE_TIME_KEYS)
+
+    return ScannedMarket(
+        market_id=market_id,
+        question=question,
+        market_url=_build_market_url(event_slug),
+        slug=_read_string(row, _MARKET_SLUG_KEYS),
+        close_time=_extract_close_time(close_time),
+        theme=_read_string(row, _CATEGORY_KEYS) or "Uncategorized",
+        current_yes_odds=current_yes_odds,
+        current_no_odds=current_no_odds,
+        volume_usd=_read_nested_number(
+            row,
+            (
+                "volume",
+                "volume24hr",
+                "volume24h",
+                "totalVolume",
+                "volumeNum",
+                "volumeUsd",
+                "volumeUSD",
+                "dollarVolume",
+            ),
+        ),
+        liquidity_usd=_read_nested_number(
+            row,
+            ("liquidity", "liquidityNum", "liquidityUsd", "liquidityUSD"),
+        ),
+        description=_read_string(row, ("description",)),
+        outcome_labels=outcome_labels,
+        event_slug=event_slug,
+        best_bid_cents=_normalize_console_odds(row.get("bestBid")),
+        best_ask_cents=_normalize_console_odds(row.get("bestAsk")),
+        spread_cents=_normalize_console_odds(row.get("spread")),
+        force_include=False,
+        raw=row,
+    )
+
+
+def _build_cli_console_scan_result(
+    rows: list[dict[str, object]],
+    *,
+    now: datetime,
+    scanned_at: str,
+) -> ConsoleScanResult:
+    normalized_by_market_id: dict[str, ScannedMarket] = {}
+    for row in rows:
+        market = _normalize_console_market(row)
+        if market is None or market.market_id in normalized_by_market_id:
+            continue
+        normalized_by_market_id[market.market_id] = market
+
+    accepted: list[ScannedMarket] = []
+    rejected: list[ScanRejectedMarket] = []
+    for market in normalized_by_market_id.values():
+        reasons = _console_market_filter_reasons(market, now=now)
+        if reasons:
+            rejected.append(
+                ScanRejectedMarket(
+                    market_id=market.market_id,
+                    question=market.question,
+                    slug=market.slug,
+                    market_url=market.market_url,
+                    reasons=reasons,
+                )
+            )
+            continue
+        accepted.append(market)
+
+    accepted.sort(key=lambda market: (market.close_time or "", market.question))
+    rejected.sort(key=lambda market: (market.question, market.market_id))
+    return ConsoleScanResult(
+        source_label=CONSOLE_CLI_SOURCE_LABEL,
+        source_url=CONSOLE_CLI_SOURCE_URL,
+        scanned_at=scanned_at,
+        accepted=accepted,
+        rejected=rejected,
+        total_candidates=len(normalized_by_market_id),
+    )
+
+
+async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
+    scanned_at = datetime.now(UTC).isoformat()
+    try:
+        parsed = await run_first_bullpen_json(
+            _DISCOVER_COMMAND_VARIANTS,
+            timeout_seconds=25,
+        )
+        return _build_cli_console_scan_result(
+            _collect_bullpen_rows(parsed),
+            now=now,
+            scanned_at=scanned_at,
+        )
+    except Exception as cli_exc:
+        gamma_scan = await scan_candidate_markets(
+            min_liquidity_usd=0,
+            existing_position_slugs=set(),
+        )
+        accepted: list[ScannedMarket] = []
+        rejected = list(gamma_scan.rejected)
+        for market in gamma_scan.accepted:
+            reasons = _console_market_filter_reasons(market, now=now)
+            if reasons:
+                rejected.append(
+                    ScanRejectedMarket(
+                        market_id=market.market_id,
+                        question=market.question,
+                        slug=market.slug,
+                        market_url=market.market_url,
+                        reasons=reasons,
+                    )
+                )
+                continue
+            accepted.append(market)
+        accepted.sort(key=lambda market: (market.close_time or "", market.question))
+        return ConsoleScanResult(
+            source_label=CONSOLE_GAMMA_SOURCE_LABEL,
+            source_url=gamma_scan.source_url,
+            scanned_at=gamma_scan.scanned_at,
+            accepted=accepted,
+            rejected=rejected,
+            total_candidates=len(gamma_scan.accepted) + len(gamma_scan.rejected),
+            warning=(
+                "Using Polymarket Gamma API fallback because the Bullpen CLI scan failed."
+            ),
+            details=str(cli_exc),
+        )
 
 
 def _position_yes_no_odds(side: str, current_price_cents: float | None) -> tuple[float | None, float | None]:

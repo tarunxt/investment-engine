@@ -20,6 +20,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveRun,
+    BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
     BullpenAutoLiveState,
@@ -170,7 +171,12 @@ class BullpenAutoLiveBot:
             repo = AsyncPolymarketAutoLiveRepository(session)
             return await repo.list_decisions(self.user_id)
 
-    async def run_once(self, *, triggered_by: str = "manual") -> BullpenAutoLiveRun:
+    async def run_once(
+        self,
+        *,
+        triggered_by: str = "manual",
+        request: BullpenAutoLiveRunOnceRequest | None = None,
+    ) -> BullpenAutoLiveRun:
         from app.domains.polymarket_auto_live.tasks import execute_polymarket_auto_live_run
 
         async with AsyncSessionLocal() as session:
@@ -225,6 +231,7 @@ class BullpenAutoLiveBot:
                 summary="Auto-Live run queued.",
                 live_execution_requested=live_execution_requested(settings),
                 guardrail_checks=self._build_guardrail_checks(settings, state),
+                request_context=request,
             )
             session.add(self._new_run_record(run))
             state.last_action = run.summary

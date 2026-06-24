@@ -15,6 +15,8 @@ from types import SimpleNamespace
 from app.domains.auth.dependencies import get_current_user
 from app.domains.polymarket_auto_live.router import router as auto_live_router
 from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveRun,
+    BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
 )
@@ -104,6 +106,7 @@ async def test_trading_bots_summary_route_returns_four_cards(monkeypatch):
 class _FakeAutoLiveBot:
     def __init__(self) -> None:
         self.settings = BullpenAutoLiveSettings()
+        self.run_once_request: BullpenAutoLiveRunOnceRequest | None = None
 
     async def get_settings(self) -> BullpenAutoLiveSettings:
         return self.settings
@@ -120,6 +123,23 @@ class _FakeAutoLiveBot:
     async def reset_settings(self) -> BullpenAutoLiveSettings:
         self.settings = BullpenAutoLiveSettings()
         return self.settings
+
+    async def run_once(
+        self,
+        *,
+        triggered_by: str = "manual",
+        request: BullpenAutoLiveRunOnceRequest | None = None,
+    ) -> BullpenAutoLiveRun:
+        self.run_once_request = request
+        return BullpenAutoLiveRun(
+            id="run-1",
+            triggered_by=triggered_by,  # type: ignore[arg-type]
+            status="running",
+            dry_run=True,
+            started_at="2026-06-21T10:00:00+00:00",
+            summary="Queued",
+            request_context=request,
+        )
 
 
 @pytest.mark.anyio
@@ -166,6 +186,54 @@ async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
         reset_response = await client.post("/polymarket/auto-live/settings/reset")
         assert reset_response.status_code == 200
         assert reset_response.json() == BullpenAutoLiveSettings().model_dump(mode="json")
+
+
+@pytest.mark.anyio
+async def test_auto_live_run_once_route_accepts_manual_console_rows(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    fake_bot = _FakeAutoLiveBot()
+
+    async def fake_get_bot(user_id: int):
+        return fake_bot
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.polymarket_auto_live_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/polymarket/auto-live/run-once",
+            json={
+                "console_profile": {
+                    "source_label": "Bullpen CLI",
+                    "total_candidates": 2,
+                    "candidate_rows": [
+                        {
+                            "question_id": "candidate-market-1",
+                            "market_id": "candidate-market-1",
+                            "market_title": "Candidate market 1",
+                            "slug": "candidate-market-1",
+                            "current_yes_odds": 18,
+                            "current_no_odds": 82,
+                            "llm_yes_odds": 8,
+                            "llm_no_odds": 92,
+                            "returns_per_day": 9.2,
+                            "amount_to_be_invested": 5,
+                            "selected": True,
+                            "llm_outputs": [],
+                        }
+                    ],
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    assert fake_bot.run_once_request is not None
+    assert fake_bot.run_once_request.console_profile is not None
+    assert fake_bot.run_once_request.console_profile.source_label == "Bullpen CLI"
+    assert fake_bot.run_once_request.console_profile.candidate_rows[0].selected is True
 
 
 def test_polymarket_manual_invest_route_remains_available():
