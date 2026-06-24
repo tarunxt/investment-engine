@@ -611,7 +611,7 @@ export function buildBullpenAiTradingBotSummary(
   const guardrails: TradingBotGuardrail[] = [
     { label: "Selection filters", value: "Active market filters" },
     { label: "Evidence check", value: "Consensus review required" },
-    { label: "Pink-row threshold", value: "LLM No > 80% and returns/day > 5%" },
+    { label: "Pink-row threshold", value: "LLM Yes/No > 80%" },
     { label: "Sizing logic", value: "Amount-to-invest formula" },
     { label: "Execution", value: "Manual review before live invest" },
   ];

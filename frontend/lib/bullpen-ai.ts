@@ -215,10 +215,11 @@ export type BullpenReturnsPerDayBreakdown = {
 };
 
 export type BullpenAmountToBeInvestedBreakdown = {
+  llmYesOdds: number | null;
   llmNoOdds: number | null;
+  strongestLlmOdds: number | null;
   returnsPerDay: number | null;
-  minLlmNoOdds: number;
-  minReturnsPerDay: number;
+  minStrongestLlmOdds: number;
   fixedAmountUsd: number;
   qualifies: boolean;
   result: number | null;
@@ -950,10 +951,12 @@ function calculateCurrentVsLlmOddsDifference({
 }
 
 function calculateBullpenAmountToBeInvested({
+  llmYesOdds,
   llmNoOdds,
   returnsPerDay,
-}: Pick<BullpenQuestionRow, "llmNoOdds" | "returnsPerDay">) {
+}: Pick<BullpenQuestionRow, "llmYesOdds" | "llmNoOdds" | "returnsPerDay">) {
   return getBullpenAmountToBeInvestedBreakdown({
+    llmYesOdds,
     llmNoOdds,
     returnsPerDay,
   }).result;
@@ -1003,25 +1006,29 @@ export function getBullpenReturnsPerDayBreakdown({
 }
 
 export function getBullpenAmountToBeInvestedBreakdown({
+  llmYesOdds,
   llmNoOdds,
   returnsPerDay,
 }: Pick<
   BullpenQuestionRow,
-  "llmNoOdds" | "returnsPerDay"
+  "llmYesOdds" | "llmNoOdds" | "returnsPerDay"
 >): BullpenAmountToBeInvestedBreakdown {
-  const minLlmNoOdds = 80;
-  const minReturnsPerDay = 5;
+  const minStrongestLlmOdds = 80;
+  const strongestLlmOdds = Math.max(llmYesOdds ?? -Infinity, llmNoOdds ?? -Infinity);
+  const normalizedStrongestLlmOdds = Number.isFinite(strongestLlmOdds)
+    ? strongestLlmOdds
+    : null;
   const qualifies =
-    llmNoOdds !== null &&
     returnsPerDay !== null &&
-    llmNoOdds > minLlmNoOdds &&
-    returnsPerDay > minReturnsPerDay;
+    normalizedStrongestLlmOdds !== null &&
+    normalizedStrongestLlmOdds > minStrongestLlmOdds;
 
   return {
+    llmYesOdds,
     llmNoOdds,
+    strongestLlmOdds: normalizedStrongestLlmOdds,
     returnsPerDay,
-    minLlmNoOdds,
-    minReturnsPerDay,
+    minStrongestLlmOdds,
     fixedAmountUsd: BULLPEN_FIXED_INVEST_AMOUNT_USD,
     qualifies,
     result: qualifies ? BULLPEN_FIXED_INVEST_AMOUNT_USD : null,
@@ -1031,19 +1038,19 @@ export function getBullpenAmountToBeInvestedBreakdown({
 export function isBullpenQuestionInvestmentCandidate(
   question: Pick<
     BullpenQuestionRow,
-    "llmNoOdds" | "returnsPerDay" | "amountToBeInvested"
+    "llmYesOdds" | "llmNoOdds" | "returnsPerDay" | "amountToBeInvested"
   > &
     Partial<
       Pick<BullpenQuestionRow, "llmDisagreementLevel" | "adjudicationRequired">
     >,
 ) {
   return (
-    question.llmNoOdds !== null &&
     question.returnsPerDay !== null &&
     question.amountToBeInvested !== null &&
     question.llmDisagreementLevel !== "High" &&
     !question.adjudicationRequired &&
-    question.llmNoOdds > 80
+    ((question.llmYesOdds !== null && question.llmYesOdds > 80) ||
+      (question.llmNoOdds !== null && question.llmNoOdds > 80))
   );
 }
 
@@ -1126,10 +1133,12 @@ export function createBullpenQuestionRow(
     calculateCurrentVsLlmOddsDifference(baseRow);
   const returnsPerDay = calculateBullpenReturnsPerDay(baseRow);
   const amountToBeInvested = calculateBullpenAmountToBeInvested({
+    llmYesOdds,
     llmNoOdds,
     returnsPerDay,
   });
   const isAmountToBeInvestedHighlighted = isBullpenQuestionInvestmentCandidate({
+    llmYesOdds,
     llmNoOdds,
     returnsPerDay,
     amountToBeInvested,

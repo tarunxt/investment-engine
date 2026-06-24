@@ -194,7 +194,7 @@ test("Bullpen x AI scan defaults exclude tweet counts", async () => {
   );
 });
 
-test("Bullpen x AI investment candidates exclude new high-disagreement scan rows", async () => {
+test("Bullpen x AI investment candidates include strong LLM Yes or No odds", async () => {
   const { isBullpenQuestionInvestmentCandidate } = await loadBullpenAiModule();
 
   assert.equal(isBullpenQuestionInvestmentCandidate(createQuestionRow()), false);
@@ -206,6 +206,24 @@ test("Bullpen x AI investment candidates exclude new high-disagreement scan rows
     amountToBeInvested: 15.5,
   };
   assert.equal(isBullpenQuestionInvestmentCandidate(eligibleQuestion), true);
+
+  assert.equal(
+    isBullpenQuestionInvestmentCandidate({
+      ...eligibleQuestion,
+      llmYesOdds: 85,
+      llmNoOdds: 15,
+    }),
+    true,
+  );
+
+  assert.equal(
+    isBullpenQuestionInvestmentCandidate({
+      ...eligibleQuestion,
+      llmYesOdds: 79,
+      llmNoOdds: 80,
+    }),
+    false,
+  );
 
   assert.equal(
     isBullpenQuestionInvestmentCandidate({
