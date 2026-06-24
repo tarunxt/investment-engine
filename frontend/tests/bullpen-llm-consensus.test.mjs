@@ -108,6 +108,73 @@ test("computeBullpenLlmConsensus excludes entries flagged with invalid reasons",
   assert.equal(consensus.llmSpreadYesOdds, 0);
 });
 
+test("computeBullpenLlmConsensus treats one uncertain outlier as consensus with outlier", async () => {
+  const { computeBullpenLlmConsensus } = await loadBullpenAiModule();
+  const yesValues = [10, 12, 15, 8, 14, 9, 11, 13, 50];
+  const breakdown = yesValues.map((llmYesOdds, index) => ({
+    provider: `provider-${index + 1}`,
+    model: `test-model-${index + 1}`,
+    jobId: null,
+    runId: null,
+    timestamp: null,
+    llmYesOdds,
+    llmNoOdds: 100 - llmYesOdds,
+    yesDefinition: null,
+    deadlineEt: null,
+    hoursRemaining: null,
+    evidenceStatus: "Strong",
+    eventState: "no_confirmed_event",
+    confidence: "High",
+    keyEvidence: [],
+    redFlags: [],
+    rationale:
+      llmYesOdds >= 45
+        ? "No credible evidence confirms the event yet."
+        : "No confirmed event has happened yet.",
+  }));
+
+  const consensus = computeBullpenLlmConsensus(breakdown);
+
+  assert.equal(consensus.llmDisagreementLevel, "Medium");
+  assert.equal(consensus.llmDisagreementCategory, "CONSENSUS_WITH_OUTLIER");
+  assert.equal(consensus.adjudicationRequired, false);
+  assert.equal(consensus.llmMedianYesOdds, 12);
+  assert.equal(consensus.llmTrimmedMeanYesOdds, 12);
+  assert.equal(consensus.consensusMethod, "trimmedMean");
+  assert.equal(consensus.consensusYesOdds, 12);
+  assert.equal(consensus.llmRationaleMismatchCount, 1);
+});
+
+test("computeBullpenLlmConsensus flags true two-sided disagreement only when both camps have support", async () => {
+  const { computeBullpenLlmConsensus } = await loadBullpenAiModule();
+  const yesValues = [72, 68, 65, 18, 22, 30];
+  const breakdown = yesValues.map((llmYesOdds, index) => ({
+    provider: `provider-${index + 1}`,
+    model: `test-model-${index + 1}`,
+    jobId: null,
+    runId: null,
+    timestamp: null,
+    llmYesOdds,
+    llmNoOdds: 100 - llmYesOdds,
+    yesDefinition: null,
+    deadlineEt: null,
+    hoursRemaining: null,
+    evidenceStatus: "Strong",
+    eventState: "conflicting",
+    confidence: "Medium",
+    keyEvidence: [],
+    redFlags: [],
+    rationale: null,
+  }));
+
+  const consensus = computeBullpenLlmConsensus(breakdown);
+
+  assert.equal(consensus.llmDisagreementLevel, "High");
+  assert.equal(consensus.llmDisagreementCategory, "HIGH_DISAGREEMENT");
+  assert.equal(consensus.adjudicationRequired, true);
+  assert.equal(consensus.consensusMethod, "median");
+});
+
 
 test("getBullpenReturnsPerDayBreakdown matches spreadsheet column O", async () => {
   const { getBullpenReturnsPerDayBreakdown } = await loadBullpenAiModule();

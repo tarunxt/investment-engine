@@ -27,6 +27,13 @@ export type BullpenQuestion = {
 };
 
 export type BullpenLlmDisagreementLevel = "Low" | "Medium" | "High";
+export type BullpenLlmDirection = "YES_CAMP" | "NO_CAMP" | "UNCERTAIN";
+export type BullpenLlmDisagreementCategory =
+  | "CONSENSUS"
+  | "MOSTLY_CONSENSUS_SOME_UNCERTAINTY"
+  | "CONSENSUS_WITH_OUTLIER"
+  | "HIGH_DISAGREEMENT";
+export type BullpenLlmReviewTone = "high" | "medium" | "lowEvidence";
 
 export type BullpenQuestionAnalysis = {
   llmYesOdds: number | null;
@@ -34,10 +41,14 @@ export type BullpenQuestionAnalysis = {
   llmAverageYesOdds: number | null;
   llmMedianYesOdds: number | null;
   llmTrimmedMeanYesOdds: number | null;
+  llmIqrYesOdds: number | null;
+  llmTrimmedRangeYesOdds: number | null;
   llmMinYesOdds: number | null;
   llmMaxYesOdds: number | null;
   llmSpreadYesOdds: number | null;
   llmDisagreementLevel: BullpenLlmDisagreementLevel | null;
+  llmDisagreementCategory: BullpenLlmDisagreementCategory | null;
+  llmRationaleMismatchCount: number;
   adjudicationRequired: boolean;
   evidenceStatus: string | null;
   eventState: string | null;
@@ -130,6 +141,10 @@ export type BullpenQuestionLlmBreakdownItem = {
   keyEvidence: string[];
   redFlags: string[];
   rationale: string | null;
+  direction?: BullpenLlmDirection | null;
+  rationaleOddsMismatch?: boolean;
+  rationaleOddsMismatchReason?: string | null;
+  effectiveWeight?: number | null;
   webSearchUsed: boolean | null;
   webSearchQueries: string[];
   webSources: string[];
@@ -179,10 +194,14 @@ export type BullpenLlmConsensus = {
   llmAverageYesOdds: number | null;
   llmMedianYesOdds: number | null;
   llmTrimmedMeanYesOdds: number | null;
+  llmIqrYesOdds: number | null;
+  llmTrimmedRangeYesOdds: number | null;
   llmMinYesOdds: number | null;
   llmMaxYesOdds: number | null;
   llmSpreadYesOdds: number | null;
   llmDisagreementLevel: BullpenLlmDisagreementLevel | null;
+  llmDisagreementCategory: BullpenLlmDisagreementCategory | null;
+  llmRationaleMismatchCount: number;
   adjudicationRequired: boolean;
 };
 
@@ -576,6 +595,331 @@ function trimmedMeanBullpenValues(values: number[]) {
   return averageBullpenValues(trimmedValues);
 }
 
+const BULLPEN_YES_CAMP_THRESHOLD = 60;
+const BULLPEN_NO_CAMP_THRESHOLD = 40;
+const BULLPEN_HIGH_RAW_SPREAD_THRESHOLD = 30;
+const BULLPEN_PROVIDER_SHARE_THRESHOLD = 0.25;
+const BULLPEN_OUTLIER_DISTANCE_THRESHOLD = 20;
+const BULLPEN_RATIONALE_MISMATCH_WEIGHT = 0.35;
+const BULLPEN_NEGATIVE_RATIONALE_PATTERNS = [
+  /\bno credible evidence\b/i,
+  /\bno confirmed (?:event|announcement|launch|deal|filing|approval|evidence)\b/i,
+  /\bnot confirmed\b/i,
+  /\bevent not confirmed\b/i,
+  /\bno official (?:announcement|confirmation|filing)\b/i,
+  /\bunlikely\b/i,
+  /\bunconfirmed\b/i,
+  /\brumou?r(?:ed|s)?\b/i,
+  /\bspeculative\b/i,
+] as const;
+
+type BullpenComputedLlmEntry = {
+  provider: string;
+  model: string;
+  yesOdds: number;
+  direction: BullpenLlmDirection;
+  effectiveWeight: number;
+  rationaleOddsMismatch: boolean;
+  rationaleOddsMismatchReason: string | null;
+};
+
+type BullpenProviderSignal = {
+  provider: string;
+  medianYesOdds: number;
+  direction: BullpenLlmDirection;
+  effectiveWeight: number;
+  modelCount: number;
+  rationaleMismatchCount: number;
+};
+
+function getBullpenTrimmedValues(values: number[]) {
+  if (values.length === 0) return [] as number[];
+
+  const sorted = [...values].sort((left, right) => left - right);
+  const trimCount =
+    sorted.length >= 5 ? Math.max(1, Math.floor(sorted.length * 0.1)) : 0;
+
+  if (trimCount === 0 || trimCount * 2 >= sorted.length) {
+    return sorted;
+  }
+
+  return sorted.slice(trimCount, sorted.length - trimCount);
+}
+
+function quantileBullpenValues(values: number[], quantile: number) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const clampedQuantile = Math.min(1, Math.max(0, quantile));
+  const position = (sorted.length - 1) * clampedQuantile;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+  const lowerValue = sorted[lowerIndex] ?? sorted[0] ?? 0;
+  const upperValue = sorted[upperIndex] ?? sorted.at(-1) ?? lowerValue;
+
+  if (lowerIndex === upperIndex) {
+    return roundBullpenValue(lowerValue);
+  }
+
+  return roundBullpenValue(
+    lowerValue + (upperValue - lowerValue) * (position - lowerIndex),
+  );
+}
+
+function iqrBullpenValues(values: number[]) {
+  if (values.length < 2) return 0;
+  const q1 = quantileBullpenValues(values, 0.25);
+  const q3 = quantileBullpenValues(values, 0.75);
+  if (q1 === null || q3 === null) return 0;
+  return roundBullpenValue(q3 - q1) ?? 0;
+}
+
+function trimmedRangeBullpenValues(values: number[]) {
+  const trimmedValues = getBullpenTrimmedValues(values);
+  if (trimmedValues.length === 0) return null;
+  const minValue = trimmedValues[0] ?? null;
+  const maxValue = trimmedValues.at(-1) ?? null;
+  if (minValue === null || maxValue === null) return null;
+  return roundBullpenValue(maxValue - minValue);
+}
+
+export function classifyBullpenLlmDirection(
+  yesOdds: number | null,
+): BullpenLlmDirection | null {
+  if (yesOdds === null) return null;
+  if (yesOdds >= BULLPEN_YES_CAMP_THRESHOLD) return "YES_CAMP";
+  if (yesOdds <= BULLPEN_NO_CAMP_THRESHOLD) return "NO_CAMP";
+  return "UNCERTAIN";
+}
+
+function detectBullpenRationaleOddsMismatch(
+  rationale: string | null | undefined,
+  yesOdds: number | null,
+) {
+  const rationaleText = readStringValue(rationale);
+  if (!rationaleText || yesOdds === null) {
+    return {
+      rationaleOddsMismatch: false,
+      rationaleOddsMismatchReason: null,
+      effectiveWeight: 1,
+    };
+  }
+
+  const hasNegativeSignal = BULLPEN_NEGATIVE_RATIONALE_PATTERNS.some((pattern) =>
+    pattern.test(rationaleText),
+  );
+  const rationaleOddsMismatch = hasNegativeSignal && yesOdds >= 45;
+
+  return {
+    rationaleOddsMismatch,
+    rationaleOddsMismatchReason: rationaleOddsMismatch
+      ? "Rationale leans against a confirmed Yes case, but the quoted odds stayed near 50/50 or Yes-favoring."
+      : null,
+    effectiveWeight: rationaleOddsMismatch ? BULLPEN_RATIONALE_MISMATCH_WEIGHT : 1,
+  };
+}
+
+function computeBullpenLlmEntries(
+  breakdown: BullpenQuestionLlmBreakdownItem[],
+) {
+  return breakdown
+    .filter((entry) => !isBullpenBreakdownEntryInvalid(entry))
+    .map((entry): BullpenComputedLlmEntry | null => {
+      const yesOdds =
+        typeof entry.llmYesOdds === "number" && Number.isFinite(entry.llmYesOdds)
+          ? entry.llmYesOdds
+          : null;
+      if (yesOdds === null) return null;
+
+      const mismatch = detectBullpenRationaleOddsMismatch(
+        entry.rationale,
+        yesOdds,
+      );
+      const direction =
+        entry.direction ?? classifyBullpenLlmDirection(yesOdds) ?? "UNCERTAIN";
+      const effectiveWeight =
+        typeof entry.effectiveWeight === "number" &&
+        Number.isFinite(entry.effectiveWeight)
+          ? entry.effectiveWeight
+          : mismatch.effectiveWeight;
+
+      return {
+        provider: entry.provider,
+        model: entry.model,
+        yesOdds,
+        direction,
+        effectiveWeight,
+        rationaleOddsMismatch:
+          entry.rationaleOddsMismatch ?? mismatch.rationaleOddsMismatch,
+        rationaleOddsMismatchReason:
+          entry.rationaleOddsMismatchReason ??
+          mismatch.rationaleOddsMismatchReason,
+      };
+    })
+    .filter((entry): entry is BullpenComputedLlmEntry => entry !== null);
+}
+
+function buildBullpenProviderSignals(entries: BullpenComputedLlmEntry[]) {
+  const providers = new Map<
+    string,
+    { yesValues: number[]; weights: number[]; rationaleMismatchCount: number }
+  >();
+
+  entries.forEach((entry) => {
+    const existing =
+      providers.get(entry.provider) || {
+        yesValues: [],
+        weights: [],
+        rationaleMismatchCount: 0,
+      };
+    existing.yesValues.push(entry.yesOdds);
+    existing.weights.push(entry.effectiveWeight);
+    if (entry.rationaleOddsMismatch) {
+      existing.rationaleMismatchCount += 1;
+    }
+    providers.set(entry.provider, existing);
+  });
+
+  return [...providers.entries()]
+    .map(([provider, value]): BullpenProviderSignal | null => {
+      const medianYesOdds = medianBullpenValues(value.yesValues);
+      if (medianYesOdds === null) return null;
+      return {
+        provider,
+        medianYesOdds,
+        direction: classifyBullpenLlmDirection(medianYesOdds) ?? "UNCERTAIN",
+        effectiveWeight:
+          roundBullpenValue(averageBullpenValues(value.weights)) ?? 1,
+        modelCount: value.yesValues.length,
+        rationaleMismatchCount: value.rationaleMismatchCount,
+      };
+    })
+    .filter((provider): provider is BullpenProviderSignal => provider !== null);
+}
+
+function summarizeBullpenDirectionSupport<
+  T extends { direction: BullpenLlmDirection; effectiveWeight: number },
+>(items: T[]) {
+  const counts = {
+    YES_CAMP: 0,
+    NO_CAMP: 0,
+    UNCERTAIN: 0,
+  } satisfies Record<BullpenLlmDirection, number>;
+  const weights = {
+    YES_CAMP: 0,
+    NO_CAMP: 0,
+    UNCERTAIN: 0,
+  } satisfies Record<BullpenLlmDirection, number>;
+
+  items.forEach((item) => {
+    counts[item.direction] += 1;
+    weights[item.direction] += item.effectiveWeight;
+  });
+
+  const totalWeight = Object.values(weights).reduce(
+    (total, value) => total + value,
+    0,
+  );
+  const shares = {
+    YES_CAMP:
+      totalWeight > 0 ? roundBullpenValue(weights.YES_CAMP / totalWeight) ?? 0 : 0,
+    NO_CAMP:
+      totalWeight > 0 ? roundBullpenValue(weights.NO_CAMP / totalWeight) ?? 0 : 0,
+    UNCERTAIN:
+      totalWeight > 0 ? roundBullpenValue(weights.UNCERTAIN / totalWeight) ?? 0 : 0,
+  } satisfies Record<BullpenLlmDirection, number>;
+
+  return {
+    counts,
+    shares,
+  };
+}
+
+function countBullpenOutlierModels(
+  entries: BullpenComputedLlmEntry[],
+  medianYesOdds: number | null,
+  iqrYesOdds: number | null,
+) {
+  if (medianYesOdds === null) return 0;
+  const distanceThreshold = Math.max(
+    BULLPEN_OUTLIER_DISTANCE_THRESHOLD,
+    (iqrYesOdds ?? 0) * 1.5,
+  );
+
+  return entries.filter(
+    (entry) => Math.abs(entry.yesOdds - medianYesOdds) >= distanceThreshold,
+  ).length;
+}
+
+export function getBullpenLlmDisagreementCategoryLabel(
+  category: BullpenLlmDisagreementCategory | null | undefined,
+) {
+  switch (category) {
+    case "HIGH_DISAGREEMENT":
+      return "High LLM disagreement";
+    case "CONSENSUS_WITH_OUTLIER":
+      return "Consensus with outlier";
+    case "MOSTLY_CONSENSUS_SOME_UNCERTAINTY":
+      return "Mostly consensus, some uncertainty";
+    case "CONSENSUS":
+      return "Consensus";
+    default:
+      return null;
+  }
+}
+
+export function isBullpenHighLlmDisagreement(
+  question: Pick<
+    BullpenQuestionAnalysis,
+    "llmDisagreementCategory" | "llmDisagreementLevel" | "adjudicationRequired"
+  >,
+) {
+  return (
+    question.llmDisagreementCategory === "HIGH_DISAGREEMENT" ||
+    question.llmDisagreementLevel === "High" ||
+    question.adjudicationRequired
+  );
+}
+
+export function getBullpenLlmReviewState(
+  question: Pick<
+    BullpenQuestionAnalysis,
+    | "llmDisagreementCategory"
+    | "llmDisagreementLevel"
+    | "adjudicationRequired"
+    | "evidenceStatus"
+  >,
+): { label: string; tone: BullpenLlmReviewTone } | null {
+  if (isBullpenHighLlmDisagreement(question)) {
+    return {
+      label: "High LLM disagreement",
+      tone: "high",
+    };
+  }
+
+  const categoryLabel = getBullpenLlmDisagreementCategoryLabel(
+    question.llmDisagreementCategory,
+  );
+  if (
+    categoryLabel &&
+    question.llmDisagreementCategory !== "CONSENSUS" &&
+    question.llmDisagreementLevel !== "Low"
+  ) {
+    return {
+      label: categoryLabel,
+      tone: "medium",
+    };
+  }
+
+  if (question.evidenceStatus === "Low" || question.adjudicationRequired) {
+    return {
+      label: "Low evidence / adjudication needed",
+      tone: "lowEvidence",
+    };
+  }
+
+  return null;
+}
+
 function calculateBullpenReturnsPerDay({
   yesOdds,
   noOdds,
@@ -753,6 +1097,7 @@ export function createBullpenQuestionRow(
   const validLlmBreakdown = llmBreakdown.filter(
     (entry) => !isBullpenBreakdownEntryInvalid(entry),
   );
+  const hasBreakdownConsensus = validLlmBreakdown.length > 0;
   const topLevelOdds = normalizeOddsPair(
     analysisFields.llmYesOdds ?? null,
     analysisFields.llmNoOdds ?? null,
@@ -810,6 +1155,12 @@ export function createBullpenQuestionRow(
       llmConsensus.llmTrimmedMeanYesOdds ??
       analysisFields.llmTrimmedMeanYesOdds ??
       null,
+    llmIqrYesOdds:
+      llmConsensus.llmIqrYesOdds ?? analysisFields.llmIqrYesOdds ?? null,
+    llmTrimmedRangeYesOdds:
+      llmConsensus.llmTrimmedRangeYesOdds ??
+      analysisFields.llmTrimmedRangeYesOdds ??
+      null,
     llmMinYesOdds:
       llmConsensus.llmMinYesOdds ?? analysisFields.llmMinYesOdds ?? null,
     llmMaxYesOdds:
@@ -820,10 +1171,18 @@ export function createBullpenQuestionRow(
       llmConsensus.llmDisagreementLevel ??
       analysisFields.llmDisagreementLevel ??
       null,
+    llmDisagreementCategory:
+      llmConsensus.llmDisagreementCategory ??
+      analysisFields.llmDisagreementCategory ??
+      null,
+    llmRationaleMismatchCount:
+      llmConsensus.llmRationaleMismatchCount ??
+      analysisFields.llmRationaleMismatchCount ??
+      0,
     adjudicationRequired:
-      llmConsensus.adjudicationRequired ||
-      analysisFields.adjudicationRequired ||
-      false,
+      hasBreakdownConsensus
+        ? llmConsensus.adjudicationRequired
+        : analysisFields.adjudicationRequired || false,
     evidenceStatus:
       analysisFields.evidenceStatus ??
       pickBullpenConsensusLabel(
@@ -1134,7 +1493,7 @@ function normalizeBullpenLlmBreakdown(
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((entry) => {
+    .map((entry): BullpenQuestionLlmBreakdownItem | null => {
       if (!entry || typeof entry !== "object") return null;
       const record = entry as Record<string, unknown>;
       const provider = readStringValue(record.provider);
@@ -1143,6 +1502,18 @@ function normalizeBullpenLlmBreakdown(
       const normalizedOdds = normalizeOddsPair(
         extractNumber(record.llmYesOdds ?? record.llm_yes_odds),
         extractNumber(record.llmNoOdds ?? record.llm_no_odds),
+      );
+      const rationaleText =
+        readStringValue(record.rationale) ||
+        readStringValue(record.reasoning) ||
+        readStringValue(record.notes) ||
+        readStringValue(record.note) ||
+        readStringValue(record.explanation) ||
+        readStringValue(record.summary) ||
+        null;
+      const rationaleMismatch = detectBullpenRationaleOddsMismatch(
+        rationaleText,
+        normalizedOdds.yes,
       );
 
       return {
@@ -1191,14 +1562,23 @@ function normalizeBullpenLlmBreakdown(
           record.keyEvidence ?? record.key_evidence,
         ),
         redFlags: readStringArrayValue(record.redFlags ?? record.red_flags),
-        rationale:
-          readStringValue(record.rationale) ||
-          readStringValue(record.reasoning) ||
-          readStringValue(record.notes) ||
-          readStringValue(record.note) ||
-          readStringValue(record.explanation) ||
-          readStringValue(record.summary) ||
-          null,
+        rationale: rationaleText,
+        direction:
+          (readStringValue(record.direction) as BullpenLlmDirection | null) ??
+          classifyBullpenLlmDirection(normalizedOdds.yes),
+        rationaleOddsMismatch:
+          readBooleanValue(
+            record.rationaleOddsMismatch ?? record.rationale_odds_mismatch,
+          ) ?? rationaleMismatch.rationaleOddsMismatch,
+        rationaleOddsMismatchReason:
+          readStringValue(
+            record.rationaleOddsMismatchReason ??
+              record.rationale_odds_mismatch_reason,
+          ) ?? rationaleMismatch.rationaleOddsMismatchReason,
+        effectiveWeight: roundBullpenValue(
+          extractNumber(record.effectiveWeight ?? record.effective_weight) ??
+            rationaleMismatch.effectiveWeight,
+        ),
         webSearchUsed: readBooleanValue(
           record.webSearchUsed ?? record.web_search_used,
         ),
@@ -1454,12 +1834,15 @@ export function parseBullpenLlmAnalysisPayload(
 export function computeBullpenLlmConsensus(
   breakdown: BullpenQuestionLlmBreakdownItem[],
 ): BullpenLlmConsensus {
-  const yesValues = breakdown
-    .filter((entry) => !isBullpenBreakdownEntryInvalid(entry))
-    .map((entry) => entry.llmYesOdds)
-    .filter((value): value is number => typeof value === "number");
+  const computedEntries = computeBullpenLlmEntries(breakdown);
+  const modelYesValues = computedEntries.map((entry) => entry.yesOdds);
+  const providerSignals = buildBullpenProviderSignals(computedEntries);
+  const consensusYesValues =
+    providerSignals.length >= 2
+      ? providerSignals.map((provider) => provider.medianYesOdds)
+      : modelYesValues;
 
-  if (yesValues.length === 0) {
+  if (consensusYesValues.length === 0) {
     return {
       consensusYesOdds: null,
       consensusNoOdds: null,
@@ -1467,41 +1850,125 @@ export function computeBullpenLlmConsensus(
       llmAverageYesOdds: null,
       llmMedianYesOdds: null,
       llmTrimmedMeanYesOdds: null,
+      llmIqrYesOdds: null,
+      llmTrimmedRangeYesOdds: null,
       llmMinYesOdds: null,
       llmMaxYesOdds: null,
       llmSpreadYesOdds: null,
       llmDisagreementLevel: null,
+      llmDisagreementCategory: null,
+      llmRationaleMismatchCount: 0,
       adjudicationRequired: false,
     };
   }
 
-  const sortedValues = [...yesValues].sort((left, right) => left - right);
-  const llmAverageYesOdds = averageBullpenValues(sortedValues);
-  const llmMedianYesOdds = medianBullpenValues(sortedValues);
-  const llmTrimmedMeanYesOdds = trimmedMeanBullpenValues(sortedValues);
-  const llmMinYesOdds = roundBullpenValue(sortedValues[0] ?? null);
-  const llmMaxYesOdds = roundBullpenValue(sortedValues.at(-1) ?? null);
+  const sortedConsensusValues = [...consensusYesValues].sort(
+    (left, right) => left - right,
+  );
+  const sortedModelValues = [...modelYesValues].sort((left, right) => left - right);
+  const llmAverageYesOdds = averageBullpenValues(sortedConsensusValues);
+  const llmMedianYesOdds = medianBullpenValues(sortedConsensusValues);
+  const llmTrimmedMeanYesOdds = trimmedMeanBullpenValues(sortedConsensusValues);
+  const llmIqrYesOdds = iqrBullpenValues(sortedConsensusValues);
+  const llmTrimmedRangeYesOdds = trimmedRangeBullpenValues(sortedConsensusValues);
+  const llmMinYesOdds = roundBullpenValue(sortedModelValues[0] ?? null);
+  const llmMaxYesOdds = roundBullpenValue(sortedModelValues.at(-1) ?? null);
   const llmSpreadYesOdds =
     llmMinYesOdds === null || llmMaxYesOdds === null
       ? null
       : roundBullpenValue(llmMaxYesOdds - llmMinYesOdds);
+  const modelSupport = summarizeBullpenDirectionSupport(computedEntries);
+  const providerSupport = summarizeBullpenDirectionSupport(
+    providerSignals.length >= 2
+      ? providerSignals
+      : computedEntries.map((entry) => ({
+          direction: entry.direction,
+          effectiveWeight: entry.effectiveWeight,
+        })),
+  );
+  const modelTwoSidedSupport =
+    modelSupport.counts.YES_CAMP >= 2 && modelSupport.counts.NO_CAMP >= 2;
+  const providerTwoSidedSupport =
+    providerSignals.length >= 2 &&
+    providerSupport.shares.YES_CAMP >= BULLPEN_PROVIDER_SHARE_THRESHOLD &&
+    providerSupport.shares.NO_CAMP >= BULLPEN_PROVIDER_SHARE_THRESHOLD;
+  const highDisagreement = modelTwoSidedSupport || providerTwoSidedSupport;
+  const medianDirection = classifyBullpenLlmDirection(llmMedianYesOdds);
+  const trimmedMeanDirection = classifyBullpenLlmDirection(llmTrimmedMeanYesOdds);
+  const strongConsensusDirection =
+    medianDirection &&
+    medianDirection === trimmedMeanDirection &&
+    medianDirection !== "UNCERTAIN"
+      ? medianDirection
+      : null;
+  const outlierCount = countBullpenOutlierModels(
+    computedEntries,
+    llmMedianYesOdds,
+    llmIqrYesOdds,
+  );
+  const opposingProviderShare =
+    strongConsensusDirection === "YES_CAMP"
+      ? providerSupport.shares.NO_CAMP
+      : strongConsensusDirection === "NO_CAMP"
+        ? providerSupport.shares.YES_CAMP
+        : 0;
+  const majorityProviderShare =
+    strongConsensusDirection === "YES_CAMP"
+      ? providerSupport.shares.YES_CAMP
+      : strongConsensusDirection === "NO_CAMP"
+        ? providerSupport.shares.NO_CAMP
+        : 0;
+  const consensusWithOutlier =
+    !highDisagreement &&
+    llmSpreadYesOdds !== null &&
+    llmSpreadYesOdds > BULLPEN_HIGH_RAW_SPREAD_THRESHOLD &&
+    strongConsensusDirection !== null &&
+    majorityProviderShare >= 0.6 &&
+    opposingProviderShare < BULLPEN_PROVIDER_SHARE_THRESHOLD &&
+    outlierCount >= 1 &&
+    outlierCount <= 2;
+  const mostlyConsensusSomeUncertainty =
+    !highDisagreement &&
+    !consensusWithOutlier &&
+    strongConsensusDirection !== null &&
+    (modelSupport.counts.UNCERTAIN > 0 || providerSupport.shares.UNCERTAIN > 0) &&
+    opposingProviderShare < BULLPEN_PROVIDER_SHARE_THRESHOLD;
 
   let llmDisagreementLevel: BullpenLlmDisagreementLevel = "Low";
-  if (llmSpreadYesOdds !== null && llmSpreadYesOdds > 30) {
+  let llmDisagreementCategory: BullpenLlmDisagreementCategory = "CONSENSUS";
+  if (highDisagreement) {
     llmDisagreementLevel = "High";
-  } else if (llmSpreadYesOdds !== null && llmSpreadYesOdds > 15) {
+    llmDisagreementCategory = "HIGH_DISAGREEMENT";
+  } else if (consensusWithOutlier) {
     llmDisagreementLevel = "Medium";
+    llmDisagreementCategory = "CONSENSUS_WITH_OUTLIER";
+  } else if (mostlyConsensusSomeUncertainty) {
+    llmDisagreementLevel = "Medium";
+    llmDisagreementCategory = "MOSTLY_CONSENSUS_SOME_UNCERTAINTY";
   }
 
-  const adjudicationRequired = llmSpreadYesOdds !== null && llmSpreadYesOdds > 30;
+  const adjudicationRequired = highDisagreement;
   const consensusMethod =
-    llmDisagreementLevel === "High" ? "median" : "average";
+    highDisagreement
+      ? "median"
+      : sortedConsensusValues.length >= 5 && llmTrimmedMeanYesOdds !== null
+        ? "trimmedMean"
+        : llmMedianYesOdds !== null
+          ? "median"
+          : "average";
   const consensusYesOdds =
-    consensusMethod === "median" ? llmMedianYesOdds : llmAverageYesOdds;
+    consensusMethod === "trimmedMean"
+      ? llmTrimmedMeanYesOdds
+      : consensusMethod === "median"
+        ? llmMedianYesOdds
+        : llmAverageYesOdds;
   const normalizedConsensus = normalizeOddsPair(
     consensusYesOdds,
     consensusYesOdds === null ? null : 100 - consensusYesOdds,
   );
+  const llmRationaleMismatchCount = computedEntries.filter(
+    (entry) => entry.rationaleOddsMismatch,
+  ).length;
 
   return {
     consensusYesOdds: normalizedConsensus.yes,
@@ -1510,10 +1977,14 @@ export function computeBullpenLlmConsensus(
     llmAverageYesOdds,
     llmMedianYesOdds,
     llmTrimmedMeanYesOdds,
+    llmIqrYesOdds,
+    llmTrimmedRangeYesOdds,
     llmMinYesOdds,
     llmMaxYesOdds,
     llmSpreadYesOdds,
     llmDisagreementLevel,
+    llmDisagreementCategory,
+    llmRationaleMismatchCount,
     adjudicationRequired,
   };
 }
@@ -1546,15 +2017,24 @@ export function summarizeBullpenLlmNotes(
   const invalidCount = breakdown.filter((entry) =>
     isBullpenBreakdownEntryInvalid(entry),
   ).length;
+  const disagreementLabel = getBullpenLlmDisagreementCategoryLabel(
+    consensus.llmDisagreementCategory,
+  );
   const disagreementNote =
-    consensus.adjudicationRequired && consensus.llmSpreadYesOdds !== null
-      ? ` High disagreement detected (${consensus.llmSpreadYesOdds.toFixed(2)}-point spread).`
+    disagreementLabel &&
+    consensus.llmDisagreementCategory !== "CONSENSUS" &&
+    consensus.llmSpreadYesOdds !== null
+      ? ` ${disagreementLabel} detected (${consensus.llmSpreadYesOdds.toFixed(2)}-point raw spread).`
       : "";
   const invalidNote =
     invalidCount > 0
       ? ` ${invalidCount} output${invalidCount === 1 ? "" : "s"} excluded for invalid or stale evidence handling.`
       : "";
-  return `${breakdown.length} LLM outputs available.${invalidNote}${disagreementNote} Click the LLM odds to inspect the full breakdown.`;
+  const mismatchNote =
+    consensus.llmRationaleMismatchCount > 0
+      ? ` ${consensus.llmRationaleMismatchCount} rationale/odds mismatch${consensus.llmRationaleMismatchCount === 1 ? "" : "es"} had reduced weight.`
+      : "";
+  return `${breakdown.length} LLM outputs available.${invalidNote}${mismatchNote}${disagreementNote} Click the LLM odds to inspect the full breakdown.`;
 }
 
 function formatBullpenDateTimeInTimeZone(date: Date, timeZone: string) {
