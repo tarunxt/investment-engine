@@ -11,9 +11,10 @@ import {
 } from "react";
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Info, X } from "lucide-react";
 
-import type {
-  BullpenQuestionRow,
-  BullpenScanSnapshot,
+import {
+  getBullpenLlmReviewState,
+  type BullpenQuestionRow,
+  type BullpenScanSnapshot,
 } from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
@@ -413,10 +414,6 @@ function getLlmOddsCellClass(value: number | null) {
   return "";
 }
 
-function hasHighLlmDisagreement(question: BullpenQuestionRow) {
-  return question.llmDisagreementLevel === "High" || question.adjudicationRequired;
-}
-
 function LlmOddsDisplay({
   question,
   value,
@@ -424,18 +421,21 @@ function LlmOddsDisplay({
   question: BullpenQuestionRow;
   value: number | null;
 }) {
-  const showWarning = value !== null && hasHighLlmDisagreement(question);
+  const reviewState = value === null ? null : getBullpenLlmReviewState(question);
 
   return (
     <span className="inline-flex items-center gap-1">
       <span>{formatOdds(value)}</span>
-      {showWarning ? (
+      {reviewState ? (
         <AlertTriangle
-          aria-label="High LLM disagreement"
-          className="h-3.5 w-3.5 shrink-0 text-amber-600"
+          aria-label={reviewState.label}
+          className={cn(
+            "h-3.5 w-3.5 shrink-0",
+            reviewState.tone === "high" ? "text-amber-600" : "text-sky-600",
+          )}
           role="img"
         >
-          <title>High LLM disagreement — review breakdown before relying on this odds value.</title>
+          <title>{`${reviewState.label} — review the LLM breakdown before relying on this odds value.`}</title>
         </AlertTriangle>
       ) : null}
     </span>

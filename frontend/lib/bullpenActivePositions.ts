@@ -15,10 +15,14 @@ export type BullpenActivePositionLlmAnalysis = Pick<
   | "llmAverageYesOdds"
   | "llmMedianYesOdds"
   | "llmTrimmedMeanYesOdds"
+  | "llmIqrYesOdds"
+  | "llmTrimmedRangeYesOdds"
   | "llmMinYesOdds"
   | "llmMaxYesOdds"
   | "llmSpreadYesOdds"
+  | "llmDisagreementCategory"
   | "llmDisagreementLevel"
+  | "llmRationaleMismatchCount"
   | "adjudicationRequired"
   | "evidenceStatus"
   | "eventState"
@@ -83,10 +87,14 @@ function createEmptyBullpenActivePositionLlmAnalysis(): BullpenActivePositionLlm
     llmAverageYesOdds: null,
     llmMedianYesOdds: null,
     llmTrimmedMeanYesOdds: null,
+    llmIqrYesOdds: null,
+    llmTrimmedRangeYesOdds: null,
     llmMinYesOdds: null,
     llmMaxYesOdds: null,
     llmSpreadYesOdds: null,
+    llmDisagreementCategory: null,
     llmDisagreementLevel: null,
+    llmRationaleMismatchCount: 0,
     adjudicationRequired: false,
     evidenceStatus: null,
     eventState: null,
@@ -137,10 +145,14 @@ export function extractBullpenActivePositionLlmAnalysis(
     llmAverageYesOdds: question.llmAverageYesOdds,
     llmMedianYesOdds: question.llmMedianYesOdds,
     llmTrimmedMeanYesOdds: question.llmTrimmedMeanYesOdds,
+    llmIqrYesOdds: question.llmIqrYesOdds,
+    llmTrimmedRangeYesOdds: question.llmTrimmedRangeYesOdds,
     llmMinYesOdds: question.llmMinYesOdds,
     llmMaxYesOdds: question.llmMaxYesOdds,
     llmSpreadYesOdds: question.llmSpreadYesOdds,
+    llmDisagreementCategory: question.llmDisagreementCategory,
     llmDisagreementLevel: question.llmDisagreementLevel,
+    llmRationaleMismatchCount: question.llmRationaleMismatchCount,
     adjudicationRequired: question.adjudicationRequired,
     evidenceStatus: question.evidenceStatus,
     eventState: question.eventState,

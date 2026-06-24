@@ -199,6 +199,10 @@ class BullpenAutoLiveLlmOutput(BaseModel):
     model: str
     llm_yes_odds: float | None = Field(default=None, ge=0, le=100)
     llm_no_odds: float | None = Field(default=None, ge=0, le=100)
+    direction: str | None = None
+    rationale_odds_mismatch: bool = False
+    rationale_odds_mismatch_reason: str | None = None
+    effective_weight: float = Field(default=1, ge=0)
     confidence: str | None = None
     evidence_status: str | None = None
     event_state: str | None = None
@@ -269,6 +273,7 @@ class BullpenAutoLiveDecision(BaseModel):
     event_state: str | None = None
     adjudication_required: bool = False
     disagreement_level: str | None = None
+    disagreement_category: str | None = None
     current_exposure_usd: float = Field(default=0, ge=0)
     target_exposure_usd: float = Field(default=0, ge=0)
     realized_pnl_usd: float | None = None

@@ -321,11 +321,16 @@ def _fake_llm_consensus(
     average_yes: float | None = None,
     median_yes: float | None = None,
     trimmed_mean_yes: float | None = None,
+    iqr_yes: float | None = None,
+    trimmed_range_yes: float | None = None,
     min_yes: float | None = None,
     max_yes: float | None = None,
     spread_yes: float = 0,
     disagreement_level: str = "Low",
+    disagreement_category: str = "CONSENSUS",
     adjudication_required: bool = False,
+    consensus_method: str = "trimmedMean",
+    rationale_mismatch_count: int = 0,
     confidence: str = "High",
     evidence_status: str = "Strong",
     event_state: str = "scheduled_not_occurred",
@@ -352,11 +357,16 @@ def _fake_llm_consensus(
         average_yes=fair_yes if average_yes is None else average_yes,
         median_yes=fair_yes if median_yes is None else median_yes,
         trimmed_mean_yes=fair_yes if trimmed_mean_yes is None else trimmed_mean_yes,
+        iqr_yes=0 if iqr_yes is None else iqr_yes,
+        trimmed_range_yes=0 if trimmed_range_yes is None else trimmed_range_yes,
         min_yes=fair_yes if min_yes is None else min_yes,
         max_yes=fair_yes if max_yes is None else max_yes,
         spread_yes=spread_yes,
         disagreement_level=disagreement_level,
+        disagreement_category=disagreement_category,
         adjudication_required=adjudication_required,
+        consensus_method=consensus_method,
+        rationale_mismatch_count=rationale_mismatch_count,
         confidence=confidence,
         evidence_status=evidence_status,
         event_state=event_state,
@@ -881,7 +891,115 @@ def test_auto_live_llm_consensus_matches_requested_statistics(monkeypatch):
     assert consensus.max_yes == 90
     assert consensus.spread_yes == 80
     assert consensus.disagreement_level == "High"
+    assert consensus.disagreement_category == "HIGH_DISAGREEMENT"
     assert consensus.adjudication_required is True
+    assert consensus.consensus_method == "median"
+
+
+@pytest.mark.anyio
+async def test_run_llm_consensus_treats_single_uncertain_outlier_as_consensus_with_outlier(monkeypatch):
+    yes_values = [10, 12, 15, 8, 14, 9, 11, 13, 50]
+    targets = [(f"provider-{index}", f"model-{index}") for index in range(len(yes_values))]
+
+    class FakeProvider:
+        def __init__(self, provider_name: str, yes_value: float) -> None:
+            self.provider_name = provider_name
+            self.yes_value = yes_value
+
+        def generate(self, *, prompt: str, model: str):
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "markets": [
+                            {
+                                "llm_yes_odds": self.yes_value,
+                                "llm_no_odds": 100 - self.yes_value,
+                                "confidence": "High",
+                                "evidence_status": "Strong",
+                                "event_state": "no_confirmed_event",
+                                "key_evidence": ["Fact"],
+                                "red_flags": [],
+                                "rationale": "No confirmed evidence the event has happened yet.",
+                            }
+                        ]
+                    }
+                ),
+                provider=self.provider_name,
+                model=model,
+            )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.llm.resolve_auto_live_llm_targets",
+        lambda: targets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.llm.ProviderFactory.create",
+        lambda provider_name: FakeProvider(
+            provider_name,
+            yes_values[int(provider_name.rsplit("-", 1)[-1])],
+        ),
+    )
+
+    outputs, consensus = run_llm_consensus(
+        _market(),
+        _fake_rules(),
+        _fake_evidence_packet(),
+    )
+
+    assert len(outputs) == len(yes_values)
+    assert consensus.disagreement_level == "Medium"
+    assert consensus.disagreement_category == "CONSENSUS_WITH_OUTLIER"
+    assert consensus.adjudication_required is False
+    assert consensus.median_yes == 12
+    assert consensus.trimmed_mean_yes == pytest.approx(12.0, abs=0.01)
+    assert consensus.fair_yes_probability_pct == pytest.approx(12.0, abs=0.01)
+
+
+@pytest.mark.anyio
+async def test_run_llm_consensus_marks_rationale_odds_mismatch_and_reduces_weight(monkeypatch):
+    targets = [("openai", "gpt-4o-mini")]
+
+    class FakeProvider:
+        def generate(self, *, prompt: str, model: str):
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "markets": [
+                            {
+                                "llm_yes_odds": 52,
+                                "llm_no_odds": 48,
+                                "confidence": "Medium",
+                                "evidence_status": "Low",
+                                "event_state": "no_confirmed_event",
+                                "key_evidence": ["No official confirmation found."],
+                                "red_flags": [],
+                                "rationale": "No credible evidence confirms the event, so it looks unlikely.",
+                            }
+                        ]
+                    }
+                ),
+                provider="openai",
+                model=model,
+            )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.llm.resolve_auto_live_llm_targets",
+        lambda: targets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.llm.ProviderFactory.create",
+        lambda provider_name: FakeProvider(),
+    )
+
+    outputs, consensus = run_llm_consensus(
+        _market(),
+        _fake_rules(),
+        _fake_evidence_packet(),
+    )
+
+    assert outputs[0].rationale_odds_mismatch is True
+    assert outputs[0].effective_weight == pytest.approx(0.35, abs=0.001)
+    assert consensus.rationale_mismatch_count == 1
 
 
 @pytest.mark.anyio
@@ -902,13 +1020,14 @@ async def test_auto_live_high_llm_disagreement_blocks_trade(monkeypatch):
             max_yes=90,
             spread_yes=80,
             disagreement_level="High",
+            disagreement_category="HIGH_DISAGREEMENT",
             adjudication_required=True,
         ),
     )
 
     assert result.decisions[0].decision == "SKIP"
     assert result.decisions[0].risk_status == "Blocked"
-    assert "llm spread is above the configured maximum" in result.decisions[0].reason.lower()
+    assert "llm disagreement is above the configured maximum" in result.decisions[0].reason.lower()
 
 
 @pytest.mark.anyio
@@ -1314,6 +1433,7 @@ async def test_auto_live_logs_submitted_and_skipped_decisions_with_reasons(monke
             max_yes=90,
             spread_yes=80,
             disagreement_level="High",
+            disagreement_category="HIGH_DISAGREEMENT",
             adjudication_required=True,
         ),
     )
@@ -1336,7 +1456,7 @@ async def test_auto_live_logs_submitted_and_skipped_decisions_with_reasons(monke
     assert any(
         level == "warning"
         and "action=SKIP" in message
-        and "llm spread is above the configured maximum" in message.lower()
+        and "llm disagreement is above the configured maximum" in message.lower()
         for level, message in decision_logs
     )
 

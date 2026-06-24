@@ -5,6 +5,9 @@ import { useState } from "react";
 
 import {
   buildBullpenQuestionPreflightEvidenceBlock,
+  computeBullpenLlmConsensus,
+  getBullpenLlmDisagreementCategoryLabel,
+  getBullpenLlmReviewState,
   type BullpenQuestionRow,
 } from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
@@ -51,6 +54,19 @@ function formatDisagreementLabel(value: string | null) {
     .join(" ");
 }
 
+function formatDirection(value: string | null | undefined) {
+  switch (value) {
+    case "YES_CAMP":
+      return "Yes camp";
+    case "NO_CAMP":
+      return "No camp";
+    case "UNCERTAIN":
+      return "Uncertain";
+    default:
+      return "—";
+  }
+}
+
 function formatYesNo(value: boolean | null | undefined) {
   if (value === true) return "Yes";
   if (value === false) return "No";
@@ -78,17 +94,28 @@ function StatCard({
   );
 }
 
-function getHighDisagreementReason(question: BullpenQuestionRow) {
+function getReviewReason(question: BullpenQuestionRow) {
   const spread = formatSpread(question.llmSpreadYesOdds);
   const minYes = formatOdds(question.llmMinYesOdds);
   const maxYes = formatOdds(question.llmMaxYesOdds);
   const modelCount = question.llmBreakdown.length.toLocaleString();
+  const medianYes = formatOdds(question.llmMedianYesOdds);
+  const trimmedMeanYes = formatOdds(question.llmTrimmedMeanYesOdds);
 
   if (question.llmSpreadYesOdds === null) {
     return `This event is marked for adjudication, but the per-model spread is not available. ${modelCount} model outputs were received.`;
   }
 
-  return `This event has a ${spread} gap between the lowest Yes estimate (${minYes}) and highest Yes estimate (${maxYes}) across ${modelCount} model outputs. That is above the 30-point high-disagreement threshold.`;
+  switch (question.llmDisagreementCategory) {
+    case "HIGH_DISAGREEMENT":
+      return `Provider-level consensus shows meaningful support on both the Yes and No sides. Raw model estimates still span ${spread} (${minYes} to ${maxYes}) across ${modelCount} outputs, so this needs manual review.`;
+    case "CONSENSUS_WITH_OUTLIER":
+      return `Raw model estimates span ${spread} (${minYes} to ${maxYes}), but the robust center still clusters near ${medianYes} median / ${trimmedMeanYes} trimmed mean. This looks like a broad consensus with only a small outlier set.`;
+    case "MOSTLY_CONSENSUS_SOME_UNCERTAINTY":
+      return `Most providers cluster around ${medianYes} median / ${trimmedMeanYes} trimmed mean. One or more models stayed near 50/50, so this is uncertainty rather than true Yes-vs-No disagreement.`;
+    default:
+      return `Model outputs range from ${minYes} to ${maxYes} across ${modelCount} runs, while the robust center stays near ${medianYes} median / ${trimmedMeanYes} trimmed mean.`;
+  }
 }
 
 function HighDisagreementCriteriaDialog({
@@ -104,65 +131,65 @@ function HighDisagreementCriteriaDialog({
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
-              High LLM Disagreement Criteria
+              LLM Consensus Criteria
             </p>
             <h3 className="mt-2 text-lg font-semibold text-slate-950">
-              Why this event needs manual review
+              Why this event was classified this way
             </h3>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close high disagreement criteria"
+            aria-label="Close LLM consensus criteria"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="space-y-5 px-6 py-5 text-sm leading-6 text-slate-700">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
-            {getHighDisagreementReason(question)}
+            {getReviewReason(question)}
           </div>
           <div>
             <h4 className="font-semibold text-slate-950">Criteria used</h4>
             <ul className="mt-2 list-disc space-y-2 pl-5">
               <li>
-                Calculate each model&apos;s normalized Yes odds, then compare the
-                minimum and maximum Yes estimates.
+                Classify each model as Yes camp ({">="}60), No camp ({"<="}40),
+                or Uncertain (40-60).
               </li>
               <li>
-                <span className="font-semibold text-slate-950">Low:</span> spread is
-                15 points or less.
+                Use provider medians plus median, trimmed mean, IQR, and trimmed
+                range as the main consensus signal.
               </li>
               <li>
-                <span className="font-semibold text-slate-950">Medium:</span> spread
-                is greater than 15 points and up to 30 points.
+                Flag <span className="font-semibold text-slate-950">High LLM disagreement</span>{" "}
+                only when both Yes and No sides have meaningful support.
               </li>
               <li>
-                <span className="font-semibold text-slate-950">High:</span> spread is
-                greater than 30 points. High disagreement also sets
-                adjudicationRequired and switches consensus odds to the median
-                instead of the simple average.
+                Flag <span className="font-semibold text-slate-950">Consensus with outlier</span>{" "}
+                when the raw spread is wide but the robust center strongly stays on
+                one side.
+              </li>
+              <li>
+                Treat 50/50-style outputs as uncertainty, not as opposition to the
+                majority camp.
               </li>
             </ul>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <StatCard
-              label="This Event Spread"
+              label="Raw Spread"
               value={formatSpread(question.llmSpreadYesOdds)}
             />
             <StatCard
-              label="Min / Max Yes"
-              value={formatRange(
-                question.llmMinYesOdds,
-                question.llmMaxYesOdds,
-              )}
+              label="Trimmed Range"
+              value={formatSpread(question.llmTrimmedRangeYesOdds)}
             />
             <StatCard
               label="Consensus Method"
-              value={
-                question.llmDisagreementLevel === "High" ? "Median" : "Average"
-              }
+              value={formatDisagreementLabel(
+                computeBullpenLlmConsensus(question.llmBreakdown).consensusMethod,
+              )}
             />
           </div>
         </div>
@@ -176,6 +203,10 @@ export function BullpenLlmBreakdownDialog({
   onClose,
 }: BullpenLlmBreakdownDialogProps) {
   const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
+  const reviewState = getBullpenLlmReviewState(question);
+  const disagreementLabel = getBullpenLlmDisagreementCategoryLabel(
+    question.llmDisagreementCategory,
+  );
   const preflightEvidenceBlock =
     question.preflightEvidenceBlock ||
     buildBullpenQuestionPreflightEvidenceBlock(question);
@@ -213,6 +244,14 @@ export function BullpenLlmBreakdownDialog({
                 value={formatOdds(question.llmTrimmedMeanYesOdds)}
               />
               <StatCard
+                label="IQR"
+                value={formatSpread(question.llmIqrYesOdds)}
+              />
+              <StatCard
+                label="Trimmed Range"
+                value={formatSpread(question.llmTrimmedRangeYesOdds)}
+              />
+              <StatCard
                 label="Min / Max Yes"
                 value={formatRange(
                   question.llmMinYesOdds,
@@ -226,6 +265,10 @@ export function BullpenLlmBreakdownDialog({
               <StatCard
                 label="Disagreement Level"
                 value={question.llmDisagreementLevel || "—"}
+              />
+              <StatCard
+                label="Consensus Signal"
+                value={disagreementLabel || "—"}
               />
               <StatCard
                 label="Current Yes vs Consensus"
@@ -243,6 +286,10 @@ export function BullpenLlmBreakdownDialog({
               <StatCard
                 label="Model Outputs"
                 value={question.llmBreakdown.length.toLocaleString()}
+              />
+              <StatCard
+                label="Rationale Mismatches"
+                value={question.llmRationaleMismatchCount.toLocaleString()}
               />
               <StatCard
                 label="Evidence Status"
@@ -265,14 +312,24 @@ export function BullpenLlmBreakdownDialog({
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-5">
-          {question.adjudicationRequired ? (
-            <div className="mb-4 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {reviewState ? (
+            <div
+              className={`mb-4 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${
+                reviewState.tone === "high"
+                  ? "border border-amber-300 bg-amber-50 text-amber-900"
+                  : "border border-sky-200 bg-sky-50 text-sky-900"
+              }`}
+            >
               <button
                 type="button"
                 onClick={() => setIsCriteriaOpen(true)}
-                className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-amber-800 transition hover:bg-amber-100 hover:text-amber-950 focus:outline-none focus:ring-2 focus:ring-amber-400"
-                aria-label="Open high LLM disagreement criteria"
-                title="Open high LLM disagreement criteria"
+                className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition focus:outline-none focus:ring-2 ${
+                  reviewState.tone === "high"
+                    ? "text-amber-800 hover:bg-amber-100 hover:text-amber-950 focus:ring-amber-400"
+                    : "text-sky-800 hover:bg-sky-100 hover:text-sky-950 focus:ring-sky-400"
+                }`}
+                aria-label="Open LLM consensus criteria"
+                title="Open LLM consensus criteria"
               >
                 <AlertTriangle className="h-4 w-4" />
               </button>
@@ -280,11 +337,18 @@ export function BullpenLlmBreakdownDialog({
                 <button
                   type="button"
                   onClick={() => setIsCriteriaOpen(true)}
-                  className="font-semibold underline decoration-amber-500/60 underline-offset-4 transition hover:text-amber-950"
+                  className={`font-semibold underline underline-offset-4 transition ${
+                    reviewState.tone === "high"
+                      ? "decoration-amber-500/60 hover:text-amber-950"
+                      : "decoration-sky-500/60 hover:text-sky-950"
+                  }`}
                 >
-                  High LLM disagreement
+                  {reviewState.label}
                 </button>{" "}
-                — do not rely on simple average. Manual/adjudicator review needed.
+                —{" "}
+                {reviewState.tone === "high"
+                  ? "provider-level camps are split, so manual/adjudicator review is needed."
+                  : "robust consensus exists, but the breakdown still deserves a quick sanity-check."}
               </p>
             </div>
           ) : null}
@@ -307,6 +371,7 @@ export function BullpenLlmBreakdownDialog({
                   <tr>
                     <th className="px-4 py-3">Provider</th>
                     <th className="px-4 py-3">Model</th>
+                    <th className="px-4 py-3">Direction</th>
                     <th className="px-4 py-3">LLM Yes Odds</th>
                     <th className="px-4 py-3">LLM No Odds</th>
                     <th className="px-4 py-3">Timestamp</th>
@@ -321,6 +386,9 @@ export function BullpenLlmBreakdownDialog({
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                         {entry.model}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                        {formatDirection(entry.direction)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 font-semibold text-indigo-700">
                         {formatOdds(entry.llmYesOdds)}
@@ -377,7 +445,20 @@ export function BullpenLlmBreakdownDialog({
                                       Excluded from consensus
                                     </span>
                                   ) : null}
+                                  {entry.rationaleOddsMismatch ? (
+                                    <span className="rounded-full bg-orange-50 px-2 py-0.5 font-medium text-orange-700 ring-1 ring-orange-100">
+                                      Rationale/odds mismatch
+                                    </span>
+                                  ) : null}
                                 </div>
+                                <div>Direction: {formatDirection(entry.direction)}</div>
+                                <div>
+                                  Effective weight:{" "}
+                                  {entry.effectiveWeight?.toLocaleString(undefined, {
+                                    maximumFractionDigits: 2,
+                                  }) || "—"}
+                                </div>
+                                <div>Web used: {formatYesNo(entry.webSearchUsed)}</div>
                                 <div>
                                   Internet verified: {formatYesNo(internetVerified)}
                                 </div>
@@ -440,6 +521,11 @@ export function BullpenLlmBreakdownDialog({
                                 {invalidWarning ? (
                                   <div className="font-medium text-rose-700">
                                     Invalid/stale warning: {invalidWarning}
+                                  </div>
+                                ) : null}
+                                {entry.rationaleOddsMismatchReason ? (
+                                  <div className="font-medium text-orange-700">
+                                    Mismatch warning: {entry.rationaleOddsMismatchReason}
                                   </div>
                                 ) : null}
                               </div>

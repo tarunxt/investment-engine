@@ -415,9 +415,7 @@ export function buildAutoLiveDecisionRows({
     const spread = readNumber(readStageOutput(stage3, "spread_yes"));
     const highDisagreement =
       decision.disagreement_level?.toLowerCase() === "high" ||
-      (spread !== null &&
-        settings !== null &&
-        spread >= settings.half_size_llm_spread_pp);
+      decision.adjudication_required === true;
     const lowEvidence = decision.evidence_status === "Low";
     const deadlineRisk = deriveDeadlineRisk(hoursRemaining, settings);
 

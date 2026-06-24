@@ -9,7 +9,10 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
+import {
+  getBullpenLlmReviewState,
+  type BullpenQuestionRow,
+} from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
 import type {
   BullpenActivePositionView,
@@ -88,10 +91,6 @@ function formatMoney(value: number | null) {
   });
 }
 
-function hasHighLlmDisagreement(question: BullpenQuestionRow) {
-  return question.llmDisagreementLevel === "High" || question.adjudicationRequired;
-}
-
 function MetricCard({
   label,
   accent = false,
@@ -139,12 +138,14 @@ function OddsPairValue({
   yesOdds,
   noOdds,
   accentClassName = "text-slate-950",
-  warning = false,
+  warningLabel = null,
+  warningTone = "medium",
 }: {
   yesOdds: number | null;
   noOdds: number | null;
   accentClassName?: string;
-  warning?: boolean;
+  warningLabel?: string | null;
+  warningTone?: "high" | "medium" | "lowEvidence";
 }) {
   return (
     <div className="space-y-1">
@@ -164,10 +165,15 @@ function OddsPairValue({
           {formatOdds(noOdds)}
         </span>
       </div>
-      {warning ? (
-        <div className="flex items-center gap-1 text-[11px] font-medium text-amber-700">
+      {warningLabel ? (
+        <div
+          className={cn(
+            "flex items-center gap-1 text-[11px] font-medium",
+            warningTone === "high" ? "text-amber-700" : "text-sky-700",
+          )}
+        >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          High disagreement
+          {warningLabel}
         </div>
       ) : null}
     </div>
@@ -185,12 +191,14 @@ function LlmOddsMetric({
   question: BullpenQuestionRow | null | undefined;
   onOpenBreakdown: (question: BullpenQuestionRow) => void;
 }) {
+  const reviewState = question ? getBullpenLlmReviewState(question) : null;
   const odds = (
     <OddsPairValue
       yesOdds={question?.llmYesOdds ?? null}
       noOdds={question?.llmNoOdds ?? null}
       accentClassName="text-violet-700"
-      warning={question ? hasHighLlmDisagreement(question) : false}
+      warningLabel={reviewState?.label ?? null}
+      warningTone={reviewState?.tone ?? "medium"}
     />
   );
 
@@ -286,8 +294,8 @@ export function BullpenInvestmentsSection({
     [activePositionQuestions],
   );
   const sortedCandidates = [...candidates].sort((left, right) => {
-    const leftHasWarning = hasHighLlmDisagreement(left);
-    const rightHasWarning = hasHighLlmDisagreement(right);
+    const leftHasWarning = getBullpenLlmReviewState(left)?.tone === "high";
+    const rightHasWarning = getBullpenLlmReviewState(right)?.tone === "high";
 
     if (leftHasWarning !== rightHasWarning) return leftHasWarning ? 1 : -1;
     return 0;

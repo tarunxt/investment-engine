@@ -156,6 +156,7 @@ class CandidateEvaluation:
     evidence_status: str = "Low"
     event_state: str | None = None
     disagreement_level: str | None = None
+    disagreement_category: str | None = None
     current_exposure_usd: float = 0
     target_exposure_usd: float = 0
     order_usd: float = 0
@@ -217,13 +218,17 @@ def _liquidity_weight(liquidity_usd: float | None, minimum: float) -> float:
     return 1.0
 
 
-def _disagreement_weight(spread_yes: float | None, settings: BullpenAutoLiveSettings) -> float:
-    if spread_yes is None:
+def _disagreement_weight(consensus: LlmConsensus | None, settings: BullpenAutoLiveSettings) -> float:
+    if consensus is None:
         return 0.7
-    if spread_yes > settings.max_llm_spread_pp:
+    if consensus.disagreement_level == "High" or consensus.adjudication_required:
         return 0.4
-    if spread_yes > settings.half_size_llm_spread_pp:
+    if consensus.disagreement_level == "Medium":
         return 0.7
+    if consensus.trimmed_range_yes is None:
+        return 0.85
+    if consensus.trimmed_range_yes > settings.half_size_llm_spread_pp:
+        return 0.85
     return 1.0
 
 
@@ -669,13 +674,11 @@ class BullpenAutoLiveEngine:
             candidate.evidence_status = llm_consensus.evidence_status or "Low"
             candidate.event_state = llm_consensus.event_state
             candidate.disagreement_level = llm_consensus.disagreement_level
+            candidate.disagreement_category = llm_consensus.disagreement_category
             stage3_fail = llm_consensus.fair_yes_probability_pct is None
             stage3_warning = (
                 llm_consensus.provider_error_rate > 0
-                or (
-                    llm_consensus.spread_yes is not None
-                    and llm_consensus.spread_yes > settings.half_size_llm_spread_pp
-                )
+                or llm_consensus.disagreement_level in {"Medium", "High"}
             )
             candidate.stage_results.append(
                 build_stage_result(
@@ -708,11 +711,16 @@ class BullpenAutoLiveEngine:
                         "average_yes": llm_consensus.average_yes,
                         "median_yes": llm_consensus.median_yes,
                         "trimmed_mean_yes": llm_consensus.trimmed_mean_yes,
+                        "iqr_yes": llm_consensus.iqr_yes,
+                        "trimmed_range_yes": llm_consensus.trimmed_range_yes,
                         "min_yes": llm_consensus.min_yes,
                         "max_yes": llm_consensus.max_yes,
                         "spread_yes": llm_consensus.spread_yes,
                         "disagreement_level": llm_consensus.disagreement_level,
+                        "disagreement_category": llm_consensus.disagreement_category,
                         "adjudication_required": llm_consensus.adjudication_required,
+                        "consensus_method": llm_consensus.consensus_method,
+                        "rationale_mismatch_count": llm_consensus.rationale_mismatch_count,
                     },
                     hard_block=stage3_fail,
                 )
@@ -740,7 +748,7 @@ class BullpenAutoLiveEngine:
             evidence_weight = EVIDENCE_WEIGHT.get(candidate.evidence_status, 0.55)
             confidence_weight = CONFIDENCE_WEIGHT.get(candidate.confidence, 0.55)
             liquidity_weight = _liquidity_weight(market.liquidity_usd, settings.min_liquidity_usd)
-            disagreement_weight = _disagreement_weight(llm_consensus.spread_yes, settings)
+            disagreement_weight = _disagreement_weight(llm_consensus, settings)
             candidate.score = round(
                 candidate.edge_pp
                 * evidence_weight
@@ -767,11 +775,8 @@ class BullpenAutoLiveEngine:
                 stage4_blockers.append("Confidence is below the configured minimum.")
             if candidate.event_state == "conflicting":
                 stage4_blockers.append("Evidence is conflicting, so trading is blocked.")
-            if (
-                llm_consensus.spread_yes is not None
-                and llm_consensus.spread_yes > settings.max_llm_spread_pp
-            ):
-                stage4_blockers.append("LLM spread is above the configured maximum.")
+            if llm_consensus.disagreement_level == "High":
+                stage4_blockers.append("LLM disagreement is above the configured maximum.")
             if (
                 market.liquidity_usd is not None
                 and market.liquidity_usd < settings.min_liquidity_usd
@@ -956,10 +961,9 @@ class BullpenAutoLiveEngine:
                     exit_conditions.append("Edge is at or below the exit threshold.")
                 if (
                     candidate.llm_consensus
-                    and candidate.llm_consensus.spread_yes is not None
-                    and candidate.llm_consensus.spread_yes > settings.max_llm_spread_pp
+                    and candidate.llm_consensus.disagreement_level == "High"
                 ):
-                    exit_conditions.append("LLM spread rose above the configured maximum.")
+                    exit_conditions.append("LLM disagreement rose above the configured maximum.")
                 if candidate.evidence_status == "Low":
                     exit_conditions.append("Evidence fell to Low.")
                 if daily_loss_stop_hit:
@@ -1719,6 +1723,7 @@ class BullpenAutoLiveEngine:
                 candidate.llm_consensus.adjudication_required if candidate.llm_consensus else False
             ),
             disagreement_level=candidate.disagreement_level,
+            disagreement_category=candidate.disagreement_category,
             current_exposure_usd=round(candidate.current_exposure_usd, 2),
             target_exposure_usd=round(candidate.target_exposure_usd, 2),
             realized_pnl_usd=candidate.realized_pnl_usd,
