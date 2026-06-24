@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useEffect, useEffectEvent, useState } from "react";
 import {
+  Activity,
   CalendarClock,
+  CheckCircle2,
   Loader2,
   PlayCircle,
   ShieldAlert,
@@ -18,7 +20,7 @@ import { formatApiTimestamp } from "@/lib/datetime";
 import { formatUnknownError } from "@/lib/apiErrors";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
-import type { BullpenAutoLiveSummaryResponse } from "@/types/api";
+import type { BullpenAutoLiveRun, BullpenAutoLiveSummaryResponse } from "@/types/api";
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
@@ -88,6 +90,32 @@ function modeLabel(summary: BullpenAutoLiveSummaryResponse | null) {
   if (summary.state.mode === "live-trading") return "Live trading";
   if (summary.state.mode === "analysis-only") return "Analysis only";
   return "Dry run";
+}
+
+function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
+  if (status === "running") return "Running";
+  if (status === "completed") return "Completed";
+  if (status === "failed") return "Failed";
+  return "Skipped";
+}
+
+function getVisibleRun(summary: BullpenAutoLiveSummaryResponse | null, pendingRunId: string | null) {
+  if (!summary) return null;
+  if (pendingRunId) {
+    return (
+      summary.recent_runs.find((run) => run.id === pendingRunId) ??
+      (summary.latest_run?.id === pendingRunId ? summary.latest_run : null)
+    );
+  }
+  if (summary.latest_run?.status === "running") return summary.latest_run;
+  return summary.recent_runs.find((run) => run.status === "running") ?? null;
+}
+
+function getStageTone(status: BullpenAutoLiveRun["stage_results"][number]["status"]) {
+  if (status === "pass") return "border-emerald-200 bg-emerald-50 text-emerald-900";
+  if (status === "fail") return "border-rose-200 bg-rose-50 text-rose-900";
+  if (status === "warning") return "border-amber-200 bg-amber-50 text-amber-900";
+  return "border-slate-200 bg-white text-slate-700";
 }
 
 export function BullpenAutoRunScheduleCard({
@@ -230,6 +258,11 @@ export function BullpenAutoRunScheduleCard({
   const autoRunActive = isAutoRunActive(summary);
   const consoleProfileSelected = isConsoleProfileSelected(summary);
   const mode = modeLabel(summary);
+  const visibleRun = getVisibleRun(summary, pendingRunId);
+  const visibleRunStages = visibleRun?.stage_results ?? [];
+  const latestVisibleStage = visibleRunStages.at(-1);
+  const visibleGuardrailChecks = visibleRun?.guardrail_checks ?? summary?.latest_guardrail_checks ?? [];
+  const visibleGuardrailFailures = visibleGuardrailChecks.filter((check) => check.status === "fail").length;
 
   return (
     <Card className="border-fuchsia-200 bg-[linear-gradient(135deg,rgba(253,242,248,0.98),rgba(239,246,255,0.98))] shadow-sm">
@@ -389,6 +422,94 @@ export function BullpenAutoRunScheduleCard({
               inspect the current gate.
             </AlertDescription>
           </Alert>
+        ) : null}
+
+        {visibleRun ? (
+          <div className="rounded-2xl border border-sky-200 bg-white/85 p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
+                  {visibleRun.status === "running" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Activity className="h-4 w-4" />
+                  )}
+                  Background execution monitor
+                </div>
+                <p className="mt-2 text-sm font-semibold text-slate-950">
+                  {visibleRun.status === "running"
+                    ? "Auto-Live worker is processing the queued scan, LLM, and invest flow."
+                    : `Latest worker result: ${formatRunStatusLabel(visibleRun.status)}.`}
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  Run {visibleRun.id} · started {formatIstDateTime(visibleRun.started_at)}
+                </p>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="font-semibold text-slate-950">{visibleRun.decisions_count}</div>
+                  <div className="text-slate-500">Decisions</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="font-semibold text-slate-950">{visibleRun.orders_planned}</div>
+                  <div className="text-slate-500">Orders planned</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="font-semibold text-slate-950">{visibleRun.orders_submitted}</div>
+                  <div className="text-slate-500">Submitted</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  Worker stages
+                </div>
+                {visibleRunStages.length > 0 ? (
+                  <div className="space-y-2">
+                    {visibleRunStages.map((stage) => (
+                      <div
+                        key={`${visibleRun.id}-${stage.stage_number}-${stage.stage_name}`}
+                        className={`rounded-xl border px-3 py-2 text-xs ${getStageTone(stage.status)}`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-semibold">
+                            {stage.stage_number}. {stage.stage_name}
+                          </span>
+                          <span className="uppercase tracking-[0.14em]">{stage.status}</span>
+                        </div>
+                        <p className="mt-1 leading-5">{stage.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Waiting for the worker to publish its first stage update. This panel refreshes every 4 seconds while the run is active.
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                <div className="flex items-center gap-2 font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Live health
+                </div>
+                <p className="mt-2">
+                  Current stage: {latestVisibleStage?.stage_name ?? "Queue handoff"}
+                </p>
+                <p className="mt-1">
+                  Guardrail checks: {visibleGuardrailChecks.length} total, {visibleGuardrailFailures} failing.
+                </p>
+                <p className="mt-1">
+                  Live execution {visibleRun.live_execution_attempted ? "attempted" : "not attempted yet"}.
+                </p>
+                {visibleRun.error_message ? (
+                  <p className="mt-2 font-semibold text-rose-700">{visibleRun.error_message}</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
         ) : null}
 
         {notice ? (
