@@ -9,6 +9,10 @@ BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-/etc/investor/backend.env}"
 FRONTEND_ENV_FILE="${FRONTEND_ENV_FILE:-/etc/investor/frontend.env}"
 SKIP_GIT_SYNC="${SKIP_GIT_SYNC:-false}"
 BULLPEN_VERSION="${BULLPEN_VERSION:-0.1.101}"
+BACKEND_LIVE_URL="${BACKEND_LIVE_URL:-http://127.0.0.1:8000/health/live}"
+BACKEND_READY_URL="${BACKEND_READY_URL:-http://127.0.0.1:8000/health/ready}"
+FRONTEND_SMOKE_URL="${FRONTEND_SMOKE_URL:-http://127.0.0.1:3000/login}"
+SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-20}"
 
 case "$SCOPE" in
   backend|full)
@@ -107,6 +111,14 @@ validate_backend_env_file() {
 
 run_as_app_user() {
   sudo -u "$APP_USER" -H bash -lc "$1"
+}
+
+smoke_check() {
+  local label="$1"
+  local url="$2"
+
+  echo "==> Smoke check: $label ($url)"
+  curl --fail --silent --show-error --location --max-time "$SMOKE_TIMEOUT_SECONDS" "$url" >/dev/null
 }
 
 install_bullpen_cli_if_needed() {
@@ -255,6 +267,14 @@ sudo systemctl status investor-celery-beat --no-pager
 
 if [[ "$SCOPE" == "full" ]]; then
   sudo systemctl status investor-frontend --no-pager
+fi
+
+echo "==> Smoke checks"
+smoke_check "backend live" "$BACKEND_LIVE_URL"
+smoke_check "backend ready" "$BACKEND_READY_URL"
+
+if [[ "$SCOPE" == "full" ]]; then
+  smoke_check "frontend login" "$FRONTEND_SMOKE_URL"
 fi
 
 echo "==> Deploy complete"

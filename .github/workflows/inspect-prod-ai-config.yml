@@ -3,6 +3,9 @@ name: Inspect Production AI Config
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   inspect:
     name: Inspect backend provider config
@@ -20,8 +23,12 @@ jobs:
           command_timeout: 900s
           script: |
             set -euo pipefail
-            APP="${{ secrets.APP_PATH }}"
+            APP="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
             BACKEND_ENV_FILE="/etc/investor/backend.env"
+
+            echo "==> App root"
+            sudo test -d "$APP/backend"
+            echo "$APP"
 
             echo "==> Backend env file presence"
             sudo test -f "$BACKEND_ENV_FILE"
