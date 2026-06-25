@@ -10,6 +10,8 @@ from sqlalchemy import and_, select
 from app.core.logging import get_logger
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
+    build_initial_run_summary,
+    build_initial_scan_stage_result,
     effective_dry_run,
     live_execution_requested,
 )
@@ -178,9 +180,14 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
                 status="running",
                 dry_run=effective_dry_run(settings),
                 started_at=now.isoformat(),
-                summary="Scheduled Auto-Live run queued.",
+                summary=build_initial_run_summary(),
                 live_execution_requested=live_execution_requested(settings),
                 guardrail_checks=state.latest_guardrail_checks,
+                stage_results=[
+                    build_initial_scan_stage_result(
+                        started_at=now.isoformat(),
+                    )
+                ],
             )
             repo.save_run(user_id, run)
             repo.save_state(user_id, state)

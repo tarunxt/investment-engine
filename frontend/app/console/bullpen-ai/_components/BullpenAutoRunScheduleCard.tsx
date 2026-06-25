@@ -338,8 +338,8 @@ export function BullpenAutoRunScheduleCard({
       setRunNowStartedAt(run.started_at ?? new Date().toISOString());
       setNotice(
         runNowRequest
-          ? "Bullpen Scan + LLM + Invest flow queued with the current Bullpen x AI table rows. Waiting for completion..."
-          : "Bullpen Scan + LLM + Invest flow queued. Waiting for completion...",
+          ? "Bullpen Scan + LLM + Invest flow started with the current Bullpen x AI table rows. Stage 1 is now in progress..."
+          : "Bullpen Scan + LLM + Invest flow started. Stage 1 is now in progress...",
       );
       await loadSummary({ preserveLoading: true });
     } catch (nextError) {
@@ -404,8 +404,12 @@ export function BullpenAutoRunScheduleCard({
   const workflowRun =
     visibleRun ??
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
-  const workflowView = buildBullpenAutoRunWorkflowView(workflowRun, pendingRunId);
   const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
+  const workflowView = buildBullpenAutoRunWorkflowView(
+    workflowRun,
+    pendingRunId,
+    runTimerStartedAt,
+  );
   const hasActiveWorkflowStage = workflowView.stages.some((stage) => stage.isCurrent);
   const showRunTimer = action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
   const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;

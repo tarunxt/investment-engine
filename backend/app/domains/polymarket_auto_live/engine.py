@@ -148,6 +148,17 @@ def build_stage_result(
     )
 
 
+def set_run_stage_result(
+    run: BullpenAutoLiveRun,
+    stage_result: BullpenAutoLiveStageResult,
+) -> None:
+    for index, existing in enumerate(run.stage_results):
+        if existing.stage_number == stage_result.stage_number:
+            run.stage_results[index] = stage_result
+            return
+    run.stage_results.append(stage_result)
+
+
 @dataclass
 class PositionSnapshot:
     market_id: str
@@ -684,7 +695,8 @@ class BullpenAutoLiveEngine:
                 market.question,
             ),
         )
-        run.stage_results.append(
+        set_run_stage_result(
+            run,
             build_stage_result(
                 stage_number=1,
                 status="pass" if sorted_candidates else "warning",
@@ -724,7 +736,7 @@ class BullpenAutoLiveEngine:
                     ],
                 },
                 guardrails_checked=global_guardrails,
-            )
+            ),
         )
 
         evaluated: list[CandidateEvaluation] = []
@@ -2016,7 +2028,8 @@ class BullpenAutoLiveEngine:
             if not position.is_claimable
         ]
 
-        run.stage_results.append(
+        set_run_stage_result(
+            run,
             build_stage_result(
                 stage_number=1,
                 status="pass",
@@ -2050,7 +2063,7 @@ class BullpenAutoLiveEngine:
                     "item_label": "events",
                 },
                 guardrails_checked=global_guardrails,
-            )
+            ),
         )
 
         if not manual_console_rows_used:

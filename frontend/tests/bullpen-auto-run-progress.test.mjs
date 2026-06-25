@@ -143,3 +143,21 @@ test("Bullpen auto-run workflow view does not show a failed run as actively work
   assert.equal(view.stages.some((stage) => stage.isCurrent), false);
   assert.equal(view.stages[0].tone, "blue");
 });
+
+test("Bullpen auto-run workflow view starts Stage 1 immediately for a pending run", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView(
+    null,
+    "run-pending",
+    "2026-06-25T05:00:00Z",
+  );
+
+  assert.equal(view.currentStageLabel, "Stage 1 · Bullpen Scan");
+  assert.equal(view.stages[0].isCurrent, true);
+  assert.equal(view.stages[0].timerStartedAt, "2026-06-25T05:00:00Z");
+  assert.equal(
+    view.stages[0].detail,
+    "Bullpen scan started. Waiting for the worker handoff to complete.",
+  );
+});
