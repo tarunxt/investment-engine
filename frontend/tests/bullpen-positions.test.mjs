@@ -23,6 +23,7 @@ async function loadBullpenPositionsModule() {
 
 test("claimable Bullpen rows are normalized and summarized correctly", async () => {
   const {
+    aggregateBullpenPositionViews,
     buildClaimableBullpenSignature,
     normalizeBullpenPosition,
     summarizeBullpenPositions,
@@ -87,6 +88,31 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
     buildClaimableBullpenSignature([openPosition, claimablePosition]),
     claimablePosition.key,
   );
+
+  const duplicatedOpenLot = normalizeBullpenPosition(
+    {
+      condition_id:
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+      slug: "open-market",
+      market: "Open market",
+      outcome: "No",
+      shares: "5",
+      avg_price: "0.55",
+      current_price: "0.50",
+      current_value: "2.50",
+      invested_usd: "2.75",
+      end_date: "2026-06-25",
+      status: "open",
+    },
+    () => null,
+  );
+  const aggregated = aggregateBullpenPositionViews([openPosition, duplicatedOpenLot]);
+
+  assert.equal(aggregated.length, 1);
+  assert.equal(aggregated[0].shares, 15);
+  assert.equal(aggregated[0].costBasis, 7.25);
+  assert.equal(aggregated[0].currentValue, 7.5);
+  assert.equal(aggregated[0].averagePrice, 0.4833);
 });
 
 test("Bullpen positions refresh current odds and use end-of-day ET for returns/day", async () => {

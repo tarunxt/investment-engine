@@ -656,6 +656,107 @@ def active_position_slug_set(positions: list[ConsoleWalletPosition]) -> set[str]
     return {position.slug for position in positions if position.slug}
 
 
+def _position_aliases(position: ConsoleWalletPosition) -> list[str]:
+    aliases = [
+        position.slug,
+        position.condition_id,
+        position.market_id,
+        position.market_title,
+    ]
+    deduped_aliases: list[str] = []
+    seen: set[str] = set()
+    for alias in aliases:
+        if not alias or alias in seen:
+            continue
+        seen.add(alias)
+        deduped_aliases.append(alias)
+    return deduped_aliases
+
+
+def _merge_console_wallet_position(
+    existing: ConsoleWalletPosition,
+    incoming: ConsoleWalletPosition,
+) -> ConsoleWalletPosition:
+    total_shares = round(existing.shares + incoming.shares, 6)
+    total_exposure_usd = round(existing.exposure_usd + incoming.exposure_usd, 2)
+
+    average_price_cents = existing.average_price_cents
+    if total_shares > 0:
+        average_price_cents = round((total_exposure_usd / total_shares) * 100, 4)
+
+    priced_lots = [
+        lot
+        for lot in (existing, incoming)
+        if lot.current_price_cents is not None and lot.shares > 0
+    ]
+    current_price_cents: float | None = None
+    if priced_lots:
+        total_current_value_usd = sum(
+            lot.shares * (float(lot.current_price_cents) / 100) for lot in priced_lots
+        )
+        total_priced_shares = sum(lot.shares for lot in priced_lots)
+        if total_priced_shares > 0:
+            current_price_cents = round(
+                (total_current_value_usd / total_priced_shares) * 100,
+                4,
+            )
+
+    yes_odds, no_odds = _position_yes_no_odds(existing.side, current_price_cents)
+
+    return ConsoleWalletPosition(
+        market_id=existing.market_id or incoming.market_id,
+        slug=existing.slug or incoming.slug,
+        condition_id=existing.condition_id or incoming.condition_id,
+        market_title=(
+            existing.market_title
+            if existing.market_title and existing.market_title != existing.market_id
+            else incoming.market_title or existing.market_title
+        ),
+        market_url=existing.market_url or incoming.market_url,
+        side=existing.side,
+        shares=total_shares,
+        average_price_cents=average_price_cents,
+        exposure_usd=total_exposure_usd,
+        current_price_cents=current_price_cents,
+        current_yes_odds=yes_odds if yes_odds is not None else existing.current_yes_odds,
+        current_no_odds=no_odds if no_odds is not None else existing.current_no_odds,
+        close_time=existing.close_time or incoming.close_time,
+        theme=existing.theme or incoming.theme,
+        is_claimable=existing.is_claimable or incoming.is_claimable,
+    )
+
+
+def _aggregate_console_wallet_positions(
+    positions: list[ConsoleWalletPosition],
+) -> list[ConsoleWalletPosition]:
+    grouped_positions: dict[str, ConsoleWalletPosition] = {}
+    alias_to_group_key: dict[tuple[str, str, bool], str] = {}
+
+    for position in positions:
+        aliases = _position_aliases(position)
+        group_key = next(
+            (
+                alias_to_group_key[(alias, position.side, position.is_claimable)]
+                for alias in aliases
+                if (alias, position.side, position.is_claimable) in alias_to_group_key
+            ),
+            None,
+        )
+        if group_key is None:
+            group_key = aliases[0] if aliases else position.market_id
+            grouped_positions[group_key] = position
+        else:
+            grouped_positions[group_key] = _merge_console_wallet_position(
+                grouped_positions[group_key],
+                position,
+            )
+
+        for alias in aliases or [group_key]:
+            alias_to_group_key[(alias, position.side, position.is_claimable)] = group_key
+
+    return list(grouped_positions.values())
+
+
 async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
     parsed = await run_first_bullpen_json(_POSITIONS_COMMAND_VARIANTS, timeout_seconds=30)
     rows = _collect_bullpen_rows(parsed)
@@ -708,7 +809,8 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
             )
         )
 
-    return [position for position in positions if position.shares > 0]
+    positive_share_positions = [position for position in positions if position.shares > 0]
+    return _aggregate_console_wallet_positions(positive_share_positions)
 
 
 def apply_scanned_market_to_position(

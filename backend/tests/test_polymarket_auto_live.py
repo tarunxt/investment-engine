@@ -786,6 +786,51 @@ async def test_console_wallet_positions_parse_top_level_positions_payload(monkey
     assert positions[0].current_no_odds == 39
 
 
+@pytest.mark.anyio
+async def test_console_wallet_positions_aggregate_duplicate_lots(monkeypatch):
+    async def fake_run_first_bullpen_json(*_args, **_kwargs):
+        return {
+            "positions": [
+                {
+                    "condition_id": "0xabc",
+                    "market": "Will candidate X win?",
+                    "outcome": "No",
+                    "shares": 5,
+                    "avg_price": 0.4,
+                    "current_price": 0.39,
+                    "invested_usd": 2.0,
+                    "end_date": "2026-06-30T23:59:00+00:00",
+                },
+                {
+                    "slug": "candidate-x-win",
+                    "condition_id": "0xabc",
+                    "market": "Will candidate X win?",
+                    "outcome": "No",
+                    "shares": 7,
+                    "avg_price": 0.5,
+                    "current_price": 0.39,
+                    "invested_usd": 3.5,
+                    "end_date": "2026-06-30T23:59:00+00:00",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        fake_run_first_bullpen_json,
+    )
+
+    positions = await read_console_wallet_positions()
+
+    assert len(positions) == 1
+    assert positions[0].slug == "candidate-x-win"
+    assert positions[0].condition_id == "0xabc"
+    assert positions[0].shares == 12
+    assert positions[0].exposure_usd == 5.5
+    assert positions[0].average_price_cents == 45.8333
+    assert positions[0].current_no_odds == 39
+
+
 def test_market_rules_extract_resolution_criteria_and_deadline():
     market = _market(
         description=(

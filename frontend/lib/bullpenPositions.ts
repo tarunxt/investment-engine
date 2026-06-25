@@ -390,6 +390,113 @@ function extractClaimableStatus(value: BullpenCliPosition) {
   return /\b(claim|redeem|claimable|redeemable|won)\b/.test(claimText);
 }
 
+function buildBullpenCliAliases(position: BullpenCliPosition) {
+  const market = readString(position.market) || readString(position.title);
+  const aliases = [
+    readString(position.slug),
+    readString(position.condition_id ?? position.conditionId),
+    market,
+  ].filter((value): value is string => Boolean(value));
+  return [...new Set(aliases)];
+}
+
+function mergeBullpenCliPosition(
+  existing: BullpenCliPosition,
+  incoming: BullpenCliPosition,
+) {
+  const existingShares = readNumber(existing.shares) || 0;
+  const incomingShares = readNumber(incoming.shares) || 0;
+  const shares = round(existingShares + incomingShares, 4);
+  const existingCostBasis =
+    readNumber(existing.invested_usd ?? existing.investedUsd) ?? 0;
+  const incomingCostBasis =
+    readNumber(incoming.invested_usd ?? incoming.investedUsd) ?? 0;
+  const investedUsd = round(existingCostBasis + incomingCostBasis, 2);
+  const averagePrice =
+    shares > 0 ? round(investedUsd / shares, 4) : readPrice(existing.avg_price ?? existing.avgPrice);
+  const existingCurrentValue =
+    readNumber(existing.current_value ?? existing.currentValue) ??
+    ((readPrice(existing.current_price ?? existing.currentPrice) ?? 0) * existingShares);
+  const incomingCurrentValue =
+    readNumber(incoming.current_value ?? incoming.currentValue) ??
+    ((readPrice(incoming.current_price ?? incoming.currentPrice) ?? 0) * incomingShares);
+  const currentValue = round(existingCurrentValue + incomingCurrentValue, 2);
+  const currentPrice = shares > 0 ? round(currentValue / shares, 4) : null;
+
+  return {
+    ...existing,
+    slug: readString(existing.slug) ?? readString(incoming.slug) ?? existing.slug ?? incoming.slug,
+    condition_id:
+      readString(existing.condition_id ?? existing.conditionId) ??
+      readString(incoming.condition_id ?? incoming.conditionId) ??
+      existing.condition_id ??
+      existing.conditionId ??
+      incoming.condition_id ??
+      incoming.conditionId,
+    market: readString(existing.market) ?? readString(incoming.market) ?? existing.market ?? incoming.market,
+    shares,
+    avg_price: averagePrice,
+    invested_usd: investedUsd,
+    current_price: currentPrice,
+    current_value: currentValue,
+    claimableValue:
+      readNumber(existing.claimableValue ?? existing.claimable_value) !== null ||
+      readNumber(incoming.claimableValue ?? incoming.claimable_value) !== null
+        ? round(
+            (readNumber(existing.claimableValue ?? existing.claimable_value) ?? 0) +
+              (readNumber(incoming.claimableValue ?? incoming.claimable_value) ?? 0),
+            2,
+          )
+        : existing.claimableValue ?? existing.claimable_value ?? incoming.claimableValue ?? incoming.claimable_value,
+    end_date:
+      readString(existing.end_date ?? existing.endDate) ??
+      readString(incoming.end_date ?? incoming.endDate) ??
+      existing.end_date ??
+      existing.endDate ??
+      incoming.end_date ??
+      incoming.endDate,
+    event_slug:
+      readString(existing.event_slug ?? existing.eventSlug) ??
+      readString(incoming.event_slug ?? incoming.eventSlug) ??
+      existing.event_slug ??
+      existing.eventSlug ??
+      incoming.event_slug ??
+      incoming.eventSlug,
+  } satisfies BullpenCliPosition;
+}
+
+export function aggregateBullpenCliPositions(positions: BullpenCliPosition[]) {
+  const grouped = new Map<string, BullpenCliPosition>();
+  const aliasToGroup = new Map<string, string>();
+
+  for (const [index, position] of positions.entries()) {
+    const outcome = (readString(position.outcome) || "—").toLowerCase();
+    const isClaimable = extractClaimableStatus(position) ? "claimable" : "open";
+    const aliases = buildBullpenCliAliases(position).map(
+      (alias) => `${outcome}::${isClaimable}::${alias}`,
+    );
+    const existingGroupKey = aliases.find((alias) => aliasToGroup.has(alias));
+    const groupKey = existingGroupKey
+      ? (aliasToGroup.get(existingGroupKey) ?? existingGroupKey)
+      : aliases[0] ?? `${outcome}::${isClaimable}::bullpen-position-${index + 1}`;
+    const existing = groupKey ? grouped.get(groupKey) : undefined;
+
+    if (existing && groupKey) {
+      grouped.set(groupKey, mergeBullpenCliPosition(existing, position));
+    } else if (groupKey) {
+      grouped.set(groupKey, position);
+    }
+
+    for (const alias of aliases) {
+      if (groupKey) {
+        aliasToGroup.set(alias, groupKey);
+      }
+    }
+  }
+
+  return Array.from(grouped.values());
+}
+
 export function normalizeBullpenPosition(
   value: BullpenCliPosition,
   buildMarketUrl: (eventSlug: string | null) => string | null,
@@ -466,6 +573,118 @@ export function normalizeBullpenPosition(
     marketContext: null,
     resolutionSource: null,
   };
+}
+
+function buildBullpenPositionAliases(position: BullpenActivePositionView) {
+  const aliases = [position.marketId, position.conditionId, position.marketTitle].filter(
+    (value): value is string => Boolean(value),
+  );
+  return [...new Set(aliases)];
+}
+
+function mergeBullpenPositionViews(
+  existing: BullpenActivePositionView,
+  incoming: BullpenActivePositionView,
+) {
+  const shares = round(existing.shares + incoming.shares, 4);
+  const costBasis = round(existing.costBasis + incoming.costBasis, 2);
+  const averagePrice =
+    shares > 0 ? round(costBasis / shares, 4) : existing.averagePrice ?? incoming.averagePrice;
+  const currentValue =
+    existing.currentValue !== null || incoming.currentValue !== null
+      ? round((existing.currentValue ?? 0) + (incoming.currentValue ?? 0), 2)
+      : null;
+  const currentPrice =
+    currentValue !== null && shares > 0 ? round(currentValue / shares, 4) : existing.currentPrice;
+  const normalizedOutcome = existing.outcome.trim().toLowerCase();
+  const heldSideOdds =
+    currentPrice === null ? null : round((currentPrice > 1 ? currentPrice / 100 : currentPrice) * 100, 2);
+  const yesOdds =
+    normalizedOutcome === "yes"
+      ? heldSideOdds
+      : heldSideOdds === null
+        ? existing.yesOdds ?? incoming.yesOdds
+        : round(100 - heldSideOdds, 2);
+  const noOdds =
+    normalizedOutcome === "no"
+      ? heldSideOdds
+      : heldSideOdds === null
+        ? existing.noOdds ?? incoming.noOdds
+        : round(100 - heldSideOdds, 2);
+  const unrealizedPnl = currentValue === null ? null : round(currentValue - costBasis, 2);
+  const unrealizedPnlPercent =
+    unrealizedPnl === null || costBasis <= 0
+      ? null
+      : round((unrealizedPnl / costBasis) * 100, 2);
+  const claimableValue =
+    existing.claimableValue !== null || incoming.claimableValue !== null
+      ? round((existing.claimableValue ?? 0) + (incoming.claimableValue ?? 0), 2)
+      : null;
+
+  const merged = {
+    ...existing,
+    key: existing.key,
+    conditionId: existing.conditionId ?? incoming.conditionId,
+    marketTitle:
+      existing.marketTitle && existing.marketTitle !== existing.marketId
+        ? existing.marketTitle
+        : incoming.marketTitle,
+    shares,
+    averagePrice,
+    costBasis,
+    currentPrice,
+    currentValue,
+    unrealizedPnl,
+    unrealizedPnlPercent,
+    marketUrl: existing.marketUrl ?? incoming.marketUrl,
+    closeTime: existing.closeTime ?? incoming.closeTime,
+    yesOdds,
+    noOdds,
+    claimableValue,
+    rules: existing.rules ?? incoming.rules,
+    marketContext: existing.marketContext ?? incoming.marketContext,
+    resolutionSource: existing.resolutionSource ?? incoming.resolutionSource,
+  } satisfies BullpenActivePositionView;
+
+  return {
+    ...merged,
+    returnsPerDay: calculateBullpenPositionReturnsPerDay({
+      closeTime: merged.closeTime,
+      currentPrice: merged.currentPrice,
+      isClaimable: merged.isClaimable,
+    }),
+  } satisfies BullpenActivePositionView;
+}
+
+export function aggregateBullpenPositionViews(
+  positions: BullpenActivePositionView[],
+) {
+  const grouped = new Map<string, BullpenActivePositionView>();
+  const aliasToGroup = new Map<string, string>();
+
+  for (const [index, position] of positions.entries()) {
+    const scope = `${position.outcome.trim().toLowerCase()}::${position.isClaimable ? "claimable" : "open"}`;
+    const aliases = buildBullpenPositionAliases(position).map((alias) => `${scope}::${alias}`);
+    const existingGroupKey = aliases.find((alias) => aliasToGroup.has(alias));
+    const groupKey = existingGroupKey
+      ? (aliasToGroup.get(existingGroupKey) ?? existingGroupKey)
+      : aliases[0] ?? `${scope}::bullpen-position-${index + 1}`;
+    const existing = groupKey ? grouped.get(groupKey) : undefined;
+
+    if (existing && groupKey) {
+      grouped.set(groupKey, mergeBullpenPositionViews(existing, position));
+    } else if (groupKey) {
+      grouped.set(groupKey, position);
+    }
+
+    for (const alias of aliases) {
+      if (groupKey) {
+        aliasToGroup.set(alias, groupKey);
+      }
+    }
+  }
+
+  return Array.from(grouped.values());
 }
 
 export function applyBullpenPositionMarketData(

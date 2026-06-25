@@ -14,6 +14,7 @@ import {
   type BullpenCliHealth,
 } from "./bullpenHealthCore.ts";
 import {
+  aggregateBullpenCliPositions,
   applyBullpenPositionMarketData,
   normalizeBullpenPosition,
   summarizeBullpenPositions,
@@ -107,14 +108,15 @@ async function buildBullpenLiveSnapshot(
   const rawPositions = Array.isArray(payload.positions)
     ? (payload.positions as BullpenCliPosition[])
     : [];
-  const positions = rawPositions.map((position) =>
+  const aggregatedRawPositions = aggregateBullpenCliPositions(rawPositions);
+  const positions = aggregatedRawPositions.map((position) =>
     normalizeBullpenPosition(position, buildPolymarketEventUrl),
   );
   let refreshedPositions = positions;
 
   try {
     const refreshedMarkets = await resolvePolymarketMarkets(
-      rawPositions.map((position, index) => ({
+      aggregatedRawPositions.map((position, index) => ({
         id: positions[index]?.key || `bullpen-position-${index + 1}`,
         slug:
           typeof position.slug === "string" && position.slug.trim()

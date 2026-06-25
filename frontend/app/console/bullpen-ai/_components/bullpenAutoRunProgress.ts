@@ -86,6 +86,20 @@ function readBoolean(value: unknown) {
   return false;
 }
 
+function buildStageDetail(
+  stage: BullpenAutoLiveStageResult | null,
+  detail: string,
+  workflowDefinition: WorkflowDefinition,
+) {
+  if (
+    workflowDefinition.key === "llm" &&
+    readBoolean(stage?.outputs?.reused_existing_llm_outputs)
+  ) {
+    return `${detail} Reused the current Bullpen x AI table's saved LLM outputs instead of making fresh LLM calls.`;
+  }
+  return detail;
+}
+
 function readNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
@@ -277,6 +291,7 @@ export function buildBullpenAutoRunWorkflowView(
     ) {
       detail = normalizedRun.summary;
     }
+    detail = buildStageDetail(stage, detail, definition);
 
     return {
       key: definition.key,

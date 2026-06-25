@@ -231,6 +231,47 @@ test("Bullpen auto-run workflow view explains Stage 3 counts as combined review 
   assert.equal(view.stages[2].outputs.candidate_decision_rows, 9);
 });
 
+test("Bullpen auto-run workflow view explains when Stage 2 reuses saved LLM outputs", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage-2-reuse",
+    triggered_by: "manual",
+    status: "completed",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    completed_at: "2026-06-25T05:00:01Z",
+    summary: "Stage 2 reused existing LLM outputs.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        completed_items: 9,
+        total_items: 9,
+        item_label: "events",
+      }),
+      createStage(2, "LLM review completed for 9 events from 9 Stage 1 candidates.", {
+        workflow_stage_key: "llm",
+        phase_status: "completed",
+        completed_items: 9,
+        total_items: 9,
+        item_label: "events",
+        reused_existing_llm_outputs: true,
+      }),
+    ],
+  });
+
+  assert.match(view.stages[1].detail, /Reused the current Bullpen x AI table's saved LLM outputs/);
+});
+
 test("Bullpen auto-run workflow view treats legacy completed runs as fully finished", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 
