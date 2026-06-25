@@ -184,7 +184,7 @@ class BullpenAutoLiveBot:
                     **stage_result.outputs,
                     "phase_status": "cancelled",
                 }
-        repo.save_run(self.user_id, active_run)
+        await repo.save_run(self.user_id, active_run)
         return active_run
 
     async def get_settings(self) -> BullpenAutoLiveSettings:
