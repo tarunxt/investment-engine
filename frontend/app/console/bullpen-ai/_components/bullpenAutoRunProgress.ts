@@ -4,6 +4,19 @@ type WorkflowTone = "yellow" | "green" | "blue";
 type WorkflowState = "current" | "finished" | "queued";
 type WorkflowStageKey = "scan" | "llm" | "invest";
 
+export type BullpenAutoRunScanCandidateView = {
+  question: string;
+  marketUrl: string | null;
+  slug: string | null;
+  closeTime: string | null;
+  theme: string | null;
+  currentYesOdds: number | null;
+  currentNoOdds: number | null;
+  volumeUsd: number | null;
+  liquidityUsd: number | null;
+  forceInclude: boolean;
+};
+
 export type BullpenAutoRunWorkflowStageView = {
   key: WorkflowStageKey;
   title: string;
@@ -16,6 +29,7 @@ export type BullpenAutoRunWorkflowStageView = {
   isCurrent: boolean;
   timerStartedAt: string | null;
   timerCompletedAt: string | null;
+  scanCandidates: BullpenAutoRunScanCandidateView[];
 };
 
 export type BullpenAutoRunWorkflowView = {
@@ -61,6 +75,16 @@ function readString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function readBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return false;
+}
+
 function readNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
@@ -103,6 +127,33 @@ function getItemLabel(
   workflowDefinition: WorkflowDefinition,
 ) {
   return readString(stage?.outputs?.item_label) ?? workflowDefinition.defaultItemLabel;
+}
+
+function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
+  const rawCandidates = stage?.outputs?.accepted_candidates;
+  if (!Array.isArray(rawCandidates)) return [];
+
+  return rawCandidates
+    .map((candidate) => {
+      if (!candidate || typeof candidate !== "object") return null;
+      const record = candidate as Record<string, unknown>;
+      const question = readString(record.question);
+      if (!question) return null;
+
+      return {
+        question,
+        marketUrl: readString(record.market_url),
+        slug: readString(record.slug),
+        closeTime: readString(record.close_time),
+        theme: readString(record.theme),
+        currentYesOdds: readNumber(record.current_yes_odds),
+        currentNoOdds: readNumber(record.current_no_odds),
+        volumeUsd: readNumber(record.volume_usd),
+        liquidityUsd: readNumber(record.liquidity_usd),
+        forceInclude: readBoolean(record.force_include),
+      } satisfies BullpenAutoRunScanCandidateView;
+    })
+    .filter((candidate): candidate is BullpenAutoRunScanCandidateView => Boolean(candidate));
 }
 
 function clampPercent(value: number) {
@@ -202,6 +253,7 @@ export function buildBullpenAutoRunWorkflowView(
       isCurrent: state === "current",
       timerStartedAt: stageTimerStartedAt,
       timerCompletedAt: stage?.completed_at ?? null,
+      scanCandidates: definition.key === "scan" ? readScanCandidates(stage) : [],
     } satisfies BullpenAutoRunWorkflowStageView;
   });
 

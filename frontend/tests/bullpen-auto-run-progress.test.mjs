@@ -161,3 +161,61 @@ test("Bullpen auto-run workflow view starts Stage 1 immediately for a pending ru
     "Bullpen scan started. Waiting for the worker handoff to complete.",
   );
 });
+
+test("Bullpen auto-run workflow view exposes Stage 1 output candidates", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-candidates",
+    triggered_by: "manual",
+    status: "completed",
+    dry_run: false,
+    started_at: "2026-06-25T05:00:00Z",
+    completed_at: "2026-06-25T05:02:00Z",
+    summary: "Candidate scan completed.",
+    live_execution_requested: true,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        accepted_candidates: [
+          {
+            question: "Will the event resolve No?",
+            market_url: "https://polymarket.com/event/no",
+            slug: "event-no",
+            close_time: "2026-06-25T12:30:00Z",
+            theme: "Politics",
+            current_yes_odds: "32.5",
+            current_no_odds: 67.5,
+            volume_usd: "1200.50",
+            liquidity_usd: 450,
+            force_include: "true",
+          },
+          { question: "" },
+        ],
+      }),
+    ],
+  });
+
+  assert.equal(view.stages[0].scanCandidates.length, 1);
+  assert.deepEqual(view.stages[0].scanCandidates[0], {
+    question: "Will the event resolve No?",
+    marketUrl: "https://polymarket.com/event/no",
+    slug: "event-no",
+    closeTime: "2026-06-25T12:30:00Z",
+    theme: "Politics",
+    currentYesOdds: 32.5,
+    currentNoOdds: 67.5,
+    volumeUsd: 1200.5,
+    liquidityUsd: 450,
+    forceInclude: true,
+  });
+  assert.deepEqual(view.stages[1].scanCandidates, []);
+});
