@@ -129,6 +129,57 @@ test("Bullpen auto-run workflow view ignores completed_at on an actively running
   assert.equal(view.stages[1].progressLabel, "0/2 events");
 });
 
+test("Bullpen auto-run workflow view hides queued Stage 3 progress when Stage 2 is still the active worker stage", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-overlap",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 2 is still reviewing events.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        completed_items: 20,
+        total_items: 20,
+        item_label: "events",
+      }),
+      createStage(2, "Stage 2 is reviewing event 3 of 20.", {
+        workflow_stage_key: "llm",
+        phase_status: "running",
+        completed_items: 2,
+        total_items: 20,
+        item_label: "events",
+      }),
+      createStage(3, "Stage 3 started unexpectedly early.", {
+        workflow_stage_key: "invest",
+        phase_status: "running",
+        completed_items: 0,
+        total_items: 29,
+        item_label: "rows",
+      }),
+    ],
+  });
+
+  assert.equal(view.currentStageLabel, "Stage 2 · Run LLM");
+  assert.equal(view.stages[2].state, "queued");
+  assert.equal(view.stages[2].progressLabel, "Queued");
+  assert.equal(view.stages[2].timerStartedAt, null);
+  assert.equal(view.stages[2].detail, "Waiting for Stage 2 to finish before investment planning starts.");
+  assert.deepEqual(view.stages[2].outputs, {});
+});
+
 test("Bullpen auto-run workflow view treats legacy completed runs as fully finished", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 

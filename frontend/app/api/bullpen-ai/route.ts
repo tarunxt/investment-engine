@@ -97,6 +97,15 @@ const SPORTS_KEYWORDS = [
   "basketball",
   "cricket",
   "tennis",
+  "wimbledon",
+  "atp",
+  "wta",
+  "grand slam",
+  "roland garros",
+  "french open",
+  "australian open",
+  "davis cup",
+  "billie jean king cup",
   "golf",
   "pga",
   "u.s. open",
@@ -184,6 +193,12 @@ const SOCIAL_POST_COUNT_PATTERNS = [
   /\b(?:at least|at most|more than|less than|over|under|between)\s+\d+[\w\s-]*(?:tweets?|posts?|truths?)\b/i,
   /\b\d+\s*(?:-|to)\s*\d+\s+(?:tweets?|posts?|truths?)\b/i,
   /\b\d+\+?\s+(?:tweets?|posts?|truths?)\b/i,
+];
+const INSULT_MARKET_PATTERNS = [
+  /\b(?:donald\s+)?trump\b.{0,80}\bpublic(?:ly)?\s+insult(?:s|ed|ing)?\b/i,
+  /\bpublic(?:ly)?\s+insult(?:s|ed|ing)?\s+(?:someone|somebody|anyone)\b/i,
+  /\binsult(?:s|ed|ing)?\s+(?:someone|somebody|anyone)\b/i,
+  /\bname[\s-]?calling\b/i,
 ];
 const MONTH_NAMES = [
   "january",
@@ -556,6 +571,11 @@ function isTweetCountQuestion(question: BullpenQuestion) {
   );
 }
 
+function isInsultMarket(question: BullpenQuestion) {
+  const searchText = getQuestionSearchText(question);
+  return INSULT_MARKET_PATTERNS.some((pattern) => pattern.test(searchText));
+}
+
 function sortQuestions(questions: BullpenQuestion[]) {
   return [...questions].sort((left, right) => {
     const leftTime = left.closeTime ? new Date(left.closeTime).getTime() : Number.POSITIVE_INFINITY;
@@ -756,6 +776,7 @@ function passesFilters(question: BullpenQuestion, mode: ScanMode, filters: Bullp
     return false;
   if (filters.excludeTweetCountQuestions && isTweetCountQuestion(question))
     return false;
+  if (isInsultMarket(question)) return false;
   if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) return false;
   if (filters.minYesOdds > 0 && (question.yesOdds === null || question.yesOdds < filters.minYesOdds))
     return false;

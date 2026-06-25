@@ -68,7 +68,7 @@ const WORKFLOW_DEFINITIONS: WorkflowDefinition[] = [
     title: "Stage 3 · Invest",
     subtitle: "Plans buys and exits, then submits orders when the guardrails allow live execution.",
     defaultDetail: "Waiting for Stage 2 to finish before investment planning starts.",
-    defaultItemLabel: "orders",
+    defaultItemLabel: "rows",
   },
 ];
 
@@ -209,9 +209,12 @@ export function buildBullpenAutoRunWorkflowView(
 
     const tone: WorkflowTone =
       state === "finished" ? "green" : state === "current" ? "yellow" : "blue";
-    const completedItems = getCompletedItems(stage);
-    const totalItems = getTotalItems(stage);
-    const itemLabel = getItemLabel(stage, definition);
+    const shouldShowStageData = state !== "queued";
+    const completedItems = shouldShowStageData ? getCompletedItems(stage) : null;
+    const totalItems = shouldShowStageData ? getTotalItems(stage) : null;
+    const itemLabel = shouldShowStageData
+      ? getItemLabel(stage, definition)
+      : definition.defaultItemLabel;
     const progressPercent =
       totalItems && totalItems > 0 && completedItems !== null
         ? clampPercent((completedItems / totalItems) * 100)
@@ -221,7 +224,9 @@ export function buildBullpenAutoRunWorkflowView(
             ? 45
             : 0;
     const progressLabel =
-      totalItems !== null
+      !shouldShowStageData
+        ? "Queued"
+        : totalItems !== null
         ? `${completedItems ?? (state === "finished" ? totalItems : 0)}/${totalItems} ${itemLabel}`
         : state === "finished"
           ? "Finished"
@@ -229,16 +234,20 @@ export function buildBullpenAutoRunWorkflowView(
             ? "In progress"
             : "Queued";
     const stageTimerStartedAt =
-      stage?.started_at ??
+      !shouldShowStageData
+        ? null
+        : stage?.started_at ??
       (index === 0 && runStatus === "running"
         ? pendingRunStartedAt ?? normalizedRun?.started_at ?? null
         : null);
     const stageTimerCompletedAt =
-      explicitPhase === "running" && runStatus === "running"
+      !shouldShowStageData
+        ? null
+        : explicitPhase === "running" && runStatus === "running"
         ? null
         : stage?.completed_at ?? null;
     let detail =
-      stage?.reason ||
+      (shouldShowStageData ? stage?.reason : null) ||
       (state === "current" && index === 0 && runStatus === "running"
         ? "Bullpen scan started. Waiting for the worker handoff to complete."
         : state === "finished"
@@ -265,8 +274,9 @@ export function buildBullpenAutoRunWorkflowView(
       isCurrent: state === "current",
       timerStartedAt: stageTimerStartedAt,
       timerCompletedAt: stageTimerCompletedAt,
-      scanCandidates: definition.key === "scan" ? readScanCandidates(stage) : [],
-      outputs: readOutputs(stage),
+      scanCandidates:
+        definition.key === "scan" && shouldShowStageData ? readScanCandidates(stage) : [],
+      outputs: shouldShowStageData ? readOutputs(stage) : {},
     } satisfies BullpenAutoRunWorkflowStageView;
   });
 
