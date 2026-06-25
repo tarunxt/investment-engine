@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
@@ -29,10 +30,24 @@ def _http_error_detail(exc: Exception) -> str:
     return f"{exc.__class__.__name__}: {exc!r}"
 
 
+def _database_not_ready_error(exc: SQLAlchemyError) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=(
+            "Auto-Live database tables are not ready. Run Alembic migrations "
+            "inside the backend container (`alembic upgrade head`) and retry. "
+            f"{_http_error_detail(exc)}"
+        ),
+    )
+
+
 @router.get("/settings", response_model=BullpenAutoLiveSettings)
 async def get_auto_live_settings(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
-    return await bot.get_settings()
+    try:
+        return await bot.get_settings()
+    except SQLAlchemyError as exc:
+        raise _database_not_ready_error(exc) from exc
 
 
 @router.put("/settings", response_model=BullpenAutoLiveSettings)
@@ -56,13 +71,19 @@ async def reset_auto_live_settings(current_user: User = Depends(get_current_user
 @router.get("/state", response_model=BullpenAutoLiveState)
 async def get_auto_live_state(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
-    return await bot.get_state()
+    try:
+        return await bot.get_state()
+    except SQLAlchemyError as exc:
+        raise _database_not_ready_error(exc) from exc
 
 
 @router.get("/summary", response_model=BullpenAutoLiveSummary)
 async def get_auto_live_summary(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
-    return await bot.get_summary()
+    try:
+        return await bot.get_summary()
+    except SQLAlchemyError as exc:
+        raise _database_not_ready_error(exc) from exc
 
 
 @router.get("/runs", response_model=list[BullpenAutoLiveRun])
