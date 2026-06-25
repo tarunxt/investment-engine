@@ -21,6 +21,7 @@ import type {
 } from "@/types/api";
 
 type SnapshotMap = Record<ScanMode, BullpenSnapshotHistory>;
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -99,9 +100,27 @@ function readAcceptedCandidates(stage: BullpenAutoLiveStageResult | null) {
   return Array.isArray(outputs.accepted_candidates) ? outputs.accepted_candidates : [];
 }
 
+function readReviewedCandidates(stage: BullpenAutoLiveStageResult | null) {
+  const outputs = readStageOutputs(stage);
+  return Array.isArray(outputs.llm_reviewed_candidates)
+    ? outputs.llm_reviewed_candidates
+    : [];
+}
+
 function stringifyNumericValue(value: unknown) {
   const numeric = readNumber(value);
   return numeric === null ? null : String(numeric);
+}
+
+function calculateDaysUntilClose(closeTime: string | null) {
+  if (!closeTime) return null;
+
+  const closeDate = new Date(closeTime);
+  if (Number.isNaN(closeDate.getTime())) return null;
+
+  return Number(
+    ((closeDate.getTime() - Date.now()) / MILLISECONDS_PER_DAY).toFixed(1),
+  );
 }
 
 function createBaseQuestionRow({
@@ -218,6 +237,9 @@ function buildQuestionFromAcceptedCandidate({
       readBoolean(record.adjudication_required) ?? baseQuestion.adjudicationRequired,
     evidenceStatus: readString(record.evidence_status) ?? baseQuestion.evidenceStatus,
     eventState: readString(record.event_state) ?? baseQuestion.eventState,
+    daysUntilClose:
+      calculateDaysUntilClose(readString(record.close_time) ?? baseQuestion.closeTime) ??
+      baseQuestion.daysUntilClose,
   });
 }
 
@@ -316,11 +338,12 @@ function applyDecisionOutputsToSnapshot({
         stage2,
       }),
     );
+    const nextCloseTime = decision.close_time ?? question.closeTime;
     const nextQuestion = createBullpenQuestionRow({
       ...question,
       marketUrl: decision.market_url ?? question.marketUrl,
       slug: decision.slug ?? question.slug,
-      closeTime: decision.close_time ?? question.closeTime,
+      closeTime: nextCloseTime,
       category: decision.theme || question.category,
       llmYesOdds: decision.fair_yes_probability_pct ?? question.llmYesOdds,
       llmNoOdds: decision.fair_no_probability_pct ?? question.llmNoOdds,
@@ -330,6 +353,8 @@ function applyDecisionOutputsToSnapshot({
       llmDisagreementLevel:
         readDisagreementLevel(decision.disagreement_level) ??
         question.llmDisagreementLevel,
+      daysUntilClose:
+        calculateDaysUntilClose(nextCloseTime) ?? question.daysUntilClose,
       llmCompletedAt:
         llmBreakdown
           .map((entry) => entry.timestamp)
@@ -337,6 +362,74 @@ function applyDecisionOutputsToSnapshot({
           .sort()
           .at(-1) ?? question.llmCompletedAt,
       llmBreakdown,
+    });
+
+    if (JSON.stringify(nextQuestion) !== JSON.stringify(question)) {
+      questionById.set(targetQuestionId, nextQuestion);
+      changed = true;
+    }
+  }
+
+  if (!changed) return snapshot;
+
+  return {
+    ...snapshot,
+    questions: snapshot.questions.map((question) => questionById.get(question.id) ?? question),
+  };
+}
+
+function applyStage2OutputsToSnapshot({
+  snapshot,
+  run,
+}: {
+  snapshot: BullpenScanSnapshot;
+  run: BullpenAutoLiveRun;
+}) {
+  const stage1 = findWorkflowStage(run, "scan", 1);
+  const stage2 = findWorkflowStage(run, "llm", 2);
+  const reviewedCandidates = readReviewedCandidates(stage2);
+  if (reviewedCandidates.length === 0) return snapshot;
+
+  const { marketIdToQuestionId, slugToQuestionId } = buildQuestionIdMaps(stage1);
+  const questionById = new Map(snapshot.questions.map((question) => [question.id, question] as const));
+  let changed = false;
+
+  for (const reviewedCandidate of reviewedCandidates) {
+    if (!isRecord(reviewedCandidate)) continue;
+
+    const marketId = readString(reviewedCandidate.market_id);
+    const slug = readString(reviewedCandidate.slug);
+    const targetQuestionId =
+      (marketId ? marketIdToQuestionId.get(marketId) : null) ??
+      (slug ? slugToQuestionId.get(slug) : null) ??
+      marketId ??
+      slug;
+    if (!targetQuestionId) continue;
+
+    const question = questionById.get(targetQuestionId);
+    if (!question) continue;
+
+    const nextCloseTime = readString(reviewedCandidate.close_time) ?? question.closeTime;
+    const nextQuestion = createBullpenQuestionRow({
+      ...question,
+      marketUrl: readString(reviewedCandidate.market_url) ?? question.marketUrl,
+      closeTime: nextCloseTime,
+      llmYesOdds:
+        readNumber(reviewedCandidate.fair_yes_probability_pct) ?? question.llmYesOdds,
+      llmNoOdds:
+        readNumber(reviewedCandidate.fair_no_probability_pct) ?? question.llmNoOdds,
+      llmDisagreementLevel:
+        readDisagreementLevel(reviewedCandidate.disagreement_level) ??
+        question.llmDisagreementLevel,
+      adjudicationRequired:
+        readBoolean(reviewedCandidate.adjudication_required) ??
+        question.adjudicationRequired,
+      evidenceStatus:
+        readString(reviewedCandidate.evidence_status) ?? question.evidenceStatus,
+      eventState: readString(reviewedCandidate.event_state) ?? question.eventState,
+      llmCompletedAt: stage2?.completed_at ?? question.llmCompletedAt,
+      daysUntilClose:
+        calculateDaysUntilClose(nextCloseTime) ?? question.daysUntilClose,
     });
 
     if (JSON.stringify(nextQuestion) !== JSON.stringify(question)) {
@@ -418,8 +511,12 @@ export function syncBullpenAutoRunSummarySnapshots({
     }),
   };
   const runDecisions = summary.recent_decisions.filter((decision) => decision.run_id === run.id);
-  const nextSnapshot = applyDecisionOutputsToSnapshot({
+  const snapshotWithStage2Outputs = applyStage2OutputsToSnapshot({
     snapshot: nextSnapshotBase,
+    run,
+  });
+  const nextSnapshot = applyDecisionOutputsToSnapshot({
+    snapshot: snapshotWithStage2Outputs,
     run,
     decisions: runDecisions,
   });
