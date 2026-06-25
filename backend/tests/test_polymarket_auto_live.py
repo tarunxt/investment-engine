@@ -14,6 +14,10 @@ import pytest
 from pydantic import ValidationError
 
 import app.infrastructure.database.all_models  # noqa: F401
+from app.domains.polymarket_auto_live.bot import (
+    build_initial_run_summary,
+    build_initial_scan_stage_result,
+)
 from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     ConsoleWalletPosition,
@@ -76,6 +80,41 @@ def test_auto_live_settings_enforce_cross_field_validation():
             allow_live_execution=True,
             limit_orders_only=False,
         )
+
+
+def test_initial_scan_stage_result_starts_immediately_for_manual_console_rows():
+    request = BullpenAutoLiveRunOnceRequest(
+        console_profile=BullpenAutoLiveConsoleRunContext(
+            source_label="Saved Bullpen table",
+            snapshot_id="snapshot-1",
+            mode="30-days",
+            total_candidates=12,
+            candidate_rows=[
+                BullpenAutoLiveConsoleCandidateInput(
+                    question_id="question-1",
+                    market_id="market-1",
+                    market_title="Will stage 1 start immediately?",
+                    selected=True,
+                )
+            ],
+        )
+    )
+
+    summary = build_initial_run_summary(request)
+    stage = build_initial_scan_stage_result(
+        request=request,
+        started_at="2026-06-25T05:00:00+00:00",
+    )
+
+    assert summary == "Stage 1 started. Bullpen scan is loading the current questions table."
+    assert stage.reason == "Bullpen scan started with the current questions table."
+    assert stage.started_at == "2026-06-25T05:00:00+00:00"
+    assert stage.completed_at is None
+    assert stage.outputs["workflow_stage_key"] == "scan"
+    assert stage.outputs["phase_status"] == "running"
+    assert stage.outputs["completed_items"] == 0
+    assert stage.outputs["total_items"] == 12
+    assert stage.outputs["selected_manual_candidate_count"] == 1
 
 
 def test_auto_live_backend_execution_flag_defaults_false(monkeypatch):

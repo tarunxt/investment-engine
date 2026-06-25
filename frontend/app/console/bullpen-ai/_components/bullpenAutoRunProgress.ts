@@ -112,6 +112,7 @@ function clampPercent(value: number) {
 export function buildBullpenAutoRunWorkflowView(
   run: BullpenAutoLiveRun | null | undefined,
   pendingRunId?: string | null,
+  pendingRunStartedAt?: string | null,
 ): BullpenAutoRunWorkflowView {
   const normalizedRun = run ?? null;
   const runStatus = normalizedRun?.status ?? (pendingRunId ? "running" : "idle");
@@ -168,10 +169,15 @@ export function buildBullpenAutoRunWorkflowView(
           : state === "current"
             ? "In progress"
             : "Queued";
+    const stageTimerStartedAt =
+      stage?.started_at ??
+      (index === 0 && runStatus === "running"
+        ? pendingRunStartedAt ?? normalizedRun?.started_at ?? null
+        : null);
     let detail =
       stage?.reason ||
-      (state === "current" && pendingRunId && !normalizedRun
-        ? "Queued for worker handoff."
+      (state === "current" && index === 0 && runStatus === "running"
+        ? "Bullpen scan started. Waiting for the worker handoff to complete."
         : state === "finished"
           ? `${definition.title} finished in the latest run.`
           : definition.defaultDetail);
@@ -194,7 +200,7 @@ export function buildBullpenAutoRunWorkflowView(
       progressLabel,
       progressPercent,
       isCurrent: state === "current",
-      timerStartedAt: stage?.started_at ?? null,
+      timerStartedAt: stageTimerStartedAt,
       timerCompletedAt: stage?.completed_at ?? null,
     } satisfies BullpenAutoRunWorkflowStageView;
   });

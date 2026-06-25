@@ -21,6 +21,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveRun,
     BullpenAutoLiveRunOnceRequest,
+    BullpenAutoLiveStageResult,
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
     BullpenAutoLiveState,
@@ -88,6 +89,69 @@ def risk_summary_for(settings: BullpenAutoLiveSettings) -> str:
     if settings.strategy_profile == CONSOLE_PROFILE_ID:
         return CONSOLE_AUTO_LIVE_RISK_SUMMARY
     return AUTO_LIVE_RISK_SUMMARY
+
+
+def build_initial_run_summary(
+    request: BullpenAutoLiveRunOnceRequest | None = None,
+) -> str:
+    console_profile = request.console_profile if request else None
+    if console_profile and console_profile.candidate_rows:
+        return "Stage 1 started. Bullpen scan is loading the current questions table."
+    return "Stage 1 started. Bullpen scan is preparing the candidate fetch."
+
+
+def build_initial_scan_stage_result(
+    *,
+    request: BullpenAutoLiveRunOnceRequest | None = None,
+    started_at: str,
+) -> BullpenAutoLiveStageResult:
+    console_profile = request.console_profile if request else None
+    total_items = None
+    if console_profile is not None:
+        if console_profile.total_candidates > 0:
+            total_items = console_profile.total_candidates
+        elif console_profile.candidate_rows:
+            total_items = len(console_profile.candidate_rows)
+
+    selected_manual_candidate_count = (
+        sum(1 for row in console_profile.candidate_rows if row.selected)
+        if console_profile is not None
+        else 0
+    )
+    outputs: dict[str, object] = {
+        "workflow_stage_key": "scan",
+        "phase_status": "running",
+        "completed_items": 0,
+        "item_label": "events",
+    }
+    if total_items is not None:
+        outputs["total_items"] = total_items
+    if console_profile is not None:
+        if console_profile.snapshot_id:
+            outputs["snapshot_id"] = console_profile.snapshot_id
+        if console_profile.mode:
+            outputs["mode"] = console_profile.mode
+        if console_profile.source_label:
+            outputs["scan_source_label"] = console_profile.source_label
+        if console_profile.source_url:
+            outputs["scan_source_url"] = console_profile.source_url
+        if selected_manual_candidate_count > 0:
+            outputs["selected_manual_candidate_count"] = selected_manual_candidate_count
+
+    reason = (
+        "Bullpen scan started with the current questions table."
+        if console_profile and console_profile.candidate_rows
+        else "Bullpen scan started and is preparing the candidate fetch."
+    )
+    return BullpenAutoLiveStageResult(
+        stage_number=1,
+        stage_name="Candidate Scan",
+        status="pass",
+        reason=reason,
+        outputs=outputs,
+        started_at=started_at,
+        completed_at=None,
+    )
 
 
 class BullpenAutoLiveBot:
@@ -222,15 +286,22 @@ class BullpenAutoLiveBot:
                 await session.commit()
                 return run
 
+            started_at = utc_now()
             run = BullpenAutoLiveRun(
                 id=str(uuid4()),
                 triggered_by=triggered_by,  # type: ignore[arg-type]
                 status="running",
                 dry_run=effective_dry_run(settings),
-                started_at=utc_now(),
-                summary="Auto-Live run queued.",
+                started_at=started_at,
+                summary=build_initial_run_summary(request),
                 live_execution_requested=live_execution_requested(settings),
                 guardrail_checks=self._build_guardrail_checks(settings, state),
+                stage_results=[
+                    build_initial_scan_stage_result(
+                        request=request,
+                        started_at=started_at,
+                    )
+                ],
                 request_context=request,
             )
             session.add(self._new_run_record(run))
