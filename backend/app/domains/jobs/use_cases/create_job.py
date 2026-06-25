@@ -11,6 +11,7 @@ from app.domains.jobs.repository import PostgresJobRepository
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.infrastructure.messaging.event_bus import EventBus
 from app.infrastructure.messaging.idempotency import IdempotencyStore
+from app.infrastructure.messaging.task_registry import register_job_task
 from app.infrastructure.locks.redis_lock import RedisLock, LockAcquisitionError
 from app.shared.exceptions import ConflictException, ValidationException
 from app.shared.types import JobId, JobStatus, UserId
@@ -103,9 +104,10 @@ class CreateJobUseCase:
         # ── 4. Dispatch Celery task (ETA for future jobs) ────────────────────
         from app.domains.jobs.tasks import execute_ai_job
         if is_future:
-            execute_ai_job.apply_async(args=[job.id], eta=scheduled_at)
+            task = execute_ai_job.apply_async(args=[job.id], eta=scheduled_at)
         else:
-            execute_ai_job.delay(job.id)
+            task = execute_ai_job.delay(job.id)
+        await register_job_task(job.id, task.id)
 
         # ── 5. In-process domain events (non-critical, fire-and-forget) ──────
         await self._event_bus.publish(

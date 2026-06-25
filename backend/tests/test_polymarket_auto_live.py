@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 import app.infrastructure.database.all_models  # noqa: F401
 from app.domains.polymarket_auto_live.bot import (
+    BullpenAutoLiveBot,
     build_initial_run_summary,
     build_initial_scan_stage_result,
 )
@@ -115,6 +116,112 @@ def test_initial_scan_stage_result_starts_immediately_for_manual_console_rows():
     assert stage.outputs["completed_items"] == 0
     assert stage.outputs["total_items"] == 12
     assert stage.outputs["selected_manual_candidate_count"] == 1
+
+
+@pytest.mark.anyio
+async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
+    run = BullpenAutoLiveRun(
+        id="run-stop-test",
+        triggered_by="manual",
+        status="running",
+        dry_run=True,
+        started_at="2026-06-25T07:00:00+00:00",
+        summary="Stage 1 started.",
+        stage_results=[
+            build_initial_scan_stage_result(
+                started_at="2026-06-25T07:00:00+00:00",
+            )
+        ],
+    )
+    settings = BullpenAutoLiveSettings(auto_live_enabled=True)
+    state = BullpenAutoLiveState(
+        running=True,
+        paused=False,
+        status="running",
+        mode="analysis-only",
+    )
+    saved: dict[str, object] = {}
+    revoked_run_ids: list[str] = []
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.committed = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def commit(self) -> None:
+            self.committed = True
+
+    fake_session = _FakeSession()
+
+    class _FakeRepo:
+        def __init__(self, session) -> None:
+            assert session is fake_session
+
+        async def ensure_settings(self, user_id: int):
+            assert user_id == 7
+            return settings
+
+        async def ensure_state(self, user_id: int):
+            assert user_id == 7
+            return state
+
+        async def get_running_run_record(self, user_id: int):
+            assert user_id == 7
+            return object()
+
+        def save_run(self, user_id: int, next_run: BullpenAutoLiveRun) -> None:
+            assert user_id == 7
+            saved["run"] = next_run
+
+        async def save_state(self, user_id: int, next_state: BullpenAutoLiveState) -> None:
+            assert user_id == 7
+            saved["state"] = next_state
+
+    async def _fake_revoke(run_id: str):
+        revoked_run_ids.append(run_id)
+        return "task-run-stop-test"
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncSessionLocal",
+        lambda: fake_session,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncPolymarketAutoLiveRepository",
+        _FakeRepo,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.record_to_run",
+        lambda _record: run,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.revoke_registered_auto_live_run_task",
+        _fake_revoke,
+    )
+
+    result = await BullpenAutoLiveBot(user_id=7).stop()
+
+    saved_run = saved["run"]
+    saved_state = saved["state"]
+    assert isinstance(saved_run, BullpenAutoLiveRun)
+    assert isinstance(saved_state, BullpenAutoLiveState)
+    assert fake_session.committed is True
+    assert saved_run.status == "failed"
+    assert saved_run.completed_at is not None
+    assert saved_run.error_message == "Cancelled by user"
+    assert saved_run.summary == "Auto-Live run cancelled by user."
+    assert saved_run.stage_results[0].outputs["phase_status"] == "cancelled"
+    assert saved_run.stage_results[0].reason == "Cancelled by user."
+    assert saved_state.running is False
+    assert saved_state.paused is False
+    assert saved_state.status == "stopped"
+    assert "cancelled" in saved_state.last_action.lower()
+    assert revoked_run_ids == ["run-stop-test"]
+    assert result.status == "stopped"
 
 
 def test_auto_live_backend_execution_flag_defaults_false(monkeypatch):

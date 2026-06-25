@@ -231,6 +231,7 @@ export const URLs = {
     create: () => `${resolveApiBaseUrl()}/jobs`,
     list: () => `${resolveApiBaseUrl()}/jobs`,
     get: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}`,
+    cancel: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}/cancel`,
     update: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}`,
     delete: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}`,
     getCost: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}/cost`,

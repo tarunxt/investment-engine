@@ -203,6 +203,7 @@ export interface IApiService {
     emergencyStopBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     clearEmergencyStopBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     getTradingBotsSummary(): Promise<TradingBotsSummaryResponse>;
+    cancelJob(id: number): Promise<JobResponse>;
 
     // Legacy aliases kept for existing callers.
     bullpenAiAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse>;

@@ -29,6 +29,10 @@ from app.domains.polymarket_auto_live.schemas import (
     TradingBotGuardrail,
 )
 from app.infrastructure.database.session import AsyncSessionLocal
+from app.infrastructure.messaging.task_registry import (
+    register_auto_live_run_task,
+    revoke_registered_auto_live_run_task,
+)
 
 AUTO_LIVE_STRATEGY_SUMMARY = (
     "Fully automated AI + evidence + market-rules based Bullpen trading engine. "
@@ -157,6 +161,31 @@ def build_initial_scan_stage_result(
 class BullpenAutoLiveBot:
     def __init__(self, user_id: int) -> None:
         self.user_id = user_id
+
+    async def _cancel_active_run_if_needed(
+        self,
+        repo: AsyncPolymarketAutoLiveRepository,
+    ) -> BullpenAutoLiveRun | None:
+        active_run_record = await repo.get_running_run_record(self.user_id)
+        if active_run_record is None:
+            return None
+
+        active_run = record_to_run(active_run_record)
+        cancelled_at = utc_now()
+        active_run.status = "failed"
+        active_run.completed_at = cancelled_at
+        active_run.error_message = "Cancelled by user"
+        active_run.summary = "Auto-Live run cancelled by user."
+        for stage_result in active_run.stage_results:
+            if stage_result.completed_at is None:
+                stage_result.completed_at = cancelled_at
+                stage_result.reason = "Cancelled by user."
+                stage_result.outputs = {
+                    **stage_result.outputs,
+                    "phase_status": "cancelled",
+                }
+        repo.save_run(self.user_id, active_run)
+        return active_run
 
     async def get_settings(self) -> BullpenAutoLiveSettings:
         async with AsyncSessionLocal() as session:
@@ -313,7 +342,8 @@ class BullpenAutoLiveBot:
                 self._schedule_next_cycles(settings, state, reference_time=datetime.now(UTC))
             await repo.save_state(self.user_id, state)
             await session.commit()
-            execute_polymarket_auto_live_run.delay(self.user_id, run.id)  # type: ignore[attr-defined]
+            task = execute_polymarket_auto_live_run.delay(self.user_id, run.id)  # type: ignore[attr-defined]
+            await register_auto_live_run_task(run.id, task.id)
             return run
 
     async def start(self) -> BullpenAutoLiveState:
@@ -327,6 +357,7 @@ class BullpenAutoLiveBot:
             state.stopped_at = None
             state.last_action = "Auto-Live scheduler started."
             self._schedule_next_cycles(settings, state, reference_time=datetime.now(UTC))
+            state = self._synchronize_state(settings, state)
             await repo.save_state(self.user_id, state)
             await session.commit()
             return state
@@ -336,15 +367,24 @@ class BullpenAutoLiveBot:
             repo = AsyncPolymarketAutoLiveRepository(session)
             settings = await repo.ensure_settings(self.user_id)
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
+            cancelled_run = await self._cancel_active_run_if_needed(repo)
             state.running = False
+            state.paused = False
             state.stopped_at = utc_now()
             state.next_run_at = None
             state.next_scan_at = None
             state.next_llm_run_at = None
             state.next_rebalance_at = None
-            state.last_action = "Auto-Live scheduler stopped."
+            state.last_action = (
+                "Auto-Live scheduler stopped and the active run was cancelled."
+                if cancelled_run is not None
+                else "Auto-Live scheduler stopped."
+            )
+            state = self._synchronize_state(settings, state)
             await repo.save_state(self.user_id, state)
             await session.commit()
+            if cancelled_run is not None:
+                await revoke_registered_auto_live_run_task(cancelled_run.id)
             return state
 
     async def pause(self) -> BullpenAutoLiveState:
@@ -354,6 +394,7 @@ class BullpenAutoLiveBot:
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
             state.paused = True
             state.last_action = "Auto-Live scheduler paused."
+            state = self._synchronize_state(settings, state)
             await repo.save_state(self.user_id, state)
             await session.commit()
             return state
@@ -367,6 +408,7 @@ class BullpenAutoLiveBot:
             state.paused = False
             state.last_action = "Auto-Live scheduler resumed."
             self._schedule_next_cycles(settings, state, reference_time=datetime.now(UTC))
+            state = self._synchronize_state(settings, state)
             await repo.save_state(self.user_id, state)
             await session.commit()
             return state
@@ -379,6 +421,7 @@ class BullpenAutoLiveBot:
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
             state.paused = True
             state.last_action = "Emergency stop activated."
+            state = self._synchronize_state(settings, state)
             await repo.save_settings(self.user_id, settings)
             await repo.save_state(self.user_id, state)
             await session.commit()
@@ -391,6 +434,7 @@ class BullpenAutoLiveBot:
             settings = settings.model_copy(update={"emergency_stop": False})
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
             state.last_action = "Emergency stop cleared."
+            state = self._synchronize_state(settings, state)
             await repo.save_settings(self.user_id, settings)
             await repo.save_state(self.user_id, state)
             await session.commit()
