@@ -13,6 +13,7 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 import pytest
 from pydantic import ValidationError
 
+import app.infrastructure.database.all_models  # noqa: F401
 from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     ConsoleWalletPosition,
@@ -25,9 +26,15 @@ from app.domains.polymarket_auto_live.engine import (
     PositionSnapshot,
 )
 from app.domains.polymarket_auto_live.llm import run_llm_consensus
+from app.domains.polymarket_auto_live.models import PolymarketAutoLiveStateRecord
 from app.domains.polymarket_auto_live.normalization import (
     normalize_auto_live_confidence,
     normalize_auto_live_evidence_status,
+)
+from app.domains.polymarket_auto_live.repository import (
+    apply_state_to_record,
+    normalize_auto_live_status,
+    record_to_state,
 )
 from app.domains.polymarket_auto_live.rules import RuleEvaluation, evaluate_market_rules
 from app.domains.polymarket_auto_live.scanner import (
@@ -97,6 +104,47 @@ def test_auto_live_normalization_maps_raw_labels_to_strict_buckets():
     assert normalize_auto_live_confidence("very_high") == "High"
     assert normalize_auto_live_confidence("moderate") == "Medium"
     assert normalize_auto_live_confidence(None) == "Low"
+
+
+def test_auto_live_status_normalization_maps_legacy_values():
+    assert normalize_auto_live_status("idle") == "stopped"
+    assert normalize_auto_live_status("not_configured") == "not-configured"
+    assert normalize_auto_live_status("not configured") == "not-configured"
+    assert normalize_auto_live_status("") == "not-configured"
+    assert normalize_auto_live_status("unknown") == "error"
+
+
+def test_record_to_state_normalizes_legacy_statuses():
+    record = PolymarketAutoLiveStateRecord(
+        user_id=1,
+        running=False,
+        paused=False,
+        status="idle",
+        mode="dry-run",
+        payload={"status": "idle"},
+    )
+
+    state = record_to_state(record)
+
+    assert state.status == "stopped"
+
+
+def test_apply_state_to_record_normalizes_legacy_status_assignments():
+    record = PolymarketAutoLiveStateRecord(
+        user_id=1,
+        running=False,
+        paused=False,
+        status="not-configured",
+        mode="dry-run",
+        payload={},
+    )
+    state = BullpenAutoLiveState()
+    state.status = "idle"
+
+    apply_state_to_record(record, state)
+
+    assert record.status == "stopped"
+    assert record.payload["status"] == "stopped"
 
 
 @pytest.mark.anyio
