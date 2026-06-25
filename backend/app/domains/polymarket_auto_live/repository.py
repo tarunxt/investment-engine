@@ -21,6 +21,21 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveState,
 )
 
+VALID_AUTO_LIVE_STATUSES = {
+    "running",
+    "paused",
+    "stopped",
+    "error",
+    "not-configured",
+}
+
+LEGACY_AUTO_LIVE_STATUS_MAP = {
+    "idle": "stopped",
+    "not_configured": "not-configured",
+    "not configured": "not-configured",
+    "": "not-configured",
+}
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -46,6 +61,14 @@ def _parse_datetime(value: str | None) -> datetime | None:
 
 def _payload_or_default(payload: dict[str, object] | None) -> dict[str, object]:
     return payload.copy() if payload else {}
+
+
+def normalize_auto_live_status(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    status = LEGACY_AUTO_LIVE_STATUS_MAP.get(raw, raw)
+    if status not in VALID_AUTO_LIVE_STATUSES:
+        return "error"
+    return status
 
 
 def settings_to_record_payload(settings: BullpenAutoLiveSettings) -> dict[str, object]:
@@ -84,6 +107,7 @@ def record_to_state(record: PolymarketAutoLiveStateRecord | None) -> BullpenAuto
             "next_run_at": _isoformat(record.next_run_at),
         }
     )
+    payload["status"] = normalize_auto_live_status(payload.get("status"))
     return BullpenAutoLiveState.model_validate(payload)
 
 
@@ -141,13 +165,16 @@ def apply_state_to_record(
     record: PolymarketAutoLiveStateRecord,
     state: BullpenAutoLiveState,
 ) -> None:
+    normalized_status = normalize_auto_live_status(state.status)
     record.running = state.running
     record.paused = state.paused
-    record.status = state.status
+    record.status = normalized_status
     record.mode = state.mode
     record.last_run_at = _parse_datetime(state.last_run_at)
     record.next_run_at = _parse_datetime(state.next_run_at)
-    record.payload = state_to_record_payload(state)
+    payload = state_to_record_payload(state)
+    payload["status"] = normalized_status
+    record.payload = payload
 
 
 def apply_run_to_record(
