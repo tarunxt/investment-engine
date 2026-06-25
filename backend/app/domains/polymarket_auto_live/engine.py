@@ -76,6 +76,7 @@ DECISION_ACTIONABLES = {"BUY_NEW", "ADD_MORE", "TRIM", "EXIT"}
 CONFIDENCE_WEIGHT = {"Low": 0.55, "Medium": 0.8, "High": 1.0}
 EVIDENCE_WEIGHT = {"Low": 0.55, "Moderate": 0.8, "Strong": 1.0}
 HIGH_LLM_PROVIDER_ERROR_RATE = 0.5
+SUPPORTED_OUTCOME_SIDES = {"YES", "NO"}
 
 logger = get_logger("app.domains.polymarket_auto_live.engine")
 
@@ -262,6 +263,10 @@ def _disagreement_weight(consensus: LlmConsensus | None, settings: BullpenAutoLi
 
 def _current_price_for_side(market: ScannedMarket, side: str) -> float | None:
     return market.current_yes_odds if side == "YES" else market.current_no_odds
+
+
+def _is_supported_outcome_side(side: str | None) -> bool:
+    return side in SUPPORTED_OUTCOME_SIDES
 
 
 def _evidence_below_minimum(value: str | None, settings: BullpenAutoLiveSettings) -> bool:
@@ -1748,6 +1753,29 @@ class BullpenAutoLiveEngine:
         now: datetime,
     ) -> EngineResult:
         live_wallet_positions = await read_console_wallet_positions()
+        unsupported_live_wallet_positions = [
+            position
+            for position in live_wallet_positions
+            if not _is_supported_outcome_side(position.side)
+        ]
+        if unsupported_live_wallet_positions:
+            logger.warning(
+                "Skipping %s unsupported Bullpen wallet position(s) for Auto-Live console profile: %s",
+                len(unsupported_live_wallet_positions),
+                [
+                    {
+                        "market_id": position.market_id,
+                        "market_title": position.market_title,
+                        "side": position.side,
+                    }
+                    for position in unsupported_live_wallet_positions
+                ],
+            )
+        live_wallet_positions = [
+            position
+            for position in live_wallet_positions
+            if _is_supported_outcome_side(position.side)
+        ]
         manual_console_context = (
             run.request_context.console_profile
             if run.request_context and run.request_context.console_profile
@@ -1999,6 +2027,15 @@ class BullpenAutoLiveEngine:
                     "scanned_candidates": scanned_total_candidates,
                     "candidate_rows_before_llm": candidate_rows_before_llm,
                     "llm_candidate_count": llm_candidate_count,
+                    "unsupported_wallet_positions_skipped": len(unsupported_live_wallet_positions),
+                    "unsupported_wallet_positions": [
+                        {
+                            "market_id": position.market_id,
+                            "market_title": position.market_title,
+                            "side": position.side,
+                        }
+                        for position in unsupported_live_wallet_positions
+                    ],
                     "rejected_candidates": len(rejected_candidate_map),
                     "scan_source_label": scan_source_label,
                     "scan_source_url": scan_source_url,
@@ -2006,6 +2043,11 @@ class BullpenAutoLiveEngine:
                     "selected_manual_candidate_ids": selected_manual_candidate_ids,
                     "fixed_schedule_timezone": "Asia/Kolkata",
                     "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
+                    "workflow_stage_key": "scan",
+                    "phase_status": "completed",
+                    "completed_items": scanned_total_candidates,
+                    "total_items": scanned_total_candidates,
+                    "item_label": "events",
                 },
                 guardrails_checked=global_guardrails,
             )
@@ -2041,6 +2083,15 @@ class BullpenAutoLiveEngine:
                     "scanned_candidates": scanned_total_candidates,
                     "candidate_rows_before_llm": candidate_rows_before_llm,
                     "llm_candidate_count": llm_candidate_count,
+                    "unsupported_wallet_positions_skipped": len(unsupported_live_wallet_positions),
+                    "unsupported_wallet_positions": [
+                        {
+                            "market_id": position.market_id,
+                            "market_title": position.market_title,
+                            "side": position.side,
+                        }
+                        for position in unsupported_live_wallet_positions
+                    ],
                     "rejected_candidates": len(rejected_candidate_map),
                     "scan_source_label": scan_source_label,
                     "scan_source_url": scan_source_url,
@@ -2048,6 +2099,11 @@ class BullpenAutoLiveEngine:
                     "selected_manual_candidate_ids": selected_manual_candidate_ids,
                     "fixed_schedule_timezone": "Asia/Kolkata",
                     "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
+                    "workflow_stage_key": "scan",
+                    "phase_status": "completed",
+                    "completed_items": scanned_total_candidates,
+                    "total_items": scanned_total_candidates,
+                    "item_label": "events",
                 },
                 guardrails_checked=global_guardrails,
             )
