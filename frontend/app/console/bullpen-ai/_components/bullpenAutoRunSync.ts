@@ -357,16 +357,18 @@ export function syncBullpenAutoRunSummarySnapshots({
   snapshotsByMode,
   summary,
   run,
+  fallbackMode = null,
 }: {
   snapshotsByMode: SnapshotMap;
   summary: BullpenAutoLiveSummaryResponse;
   run: BullpenAutoLiveRun | null;
+  fallbackMode?: ScanMode | null;
 }) {
   if (!run) return snapshotsByMode;
 
   const stage1 = findWorkflowStage(run, "scan", 1);
   const stage1Outputs = readStageOutputs(stage1);
-  const mode = readScanMode(stage1Outputs.mode);
+  const mode = readScanMode(stage1Outputs.mode) ?? fallbackMode;
   if (!mode) return snapshotsByMode;
 
   const acceptedCandidates = readAcceptedCandidates(stage1);
@@ -387,7 +389,7 @@ export function syncBullpenAutoRunSummarySnapshots({
     currentSnapshot?.sourceUrl ??
     BULLPEN_SOURCE_URLS[mode];
   const scannedAt =
-    readString(stage1Outputs.scanned_at) ?? run.completed_at ?? run.started_at;
+    stage1?.completed_at ?? readString(stage1Outputs.scanned_at) ?? run.completed_at ?? run.started_at;
   const totalCandidates =
     readNumber(stage1Outputs.scanned_candidates) ?? acceptedCandidates.length;
   const existingQuestionById = new Map(

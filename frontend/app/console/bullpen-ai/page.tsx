@@ -2728,6 +2728,7 @@ export default function BullpenAiPage() {
               snapshotsByMode: current,
               summary,
               run,
+              fallbackMode: activeMode,
             }),
           );
         }}

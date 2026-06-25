@@ -248,6 +248,10 @@ function formatElapsedRunTime(startedAt: string | null, nowMs: number) {
     : `${paddedMinutes}:${paddedSeconds}`;
 }
 
+function formatStageLastRunLabel(value: string | null) {
+  return value ? formatIstDateTime(value) : "Not run yet";
+}
+
 function formatStageElapsedTime(
   startedAt: string | null,
   completedAt: string | null,
@@ -835,7 +839,8 @@ export function BullpenAutoRunScheduleCard({
                       </span>
                       <span
                         className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}
-                        aria-label={`${stage.title} timer`}
+                        aria-label={`${stage.title} time taken`}
+                        title="Time taken to run this stage"
                       >
                         <Clock3 className="h-3 w-3" />
                         {formatStageElapsedTime(
@@ -845,6 +850,35 @@ export function BullpenAutoRunScheduleCard({
                         )}
                       </span>
                     </div>
+                  </div>
+
+                  <div
+                    className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-[11px] leading-5 ${toneClasses.muted}`}
+                  >
+                    <div>
+                      Last stage run:{" "}
+                      <span className="font-semibold tabular-nums">
+                        {formatStageLastRunLabel(stage.timerCompletedAt ?? stage.timerStartedAt)}
+                      </span>
+                    </div>
+                    <div>
+                      Time taken:{" "}
+                      <span className="font-semibold tabular-nums">
+                        {formatStageElapsedTime(
+                          stage.timerStartedAt,
+                          stage.timerCompletedAt,
+                          timerNowMs,
+                        )}
+                      </span>
+                    </div>
+                    {stage.key === "scan" ? (
+                      <div>
+                        New events found:{" "}
+                        <span className="font-semibold tabular-nums">
+                          {stage.scanCandidates.length}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
