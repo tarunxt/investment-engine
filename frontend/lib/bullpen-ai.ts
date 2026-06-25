@@ -67,6 +67,33 @@ export type BullpenQuestionAnalysis = {
 
 export type BullpenQuestionRow = BullpenQuestion & BullpenQuestionAnalysis;
 
+export function hasBullpenLlmAnalysis(
+  question:
+    | Pick<
+        Partial<BullpenQuestionAnalysis>,
+        "llmYesOdds" | "llmNoOdds" | "llmRunId" | "llmCompletedAt" | "llmBreakdown"
+      >
+    | null
+    | undefined,
+) {
+  if (!question) return false;
+
+  const hasYesOdds =
+    question.llmYesOdds !== null && question.llmYesOdds !== undefined;
+  const hasNoOdds =
+    question.llmNoOdds !== null && question.llmNoOdds !== undefined;
+  const hasRunId =
+    question.llmRunId !== null && question.llmRunId !== undefined;
+
+  return (
+    hasYesOdds ||
+    hasNoOdds ||
+    hasRunId ||
+    Boolean(question.llmCompletedAt) ||
+    Boolean(question.llmBreakdown?.length)
+  );
+}
+
 export type BullpenScanFilters = {
   maxClosingDays: number;
   targetDate: string;
