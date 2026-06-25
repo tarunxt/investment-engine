@@ -27,6 +27,15 @@ SPORTS_KEYWORDS = (
     "basketball",
     "cricket",
     "tennis",
+    "wimbledon",
+    "atp",
+    "wta",
+    "grand slam",
+    "roland garros",
+    "french open",
+    "australian open",
+    "davis cup",
+    "billie jean king cup",
     "golf",
     "pga",
     "u.s. open",
@@ -101,6 +110,21 @@ TWEET_COUNT_PATTERNS = (
     ),
     re.compile(r"\b\d+\s*(?:-|to)\s*\d+\s+(?:tweets?|posts?|truths?)\b", re.IGNORECASE),
     re.compile(r"\b\d+\+?\s+(?:tweets?|posts?|truths?)\b", re.IGNORECASE),
+)
+INSULT_MARKET_PATTERNS = (
+    re.compile(
+        r"\b(?:donald\s+)?trump\b.{0,80}\bpublic(?:ly)?\s+insult(?:s|ed|ing)?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bpublic(?:ly)?\s+insult(?:s|ed|ing)?\s+(?:someone|somebody|anyone)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\binsult(?:s|ed|ing)?\s+(?:someone|somebody|anyone)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bname[\s-]?calling\b", re.IGNORECASE),
 )
 
 
@@ -207,6 +231,10 @@ def _includes_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(_contains_keyword(text, keyword) for keyword in keywords)
 
 
+def is_insult_market_text(text: str) -> bool:
+    return any(pattern.search(text) for pattern in INSULT_MARKET_PATTERNS)
+
+
 def _build_market_url(event_slug: str | None) -> str | None:
     if not event_slug:
         return None
@@ -300,6 +328,8 @@ def _evaluate_filter_reasons(
         pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS
     ):
         reasons.append("Excluded tweet-count or social-post-count market.")
+    if is_insult_market_text(search_text):
+        reasons.append("Excluded insult or name-calling market.")
     if not _is_binary_yes_no(market.outcome_labels, market.current_yes_odds, market.current_no_odds):
         reasons.append("Excluded unclear non-binary market.")
     if (

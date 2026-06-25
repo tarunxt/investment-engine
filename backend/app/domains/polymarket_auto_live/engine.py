@@ -18,6 +18,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     ConsoleScanResult,
     apply_scanned_market_to_position,
     candidate_returns_per_day,
+    console_market_filter_reasons,
     next_console_schedule_time,
     position_returns_per_day,
     read_console_wallet_positions,
@@ -1913,13 +1914,8 @@ class BullpenAutoLiveEngine:
             manual_console_context.candidate_rows if manual_console_context else []
         )
         manual_console_rows_used = bool(manual_console_rows)
-        manual_console_rows_have_reusable_llm = manual_console_rows_used and all(
-            row.llm_yes_odds is not None or row.llm_no_odds is not None
-            for row in manual_console_rows
-        )
-        selected_manual_candidate_ids = [
-            row.market_id for row in manual_console_rows if row.selected
-        ]
+        manual_console_rows_have_reusable_llm = False
+        selected_manual_candidate_ids: list[str] = []
         rejected_candidate_map: dict[str, BullpenAutoLiveRejectedCandidateDiagnostic] = {}
         scan_source_label = (
             manual_console_context.source_label
@@ -1938,6 +1934,8 @@ class BullpenAutoLiveEngine:
         scanned_total_candidates = 0
         candidate_contexts: list[dict[str, object]] = []
         scan_seed_markets: list[ScannedMarket] | None = None
+        market_by_slug: dict[str, ScannedMarket] = {}
+        market_by_id: dict[str, ScannedMarket] = {}
 
         if manual_console_rows_used:
             scan_source_label = scan_source_label or "Bullpen x AI manual table"
@@ -1947,20 +1945,53 @@ class BullpenAutoLiveEngine:
                 len(manual_console_rows),
             )
             manual_markets = [_manual_console_market(row) for row in manual_console_rows]
+            accepted_manual_pairs: list[
+                tuple[BullpenAutoLiveConsoleCandidateInput, ScannedMarket]
+            ] = []
+            for row, market in zip(manual_console_rows, manual_markets, strict=False):
+                rejection_reasons = console_market_filter_reasons(market, now=now)
+                if rejection_reasons:
+                    rejected = ScanRejectedMarket(
+                        market_id=market.market_id,
+                        question=market.question,
+                        slug=market.slug,
+                        market_url=market.market_url,
+                        reasons=rejection_reasons,
+                    )
+                    stage1_rejected_candidates.append(
+                        _serialize_rejected_scan_candidate(rejected)
+                    )
+                    for reason in rejection_reasons:
+                        _record_rejected_candidate(
+                            rejected_candidate_map,
+                            market=market,
+                            reason=reason,
+                        )
+                    continue
+                accepted_manual_pairs.append((row, market))
+            accepted_manual_rows = [row for row, _ in accepted_manual_pairs]
+            manual_markets = [market for _, market in accepted_manual_pairs]
+            manual_console_rows_have_reusable_llm = bool(accepted_manual_rows) and all(
+                row.llm_yes_odds is not None or row.llm_no_odds is not None
+                for row in accepted_manual_rows
+            )
+            selected_manual_candidate_ids = [
+                row.market_id for row in accepted_manual_rows if row.selected
+            ]
             stage1_accepted_candidates = [
                 _serialize_manual_console_candidate(row, market)
-                for row, market in zip(manual_console_rows, manual_markets, strict=False)
+                for row, market in accepted_manual_pairs
             ]
             market_by_slug = {market.slug: market for market in manual_markets if market.slug}
             market_by_id = {market.market_id: market for market in manual_markets}
             if manual_console_rows_have_reusable_llm:
-                candidate_rows_before_llm = len(manual_console_rows)
+                candidate_rows_before_llm = len(accepted_manual_rows)
                 llm_candidate_count = sum(
                     1
-                    for row in manual_console_rows
+                    for row in accepted_manual_rows
                     if row.llm_yes_odds is not None or row.llm_no_odds is not None
                 )
-                for row, market in zip(manual_console_rows, manual_markets, strict=False):
+                for row, market in accepted_manual_pairs:
                     returns_per_day = row.returns_per_day
                     llm_outputs = row.llm_outputs
                     llm_consensus = (
@@ -2722,36 +2753,79 @@ class BullpenAutoLiveEngine:
 
         invest_stage_started_at = utc_now_iso()
         total_decision_rows = len(position_snapshots) + len(candidate_contexts)
-        set_run_stage_result(
-            run,
-            build_workflow_stage_result(
-                stage_number=3,
-                workflow_stage_key="invest",
-                phase_status="running",
-                status="pass" if total_decision_rows > 0 else "warning",
-                reason=(
-                    "Stage 3 started. Planning buys and exits from the ranked Bullpen table."
-                    if total_decision_rows > 0
-                    else "No decision rows were available for Stage 3."
+
+        def report_invest_stage_progress(
+            *,
+            phase_status: str,
+            reason: str,
+            completed_items: int,
+            last_completed_market: ScannedMarket | None = None,
+            completed_at: str | None | object = _DEFAULT_COMPLETED_AT,
+        ) -> None:
+            stage_outputs: dict[str, object] = {
+                "top_table_size": len(top_rows),
+                "active_rows_ranked": len(active_rank_rows),
+                "qualified_candidate_rows": len(candidate_rank_rows),
+                "top_candidate_market_ids": sorted(top_candidate_market_ids),
+                "top_active_keys": sorted(top_active_keys),
+                "active_position_rows": len(position_snapshots),
+                "candidate_decision_rows": len(candidate_contexts),
+            }
+            if last_completed_market is not None:
+                stage_outputs["last_completed_market_id"] = last_completed_market.market_id
+                stage_outputs["last_completed_question"] = last_completed_market.question
+                stage_outputs["last_completed_market_url"] = last_completed_market.market_url
+            set_run_stage_result(
+                run,
+                build_workflow_stage_result(
+                    stage_number=3,
+                    workflow_stage_key="invest",
+                    phase_status=phase_status,
+                    status="pass" if total_decision_rows > 0 else "warning",
+                    reason=reason,
+                    completed_items=completed_items,
+                    total_items=total_decision_rows,
+                    item_label="rows",
+                    outputs=stage_outputs,
+                    guardrails_checked=global_guardrails,
+                    started_at=invest_stage_started_at,
+                    completed_at=completed_at,
                 ),
-                completed_items=0,
-                total_items=total_decision_rows,
-                item_label="decisions",
-                outputs={
-                    "top_table_size": len(top_rows),
-                    "active_rows_ranked": len(active_rank_rows),
-                    "qualified_candidate_rows": len(candidate_rank_rows),
-                    "top_candidate_market_ids": sorted(top_candidate_market_ids),
-                    "top_active_keys": sorted(top_active_keys),
-                },
-                guardrails_checked=global_guardrails,
-                started_at=invest_stage_started_at,
-                completed_at=None,
+            )
+            self._report_progress(progress_callback, run, state)
+
+        report_invest_stage_progress(
+            phase_status="running",
+            reason=(
+                "Stage 3 started. Planning buys and exits from the ranked Bullpen table."
+                if total_decision_rows > 0
+                else "No candidate or position rows were available for Stage 3."
             ),
+            completed_items=0,
+            completed_at=None,
         )
-        self._report_progress(progress_callback, run, state)
 
         decisions: list[BullpenAutoLiveDecision] = []
+        processed_decision_rows = 0
+
+        def record_invest_decision(
+            decision: BullpenAutoLiveDecision,
+            *,
+            market: ScannedMarket,
+        ) -> None:
+            nonlocal processed_decision_rows
+            decisions.append(decision)
+            processed_decision_rows += 1
+            report_invest_stage_progress(
+                phase_status="running",
+                reason=(
+                    f"Stage 3 reviewed row {processed_decision_rows} of "
+                    f"{total_decision_rows}. Latest: {market.question}"
+                ),
+                completed_items=processed_decision_rows,
+                last_completed_market=market,
+                completed_at=None,
+            )
 
         def _build_decision(
             *,
@@ -2930,7 +3004,7 @@ class BullpenAutoLiveEngine:
                         reason="Position was left untouched because returns/day could not be computed safely.",
                     )
                 )
-                decisions.append(
+                record_invest_decision(
                     _build_decision(
                         market=market,
                         decision_action="HOLD",
@@ -2939,7 +3013,8 @@ class BullpenAutoLiveEngine:
                         current_position=current_position,
                         current_exposure_usd=position.exposure_usd,
                         target_exposure_usd=position.exposure_usd,
-                    )
+                    ),
+                    market=market,
                 )
                 continue
             key = f"{position.market_id}::{position.side}"
@@ -2952,7 +3027,7 @@ class BullpenAutoLiveEngine:
                         outputs={"returns_per_day": returns_per_day},
                     )
                 )
-                decisions.append(
+                record_invest_decision(
                     _build_decision(
                         market=market,
                         decision_action="HOLD",
@@ -2961,7 +3036,8 @@ class BullpenAutoLiveEngine:
                         current_position=current_position,
                         current_exposure_usd=position.exposure_usd,
                         target_exposure_usd=position.exposure_usd,
-                    )
+                    ),
+                    market=market,
                 )
                 continue
             stage_results.append(
@@ -2972,7 +3048,7 @@ class BullpenAutoLiveEngine:
                     outputs={"returns_per_day": returns_per_day},
                 )
             )
-            decisions.append(
+            record_invest_decision(
                 _build_decision(
                     market=market,
                     decision_action="EXIT",
@@ -2983,7 +3059,8 @@ class BullpenAutoLiveEngine:
                     target_exposure_usd=0,
                     order_usd=position.exposure_usd,
                     order_shares=position.shares,
-                )
+                ),
+                market=market,
             )
 
         for context in candidate_contexts:
@@ -3006,7 +3083,7 @@ class BullpenAutoLiveEngine:
                         hard_block=True,
                     )
                 )
-                decisions.append(
+                record_invest_decision(
                     _build_decision(
                         market=market,
                         decision_action="SKIP",
@@ -3015,7 +3092,8 @@ class BullpenAutoLiveEngine:
                         side_to_trade=context.get("selected_side"),
                         llm_outputs=llm_outputs,
                         llm_consensus=llm_consensus,
-                    )
+                    ),
+                    market=market,
                 )
                 continue
             if market.market_id not in top_candidate_market_ids:
@@ -3033,7 +3111,7 @@ class BullpenAutoLiveEngine:
                         hard_block=True,
                     )
                 )
-                decisions.append(
+                record_invest_decision(
                     _build_decision(
                         market=market,
                         decision_action="SKIP",
@@ -3042,7 +3120,8 @@ class BullpenAutoLiveEngine:
                         side_to_trade=context.get("selected_side"),
                         llm_outputs=llm_outputs,
                         llm_consensus=llm_consensus,
-                    )
+                    ),
+                    market=market,
                 )
                 continue
             stage_results.append(
@@ -3061,7 +3140,7 @@ class BullpenAutoLiveEngine:
                     outputs={"returns_per_day": returns_per_day},
                 )
             )
-            decisions.append(
+            record_invest_decision(
                 _build_decision(
                     market=market,
                     decision_action="BUY_NEW",
@@ -3073,7 +3152,8 @@ class BullpenAutoLiveEngine:
                     order_usd=CONSOLE_FIXED_ORDER_USD,
                     llm_outputs=llm_outputs,
                     llm_consensus=llm_consensus,
-                )
+                ),
+                market=market,
             )
 
         actionable_decisions = [
@@ -3196,7 +3276,7 @@ class BullpenAutoLiveEngine:
                 if order_plan.action == "buy":
                     order_plan.execution_response = await executor.buy_limit(
                         market_id=market_id_for_execution,
-                        outcome="No",
+                        outcome="Yes" if order_plan.side == "YES" else "No",
                         amount_usd=order_plan.order_size_usd,
                         max_price=cents_to_decimal(order_plan.limit_price_cents),
                     )
@@ -3207,7 +3287,7 @@ class BullpenAutoLiveEngine:
                             market_title=decision.market_title,
                             market_url=decision.market_url,
                             theme=decision.theme,
-                            side="NO",
+                            side=order_plan.side,
                             exposure_usd=round(order_plan.order_size_usd, 2),
                             shares=round(order_plan.shares, 6),
                             average_price_cents=order_plan.limit_price_cents,
@@ -3317,13 +3397,15 @@ class BullpenAutoLiveEngine:
                 ),
                 completed_items=len(decisions),
                 total_items=total_decision_rows,
-                item_label="decisions",
+                item_label="rows",
                 outputs={
                     "top_table_size": len(top_rows),
                     "active_rows_ranked": len(active_rank_rows),
                     "qualified_candidate_rows": len(candidate_rank_rows),
                     "top_candidate_market_ids": sorted(top_candidate_market_ids),
                     "top_active_keys": sorted(top_active_keys),
+                    "active_position_rows": len(position_snapshots),
+                    "candidate_decision_rows": len(candidate_contexts),
                     "decisions_count": len(decisions),
                     "orders_planned": planned_orders,
                     "orders_submitted": submitted_orders,
