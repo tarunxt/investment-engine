@@ -9,10 +9,8 @@ from app.core.logging import get_logger
 from app.domains.polymarket import bullpen as bullpen_module
 from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_FIXED_ORDER_USD,
-    CONSOLE_LLM_CANDIDATE_LIMIT,
-    CONSOLE_MIN_LLM_NO_ODDS,
+    CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
     CONSOLE_MIN_MARKET_ODDS,
-    CONSOLE_MIN_RETURNS_PER_DAY,
     CONSOLE_PROFILE_ID,
     CONSOLE_RANKED_EVENT_LIMIT,
     CONSOLE_SCHEDULE_HOURS,
@@ -323,6 +321,27 @@ def _disagreement_weight(consensus: LlmConsensus | None, settings: BullpenAutoLi
 
 def _current_price_for_side(market: ScannedMarket, side: str) -> float | None:
     return market.current_yes_odds if side == "YES" else market.current_no_odds
+
+
+def _stronger_probability_side(
+    *,
+    yes_probability: float | None,
+    no_probability: float | None,
+    minimum_probability: float,
+) -> tuple[str | None, float | None]:
+    if yes_probability is None and no_probability is None:
+        return None, None
+
+    normalized_yes = yes_probability if yes_probability is not None else float("-inf")
+    normalized_no = no_probability if no_probability is not None else float("-inf")
+    strongest_probability = max(normalized_yes, normalized_no)
+    if strongest_probability == float("-inf"):
+        return None, None
+    if strongest_probability <= minimum_probability:
+        return None, strongest_probability
+    if normalized_yes >= normalized_no:
+        return "YES", strongest_probability
+    return "NO", strongest_probability
 
 
 def _is_supported_outcome_side(side: str | None) -> bool:
@@ -1992,7 +2011,7 @@ class BullpenAutoLiveEngine:
                         candidate_contexts.append(
                             {
                                 "market": market,
-                                "returns_per_day": returns_per_day or 0,
+                                "returns_per_day": returns_per_day,
                                 "rules": None,
                                 "llm_outputs": llm_outputs,
                                 "llm_consensus": None,
@@ -2003,15 +2022,16 @@ class BullpenAutoLiveEngine:
                         )
                         continue
 
+                    selected_side, strongest_llm_odds = _stronger_probability_side(
+                        yes_probability=llm_consensus.fair_yes_probability_pct,
+                        no_probability=llm_consensus.fair_no_probability_pct,
+                        minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                    )
                     qualified_by_table = bool(
-                        row.amount_to_be_invested is not None
-                        and row.amount_to_be_invested > 0
-                        and returns_per_day is not None
-                        and returns_per_day > CONSOLE_MIN_RETURNS_PER_DAY
-                        and row.llm_no_odds is not None
-                        and row.llm_no_odds > CONSOLE_MIN_LLM_NO_ODDS
-                        and row.llm_disagreement_level != "High"
-                        and not row.adjudication_required
+                        returns_per_day is not None
+                        and selected_side is not None
+                        and llm_consensus.disagreement_level != "High"
+                        and not llm_consensus.adjudication_required
                     )
                     stage_results.append(
                         build_stage_result(
@@ -2032,13 +2052,13 @@ class BullpenAutoLiveEngine:
                     )
 
                     qualification_reason = (
-                        "Candidate qualifies for the fixed $5 No-side flow."
+                        "Candidate qualifies for the Events to invest in table."
                         if qualified_by_table
-                        else "Candidate failed the fixed Bullpen table thresholds."
+                        else "Candidate did not pass the Events to invest in table thresholds."
                     )
                     if qualified_by_table and not row.selected:
                         qualification_reason = (
-                            "Candidate qualifies in the Bullpen x AI table but was not selected for auto-invest."
+                            "Candidate qualifies in the Events to invest in table but was not selected for auto-invest."
                         )
                     stage_results.append(
                         build_stage_result(
@@ -2049,9 +2069,11 @@ class BullpenAutoLiveEngine:
                             reason=qualification_reason,
                             outputs={
                                 "returns_per_day": returns_per_day,
-                                "min_returns_per_day": CONSOLE_MIN_RETURNS_PER_DAY,
+                                "selected_side": selected_side,
+                                "strongest_llm_odds": strongest_llm_odds,
+                                "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
                                 "fair_no_probability_pct": llm_consensus.fair_no_probability_pct,
-                                "min_llm_no_odds": CONSOLE_MIN_LLM_NO_ODDS,
+                                "min_strongest_llm_odds": CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
                                 "selected": row.selected,
                             },
                             hard_block=not (qualified_by_table and row.selected),
@@ -2066,12 +2088,13 @@ class BullpenAutoLiveEngine:
                     candidate_contexts.append(
                         {
                             "market": market,
-                            "returns_per_day": returns_per_day or 0,
+                            "returns_per_day": returns_per_day,
                             "rules": None,
                             "llm_outputs": llm_outputs,
                             "llm_consensus": llm_consensus,
                             "stage_results": stage_results,
                             "qualified": qualified_by_table and row.selected,
+                            "selected_side": selected_side,
                             "reason": qualification_reason,
                         }
                     )
@@ -2276,7 +2299,7 @@ class BullpenAutoLiveEngine:
                     reason=reason,
                     completed_items=completed_items,
                     total_items=llm_candidate_count,
-                    item_label="shortlisted events",
+                    item_label="events",
                     outputs=stage_outputs,
                     guardrails_checked=global_guardrails,
                     started_at=llm_stage_started_at,
@@ -2289,7 +2312,7 @@ class BullpenAutoLiveEngine:
             report_llm_stage_progress(
                 phase_status="running",
                 reason=(
-                    f"Stage 2 started. Reusing existing LLM outputs for {llm_candidate_count} of {stage1_accepted_candidate_count} Stage 1 events."
+                    f"Stage 2 started. Reusing existing LLM outputs for {llm_candidate_count} Stage 1 events."
                     if llm_candidate_count > 0
                     else "No candidate events qualified for Stage 2 LLM review."
                 ),
@@ -2300,23 +2323,21 @@ class BullpenAutoLiveEngine:
 
         if scan_seed_markets is not None:
             positioned_market_ids = {position.market_id for position in position_snapshots}
-            candidate_rows: list[tuple[ScannedMarket, float]] = []
+            candidate_rows: list[tuple[ScannedMarket, float | None]] = []
             for market in scan_seed_markets:
                 if market.market_id in positioned_market_ids:
                     continue
                 returns_per_day = candidate_returns_per_day(market, now=now)
-                if returns_per_day is None or returns_per_day <= CONSOLE_MIN_RETURNS_PER_DAY:
-                    continue
                 candidate_rows.append((market, returns_per_day))
             candidate_rows.sort(
                 key=lambda item: (
-                    -item[1],
+                    -(item[1] if item[1] is not None else float("-inf")),
                     item[0].close_time or "",
                     item[0].question,
                 )
             )
             candidate_rows_before_llm = len(candidate_rows)
-            llm_markets = candidate_rows[:CONSOLE_LLM_CANDIDATE_LIMIT]
+            llm_markets = candidate_rows
             llm_candidate_count = len(llm_markets)
             set_run_stage_result(
                 run,
@@ -2373,7 +2394,7 @@ class BullpenAutoLiveEngine:
             report_llm_stage_progress(
                 phase_status="running",
                 reason=(
-                    f"Stage 2 started. Shortlisted {llm_candidate_count} of {stage1_accepted_candidate_count} Stage 1 events for LLM review."
+                    f"Stage 2 started. Reviewing {llm_candidate_count} Stage 1 events."
                     if llm_candidate_count > 0
                     else "No candidate events qualified for Stage 2 LLM review."
                 ),
@@ -2385,7 +2406,7 @@ class BullpenAutoLiveEngine:
                 report_llm_stage_progress(
                     phase_status="running",
                     reason=(
-                        f"Stage 2 is reviewing shortlisted event {index} of {llm_candidate_count}: {market.question}"
+                        f"Stage 2 is reviewing event {index} of {llm_candidate_count}: {market.question}"
                     ),
                     completed_items=index - 1,
                     current_candidate_index=index,
@@ -2441,7 +2462,7 @@ class BullpenAutoLiveEngine:
                     report_llm_stage_progress(
                         phase_status="running",
                         reason=(
-                            f"Stage 2 reviewed {index} of {llm_candidate_count} shortlisted events. Latest: {market.question}"
+                            f"Stage 2 reviewed {index} of {llm_candidate_count} events. Latest: {market.question}"
                         ),
                         completed_items=index,
                         last_completed_market=market,
@@ -2468,12 +2489,16 @@ class BullpenAutoLiveEngine:
                 evidence_packet = build_evidence_packet(market, rules, built_at=utc_now_iso())
                 llm_outputs, llm_consensus = run_llm_consensus(market, rules, evidence_packet)
                 fair_no = llm_consensus.fair_no_probability_pct
+                selected_side, strongest_llm_odds = _stronger_probability_side(
+                    yes_probability=llm_consensus.fair_yes_probability_pct,
+                    no_probability=fair_no,
+                    minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                )
                 qualified = bool(
-                    fair_no is not None
-                    and fair_no > CONSOLE_MIN_LLM_NO_ODDS
+                    selected_side is not None
                     and llm_consensus.disagreement_level != "High"
                     and not llm_consensus.adjudication_required
-                    and returns_per_day > CONSOLE_MIN_RETURNS_PER_DAY
+                    and returns_per_day is not None
                 )
                 stage_results.append(
                     build_stage_result(
@@ -2493,9 +2518,9 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 qualification_reason = (
-                    "Candidate qualifies for the fixed $5 No-side flow."
+                    "Candidate qualifies for the Events to invest in table."
                     if qualified
-                    else "Candidate failed the fixed Bullpen table thresholds."
+                    else "Candidate did not pass the Events to invest in table thresholds."
                 )
                 stage_results.append(
                     build_stage_result(
@@ -2504,13 +2529,15 @@ class BullpenAutoLiveEngine:
                         reason=(
                             "Candidate qualifies for the Events to invest in table."
                             if qualified
-                            else "Candidate did not pass the fixed Bullpen No-odds thresholds."
+                            else "Candidate did not pass the Events to invest in table thresholds."
                         ),
                         outputs={
                             "returns_per_day": returns_per_day,
-                            "min_returns_per_day": CONSOLE_MIN_RETURNS_PER_DAY,
+                            "selected_side": selected_side,
+                            "strongest_llm_odds": strongest_llm_odds,
+                            "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
                             "fair_no_probability_pct": fair_no,
-                            "min_llm_no_odds": CONSOLE_MIN_LLM_NO_ODDS,
+                            "min_strongest_llm_odds": CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
                         },
                         hard_block=not qualified,
                     )
@@ -2530,13 +2557,14 @@ class BullpenAutoLiveEngine:
                         "llm_consensus": llm_consensus,
                         "stage_results": stage_results,
                         "qualified": qualified,
+                        "selected_side": selected_side,
                         "reason": qualification_reason,
                     }
                 )
                 report_llm_stage_progress(
                     phase_status="running",
                     reason=(
-                        f"Stage 2 reviewed {index} of {llm_candidate_count} shortlisted events. Latest: {market.question}"
+                        f"Stage 2 reviewed {index} of {llm_candidate_count} events. Latest: {market.question}"
                     ),
                     completed_items=index,
                     last_completed_market=market,
@@ -2564,6 +2592,7 @@ class BullpenAutoLiveEngine:
                     "returns_per_day": context["returns_per_day"],
                     "qualified": bool(context["qualified"]),
                     "reason": str(context["reason"]),
+                    "selected_side": context.get("selected_side"),
                     "fair_yes_probability_pct": (
                         llm_consensus.fair_yes_probability_pct if llm_consensus else None
                     ),
@@ -2589,13 +2618,13 @@ class BullpenAutoLiveEngine:
                 phase_status="completed",
                 status="pass" if llm_candidate_count > 0 else "warning",
                 reason=(
-                    f"LLM review completed for {llm_candidate_count} shortlisted events from {stage1_accepted_candidate_count} Stage 1 candidates."
+                    f"LLM review completed for {llm_candidate_count} events from {stage1_accepted_candidate_count} Stage 1 candidates."
                     if llm_candidate_count > 0
                     else "Stage 2 had no candidate events to review."
                 ),
                 completed_items=llm_candidate_count,
                 total_items=llm_candidate_count,
-                item_label="shortlisted events",
+                item_label="events",
                 outputs={
                     "scan_source_label": scan_source_label,
                     "scan_source_url": scan_source_url,
@@ -2664,7 +2693,7 @@ class BullpenAutoLiveEngine:
             build_stage_result(
                 stage_number=6,
                 status="pass",
-                reason="Ranked active positions and new No-side candidates into the fixed top-10 table.",
+                reason="Ranked active positions and new qualified candidates into the fixed top-10 table.",
                 outputs={
                     "top_table_size": len(top_rows),
                     "active_rows_ranked": len(active_rank_rows),
@@ -2731,6 +2760,7 @@ class BullpenAutoLiveEngine:
             reason: str,
             stage_results: list[BullpenAutoLiveStageResult],
             current_position: PositionSnapshot | None = None,
+            side_to_trade: str | None = None,
             current_exposure_usd: float = 0,
             target_exposure_usd: float = 0,
             order_usd: float = 0,
@@ -2740,22 +2770,37 @@ class BullpenAutoLiveEngine:
         ) -> BullpenAutoLiveDecision:
             fair_no = llm_consensus.fair_no_probability_pct if llm_consensus else None
             fair_yes = llm_consensus.fair_yes_probability_pct if llm_consensus else None
-            price_cents = market.current_no_odds if decision_action == "BUY_NEW" else _current_price_for_side(
-                market,
-                current_position.side if current_position else "NO",
-            )
             confidence = normalize_auto_live_confidence(
                 llm_consensus.confidence if llm_consensus else None,
             )
             evidence_status = normalize_auto_live_evidence_status(
                 llm_consensus.evidence_status if llm_consensus else None,
             )
+            normalized_side_to_trade = (
+                side_to_trade if _is_supported_outcome_side(side_to_trade) else None
+            )
             side = (
-                "NO"
+                normalized_side_to_trade
                 if decision_action == "BUY_NEW"
                 else current_position.side
                 if current_position is not None
-                else "NO"
+                else normalized_side_to_trade or "NO"
+            )
+            price_cents = _current_price_for_side(
+                market,
+                side if decision_action == "BUY_NEW" else current_position.side if current_position else side,
+            )
+            fair_probability_pct = (
+                fair_yes
+                if side == "YES"
+                else fair_no
+                if side == "NO"
+                else fair_no or fair_yes or 0
+            )
+            edge_pp = (
+                round((fair_probability_pct or 0) - (price_cents or 0), 2)
+                if decision_action == "BUY_NEW"
+                else 0
             )
             order_plan = None
             if decision_action in {"BUY_NEW", "EXIT"}:
@@ -2791,18 +2836,10 @@ class BullpenAutoLiveEngine:
                 price_cents=round(price_cents or 0, 2),
                 current_yes_odds=market.current_yes_odds,
                 current_no_odds=market.current_no_odds,
-                fair_probability_pct=round(
-                    fair_no if decision_action == "BUY_NEW" else fair_yes or fair_no or 0,
-                    2,
-                ),
+                fair_probability_pct=round(fair_probability_pct or 0, 2),
                 fair_yes_probability_pct=fair_yes,
                 fair_no_probability_pct=fair_no,
-                edge_pp=round(
-                    ((fair_no or 0) - (market.current_no_odds or 0))
-                    if decision_action == "BUY_NEW"
-                    else 0,
-                    2,
-                ),
+                edge_pp=edge_pp,
                 score=round(
                     order_usd if decision_action == "BUY_NEW" else current_exposure_usd,
                     2,
@@ -2951,7 +2988,7 @@ class BullpenAutoLiveEngine:
 
         for context in candidate_contexts:
             market = context["market"]
-            returns_per_day = float(context["returns_per_day"])
+            returns_per_day = context["returns_per_day"]
             stage_results = list(context["stage_results"])
             llm_outputs = context["llm_outputs"]
             llm_consensus = context["llm_consensus"]
@@ -2975,6 +3012,7 @@ class BullpenAutoLiveEngine:
                         decision_action="SKIP",
                         reason=str(context["reason"]),
                         stage_results=stage_results,
+                        side_to_trade=context.get("selected_side"),
                         llm_outputs=llm_outputs,
                         llm_consensus=llm_consensus,
                     )
@@ -3001,6 +3039,7 @@ class BullpenAutoLiveEngine:
                         decision_action="SKIP",
                         reason="Candidate qualified but did not make the top-10 returns/day table.",
                         stage_results=stage_results,
+                        side_to_trade=context.get("selected_side"),
                         llm_outputs=llm_outputs,
                         llm_consensus=llm_consensus,
                     )
@@ -3018,7 +3057,7 @@ class BullpenAutoLiveEngine:
                 build_stage_result(
                     stage_number=6,
                     status="pass",
-                    reason="Qualified No-side candidate ranked inside the top-10 returns/day table.",
+                    reason="Qualified candidate ranked inside the top-10 returns/day table.",
                     outputs={"returns_per_day": returns_per_day},
                 )
             )
@@ -3026,8 +3065,9 @@ class BullpenAutoLiveEngine:
                 _build_decision(
                     market=market,
                     decision_action="BUY_NEW",
-                    reason="Qualified No-side candidate ranked inside the top-10 returns/day table.",
+                    reason="Qualified candidate ranked inside the top-10 returns/day table.",
                     stage_results=stage_results,
+                    side_to_trade=context.get("selected_side"),
                     current_exposure_usd=0,
                     target_exposure_usd=CONSOLE_FIXED_ORDER_USD,
                     order_usd=CONSOLE_FIXED_ORDER_USD,

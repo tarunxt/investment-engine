@@ -412,13 +412,13 @@ async def test_console_profile_advances_to_stage_2_with_naive_candidate_close_ti
 async def test_console_profile_reports_incremental_stage_2_progress(monkeypatch):
     fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
     first_market = _market(
-        question="Will the first shortlisted market finish review?",
+        question="Will the first Stage 1 market finish review?",
         slug="stage-2-shortlist-1",
         current_yes_odds=12,
         current_no_odds=88,
     )
     second_market = _market(
-        question="Will the second shortlisted market finish review?",
+        question="Will the second Stage 1 market finish review?",
         slug="stage-2-shortlist-2",
         current_yes_odds=10,
         current_no_odds=90,
@@ -515,7 +515,7 @@ async def test_console_profile_reports_incremental_stage_2_progress(monkeypatch)
     assert any(stage.completed_at is None for stage in llm_running_stages)
     assert any(stage.outputs.get("completed_items") == 1 for stage in llm_running_stages)
     assert any(
-        "reviewing shortlisted event 1 of 2" in stage.reason.lower()
+        "reviewing event 1 of 2" in stage.reason.lower()
         for stage in llm_running_stages
     )
     assert any(
@@ -528,10 +528,110 @@ async def test_console_profile_reports_incremental_stage_2_progress(monkeypatch)
         for stage in result.run.stage_results
         if stage.outputs.get("workflow_stage_key") == "llm"
     )
-    assert llm_stage.outputs["item_label"] == "shortlisted events"
+    assert llm_stage.outputs["item_label"] == "events"
     assert llm_stage.reason == (
-        "LLM review completed for 2 shortlisted events from 2 Stage 1 candidates."
+        "LLM review completed for 2 events from 2 Stage 1 candidates."
     )
+
+
+@pytest.mark.anyio
+async def test_console_profile_reviews_all_stage1_events_before_building_ranked_invest_table(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    first_market = _market(
+        question="Will the first lower-return event still be reviewed?",
+        slug="stage-1-event-1",
+        current_yes_odds=18,
+        current_no_odds=82,
+    )
+    second_market = _market(
+        question="Will the second lower-return event still be reviewed?",
+        slug="stage-1-event-2",
+        current_yes_odds=22,
+        current_no_odds=78,
+    )
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[first_market, second_market],
+            rejected=[],
+            total_candidates=2,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert side == "YES"
+        market = {
+            first_market.slug: first_market,
+            second_market.slug: second_market,
+        }[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=market.current_yes_odds,
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda market, **_kwargs: 1.5 if market.slug == first_market.slug else 2.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=91, fair_no=9),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+
+    assert result.run.stage_results[1].outputs["llm_candidate_count"] == 2
+    assert len(buy_decisions) == 2
+    assert all(decision.order_plan is not None for decision in buy_decisions)
+    assert all(decision.order_plan.side == "YES" for decision in buy_decisions)
 
 
 def test_auto_live_normalization_maps_raw_labels_to_strict_buckets():
@@ -1449,10 +1549,10 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
             question_id="candidate-market-2",
             market_title="Candidate market 2",
             slug="candidate-market-2",
-            current_yes_odds=16,
-            current_no_odds=84,
-            llm_yes_odds=11,
-            llm_no_odds=89,
+            current_yes_odds=22,
+            current_no_odds=78,
+            llm_yes_odds=91,
+            llm_no_odds=9,
             returns_per_day=7.2,
             selected=True,
             evidence_status="conflicting_evidence",
@@ -1528,7 +1628,10 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
     assert len(buy_decisions) == 2
     assert all(decision.order_plan is not None for decision in buy_decisions)
     assert all(decision.order_plan.order_size_usd == 5 for decision in buy_decisions)
-    assert all(decision.order_plan.side == "NO" for decision in buy_decisions)
+    assert sorted(decision.order_plan.side for decision in buy_decisions) == [
+        "NO",
+        "YES",
+    ]
     assert sorted(decision.evidence_status for decision in buy_decisions) == [
         "Moderate",
         "Strong",
@@ -1933,9 +2036,13 @@ async def test_console_profile_manual_scan_rows_skip_backend_rescan_and_run_llm_
     assert result.run.stage_results[1].outputs["workflow_stage_key"] == "llm"
     assert result.run.stage_results[1].outputs["phase_status"] == "completed"
     assert result.run.stage_results[1].outputs["llm_candidate_count"] == 2
-    assert result.run.stage_results[2].outputs["workflow_stage_key"] == "invest"
-    assert result.run.stage_results[2].outputs["phase_status"] == "completed"
-    assert result.run.stage_results[2].outputs["decisions_count"] == 2
+    invest_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+    assert invest_stage.outputs["phase_status"] == "completed"
+    assert invest_stage.outputs["decisions_count"] == 2
     assert any(
         any(
             stage_number == 2

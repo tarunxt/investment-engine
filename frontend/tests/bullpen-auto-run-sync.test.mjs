@@ -161,7 +161,7 @@ function createReviewedCandidate(overrides = {}) {
     close_time: DEFAULT_CLOSE_TIME,
     returns_per_day: 1.25,
     qualified: true,
-    reason: "Candidate qualifies for the fixed $5 No-side flow.",
+    reason: "Candidate qualifies for the Events to invest in table.",
     fair_yes_probability_pct: 12,
     fair_no_probability_pct: 88,
     disagreement_level: "Low",
@@ -208,7 +208,7 @@ function createDecision(overrides = {}) {
     key_evidence: ["Evidence one"],
     red_flags: [],
     rationale: "Consensus stayed strongly on the No side.",
-    reason: "Qualified No-side candidate ranked inside the top-10 returns/day table.",
+    reason: "Qualified candidate ranked inside the top-10 returns/day table.",
     summary: "Decision summary",
     order_plan: null,
     llm_outputs: [
