@@ -25,6 +25,7 @@ test("deriveApiErrorMessage handles nested and string payloads", async () => {
   const {
     deriveApiErrorMessage,
     formatApiErrorSummary,
+    splitApiErrorSummary,
     stringifyErrorDetail,
   } = await loadApiErrorsModule();
 
@@ -54,5 +55,20 @@ test("deriveApiErrorMessage handles nested and string payloads", async () => {
       details: { detail: "RuntimeError: Bullpen claim rejected" },
     }),
     "HTTP 400: API request failed. Details: RuntimeError: Bullpen claim rejected",
+  );
+  assert.deepEqual(
+    splitApiErrorSummary({
+      status: 500,
+      message: "An unexpected error occurred",
+      details: {
+        error: "INTERNAL_SERVER_ERROR",
+        message: "An unexpected error occurred",
+      },
+    }),
+    {
+      statusText: "HTTP 500",
+      message: "An unexpected error occurred",
+      details: "Code: INTERNAL_SERVER_ERROR",
+    },
   );
 });
