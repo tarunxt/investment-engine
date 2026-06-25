@@ -1515,6 +1515,146 @@ async def test_console_profile_manual_selected_rows_skip_backend_rescan_and_avoi
     ]
 
 
+@pytest.mark.anyio
+async def test_console_profile_manual_scan_rows_skip_backend_rescan_and_run_llm_from_snapshot(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_rows = [
+        BullpenAutoLiveConsoleCandidateInput(
+            question_id="candidate-market-1",
+            market_id="candidate-market-1",
+            market_title="Candidate market 1",
+            slug="candidate-market-1",
+            market_url="https://polymarket.com/event/candidate-market-1",
+            close_time="2026-06-24T00:00:00+00:00",
+            theme="Politics",
+            current_yes_odds=19,
+            current_no_odds=81,
+            returns_per_day=7.6,
+            rules='This market will resolve to "Yes" if candidate X wins.',
+            selected=False,
+            llm_outputs=[],
+        ),
+        BullpenAutoLiveConsoleCandidateInput(
+            question_id="candidate-market-2",
+            market_id="candidate-market-2",
+            market_title="Candidate market 2",
+            slug="candidate-market-2",
+            market_url="https://polymarket.com/event/candidate-market-2",
+            close_time="2026-06-24T00:00:00+00:00",
+            theme="Politics",
+            current_yes_odds=17,
+            current_no_odds=83,
+            returns_per_day=6.8,
+            rules='This market will resolve to "Yes" if candidate Y wins.',
+            selected=False,
+            llm_outputs=[],
+        ),
+    ]
+    market_lookup = {
+        row.slug: _market(
+            question=row.market_title,
+            slug=row.slug,
+            close_time=row.close_time,
+            current_yes_odds=row.current_yes_odds,
+            current_no_odds=row.current_no_odds,
+        )
+        for row in manual_rows
+        if row.slug
+    }
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    async def fail_scan_candidate_markets(**_kwargs):
+        raise AssertionError("Manual Bullpen x AI scan rows should bypass the backend rescan.")
+
+    async def fail_scan_console_profile_markets(**_kwargs):
+        raise AssertionError("Manual Bullpen x AI scan rows should bypass the console profile scan.")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_candidate_markets",
+        fail_scan_candidate_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fail_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=60),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=10, fair_no=90),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=2,
+                    candidate_rows=manual_rows,
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+
+    assert len(buy_decisions) == 2
+    assert result.run.decisions_count == 2
+    assert result.run.diagnostics.used_manual_console_rows is True
+    assert result.run.diagnostics.candidate_rows_before_llm == 2
+    assert result.run.diagnostics.llm_candidate_count == 2
+    assert result.run.stage_results[0].outputs["used_manual_console_rows"] is True
+    assert result.run.stage_results[0].outputs["candidate_rows_before_llm"] == 2
+    assert result.run.stage_results[0].outputs["phase_status"] == "completed"
+
+
 async def _execute_auto_live(
     monkeypatch,
     *,

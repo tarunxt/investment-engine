@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -1764,30 +1765,7 @@ class BullpenAutoLiveEngine:
         global_guardrails: list[BullpenAutoLiveGuardrailCheck],
         now: datetime,
     ) -> EngineResult:
-        live_wallet_positions = await read_console_wallet_positions()
-        unsupported_live_wallet_positions = [
-            position
-            for position in live_wallet_positions
-            if not _is_supported_outcome_side(position.side)
-        ]
-        if unsupported_live_wallet_positions:
-            logger.warning(
-                "Skipping %s unsupported Bullpen wallet position(s) for Auto-Live console profile: %s",
-                len(unsupported_live_wallet_positions),
-                [
-                    {
-                        "market_id": position.market_id,
-                        "market_title": position.market_title,
-                        "side": position.side,
-                    }
-                    for position in unsupported_live_wallet_positions
-                ],
-            )
-        live_wallet_positions = [
-            position
-            for position in live_wallet_positions
-            if _is_supported_outcome_side(position.side)
-        ]
+        live_wallet_positions_task = asyncio.create_task(read_console_wallet_positions())
         manual_console_context = (
             run.request_context.console_profile
             if run.request_context and run.request_context.console_profile
@@ -1797,6 +1775,10 @@ class BullpenAutoLiveEngine:
             manual_console_context.candidate_rows if manual_console_context else []
         )
         manual_console_rows_used = bool(manual_console_rows)
+        manual_console_rows_have_reusable_llm = manual_console_rows_used and all(
+            row.llm_yes_odds is not None or row.llm_no_odds is not None
+            for row in manual_console_rows
+        )
         selected_manual_candidate_ids = [
             row.market_id for row in manual_console_rows if row.selected
         ]
@@ -1815,6 +1797,7 @@ class BullpenAutoLiveEngine:
         llm_candidate_count = 0
         scanned_total_candidates = 0
         candidate_contexts: list[dict[str, object]] = []
+        scan_seed_markets: list[ScannedMarket] | None = None
 
         if manual_console_rows_used:
             scan_source_label = scan_source_label or "Bullpen x AI manual table"
@@ -1823,149 +1806,152 @@ class BullpenAutoLiveEngine:
                 manual_console_context.total_candidates,
                 len(manual_console_rows),
             )
-            candidate_rows_before_llm = len(manual_console_rows)
-            llm_candidate_count = sum(
-                1
-                for row in manual_console_rows
-                if row.llm_yes_odds is not None or row.llm_no_odds is not None
-            )
             manual_markets = [_manual_console_market(row) for row in manual_console_rows]
             market_by_slug = {market.slug: market for market in manual_markets if market.slug}
             market_by_id = {market.market_id: market for market in manual_markets}
-            for row, market in zip(manual_console_rows, manual_markets, strict=False):
-                returns_per_day = row.returns_per_day
-                llm_outputs = row.llm_outputs
-                llm_consensus = (
-                    _manual_console_consensus(row)
+            if manual_console_rows_have_reusable_llm:
+                candidate_rows_before_llm = len(manual_console_rows)
+                llm_candidate_count = sum(
+                    1
+                    for row in manual_console_rows
                     if row.llm_yes_odds is not None or row.llm_no_odds is not None
-                    else None
                 )
-                stage_results = [
-                    build_stage_result(
-                        stage_number=1,
-                        status="pass",
-                        reason="Candidate came from the visible Bullpen x AI table.",
-                        outputs={
-                            "question_id": row.question_id,
-                            "selected": row.selected,
-                            "close_time": row.close_time,
-                            "current_no_odds": row.current_no_odds,
-                            "returns_per_day": returns_per_day,
-                            "source_label": scan_source_label,
-                        },
-                    ),
-                    build_stage_result(
-                        stage_number=2,
-                        status="pass",
-                        reason="Using the current Bullpen x AI table row instead of rerunning a separate scan.",
-                        outputs={
-                            "rules_available": bool(row.rules),
-                            "market_url": row.market_url,
-                        },
-                    ),
-                ]
+                for row, market in zip(manual_console_rows, manual_markets, strict=False):
+                    returns_per_day = row.returns_per_day
+                    llm_outputs = row.llm_outputs
+                    llm_consensus = (
+                        _manual_console_consensus(row)
+                        if row.llm_yes_odds is not None or row.llm_no_odds is not None
+                        else None
+                    )
+                    stage_results = [
+                        build_stage_result(
+                            stage_number=1,
+                            status="pass",
+                            reason="Candidate came from the visible Bullpen x AI table.",
+                            outputs={
+                                "question_id": row.question_id,
+                                "selected": row.selected,
+                                "close_time": row.close_time,
+                                "current_no_odds": row.current_no_odds,
+                                "returns_per_day": returns_per_day,
+                                "source_label": scan_source_label,
+                            },
+                        ),
+                        build_stage_result(
+                            stage_number=2,
+                            status="pass",
+                            reason="Using the current Bullpen x AI table row instead of rerunning a separate scan.",
+                            outputs={
+                                "rules_available": bool(row.rules),
+                                "market_url": row.market_url,
+                            },
+                        ),
+                    ]
 
-                if llm_consensus is None:
-                    reason = "Candidate is missing LLM output in the current Bullpen x AI table."
+                    if llm_consensus is None:
+                        reason = "Candidate is missing LLM output in the current Bullpen x AI table."
+                        stage_results.append(
+                            build_stage_result(
+                                stage_number=3,
+                                status="fail",
+                                reason=reason,
+                                hard_block=True,
+                            )
+                        )
+                        _record_rejected_candidate(
+                            rejected_candidate_map,
+                            market=market,
+                            reason=reason,
+                        )
+                        candidate_contexts.append(
+                            {
+                                "market": market,
+                                "returns_per_day": returns_per_day or 0,
+                                "rules": None,
+                                "llm_outputs": llm_outputs,
+                                "llm_consensus": None,
+                                "stage_results": stage_results,
+                                "qualified": False,
+                                "reason": reason,
+                            }
+                        )
+                        continue
+
+                    qualified_by_table = bool(
+                        row.amount_to_be_invested is not None
+                        and row.amount_to_be_invested > 0
+                        and returns_per_day is not None
+                        and returns_per_day > CONSOLE_MIN_RETURNS_PER_DAY
+                        and row.llm_no_odds is not None
+                        and row.llm_no_odds > CONSOLE_MIN_LLM_NO_ODDS
+                        and row.llm_disagreement_level != "High"
+                        and not row.adjudication_required
+                    )
                     stage_results.append(
                         build_stage_result(
                             stage_number=3,
-                            status="fail",
-                            reason=reason,
-                            hard_block=True,
+                            status="warning"
+                            if row.llm_disagreement_level in {"Medium", "High"}
+                            else "pass",
+                            reason="Using the current Bullpen x AI LLM output for this candidate.",
+                            outputs={
+                                "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
+                                "fair_no_probability_pct": llm_consensus.fair_no_probability_pct,
+                                "disagreement_level": llm_consensus.disagreement_level,
+                                "adjudication_required": llm_consensus.adjudication_required,
+                                "confidence": llm_consensus.confidence,
+                                "evidence_status": llm_consensus.evidence_status,
+                            },
                         )
                     )
-                    _record_rejected_candidate(
-                        rejected_candidate_map,
-                        market=market,
-                        reason=reason,
+
+                    qualification_reason = (
+                        "Candidate qualifies for the fixed $5 No-side flow."
+                        if qualified_by_table
+                        else "Candidate failed the fixed Bullpen table thresholds."
                     )
+                    if qualified_by_table and not row.selected:
+                        qualification_reason = (
+                            "Candidate qualifies in the Bullpen x AI table but was not selected for auto-invest."
+                        )
+                    stage_results.append(
+                        build_stage_result(
+                            stage_number=4,
+                            status="pass"
+                            if qualified_by_table and row.selected
+                            else "warning",
+                            reason=qualification_reason,
+                            outputs={
+                                "returns_per_day": returns_per_day,
+                                "min_returns_per_day": CONSOLE_MIN_RETURNS_PER_DAY,
+                                "fair_no_probability_pct": llm_consensus.fair_no_probability_pct,
+                                "min_llm_no_odds": CONSOLE_MIN_LLM_NO_ODDS,
+                                "selected": row.selected,
+                            },
+                            hard_block=not (qualified_by_table and row.selected),
+                        )
+                    )
+                    if not qualified_by_table or not row.selected:
+                        _record_rejected_candidate(
+                            rejected_candidate_map,
+                            market=market,
+                            reason=qualification_reason,
+                        )
                     candidate_contexts.append(
                         {
                             "market": market,
                             "returns_per_day": returns_per_day or 0,
                             "rules": None,
                             "llm_outputs": llm_outputs,
-                            "llm_consensus": None,
+                            "llm_consensus": llm_consensus,
                             "stage_results": stage_results,
-                            "qualified": False,
-                            "reason": reason,
+                            "qualified": qualified_by_table and row.selected,
+                            "reason": qualification_reason,
                         }
                     )
-                    continue
-
-                qualified_by_table = bool(
-                    row.amount_to_be_invested is not None
-                    and row.amount_to_be_invested > 0
-                    and returns_per_day is not None
-                    and returns_per_day > CONSOLE_MIN_RETURNS_PER_DAY
-                    and row.llm_no_odds is not None
-                    and row.llm_no_odds > CONSOLE_MIN_LLM_NO_ODDS
-                    and row.llm_disagreement_level != "High"
-                    and not row.adjudication_required
-                )
-                stage_results.append(
-                    build_stage_result(
-                        stage_number=3,
-                        status="warning"
-                        if row.llm_disagreement_level in {"Medium", "High"}
-                        else "pass",
-                        reason="Using the current Bullpen x AI LLM output for this candidate.",
-                        outputs={
-                            "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
-                            "fair_no_probability_pct": llm_consensus.fair_no_probability_pct,
-                            "disagreement_level": llm_consensus.disagreement_level,
-                            "adjudication_required": llm_consensus.adjudication_required,
-                            "confidence": llm_consensus.confidence,
-                            "evidence_status": llm_consensus.evidence_status,
-                        },
-                    )
-                )
-
-                qualification_reason = (
-                    "Candidate qualifies for the fixed $5 No-side flow."
-                    if qualified_by_table
-                    else "Candidate failed the fixed Bullpen table thresholds."
-                )
-                if qualified_by_table and not row.selected:
-                    qualification_reason = (
-                        "Candidate qualifies in the Bullpen x AI table but was not selected for auto-invest."
-                    )
-                stage_results.append(
-                    build_stage_result(
-                        stage_number=4,
-                        status="pass"
-                        if qualified_by_table and row.selected
-                        else "warning",
-                        reason=qualification_reason,
-                        outputs={
-                            "returns_per_day": returns_per_day,
-                            "min_returns_per_day": CONSOLE_MIN_RETURNS_PER_DAY,
-                            "fair_no_probability_pct": llm_consensus.fair_no_probability_pct,
-                            "min_llm_no_odds": CONSOLE_MIN_LLM_NO_ODDS,
-                            "selected": row.selected,
-                        },
-                        hard_block=not (qualified_by_table and row.selected),
-                    )
-                )
-                if not qualified_by_table or not row.selected:
-                    _record_rejected_candidate(
-                        rejected_candidate_map,
-                        market=market,
-                        reason=qualification_reason,
-                    )
-                candidate_contexts.append(
-                    {
-                        "market": market,
-                        "returns_per_day": returns_per_day or 0,
-                        "rules": None,
-                        "llm_outputs": llm_outputs,
-                        "llm_consensus": llm_consensus,
-                        "stage_results": stage_results,
-                        "qualified": qualified_by_table and row.selected,
-                        "reason": qualification_reason,
-                    }
-                )
+            else:
+                scan_seed_markets = manual_markets
         else:
             scanned = await scan_console_profile_markets(now=now)
             scan_source_label = scanned.source_label
@@ -1973,6 +1959,7 @@ class BullpenAutoLiveEngine:
             scanned_total_candidates = scanned.total_candidates
             market_by_slug = {market.slug: market for market in scanned.accepted if market.slug}
             market_by_id = {market.market_id: market for market in scanned.accepted}
+            scan_seed_markets = scanned.accepted
             for rejected in scanned.rejected:
                 for reason in rejected.reasons:
                     _record_rejected_candidate(
@@ -1999,6 +1986,31 @@ class BullpenAutoLiveEngine:
                         ),
                         reason=reason,
                     )
+
+        live_wallet_positions = await live_wallet_positions_task
+        unsupported_live_wallet_positions = [
+            position
+            for position in live_wallet_positions
+            if not _is_supported_outcome_side(position.side)
+        ]
+        if unsupported_live_wallet_positions:
+            logger.warning(
+                "Skipping %s unsupported Bullpen wallet position(s) for Auto-Live console profile: %s",
+                len(unsupported_live_wallet_positions),
+                [
+                    {
+                        "market_id": position.market_id,
+                        "market_title": position.market_title,
+                        "side": position.side,
+                    }
+                    for position in unsupported_live_wallet_positions
+                ],
+            )
+        live_wallet_positions = [
+            position
+            for position in live_wallet_positions
+            if _is_supported_outcome_side(position.side)
+        ]
 
         enriched_wallet_positions = [
             apply_scanned_market_to_position(
@@ -2066,10 +2078,10 @@ class BullpenAutoLiveEngine:
             ),
         )
 
-        if not manual_console_rows_used:
+        if scan_seed_markets is not None:
             positioned_market_ids = {position.market_id for position in position_snapshots}
             candidate_rows: list[tuple[ScannedMarket, float]] = []
-            for market in scanned.accepted:
+            for market in scan_seed_markets:
                 if market.market_id in positioned_market_ids:
                     continue
                 returns_per_day = candidate_returns_per_day(market, now=now)

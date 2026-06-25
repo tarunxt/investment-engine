@@ -601,7 +601,7 @@ function buildBullpenAutoRunRequest({
   snapshot: BullpenScanSnapshot | null;
   selectedQuestionIds: Set<string>;
 }) {
-  if (!snapshot || selectedQuestionIds.size === 0) {
+  if (!snapshot || snapshot.questions.length === 0) {
     return null;
   }
 
