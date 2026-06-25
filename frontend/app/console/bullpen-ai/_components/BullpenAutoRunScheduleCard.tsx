@@ -15,7 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatApiTimestamp } from "@/lib/datetime";
-import { formatUnknownError } from "@/lib/apiErrors";
+import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type { BullpenAutoLiveSummaryResponse } from "@/types/api";
@@ -26,6 +26,10 @@ type BullpenAutoRunScheduleCardProps = {
 };
 
 type ActionState = "enable" | "run-now" | "stop" | null;
+type ErrorState = {
+  message: string;
+  details: string | null;
+};
 
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
 const POLL_INTERVAL_MS = 4_000;
@@ -37,8 +41,18 @@ const AUTO_RUN_TIMINGS = [
 ];
 
 function normalizeError(error: unknown) {
-  if (error instanceof APIError) return error.message;
-  return formatUnknownError(error);
+  if (error instanceof APIError) {
+    const { statusText, message, details } = splitApiErrorSummary(error);
+    return {
+      message,
+      details: [statusText, details].filter(Boolean).join(" • ") || null,
+    } satisfies ErrorState;
+  }
+
+  return {
+    message: formatUnknownError(error),
+    details: null,
+  } satisfies ErrorState;
 }
 
 function formatIstDateTime(value: string | null | undefined) {
@@ -98,7 +112,7 @@ export function BullpenAutoRunScheduleCard({
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<ActionState>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorState | null>(null);
   const [pendingRunId, setPendingRunId] = useState<string | null>(null);
 
   async function loadSummary(options?: { preserveLoading?: boolean }) {
@@ -399,7 +413,10 @@ export function BullpenAutoRunScheduleCard({
 
         {error ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-            {error}
+            <p className="font-medium">{error.message}</p>
+            {error.details ? (
+              <p className="mt-1 text-xs leading-5 text-rose-800">{error.details}</p>
+            ) : null}
           </div>
         ) : null}
 

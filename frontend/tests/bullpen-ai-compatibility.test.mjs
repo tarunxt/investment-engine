@@ -178,6 +178,20 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.match(autoRunCardSource, /12:00 AM IST/);
 });
 
+test("Bullpen x AI auto-run errors render detail text alongside the main message", () => {
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(autoRunCardSource, /splitApiErrorSummary/);
+  assert.match(autoRunCardSource, /error\.details/);
+  assert.match(autoRunCardSource, /text-xs leading-5 text-rose-800/);
+});
+
 test("Bullpen x AI scan defaults exclude tweet counts", async () => {
   const { DEFAULT_BULLPEN_SCAN_FILTERS } = await loadBullpenAiModule();
 

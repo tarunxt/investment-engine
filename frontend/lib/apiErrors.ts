@@ -4,6 +4,60 @@ type ApiErrorLike = {
   status?: number | null;
 };
 
+type ApiErrorSummaryParts = {
+  statusText: string | null;
+  message: string;
+  details: string | null;
+};
+
+function normalizeText(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "undefined") return null;
+  return trimmed;
+}
+
+function appendUniqueDetail(
+  parts: string[],
+  seen: Set<string>,
+  value: string | null | undefined,
+) {
+  const normalized = normalizeText(value);
+  if (!normalized) return;
+
+  const key = normalized.toLowerCase();
+  if (seen.has(key)) return;
+
+  seen.add(key);
+  parts.push(normalized);
+}
+
+function collectApiErrorDetails(
+  detail: unknown,
+  baseMessage: string,
+): string | null {
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  appendUniqueDetail(parts, seen, baseMessage);
+
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const record = detail as Record<string, unknown>;
+    const errorCode = normalizeText(stringifyErrorDetail(record.error));
+    if (errorCode) {
+      appendUniqueDetail(parts, seen, `Code: ${errorCode}`);
+    }
+
+    appendUniqueDetail(parts, seen, stringifyErrorDetail(record.detail));
+    appendUniqueDetail(parts, seen, stringifyErrorDetail(record.reason));
+    appendUniqueDetail(parts, seen, stringifyErrorDetail(record.title));
+    appendUniqueDetail(parts, seen, stringifyErrorDetail(record.details));
+  }
+
+  appendUniqueDetail(parts, seen, stringifyErrorDetail(detail));
+
+  return parts.length > 1 ? parts.slice(1).join(" • ") : null;
+}
+
 export function stringifyErrorDetail(detail: unknown): string | null {
   if (detail == null) return null;
   if (typeof detail === "string") {
@@ -50,17 +104,26 @@ export function deriveApiErrorMessage(
   return message;
 }
 
-export function formatApiErrorSummary(error: ApiErrorLike) {
-  const statusText =
-    typeof error.status === "number" ? `HTTP ${error.status}` : "API error";
-  const baseMessage =
+export function splitApiErrorSummary(error: ApiErrorLike): ApiErrorSummaryParts {
+  const message =
     deriveApiErrorMessage(error.message, "API request failed") ||
     "API request failed";
-  const details = stringifyErrorDetail(error.details);
+  const statusText =
+    typeof error.status === "number" ? `HTTP ${error.status}` : null;
 
-  return details && details !== baseMessage
-    ? `${statusText}: ${baseMessage}. Details: ${details}`
-    : `${statusText}: ${baseMessage}`;
+  return {
+    statusText,
+    message,
+    details: collectApiErrorDetails(error.details, message),
+  };
+}
+
+export function formatApiErrorSummary(error: ApiErrorLike) {
+  const { statusText, message, details } = splitApiErrorSummary(error);
+  const prefix = statusText ?? "API error";
+  return details
+    ? `${prefix}: ${message}. Details: ${details}`
+    : `${prefix}: ${message}`;
 }
 
 export function formatUnknownError(error: unknown) {
