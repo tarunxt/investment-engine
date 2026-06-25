@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useEffectEvent, useState } from "react";
 import {
   CalendarClock,
+  Clock3,
   Loader2,
   PlayCircle,
   ShieldAlert,
@@ -123,6 +124,21 @@ function formatElapsedRunTime(startedAt: string | null, nowMs: number) {
   return hours > 0
     ? `${hours}:${paddedMinutes}:${paddedSeconds}`
     : `${paddedMinutes}:${paddedSeconds}`;
+}
+
+function formatStageElapsedTime(
+  startedAt: string | null,
+  completedAt: string | null,
+  nowMs: number,
+) {
+  if (!startedAt) return "Not started";
+
+  const startedAtMs = Date.parse(startedAt);
+  if (Number.isNaN(startedAtMs)) return "Timer unavailable";
+
+  const completedAtMs = completedAt ? Date.parse(completedAt) : null;
+  const endMs = completedAtMs !== null && !Number.isNaN(completedAtMs) ? completedAtMs : nowMs;
+  return formatElapsedRunTime(startedAt, Math.max(startedAtMs, endMs));
 }
 
 function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
@@ -335,11 +351,13 @@ export function BullpenAutoRunScheduleCard({
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
   const workflowView = buildBullpenAutoRunWorkflowView(workflowRun, pendingRunId);
   const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
+  const hasActiveWorkflowStage = workflowView.stages.some((stage) => stage.isCurrent);
   const showRunTimer = action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
+  const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
 
   useEffect(() => {
-    if (!showRunTimer) return;
+    if (!shouldTickTimers) return;
 
     const intervalId = window.setInterval(() => {
       setTimerNowMs(Date.now());
@@ -348,7 +366,7 @@ export function BullpenAutoRunScheduleCard({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [showRunTimer, runTimerStartedAt]);
+  }, [shouldTickTimers, runTimerStartedAt]);
 
   return (
     <Card className="border-fuchsia-200 bg-[linear-gradient(135deg,rgba(253,242,248,0.98),rgba(239,246,255,0.98))] shadow-sm">
@@ -586,15 +604,28 @@ export function BullpenAutoRunScheduleCard({
                         {stage.subtitle}
                       </p>
                     </div>
-                    <span
-                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
-                    >
-                      {stage.state === "current"
-                        ? "Working"
-                        : stage.state === "finished"
-                          ? "Finished"
-                          : "In Queue"}
-                    </span>
+                    <div className="flex flex-col items-end gap-2">
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
+                      >
+                        {stage.state === "current"
+                          ? "Working"
+                          : stage.state === "finished"
+                            ? "Finished"
+                            : "In Queue"}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}
+                        aria-label={`${stage.title} timer`}
+                      >
+                        <Clock3 className="h-3 w-3" />
+                        {formatStageElapsedTime(
+                          stage.timerStartedAt,
+                          stage.timerCompletedAt,
+                          timerNowMs,
+                        )}
+                      </span>
+                    </div>
                   </div>
 
                   <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>

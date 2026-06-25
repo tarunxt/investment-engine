@@ -81,6 +81,9 @@ test("Bullpen auto-run workflow view maps running stages to green, yellow, and b
   assert.equal(view.stages[1].tone, "yellow");
   assert.equal(view.stages[2].tone, "blue");
   assert.equal(view.stages[1].progressLabel, "4/9 events");
+  assert.equal(view.stages[0].timerStartedAt, "2026-06-25T05:00:00Z");
+  assert.equal(view.stages[0].timerCompletedAt, "2026-06-25T05:01:00Z");
+  assert.equal(view.stages[1].timerCompletedAt, null);
 });
 
 test("Bullpen auto-run workflow view treats legacy completed runs as fully finished", async () => {

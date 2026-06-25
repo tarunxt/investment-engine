@@ -14,6 +14,8 @@ export type BullpenAutoRunWorkflowStageView = {
   progressLabel: string;
   progressPercent: number;
   isCurrent: boolean;
+  timerStartedAt: string | null;
+  timerCompletedAt: string | null;
 };
 
 export type BullpenAutoRunWorkflowView = {
@@ -196,6 +198,8 @@ export function buildBullpenAutoRunWorkflowView(
       progressLabel,
       progressPercent,
       isCurrent: state === "current",
+      timerStartedAt: stage?.started_at ?? null,
+      timerCompletedAt: stage?.completed_at ?? null,
     } satisfies BullpenAutoRunWorkflowStageView;
   });
 
