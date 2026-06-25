@@ -182,6 +182,19 @@ def _normalize_odds(value: float | None) -> float | None:
     return round(min(100, max(0, normalized)), 2)
 
 
+def _normalize_close_time(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
+
+
 def _normalize_text(value: str | None) -> str:
     return " ".join((value or "").strip().lower().split())
 
@@ -325,7 +338,7 @@ def _normalize_market(row: dict[str, Any], *, force_include: bool = False) -> Sc
         question=question.strip(),
         market_url=_build_market_url(event_slug),
         slug=row.get("slug").strip() if isinstance(row.get("slug"), str) and row.get("slug").strip() else None,
-        close_time=row.get("endDate").strip() if isinstance(row.get("endDate"), str) else None,
+        close_time=_normalize_close_time(row.get("endDate")),
         theme=_read_theme(row),
         current_yes_odds=yes_odds,
         current_no_odds=no_odds,

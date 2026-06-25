@@ -22,7 +22,9 @@ from app.domains.polymarket_auto_live.bot import (
 from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     ConsoleWalletPosition,
+    candidate_returns_per_day,
     next_console_schedule_time,
+    position_returns_per_day,
     read_console_wallet_positions,
 )
 from app.domains.polymarket_auto_live.config import auto_live_backend_allows_execution
@@ -289,6 +291,121 @@ def test_console_schedule_uses_fixed_ist_slots():
     assert next_console_schedule_time(
         datetime(2026, 6, 24, 18, 29, tzinfo=UTC)
     ) == datetime(2026, 6, 24, 18, 30, tzinfo=UTC)
+
+
+def test_candidate_returns_per_day_accepts_naive_close_time():
+    returns = candidate_returns_per_day(
+        _market(
+            close_time="2026-06-25T00:00:00",
+            current_yes_odds=20,
+            current_no_odds=80,
+        ),
+        now=datetime(2026, 6, 21, 0, 0, tzinfo=UTC),
+    )
+
+    assert returns == 5.0
+
+
+def test_position_returns_per_day_accepts_naive_close_time():
+    returns = position_returns_per_day(
+        _console_wallet_position(
+            slug="naive-close-time-position",
+            market_title="Will the naive close time stay safe?",
+            current_price_cents=80,
+            close_time="2026-06-25T00:00:00",
+        ),
+        now=datetime(2026, 6, 21, 0, 0, tzinfo=UTC),
+    )
+
+    assert returns == 5.0
+
+
+@pytest.mark.anyio
+async def test_console_profile_advances_to_stage_2_with_naive_candidate_close_time(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will the naive candidate reach Stage 2?",
+        slug="naive-stage-2-candidate",
+        close_time="2026-06-25T00:00:00",
+        current_yes_odds=21,
+        current_no_odds=79,
+    )
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        assert side == "NO"
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=candidate_market.current_no_odds,
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    assert result.run.stage_results[0].outputs["workflow_stage_key"] == "scan"
+    assert result.run.stage_results[0].outputs["phase_status"] == "completed"
+    assert result.run.stage_results[1].outputs["workflow_stage_key"] == "llm"
+    assert result.run.stage_results[1].outputs["phase_status"] == "completed"
+    assert result.run.decisions_count == 1
+    assert result.run.orders_planned == 1
 
 
 def test_auto_live_normalization_maps_raw_labels_to_strict_buckets():

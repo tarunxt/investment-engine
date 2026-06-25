@@ -177,7 +177,7 @@ def _normalize_side(value: object) -> str:
     return normalized.upper() or "NO"
 
 
-def _extract_close_time(value: object) -> str | None:
+def _parse_close_time_utc(value: object) -> datetime | None:
     raw = _read_string(value)
     if not raw:
         return None
@@ -186,18 +186,22 @@ def _extract_close_time(value: object) -> str | None:
             date_only = datetime.strptime(raw, "%Y-%m-%d").date()
         except ValueError:
             return None
-        close_dt = datetime.combine(
+        return datetime.combine(
             date_only,
             time(hour=23, minute=59, second=59, tzinfo=_EASTERN_TIMEZONE),
-        )
-        return close_dt.astimezone(UTC).isoformat()
+        ).astimezone(UTC)
     try:
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC).isoformat()
+    return parsed.astimezone(UTC)
+
+
+def _extract_close_time(value: object) -> str | None:
+    parsed = _parse_close_time_utc(value)
+    return parsed.isoformat() if parsed is not None else None
 
 
 def _extract_claimable(row: dict[str, object]) -> bool:
@@ -437,9 +441,8 @@ def _console_market_filter_reasons(
     if not market.close_time:
         reasons.append("Excluded market without a close time.")
     else:
-        try:
-            close_time = datetime.fromisoformat(market.close_time.replace("Z", "+00:00"))
-        except ValueError:
+        close_time = _parse_close_time_utc(market.close_time)
+        if close_time is None:
             reasons.append("Excluded market with an invalid close time.")
         else:
             days_until_close = (close_time - now).total_seconds() / 86_400
@@ -623,9 +626,8 @@ def position_returns_per_day(
 ) -> float | None:
     if position.is_claimable or position.current_price_cents is None or not position.close_time:
         return None
-    try:
-        close_time = datetime.fromisoformat(position.close_time.replace("Z", "+00:00"))
-    except ValueError:
+    close_time = _parse_close_time_utc(position.close_time)
+    if close_time is None:
         return None
     days_until_close = round((close_time - now).total_seconds() / 86_400, 1)
     if days_until_close <= 0:
@@ -640,9 +642,8 @@ def candidate_returns_per_day(
 ) -> float | None:
     if market.current_no_odds is None or not market.close_time:
         return None
-    try:
-        close_time = datetime.fromisoformat(market.close_time.replace("Z", "+00:00"))
-    except ValueError:
+    close_time = _parse_close_time_utc(market.close_time)
+    if close_time is None:
         return None
     days_until_close = round((close_time - now).total_seconds() / 86_400, 1)
     if days_until_close <= 0:
