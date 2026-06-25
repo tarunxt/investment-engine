@@ -640,6 +640,64 @@ def _manual_console_consensus(
     )
 
 
+def _serialize_scan_candidate(
+    market: ScannedMarket,
+) -> dict[str, object]:
+    return {
+        "market_id": market.market_id,
+        "question": market.question,
+        "market_title": market.question,
+        "market_url": market.market_url,
+        "slug": market.slug,
+        "close_time": market.close_time,
+        "theme": market.theme,
+        "current_yes_odds": market.current_yes_odds,
+        "current_no_odds": market.current_no_odds,
+        "volume_usd": market.volume_usd,
+        "liquidity_usd": market.liquidity_usd,
+        "force_include": market.force_include,
+    }
+
+
+def _serialize_manual_console_candidate(
+    row: BullpenAutoLiveConsoleCandidateInput,
+    market: ScannedMarket,
+) -> dict[str, object]:
+    serialized = _serialize_scan_candidate(market)
+    serialized.update(
+        {
+            "question_id": row.question_id,
+            "selected": row.selected,
+            "llm_yes_odds": row.llm_yes_odds,
+            "llm_no_odds": row.llm_no_odds,
+            "returns_per_day": row.returns_per_day,
+            "amount_to_be_invested": row.amount_to_be_invested,
+            "llm_disagreement_level": row.llm_disagreement_level,
+            "llm_disagreement_category": row.llm_disagreement_category,
+            "adjudication_required": row.adjudication_required,
+            "confidence": row.confidence,
+            "evidence_status": row.evidence_status,
+            "event_state": row.event_state,
+            "rules": row.rules,
+        }
+    )
+    return serialized
+
+
+def _serialize_rejected_scan_candidate(
+    rejected: ScanRejectedMarket,
+) -> dict[str, object]:
+    return {
+        "market_id": rejected.market_id,
+        "question": rejected.question,
+        "market_title": rejected.question,
+        "market_url": rejected.market_url,
+        "slug": rejected.slug,
+        "reasons": list(rejected.reasons),
+        "force_included_position": rejected.force_included_position,
+    }
+
+
 class BullpenAutoLiveEngine:
     async def execute(
         self,
@@ -1793,6 +1851,8 @@ class BullpenAutoLiveEngine:
             if manual_console_context and manual_console_context.source_url
             else None
         )
+        stage1_accepted_candidates: list[dict[str, object]] = []
+        stage1_rejected_candidates: list[dict[str, object]] = []
         candidate_rows_before_llm = 0
         llm_candidate_count = 0
         scanned_total_candidates = 0
@@ -1807,6 +1867,10 @@ class BullpenAutoLiveEngine:
                 len(manual_console_rows),
             )
             manual_markets = [_manual_console_market(row) for row in manual_console_rows]
+            stage1_accepted_candidates = [
+                _serialize_manual_console_candidate(row, market)
+                for row, market in zip(manual_console_rows, manual_markets, strict=False)
+            ]
             market_by_slug = {market.slug: market for market in manual_markets if market.slug}
             market_by_id = {market.market_id: market for market in manual_markets}
             if manual_console_rows_have_reusable_llm:
@@ -1957,6 +2021,13 @@ class BullpenAutoLiveEngine:
             scan_source_label = scanned.source_label
             scan_source_url = scanned.source_url
             scanned_total_candidates = scanned.total_candidates
+            stage1_accepted_candidates = [
+                _serialize_scan_candidate(market) for market in scanned.accepted
+            ]
+            stage1_rejected_candidates = [
+                _serialize_rejected_scan_candidate(rejected)
+                for rejected in scanned.rejected
+            ]
             market_by_slug = {market.slug: market for market in scanned.accepted if market.slug}
             market_by_id = {market.market_id: market for market in scanned.accepted}
             scan_seed_markets = scanned.accepted
@@ -2061,11 +2132,15 @@ class BullpenAutoLiveEngine:
                         }
                         for position in unsupported_live_wallet_positions
                     ],
-                    "rejected_candidates": len(rejected_candidate_map),
+                    "accepted_candidates": stage1_accepted_candidates,
+                    "accepted_candidates_count": len(stage1_accepted_candidates),
+                    "rejected_candidates": stage1_rejected_candidates,
+                    "rejected_candidates_count": len(stage1_rejected_candidates),
                     "scan_source_label": scan_source_label,
                     "scan_source_url": scan_source_url,
                     "used_manual_console_rows": manual_console_rows_used,
                     "selected_manual_candidate_ids": selected_manual_candidate_ids,
+                    "selected_manual_candidate_count": len(selected_manual_candidate_ids),
                     "fixed_schedule_timezone": "Asia/Kolkata",
                     "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                     "workflow_stage_key": "scan",
@@ -2117,11 +2192,15 @@ class BullpenAutoLiveEngine:
                         }
                         for position in unsupported_live_wallet_positions
                     ],
-                    "rejected_candidates": len(rejected_candidate_map),
+                    "accepted_candidates": stage1_accepted_candidates,
+                    "accepted_candidates_count": len(stage1_accepted_candidates),
+                    "rejected_candidates": stage1_rejected_candidates,
+                    "rejected_candidates_count": len(stage1_rejected_candidates),
                     "scan_source_label": scan_source_label,
                     "scan_source_url": scan_source_url,
                     "used_manual_console_rows": manual_console_rows_used,
                     "selected_manual_candidate_ids": selected_manual_candidate_ids,
+                    "selected_manual_candidate_count": len(selected_manual_candidate_ids),
                     "fixed_schedule_timezone": "Asia/Kolkata",
                     "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                     "workflow_stage_key": "scan",

@@ -1513,6 +1513,14 @@ async def test_console_profile_manual_selected_rows_skip_backend_rescan_and_avoi
         "candidate-market-1",
         "candidate-market-2",
     ]
+    assert len(result.run.stage_results[0].outputs["accepted_candidates"]) == 2
+    assert result.run.stage_results[0].outputs["accepted_candidates"][0]["market_id"] == (
+        "candidate-market-1"
+    )
+    assert result.run.stage_results[0].outputs["accepted_candidates"][0]["selected"] is True
+    assert result.run.stage_results[0].outputs["rejected_candidates"] == []
+    assert result.run.stage_results[0].outputs["accepted_candidates_count"] == 2
+    assert result.run.stage_results[0].outputs["rejected_candidates_count"] == 0
 
 
 @pytest.mark.anyio
@@ -1653,6 +1661,14 @@ async def test_console_profile_manual_scan_rows_skip_backend_rescan_and_run_llm_
     assert result.run.stage_results[0].outputs["used_manual_console_rows"] is True
     assert result.run.stage_results[0].outputs["candidate_rows_before_llm"] == 2
     assert result.run.stage_results[0].outputs["phase_status"] == "completed"
+    assert len(result.run.stage_results[0].outputs["accepted_candidates"]) == 2
+    assert result.run.stage_results[0].outputs["accepted_candidates"][0]["question_id"] == (
+        "candidate-market-1"
+    )
+    assert result.run.stage_results[0].outputs["accepted_candidates"][0]["selected"] is False
+    assert result.run.stage_results[0].outputs["rejected_candidates"] == []
+    assert result.run.stage_results[0].outputs["accepted_candidates_count"] == 2
+    assert result.run.stage_results[0].outputs["rejected_candidates_count"] == 0
 
 
 async def _execute_auto_live(
