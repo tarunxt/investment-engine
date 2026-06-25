@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Iterable
 
+from pydantic import ValidationError
 from sqlalchemy import Select, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveDecisionRecord,
     PolymarketAutoLivePositionRecord,
@@ -20,6 +22,8 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveSettings,
     BullpenAutoLiveState,
 )
+
+logger = get_logger("app.domains.polymarket_auto_live.repository")
 
 VALID_AUTO_LIVE_STATUSES = {
     "running",
@@ -133,6 +137,10 @@ def record_to_run(record: PolymarketAutoLiveRunRecord) -> BullpenAutoLiveRun:
     return BullpenAutoLiveRun.model_validate(payload)
 
 
+def _record_id(record: PolymarketAutoLiveDecisionRecord) -> str:
+    return f"{record.id} (run={record.run_id}, market={record.market_id})"
+
+
 def record_to_decision(record: PolymarketAutoLiveDecisionRecord) -> BullpenAutoLiveDecision:
     payload = _payload_or_default(record.payload)
     payload.update(
@@ -151,7 +159,24 @@ def record_to_decision(record: PolymarketAutoLiveDecisionRecord) -> BullpenAutoL
             "updated_at": _isoformat(record.updated_at),
         }
     )
-    return BullpenAutoLiveDecision.model_validate(payload)
+    try:
+        return BullpenAutoLiveDecision.model_validate(payload)
+    except ValidationError as exc:
+        if payload.get("order_plan") is not None:
+            fallback_payload = payload.copy()
+            fallback_payload["order_plan"] = None
+            try:
+                decision = BullpenAutoLiveDecision.model_validate(fallback_payload)
+            except ValidationError:
+                pass
+            else:
+                logger.warning(
+                    "Dropped malformed Auto-Live order_plan while hydrating decision %s: %s",
+                    _record_id(record),
+                    exc,
+                )
+                return decision
+        raise
 
 
 def apply_settings_to_record(
@@ -333,7 +358,17 @@ class AsyncPolymarketAutoLiveRepository:
         if limit is not None:
             query = query.limit(limit)
         rows = (await self.session.execute(query)).scalars().all()
-        return [record_to_decision(row) for row in rows]
+        decisions: list[BullpenAutoLiveDecision] = []
+        for row in rows:
+            try:
+                decisions.append(record_to_decision(row))
+            except ValidationError as exc:
+                logger.warning(
+                    "Skipping malformed Auto-Live decision %s during async load: %s",
+                    _record_id(row),
+                    exc,
+                )
+        return decisions
 
 
 class SyncPolymarketAutoLiveRepository:
@@ -460,7 +495,17 @@ class SyncPolymarketAutoLiveRepository:
         if limit is not None:
             query = query.limit(limit)
         rows = self.session.execute(query).scalars().all()
-        return [record_to_decision(row) for row in rows]
+        decisions: list[BullpenAutoLiveDecision] = []
+        for row in rows:
+            try:
+                decisions.append(record_to_decision(row))
+            except ValidationError as exc:
+                logger.warning(
+                    "Skipping malformed Auto-Live decision %s during sync load: %s",
+                    _record_id(row),
+                    exc,
+                )
+        return decisions
 
     def list_open_position_records(
         self, user_id: int

@@ -122,15 +122,11 @@ export function buildBullpenAutoRunWorkflowView(
     (stage) => getPhaseStatus(stage) === "completed",
   ).length;
   const currentStageIndex = (() => {
-    if (runStatus === "completed") return -1;
-    if (runStatus === "idle") return -1;
+    if (runStatus !== "running") return -1;
     const runningStageIndex = stageResults.findIndex(
       (stage) => getPhaseStatus(stage) === "running",
     );
     if (runningStageIndex >= 0) return runningStageIndex;
-    if (runStatus === "failed" || runStatus === "skipped") {
-      return Math.min(completedStageCount, WORKFLOW_DEFINITIONS.length - 1);
-    }
     return Math.min(completedStageCount, WORKFLOW_DEFINITIONS.length - 1);
   })();
 
@@ -208,11 +204,21 @@ export function buildBullpenAutoRunWorkflowView(
     ? currentStage.title
     : runStatus === "completed"
       ? "All 3 stages finished"
+      : runStatus === "failed"
+        ? "Last run failed"
+        : runStatus === "skipped"
+          ? "Last run was skipped"
       : "Queued for the next auto-run";
   const statusCopy = currentStage
     ? `Current stage: ${currentStage.title}`
     : runStatus === "completed"
       ? "The latest Bullpen Scan + LLM + Invest run finished all 3 stages."
+      : runStatus === "failed"
+        ? normalizedRun?.summary ||
+          "The latest Bullpen Scan + LLM + Invest run failed before finishing."
+        : runStatus === "skipped"
+          ? normalizedRun?.summary ||
+            "The latest Bullpen Scan + LLM + Invest run was skipped."
       : "The next Bullpen Scan + LLM + Invest run is waiting in queue.";
 
   return {

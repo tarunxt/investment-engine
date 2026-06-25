@@ -6,9 +6,11 @@ import {
   CalendarClock,
   Clock3,
   Loader2,
+  PauseCircle,
   PlayCircle,
   ShieldAlert,
   Square,
+  X,
   Zap,
 } from "lucide-react";
 
@@ -28,7 +30,14 @@ type BullpenAutoRunScheduleCardProps = {
   buildRunNowRequest?: () => Record<string, unknown> | null;
 };
 
-type ActionState = "enable" | "run-now" | "stop" | null;
+type ActionState =
+  | "enable"
+  | "run-now"
+  | "stop"
+  | "pause-run"
+  | "resume-run"
+  | "kill-run"
+  | null;
 type ErrorState = {
   message: string;
   details: string | null;
@@ -341,6 +350,52 @@ export function BullpenAutoRunScheduleCard({
     }
   }
 
+  async function handlePauseRun() {
+    const shouldResume = Boolean(summary?.state.paused);
+    setAction(shouldResume ? "resume-run" : "pause-run");
+    setNotice(null);
+    setError(null);
+
+    try {
+      if (shouldResume) {
+        await apiService.resumeBullpenAutoLive();
+      } else {
+        await apiService.pauseBullpenAutoLive();
+      }
+      await loadSummary({ preserveLoading: true });
+      setNotice(
+        shouldResume
+          ? "Auto-Live resumed. The active run can continue at the next safe backend checkpoint."
+          : "Auto-Live paused. The active run will stop before any new backend work starts where runtime guards are checked.",
+      );
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+    } finally {
+      setAction(null);
+    }
+  }
+
+  async function handleKillRun() {
+    setAction("kill-run");
+    setNotice(null);
+    setError(null);
+
+    try {
+      if (!summary?.state.paused) {
+        await apiService.pauseBullpenAutoLive();
+      }
+      await apiService.stopBullpenAutoLive();
+      await loadSummary({ preserveLoading: true });
+      setNotice(
+        "Auto-Live stop requested. Any in-flight backend work will wind down at the next safe checkpoint.",
+      );
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+    } finally {
+      setAction(null);
+    }
+  }
+
   const autoRunActive = isAutoRunActive(summary);
   const consoleProfileSelected = isConsoleProfileSelected(summary);
   const mode = modeLabel(summary);
@@ -354,6 +409,8 @@ export function BullpenAutoRunScheduleCard({
   const hasActiveWorkflowStage = workflowView.stages.some((stage) => stage.isCurrent);
   const showRunTimer = action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
   const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;
+  const showActiveRunControls =
+    action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
 
   useEffect(() => {
@@ -459,6 +516,39 @@ export function BullpenAutoRunScheduleCard({
             </div>
           </div>
         </div>
+
+        {showActiveRunControls ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={handlePauseRun}
+              disabled={action !== null}
+              className="rounded-full bg-orange-500 text-white hover:bg-orange-600"
+            >
+              {action === "pause-run" || action === "resume-run" ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : summary?.state.paused ? (
+                <PlayCircle className="mr-2 h-4 w-4" />
+              ) : (
+                <PauseCircle className="mr-2 h-4 w-4" />
+              )}
+              {summary?.state.paused ? "Resume" : "Pause"}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleKillRun}
+              disabled={action !== null}
+              className="rounded-full bg-rose-600 text-white hover:bg-rose-700"
+            >
+              {action === "kill-run" ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <X className="mr-2 h-4 w-4" />
+              )}
+              Kill
+            </Button>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap gap-2">
           {AUTO_RUN_TIMINGS.map((timing) => (

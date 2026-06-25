@@ -115,3 +115,31 @@ test("Bullpen auto-run workflow view treats legacy completed runs as fully finis
   );
   assert.match(view.stages[2].detail, /Console schedule simulated/);
 });
+
+test("Bullpen auto-run workflow view does not show a failed run as actively working", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-failed",
+    triggered_by: "manual",
+    status: "failed",
+    dry_run: false,
+    started_at: "2026-06-25T05:00:00Z",
+    completed_at: "2026-06-25T05:00:04Z",
+    summary: "Auto-Live run failed before Stage 1 completed.",
+    live_execution_requested: true,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: "validation error",
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [],
+  });
+
+  assert.equal(view.currentStageLabel, "Last run failed");
+  assert.equal(view.statusCopy, "Auto-Live run failed before Stage 1 completed.");
+  assert.equal(view.stages.some((stage) => stage.isCurrent), false);
+  assert.equal(view.stages[0].tone, "blue");
+});
