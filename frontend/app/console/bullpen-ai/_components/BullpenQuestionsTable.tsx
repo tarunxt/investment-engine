@@ -68,6 +68,12 @@ function formatDate(value: string | null) {
   });
 }
 
+function formatUpdatedAt(value: string | null | undefined) {
+  return formatApiTimestamp(value, {
+    emptyValue: "—",
+  });
+}
+
 function formatOdds(value: number | null) {
   if (value === null) return "—";
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
@@ -480,6 +486,7 @@ export function BullpenQuestionsTable({
   const allVisibleSelected =
     selectableRowCount > 0 && selectedVisibleCount === selectableRowCount;
   const tableWidth = getBullpenTableWidth(columnWidths);
+  const updatedAtLabel = formatUpdatedAt(snapshot?.scannedAt);
 
   const setColumnWidth = (
     columnId: ResizableBullpenTableColumnId,
@@ -578,8 +585,11 @@ export function BullpenQuestionsTable({
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200">
-      <div className="border-b border-slate-200 bg-white px-4 py-3 text-left">
-        <h2 className="text-sm font-semibold text-slate-950">Bullpen questions</h2>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-200 bg-white px-4 py-3 text-left">
+        <h2 className="text-sm font-semibold text-slate-950">Fresh Bullpen Opportunities</h2>
+        <span className="text-xs font-medium text-slate-500">
+          Updated {updatedAtLabel}
+        </span>
       </div>
       <div className="overflow-x-auto">
         <table
