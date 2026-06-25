@@ -2940,7 +2940,7 @@ export default function BullpenAiPage() {
                               updateActiveFilters({ excludeSports: checked })
                             }
                             label="Exclude sports"
-                            description="Remove sports leagues, teams, games, tournaments, and match-result markets."
+                            description="Remove sports leagues, teams, games, tournaments, and match-result markets, including tennis tours and Wimbledon-style questions."
                             className="h-full"
                           />
                           <FilterToggle

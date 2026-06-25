@@ -834,6 +834,28 @@ def test_candidate_filter_reasons_block_sports_and_low_liquidity():
     assert any("Excluded low-liquidity market" in reason for reason in reasons)
 
 
+def test_candidate_filter_reasons_block_wimbledon_tennis_markets():
+    market = _market(
+        question="Will Aryna Sabalenka be the 2026 Women's Wimbledon Winner?",
+        theme="WTA",
+    )
+
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+    assert "Excluded sports market." in reasons
+
+
+def test_candidate_filter_reasons_block_trump_insult_markets():
+    market = _market(
+        question="Will Donald Trump publicly insult someone on June 27, 2026?",
+        theme="Trump",
+    )
+
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+    assert "Excluded insult or name-calling market." in reasons
+
+
 def test_candidate_filter_reasons_block_unclear_social_count_market():
     market = _market(
         question="How many tweets will candidate X post this week?",
@@ -1867,6 +1889,117 @@ async def test_console_profile_manual_selected_rows_skip_backend_rescan_and_avoi
     assert result.run.stage_results[0].outputs["rejected_candidates"] == []
     assert result.run.stage_results[0].outputs["accepted_candidates_count"] == 2
     assert result.run.stage_results[0].outputs["rejected_candidates_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_console_profile_manual_rows_exclude_trump_insult_markets_before_stage_2(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_rows = [
+        _manual_console_candidate_row(
+            market_id="trump-insult-market",
+            question_id="trump-insult-market",
+            market_title="Will Donald Trump publicly insult someone on June 27, 2026?",
+            slug="trump-insult-market",
+            current_yes_odds=90.5,
+            current_no_odds=9.5,
+            llm_yes_odds=6,
+            llm_no_odds=94,
+            returns_per_day=18,
+            selected=True,
+        ),
+        _manual_console_candidate_row(
+            market_id="candidate-market-2",
+            question_id="candidate-market-2",
+            market_title="Will candidate market 2 resolve No?",
+            slug="candidate-market-2",
+            current_yes_odds=22,
+            current_no_odds=78,
+            llm_yes_odds=9,
+            llm_no_odds=91,
+            returns_per_day=7.2,
+            selected=True,
+        ),
+    ]
+    market_lookup = {
+        row.slug: _market(
+            question=row.market_title,
+            slug=row.slug,
+            close_time=row.close_time,
+            current_yes_odds=row.current_yes_odds,
+            current_no_odds=row.current_no_odds,
+        )
+        for row in manual_rows
+        if row.slug
+    }
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=2,
+                    candidate_rows=manual_rows,
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    assert result.run.decisions_count == 1
+    assert result.run.diagnostics.selected_manual_candidate_ids == ["candidate-market-2"]
+    assert result.run.stage_results[0].outputs["accepted_candidates_count"] == 1
+    assert result.run.stage_results[0].outputs["rejected_candidates_count"] == 1
+    assert result.run.stage_results[0].outputs["llm_candidate_count"] == 1
+    assert (
+        result.run.stage_results[0].outputs["rejected_candidates"][0]["reasons"]
+        == ["Excluded insult or name-calling market."]
+    )
+    assert all(
+        "publicly insult" not in decision.market_title.lower()
+        for decision in result.decisions
+    )
 
 
 @pytest.mark.anyio
@@ -2965,8 +3098,11 @@ async def test_auto_live_live_execution_uses_limit_order_executor_only_after_gua
     assert result.run.status == "completed"
     assert result.run.orders_submitted == 1
     assert result.decisions[0].order_plan is not None
+    assert result.decisions[0].order_plan.side == "YES"
     assert result.decisions[0].order_plan.status == "submitted"
     assert [call[0] for call in executor_calls] == ["buy_limit"]
+    assert executor_calls[0][1]["outcome"] == "Yes"
+    assert result.positions[0].side == "YES"
 
 
 @pytest.mark.anyio

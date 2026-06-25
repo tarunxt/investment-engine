@@ -15,6 +15,7 @@ from app.domains.polymarket_auto_live.scanner import (
     WEATHER_KEYWORDS,
     ScanRejectedMarket,
     ScannedMarket,
+    is_insult_market_text,
     scan_candidate_markets,
 )
 
@@ -404,7 +405,7 @@ def _console_search_text(market: ScannedMarket) -> str:
     ).lower()
 
 
-def _console_market_filter_reasons(
+def console_market_filter_reasons(
     market: ScannedMarket,
     *,
     now: datetime,
@@ -421,6 +422,8 @@ def _console_market_filter_reasons(
         pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS
     ):
         reasons.append("Excluded tweet-count or social-post-count market.")
+    if is_insult_market_text(search_text):
+        reasons.append("Excluded insult or name-calling market.")
     if not _is_binary_yes_no(
         market.outcome_labels,
         market.current_yes_odds,
@@ -531,7 +534,7 @@ def _build_cli_console_scan_result(
     accepted: list[ScannedMarket] = []
     rejected: list[ScanRejectedMarket] = []
     for market in normalized_by_market_id.values():
-        reasons = _console_market_filter_reasons(market, now=now)
+        reasons = console_market_filter_reasons(market, now=now)
         if reasons:
             rejected.append(
                 ScanRejectedMarket(
@@ -577,7 +580,7 @@ async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
         accepted: list[ScannedMarket] = []
         rejected = list(gamma_scan.rejected)
         for market in gamma_scan.accepted:
-            reasons = _console_market_filter_reasons(market, now=now)
+            reasons = console_market_filter_reasons(market, now=now)
             if reasons:
                 rejected.append(
                     ScanRejectedMarket(
