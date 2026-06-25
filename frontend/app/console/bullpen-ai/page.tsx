@@ -79,6 +79,7 @@ import {
 import { BullpenAutoRunScheduleCard } from "./_components/BullpenAutoRunScheduleCard";
 import { BullpenInvestmentsSection } from "./_components/BullpenInvestmentsSection";
 import { BullpenPromptEditorDialog } from "./_components/BullpenPromptEditorDialog";
+import { syncBullpenAutoRunSummarySnapshots } from "./_components/bullpenAutoRunSync";
 import {
   buildClaimableBullpenSignature,
   buildBullpenCloseTimeFromDateOnly,
@@ -2721,6 +2722,15 @@ export default function BullpenAiPage() {
 
       <BullpenAutoRunScheduleCard
         buildRunNowRequest={buildRunNowRequest}
+        onSummaryUpdated={({ summary, run }) => {
+          setSnapshotsByMode((current) =>
+            syncBullpenAutoRunSummarySnapshots({
+              snapshotsByMode: current,
+              summary,
+              run,
+            }),
+          );
+        }}
         onRunCompleted={() => {
           void refreshBullpenPositions({ suppressAutoClaim: true });
         }}

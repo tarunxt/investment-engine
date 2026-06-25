@@ -219,3 +219,46 @@ test("Bullpen auto-run workflow view exposes Stage 1 output candidates", async (
   });
   assert.deepEqual(view.stages[1].scanCandidates, []);
 });
+
+test("Bullpen auto-run workflow view keeps the failed stage highlighted when backend progress was persisted", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-failed-stage-2",
+    triggered_by: "manual",
+    status: "failed",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    completed_at: "2026-06-25T05:00:06Z",
+    summary: "Auto-Live run failed during Stage 2.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: "stage-2-error",
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        completed_items: 12,
+        total_items: 12,
+        item_label: "events",
+      }),
+      createStage(2, "Stage 2 started.", {
+        workflow_stage_key: "llm",
+        phase_status: "running",
+        completed_items: 0,
+        total_items: 4,
+        item_label: "events",
+        llm_candidate_count: 4,
+      }),
+    ],
+  });
+
+  assert.equal(view.currentStageLabel, "Stage 2 · Run LLM");
+  assert.equal(view.stages[1].isCurrent, true);
+  assert.equal(view.stages[1].outputs.llm_candidate_count, 4);
+});

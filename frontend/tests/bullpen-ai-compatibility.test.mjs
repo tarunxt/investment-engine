@@ -188,9 +188,12 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.match(autoRunCardSource, /refreshes every 4 seconds/);
   assert.match(autoRunCardSource, /Pause/);
   assert.match(autoRunCardSource, /Kill/);
+  assert.match(autoRunCardSource, /Open .* output/);
+  assert.match(autoRunCardSource, /BullpenAutoRunStageOutputDialog/);
   assert.match(autoRunProgressSource, /Stage 1 · Bullpen Scan/);
   assert.match(autoRunProgressSource, /Stage 2 · Run LLM/);
   assert.match(autoRunProgressSource, /Stage 3 · Invest/);
+  assert.match(autoRunProgressSource, /outputs: Record<string, unknown>/);
 });
 
 test("Bullpen x AI run-now request can reuse the current scan snapshot before manual LLM selection exists", () => {

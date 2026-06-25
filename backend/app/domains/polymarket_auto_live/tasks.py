@@ -105,6 +105,11 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
         historical_decisions = repo.list_decisions(user_id)
 
         try:
+            def persist_progress(current_run: BullpenAutoLiveRun, current_state) -> None:
+                repo.save_run(user_id, current_run)
+                repo.save_state(user_id, current_state)
+                session.commit()
+
             engine_result = asyncio.run(
                 BullpenAutoLiveEngine().execute(
                     user_id=user_id,
@@ -113,6 +118,7 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
                     run=run,
                     positions=positions,
                     historical_decisions=historical_decisions,
+                    progress_callback=persist_progress,
                 )
             )
         except Exception as exc:
