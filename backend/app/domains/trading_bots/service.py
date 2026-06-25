@@ -263,7 +263,7 @@ def build_bullpen_ai_placeholder_card() -> TradingBotCardSummary:
         TradingBotGuardrail(label="Evidence check", value="Consensus review required"),
         TradingBotGuardrail(
             label="Pink-row threshold",
-            value="LLM No > 80% and returns/day > 5%",
+            value="LLM Yes or No > 80% with returns/day available",
         ),
         TradingBotGuardrail(label="Sizing logic", value="Amount-to-invest formula"),
         TradingBotGuardrail(label="Execution", value="Manual review before live invest"),

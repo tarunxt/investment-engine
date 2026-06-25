@@ -46,9 +46,9 @@ AUTO_LIVE_RISK_SUMMARY = (
 )
 CONSOLE_AUTO_LIVE_STRATEGY_SUMMARY = (
     "Runs the Bullpen console top-10 profile on a fixed IST schedule. Each cycle "
-    "scans upcoming markets, runs LLM consensus, buys $5 of each new No-side "
-    "opportunity in the top-10 returns/day table, and exits active positions that "
-    "fall outside that top 10."
+    "scans upcoming markets, runs LLM consensus on every Stage 1 event, buys $5 "
+    "of each new opportunity that reaches the ranked top-10 returns/day table on "
+    "its stronger LLM side, and exits active positions that fall outside that top 10."
 )
 CONSOLE_AUTO_LIVE_RISK_SUMMARY = (
     "The console profile still depends on Bullpen live session health, doctor "

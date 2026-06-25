@@ -575,10 +575,10 @@ export function BullpenAutoRunScheduleCard({
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-700">
                 Scheduled runs use the Bullpen console top-10 profile: scan upcoming
-                markets, run LLM consensus, buy <span className="font-semibold">$5</span>{" "}
-                of each new <span className="font-semibold">No</span>-side opportunity in
-                the top 10 by returns/day, and exit active positions that fall out of
-                that top 10 list.
+                markets, run LLM consensus on every Stage 1 event, buy{" "}
+                <span className="font-semibold">$5</span> of each new opportunity on
+                the stronger LLM side when it ranks inside the top 10 by returns/day,
+                and exit active positions that fall out of that top 10 list.
               </p>
             </div>
           </div>
