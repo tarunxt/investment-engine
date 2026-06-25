@@ -193,6 +193,19 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.match(autoRunProgressSource, /Stage 3 · Invest/);
 });
 
+test("Bullpen x AI run-now request can reuse the current scan snapshot before manual LLM selection exists", () => {
+  const bullpenAiPageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.doesNotMatch(bullpenAiPageSource, /selectedQuestionIds\.size === 0/);
+  assert.match(
+    bullpenAiPageSource,
+    /if \(!snapshot \|\| snapshot\.questions\.length === 0\) \{/,
+  );
+});
+
 test("Bullpen x AI auto-run errors render detail text alongside the main message", () => {
   const autoRunCardSource = readFileSync(
     new URL(
