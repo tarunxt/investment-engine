@@ -13,6 +13,8 @@ BACKEND_LIVE_URL="${BACKEND_LIVE_URL:-http://127.0.0.1:8000/health/live}"
 BACKEND_READY_URL="${BACKEND_READY_URL:-http://127.0.0.1:8000/health/ready}"
 FRONTEND_SMOKE_URL="${FRONTEND_SMOKE_URL:-http://127.0.0.1:3000/login}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-20}"
+SMOKE_RETRIES="${SMOKE_RETRIES:-30}"
+SMOKE_RETRY_SLEEP_SECONDS="${SMOKE_RETRY_SLEEP_SECONDS:-2}"
 
 case "$SCOPE" in
   backend|full)
@@ -116,8 +118,23 @@ run_as_app_user() {
 smoke_check() {
   local label="$1"
   local url="$2"
+  local attempt
 
   echo "==> Smoke check: $label ($url)"
+
+  for (( attempt = 1; attempt <= SMOKE_RETRIES; attempt++ )); do
+    if curl --fail --silent --show-error --location --max-time "$SMOKE_TIMEOUT_SECONDS" "$url" >/dev/null 2>&1; then
+      echo "==> Smoke check passed: $label"
+      return 0
+    fi
+
+    if (( attempt < SMOKE_RETRIES )); then
+      echo "==> Smoke check not ready: $label (attempt $attempt/$SMOKE_RETRIES); retrying in ${SMOKE_RETRY_SLEEP_SECONDS}s"
+      sleep "$SMOKE_RETRY_SLEEP_SECONDS"
+    fi
+  done
+
+  echo "Smoke check failed after $SMOKE_RETRIES attempts: $label ($url)" >&2
   curl --fail --silent --show-error --location --max-time "$SMOKE_TIMEOUT_SECONDS" "$url" >/dev/null
 }
 
