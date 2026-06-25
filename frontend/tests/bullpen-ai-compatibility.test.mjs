@@ -186,6 +186,8 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.match(autoRunCardSource, /Background execution monitor/);
   assert.match(autoRunCardSource, /Worker stages/);
   assert.match(autoRunCardSource, /refreshes every 4 seconds/);
+  assert.match(autoRunCardSource, /Pause/);
+  assert.match(autoRunCardSource, /Kill/);
   assert.match(autoRunProgressSource, /Stage 1 · Bullpen Scan/);
   assert.match(autoRunProgressSource, /Stage 2 · Run LLM/);
   assert.match(autoRunProgressSource, /Stage 3 · Invest/);

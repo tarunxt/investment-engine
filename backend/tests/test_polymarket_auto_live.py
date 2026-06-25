@@ -26,7 +26,10 @@ from app.domains.polymarket_auto_live.engine import (
     PositionSnapshot,
 )
 from app.domains.polymarket_auto_live.llm import run_llm_consensus
-from app.domains.polymarket_auto_live.models import PolymarketAutoLiveStateRecord
+from app.domains.polymarket_auto_live.models import (
+    PolymarketAutoLiveDecisionRecord,
+    PolymarketAutoLiveStateRecord,
+)
 from app.domains.polymarket_auto_live.normalization import (
     normalize_auto_live_confidence,
     normalize_auto_live_evidence_status,
@@ -34,6 +37,7 @@ from app.domains.polymarket_auto_live.normalization import (
 from app.domains.polymarket_auto_live.repository import (
     apply_state_to_record,
     normalize_auto_live_status,
+    record_to_decision,
     record_to_state,
 )
 from app.domains.polymarket_auto_live.rules import RuleEvaluation, evaluate_market_rules
@@ -145,6 +149,76 @@ def test_apply_state_to_record_normalizes_legacy_status_assignments():
 
     assert record.status == "stopped"
     assert record.payload["status"] == "stopped"
+
+
+def test_record_to_decision_drops_malformed_legacy_order_plan():
+    executed_at = "2026-06-25T06:00:00+00:00"
+    executed_at_dt = datetime.fromisoformat(executed_at)
+    record = PolymarketAutoLiveDecisionRecord(
+        id="decision-legacy-order-plan",
+        user_id=1,
+        run_id="run-legacy-order-plan",
+        market_id="market-legacy-order-plan",
+        slug="legacy-order-plan",
+        market_title="Will Erika Sema win?",
+        side="NO",
+        decision="BUY_NEW",
+        risk_status="Ready",
+        edge_pp=14.5,
+        score=9.2,
+        created_at=executed_at_dt,
+        updated_at=executed_at_dt,
+        payload={
+            "created_at": executed_at,
+            "updated_at": executed_at,
+            "market_url": "https://example.com/markets/legacy-order-plan",
+            "close_time": "2026-06-30T00:00:00+00:00",
+            "theme": "Politics",
+            "price_cents": 42.0,
+            "current_yes_odds": 58.0,
+            "current_no_odds": 42.0,
+            "fair_probability_pct": 61.0,
+            "fair_yes_probability_pct": 39.0,
+            "fair_no_probability_pct": 61.0,
+            "confidence": "High",
+            "evidence_status": "Strong",
+            "adjudication_required": False,
+            "current_exposure_usd": 0.0,
+            "target_exposure_usd": 5.0,
+            "key_evidence": ["Legacy payload regression coverage."],
+            "red_flags": [],
+            "reason": "Legacy order-plan payload should not break hydration.",
+            "summary": "Legacy order-plan payload should not break hydration.",
+            "llm_outputs": [],
+            "stage_results": [],
+            "guardrail_checks": [],
+            "order_plan": {
+                "id": "order-legacy-order-plan",
+                "action": "buy",
+                "side": "ERIKA SEMA",
+                "order_type": "limit",
+                "status": "planned",
+                "market_id": "market-legacy-order-plan",
+                "market_title": "Will Erika Sema win?",
+                "order_size_usd": 5.0,
+                "shares": 11.9,
+                "limit_price_cents": 42.0,
+                "refreshed_market_price_cents": 42.0,
+                "max_slippage_cents": 2.0,
+                "dry_run": True,
+                "detail": "Legacy malformed payload.",
+                "execution_response": None,
+                "created_at": executed_at,
+                "executed_at": None,
+            },
+        },
+    )
+
+    decision = record_to_decision(record)
+
+    assert decision.id == "decision-legacy-order-plan"
+    assert decision.side == "NO"
+    assert decision.order_plan is None
 
 
 @pytest.mark.anyio
