@@ -169,6 +169,13 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
     ),
     "utf8",
   );
+  const autoRunProgressSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/bullpenAutoRunProgress.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
 
   assert.match(bullpenAiPageSource, /BullpenAutoRunScheduleCard/);
   assert.match(autoRunCardSource, /Run Scans and Invest Now/);
@@ -179,6 +186,9 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.match(autoRunCardSource, /Background execution monitor/);
   assert.match(autoRunCardSource, /Worker stages/);
   assert.match(autoRunCardSource, /refreshes every 4 seconds/);
+  assert.match(autoRunProgressSource, /Stage 1 · Bullpen Scan/);
+  assert.match(autoRunProgressSource, /Stage 2 · Run LLM/);
+  assert.match(autoRunProgressSource, /Stage 3 · Invest/);
 });
 
 test("Bullpen x AI auto-run errors render detail text alongside the main message", () => {

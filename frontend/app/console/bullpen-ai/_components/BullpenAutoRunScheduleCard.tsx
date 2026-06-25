@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { useEffect, useEffectEvent, useState } from "react";
 import {
-  Activity,
   CalendarClock,
-  CheckCircle2,
   Loader2,
   PlayCircle,
   ShieldAlert,
@@ -144,11 +142,35 @@ function getVisibleRun(summary: BullpenAutoLiveSummaryResponse | null, pendingRu
   return summary.recent_runs.find((run) => run.status === "running") ?? null;
 }
 
-function getStageTone(status: BullpenAutoLiveRun["stage_results"][number]["status"]) {
-  if (status === "pass") return "border-emerald-200 bg-emerald-50 text-emerald-900";
-  if (status === "fail") return "border-rose-200 bg-rose-50 text-rose-900";
-  if (status === "warning") return "border-amber-200 bg-amber-50 text-amber-900";
-  return "border-slate-200 bg-white text-slate-700";
+function getWorkflowToneClasses(tone: "yellow" | "green" | "blue") {
+  if (tone === "yellow") {
+    return {
+      container: "border-amber-300 bg-amber-50/90",
+      badge: "border-amber-300 bg-amber-100 text-amber-900",
+      text: "text-amber-950",
+      muted: "text-amber-900/80",
+      progress: "bg-amber-500",
+      progressTrack: "bg-amber-200/80",
+    };
+  }
+  if (tone === "green") {
+    return {
+      container: "border-emerald-300 bg-emerald-50/90",
+      badge: "border-emerald-300 bg-emerald-100 text-emerald-900",
+      text: "text-emerald-950",
+      muted: "text-emerald-900/80",
+      progress: "bg-emerald-500",
+      progressTrack: "bg-emerald-200/80",
+    };
+  }
+  return {
+    container: "border-sky-300 bg-sky-50/90",
+    badge: "border-sky-300 bg-sky-100 text-sky-900",
+    text: "text-sky-950",
+    muted: "text-sky-900/80",
+    progress: "bg-sky-500",
+    progressTrack: "bg-sky-200/80",
+  };
 }
 
 export function BullpenAutoRunScheduleCard({
@@ -193,43 +215,49 @@ export function BullpenAutoRunScheduleCard({
     };
   }, []);
 
-  const pollPendingRun = useEffectEvent(async () => {
+  const trackedRunId =
+    pendingRunId ??
+    (summary?.latest_run?.status === "running" ? summary.latest_run.id : null);
+
+  const pollTrackedRun = useEffectEvent(async (runId: string) => {
     const nextSummary = await loadSummary({ preserveLoading: true });
-    if (!nextSummary || !pendingRunId) {
+    if (!nextSummary) {
       return;
     }
 
     const matchingRun =
-      nextSummary.recent_runs.find((run) => run.id === pendingRunId) ??
-      (nextSummary.latest_run?.id === pendingRunId ? nextSummary.latest_run : null);
+      nextSummary.recent_runs.find((run) => run.id === runId) ??
+      (nextSummary.latest_run?.id === runId ? nextSummary.latest_run : null);
     if (!matchingRun || matchingRun.status === "running") {
       return;
     }
 
-    setPendingRunId(null);
-    setRunNowStartedAt(null);
-    setAction(null);
-    setNotice(matchingRun.summary);
-    if (onRunCompleted) {
-      await onRunCompleted();
+    if (pendingRunId === runId) {
+      setPendingRunId(null);
+      setRunNowStartedAt(null);
+      setAction(null);
+      setNotice(matchingRun.summary);
+      if (onRunCompleted) {
+        await onRunCompleted();
+      }
     }
   });
 
   useEffect(() => {
-    if (!pendingRunId) return;
+    if (!trackedRunId) return;
 
     const intervalId = window.setInterval(() => {
-      void pollPendingRun();
+      void pollTrackedRun(trackedRunId);
     }, POLL_INTERVAL_MS);
     const timeoutId = window.setTimeout(() => {
-      void pollPendingRun();
+      void pollTrackedRun(trackedRunId);
     }, 0);
 
     return () => {
       window.clearInterval(intervalId);
       window.clearTimeout(timeoutId);
     };
-  }, [pendingRunId]);
+  }, [trackedRunId]);
 
   async function handleEnableAutoRuns() {
     setAction("enable");
@@ -299,10 +327,11 @@ export function BullpenAutoRunScheduleCard({
   const consoleProfileSelected = isConsoleProfileSelected(summary);
   const mode = modeLabel(summary);
   const visibleRun = getVisibleRun(summary, pendingRunId);
-  const visibleRunStages = visibleRun?.stage_results ?? [];
-  const latestVisibleStage = visibleRunStages.at(-1);
-  const visibleGuardrailChecks = visibleRun?.guardrail_checks ?? summary?.latest_guardrail_checks ?? [];
-  const visibleGuardrailFailures = visibleGuardrailChecks.filter((check) => check.status === "fail").length;
+  const latestRun = summary?.latest_run ?? null;
+  const workflowRun =
+    visibleRun ??
+    (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
+  const workflowView = buildBullpenAutoRunWorkflowView(workflowRun, pendingRunId);
   const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
   const showRunTimer = action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
@@ -486,93 +515,110 @@ export function BullpenAutoRunScheduleCard({
           </Alert>
         ) : null}
 
-        {visibleRun ? (
-          <div className="rounded-2xl border border-sky-200 bg-white/85 p-4 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
-                  {visibleRun.status === "running" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Activity className="h-4 w-4" />
-                  )}
+        <div className="rounded-3xl border border-slate-200/80 bg-white/70 p-4 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                   Background execution monitor
-                </div>
-                <p className="mt-2 text-sm font-semibold text-slate-950">
-                  {visibleRun.status === "running"
-                    ? "Auto-Live worker is processing the queued scan, LLM, and invest flow."
-                    : `Latest worker result: ${formatRunStatusLabel(visibleRun.status)}.`}
                 </p>
-                <p className="mt-1 text-xs text-slate-600">
-                  Run {visibleRun.id} · started {formatIstDateTime(visibleRun.started_at)}
-                </p>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <div className="font-semibold text-slate-950">{visibleRun.decisions_count}</div>
-                  <div className="text-slate-500">Decisions</div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <div className="font-semibold text-slate-950">{visibleRun.orders_planned}</div>
-                  <div className="text-slate-500">Orders planned</div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <div className="font-semibold text-slate-950">{visibleRun.orders_submitted}</div>
-                  <div className="text-slate-500">Submitted</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
-              <div className="space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  Worker stages
-                </div>
-                {visibleRunStages.length > 0 ? (
-                  <div className="space-y-2">
-                    {visibleRunStages.map((stage) => (
-                      <div
-                        key={`${visibleRun.id}-${stage.stage_number}-${stage.stage_name}`}
-                        className={`rounded-xl border px-3 py-2 text-xs ${getStageTone(stage.status)}`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="font-semibold">
-                            {stage.stage_number}. {stage.stage_name}
-                          </span>
-                          <span className="uppercase tracking-[0.14em]">{stage.status}</span>
-                        </div>
-                        <p className="mt-1 leading-5">{stage.reason}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    Waiting for the worker to publish its first stage update. This panel refreshes every 4 seconds while the run is active.
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                <div className="flex items-center gap-2 font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  <CheckCircle2 className="h-4 w-4" />
-                  Live health
-                </div>
-                <p className="mt-2">
-                  Current stage: {latestVisibleStage?.stage_name ?? "Queue handoff"}
-                </p>
-                <p className="mt-1">
-                  Guardrail checks: {visibleGuardrailChecks.length} total, {visibleGuardrailFailures} failing.
-                </p>
-                <p className="mt-1">
-                  Live execution {visibleRun.live_execution_attempted ? "attempted" : "not attempted yet"}.
-                </p>
-                {visibleRun.error_message ? (
-                  <p className="mt-2 font-semibold text-rose-700">{visibleRun.error_message}</p>
+                {workflowRun ? (
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                    {formatRunStatusLabel(workflowRun.status)}
+                  </span>
                 ) : null}
               </div>
+              <p className="text-sm font-semibold text-slate-950">
+                {workflowView.statusCopy}
+              </p>
+              <p className="text-xs text-slate-600">
+                {workflowRun
+                  ? `Run ${workflowRun.id} · started ${formatIstDateTime(workflowRun.started_at)}`
+                  : "The 3-stage monitor turns yellow while working, green when finished, and blue while queued."}
+              </p>
+              <p className="text-xs text-slate-500">
+                Worker stages. This panel refreshes every 4 seconds while the run is active.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                {workflowView.currentStageLabel}
+              </span>
+              {workflowRun ? (
+                <>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                    {workflowRun.decisions_count} decisions
+                  </span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                    {workflowRun.orders_planned} planned
+                  </span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                    {workflowRun.orders_submitted} submitted
+                  </span>
+                </>
+              ) : null}
             </div>
           </div>
-        ) : null}
+
+          <div className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Worker stages
+            </p>
+          </div>
+
+          <div className="mt-3 grid gap-3 lg:grid-cols-3">
+            {workflowView.stages.map((stage) => {
+              const toneClasses = getWorkflowToneClasses(stage.tone);
+
+              return (
+                <div
+                  key={stage.key}
+                  className={`rounded-2xl border p-4 shadow-sm transition ${toneClasses.container}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className={`text-sm font-semibold ${toneClasses.text}`}>
+                        {stage.title}
+                      </p>
+                      <p className={`text-xs leading-5 ${toneClasses.muted}`}>
+                        {stage.subtitle}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
+                    >
+                      {stage.state === "current"
+                        ? "Working"
+                        : stage.state === "finished"
+                          ? "Finished"
+                          : "In Queue"}
+                    </span>
+                  </div>
+
+                  <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
+                    <div
+                      className={`h-full rounded-full ${toneClasses.progress}`}
+                      style={{ width: `${stage.progressPercent}%` }}
+                    />
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <p className={`text-xs font-semibold ${toneClasses.text}`}>
+                      {stage.progressLabel}
+                    </p>
+                    {stage.isCurrent ? (
+                      <Loader2 className={`h-4 w-4 animate-spin ${toneClasses.text}`} />
+                    ) : null}
+                  </div>
+
+                  <p className={`mt-2 text-xs leading-5 ${toneClasses.muted}`}>
+                    {stage.detail}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         {notice ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
