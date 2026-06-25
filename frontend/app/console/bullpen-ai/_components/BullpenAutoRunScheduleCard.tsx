@@ -100,6 +100,27 @@ function formatMoney(value: number | null) {
   return `$${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+function readStageOutputNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatInvestStageRowMix(
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
+) {
+  if (stage.key !== "invest") return null;
+
+  const activePositionRows = readStageOutputNumber(stage.outputs.active_position_rows);
+  const candidateRows = readStageOutputNumber(stage.outputs.candidate_decision_rows);
+  if (activePositionRows === null && candidateRows === null) return null;
+
+  return `${activePositionRows ?? 0} active position ${activePositionRows === 1 ? "row" : "rows"} + ${candidateRows ?? 0} candidate ${candidateRows === 1 ? "row" : "rows"}`;
+}
+
 function StageOneOutputDialog({
   state,
   onClose,
@@ -372,6 +393,8 @@ export function BullpenAutoRunScheduleCard({
     return () => {
       window.clearTimeout(timeoutId);
     };
+    // loadSummary intentionally reads the latest pending run id at execution time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const trackedRunId =
@@ -468,11 +491,6 @@ export function BullpenAutoRunScheduleCard({
       const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
       setPendingRunId(run.id);
       setRunNowStartedAt(run.started_at ?? new Date().toISOString());
-      setNotice(
-        runNowRequest
-          ? "Bullpen Scan + LLM + Invest flow started with the current Bullpen x AI table rows. Stage 1 is now in progress..."
-          : "Bullpen Scan + LLM + Invest flow started. Stage 1 is now in progress...",
-      );
       await loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
     } catch (nextError) {
       setError(normalizeError(nextError));
@@ -544,6 +562,13 @@ export function BullpenAutoRunScheduleCard({
     action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
   const openStage = workflowView.stages.find((stage) => stage.key === openStageKey) ?? null;
+  const activeWorkflowStage =
+    workflowView.stages.find((stage) => stage.isCurrent) ?? null;
+  const displayNotice =
+    notice ??
+    (workflowRun?.status === "running"
+      ? activeWorkflowStage?.detail ?? workflowView.statusCopy
+      : null);
 
   useEffect(() => {
     if (!shouldTickTimers) return;
@@ -878,6 +903,14 @@ export function BullpenAutoRunScheduleCard({
                         </span>
                       </div>
                     ) : null}
+                    {stage.key === "invest" && formatInvestStageRowMix(stage) ? (
+                      <div>
+                        Rows counted:{" "}
+                        <span className="font-semibold">
+                          {formatInvestStageRowMix(stage)}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
@@ -938,9 +971,9 @@ export function BullpenAutoRunScheduleCard({
           />
         ) : null}
 
-        {notice ? (
+        {displayNotice ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-            {notice}
+            {displayNotice}
           </div>
         ) : null}
 

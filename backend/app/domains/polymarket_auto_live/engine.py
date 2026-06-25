@@ -2463,57 +2463,27 @@ class BullpenAutoLiveEngine:
                     )
                 ]
                 rules = evaluate_market_rules(market, now=now)
-                if rules.fail_reason:
-                    stage_results.append(
-                        build_stage_result(
-                            stage_number=2,
-                            status="fail",
-                            reason=rules.fail_reason,
-                            outputs={"close_time": market.close_time},
-                            hard_block=True,
-                        )
-                    )
-                    _record_rejected_candidate(
-                        rejected_candidate_map,
-                        market=market,
-                        reason=rules.fail_reason,
-                    )
-                    candidate_contexts.append(
-                        {
-                            "market": market,
-                            "returns_per_day": returns_per_day,
-                            "rules": rules,
-                            "llm_outputs": [],
-                            "llm_consensus": None,
-                            "stage_results": stage_results,
-                            "qualified": False,
-                            "reason": rules.fail_reason,
-                        }
-                    )
-                    report_llm_stage_progress(
-                        phase_status="running",
-                        reason=(
-                            f"Stage 2 reviewed {index} of {llm_candidate_count} events. Latest: {market.question}"
-                        ),
-                        completed_items=index,
-                        last_completed_market=market,
-                        qualified_candidate_count=len(
-                            [context for context in candidate_contexts if bool(context["qualified"])]
-                        ),
-                        completed_at=None,
-                    )
-                    continue
-
+                rules_fail_reason = rules.fail_reason
                 stage_results.append(
                     build_stage_result(
                         stage_number=2,
-                        status="pass",
-                        reason="Resolution criteria and deadline were parsed successfully.",
+                        status="warning" if rules_fail_reason else "pass",
+                        reason=(
+                            "Resolution criteria and deadline were parsed successfully."
+                            if not rules_fail_reason
+                            else (
+                                f"{rules_fail_reason} LLM consensus still ran, but this event "
+                                "stayed blocked from Stage 3 qualification."
+                            )
+                        ),
                         outputs={
+                            "close_time": market.close_time,
                             "yes_definition": rules.yes_definition,
                             "deadline_et": rules.deadline_et,
                             "hours_remaining": rules.hours_remaining,
+                            "rules_fail_reason": rules_fail_reason,
                         },
+                        hard_block=False,
                     )
                 )
 
@@ -2526,7 +2496,8 @@ class BullpenAutoLiveEngine:
                     minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
                 )
                 qualified = bool(
-                    selected_side is not None
+                    not rules_fail_reason
+                    and selected_side is not None
                     and llm_consensus.disagreement_level != "High"
                     and not llm_consensus.adjudication_required
                     and returns_per_day is not None
@@ -2535,9 +2506,17 @@ class BullpenAutoLiveEngine:
                     build_stage_result(
                         stage_number=3,
                         status="warning"
-                        if llm_consensus.disagreement_level in {"Medium", "High"}
+                        if rules_fail_reason
+                        or llm_consensus.disagreement_level in {"Medium", "High"}
                         else "pass",
-                        reason="LLM consensus completed for the candidate market.",
+                        reason=(
+                            "LLM consensus completed for the candidate market."
+                            if not rules_fail_reason
+                            else (
+                                f"LLM consensus completed, but Stage 2 kept the candidate "
+                                f"blocked because {rules_fail_reason.rstrip('.')}."
+                            )
+                        ),
                         outputs={
                             "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
                             "fair_no_probability_pct": fair_no,
@@ -2545,23 +2524,28 @@ class BullpenAutoLiveEngine:
                             "adjudication_required": llm_consensus.adjudication_required,
                             "confidence": llm_consensus.confidence,
                             "evidence_status": llm_consensus.evidence_status,
+                            "event_state": llm_consensus.event_state,
+                            "rules_fail_reason": rules_fail_reason,
                         },
                     )
                 )
                 qualification_reason = (
                     "Candidate qualifies for the Events to invest in table."
                     if qualified
-                    else "Candidate did not pass the Events to invest in table thresholds."
+                    else (
+                        "Candidate did not pass the Events to invest in table thresholds."
+                        if not rules_fail_reason
+                        else (
+                            "LLM consensus completed, but the market is still blocked because "
+                            f"{rules_fail_reason.rstrip('.')}."
+                        )
+                    )
                 )
                 stage_results.append(
                     build_stage_result(
                         stage_number=4,
                         status="pass" if qualified else "warning",
-                        reason=(
-                            "Candidate qualifies for the Events to invest in table."
-                            if qualified
-                            else "Candidate did not pass the Events to invest in table thresholds."
-                        ),
+                        reason=qualification_reason,
                         outputs={
                             "returns_per_day": returns_per_day,
                             "selected_side": selected_side,
@@ -2569,6 +2553,7 @@ class BullpenAutoLiveEngine:
                             "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
                             "fair_no_probability_pct": fair_no,
                             "min_strongest_llm_odds": CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                            "rules_fail_reason": rules_fail_reason,
                         },
                         hard_block=not qualified,
                     )

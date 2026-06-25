@@ -180,6 +180,57 @@ test("Bullpen auto-run workflow view hides queued Stage 3 progress when Stage 2 
   assert.deepEqual(view.stages[2].outputs, {});
 });
 
+test("Bullpen auto-run workflow view explains Stage 3 counts as combined review rows", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage-3-rows",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 3 is reviewing active positions and candidate rows.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        completed_items: 9,
+        total_items: 9,
+        item_label: "events",
+      }),
+      createStage(2, "Stage 2 reviewed all 9 events.", {
+        workflow_stage_key: "llm",
+        phase_status: "completed",
+        completed_items: 9,
+        total_items: 9,
+        item_label: "events",
+      }),
+      createStage(3, "Stage 3 reviewed row 18 of 18.", {
+        workflow_stage_key: "invest",
+        phase_status: "running",
+        completed_items: 18,
+        total_items: 18,
+        item_label: "rows",
+        active_position_rows: 9,
+        candidate_decision_rows: 9,
+      }),
+    ],
+  });
+
+  assert.equal(view.currentStageLabel, "Stage 3 · Invest");
+  assert.equal(view.stages[2].progressLabel, "18/18 review rows");
+  assert.equal(view.stages[2].outputs.active_position_rows, 9);
+  assert.equal(view.stages[2].outputs.candidate_decision_rows, 9);
+});
+
 test("Bullpen auto-run workflow view treats legacy completed runs as fully finished", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 
