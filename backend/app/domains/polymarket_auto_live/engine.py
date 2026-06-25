@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Callable
 
 from app.core.logging import get_logger
 from app.domains.polymarket import bullpen as bullpen_module
@@ -81,6 +82,8 @@ SUPPORTED_OUTCOME_SIDES = {"YES", "NO"}
 
 logger = get_logger("app.domains.polymarket_auto_live.engine")
 
+ProgressCallback = Callable[[BullpenAutoLiveRun, BullpenAutoLiveState], None]
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -146,6 +149,45 @@ def build_stage_result(
         hard_block=hard_block,
         started_at=started_at or utc_now_iso(),
         completed_at=completed_at or utc_now_iso(),
+    )
+
+
+def build_workflow_stage_result(
+    *,
+    stage_number: int,
+    workflow_stage_key: str,
+    phase_status: str,
+    status: str,
+    reason: str,
+    completed_items: int | None = None,
+    total_items: int | None = None,
+    item_label: str | None = None,
+    inputs: dict[str, object] | None = None,
+    outputs: dict[str, object] | None = None,
+    guardrails_checked: list[BullpenAutoLiveGuardrailCheck] | None = None,
+    hard_block: bool = False,
+    started_at: str | None = None,
+    completed_at: str | None = None,
+) -> BullpenAutoLiveStageResult:
+    workflow_outputs = dict(outputs or {})
+    workflow_outputs["workflow_stage_key"] = workflow_stage_key
+    workflow_outputs["phase_status"] = phase_status
+    if completed_items is not None:
+        workflow_outputs["completed_items"] = completed_items
+    if total_items is not None:
+        workflow_outputs["total_items"] = total_items
+    if item_label is not None:
+        workflow_outputs["item_label"] = item_label
+    return build_stage_result(
+        stage_number=stage_number,
+        status=status,
+        reason=reason,
+        inputs=inputs,
+        outputs=workflow_outputs,
+        guardrails_checked=guardrails_checked,
+        hard_block=hard_block,
+        started_at=started_at,
+        completed_at=completed_at,
     )
 
 
@@ -699,6 +741,15 @@ def _serialize_rejected_scan_candidate(
 
 
 class BullpenAutoLiveEngine:
+    @staticmethod
+    def _report_progress(
+        progress_callback: ProgressCallback | None,
+        run: BullpenAutoLiveRun,
+        state: BullpenAutoLiveState,
+    ) -> None:
+        if progress_callback is not None:
+            progress_callback(run, state)
+
     async def execute(
         self,
         *,
@@ -708,6 +759,7 @@ class BullpenAutoLiveEngine:
         run: BullpenAutoLiveRun,
         positions: list[PositionSnapshot],
         historical_decisions: list[BullpenAutoLiveDecision],
+        progress_callback: ProgressCallback | None = None,
     ) -> EngineResult:
         now = utc_now()
         state.dry_run = effective_dry_run(settings)
@@ -733,6 +785,7 @@ class BullpenAutoLiveEngine:
                 historical_decisions=historical_decisions,
                 global_guardrails=global_guardrails,
                 now=now,
+                progress_callback=progress_callback,
             )
         daily_loss_stop_hit, weekly_loss_stop_hit = _daily_weekly_loss_stops(
             historical_decisions,
@@ -797,6 +850,7 @@ class BullpenAutoLiveEngine:
                 guardrails_checked=global_guardrails,
             ),
         )
+        self._report_progress(progress_callback, run, state)
 
         evaluated: list[CandidateEvaluation] = []
         for market in sorted_candidates:
@@ -1822,6 +1876,7 @@ class BullpenAutoLiveEngine:
         historical_decisions: list[BullpenAutoLiveDecision],
         global_guardrails: list[BullpenAutoLiveGuardrailCheck],
         now: datetime,
+        progress_callback: ProgressCallback | None = None,
     ) -> EngineResult:
         live_wallet_positions_task = asyncio.create_task(read_console_wallet_positions())
         manual_console_context = (
@@ -2113,10 +2168,15 @@ class BullpenAutoLiveEngine:
 
         set_run_stage_result(
             run,
-            build_stage_result(
+            build_workflow_stage_result(
                 stage_number=1,
+                workflow_stage_key="scan",
+                phase_status="completed",
                 status="pass",
                 reason="Bullpen console profile synced live wallet positions and prepared the candidate set.",
+                completed_items=scanned_total_candidates,
+                total_items=scanned_total_candidates,
+                item_label="events",
                 outputs={
                     "live_wallet_positions": len(enriched_wallet_positions),
                     "active_wallet_positions": len(position_snapshots),
@@ -2141,17 +2201,53 @@ class BullpenAutoLiveEngine:
                     "used_manual_console_rows": manual_console_rows_used,
                     "selected_manual_candidate_ids": selected_manual_candidate_ids,
                     "selected_manual_candidate_count": len(selected_manual_candidate_ids),
+                    "snapshot_id": manual_console_context.snapshot_id
+                    if manual_console_context and manual_console_context.snapshot_id
+                    else None,
+                    "mode": manual_console_context.mode
+                    if manual_console_context and manual_console_context.mode
+                    else None,
+                    "scanned_at": manual_console_context.scanned_at
+                    if manual_console_context and manual_console_context.scanned_at
+                    else now.isoformat(),
                     "fixed_schedule_timezone": "Asia/Kolkata",
                     "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
-                    "workflow_stage_key": "scan",
-                    "phase_status": "completed",
-                    "completed_items": scanned_total_candidates,
-                    "total_items": scanned_total_candidates,
-                    "item_label": "events",
                 },
                 guardrails_checked=global_guardrails,
             ),
         )
+        self._report_progress(progress_callback, run, state)
+        llm_stage_started_at = utc_now_iso()
+        if manual_console_rows_have_reusable_llm:
+            set_run_stage_result(
+                run,
+                build_workflow_stage_result(
+                    stage_number=2,
+                    workflow_stage_key="llm",
+                    phase_status="running",
+                    status="pass" if llm_candidate_count > 0 else "warning",
+                    reason=(
+                        "Stage 2 started. Reusing the current Bullpen x AI LLM outputs."
+                        if llm_candidate_count > 0
+                        else "No candidate events qualified for Stage 2 LLM review."
+                    ),
+                    completed_items=0,
+                    total_items=llm_candidate_count,
+                    item_label="events",
+                    outputs={
+                        "scan_source_label": scan_source_label,
+                        "scan_source_url": scan_source_url,
+                        "used_manual_console_rows": manual_console_rows_used,
+                        "candidate_rows_before_llm": candidate_rows_before_llm,
+                        "llm_candidate_count": llm_candidate_count,
+                        "reused_existing_llm_outputs": True,
+                    },
+                    guardrails_checked=global_guardrails,
+                    started_at=llm_stage_started_at,
+                    completed_at=None,
+                ),
+            )
+            self._report_progress(progress_callback, run, state)
 
         if scan_seed_markets is not None:
             positioned_market_ids = {position.market_id for position in position_snapshots}
@@ -2173,44 +2269,86 @@ class BullpenAutoLiveEngine:
             candidate_rows_before_llm = len(candidate_rows)
             llm_markets = candidate_rows[:CONSOLE_LLM_CANDIDATE_LIMIT]
             llm_candidate_count = len(llm_markets)
-            run.stage_results[0] = build_stage_result(
-                stage_number=1,
-                status="pass",
-                reason="Bullpen console profile synced live wallet positions and prepared the candidate set.",
-                outputs={
-                    "live_wallet_positions": len(enriched_wallet_positions),
-                    "active_wallet_positions": len(position_snapshots),
-                    "scanned_candidates": scanned_total_candidates,
-                    "candidate_rows_before_llm": candidate_rows_before_llm,
-                    "llm_candidate_count": llm_candidate_count,
-                    "unsupported_wallet_positions_skipped": len(unsupported_live_wallet_positions),
-                    "unsupported_wallet_positions": [
-                        {
-                            "market_id": position.market_id,
-                            "market_title": position.market_title,
-                            "side": position.side,
-                        }
-                        for position in unsupported_live_wallet_positions
-                    ],
-                    "accepted_candidates": stage1_accepted_candidates,
-                    "accepted_candidates_count": len(stage1_accepted_candidates),
-                    "rejected_candidates": stage1_rejected_candidates,
-                    "rejected_candidates_count": len(stage1_rejected_candidates),
-                    "scan_source_label": scan_source_label,
-                    "scan_source_url": scan_source_url,
-                    "used_manual_console_rows": manual_console_rows_used,
-                    "selected_manual_candidate_ids": selected_manual_candidate_ids,
-                    "selected_manual_candidate_count": len(selected_manual_candidate_ids),
-                    "fixed_schedule_timezone": "Asia/Kolkata",
-                    "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
-                    "workflow_stage_key": "scan",
-                    "phase_status": "completed",
-                    "completed_items": scanned_total_candidates,
-                    "total_items": scanned_total_candidates,
-                    "item_label": "events",
-                },
-                guardrails_checked=global_guardrails,
+            set_run_stage_result(
+                run,
+                build_workflow_stage_result(
+                    stage_number=1,
+                    workflow_stage_key="scan",
+                    phase_status="completed",
+                    status="pass",
+                    reason="Bullpen console profile synced live wallet positions and prepared the candidate set.",
+                    completed_items=scanned_total_candidates,
+                    total_items=scanned_total_candidates,
+                    item_label="events",
+                    outputs={
+                        "live_wallet_positions": len(enriched_wallet_positions),
+                        "active_wallet_positions": len(position_snapshots),
+                        "scanned_candidates": scanned_total_candidates,
+                        "candidate_rows_before_llm": candidate_rows_before_llm,
+                        "llm_candidate_count": llm_candidate_count,
+                        "unsupported_wallet_positions_skipped": len(unsupported_live_wallet_positions),
+                        "unsupported_wallet_positions": [
+                            {
+                                "market_id": position.market_id,
+                                "market_title": position.market_title,
+                                "side": position.side,
+                            }
+                            for position in unsupported_live_wallet_positions
+                        ],
+                        "accepted_candidates": stage1_accepted_candidates,
+                        "accepted_candidates_count": len(stage1_accepted_candidates),
+                        "rejected_candidates": stage1_rejected_candidates,
+                        "rejected_candidates_count": len(stage1_rejected_candidates),
+                        "scan_source_label": scan_source_label,
+                        "scan_source_url": scan_source_url,
+                        "used_manual_console_rows": manual_console_rows_used,
+                        "selected_manual_candidate_ids": selected_manual_candidate_ids,
+                        "selected_manual_candidate_count": len(selected_manual_candidate_ids),
+                        "snapshot_id": manual_console_context.snapshot_id
+                        if manual_console_context and manual_console_context.snapshot_id
+                        else None,
+                        "mode": manual_console_context.mode
+                        if manual_console_context and manual_console_context.mode
+                        else None,
+                        "scanned_at": manual_console_context.scanned_at
+                        if manual_console_context and manual_console_context.scanned_at
+                        else now.isoformat(),
+                        "fixed_schedule_timezone": "Asia/Kolkata",
+                        "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
+                    },
+                    guardrails_checked=global_guardrails,
+                ),
             )
+            self._report_progress(progress_callback, run, state)
+
+            set_run_stage_result(
+                run,
+                build_workflow_stage_result(
+                    stage_number=2,
+                    workflow_stage_key="llm",
+                    phase_status="running",
+                    status="pass" if llm_candidate_count > 0 else "warning",
+                    reason=(
+                        "Stage 2 started. LLM review is evaluating the candidate events."
+                        if llm_candidate_count > 0
+                        else "No candidate events qualified for Stage 2 LLM review."
+                    ),
+                    completed_items=0,
+                    total_items=llm_candidate_count,
+                    item_label="events",
+                    outputs={
+                        "scan_source_label": scan_source_label,
+                        "scan_source_url": scan_source_url,
+                        "used_manual_console_rows": manual_console_rows_used,
+                        "candidate_rows_before_llm": candidate_rows_before_llm,
+                        "llm_candidate_count": llm_candidate_count,
+                    },
+                    guardrails_checked=global_guardrails,
+                    started_at=llm_stage_started_at,
+                    completed_at=None,
+                ),
+            )
+            self._report_progress(progress_callback, run, state)
 
             for market, returns_per_day in llm_markets:
                 stage_results = [
@@ -2345,6 +2483,65 @@ class BullpenAutoLiveEngine:
             for context in candidate_contexts
             if bool(context["qualified"])
         ]
+        llm_stage_candidates = []
+        for context in candidate_contexts:
+            market = context["market"]
+            llm_consensus = context["llm_consensus"]
+            llm_stage_candidates.append(
+                {
+                    "market_id": market.market_id,
+                    "question": market.question,
+                    "market_url": market.market_url,
+                    "close_time": market.close_time,
+                    "returns_per_day": context["returns_per_day"],
+                    "qualified": bool(context["qualified"]),
+                    "reason": str(context["reason"]),
+                    "fair_yes_probability_pct": (
+                        llm_consensus.fair_yes_probability_pct if llm_consensus else None
+                    ),
+                    "fair_no_probability_pct": (
+                        llm_consensus.fair_no_probability_pct if llm_consensus else None
+                    ),
+                    "disagreement_level": (
+                        llm_consensus.disagreement_level if llm_consensus else None
+                    ),
+                    "adjudication_required": (
+                        llm_consensus.adjudication_required if llm_consensus else None
+                    ),
+                    "confidence": llm_consensus.confidence if llm_consensus else None,
+                    "evidence_status": llm_consensus.evidence_status if llm_consensus else None,
+                    "event_state": llm_consensus.event_state if llm_consensus else None,
+                }
+            )
+        set_run_stage_result(
+            run,
+            build_workflow_stage_result(
+                stage_number=2,
+                workflow_stage_key="llm",
+                phase_status="completed",
+                status="pass" if llm_candidate_count > 0 else "warning",
+                reason=(
+                    "LLM review completed for the candidate events."
+                    if llm_candidate_count > 0
+                    else "Stage 2 had no candidate events to review."
+                ),
+                completed_items=llm_candidate_count,
+                total_items=llm_candidate_count,
+                item_label="events",
+                outputs={
+                    "candidate_rows_before_llm": candidate_rows_before_llm,
+                    "llm_candidate_count": llm_candidate_count,
+                    "qualified_candidate_count": len(qualifying_candidates),
+                    "qualified_candidate_market_ids": [
+                        context["market"].market_id for context in qualifying_candidates
+                    ],
+                    "llm_reviewed_candidates": llm_stage_candidates,
+                },
+                guardrails_checked=global_guardrails,
+                started_at=llm_stage_started_at if "llm_stage_started_at" in locals() else utc_now_iso(),
+            ),
+        )
+        self._report_progress(progress_callback, run, state)
         active_rank_rows = []
         for position in enriched_wallet_positions:
             if position.is_claimable:
@@ -2420,6 +2617,37 @@ class BullpenAutoLiveEngine:
         run.diagnostics.scan_source_url = scan_source_url
         run.diagnostics.used_manual_console_rows = manual_console_rows_used
         run.diagnostics.selected_manual_candidate_ids = selected_manual_candidate_ids
+
+        invest_stage_started_at = utc_now_iso()
+        total_decision_rows = len(position_snapshots) + len(candidate_contexts)
+        set_run_stage_result(
+            run,
+            build_workflow_stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="running",
+                status="pass" if total_decision_rows > 0 else "warning",
+                reason=(
+                    "Stage 3 started. Planning buys and exits from the ranked Bullpen table."
+                    if total_decision_rows > 0
+                    else "No decision rows were available for Stage 3."
+                ),
+                completed_items=0,
+                total_items=total_decision_rows,
+                item_label="decisions",
+                outputs={
+                    "top_table_size": len(top_rows),
+                    "active_rows_ranked": len(active_rank_rows),
+                    "qualified_candidate_rows": len(candidate_rank_rows),
+                    "top_candidate_market_ids": sorted(top_candidate_market_ids),
+                    "top_active_keys": sorted(top_active_keys),
+                },
+                guardrails_checked=global_guardrails,
+                started_at=invest_stage_started_at,
+                completed_at=None,
+            ),
+        )
+        self._report_progress(progress_callback, run, state)
 
         decisions: list[BullpenAutoLiveDecision] = []
 
@@ -2962,6 +3190,50 @@ class BullpenAutoLiveEngine:
                 f"Console schedule completed with {len(decisions)} decisions, "
                 f"{planned_orders} planned orders, and {submitted_orders} submitted orders."
             )
+        set_run_stage_result(
+            run,
+            build_workflow_stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="completed",
+                status="pass" if len(decisions) > 0 else "warning",
+                reason=(
+                    "Investment planning and execution finished for the ranked Bullpen table."
+                    if len(decisions) > 0
+                    else "Stage 3 finished without any decisions to process."
+                ),
+                completed_items=len(decisions),
+                total_items=total_decision_rows,
+                item_label="decisions",
+                outputs={
+                    "top_table_size": len(top_rows),
+                    "active_rows_ranked": len(active_rank_rows),
+                    "qualified_candidate_rows": len(candidate_rank_rows),
+                    "top_candidate_market_ids": sorted(top_candidate_market_ids),
+                    "top_active_keys": sorted(top_active_keys),
+                    "decisions_count": len(decisions),
+                    "orders_planned": planned_orders,
+                    "orders_submitted": submitted_orders,
+                    "decision_summaries": [
+                        {
+                            "market_id": decision.market_id,
+                            "market_title": decision.market_title,
+                            "decision": decision.decision,
+                            "side": decision.side,
+                            "target_exposure_usd": decision.target_exposure_usd,
+                            "order_status": decision.order_plan.status
+                            if decision.order_plan
+                            else None,
+                            "reason": decision.reason,
+                        }
+                        for decision in decisions
+                    ],
+                },
+                guardrails_checked=global_guardrails,
+                started_at=invest_stage_started_at,
+                completed_at=run.completed_at,
+            ),
+        )
 
         state.last_run_id = run.id
         state.last_run_at = run.completed_at

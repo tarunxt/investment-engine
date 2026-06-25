@@ -1528,6 +1528,7 @@ async def test_console_profile_manual_scan_rows_skip_backend_rescan_and_run_llm_
     monkeypatch,
 ):
     fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    progress_snapshots: list[list[tuple[int, str | None, str | None]]] = []
     manual_rows = [
         BullpenAutoLiveConsoleCandidateInput(
             question_id="candidate-market-1",
@@ -1628,6 +1629,22 @@ async def test_console_profile_manual_scan_rows_skip_backend_rescan_and_run_llm_
         fake_refresh_execution_quote,
     )
 
+    def record_progress(run: BullpenAutoLiveRun, _state: BullpenAutoLiveState):
+        progress_snapshots.append(
+            [
+                (
+                    stage.stage_number,
+                    stage.outputs.get("workflow_stage_key")
+                    if isinstance(stage.outputs, dict)
+                    else None,
+                    stage.outputs.get("phase_status")
+                    if isinstance(stage.outputs, dict)
+                    else None,
+                )
+                for stage in run.stage_results
+            ]
+        )
+
     result = await BullpenAutoLiveEngine().execute(
         user_id=7,
         settings=BullpenAutoLiveSettings(
@@ -1649,6 +1666,7 @@ async def test_console_profile_manual_scan_rows_skip_backend_rescan_and_run_llm_
         ),
         positions=[],
         historical_decisions=[],
+        progress_callback=record_progress,
     )
 
     buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
@@ -1669,6 +1687,30 @@ async def test_console_profile_manual_scan_rows_skip_backend_rescan_and_run_llm_
     assert result.run.stage_results[0].outputs["rejected_candidates"] == []
     assert result.run.stage_results[0].outputs["accepted_candidates_count"] == 2
     assert result.run.stage_results[0].outputs["rejected_candidates_count"] == 0
+    assert result.run.stage_results[1].outputs["workflow_stage_key"] == "llm"
+    assert result.run.stage_results[1].outputs["phase_status"] == "completed"
+    assert result.run.stage_results[1].outputs["llm_candidate_count"] == 2
+    assert result.run.stage_results[2].outputs["workflow_stage_key"] == "invest"
+    assert result.run.stage_results[2].outputs["phase_status"] == "completed"
+    assert result.run.stage_results[2].outputs["decisions_count"] == 2
+    assert any(
+        any(
+            stage_number == 2
+            and workflow_stage_key == "llm"
+            and phase_status == "running"
+            for stage_number, workflow_stage_key, phase_status in snapshot
+        )
+        for snapshot in progress_snapshots
+    )
+    assert any(
+        any(
+            stage_number == 3
+            and workflow_stage_key == "invest"
+            and phase_status == "running"
+            for stage_number, workflow_stage_key, phase_status in snapshot
+        )
+        for snapshot in progress_snapshots
+    )
 
 
 async def _execute_auto_live(

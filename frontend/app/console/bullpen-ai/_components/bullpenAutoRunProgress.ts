@@ -30,6 +30,7 @@ export type BullpenAutoRunWorkflowStageView = {
   timerStartedAt: string | null;
   timerCompletedAt: string | null;
   scanCandidates: BullpenAutoRunScanCandidateView[];
+  outputs: Record<string, unknown>;
 };
 
 export type BullpenAutoRunWorkflowView = {
@@ -110,6 +111,13 @@ function findWorkflowStageResult(
   );
 }
 
+function readOutputs(stage: BullpenAutoLiveStageResult | null) {
+  if (!stage?.outputs || typeof stage.outputs !== "object" || Array.isArray(stage.outputs)) {
+    return {};
+  }
+  return stage.outputs as Record<string, unknown>;
+}
+
 function getPhaseStatus(stage: BullpenAutoLiveStageResult | null) {
   return readString(stage?.outputs?.phase_status);
 }
@@ -174,11 +182,11 @@ export function buildBullpenAutoRunWorkflowView(
     (stage) => getPhaseStatus(stage) === "completed",
   ).length;
   const currentStageIndex = (() => {
-    if (runStatus !== "running") return -1;
     const runningStageIndex = stageResults.findIndex(
       (stage) => getPhaseStatus(stage) === "running",
     );
     if (runningStageIndex >= 0) return runningStageIndex;
+    if (runStatus !== "running") return -1;
     return Math.min(completedStageCount, WORKFLOW_DEFINITIONS.length - 1);
   })();
 
@@ -254,6 +262,7 @@ export function buildBullpenAutoRunWorkflowView(
       timerStartedAt: stageTimerStartedAt,
       timerCompletedAt: stage?.completed_at ?? null,
       scanCandidates: definition.key === "scan" ? readScanCandidates(stage) : [],
+      outputs: readOutputs(stage),
     } satisfies BullpenAutoRunWorkflowStageView;
   });
 

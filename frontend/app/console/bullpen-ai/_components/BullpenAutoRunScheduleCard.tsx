@@ -6,6 +6,7 @@ import {
   CalendarClock,
   Clock3,
   LogOut,
+  FileText,
   Loader2,
   PauseCircle,
   PlayCircle,
@@ -25,10 +26,16 @@ import { APIError, apiService } from "@/services/api";
 import type { BullpenAutoLiveRun, BullpenAutoLiveSummaryResponse } from "@/types/api";
 
 import { buildBullpenAutoRunWorkflowView } from "./bullpenAutoRunProgress";
+import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
   buildRunNowRequest?: () => Record<string, unknown> | null;
+  onSummaryUpdated?: (payload: {
+    summary: BullpenAutoLiveSummaryResponse;
+    run: BullpenAutoLiveRun | null;
+    pendingRunId: string | null;
+  }) => void;
 };
 
 type ActionState =
@@ -309,6 +316,7 @@ function getWorkflowToneClasses(tone: "yellow" | "green" | "blue") {
 export function BullpenAutoRunScheduleCard({
   onRunCompleted,
   buildRunNowRequest,
+  onSummaryUpdated,
 }: BullpenAutoRunScheduleCardProps) {
   const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -320,8 +328,12 @@ export function BullpenAutoRunScheduleCard({
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
   const [scanCandidateDialog, setScanCandidateDialog] =
     useState<ScanCandidateDialogState | null>(null);
+  const [openStageKey, setOpenStageKey] = useState<"scan" | "llm" | "invest" | null>(null);
 
-  async function loadSummary(options?: { preserveLoading?: boolean }) {
+  async function loadSummary(options?: {
+    preserveLoading?: boolean;
+    nextPendingRunId?: string | null;
+  }) {
     if (!options?.preserveLoading) {
       setLoading(true);
     }
@@ -329,6 +341,15 @@ export function BullpenAutoRunScheduleCard({
       const nextSummary = await apiService.getBullpenAutoLiveSummary();
       setSummary(nextSummary);
       setError(null);
+      const nextTrackedRun = getVisibleRun(
+        nextSummary,
+        options?.nextPendingRunId ?? pendingRunId,
+      );
+      onSummaryUpdated?.({
+        summary: nextSummary,
+        run: nextTrackedRun,
+        pendingRunId: options?.nextPendingRunId ?? pendingRunId,
+      });
       return nextSummary;
     } catch (nextError) {
       setError(normalizeError(nextError));
@@ -449,7 +470,7 @@ export function BullpenAutoRunScheduleCard({
           ? "Bullpen Scan + LLM + Invest flow started with the current Bullpen x AI table rows. Stage 1 is now in progress..."
           : "Bullpen Scan + LLM + Invest flow started. Stage 1 is now in progress...",
       );
-      await loadSummary({ preserveLoading: true });
+      await loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
     } catch (nextError) {
       setError(normalizeError(nextError));
       setAction(null);
@@ -519,6 +540,7 @@ export function BullpenAutoRunScheduleCard({
   const showActiveRunControls =
     action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
+  const openStage = workflowView.stages.find((stage) => stage.key === openStageKey) ?? null;
 
   useEffect(() => {
     if (!shouldTickTimers) return;
@@ -836,9 +858,22 @@ export function BullpenAutoRunScheduleCard({
                     <p className={`text-xs font-semibold ${toneClasses.text}`}>
                       {stage.progressLabel}
                     </p>
-                    {stage.isCurrent ? (
-                      <Loader2 className={`h-4 w-4 animate-spin ${toneClasses.text}`} />
-                    ) : null}
+                    <div className="flex items-center gap-2">
+                      {stage.key !== "scan" && Object.keys(stage.outputs).length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setOpenStageKey(stage.key)}
+                          className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition hover:bg-white/70 ${toneClasses.badge}`}
+                          aria-label={`Open ${stage.title} output`}
+                          title={`Open ${stage.title} output`}
+                        >
+                          <FileText className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                      {stage.isCurrent ? (
+                        <Loader2 className={`h-4 w-4 animate-spin ${toneClasses.text}`} />
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="mt-2 flex items-end justify-between gap-3">
@@ -908,6 +943,15 @@ export function BullpenAutoRunScheduleCard({
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading auto-run status...
           </div>
+        ) : null}
+
+        {openStage ? (
+          <BullpenAutoRunStageOutputDialog
+            stageTitle={openStage.title}
+            stageDetail={openStage.detail}
+            outputs={openStage.outputs}
+            onClose={() => setOpenStageKey(null)}
+          />
         ) : null}
       </CardContent>
     </Card>
