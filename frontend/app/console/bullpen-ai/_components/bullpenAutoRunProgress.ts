@@ -137,6 +137,22 @@ function getItemLabel(
   return readString(stage?.outputs?.item_label) ?? workflowDefinition.defaultItemLabel;
 }
 
+function getProgressItemLabel(
+  stage: BullpenAutoLiveStageResult | null,
+  workflowDefinition: WorkflowDefinition,
+) {
+  const defaultLabel = getItemLabel(stage, workflowDefinition);
+  if (workflowDefinition.key !== "invest") return defaultLabel;
+
+  const activePositionRows = readNumber(stage?.outputs?.active_position_rows);
+  const candidateDecisionRows = readNumber(stage?.outputs?.candidate_decision_rows);
+  if (activePositionRows === null && candidateDecisionRows === null) {
+    return defaultLabel;
+  }
+
+  return "review rows";
+}
+
 function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
   const rawCandidates = stage?.outputs?.accepted_candidates;
   if (!Array.isArray(rawCandidates)) return [];
@@ -213,7 +229,7 @@ export function buildBullpenAutoRunWorkflowView(
     const completedItems = shouldShowStageData ? getCompletedItems(stage) : null;
     const totalItems = shouldShowStageData ? getTotalItems(stage) : null;
     const itemLabel = shouldShowStageData
-      ? getItemLabel(stage, definition)
+      ? getProgressItemLabel(stage, definition)
       : definition.defaultItemLabel;
     const progressPercent =
       totalItems && totalItems > 0 && completedItems !== null

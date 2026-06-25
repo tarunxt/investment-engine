@@ -222,6 +222,9 @@ export function BullpenLlmBreakdownDialog({
             <h2 className="max-w-4xl text-xl font-semibold text-slate-950">
               {question.question}
             </h2>
+            <p className="text-sm text-slate-600">
+              Latest LLM update: {formatDate(question.llmCompletedAt)}
+            </p>
             <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
               <StatCard
                 label="Consensus Yes"

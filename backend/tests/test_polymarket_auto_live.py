@@ -2003,6 +2003,84 @@ async def test_console_profile_manual_rows_exclude_trump_insult_markets_before_s
 
 
 @pytest.mark.anyio
+async def test_console_profile_stage_2_still_runs_llm_when_rules_are_incomplete(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    market = _market(
+        question="Will unclear-rules market resolve Yes?",
+        slug="unclear-rules-market",
+        description=None,
+        current_yes_odds=34,
+        current_no_odds=66,
+    )
+
+    async def fake_scan_console_profile_markets(**kwargs):
+        return SimpleNamespace(
+            source_label="Bullpen CLI",
+            source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+            total_candidates=1,
+            accepted=[market],
+            rejected=[],
+        )
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(
+            fail_reason="Resolution criteria are unavailable."
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=82, fair_no=18),
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    reviewed_candidate = result.run.stage_results[1].outputs["llm_reviewed_candidates"][0]
+    assert reviewed_candidate["fair_yes_probability_pct"] == 82
+    assert reviewed_candidate["fair_no_probability_pct"] == 18
+    assert "still blocked because Resolution criteria are unavailable" in reviewed_candidate["reason"]
+    assert result.decisions[0].decision == "SKIP"
+    assert result.decisions[0].llm_outputs[0].llm_yes_odds == 82
+    assert result.decisions[0].stage_results[1].status == "warning"
+
+
+@pytest.mark.anyio
 async def test_console_profile_manual_scan_rows_skip_backend_rescan_and_run_llm_from_snapshot(
     monkeypatch,
 ):
