@@ -10,6 +10,7 @@ from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.runs.models import Run, RunJob
 from app.domains.runs.repository import PostgresRunRepository
+from app.infrastructure.messaging.task_registry import register_job_task
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
 from app.shared.exceptions import ConflictException, ValidationException
 from app.shared.types import JobStatus, UserId
@@ -152,9 +153,10 @@ class CreateRunUseCase:
                 if eta is not None:
                     eta = eta + timedelta(seconds=countdown)
             if is_future:
-                execute_ai_job.apply_async(args=[job.id], eta=eta)  # type: ignore
+                task = execute_ai_job.apply_async(args=[job.id], eta=eta)  # type: ignore
             else:
-                execute_ai_job.apply_async(args=[job.id], countdown=countdown)  # type: ignore
+                task = execute_ai_job.apply_async(args=[job.id], countdown=countdown)  # type: ignore
+            await register_job_task(job.id, task.id)
 
         # Re-fetch with all relationships loaded for the response
         result = await self._run_repo.get(run.id)

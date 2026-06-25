@@ -25,6 +25,7 @@ from app.domains.runs.use_cases.create_run import (
 )
 from app.infrastructure.database.session import get_async_db
 from app.infrastructure.locks.redis_lock import RedisLock
+from app.infrastructure.messaging.task_registry import revoke_registered_job_task
 from app.shared.exceptions import AppException
 from app.shared.pagination import PagedQuery
 from app.shared.types import JobStatus, UserId
@@ -274,6 +275,7 @@ async def cancel_run(
         select(RunJob).where(RunJob.run_id == run_id)
     )
     run_jobs = run_job_rows.scalars().all()
+    jobs: list[Job] = []
     if run_jobs:
         job_ids = [rj.job_id for rj in run_jobs]
         jobs_rows = await db.execute(select(Job).where(Job.id.in_(job_ids)))
@@ -287,7 +289,25 @@ async def cancel_run(
                     job.export_error = "Cancelled by user"
 
     await db.commit()
+
+    from app.domains.jobs.tasks import _publish_job_update, _publish_run_update
+
+    for job in jobs:
+        if job.status == JobStatus.FAILED and (job.error_message or "").lower().find("cancelled") >= 0:
+            _publish_job_update(job)
+            await revoke_registered_job_task(job.id)
+
     run = await repo.get(run_id)
     if not run:
         raise HTTPException(404, detail="Run not found")
+    _publish_run_update(
+        run.id,
+        run.user_id,
+        run.status,
+        run.current_stage,
+        run.export_status,
+        run.export_error,
+        run.exported_at.isoformat() if run.exported_at else None,
+        run.exported_sheet_url,
+    )
     return run

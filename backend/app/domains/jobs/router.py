@@ -9,6 +9,7 @@ from app.infrastructure.database.session import get_async_db
 from app.infrastructure.locks.redis_lock import RedisLock
 from app.infrastructure.messaging.event_bus import event_bus
 from app.infrastructure.messaging.idempotency import IdempotencyStore
+from app.infrastructure.messaging.task_registry import revoke_registered_job_task
 from app.shared.exceptions import AppException
 from app.shared.pagination import PagedQuery
 from app.shared.types import JobId, JobStatus, UserId
@@ -100,4 +101,40 @@ async def get_job(
     job = await repo.get(JobId(job_id))
     if not job:
         raise HTTPException(404, detail="Job not found")
+    return job
+
+
+@router.post("/{job_id}/cancel", response_model=JobResponse)
+async def cancel_job(
+    job_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    repo = PostgresJobRepository(db)
+    job = await repo.get(JobId(job_id))
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    if job.user_id != current_user.id:
+        raise HTTPException(403, detail="Not allowed")
+
+    if job.status not in JobStatus.active():
+        return job
+
+    job.status = JobStatus.FAILED
+    job.error_message = "Cancelled by user"
+    if (job.export_status or "").lower() in {"", "pending", "queued", "processing"}:
+        job.export_status = "failed"
+        job.export_error = "Cancelled by user"
+
+    await db.commit()
+
+    job = await repo.get(JobId(job_id))
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+
+    await revoke_registered_job_task(job_id)
+
+    from app.domains.jobs.tasks import _publish_job_update
+
+    _publish_job_update(job)
     return job

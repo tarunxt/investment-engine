@@ -19,6 +19,7 @@ from app.domains.polymarket.event_preflight import (
     finalize_polymarket_event_runtime_metadata,
 )
 from app.domains.runs.schemas import PolymarketEventRunContext
+from app.infrastructure.messaging.task_registry import register_job_task_sync
 from app.shared.types import JobStatus
 
 logger = get_logger("app.domains.jobs.tasks")
@@ -1087,6 +1088,15 @@ def _mark_failed(
         logger.exception("Could not mark job %s as failed", job_id)
 
 
+def _job_was_cancelled(repo: SyncJobRepository, job_id: int) -> bool:
+    latest = repo.get(job_id)
+    return bool(
+        latest
+        and latest.status == JobStatus.FAILED
+        and "cancelled" in (latest.error_message or "").lower()
+    )
+
+
 # ── Task ─────────────────────────────────────────────────────────────────────
 
 @celery.task(
@@ -1112,11 +1122,13 @@ def execute_ai_job(self, job_id: int) -> None:
     runtime_metadata_json: dict | None = None
 
     try:
+        if self.request.id:
+            register_job_task_sync(job_id, self.request.id)
         job = repo.get(job_id)
         if not job:
             logger.warning("Job %s not found", job_id)
             return
-        if job.status == JobStatus.FAILED and (job.error_message or "").lower().find("cancelled") >= 0:
+        if _job_was_cancelled(repo, job_id):
             logger.info("Skipping cancelled job %s", job_id)
             return
 
@@ -1172,6 +1184,9 @@ def execute_ai_job(self, job_id: int) -> None:
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
                     if not rebalance_table_issue:
                         break
+                    if _job_was_cancelled(repo, job_id):
+                        logger.info("Stopping cancelled rebalance repair job %s", job_id)
+                        return
                     logger.info(
                         "Repairing rebalance table for job %s because %s (attempt %s/%s)",
                         job_id,
@@ -1238,6 +1253,9 @@ def execute_ai_job(self, job_id: int) -> None:
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
                     if not stock_table_issue:
                         break
+                    if _job_was_cancelled(repo, job_id):
+                        logger.info("Stopping cancelled stock repair job %s", job_id)
+                        return
                     logger.info(
                         "Repairing stock table for job %s because %s (attempt %s/%s)",
                         job_id,
@@ -1316,6 +1334,9 @@ def execute_ai_job(self, job_id: int) -> None:
             content = _sanitize_portfolio_event_content(job.prompt, content)
             retry_reason = _portfolio_event_retry_reason(job.prompt, content)
             if retry_reason:
+                if _job_was_cancelled(repo, job_id):
+                    logger.info("Stopping cancelled portfolio events job %s", job_id)
+                    return
                 logger.info("Retrying portfolio events job %s because %s", job_id, retry_reason)
                 repair_result = provider.generate(
                     prompt=_build_portfolio_event_repair_prompt(job.prompt, content, retry_reason),
@@ -1345,8 +1366,7 @@ def execute_ai_job(self, job_id: int) -> None:
                 model_web_sources=result.web_sources,
                 runtime_metadata=runtime_metadata_json,
             )
-        latest = repo.get(job_id)
-        if latest and latest.status == JobStatus.FAILED and (latest.error_message or "").lower().find("cancelled") >= 0:
+        if _job_was_cancelled(repo, job_id):
             logger.info("Skipping completion update for cancelled job %s", job_id)
             return
 

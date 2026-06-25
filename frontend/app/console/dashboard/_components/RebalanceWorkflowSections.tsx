@@ -4970,7 +4970,7 @@ export function RebalanceWorkflowSections({
   });
   const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
-  const activeRunIdsRef = useRef<number[]>([]);
+  const activeExecutionRefsRef = useRef<Array<{ kind: "run" | "job"; id: number }>>([]);
   const cancelRequestedRef = useRef(false);
   const pauseRequestedRef = useRef(false);
 
@@ -5933,9 +5933,12 @@ ${zerodhaExecutionMode === "direct_market"
       stage: WorkflowStageKey,
       runId: number,
     ) => {
-      activeRunIdsRef.current = Array.from(
-        new Set([...activeRunIdsRef.current, runId]),
-      );
+      activeExecutionRefsRef.current = [
+        ...activeExecutionRefsRef.current.filter(
+          (entry) => !(entry.kind === "run" && entry.id === runId),
+        ),
+        { kind: "run", id: runId },
+      ];
       updateStage(portfolio, stage, { activeRunId: runId });
 
       while (true) {
@@ -6375,7 +6378,7 @@ ${zerodhaExecutionMode === "direct_market"
       };
       setRunningPortfolio(portfolio);
       resetPortfolio(portfolio);
-      activeRunIdsRef.current = [];
+      activeExecutionRefsRef.current = [];
       cancelRequestedRef.current = false;
       pauseRequestedRef.current = false;
       setWorkflowPaused(false);
@@ -6498,6 +6501,12 @@ ${zerodhaExecutionMode === "direct_market"
             portfolio === "zerodha"
               ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata })
               : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata });
+          activeExecutionRefsRef.current = [
+            ...activeExecutionRefsRef.current.filter(
+              (entry) => !(entry.kind === "job" && entry.id === queuedThreat.job_id),
+            ),
+            { kind: "job", id: queuedThreat.job_id },
+          ];
           updateStage(portfolio, "threats", {
             activeRunId: queuedThreat.job_id,
           });
@@ -6855,7 +6864,7 @@ ${zerodhaExecutionMode === "direct_market"
         }, WORKFLOW_COMPLETION_RESET_DELAY_MS);
       } finally {
         const wasCancelled = cancelRequestedRef.current;
-        activeRunIdsRef.current = [];
+        activeExecutionRefsRef.current = [];
         setRunningPortfolio(null);
         if (wasCancelled) {
           const timestamp = new Date().toISOString();
@@ -7101,8 +7110,10 @@ ${zerodhaExecutionMode === "direct_market"
                       pauseRequestedRef.current = false;
                       setWorkflowPaused(false);
                       void Promise.allSettled(
-                        activeRunIdsRef.current.map((runId) =>
-                          apiService.cancelRun(runId),
+                        activeExecutionRefsRef.current.map((execution) =>
+                          execution.kind === "job"
+                            ? apiService.cancelJob(execution.id)
+                            : apiService.cancelRun(execution.id),
                         ),
                       );
                     }}

@@ -29,6 +29,9 @@ from app.domains.polymarket_auto_live.repository import (
 from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveRun
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
+from app.infrastructure.messaging.task_registry import (
+    register_auto_live_run_task_sync,
+)
 import app.infrastructure.database.all_models  # noqa: F401
 
 logger = get_logger("app.domains.polymarket_auto_live.tasks")
@@ -86,9 +89,14 @@ def _synchronize_state(
 def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
     with SyncSessionLocal() as session:
         repo = SyncPolymarketAutoLiveRepository(session)
+        if self.request.id:
+            register_auto_live_run_task_sync(run_id, self.request.id)
         run = repo.get_run(run_id)
         if run is None:
             logger.warning("Auto-Live run %s for user %s was not found", run_id, user_id)
+            return
+        if run.status != "running":
+            logger.info("Skipping inactive Auto-Live run %s with status %s", run_id, run.status)
             return
 
         settings, state = _synchronize_state(user_id, repo)
@@ -192,4 +200,5 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
             repo.save_run(user_id, run)
             repo.save_state(user_id, state)
             session.commit()
-            execute_polymarket_auto_live_run.delay(user_id, run.id)  # type: ignore[attr-defined]
+            task = execute_polymarket_auto_live_run.delay(user_id, run.id)  # type: ignore[attr-defined]
+            register_auto_live_run_task_sync(run.id, task.id)

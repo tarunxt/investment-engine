@@ -604,6 +604,10 @@ class apiServiceClass implements IApiService {
     return this.get<JobResponse>(URLs.jobs.get(id));
   }
 
+  cancelJob(id: number): Promise<JobResponse> {
+    return this.post<JobResponse>(URLs.jobs.cancel(id), {});
+  }
+
   // ===== Provider Endpoints =====
 
   getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]> {

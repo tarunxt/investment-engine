@@ -315,7 +315,7 @@ export function BullpenAutoRunScheduleCard({
     try {
       await apiService.stopBullpenAutoLive();
       await loadSummary({ preserveLoading: true });
-      setNotice("Auto runs stopped.");
+      setNotice("Auto runs stopped. Any active Auto-Live run was cancelled immediately.");
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
@@ -381,14 +381,9 @@ export function BullpenAutoRunScheduleCard({
     setError(null);
 
     try {
-      if (!summary?.state.paused) {
-        await apiService.pauseBullpenAutoLive();
-      }
       await apiService.stopBullpenAutoLive();
       await loadSummary({ preserveLoading: true });
-      setNotice(
-        "Auto-Live stop requested. Any in-flight backend work will wind down at the next safe checkpoint.",
-      );
+      setNotice("Auto-Live stopped. Active backend work was cancelled immediately.");
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
