@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   getBullpenLlmReviewState,
+  hasBullpenLlmAnalysis,
   type BullpenQuestionRow,
 } from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
@@ -192,6 +193,7 @@ function LlmOddsMetric({
   onOpenBreakdown: (question: BullpenQuestionRow) => void;
 }) {
   const reviewState = question ? getBullpenLlmReviewState(question) : null;
+  const hasAnalysis = hasBullpenLlmAnalysis(question);
   const odds = (
     <OddsPairValue
       yesOdds={question?.llmYesOdds ?? null}
@@ -201,22 +203,28 @@ function LlmOddsMetric({
       warningTone={reviewState?.tone ?? "medium"}
     />
   );
+  const content = (
+    <div className="space-y-2">
+      {odds}
+      <div className="border-t border-slate-200 pt-2 text-[10px] font-medium leading-4 text-slate-500">
+        <LlmTimestamp completedAt={question?.llmCompletedAt ?? null} />
+      </div>
+    </div>
+  );
 
   return (
-    <MetricCard
-      label="LLM Yes / No"
-      footer={<LlmTimestamp completedAt={question?.llmCompletedAt ?? null} />}
-    >
-      {question && question.llmBreakdown.length > 0 ? (
+    <MetricCard label="LLM Yes / No">
+      {question && hasAnalysis ? (
         <button
           type="button"
           onClick={() => onOpenBreakdown(question)}
+          aria-label={`Open LLM odds breakdown for ${question.question}`}
           className="w-full rounded-md text-left underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
         >
-          {odds}
+          {content}
         </button>
       ) : (
-        odds
+        content
       )}
     </MetricCard>
   );

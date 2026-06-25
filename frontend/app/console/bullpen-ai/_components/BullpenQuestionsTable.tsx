@@ -13,6 +13,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Info, X }
 
 import {
   getBullpenLlmReviewState,
+  hasBullpenLlmAnalysis,
   type BullpenQuestionRow,
   type BullpenScanSnapshot,
 } from "@/lib/bullpen-ai";
@@ -782,118 +783,124 @@ export function BullpenQuestionsTable({
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {rows.length > 0 ? (
-              rows.map((question) => (
-                <tr key={question.id} className="align-top hover:bg-slate-50">
-                  <td className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedQuestionIds.has(question.id)}
-                      disabled={!selectionEnabled}
-                      onChange={() => onToggleQuestion(question.id)}
-                      className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-                  </td>
-                  <td className="px-4 py-3 font-medium text-slate-900">
-                    <div>{question.question}</div>
-                    {question.marketUrl ? (
-                      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
-                        <a
-                          href={question.marketUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-purple-700 hover:text-purple-900"
+              rows.map((question) => {
+                const hasLlmAnalysis = hasBullpenLlmAnalysis(question);
+
+                return (
+                  <tr key={question.id} className="align-top hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedQuestionIds.has(question.id)}
+                        disabled={!selectionEnabled}
+                        onChange={() => onToggleQuestion(question.id)}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                    </td>
+                    <td className="px-4 py-3 font-medium text-slate-900">
+                      <div>{question.question}</div>
+                      {question.marketUrl ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
+                          <a
+                            href={question.marketUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-purple-700 hover:text-purple-900"
+                          >
+                            Open market
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                      {formatDate(question.closeTime)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                      {formatDays(question.daysUntilClose)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                      {question.category}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                      {formatOutcomeSummary(question)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-emerald-700">
+                      {formatOdds(question.yesOdds)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-rose-700">
+                      {formatOdds(question.noOdds)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-indigo-700">
+                      {hasLlmAnalysis ? (
+                        <button
+                          type="button"
+                          onClick={() => setBreakdownQuestion(question)}
+                          aria-label={`Open LLM odds breakdown for ${question.question}`}
+                          className={cn(
+                            "rounded-md px-2 py-1 underline decoration-indigo-300 underline-offset-4 transition hover:text-indigo-900",
+                            getLlmOddsCellClass(question.llmYesOdds),
+                          )}
                         >
-                          Open market
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                    {formatDate(question.closeTime)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                    {formatDays(question.daysUntilClose)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                    {question.category}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                    {formatOutcomeSummary(question)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-emerald-700">
-                    {formatOdds(question.yesOdds)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-rose-700">
-                    {formatOdds(question.noOdds)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-indigo-700">
-                    {question.llmBreakdown.length > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => setBreakdownQuestion(question)}
-                        className={cn(
-                          "rounded-md px-2 py-1 underline decoration-indigo-300 underline-offset-4 transition hover:text-indigo-900",
-                          getLlmOddsCellClass(question.llmYesOdds),
-                        )}
-                      >
-                        <LlmOddsDisplay question={question} value={question.llmYesOdds} />
-                      </button>
-                    ) : (
-                      <span
-                        className={cn(
-                          "rounded-md px-2 py-1",
-                          getLlmOddsCellClass(question.llmYesOdds),
-                        )}
-                      >
-                        <LlmOddsDisplay question={question} value={question.llmYesOdds} />
-                      </span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-violet-700">
-                    {question.llmBreakdown.length > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => setBreakdownQuestion(question)}
-                        className={cn(
-                          "rounded-md px-2 py-1 underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900",
-                          getLlmOddsCellClass(question.llmNoOdds),
-                        )}
-                      >
-                        <LlmOddsDisplay question={question} value={question.llmNoOdds} />
-                      </button>
-                    ) : (
-                      <span
-                        className={cn(
-                          "rounded-md px-2 py-1",
-                          getLlmOddsCellClass(question.llmNoOdds),
-                        )}
-                      >
-                        <LlmOddsDisplay question={question} value={question.llmNoOdds} />
-                      </span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
-                    {formatReturnsPerDay(question.returnsPerDay)}
-                  </td>
-                  <td
-                    className={cn(
-                      "whitespace-nowrap px-4 py-3 text-right font-semibold text-slate-700",
-                      question.isAmountToBeInvestedHighlighted
-                        ? "bg-fuchsia-500 text-slate-950"
-                        : "",
-                    )}
-                  >
-                    {formatMoney(question.amountToBeInvested)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                    {question.volume || "—"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                    {question.liquidity || "—"}
-                  </td>
-                </tr>
-              ))
+                          <LlmOddsDisplay question={question} value={question.llmYesOdds} />
+                        </button>
+                      ) : (
+                        <span
+                          className={cn(
+                            "rounded-md px-2 py-1",
+                            getLlmOddsCellClass(question.llmYesOdds),
+                          )}
+                        >
+                          <LlmOddsDisplay question={question} value={question.llmYesOdds} />
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-violet-700">
+                      {hasLlmAnalysis ? (
+                        <button
+                          type="button"
+                          onClick={() => setBreakdownQuestion(question)}
+                          aria-label={`Open LLM odds breakdown for ${question.question}`}
+                          className={cn(
+                            "rounded-md px-2 py-1 underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900",
+                            getLlmOddsCellClass(question.llmNoOdds),
+                          )}
+                        >
+                          <LlmOddsDisplay question={question} value={question.llmNoOdds} />
+                        </button>
+                      ) : (
+                        <span
+                          className={cn(
+                            "rounded-md px-2 py-1",
+                            getLlmOddsCellClass(question.llmNoOdds),
+                          )}
+                        >
+                          <LlmOddsDisplay question={question} value={question.llmNoOdds} />
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
+                      {formatReturnsPerDay(question.returnsPerDay)}
+                    </td>
+                    <td
+                      className={cn(
+                        "whitespace-nowrap px-4 py-3 text-right font-semibold text-slate-700",
+                        question.isAmountToBeInvestedHighlighted
+                          ? "bg-fuchsia-500 text-slate-950"
+                          : "",
+                      )}
+                    >
+                      {formatMoney(question.amountToBeInvested)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                      {question.volume || "—"}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                      {question.liquidity || "—"}
+                    </td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td

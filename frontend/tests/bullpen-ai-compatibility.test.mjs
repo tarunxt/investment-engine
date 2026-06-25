@@ -347,6 +347,60 @@ test("Bullpen x AI LLM breakdown dialog shows the preflight evidence block", () 
   assert.match(dialogSource, /Sources count:/);
 });
 
+test("Bullpen x AI treats saved odds or timestamps as clickable LLM analysis", async () => {
+  const { hasBullpenLlmAnalysis } = await loadBullpenAiModule();
+
+  assert.equal(
+    hasBullpenLlmAnalysis({
+      llmYesOdds: null,
+      llmNoOdds: null,
+      llmRunId: null,
+      llmCompletedAt: "2026-06-25T18:45:06.000Z",
+      llmBreakdown: [],
+    }),
+    true,
+  );
+  assert.equal(
+    hasBullpenLlmAnalysis({
+      llmYesOdds: 82,
+      llmNoOdds: 18,
+      llmRunId: null,
+      llmCompletedAt: null,
+      llmBreakdown: [],
+    }),
+    true,
+  );
+  assert.equal(
+    hasBullpenLlmAnalysis({
+      llmYesOdds: null,
+      llmNoOdds: null,
+      llmRunId: null,
+      llmCompletedAt: null,
+      llmBreakdown: [],
+    }),
+    false,
+  );
+
+  const investmentsSectionSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenInvestmentsSection.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const questionsTableSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(investmentsSectionSource, /hasBullpenLlmAnalysis/);
+  assert.match(investmentsSectionSource, /Open LLM odds breakdown for/);
+  assert.match(questionsTableSource, /hasBullpenLlmAnalysis/);
+});
+
 test("Bullpen x AI stale fact validation excludes contradictory public-listing claims", async () => {
   const { validateBullpenStaleFacts } = await loadBullpenAiModule();
 
