@@ -330,6 +330,23 @@ class AsyncPolymarketAutoLiveRepository:
         )
         return (await self.session.execute(query)).scalar_one_or_none()
 
+    async def save_run(self, user_id: int, run: BullpenAutoLiveRun) -> None:
+        record = await self.session.get(PolymarketAutoLiveRunRecord, run.id)
+        if record is None:
+            record = PolymarketAutoLiveRunRecord(
+                id=run.id,
+                user_id=user_id,
+                status=run.status,
+                triggered_by=run.triggered_by,
+                dry_run=run.dry_run,
+                started_at=_parse_datetime(run.started_at) or utc_now(),
+                summary=run.summary,
+                payload={},
+            )
+            self.session.add(record)
+        apply_run_to_record(record, run, user_id=user_id)
+        await self.session.flush()
+
     async def list_runs(self, user_id: int, *, limit: int | None = None) -> list[BullpenAutoLiveRun]:
         query = (
             select(PolymarketAutoLiveRunRecord)

@@ -40,6 +40,7 @@ from app.domains.polymarket_auto_live.normalization import (
     normalize_auto_live_evidence_status,
 )
 from app.domains.polymarket_auto_live.repository import (
+    AsyncPolymarketAutoLiveRepository,
     apply_state_to_record,
     normalize_auto_live_status,
     record_to_decision,
@@ -119,6 +120,49 @@ def test_initial_scan_stage_result_starts_immediately_for_manual_console_rows():
 
 
 @pytest.mark.anyio
+async def test_async_repository_save_run_persists_cancelled_active_run_payload():
+    run = BullpenAutoLiveRun(
+        id="run-save-test",
+        triggered_by="manual",
+        status="failed",
+        dry_run=True,
+        started_at="2026-06-25T07:00:00+00:00",
+        completed_at="2026-06-25T07:01:00+00:00",
+        summary="Auto-Live run cancelled by user.",
+        error_message="Cancelled by user",
+    )
+
+    class _FakeAsyncSession:
+        def __init__(self) -> None:
+            self.records: dict[str, object] = {}
+            self.flushed = False
+
+        async def get(self, model, key):
+            assert model.__name__ == "PolymarketAutoLiveRunRecord"
+            return self.records.get(key)
+
+        def add(self, record) -> None:
+            self.records[record.id] = record
+
+        async def flush(self) -> None:
+            self.flushed = True
+
+    session = _FakeAsyncSession()
+    repo = AsyncPolymarketAutoLiveRepository(session)  # type: ignore[arg-type]
+
+    await repo.save_run(7, run)
+
+    saved_record = session.records["run-save-test"]
+    assert session.flushed is True
+    assert saved_record.user_id == 7
+    assert saved_record.status == "failed"
+    assert saved_record.summary == "Auto-Live run cancelled by user."
+    assert saved_record.error_message == "Cancelled by user"
+    assert saved_record.payload["summary"] == "Auto-Live run cancelled by user."
+    assert saved_record.payload["error_message"] == "Cancelled by user"
+
+
+@pytest.mark.anyio
 async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
     run = BullpenAutoLiveRun(
         id="run-stop-test",
@@ -174,7 +218,7 @@ async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
             assert user_id == 7
             return object()
 
-        def save_run(self, user_id: int, next_run: BullpenAutoLiveRun) -> None:
+        async def save_run(self, user_id: int, next_run: BullpenAutoLiveRun) -> None:
             assert user_id == 7
             saved["run"] = next_run
 
