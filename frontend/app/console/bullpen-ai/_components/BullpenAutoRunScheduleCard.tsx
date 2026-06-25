@@ -20,6 +20,8 @@ import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type { BullpenAutoLiveRun, BullpenAutoLiveSummaryResponse } from "@/types/api";
 
+import { buildBullpenAutoRunWorkflowView } from "./bullpenAutoRunProgress";
+
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
   buildRunNowRequest?: () => Record<string, unknown> | null;
