@@ -118,7 +118,7 @@ function formatInvestStageRowMix(
   const candidateRows = readStageOutputNumber(stage.outputs.candidate_decision_rows);
   if (activePositionRows === null && candidateRows === null) return null;
 
-  return `${activePositionRows ?? 0} active position ${activePositionRows === 1 ? "row" : "rows"} + ${candidateRows ?? 0} candidate ${candidateRows === 1 ? "row" : "rows"}`;
+  return `${activePositionRows ?? 0} Bullpen position ${activePositionRows === 1 ? "row" : "rows"} + ${candidateRows ?? 0} candidate ${candidateRows === 1 ? "row" : "rows"}`;
 }
 
 function StageOneOutputDialog({
@@ -284,6 +284,9 @@ function formatStageElapsedTime(
 
   const completedAtMs = completedAt ? Date.parse(completedAt) : null;
   const endMs = completedAtMs !== null && !Number.isNaN(completedAtMs) ? completedAtMs : nowMs;
+  if (endMs >= startedAtMs && endMs - startedAtMs < 1_000) {
+    return "<0:01";
+  }
   return formatElapsedRunTime(startedAt, Math.max(startedAtMs, endMs));
 }
 
