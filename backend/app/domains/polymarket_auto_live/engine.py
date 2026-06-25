@@ -74,6 +74,7 @@ STAGE_NAMES = {
     6: "Rebalance & Exit",
     7: "Execution",
 }
+_DEFAULT_COMPLETED_AT = object()
 DECISION_ACTIONABLES = {"BUY_NEW", "ADD_MORE", "TRIM", "EXIT"}
 CONFIDENCE_WEIGHT = {"Low": 0.55, "Medium": 0.8, "High": 1.0}
 EVIDENCE_WEIGHT = {"Low": 0.55, "Moderate": 0.8, "Strong": 1.0}
@@ -136,8 +137,11 @@ def build_stage_result(
     guardrails_checked: list[BullpenAutoLiveGuardrailCheck] | None = None,
     hard_block: bool = False,
     started_at: str | None = None,
-    completed_at: str | None = None,
+    completed_at: str | None | object = _DEFAULT_COMPLETED_AT,
 ) -> BullpenAutoLiveStageResult:
+    resolved_completed_at = (
+        utc_now_iso() if completed_at is _DEFAULT_COMPLETED_AT else completed_at
+    )
     return BullpenAutoLiveStageResult(
         stage_number=stage_number,
         stage_name=STAGE_NAMES[stage_number],
@@ -148,7 +152,7 @@ def build_stage_result(
         guardrails_checked=guardrails_checked or [],
         hard_block=hard_block,
         started_at=started_at or utc_now_iso(),
-        completed_at=completed_at or utc_now_iso(),
+        completed_at=resolved_completed_at,
     )
 
 
@@ -167,7 +171,7 @@ def build_workflow_stage_result(
     guardrails_checked: list[BullpenAutoLiveGuardrailCheck] | None = None,
     hard_block: bool = False,
     started_at: str | None = None,
-    completed_at: str | None = None,
+    completed_at: str | None | object = _DEFAULT_COMPLETED_AT,
 ) -> BullpenAutoLiveStageResult:
     workflow_outputs = dict(outputs or {})
     workflow_outputs["workflow_stage_key"] = workflow_stage_key
@@ -178,17 +182,19 @@ def build_workflow_stage_result(
         workflow_outputs["total_items"] = total_items
     if item_label is not None:
         workflow_outputs["item_label"] = item_label
-    return build_stage_result(
-        stage_number=stage_number,
-        status=status,
-        reason=reason,
-        inputs=inputs,
-        outputs=workflow_outputs,
-        guardrails_checked=guardrails_checked,
-        hard_block=hard_block,
-        started_at=started_at,
-        completed_at=completed_at,
-    )
+    stage_result_kwargs = {
+        "stage_number": stage_number,
+        "status": status,
+        "reason": reason,
+        "inputs": inputs,
+        "outputs": workflow_outputs,
+        "guardrails_checked": guardrails_checked,
+        "hard_block": hard_block,
+        "started_at": started_at,
+    }
+    if completed_at is not _DEFAULT_COMPLETED_AT:
+        stage_result_kwargs["completed_at"] = completed_at
+    return build_stage_result(**stage_result_kwargs)
 
 
 def set_run_stage_result(
@@ -2218,36 +2224,79 @@ class BullpenAutoLiveEngine:
         )
         self._report_progress(progress_callback, run, state)
         llm_stage_started_at = utc_now_iso()
-        if manual_console_rows_have_reusable_llm:
+        stage1_accepted_candidate_count = len(stage1_accepted_candidates)
+
+        def report_llm_stage_progress(
+            *,
+            phase_status: str,
+            reason: str,
+            completed_items: int,
+            current_candidate_index: int | None = None,
+            current_market: ScannedMarket | None = None,
+            last_completed_market: ScannedMarket | None = None,
+            qualified_candidate_count: int | None = None,
+            reused_existing_llm_outputs: bool = False,
+            completed_at: str | None | object = _DEFAULT_COMPLETED_AT,
+        ) -> None:
+            stage_outputs: dict[str, object] = {
+                "scan_source_label": scan_source_label,
+                "scan_source_url": scan_source_url,
+                "used_manual_console_rows": manual_console_rows_used,
+                "candidate_rows_before_llm": candidate_rows_before_llm,
+                "llm_candidate_count": llm_candidate_count,
+                "stage1_accepted_candidate_count": stage1_accepted_candidate_count,
+            }
+            if reused_existing_llm_outputs:
+                stage_outputs["reused_existing_llm_outputs"] = True
+            if current_candidate_index is not None:
+                stage_outputs["current_candidate_index"] = current_candidate_index
+            if current_market is not None:
+                stage_outputs["current_candidate_market_id"] = current_market.market_id
+                stage_outputs["current_candidate_question"] = current_market.question
+                stage_outputs["current_candidate_market_url"] = current_market.market_url
+            if last_completed_market is not None:
+                stage_outputs["last_completed_candidate_market_id"] = (
+                    last_completed_market.market_id
+                )
+                stage_outputs["last_completed_candidate_question"] = (
+                    last_completed_market.question
+                )
+                stage_outputs["last_completed_candidate_market_url"] = (
+                    last_completed_market.market_url
+                )
+            if qualified_candidate_count is not None:
+                stage_outputs["qualified_candidate_count_so_far"] = qualified_candidate_count
             set_run_stage_result(
                 run,
                 build_workflow_stage_result(
                     stage_number=2,
                     workflow_stage_key="llm",
-                    phase_status="running",
+                    phase_status=phase_status,
                     status="pass" if llm_candidate_count > 0 else "warning",
-                    reason=(
-                        "Stage 2 started. Reusing the current Bullpen x AI LLM outputs."
-                        if llm_candidate_count > 0
-                        else "No candidate events qualified for Stage 2 LLM review."
-                    ),
-                    completed_items=0,
+                    reason=reason,
+                    completed_items=completed_items,
                     total_items=llm_candidate_count,
-                    item_label="events",
-                    outputs={
-                        "scan_source_label": scan_source_label,
-                        "scan_source_url": scan_source_url,
-                        "used_manual_console_rows": manual_console_rows_used,
-                        "candidate_rows_before_llm": candidate_rows_before_llm,
-                        "llm_candidate_count": llm_candidate_count,
-                        "reused_existing_llm_outputs": True,
-                    },
+                    item_label="shortlisted events",
+                    outputs=stage_outputs,
                     guardrails_checked=global_guardrails,
                     started_at=llm_stage_started_at,
-                    completed_at=None,
+                    completed_at=completed_at,
                 ),
             )
             self._report_progress(progress_callback, run, state)
+
+        if manual_console_rows_have_reusable_llm:
+            report_llm_stage_progress(
+                phase_status="running",
+                reason=(
+                    f"Stage 2 started. Reusing existing LLM outputs for {llm_candidate_count} of {stage1_accepted_candidate_count} Stage 1 events."
+                    if llm_candidate_count > 0
+                    else "No candidate events qualified for Stage 2 LLM review."
+                ),
+                completed_items=0,
+                reused_existing_llm_outputs=True,
+                completed_at=None,
+            )
 
         if scan_seed_markets is not None:
             positioned_market_ids = {position.market_id for position in position_snapshots}
@@ -2321,36 +2370,31 @@ class BullpenAutoLiveEngine:
             )
             self._report_progress(progress_callback, run, state)
 
-            set_run_stage_result(
-                run,
-                build_workflow_stage_result(
-                    stage_number=2,
-                    workflow_stage_key="llm",
-                    phase_status="running",
-                    status="pass" if llm_candidate_count > 0 else "warning",
-                    reason=(
-                        "Stage 2 started. LLM review is evaluating the candidate events."
-                        if llm_candidate_count > 0
-                        else "No candidate events qualified for Stage 2 LLM review."
-                    ),
-                    completed_items=0,
-                    total_items=llm_candidate_count,
-                    item_label="events",
-                    outputs={
-                        "scan_source_label": scan_source_label,
-                        "scan_source_url": scan_source_url,
-                        "used_manual_console_rows": manual_console_rows_used,
-                        "candidate_rows_before_llm": candidate_rows_before_llm,
-                        "llm_candidate_count": llm_candidate_count,
-                    },
-                    guardrails_checked=global_guardrails,
-                    started_at=llm_stage_started_at,
-                    completed_at=None,
+            report_llm_stage_progress(
+                phase_status="running",
+                reason=(
+                    f"Stage 2 started. Shortlisted {llm_candidate_count} of {stage1_accepted_candidate_count} Stage 1 events for LLM review."
+                    if llm_candidate_count > 0
+                    else "No candidate events qualified for Stage 2 LLM review."
                 ),
+                completed_items=0,
+                completed_at=None,
             )
-            self._report_progress(progress_callback, run, state)
 
-            for market, returns_per_day in llm_markets:
+            for index, (market, returns_per_day) in enumerate(llm_markets, start=1):
+                report_llm_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        f"Stage 2 is reviewing shortlisted event {index} of {llm_candidate_count}: {market.question}"
+                    ),
+                    completed_items=index - 1,
+                    current_candidate_index=index,
+                    current_market=market,
+                    qualified_candidate_count=len(
+                        [context for context in candidate_contexts if bool(context["qualified"])]
+                    ),
+                    completed_at=None,
+                )
                 stage_results = [
                     build_stage_result(
                         stage_number=1,
@@ -2393,6 +2437,18 @@ class BullpenAutoLiveEngine:
                             "qualified": False,
                             "reason": rules.fail_reason,
                         }
+                    )
+                    report_llm_stage_progress(
+                        phase_status="running",
+                        reason=(
+                            f"Stage 2 reviewed {index} of {llm_candidate_count} shortlisted events. Latest: {market.question}"
+                        ),
+                        completed_items=index,
+                        last_completed_market=market,
+                        qualified_candidate_count=len(
+                            [context for context in candidate_contexts if bool(context["qualified"])]
+                        ),
+                        completed_at=None,
                     )
                     continue
 
@@ -2477,6 +2533,18 @@ class BullpenAutoLiveEngine:
                         "reason": qualification_reason,
                     }
                 )
+                report_llm_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        f"Stage 2 reviewed {index} of {llm_candidate_count} shortlisted events. Latest: {market.question}"
+                    ),
+                    completed_items=index,
+                    last_completed_market=market,
+                    qualified_candidate_count=len(
+                        [context for context in candidate_contexts if bool(context["qualified"])]
+                    ),
+                    completed_at=None,
+                )
 
         qualifying_candidates = [
             context
@@ -2521,14 +2589,18 @@ class BullpenAutoLiveEngine:
                 phase_status="completed",
                 status="pass" if llm_candidate_count > 0 else "warning",
                 reason=(
-                    "LLM review completed for the candidate events."
+                    f"LLM review completed for {llm_candidate_count} shortlisted events from {stage1_accepted_candidate_count} Stage 1 candidates."
                     if llm_candidate_count > 0
                     else "Stage 2 had no candidate events to review."
                 ),
                 completed_items=llm_candidate_count,
                 total_items=llm_candidate_count,
-                item_label="events",
+                item_label="shortlisted events",
                 outputs={
+                    "scan_source_label": scan_source_label,
+                    "scan_source_url": scan_source_url,
+                    "used_manual_console_rows": manual_console_rows_used,
+                    "stage1_accepted_candidate_count": stage1_accepted_candidate_count,
                     "candidate_rows_before_llm": candidate_rows_before_llm,
                     "llm_candidate_count": llm_candidate_count,
                     "qualified_candidate_count": len(qualifying_candidates),
@@ -2536,6 +2608,7 @@ class BullpenAutoLiveEngine:
                         context["market"].market_id for context in qualifying_candidates
                     ],
                     "llm_reviewed_candidates": llm_stage_candidates,
+                    "reused_existing_llm_outputs": manual_console_rows_have_reusable_llm,
                 },
                 guardrails_checked=global_guardrails,
                 started_at=llm_stage_started_at if "llm_stage_started_at" in locals() else utc_now_iso(),

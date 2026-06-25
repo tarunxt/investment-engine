@@ -233,6 +233,10 @@ export function buildBullpenAutoRunWorkflowView(
       (index === 0 && runStatus === "running"
         ? pendingRunStartedAt ?? normalizedRun?.started_at ?? null
         : null);
+    const stageTimerCompletedAt =
+      explicitPhase === "running" && runStatus === "running"
+        ? null
+        : stage?.completed_at ?? null;
     let detail =
       stage?.reason ||
       (state === "current" && index === 0 && runStatus === "running"
@@ -260,7 +264,7 @@ export function buildBullpenAutoRunWorkflowView(
       progressPercent,
       isCurrent: state === "current",
       timerStartedAt: stageTimerStartedAt,
-      timerCompletedAt: stage?.completed_at ?? null,
+      timerCompletedAt: stageTimerCompletedAt,
       scanCandidates: definition.key === "scan" ? readScanCandidates(stage) : [],
       outputs: readOutputs(stage),
     } satisfies BullpenAutoRunWorkflowStageView;

@@ -86,6 +86,49 @@ test("Bullpen auto-run workflow view maps running stages to green, yellow, and b
   assert.equal(view.stages[1].timerCompletedAt, null);
 });
 
+test("Bullpen auto-run workflow view ignores completed_at on an actively running stage", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const runningStage = createStage(2, "Stage 2 is reviewing shortlisted event 1 of 2.", {
+    workflow_stage_key: "llm",
+    phase_status: "running",
+    completed_items: 0,
+    total_items: 2,
+    item_label: "shortlisted events",
+  });
+  runningStage.completed_at = "2026-06-25T05:00:30Z";
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-active-stage",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 2 is reviewing shortlisted events.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        completed_items: 20,
+        total_items: 20,
+        item_label: "events",
+      }),
+      runningStage,
+    ],
+  });
+
+  assert.equal(view.stages[1].timerCompletedAt, null);
+  assert.equal(view.stages[1].progressLabel, "0/2 shortlisted events");
+});
+
 test("Bullpen auto-run workflow view treats legacy completed runs as fully finished", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 

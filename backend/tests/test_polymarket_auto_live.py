@@ -408,6 +408,132 @@ async def test_console_profile_advances_to_stage_2_with_naive_candidate_close_ti
     assert result.run.orders_planned == 1
 
 
+@pytest.mark.anyio
+async def test_console_profile_reports_incremental_stage_2_progress(monkeypatch):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    first_market = _market(
+        question="Will the first shortlisted market finish review?",
+        slug="stage-2-shortlist-1",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+    second_market = _market(
+        question="Will the second shortlisted market finish review?",
+        slug="stage-2-shortlist-2",
+        current_yes_odds=10,
+        current_no_odds=90,
+    )
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[first_market, second_market],
+            rejected=[],
+            total_candidates=2,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert side == "NO"
+        market = {
+            first_market.slug: first_market,
+            second_market.slug: second_market,
+        }[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=market.current_no_odds,
+            spread_cents=2,
+        )
+
+    progress_runs: list[BullpenAutoLiveRun] = []
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda *_args, **_kwargs: 9.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+        progress_callback=lambda current_run, _state: progress_runs.append(
+            current_run.model_copy(deep=True)
+        ),
+    )
+
+    llm_running_stages = [
+        stage
+        for snapshot in progress_runs
+        for stage in snapshot.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+        and stage.outputs.get("phase_status") == "running"
+    ]
+
+    assert llm_running_stages
+    assert any(stage.completed_at is None for stage in llm_running_stages)
+    assert any(stage.outputs.get("completed_items") == 1 for stage in llm_running_stages)
+    assert any(
+        "reviewing shortlisted event 1 of 2" in stage.reason.lower()
+        for stage in llm_running_stages
+    )
+    assert any(
+        stage.outputs.get("stage1_accepted_candidate_count") == 2
+        for stage in llm_running_stages
+    )
+
+    llm_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+    assert llm_stage.outputs["item_label"] == "shortlisted events"
+    assert llm_stage.reason == (
+        "LLM review completed for 2 shortlisted events from 2 Stage 1 candidates."
+    )
+
+
 def test_auto_live_normalization_maps_raw_labels_to_strict_buckets():
     assert normalize_auto_live_evidence_status("conflicting_evidence") == "Moderate"
     assert normalize_auto_live_evidence_status("official") == "Strong"

@@ -5,9 +5,8 @@ import { useEffect, useEffectEvent, useState } from "react";
 import {
   CalendarClock,
   Clock3,
-  LogOut,
-  FileText,
   Loader2,
+  LogOut,
   PauseCircle,
   PlayCircle,
   ShieldAlert,
@@ -858,39 +857,34 @@ export function BullpenAutoRunScheduleCard({
                     <p className={`text-xs font-semibold ${toneClasses.text}`}>
                       {stage.progressLabel}
                     </p>
-                    <div className="flex items-center gap-2">
-                      {stage.key !== "scan" && Object.keys(stage.outputs).length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => setOpenStageKey(stage.key)}
-                          className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition hover:bg-white/70 ${toneClasses.badge}`}
-                          aria-label={`Open ${stage.title} output`}
-                          title={`Open ${stage.title} output`}
-                        >
-                          <FileText className="h-4 w-4" />
-                        </button>
-                      ) : null}
-                      {stage.isCurrent ? (
-                        <Loader2 className={`h-4 w-4 animate-spin ${toneClasses.text}`} />
-                      ) : null}
-                    </div>
+                    {stage.isCurrent ? (
+                      <Loader2 className={`h-4 w-4 animate-spin ${toneClasses.text}`} />
+                    ) : null}
                   </div>
 
                   <div className="mt-2 flex items-end justify-between gap-3">
                     <p className={`text-xs leading-5 ${toneClasses.muted}`}>
                       {stage.detail}
                     </p>
-                    {stage.key === "scan" ? (
+                    {stage.key === "scan" || Object.keys(stage.outputs).length > 0 ? (
                       <button
                         type="button"
-                        onClick={() =>
-                          setScanCandidateDialog({
-                            scanCompletedAt: stage.timerCompletedAt,
-                            candidates: stage.scanCandidates,
-                          })
-                        }
+                        onClick={() => {
+                          if (stage.key === "scan") {
+                            setScanCandidateDialog({
+                              scanCompletedAt: stage.timerCompletedAt,
+                              candidates: stage.scanCandidates,
+                            });
+                            return;
+                          }
+                          setOpenStageKey(stage.key);
+                        }}
                         className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white/75 transition hover:-translate-y-0.5 hover:bg-white ${toneClasses.badge}`}
-                        aria-label="Open Stage 1 output candidates"
+                        aria-label={
+                          stage.key === "scan"
+                            ? "Open Stage 1 output candidates"
+                            : `Open ${stage.title} output`
+                        }
                         title="Output"
                       >
                         <LogOut className="h-5 w-5" />
