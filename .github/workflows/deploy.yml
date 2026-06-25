@@ -16,6 +16,9 @@ on:
           - backend
           - full
 
+permissions:
+  contents: read
+
 concurrency:
   group: production-deploy
   cancel-in-progress: false
@@ -72,10 +75,21 @@ jobs:
           command_timeout: 1800s
           script: |
             set -euo pipefail
-            APP="${{ secrets.APP_PATH }}"
-            cd "$APP"
-            sudo -u investor -H bash -lc "cd '$APP' && git fetch origin main && git reset --hard origin/main"
-            SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" backend
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
+            APP_USER="${{ vars.EC2_APP_USER || 'investor' }}"
+
+            echo "==> Production app root: $APP_ROOT"
+            echo "==> Production app user: $APP_USER"
+            command -v git >/dev/null
+            sudo test -d "$APP_ROOT/.git"
+            id "$APP_USER" >/dev/null
+
+            echo "==> Sync GitHub main to EC2"
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard origin/main
+
+            echo "==> Run backend deploy"
+            SKIP_GIT_SYNC=true APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$APP_ROOT/deploy/no-docker/redeploy.sh" backend
 
   deploy-full:
     name: Deploy full stack
@@ -97,7 +111,18 @@ jobs:
           command_timeout: 1800s
           script: |
             set -euo pipefail
-            APP="${{ secrets.APP_PATH }}"
-            cd "$APP"
-            sudo -u investor -H bash -lc "cd '$APP' && git fetch origin main && git reset --hard origin/main"
-            SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" full
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
+            APP_USER="${{ vars.EC2_APP_USER || 'investor' }}"
+
+            echo "==> Production app root: $APP_ROOT"
+            echo "==> Production app user: $APP_USER"
+            command -v git >/dev/null
+            sudo test -d "$APP_ROOT/.git"
+            id "$APP_USER" >/dev/null
+
+            echo "==> Sync GitHub main to EC2"
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard origin/main
+
+            echo "==> Run full-stack deploy"
+            SKIP_GIT_SYNC=true APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$APP_ROOT/deploy/no-docker/redeploy.sh" full
