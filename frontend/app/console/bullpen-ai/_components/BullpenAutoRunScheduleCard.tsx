@@ -5,6 +5,7 @@ import { useEffect, useEffectEvent, useState } from "react";
 import {
   CalendarClock,
   Clock3,
+  LogOut,
   Loader2,
   PauseCircle,
   PlayCircle,
@@ -43,6 +44,11 @@ type ErrorState = {
   details: string | null;
 };
 
+type ScanCandidateDialogState = {
+  scanCompletedAt: string | null;
+  candidates: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["scanCandidates"];
+};
+
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
 const POLL_INTERVAL_MS = 4_000;
 const RUN_TIMER_INTERVAL_MS = 1_000;
@@ -75,6 +81,106 @@ function formatIstDateTime(value: string | null | undefined) {
     timeZoneName: "short",
     second: undefined,
   });
+}
+
+
+function formatOddsPercent(value: number | null) {
+  if (value === null) return "—";
+  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+}
+
+function formatMoney(value: number | null) {
+  if (value === null) return "—";
+  return `$${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+function StageOneOutputDialog({
+  state,
+  onClose,
+}: {
+  state: ScanCandidateDialogState;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 1 Output
+            </p>
+            <h2 className="text-xl font-semibold text-slate-950">
+              New event opportunity candidates
+            </h2>
+            <p className="text-sm text-slate-600">
+              Latest Bullpen Scan Stage 1 completed at {formatIstDateTime(state.scanCompletedAt)}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close Stage 1 output"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-5">
+          {state.candidates.length > 0 ? (
+            <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Candidate</th>
+                    <th className="px-4 py-3">Odds</th>
+                    <th className="px-4 py-3">Liquidity</th>
+                    <th className="px-4 py-3">Close time</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {state.candidates.map((candidate, index) => (
+                    <tr key={`${candidate.slug || candidate.question}-${index}`}>
+                      <td className="px-4 py-3 align-top">
+                        <div className="font-semibold text-slate-950">
+                          {candidate.marketUrl ? (
+                            <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">
+                              {candidate.question}
+                            </a>
+                          ) : (
+                            candidate.question
+                          )}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                          {candidate.theme ? <span>{candidate.theme}</span> : null}
+                          {candidate.forceInclude ? <span>Force included</span> : null}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 align-top text-slate-700">
+                        Yes {formatOddsPercent(candidate.currentYesOdds)}<br />
+                        No {formatOddsPercent(candidate.currentNoOdds)}
+                      </td>
+                      <td className="px-4 py-3 align-top text-slate-700">
+                        Liquidity {formatMoney(candidate.liquidityUsd)}<br />
+                        Volume {formatMoney(candidate.volumeUsd)}
+                      </td>
+                      <td className="px-4 py-3 align-top text-slate-700">
+                        {formatIstDateTime(candidate.closeTime)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+              No new event opportunity candidates were recorded for this Stage 1 scan.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function buildConsoleSettingsUpdate() {
@@ -212,6 +318,8 @@ export function BullpenAutoRunScheduleCard({
   const [pendingRunId, setPendingRunId] = useState<string | null>(null);
   const [runNowStartedAt, setRunNowStartedAt] = useState<string | null>(null);
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
+  const [scanCandidateDialog, setScanCandidateDialog] =
+    useState<ScanCandidateDialogState | null>(null);
 
   async function loadSummary(options?: { preserveLoading?: boolean }) {
     if (!options?.preserveLoading) {
@@ -733,14 +841,39 @@ export function BullpenAutoRunScheduleCard({
                     ) : null}
                   </div>
 
-                  <p className={`mt-2 text-xs leading-5 ${toneClasses.muted}`}>
-                    {stage.detail}
-                  </p>
+                  <div className="mt-2 flex items-end justify-between gap-3">
+                    <p className={`text-xs leading-5 ${toneClasses.muted}`}>
+                      {stage.detail}
+                    </p>
+                    {stage.key === "scan" ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setScanCandidateDialog({
+                            scanCompletedAt: stage.timerCompletedAt,
+                            candidates: stage.scanCandidates,
+                          })
+                        }
+                        className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white/75 transition hover:-translate-y-0.5 hover:bg-white ${toneClasses.badge}`}
+                        aria-label="Open Stage 1 output candidates"
+                        title="Output"
+                      >
+                        <LogOut className="h-5 w-5" />
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
           </div>
         </div>
+
+        {scanCandidateDialog ? (
+          <StageOneOutputDialog
+            state={scanCandidateDialog}
+            onClose={() => setScanCandidateDialog(null)}
+          />
+        ) : null}
 
         {notice ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
