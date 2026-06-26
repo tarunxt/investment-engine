@@ -15,6 +15,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_RANKED_EVENT_LIMIT,
     CONSOLE_SCHEDULE_HOURS,
     CONSOLE_SCAN_WINDOW_DAYS,
+    ConsoleWalletPosition,
     ConsoleScanResult,
     apply_scanned_market_to_position,
     candidate_returns_per_day,
@@ -764,6 +765,107 @@ def _serialize_rejected_scan_candidate(
         "reasons": list(rejected.reasons),
         "force_included_position": rejected.force_included_position,
     }
+
+
+def _active_position_market(
+    position: ConsoleWalletPosition,
+    *,
+    market_by_slug: dict[str, ScannedMarket],
+    market_by_id: dict[str, ScannedMarket],
+) -> ScannedMarket:
+    matched_market = market_by_slug.get(position.slug) or market_by_id.get(position.market_id)
+    if matched_market is not None:
+        return matched_market
+
+    return ScannedMarket(
+        market_id=position.market_id,
+        question=position.market_title,
+        market_url=position.market_url,
+        slug=position.slug,
+        close_time=position.close_time,
+        theme=position.theme,
+        current_yes_odds=position.current_yes_odds,
+        current_no_odds=position.current_no_odds,
+        volume_usd=None,
+        liquidity_usd=None,
+        description=None,
+        outcome_labels=["Yes", "No"],
+        event_slug=None,
+        best_bid_cents=None,
+        best_ask_cents=None,
+        spread_cents=None,
+        force_include=True,
+        raw=None,
+    )
+
+
+def _serialize_llm_review_context(
+    context: dict[str, object],
+) -> dict[str, object]:
+    market = context["market"]
+    llm_consensus = context["llm_consensus"]
+    rules = context.get("rules")
+    llm_outputs = context.get("llm_outputs") or []
+
+    if not isinstance(market, ScannedMarket):
+        raise TypeError("Expected ScannedMarket in LLM review context.")
+
+    payload: dict[str, object] = {
+        "market_id": market.market_id,
+        "question": market.question,
+        "market_url": market.market_url,
+        "slug": market.slug,
+        "close_time": market.close_time,
+        "returns_per_day": context.get("returns_per_day"),
+        "qualified": bool(context.get("qualified")),
+        "reason": str(context.get("reason") or ""),
+        "selected_side": context.get("selected_side"),
+        "fair_yes_probability_pct": (
+            getattr(llm_consensus, "fair_yes_probability_pct", None)
+            if llm_consensus
+            else None
+        ),
+        "fair_no_probability_pct": (
+            getattr(llm_consensus, "fair_no_probability_pct", None)
+            if llm_consensus
+            else None
+        ),
+        "disagreement_level": (
+            getattr(llm_consensus, "disagreement_level", None)
+            if llm_consensus
+            else None
+        ),
+        "disagreement_category": (
+            getattr(llm_consensus, "disagreement_category", None)
+            if llm_consensus
+            else None
+        ),
+        "adjudication_required": (
+            getattr(llm_consensus, "adjudication_required", None)
+            if llm_consensus
+            else None
+        ),
+        "confidence": getattr(llm_consensus, "confidence", None) if llm_consensus else None,
+        "evidence_status": (
+            getattr(llm_consensus, "evidence_status", None) if llm_consensus else None
+        ),
+        "event_state": getattr(llm_consensus, "event_state", None) if llm_consensus else None,
+        "yes_definition": getattr(rules, "yes_definition", None) if rules else None,
+        "deadline_et": getattr(rules, "deadline_et", None) if rules else None,
+        "hours_remaining": getattr(rules, "hours_remaining", None) if rules else None,
+        "rules_fail_reason": getattr(rules, "fail_reason", None) if rules else None,
+        "llm_outputs": [
+            item.model_dump(mode="json")
+            for item in llm_outputs
+            if isinstance(item, BullpenAutoLiveLlmOutput)
+        ],
+        "source_kind": context.get("source_kind") or "candidate",
+    }
+    if context.get("position_key") is not None:
+        payload["position_key"] = context["position_key"]
+    if context.get("position_side") is not None:
+        payload["position_side"] = context["position_side"]
+    return payload
 
 
 class BullpenAutoLiveEngine:
@@ -1935,8 +2037,10 @@ class BullpenAutoLiveEngine:
         stage1_accepted_candidates: list[dict[str, object]] = []
         stage1_rejected_candidates: list[dict[str, object]] = []
         candidate_rows_before_llm = 0
+        active_position_rows_before_llm = 0
         llm_candidate_count = 0
         scanned_total_candidates = 0
+        active_position_contexts: list[dict[str, object]] = []
         candidate_contexts: list[dict[str, object]] = []
         scan_seed_markets: list[ScannedMarket] | None = None
         market_by_slug: dict[str, ScannedMarket] = {}
@@ -2234,6 +2338,7 @@ class BullpenAutoLiveEngine:
             for position in enriched_wallet_positions
             if not position.is_claimable
         ]
+        active_position_rows_before_llm = len(position_snapshots)
 
         set_run_stage_result(
             run,
@@ -2250,6 +2355,7 @@ class BullpenAutoLiveEngine:
                     "live_wallet_positions": len(enriched_wallet_positions),
                     "active_wallet_positions": len(position_snapshots),
                     "scanned_candidates": scanned_total_candidates,
+                    "active_position_rows_before_llm": active_position_rows_before_llm,
                     "candidate_rows_before_llm": candidate_rows_before_llm,
                     "llm_candidate_count": llm_candidate_count,
                     "unsupported_wallet_positions_skipped": len(unsupported_live_wallet_positions),
@@ -2305,6 +2411,7 @@ class BullpenAutoLiveEngine:
                 "scan_source_label": scan_source_label,
                 "scan_source_url": scan_source_url,
                 "used_manual_console_rows": manual_console_rows_used,
+                "active_position_rows_before_llm": active_position_rows_before_llm,
                 "candidate_rows_before_llm": candidate_rows_before_llm,
                 "llm_candidate_count": llm_candidate_count,
                 "stage1_accepted_candidate_count": stage1_accepted_candidate_count,
@@ -2369,6 +2476,20 @@ class BullpenAutoLiveEngine:
                     continue
                 returns_per_day = candidate_returns_per_day(market, now=now)
                 candidate_rows.append((market, returns_per_day))
+            active_llm_rows: list[dict[str, object]] = [
+                {
+                    "kind": "active_position",
+                    "position": position,
+                    "market": _active_position_market(
+                        position,
+                        market_by_slug=market_by_slug,
+                        market_by_id=market_by_id,
+                    ),
+                    "returns_per_day": position_returns_per_day(position, now=now),
+                }
+                for position in enriched_wallet_positions
+                if not position.is_claimable
+            ]
             candidate_rows.sort(
                 key=lambda item: (
                     -(item[1] if item[1] is not None else float("-inf")),
@@ -2377,7 +2498,17 @@ class BullpenAutoLiveEngine:
                 )
             )
             candidate_rows_before_llm = len(candidate_rows)
-            llm_markets = candidate_rows
+            llm_markets = [
+                *active_llm_rows,
+                *[
+                    {
+                        "kind": "candidate",
+                        "market": market,
+                        "returns_per_day": returns_per_day,
+                    }
+                    for market, returns_per_day in candidate_rows
+                ],
+            ]
             llm_candidate_count = len(llm_markets)
             set_run_stage_result(
                 run,
@@ -2394,6 +2525,7 @@ class BullpenAutoLiveEngine:
                         "live_wallet_positions": len(enriched_wallet_positions),
                         "active_wallet_positions": len(position_snapshots),
                         "scanned_candidates": scanned_total_candidates,
+                        "active_position_rows_before_llm": active_position_rows_before_llm,
                         "candidate_rows_before_llm": candidate_rows_before_llm,
                         "llm_candidate_count": llm_candidate_count,
                         "unsupported_wallet_positions_skipped": len(unsupported_live_wallet_positions),
@@ -2434,7 +2566,12 @@ class BullpenAutoLiveEngine:
             report_llm_stage_progress(
                 phase_status="running",
                 reason=(
-                    f"Stage 2 started. Reviewing {llm_candidate_count} Stage 1 events."
+                    (
+                        "Stage 2 started. Reviewing "
+                        f"{llm_candidate_count} Bullpen rows from active positions and Stage 1 events."
+                    )
+                    if active_position_rows_before_llm > 0
+                    else f"Stage 2 started. Reviewing {llm_candidate_count} Stage 1 events."
                     if llm_candidate_count > 0
                     else "No candidate events qualified for Stage 2 LLM review."
                 ),
@@ -2442,7 +2579,11 @@ class BullpenAutoLiveEngine:
                 completed_at=None,
             )
 
-            for index, (market, returns_per_day) in enumerate(llm_markets, start=1):
+            for index, llm_row in enumerate(llm_markets, start=1):
+                market = llm_row["market"]
+                returns_per_day = llm_row["returns_per_day"]
+                if not isinstance(market, ScannedMarket):
+                    continue
                 report_llm_stage_progress(
                     phase_status="running",
                     reason=(
@@ -2456,6 +2597,128 @@ class BullpenAutoLiveEngine:
                     ),
                     completed_at=None,
                 )
+                if llm_row["kind"] == "active_position":
+                    position = llm_row["position"]
+                    if not isinstance(position, ConsoleWalletPosition):
+                        continue
+                    stage_results = [
+                        build_stage_result(
+                            stage_number=1,
+                            status="pass",
+                            reason="Live wallet position was included for LLM review.",
+                            outputs={
+                                "source_kind": "active_position",
+                                "position_key": f"{position.market_id}::{position.side}",
+                                "position_side": position.side,
+                                "shares": position.shares,
+                                "close_time": position.close_time,
+                                "current_yes_odds": position.current_yes_odds,
+                                "current_no_odds": position.current_no_odds,
+                                "returns_per_day": returns_per_day,
+                            },
+                        )
+                    ]
+                    rules = evaluate_market_rules(market, now=now)
+                    rules_fail_reason = rules.fail_reason
+                    stage_results.append(
+                        build_stage_result(
+                            stage_number=2,
+                            status="warning" if rules_fail_reason else "pass",
+                            reason=(
+                                "Resolution criteria and deadline were parsed successfully."
+                                if not rules_fail_reason
+                                else (
+                                    f"{rules_fail_reason} LLM consensus still ran so the active "
+                                    "position could be monitored."
+                                )
+                            ),
+                            outputs={
+                                "close_time": market.close_time,
+                                "yes_definition": rules.yes_definition,
+                                "deadline_et": rules.deadline_et,
+                                "hours_remaining": rules.hours_remaining,
+                                "rules_fail_reason": rules_fail_reason,
+                            },
+                            hard_block=False,
+                        )
+                    )
+                    evidence_packet = build_evidence_packet(
+                        market,
+                        rules,
+                        built_at=utc_now_iso(),
+                    )
+                    llm_outputs, llm_consensus = run_llm_consensus(
+                        market,
+                        rules,
+                        evidence_packet,
+                    )
+                    selected_side, _ = _stronger_probability_side(
+                        yes_probability=llm_consensus.fair_yes_probability_pct,
+                        no_probability=llm_consensus.fair_no_probability_pct,
+                        minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                    )
+                    review_reason = (
+                        "LLM consensus completed for the active position."
+                        if not rules_fail_reason
+                        else (
+                            "LLM consensus completed for the active position, but rule parsing "
+                            f"remained incomplete because {rules_fail_reason.rstrip('.')}."
+                        )
+                    )
+                    stage_results.append(
+                        build_stage_result(
+                            stage_number=3,
+                            status="warning"
+                            if rules_fail_reason
+                            or llm_consensus.disagreement_level in {"Medium", "High"}
+                            else "pass",
+                            reason=review_reason,
+                            outputs={
+                                "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
+                                "fair_no_probability_pct": llm_consensus.fair_no_probability_pct,
+                                "disagreement_level": llm_consensus.disagreement_level,
+                                "disagreement_category": llm_consensus.disagreement_category,
+                                "adjudication_required": llm_consensus.adjudication_required,
+                                "confidence": llm_consensus.confidence,
+                                "evidence_status": llm_consensus.evidence_status,
+                                "event_state": llm_consensus.event_state,
+                                "rules_fail_reason": rules_fail_reason,
+                            },
+                        )
+                    )
+                    active_position_contexts.append(
+                        {
+                            "source_kind": "active_position",
+                            "position_key": f"{position.market_id}::{position.side}",
+                            "position_side": position.side,
+                            "market": market,
+                            "returns_per_day": returns_per_day,
+                            "rules": rules,
+                            "llm_outputs": llm_outputs,
+                            "llm_consensus": llm_consensus,
+                            "stage_results": stage_results,
+                            "qualified": False,
+                            "selected_side": selected_side,
+                            "reason": review_reason,
+                        }
+                    )
+                    report_llm_stage_progress(
+                        phase_status="running",
+                        reason=(
+                            f"Stage 2 reviewed {index} of {llm_candidate_count} events. Latest: {market.question}"
+                        ),
+                        completed_items=index,
+                        last_completed_market=market,
+                        qualified_candidate_count=len(
+                            [
+                                context
+                                for context in candidate_contexts
+                                if bool(context["qualified"])
+                            ]
+                        ),
+                        completed_at=None,
+                    )
+                    continue
                 stage_results = [
                     build_stage_result(
                         stage_number=1,
@@ -2575,6 +2838,7 @@ class BullpenAutoLiveEngine:
                     )
                 candidate_contexts.append(
                     {
+                        "source_kind": "candidate",
                         "market": market,
                         "returns_per_day": returns_per_day,
                         "rules": rules,
@@ -2604,37 +2868,10 @@ class BullpenAutoLiveEngine:
             for context in candidate_contexts
             if bool(context["qualified"])
         ]
-        llm_stage_candidates = []
-        for context in candidate_contexts:
-            market = context["market"]
-            llm_consensus = context["llm_consensus"]
-            llm_stage_candidates.append(
-                {
-                    "market_id": market.market_id,
-                    "question": market.question,
-                    "market_url": market.market_url,
-                    "close_time": market.close_time,
-                    "returns_per_day": context["returns_per_day"],
-                    "qualified": bool(context["qualified"]),
-                    "reason": str(context["reason"]),
-                    "selected_side": context.get("selected_side"),
-                    "fair_yes_probability_pct": (
-                        llm_consensus.fair_yes_probability_pct if llm_consensus else None
-                    ),
-                    "fair_no_probability_pct": (
-                        llm_consensus.fair_no_probability_pct if llm_consensus else None
-                    ),
-                    "disagreement_level": (
-                        llm_consensus.disagreement_level if llm_consensus else None
-                    ),
-                    "adjudication_required": (
-                        llm_consensus.adjudication_required if llm_consensus else None
-                    ),
-                    "confidence": llm_consensus.confidence if llm_consensus else None,
-                    "evidence_status": llm_consensus.evidence_status if llm_consensus else None,
-                    "event_state": llm_consensus.event_state if llm_consensus else None,
-                }
-            )
+        llm_stage_candidates = [
+            _serialize_llm_review_context(context)
+            for context in [*active_position_contexts, *candidate_contexts]
+        ]
         set_run_stage_result(
             run,
             build_workflow_stage_result(
@@ -2643,7 +2880,13 @@ class BullpenAutoLiveEngine:
                 phase_status="completed",
                 status="pass" if llm_candidate_count > 0 else "warning",
                 reason=(
-                    f"LLM review completed for {llm_candidate_count} events from {stage1_accepted_candidate_count} Stage 1 candidates."
+                    (
+                        "LLM review completed for "
+                        f"{llm_candidate_count} events from {stage1_accepted_candidate_count} "
+                        f"Stage 1 candidates and {len(active_position_contexts)} active positions."
+                    )
+                    if llm_candidate_count > 0 and len(active_position_contexts) > 0
+                    else f"LLM review completed for {llm_candidate_count} events from {stage1_accepted_candidate_count} Stage 1 candidates."
                     if llm_candidate_count > 0
                     else "Stage 2 had no candidate events to review."
                 ),
@@ -2655,6 +2898,8 @@ class BullpenAutoLiveEngine:
                     "scan_source_url": scan_source_url,
                     "used_manual_console_rows": manual_console_rows_used,
                     "stage1_accepted_candidate_count": stage1_accepted_candidate_count,
+                    "active_position_rows_before_llm": active_position_rows_before_llm,
+                    "active_position_rows_reviewed": len(active_position_contexts),
                     "candidate_rows_before_llm": candidate_rows_before_llm,
                     "llm_candidate_count": llm_candidate_count,
                     "qualified_candidate_count": len(qualifying_candidates),
@@ -2944,44 +3189,54 @@ class BullpenAutoLiveEngine:
                 guardrail_checks=global_guardrails,
             )
 
+        active_review_context_by_key = {
+            str(context["position_key"]): context
+            for context in active_position_contexts
+            if context.get("position_key") is not None
+        }
+
         for position in enriched_wallet_positions:
             if position.is_claimable:
                 continue
             returns_per_day = position_returns_per_day(position, now=now)
-            matched_market = market_by_slug.get(position.slug) or market_by_id.get(position.market_id)
-            market = matched_market or ScannedMarket(
-                market_id=position.market_id,
-                question=position.market_title,
-                market_url=position.market_url,
-                slug=position.slug,
-                close_time=position.close_time,
-                theme=position.theme,
-                current_yes_odds=position.current_yes_odds,
-                current_no_odds=position.current_no_odds,
-                volume_usd=None,
-                liquidity_usd=None,
-                description=None,
-                outcome_labels=["Yes", "No"],
-                event_slug=None,
-                best_bid_cents=None,
-                best_ask_cents=None,
-                spread_cents=None,
-                force_include=True,
-                raw=None,
-            )
-            stage_results = [
-                build_stage_result(
-                    stage_number=1,
-                    status="pass",
-                    reason="Live wallet position was included in the top-10 ranking review.",
-                    outputs={
-                        "side": position.side,
-                        "shares": position.shares,
-                        "close_time": position.close_time,
-                        "returns_per_day": returns_per_day,
-                    },
+            key = f"{position.market_id}::{position.side}"
+            review_context = active_review_context_by_key.get(key)
+            market = (
+                review_context["market"]
+                if review_context and isinstance(review_context.get("market"), ScannedMarket)
+                else _active_position_market(
+                    position,
+                    market_by_slug=market_by_slug,
+                    market_by_id=market_by_id,
                 )
-            ]
+            )
+            stage_results = (
+                list(review_context["stage_results"])
+                if review_context and isinstance(review_context.get("stage_results"), list)
+                else [
+                    build_stage_result(
+                        stage_number=1,
+                        status="pass",
+                        reason="Live wallet position was included in the top-10 ranking review.",
+                        outputs={
+                            "side": position.side,
+                            "shares": position.shares,
+                            "close_time": position.close_time,
+                            "returns_per_day": returns_per_day,
+                        },
+                    )
+                ]
+            )
+            llm_outputs = (
+                review_context["llm_outputs"]
+                if review_context and isinstance(review_context.get("llm_outputs"), list)
+                else None
+            )
+            llm_consensus = (
+                review_context["llm_consensus"]
+                if review_context and review_context.get("llm_consensus") is not None
+                else None
+            )
             current_position = next(
                 (
                     snapshot
@@ -3007,11 +3262,12 @@ class BullpenAutoLiveEngine:
                         current_position=current_position,
                         current_exposure_usd=position.exposure_usd,
                         target_exposure_usd=position.exposure_usd,
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
                     ),
                     market=market,
                 )
                 continue
-            key = f"{position.market_id}::{position.side}"
             if key in top_active_keys:
                 stage_results.append(
                     build_stage_result(
@@ -3030,6 +3286,8 @@ class BullpenAutoLiveEngine:
                         current_position=current_position,
                         current_exposure_usd=position.exposure_usd,
                         target_exposure_usd=position.exposure_usd,
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
                     ),
                     market=market,
                 )
@@ -3053,6 +3311,8 @@ class BullpenAutoLiveEngine:
                     target_exposure_usd=0,
                     order_usd=position.exposure_usd,
                     order_shares=position.shares,
+                    llm_outputs=llm_outputs,
+                    llm_consensus=llm_consensus,
                 ),
                 market=market,
             )
