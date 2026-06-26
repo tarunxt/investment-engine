@@ -1,4 +1,13 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import type { BullpenQuestion } from "@/lib/bullpen-ai";
+
+import {
+  BULLPEN_BIN_CANDIDATES,
+  buildBullpenProcessEnv,
+  parseBullpenJsonOutput,
+} from "./bullpenCli";
 
 const POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
@@ -8,8 +17,12 @@ const MARKET_CONTEXT_CAPTURE_CHARS = 40_000;
 const MAX_MARKET_CONTEXT_UPDATES = 6;
 const POLYMARKET_MARKET_CONTEXT_LABEL =
   "Experimental AI-generated summary referencing Polymarket data.";
+const execFileAsync = promisify(execFile);
 
 type CanonicalizableQuestion = Pick<BullpenQuestion, "id" | "slug" | "marketUrl">;
+type SearchableCanonicalizableQuestion = CanonicalizableQuestion & {
+  question?: string | null;
+};
 
 export type ResolvedPolymarketMarket = {
   id: string;
@@ -108,6 +121,10 @@ function getNestedSeriesSlug(value: unknown) {
 
 function isNumericQuestionId(value: string) {
   return /^\d+$/.test(value.trim());
+}
+
+function normalizeQuestionLookupValue(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 export function buildPolymarketEventUrl(slug: string | null) {
@@ -513,13 +530,141 @@ export async function resolvePolymarketMarkets<
   return resolvedByQuestionId;
 }
 
-export async function applyCanonicalPolymarketMarketUrls<
-  T extends CanonicalizableQuestion,
+async function searchBullpenMarketByQuestion(question: string) {
+  const normalizedQuestion = normalizeQuestionLookupValue(question);
+
+  for (const candidate of BULLPEN_BIN_CANDIDATES) {
+    try {
+      const { stdout } = await execFileAsync(
+        candidate,
+        ["polymarket", "search", question, "--output", "json"],
+        {
+          env: buildBullpenProcessEnv({ readOnly: true }),
+          timeout: 20_000,
+          maxBuffer: 5 * 1024 * 1024,
+        },
+      );
+      const payload = parseBullpenJsonOutput(stdout) as {
+        events?: Array<{
+          slug?: string | null;
+          markets?: Array<{
+            question?: string | null;
+            slug?: string | null;
+            outcomes?: Array<{
+              name?: string | null;
+              price?: number | null;
+              probability?: number | null;
+            }>;
+          }>;
+        }>;
+      };
+      const markets = payload.events?.flatMap((event) =>
+        (event.markets || []).map((market) => ({
+          ...market,
+          eventSlug: event.slug || null,
+        })),
+      );
+      const matchedMarket = markets?.find(
+        (market) =>
+          typeof market.question === "string" &&
+          normalizeQuestionLookupValue(market.question) === normalizedQuestion,
+      );
+      if (!matchedMarket || !matchedMarket.slug) {
+        continue;
+      }
+
+      const yesOutcome = matchedMarket.outcomes?.find(
+        (outcome) =>
+          normalizeQuestionLookupValue(outcome.name || "") === "yes",
+      );
+      const noOutcome = matchedMarket.outcomes?.find(
+        (outcome) =>
+          normalizeQuestionLookupValue(outcome.name || "") === "no",
+      );
+      const toPercent = (value: number | null | undefined) =>
+        typeof value === "number" ? Number((value * 100).toFixed(2)) : null;
+
+      const fallbackMarket = {
+        id: matchedMarket.slug,
+        slug: matchedMarket.slug,
+        marketUrl: buildPolymarketEventUrl(matchedMarket.eventSlug || null),
+      } satisfies CanonicalizableQuestion;
+
+      try {
+        const resolved = await resolvePolymarketMarkets([fallbackMarket]);
+        const refreshed = resolved[fallbackMarket.id];
+        if (refreshed) {
+          return refreshed;
+        }
+      } catch {
+        // Fall through to the CLI-derived fallback below.
+      }
+
+      return {
+        id: fallbackMarket.id,
+        slug: fallbackMarket.slug,
+        marketUrl: fallbackMarket.marketUrl,
+        yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
+        noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
+        rules: null,
+        marketContext: null,
+        resolutionSource: null,
+      } satisfies ResolvedPolymarketMarket;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+export async function resolvePolymarketMarketsWithQuestionFallback<
+  T extends SearchableCanonicalizableQuestion,
 >(questions: T[]) {
+  const resolvedByQuestionId = await resolvePolymarketMarkets(questions);
+  const unresolvedByNormalizedQuestion = new Map<
+    string,
+    SearchableCanonicalizableQuestion[]
+  >();
+
+  for (const question of questions) {
+    if (resolvedByQuestionId[question.id]) continue;
+    if (!question.question?.trim()) continue;
+
+    const normalizedQuestion = normalizeQuestionLookupValue(question.question);
+    if (!normalizedQuestion) continue;
+
+    const current = unresolvedByNormalizedQuestion.get(normalizedQuestion) || [];
+    current.push(question);
+    unresolvedByNormalizedQuestion.set(normalizedQuestion, current);
+  }
+
+  for (const groupedQuestions of unresolvedByNormalizedQuestion.values()) {
+    const searchQuestion = groupedQuestions[0]?.question?.trim();
+    if (!searchQuestion) continue;
+
+    const searchedMarket = await searchBullpenMarketByQuestion(searchQuestion);
+    if (!searchedMarket) continue;
+
+    groupedQuestions.forEach((question) => {
+      resolvedByQuestionId[question.id] = {
+        ...searchedMarket,
+        id: question.id,
+      };
+    });
+  }
+
+  return resolvedByQuestionId;
+}
+
+export async function applyCanonicalPolymarketMarketUrls(
+  questions: BullpenQuestion[],
+) {
   if (questions.length === 0) return questions;
 
   try {
-    const resolvedByQuestionId = await resolvePolymarketMarkets(questions);
+    const resolvedByQuestionId =
+      await resolvePolymarketMarketsWithQuestionFallback(questions);
 
     let changed = false;
     const nextQuestions = questions.map((question) => {
@@ -529,13 +674,11 @@ export async function applyCanonicalPolymarketMarketUrls<
       if (
         resolved.marketUrl === question.marketUrl &&
         resolved.slug === question.slug &&
-        ("rules" in question ? resolved.rules === question.rules : resolved.rules === null) &&
-        ("marketContext" in question
-          ? resolved.marketContext === question.marketContext
-          : resolved.marketContext === null) &&
-        ("resolutionSource" in question
-          ? resolved.resolutionSource === question.resolutionSource
-          : resolved.resolutionSource === null)
+        resolved.yesOdds === question.yesOdds &&
+        resolved.noOdds === question.noOdds &&
+        resolved.rules === question.rules &&
+        resolved.marketContext === question.marketContext &&
+        resolved.resolutionSource === question.resolutionSource
       ) {
         return question;
       }
@@ -545,11 +688,12 @@ export async function applyCanonicalPolymarketMarketUrls<
         ...question,
         slug: resolved.slug,
         marketUrl: resolved.marketUrl,
-        ...(question as Partial<BullpenQuestion>),
+        yesOdds: resolved.yesOdds,
+        noOdds: resolved.noOdds,
         rules: resolved.rules,
         marketContext: resolved.marketContext,
         resolutionSource: resolved.resolutionSource,
-      } as T;
+      } satisfies BullpenQuestion;
     });
 
     return changed ? nextQuestions : questions;

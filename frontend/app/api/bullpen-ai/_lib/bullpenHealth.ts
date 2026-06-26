@@ -24,7 +24,7 @@ import {
 } from "../../../../lib/bullpenPositions.ts";
 import {
   buildPolymarketEventUrl,
-  resolvePolymarketMarkets,
+  resolvePolymarketMarketsWithQuestionFallback,
 } from "./polymarketMarketUrls.ts";
 
 const execFileAsync = promisify(execFile);
@@ -115,7 +115,7 @@ async function buildBullpenLiveSnapshot(
   let refreshedPositions = positions;
 
   try {
-    const refreshedMarkets = await resolvePolymarketMarkets(
+    const refreshedMarkets = await resolvePolymarketMarketsWithQuestionFallback(
       aggregatedRawPositions.map((position, index) => ({
         id: positions[index]?.key || `bullpen-position-${index + 1}`,
         slug:
@@ -123,6 +123,7 @@ async function buildBullpenLiveSnapshot(
             ? position.slug.trim()
             : null,
         marketUrl: positions[index]?.marketUrl ?? null,
+        question: positions[index]?.marketTitle ?? null,
       })),
     );
     refreshedPositions = positions.map((position) => {

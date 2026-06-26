@@ -5,7 +5,7 @@ import {
   syncBullpenLiveSnapshot,
 } from "../_lib/bullpenHealth";
 import { redactBullpenSensitiveText } from "../_lib/bullpenHealthCore.ts";
-import { resolvePolymarketMarkets } from "../_lib/polymarketMarketUrls";
+import { resolvePolymarketMarketsWithQuestionFallback } from "../_lib/polymarketMarketUrls";
 import {
   buildTrackedBullpenPositionViews,
   summarizeBullpenPositions,
@@ -86,11 +86,12 @@ async function loadTrackedPositionsFallback(request: NextRequest) {
   let marketUpdates = {};
 
   try {
-    marketUpdates = await resolvePolymarketMarkets(
+    marketUpdates = await resolvePolymarketMarketsWithQuestionFallback(
       openPositions.map((position) => ({
         id: position.key,
         slug: position.market_id,
         marketUrl: null,
+        question: position.market_title,
       })),
     );
   } catch {

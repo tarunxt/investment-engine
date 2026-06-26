@@ -1,20 +1,9 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import { NextRequest, NextResponse } from "next/server";
 
-import {
-  BULLPEN_BIN_CANDIDATES,
-  buildBullpenProcessEnv,
-  parseBullpenJsonOutput,
-} from "../_lib/bullpenCli";
-import { buildPolymarketEventUrl } from "../_lib/polymarketMarketUrls";
-import { resolvePolymarketMarkets } from "../_lib/polymarketMarketUrls";
+import { resolvePolymarketMarketsWithQuestionFallback } from "../_lib/polymarketMarketUrls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-const execFileAsync = promisify(execFile);
 
 type LookupQuestion = {
   id: string;
@@ -48,86 +37,6 @@ function normalizeLookupQuestion(value: unknown): LookupQuestion | null {
   };
 }
 
-function normalizeQuestionText(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-async function searchBullpenMarketByQuestion(question: string) {
-  const normalizedQuestion = normalizeQuestionText(question);
-
-  for (const candidate of BULLPEN_BIN_CANDIDATES) {
-    try {
-      const { stdout } = await execFileAsync(
-        candidate,
-        ["polymarket", "search", question, "--output", "json"],
-        {
-          env: buildBullpenProcessEnv({ readOnly: true }),
-          timeout: 20_000,
-          maxBuffer: 5 * 1024 * 1024,
-        },
-      );
-      const payload = parseBullpenJsonOutput(stdout) as {
-        events?: Array<{
-          slug?: string | null;
-          markets?: Array<{
-            question?: string | null;
-            slug?: string | null;
-            outcomes?: Array<{
-              name?: string | null;
-              price?: number | null;
-              probability?: number | null;
-            }>;
-          }>;
-        }>;
-      };
-      const markets = payload.events?.flatMap((event) =>
-        (event.markets || []).map((market) => ({
-          ...market,
-          eventSlug: event.slug || null,
-        })),
-      );
-      const matchedMarket = markets?.find(
-        (market) =>
-          typeof market.question === "string" &&
-          normalizeQuestionText(market.question) === normalizedQuestion,
-      );
-      if (!matchedMarket || !matchedMarket.slug) {
-        continue;
-      }
-
-      const yesOutcome = matchedMarket.outcomes?.find(
-        (outcome) => normalizeQuestionText(outcome.name || "") === "yes",
-      );
-      const noOutcome = matchedMarket.outcomes?.find(
-        (outcome) => normalizeQuestionText(outcome.name || "") === "no",
-      );
-      const toPercent = (value: number | null | undefined) =>
-        typeof value === "number" ? Number((value * 100).toFixed(2)) : null;
-
-      const fallbackMarket = {
-        id: matchedMarket.slug,
-        slug: matchedMarket.slug,
-        marketUrl: buildPolymarketEventUrl(matchedMarket.eventSlug || null),
-        yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
-        noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
-        rules: null,
-        marketContext: null,
-        resolutionSource: null,
-      };
-      try {
-        const resolved = await resolvePolymarketMarkets([fallbackMarket]);
-        return resolved[fallbackMarket.id] || fallbackMarket;
-      } catch {
-        return fallbackMarket;
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as {
@@ -146,19 +55,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const resolvedByQuestionId = await resolvePolymarketMarkets(questions);
-    const unresolvedQuestions = questions.filter(
-      (question) => !resolvedByQuestionId[question.id],
-    );
-    for (const question of unresolvedQuestions) {
-      if (!question.question) continue;
-      const searchedMarket = await searchBullpenMarketByQuestion(
-        question.question,
-      );
-      if (searchedMarket) {
-        resolvedByQuestionId[question.id] = searchedMarket;
-      }
-    }
+    const resolvedByQuestionId =
+      await resolvePolymarketMarketsWithQuestionFallback(questions);
     const unresolvedQuestionIds = questions
       .map((question) => question.id)
       .filter((questionId) => !resolvedByQuestionId[questionId]);

@@ -308,7 +308,10 @@ test("Bullpen x AI active positions stay included in LLM runs and share the even
   );
 
   assert.match(bullpenAiPageSource, /buildBullpenLlmRunTargetSet\(\{/);
-  assert.match(bullpenAiPageSource, /activePositions: openActivePositions/);
+  assert.match(
+    bullpenAiPageSource,
+    /activePositions: (openActivePositions|refreshedOpenActivePositions)/,
+  );
   assert.match(
     bullpenAiPageSource,
     /BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY/,
@@ -335,6 +338,55 @@ test("Bullpen x AI active positions stay included in LLM runs and share the even
   assert.match(investmentsSectionSource, /Last LLM:/);
   assert.match(investmentsSectionSource, /Asia\/Kolkata/);
   assert.match(investmentsSectionSource, /CheckCircle2/);
+});
+
+test("Bullpen x AI stage refreshes keep fresh opportunities and active positions synced to canonical Polymarket odds", () => {
+  const bullpenAiPageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const currentOddsRouteSource = readFileSync(
+    new URL("../app/api/bullpen-ai/current-odds/route.ts", import.meta.url),
+    "utf8",
+  );
+  const positionsRouteSource = readFileSync(
+    new URL("../app/api/bullpen-ai/positions/route.ts", import.meta.url),
+    "utf8",
+  );
+  const marketUrlsSource = readFileSync(
+    new URL(
+      "../app/api/bullpen-ai/_lib/polymarketMarketUrls.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    bullpenAiPageSource,
+    /const positionsRefreshTask = refreshBullpenPositions\(\{\s*suppressAutoClaim: true,/,
+  );
+  assert.match(
+    bullpenAiPageSource,
+    /refreshCurrentOdds\(\{\s*questionIds: selectedQuestions\.map\(\(question\) => question\.id\),/,
+  );
+  assert.match(
+    bullpenAiPageSource,
+    /activePositions: refreshedOpenActivePositions/,
+  );
+  assert.match(
+    currentOddsRouteSource,
+    /resolvePolymarketMarketsWithQuestionFallback/,
+  );
+  assert.match(
+    positionsRouteSource,
+    /resolvePolymarketMarketsWithQuestionFallback/,
+  );
+  assert.match(
+    marketUrlsSource,
+    /export async function resolvePolymarketMarketsWithQuestionFallback/,
+  );
+  assert.match(marketUrlsSource, /yesOdds: resolved\.yesOdds/);
+  assert.match(marketUrlsSource, /noOdds: resolved\.noOdds/);
 });
 
 test("Bullpen x AI LLM breakdown dialog shows the preflight evidence block", () => {
