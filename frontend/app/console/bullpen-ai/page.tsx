@@ -149,6 +149,11 @@ type BullpenCurrentOddsRefreshResponse = {
   error?: string;
 };
 
+type RefreshBullpenPositionsResult = {
+  positions: BullpenActivePositionView[];
+  error: string | null;
+};
+
 const MONTH_INDEX_BY_NAME: Record<string, string> = {
   january: "01",
   february: "02",
@@ -1808,7 +1813,9 @@ export default function BullpenAiPage() {
     }
   }
 
-  async function refreshBullpenPositions(options?: { suppressAutoClaim?: boolean }) {
+  async function refreshBullpenPositions(
+    options?: { suppressAutoClaim?: boolean },
+  ): Promise<RefreshBullpenPositionsResult> {
     setIsLoadingPositions(true);
     setPositionsError(null);
 
@@ -1846,7 +1853,10 @@ export default function BullpenAiPage() {
 
       if (!livePositionsPayload.liveAvailable) {
         lastAutoClaimSignatureRef.current = null;
-        return;
+        return {
+          positions: livePositions,
+          error: livePositionsPayload.error || null,
+        };
       }
 
       const claimableSignature = buildClaimableBullpenSignature(livePositions);
@@ -1865,11 +1875,18 @@ export default function BullpenAiPage() {
       if (!livePositionsResponse.ok) {
         lastAutoClaimSignatureRef.current = null;
       }
+      return {
+        positions: livePositions,
+        error: livePositionsPayload.error || null,
+      };
     } catch (error) {
+      const normalizedError = `Failed to load Bullpen wallet positions: ${normalizeError(error)}.`;
       setHasLoadedPositions(true);
-      setPositionsError(
-        `Failed to load Bullpen wallet positions: ${normalizeError(error)}.`,
-      );
+      setPositionsError(normalizedError);
+      return {
+        positions: activePositions,
+        error: normalizedError,
+      };
     } finally {
       setIsLoadingPositions(false);
     }
@@ -1880,6 +1897,9 @@ export default function BullpenAiPage() {
     setScanningMode(activeMode);
     setMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
+    const positionsRefreshTask = refreshBullpenPositions({
+      suppressAutoClaim: true,
+    });
 
     try {
       const response = await fetch(`/api/bullpen-ai?${params.toString()}`, {
@@ -1887,6 +1907,8 @@ export default function BullpenAiPage() {
       });
       const payload = (await response.json()) as ScanResult;
       const isSuccessfulScan = response.ok && !payload.error;
+
+      await positionsRefreshTask;
 
       if (isSuccessfulScan) {
         const nextSnapshot = createBullpenScanSnapshot(payload);
@@ -1932,6 +1954,7 @@ export default function BullpenAiPage() {
                 : null,
       }));
     } catch (scanError) {
+      await positionsRefreshTask;
       setMessagesByMode((current) => ({
         ...current,
         [activeMode]:
@@ -1973,10 +1996,32 @@ export default function BullpenAiPage() {
     const selectedQuestions = activeCurrentSnapshot.questions.filter((question) =>
       selectedQuestionIdSet.has(question.id),
     );
+    const [refreshedQuestionsResult, refreshedPositionsResult] =
+      await Promise.all([
+        selectedQuestions.length > 0
+          ? refreshCurrentOdds({
+              questionIds: selectedQuestions.map((question) => question.id),
+              announceResult: false,
+              showLoadingState: false,
+            })
+          : Promise.resolve(null),
+        refreshBullpenPositions({
+          suppressAutoClaim: true,
+        }),
+      ]);
+    const refreshedSelectedQuestions = selectedQuestions.map((question) => {
+      const refreshedQuestion = refreshedQuestionsResult?.refreshedQuestions.find(
+        (item) => item.id === question.id,
+      );
+      return refreshedQuestion || question;
+    });
+    const refreshedOpenActivePositions = refreshedPositionsResult.positions.filter(
+      (position) => !position.isClaimable,
+    );
     const llmTargetSet = buildBullpenLlmRunTargetSet({
-      activePositions: openActivePositions,
+      activePositions: refreshedOpenActivePositions,
       analysesByPositionKey: activePositionAnalysesByKey,
-      selectedQuestions,
+      selectedQuestions: refreshedSelectedQuestions,
     });
     const questionsToAnalyze = llmTargetSet.questions;
 
@@ -2321,7 +2366,9 @@ export default function BullpenAiPage() {
       setActivePositionAnalysesByKey((current) => {
         const next = { ...current };
         const activePositionLookup = new Map(
-          openActivePositions.map((position) => [position.key, position] as const),
+          refreshedOpenActivePositions.map(
+            (position) => [position.key, position] as const,
+          ),
         );
 
         for (const [positionKey, llmBreakdown] of analysisByPositionKey.entries()) {
@@ -2422,14 +2469,14 @@ export default function BullpenAiPage() {
 
     if (showLoadingState) {
       setRefreshingCurrentOddsMode(activeMode);
+      setInvestmentProgressByMode((current) => ({
+        ...current,
+        [activeMode]: `Refreshing latest Polymarket odds for ${formatCountLabel(
+          questionsToRefresh.length,
+          refreshesVisibleQuestions ? "visible question" : "selected event",
+        )}...`,
+      }));
     }
-    setInvestmentProgressByMode((current) => ({
-      ...current,
-      [activeMode]: `Refreshing latest Polymarket odds for ${formatCountLabel(
-        questionsToRefresh.length,
-        refreshesVisibleQuestions ? "visible question" : "selected event",
-      )}...`,
-    }));
 
     try {
       const response = await fetch("/api/bullpen-ai/current-odds", {
@@ -2691,7 +2738,40 @@ export default function BullpenAiPage() {
 
   async function handleRefreshCurrentOdds() {
     try {
-      await refreshCurrentOdds();
+      const [snapshotRefreshResult, positionsRefreshResult] = await Promise.all([
+        refreshCurrentOdds({
+          announceResult: false,
+        }),
+        refreshBullpenPositions({
+          suppressAutoClaim: true,
+        }),
+      ]);
+      const summaryParts = [
+        `Refreshed Current % for ${formatCountLabel(
+          snapshotRefreshResult.refreshedCount,
+          "visible question",
+        )}.`,
+        `Updated ${formatCountLabel(
+          positionsRefreshResult.positions.filter((position) => !position.isClaimable)
+            .length,
+          "active position",
+        )}.`,
+      ];
+      if (snapshotRefreshResult.unresolvedCount > 0) {
+        summaryParts.push(
+          `${formatCountLabel(
+            snapshotRefreshResult.unresolvedCount,
+            "visible question",
+          )} could not be refreshed from Polymarket.`,
+        );
+      }
+      if (positionsRefreshResult.error) {
+        summaryParts.push(positionsRefreshResult.error);
+      }
+      setInvestmentMessagesByMode((current) => ({
+        ...current,
+        [activeMode]: summaryParts.join(" "),
+      }));
     } catch (error) {
       setInvestmentMessagesByMode((current) => ({
         ...current,

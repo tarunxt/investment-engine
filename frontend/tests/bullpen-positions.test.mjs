@@ -183,3 +183,41 @@ test("Bullpen positions refresh current odds and use end-of-day ET for returns/d
     Date.now = originalNow;
   }
 });
+
+test("Bullpen positions with custom outcomes still accept canonical Yes/No market refreshes", async () => {
+  const { applyBullpenPositionMarketData, normalizeBullpenPosition } =
+    await loadBullpenPositionsModule();
+
+  const position = normalizeBullpenPosition(
+    {
+      slug: "egypt-vs-ir-iran-ou-05",
+      market: "Egypt vs. IR Iran: O/U 0.5",
+      outcome: "Under",
+      shares: 5.882,
+      avg_price: 0.1699,
+      current_price: 0.1699,
+      current_value: 1.0,
+      end_date: "2026-06-28",
+      status: "open",
+    },
+    () => null,
+  );
+
+  assert.equal(position.yesOdds, null);
+  assert.equal(position.noOdds, null);
+
+  const refreshed = applyBullpenPositionMarketData(position, {
+    yesOdds: 83.5,
+    noOdds: 16.5,
+    marketUrl: "https://polymarket.com/event/egypt-vs-ir-iran-ou-05",
+  });
+
+  assert.equal(refreshed.yesOdds, 83.5);
+  assert.equal(refreshed.noOdds, 16.5);
+  assert.equal(
+    refreshed.marketUrl,
+    "https://polymarket.com/event/egypt-vs-ir-iran-ou-05",
+  );
+  assert.equal(refreshed.currentPrice, 0.1699);
+  assert.equal(refreshed.currentValue, 1);
+});
