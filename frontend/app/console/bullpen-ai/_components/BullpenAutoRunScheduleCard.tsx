@@ -26,6 +26,7 @@ import type { BullpenAutoLiveRun, BullpenAutoLiveSummaryResponse } from "@/types
 
 import { buildBullpenAutoRunWorkflowView } from "./bullpenAutoRunProgress";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
+import { formatElapsedRunTime, formatStageElapsedTime } from "./bullpenAutoRunTimers";
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
@@ -88,7 +89,6 @@ function formatIstDateTime(value: string | null | undefined) {
     second: undefined,
   });
 }
-
 
 function formatOddsPercent(value: number | null) {
   if (value === null) return "—";
@@ -250,44 +250,8 @@ function modeLabel(summary: BullpenAutoLiveSummaryResponse | null) {
   return "Dry run";
 }
 
-function formatElapsedRunTime(startedAt: string | null, nowMs: number) {
-  if (!startedAt) return "0:00";
-
-  const startedAtMs = Date.parse(startedAt);
-  if (Number.isNaN(startedAtMs)) return "0:00";
-
-  const elapsedSeconds = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
-  const hours = Math.floor(elapsedSeconds / 3600);
-  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
-  const seconds = elapsedSeconds % 60;
-  const paddedMinutes = hours > 0 ? String(minutes).padStart(2, "0") : String(minutes);
-  const paddedSeconds = String(seconds).padStart(2, "0");
-
-  return hours > 0
-    ? `${hours}:${paddedMinutes}:${paddedSeconds}`
-    : `${paddedMinutes}:${paddedSeconds}`;
-}
-
 function formatStageLastRunLabel(value: string | null) {
   return value ? formatIstDateTime(value) : "Not run yet";
-}
-
-function formatStageElapsedTime(
-  startedAt: string | null,
-  completedAt: string | null,
-  nowMs: number,
-) {
-  if (!startedAt) return "Not started";
-
-  const startedAtMs = Date.parse(startedAt);
-  if (Number.isNaN(startedAtMs)) return "Timer unavailable";
-
-  const completedAtMs = completedAt ? Date.parse(completedAt) : null;
-  const endMs = completedAtMs !== null && !Number.isNaN(completedAtMs) ? completedAtMs : nowMs;
-  if (endMs >= startedAtMs && endMs - startedAtMs < 1_000) {
-    return "<0:01";
-  }
-  return formatElapsedRunTime(startedAt, Math.max(startedAtMs, endMs));
 }
 
 function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
