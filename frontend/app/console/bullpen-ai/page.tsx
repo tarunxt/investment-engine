@@ -109,17 +109,17 @@ const TABS: {
   },
 ];
 
-const BULLPEN_SNAPSHOT_STORAGE_KEY = "investor:bullpen-ai:snapshots:v1";
+const BULLPEN_SNAPSHOT_STORAGE_KEY = "investment-engine:bullpen-ai:snapshots:v1";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
-  "investor:bullpen-ai:last-llm-target:v1";
+  "investment-engine:bullpen-ai:last-llm-target:v1";
 const BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY =
-  "investor:bullpen-ai:active-position-llm:v1";
+  "investment-engine:bullpen-ai:active-position-llm:v1";
 const BULLPEN_LLM_PROMPT_STORAGE_KEY =
-  "investor:bullpen-ai:llm-prompt-template:v1";
+  "investment-engine:bullpen-ai:llm-prompt-template:v1";
 const BULLPEN_REQUIRE_FRESH_EVIDENCE_STORAGE_KEY =
-  "investor:bullpen-ai:require-fresh-evidence:v1";
+  "investment-engine:bullpen-ai:require-fresh-evidence:v1";
 const BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY =
-  "investor:bullpen-ai:allow-non-web-evidence:v1";
+  "investment-engine:bullpen-ai:allow-non-web-evidence:v1";
 const MAX_BULLPEN_SNAPSHOT_HISTORY = 10;
 const RUN_POLL_INTERVAL_MS = 4_000;
 const MAX_RUN_POLLS = 90;
@@ -614,6 +614,7 @@ function buildBullpenAutoRunRequest({
       snapshot_id: snapshot.snapshotId,
       mode,
       total_candidates: snapshot.totalCandidates,
+      reuse_saved_llm_outputs: false,
       candidate_rows: snapshot.questions.map((question) => ({
         question_id: question.id,
         market_id:

@@ -73,7 +73,7 @@ const INITIAL_STATE: DashboardState = {
   polymarketState: null,
 };
 
-const DASHBOARD_OVERVIEW_CACHE_KEY = "investor:dashboard-overview-cache:v1";
+const DASHBOARD_OVERVIEW_CACHE_KEY = "investment-engine:dashboard-overview-cache:v1";
 const DASHBOARD_OVERVIEW_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const DASHBOARD_SECTION_KEYS = [
   "zerodhaStatus",

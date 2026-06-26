@@ -216,6 +216,7 @@ def bullpen_candidate_paths() -> list[str]:
             os.getcwd(),
             os.getenv("APP_ROOT"),
             os.getenv("BACKEND_ROOT"),
+            "/srv/investment-engine/backend",
             "/srv/investor/backend",
             "/backend",
         ]
@@ -233,6 +234,7 @@ def bullpen_candidate_paths() -> list[str]:
             shutil.which("bullpen"),
             os.path.expanduser("~/.bullpen/bin/bullpen"),
             "/home/appuser/.bullpen/bin/bullpen",
+            "/home/investment-engine/.bullpen/bin/bullpen",
             "/home/investor/.bullpen/bin/bullpen",
             "/opt/homebrew/bin/bullpen",
             "/usr/local/bin/bullpen",

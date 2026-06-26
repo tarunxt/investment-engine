@@ -24,7 +24,7 @@ Remove any Zoho Sites records for website hosting, especially a `www` CNAME to Z
 
 ## Production environment values
 
-For the no-Docker production deployment, set these values in `/etc/investor/frontend.env`:
+For the no-Docker production deployment, set these values in `/etc/investment-engine/frontend.env`:
 
 ```bash
 NODE_ENV=production
@@ -35,7 +35,7 @@ NEXTAUTH_SECRET=<generate-strong-secret>
 AUTH_TRUST_HOST=true
 ```
 
-Set these domain values in `/etc/investor/backend.env`:
+Set these domain values in `/etc/investment-engine/backend.env`:
 
 ```bash
 FRONTEND_URL=https://alkraj.com
@@ -53,7 +53,7 @@ On the production server, install the bootstrap HTTP-only config first so Let's 
 
 ```bash
 sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled /var/www/letsencrypt
-sudo cp /srv/investor/deploy/no-docker/nginx/alkraj.bootstrap.conf /etc/nginx/sites-available/alkraj.conf
+sudo cp /srv/investment-engine/deploy/no-docker/nginx/alkraj.bootstrap.conf /etc/nginx/sites-available/alkraj.conf
 sudo ln -sfn /etc/nginx/sites-available/alkraj.conf /etc/nginx/sites-enabled/alkraj.conf
 sudo nginx -t
 sudo systemctl reload nginx
@@ -69,7 +69,7 @@ sudo certbot certonly --webroot -w /var/www/letsencrypt -d api.alkraj.com
 Then switch nginx to the final HTTPS reverse-proxy config:
 
 ```bash
-sudo cp /srv/investor/deploy/no-docker/nginx/alkraj.conf /etc/nginx/sites-available/alkraj.conf
+sudo cp /srv/investment-engine/deploy/no-docker/nginx/alkraj.conf /etc/nginx/sites-available/alkraj.conf
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -79,7 +79,7 @@ sudo systemctl reload nginx
 After DNS, env files, certificates, and nginx are ready, deploy the full stack:
 
 ```bash
-cd /srv/investor
+cd /srv/investment-engine
 SKIP_GIT_SYNC=false bash deploy/no-docker/redeploy.sh full
 ```
 
@@ -88,7 +88,7 @@ Verify locally on the server first:
 ```bash
 curl -I http://127.0.0.1:3000
 curl -I http://127.0.0.1:8000/health
-sudo systemctl status investor-frontend investor-backend --no-pager
+sudo systemctl status investment-engine-frontend investment-engine-backend --no-pager
 ```
 
 Verify the public domain after DNS propagation:
@@ -110,5 +110,5 @@ Expected results:
 1. If `www.alkraj.com` still shows Zoho, DNS for `www` still points to Zoho or browser/ISP DNS cache has not expired.
 2. If `alkraj.com` works but `www.alkraj.com` does not, confirm the `www` A record and the certificate covering `www.alkraj.com`.
 3. If the frontend loads but API calls fail, confirm `NEXT_PUBLIC_API_URL=https://api.alkraj.com`, `api.alkraj.com` DNS, and the backend service health.
-4. If Google OAuth fails, update the Google Cloud OAuth redirect URI to `https://alkraj.com/console/google-sheets/callback` and match `/etc/investor/backend.env`.
+4. If Google OAuth fails, update the Google Cloud OAuth redirect URI to `https://alkraj.com/console/google-sheets/callback` and match `/etc/investment-engine/backend.env`.
 5. If nginx fails to reload, run `sudo nginx -t` and fix the exact certificate or config path reported.

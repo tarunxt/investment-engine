@@ -29,7 +29,7 @@ export default function RootLayout({
         <script
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var theme=window.localStorage.getItem("investor:theme-preference")||"light";var isDark=theme==="dark"||(theme==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",isDark);document.documentElement.style.colorScheme=isDark?"dark":"light";}catch(e){}})();`,
+            __html: `(function(){try{var theme=window.localStorage.getItem("investment-engine:theme-preference")||window.localStorage.getItem("investor:theme-preference")||"light";var isDark=theme==="dark"||(theme==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",isDark);document.documentElement.style.colorScheme=isDark?"dark":"light";}catch(e){}})();`,
           }}
         />
         {/* SessionProvider must wrap AuthProvider */}

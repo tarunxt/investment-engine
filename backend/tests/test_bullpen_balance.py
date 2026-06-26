@@ -164,6 +164,7 @@ def test_bullpen_candidate_paths_include_systemd_and_home_locations(
     assert candidates[0] == "/custom/bin/bullpen"
     assert str(tmp_path / "app" / ".runtime-tools" / "bullpen") in candidates
     assert str(tmp_path / "backend" / "runtime-tools" / "bullpen") in candidates
+    assert "/home/investment-engine/.bullpen/bin/bullpen" in candidates
     assert "/home/investor/.bullpen/bin/bullpen" in candidates
     assert "/opt/homebrew/bin/bullpen" in candidates
     assert "/usr/local/bin/bullpen" in candidates
@@ -194,13 +195,13 @@ def test_bullpen_process_env_uses_service_home_when_home_is_root(monkeypatch):
     monkeypatch.setattr(bullpen.os, "getuid", lambda: 1234)
 
     class UserInfo:
-        pw_dir = "/home/investor"
+        pw_dir = "/home/investment-engine"
 
     monkeypatch.setattr(bullpen.pwd, "getpwuid", lambda uid: UserInfo())
 
     env = bullpen.bullpen_process_env(read_only=True)
 
-    assert env["HOME"] == "/home/investor"
+    assert env["HOME"] == "/home/investment-engine"
     assert env["BULLPEN_READ_ONLY"] == "true"
     assert env["BULLPEN_NON_INTERACTIVE"] == "true"
 

@@ -75,8 +75,18 @@ jobs:
           command_timeout: 1800s
           script: |
             set -euo pipefail
-            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
-            APP_USER="${{ vars.EC2_APP_USER || 'investor' }}"
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP_ROOT="/srv/investor"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            LEGACY_APP_USER="investor"
+
+            if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+              APP_ROOT="$LEGACY_APP_ROOT"
+            fi
+
+            if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
+              APP_USER="$LEGACY_APP_USER"
+            fi
 
             echo "==> Production app root: $APP_ROOT"
             echo "==> Production app user: $APP_USER"
@@ -111,8 +121,18 @@ jobs:
           command_timeout: 1800s
           script: |
             set -euo pipefail
-            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
-            APP_USER="${{ vars.EC2_APP_USER || 'investor' }}"
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP_ROOT="/srv/investor"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            LEGACY_APP_USER="investor"
+
+            if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+              APP_ROOT="$LEGACY_APP_ROOT"
+            fi
+
+            if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
+              APP_USER="$LEGACY_APP_USER"
+            fi
 
             echo "==> Production app root: $APP_ROOT"
             echo "==> Production app user: $APP_USER"

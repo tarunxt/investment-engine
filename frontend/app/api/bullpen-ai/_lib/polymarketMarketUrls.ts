@@ -334,7 +334,7 @@ async function fetchPolymarketEventSupplement(
     cache: "no-store",
     headers: {
       accept: "text/html,application/xhtml+xml",
-      "user-agent": "Mozilla/5.0 investor-bullpen-ai",
+      "user-agent": "Mozilla/5.0 investment-engine-bullpen-ai",
     },
   });
   if (!response.ok) {

@@ -1937,6 +1937,144 @@ async def test_console_profile_manual_selected_rows_skip_backend_rescan_and_avoi
 
 
 @pytest.mark.anyio
+async def test_console_profile_manual_selected_rows_rerun_llm_when_reuse_is_disabled(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_rows = [
+        _manual_console_candidate_row(
+            market_id="candidate-market-1",
+            question_id="candidate-market-1",
+            market_title="Candidate market 1",
+            slug="candidate-market-1",
+            current_yes_odds=19,
+            current_no_odds=81,
+            llm_yes_odds=10,
+            llm_no_odds=90,
+            returns_per_day=8.4,
+            selected=True,
+        ),
+        _manual_console_candidate_row(
+            market_id="candidate-market-2",
+            question_id="candidate-market-2",
+            market_title="Candidate market 2",
+            slug="candidate-market-2",
+            current_yes_odds=17,
+            current_no_odds=83,
+            llm_yes_odds=12,
+            llm_no_odds=88,
+            returns_per_day=6.8,
+            selected=True,
+        ),
+    ]
+    market_lookup = {
+        row.slug: _market(
+            question=row.market_title,
+            slug=row.slug,
+            close_time=row.close_time,
+            current_yes_odds=row.current_yes_odds,
+            current_no_odds=row.current_no_odds,
+        )
+        for row in manual_rows
+        if row.slug
+    }
+    llm_calls: list[str] = []
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    async def fail_scan_candidate_markets(**_kwargs):
+        raise AssertionError("Manual Bullpen x AI rows should bypass the backend rescan.")
+
+    async def fail_scan_console_profile_markets(**_kwargs):
+        raise AssertionError("Manual Bullpen x AI rows should bypass the console profile scan.")
+
+    def fake_run_llm_consensus(market, *_args, **_kwargs):
+        llm_calls.append(market.market_id)
+        if market.market_id == "candidate-market-1":
+            return _fake_llm_consensus(fair_yes=10, fair_no=90)
+        return _fake_llm_consensus(fair_yes=12, fair_no=88)
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_candidate_markets",
+        fail_scan_candidate_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fail_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=60),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        fake_run_llm_consensus,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=2,
+                    reuse_saved_llm_outputs=False,
+                    candidate_rows=manual_rows,
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    assert llm_calls == ["candidate-market-1", "candidate-market-2"]
+    assert result.run.decisions_count == 2
+    assert result.run.stage_results[1].outputs["workflow_stage_key"] == "llm"
+    assert result.run.stage_results[1].outputs["phase_status"] == "completed"
+    assert result.run.stage_results[1].outputs["llm_candidate_count"] == 2
+    assert not result.run.stage_results[1].outputs.get("reused_existing_llm_outputs")
+
+
+@pytest.mark.anyio
 async def test_console_profile_manual_rows_exclude_trump_insult_markets_before_stage_2(
     monkeypatch,
 ):

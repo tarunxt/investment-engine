@@ -564,7 +564,7 @@ const BULLPEN_ACCOUNT_URL =
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
 const DEFAULT_EC2_COMMANDS = [
-  "sudo -u investor -H bullpen login",
+  "sudo -u investment-engine -H bullpen login",
   "bullpen status",
   "cd /home/deploy/apps/myapp sudo docker compose --env-file .env.prod -f docker-compose.prod.yml exec frontend sh -lc 'HOME=/var/lib/credx/bullpen /usr/local/bin/bullpen login'",
 ];
@@ -3045,7 +3045,7 @@ export default function PolymarketBotPage() {
                   </span>
                   Run{" "}
                   <code className="rounded bg-amber-100 px-1.5 py-0.5">
-                    sudo -u investor -H bullpen login
+                    sudo -u investment-engine -H bullpen login
                   </code>
                   .
                 </li>

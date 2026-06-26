@@ -68,7 +68,7 @@ const MIN_BULLPEN_TABLE_COLUMN_WIDTHS: BullpenTableColumnWidths = {
 };
 
 const BULLPEN_TABLE_COLUMN_WIDTHS_STORAGE_KEY =
-  "investor:bullpen-ai:question-table-column-widths:v1";
+  "investment-engine:bullpen-ai:question-table-column-widths:v1";
 
 export function getDefaultBullpenTableColumnWidths(): BullpenTableColumnWidths {
   return { ...DEFAULT_BULLPEN_TABLE_COLUMN_WIDTHS };

@@ -23,8 +23,23 @@ jobs:
           command_timeout: 900s
           script: |
             set -euo pipefail
-            APP="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
-            BACKEND_ENV_FILE="/etc/investor/backend.env"
+            APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP="/srv/investor"
+            if [[ ! -d "$APP" && -d "$LEGACY_APP" ]]; then
+              APP="$LEGACY_APP"
+            fi
+            BACKEND_ENV_FILE="/etc/investment-engine/backend.env"
+            if [[ ! -f "$BACKEND_ENV_FILE" && -f /etc/investor/backend.env ]]; then
+              BACKEND_ENV_FILE="/etc/investor/backend.env"
+            fi
+            APP_SERVICE_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            if ! id "$APP_SERVICE_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then
+              APP_SERVICE_USER="investor"
+            fi
+            BACKEND_SERVICE_NAME="investment-engine-backend"
+            if ! systemctl cat "$BACKEND_SERVICE_NAME" >/dev/null 2>&1; then
+              BACKEND_SERVICE_NAME="investor-backend"
+            fi
 
             echo "==> App root"
             sudo test -d "$APP/backend"
@@ -35,9 +50,9 @@ jobs:
             sudo ls -l "$BACKEND_ENV_FILE"
 
             echo "==> Provider key presence in env file"
-            sudo bash -lc '
+            sudo env BACKEND_ENV_FILE="$BACKEND_ENV_FILE" bash -lc '
               for key in OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY GEMINI_API_KEY_FALLBACK GEMINI_API_KEY_FALLBACK_2 GEMINI_API_KEY_FALLBACK_3 DEEPSEEK_API_KEY; do
-                line="$(grep -E "^${key}=" /etc/investor/backend.env || true)"
+                line="$(grep -E "^${key}=" "$BACKEND_ENV_FILE" || true)"
                 value="${line#*=}"
                 if [[ -n "$line" && -n "$value" ]]; then
                   echo "$key=present"
@@ -48,7 +63,7 @@ jobs:
             '
 
             echo "==> Provider availability from backend runtime"
-            sudo -u investor -H bash -lc "
+            sudo -u "$APP_SERVICE_USER" -H bash -lc "
               cd '$APP/backend'
               source .venv/bin/activate
               set -a
@@ -74,4 +89,4 @@ jobs:
             "
 
             echo "==> Recent backend logs"
-            sudo journalctl -u investor-backend -n 50 --no-pager
+            sudo journalctl -u "$BACKEND_SERVICE_NAME" -n 50 --no-pager

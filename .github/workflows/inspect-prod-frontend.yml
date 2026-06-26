@@ -23,8 +23,23 @@ jobs:
           command_timeout: 900s
           script: |
             set -euo pipefail
-            APP="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
-            FRONTEND_ENV_FILE="/etc/investor/frontend.env"
+            APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP="/srv/investor"
+            if [[ ! -d "$APP" && -d "$LEGACY_APP" ]]; then
+              APP="$LEGACY_APP"
+            fi
+            FRONTEND_ENV_FILE="/etc/investment-engine/frontend.env"
+            if [[ ! -f "$FRONTEND_ENV_FILE" && -f /etc/investor/frontend.env ]]; then
+              FRONTEND_ENV_FILE="/etc/investor/frontend.env"
+            fi
+            APP_SERVICE_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            if ! id "$APP_SERVICE_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then
+              APP_SERVICE_USER="investor"
+            fi
+            FRONTEND_SERVICE_NAME="investment-engine-frontend"
+            if ! systemctl cat "$FRONTEND_SERVICE_NAME" >/dev/null 2>&1; then
+              FRONTEND_SERVICE_NAME="investor-frontend"
+            fi
 
             echo "==> App root"
             sudo test -d "$APP/frontend"
@@ -35,9 +50,9 @@ jobs:
             sudo ls -l "$FRONTEND_ENV_FILE"
 
             echo "==> Frontend env values"
-            sudo bash -lc '
+            sudo env FRONTEND_ENV_FILE="$FRONTEND_ENV_FILE" bash -lc '
               for key in NODE_ENV NEXT_PUBLIC_API_URL NEXT_PUBLIC_FRONTEND_URL NEXTAUTH_URL AUTH_TRUST_HOST NEXT_PUBLIC_BRAND_PREFIX; do
-                line="$(grep -E "^${key}=" /etc/investor/frontend.env || true)"
+                line="$(grep -E "^${key}=" "$FRONTEND_ENV_FILE" || true)"
                 if [[ -n "$line" ]]; then
                   echo "$line"
                 else
@@ -45,7 +60,7 @@ jobs:
                 fi
               done
 
-              if grep -q "^NEXTAUTH_SECRET=" /etc/investor/frontend.env; then
+              if grep -q "^NEXTAUTH_SECRET=" "$FRONTEND_ENV_FILE"; then
                 echo "NEXTAUTH_SECRET=present"
               else
                 echo "NEXTAUTH_SECRET=missing"
@@ -53,17 +68,17 @@ jobs:
             '
 
             echo "==> Frontend service status"
-            sudo systemctl status investor-frontend --no-pager || true
+            sudo systemctl status "$FRONTEND_SERVICE_NAME" --no-pager || true
 
             echo "==> Recent frontend logs"
-            sudo journalctl -u investor-frontend -n 200 --no-pager || true
+            sudo journalctl -u "$FRONTEND_SERVICE_NAME" -n 200 --no-pager || true
 
             echo "==> Localhost frontend responses"
             curl -i --max-time 20 http://127.0.0.1:3000/login || true
             curl -i --max-time 20 http://127.0.0.1:3000/api/auth/csrf || true
 
             echo "==> Frontend process env sanity"
-            sudo -u investor -H bash -lc "
+            sudo -u "$APP_SERVICE_USER" -H bash -lc "
               cd '$APP/frontend'
               node -e 'console.log({ node: process.version, nextauthUrl: process.env.NEXTAUTH_URL || null, frontendUrl: process.env.NEXT_PUBLIC_FRONTEND_URL || null, apiUrl: process.env.NEXT_PUBLIC_API_URL || null, trustHost: process.env.AUTH_TRUST_HOST || null })'
             "

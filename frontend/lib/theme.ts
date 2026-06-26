@@ -1,5 +1,6 @@
-export const THEME_STORAGE_KEY = "investor:theme-preference";
-export const THEME_CHANGED_EVENT = "investor:theme-preference-changed";
+const LEGACY_THEME_STORAGE_KEY = "investor:theme-preference";
+export const THEME_STORAGE_KEY = "investment-engine:theme-preference";
+export const THEME_CHANGED_EVENT = "investment-engine:theme-preference-changed";
 
 export const THEME_PREFERENCES = ["light", "dark", "system"] as const;
 export type ThemePreference = (typeof THEME_PREFERENCES)[number];
@@ -13,7 +14,9 @@ export function getStoredThemePreference(): ThemePreference | null {
     return null;
   }
 
-  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  const storedTheme =
+    window.localStorage.getItem(THEME_STORAGE_KEY) ??
+    window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
   return isThemePreference(storedTheme) ? storedTheme : null;
 }
 
@@ -45,5 +48,6 @@ export function persistThemePreference(preference: ThemePreference) {
   }
 
   window.localStorage.setItem(THEME_STORAGE_KEY, preference);
+  window.localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
   window.dispatchEvent(new CustomEvent(THEME_CHANGED_EVENT, { detail: preference }));
 }

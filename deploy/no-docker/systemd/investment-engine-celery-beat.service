@@ -1,0 +1,19 @@
+[Unit]
+Description=Investment Engine Celery beat scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=investment-engine
+Group=investment-engine
+WorkingDirectory=/srv/investment-engine/backend
+EnvironmentFile=/etc/investment-engine/backend.env
+ExecStart=/srv/investment-engine/backend/.venv/bin/celery -A app.infrastructure.messaging.celery_app beat --loglevel=info
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

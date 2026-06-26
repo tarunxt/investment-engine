@@ -17,7 +17,7 @@ const DEFAULT_EVENT_TARGET: ProviderModelTarget = {
   provider: "openai",
   model: "gpt-4o-mini",
 };
-const MODEL_MIX_STORAGE_KEY = "investor:model-mixes:v1";
+const MODEL_MIX_STORAGE_KEY = "investment-engine:model-mixes:v1";
 
 type SavedModelMix = {
   id: string;
