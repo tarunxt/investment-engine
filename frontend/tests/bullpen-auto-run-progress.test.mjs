@@ -136,6 +136,9 @@ test("Bullpen auto-run workflow view derives Stage 2 and Stage 3 inputs from ups
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 
   const acceptedCandidates = [{ question: "Will rates fall?", slug: "rates-fall" }];
+  const activePositionsFound = [
+    { market_id: "market-1", market_title: "Will rates fall?", side: "YES" },
+  ];
   const reviewedRows = [{ question: "Will rates fall?", llm_yes_odds: 64 }];
   const view = buildBullpenAutoRunWorkflowView({
     id: "run-derived-inputs",
@@ -158,6 +161,7 @@ test("Bullpen auto-run workflow view derives Stage 2 and Stage 3 inputs from ups
         workflow_stage_key: "scan",
         phase_status: "completed",
         accepted_candidates: acceptedCandidates,
+        active_positions_found: activePositionsFound,
       }),
       createStage(2, "Stage 2 reviewed candidates.", {
         workflow_stage_key: "llm",
@@ -173,9 +177,55 @@ test("Bullpen auto-run workflow view derives Stage 2 and Stage 3 inputs from ups
 
   assert.deepEqual(view.stages[1].inputs, {
     accepted_candidates: acceptedCandidates,
+    active_positions_found: activePositionsFound,
   });
   assert.deepEqual(view.stages[2].inputs, {
     llm_review_rows: reviewedRows,
+  });
+});
+
+test("Bullpen auto-run workflow view merges derived Stage 1 positions into explicit Stage 2 inputs", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const acceptedCandidates = [{ question: "Will rates fall?", slug: "rates-fall" }];
+  const activePositionsFound = [
+    { market_id: "market-1", market_title: "Will rates fall?", side: "YES" },
+  ];
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage-2-input-merge",
+    triggered_by: "manual",
+    status: "completed",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    completed_at: "2026-06-25T05:02:00Z",
+    summary: "All stages finished.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 1,
+    orders_planned: 1,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        accepted_candidates: acceptedCandidates,
+        active_positions_found: activePositionsFound,
+      }),
+      createStage(
+        2,
+        "Stage 2 reviewed candidates.",
+        { workflow_stage_key: "llm", phase_status: "completed" },
+        { accepted_candidates: acceptedCandidates },
+      ),
+    ],
+  });
+
+  assert.deepEqual(view.stages[1].inputs, {
+    accepted_candidates: acceptedCandidates,
+    active_positions_found: activePositionsFound,
   });
 });
 

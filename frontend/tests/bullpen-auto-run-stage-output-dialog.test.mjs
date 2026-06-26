@@ -70,6 +70,16 @@ test("Bullpen auto-run stage dialog renders candidate inputs as readable tables 
             rules: "Rule text for the event input.",
           },
         ],
+        active_positions_found: [
+          {
+            position_key: "market-2::YES",
+            market_id: "market-2",
+            market_title: "Will CPI print above expectations?",
+            theme: "Macro",
+            side: "YES",
+            exposure_usd: 24,
+          },
+        ],
       },
     }),
   );
@@ -78,7 +88,9 @@ test("Bullpen auto-run stage dialog renders candidate inputs as readable tables 
   assert.match(markup, /Detailed table view/);
   assert.match(markup, /Input Summary/);
   assert.match(markup, /Accepted Candidates Count/);
+  assert.match(markup, /Active Positions Found Count/);
   assert.match(markup, /Will rates fall\?/);
+  assert.match(markup, /Will CPI print above expectations\?/);
   assert.match(markup, /Open market/);
   assert.match(markup, /Current Yes Odds/);
   assert.match(markup, /Field/);

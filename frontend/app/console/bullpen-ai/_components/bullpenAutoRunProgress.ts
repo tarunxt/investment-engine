@@ -166,9 +166,14 @@ function buildDerivedInputs(
   const previousOutputs = readOutputs(previousStage);
 
   if (workflowDefinition.key === "llm") {
-    return Array.isArray(previousOutputs.accepted_candidates)
-      ? { accepted_candidates: previousOutputs.accepted_candidates }
-      : {};
+    const derivedInputs: Record<string, unknown> = {};
+    if (Array.isArray(previousOutputs.accepted_candidates)) {
+      derivedInputs.accepted_candidates = previousOutputs.accepted_candidates;
+    }
+    if (Array.isArray(previousOutputs.active_positions_found)) {
+      derivedInputs.active_positions_found = previousOutputs.active_positions_found;
+    }
+    return derivedInputs;
   }
 
   if (workflowDefinition.key === "invest") {
@@ -186,9 +191,10 @@ function readWorkflowInputs(
   previousStage: BullpenAutoLiveStageResult | null,
 ) {
   const directInputs = readInputs(stage);
+  const derivedInputs = buildDerivedInputs(workflowDefinition, previousStage);
   return Object.keys(directInputs).length > 0
-    ? directInputs
-    : buildDerivedInputs(workflowDefinition, previousStage);
+    ? { ...derivedInputs, ...directInputs }
+    : derivedInputs;
 }
 
 function getPhaseStatus(stage: BullpenAutoLiveStageResult | null) {
