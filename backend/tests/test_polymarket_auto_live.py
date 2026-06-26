@@ -729,6 +729,113 @@ async def test_console_profile_stage_2_reviews_active_positions_and_persists_llm
     assert result.decisions[0].fair_no_probability_pct == 86
 
 
+@pytest.mark.anyio
+async def test_console_profile_stage_2_hydrates_missing_active_position_markets_before_llm(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    active_market = _market(
+        question="Will Norway win on 2026-06-26?",
+        slug="norway-win-2026-06-26",
+        theme="Sports",
+        close_time="2026-06-27T03:59:59+00:00",
+        current_yes_odds=31,
+        current_no_odds=69,
+        description=(
+            'This market will resolve to "Yes" if Norway wins on June 26, 2026. '
+            "Otherwise, it resolves to No."
+        ),
+    )
+    active_position = _console_wallet_position(
+        slug=active_market.slug or "norway-win-2026-06-26",
+        market_title=active_market.question,
+        current_price_cents=69,
+        close_time="2026-06-27T03:59:59+00:00",
+        side="NO",
+        shares=5,
+        exposure_usd=3.45,
+    )
+    llm_market_descriptions: list[str | None] = []
+
+    async def fake_read_console_wallet_positions():
+        return [active_position]
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[],
+            rejected=[],
+            total_candidates=0,
+        )
+
+    async def fake_fetch_market_by_slug(slug: str):
+        assert slug == active_market.slug
+        return active_market
+
+    def fake_run_llm_consensus(market, *_args, **_kwargs):
+        llm_market_descriptions.append(market.description)
+        assert market.slug == active_market.slug
+        assert market.description == active_market.description
+        return _fake_llm_consensus(fair_yes=22, fair_no=78)
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.fetch_market_by_slug",
+        fake_fetch_market_by_slug,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        fake_run_llm_consensus,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    llm_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+    reviewed_position = llm_stage.outputs["llm_reviewed_candidates"][0]
+
+    assert llm_market_descriptions == [active_market.description]
+    assert reviewed_position["source_kind"] == "active_position"
+    assert reviewed_position["slug"] == active_market.slug
+    assert reviewed_position["fair_yes_probability_pct"] == 22
+    assert reviewed_position["fair_no_probability_pct"] == 78
+    assert reviewed_position["yes_definition"] == "Norway wins on June 26, 2026"
+
+
 def test_auto_live_normalization_maps_raw_labels_to_strict_buckets():
     assert normalize_auto_live_evidence_status("conflicting_evidence") == "Moderate"
     assert normalize_auto_live_evidence_status("official") == "Strong"

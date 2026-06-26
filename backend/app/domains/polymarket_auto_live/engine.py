@@ -50,6 +50,7 @@ from app.domains.polymarket_auto_live.rules import RuleEvaluation, evaluate_mark
 from app.domains.polymarket_auto_live.scanner import (
     ScanRejectedMarket,
     ScannedMarket,
+    fetch_market_by_slug,
     scan_candidate_markets,
 )
 from app.domains.polymarket_auto_live.schemas import (
@@ -820,6 +821,58 @@ def _active_position_market(
         force_include=True,
         raw=None,
     )
+
+
+async def _hydrate_missing_active_position_markets(
+    positions: list[ConsoleWalletPosition],
+    *,
+    market_by_slug: dict[str, ScannedMarket],
+    market_by_id: dict[str, ScannedMarket],
+) -> tuple[dict[str, ScannedMarket], dict[str, ScannedMarket]]:
+    missing_positions_by_slug: dict[str, ConsoleWalletPosition] = {}
+    for position in positions:
+        if not position.slug:
+            continue
+        if position.slug in market_by_slug or position.market_id in market_by_id:
+            continue
+        missing_positions_by_slug.setdefault(position.slug, position)
+
+    if not missing_positions_by_slug:
+        return market_by_slug, market_by_id
+
+    async def fetch_position_market(
+        slug: str,
+    ) -> tuple[str, ScannedMarket | None]:
+        try:
+            return slug, await fetch_market_by_slug(slug)
+        except Exception:
+            logger.warning(
+                "Failed to hydrate active Bullpen position market for slug %s.",
+                slug,
+                exc_info=True,
+            )
+            return slug, None
+
+    fetched_markets = await asyncio.gather(
+        *[
+            fetch_position_market(slug)
+            for slug in missing_positions_by_slug
+        ]
+    )
+    next_market_by_slug = dict(market_by_slug)
+    next_market_by_id = dict(market_by_id)
+
+    for slug, market in fetched_markets:
+        position = missing_positions_by_slug[slug]
+        if market is None:
+            continue
+        next_market_by_slug.setdefault(slug, market)
+        if market.slug:
+            next_market_by_slug.setdefault(market.slug, market)
+        next_market_by_id.setdefault(position.market_id, market)
+        next_market_by_id.setdefault(market.market_id, market)
+
+    return next_market_by_slug, next_market_by_id
 
 
 def _serialize_llm_review_context(
@@ -2333,6 +2386,11 @@ class BullpenAutoLiveEngine:
             for position in live_wallet_positions
             if _is_supported_outcome_side(position.side)
         ]
+        market_by_slug, market_by_id = await _hydrate_missing_active_position_markets(
+            live_wallet_positions,
+            market_by_slug=market_by_slug,
+            market_by_id=market_by_id,
+        )
 
         enriched_wallet_positions = [
             apply_scanned_market_to_position(

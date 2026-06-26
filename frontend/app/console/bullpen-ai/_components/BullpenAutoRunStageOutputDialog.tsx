@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { ExternalLink, X } from "lucide-react";
 
 type BullpenAutoRunStageOutputDialogProps = {
@@ -18,6 +18,10 @@ type SummaryItem = {
   label: string;
   value: unknown;
 };
+type BreakdownDialogComponent = ComponentType<{
+  question: Record<string, unknown>;
+  onClose: () => void;
+}>;
 
 const SUMMARY_COLUMN_PRIORITY = [
   "question",
@@ -139,6 +143,8 @@ function renderJson(value: Record<string, unknown>) {
 }
 
 function formatLabel(key: string) {
+  if (key === "fair_yes_probability_pct") return "LLM Yes %";
+  if (key === "fair_no_probability_pct") return "LLM No %";
   return key
     .split("_")
     .map((part) => {
@@ -531,9 +537,13 @@ function StructuredValue({
 function KeyValueTable({
   entries,
   nested = false,
+  record = null,
+  onOpenBreakdown,
 }: {
   entries: [string, unknown][];
   nested?: boolean;
+  record?: Record<string, unknown> | null;
+  onOpenBreakdown?: (record: Record<string, unknown>) => void;
 }) {
   return (
     <div className={`overflow-hidden rounded-2xl border ${nested ? "border-slate-200" : "border-slate-200 bg-white"}`}>
@@ -551,7 +561,13 @@ function KeyValueTable({
                 {formatLabel(key)}
               </th>
               <td className="px-4 py-3 leading-6 text-slate-700">
-                <StructuredValue value={value} fieldKey={key} depth={nested ? 2 : 1} />
+                {renderRecordValue({
+                  value,
+                  key,
+                  record,
+                  depth: nested ? 2 : 1,
+                  onOpenBreakdown,
+                })}
               </td>
             </tr>
           ))}
@@ -604,6 +620,191 @@ function readSummaryBoolean(value: unknown) {
     if (normalized === "false") return false;
   }
   return false;
+}
+
+function readNumberValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function readStringArrayValue(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function isBreakdownProbabilityKey(key: string) {
+  return key === "fair_yes_probability_pct" || key === "fair_no_probability_pct";
+}
+
+function canOpenLlmBreakdown(record: Record<string, unknown>) {
+  const title = readSummaryString(record.question) ?? readSummaryString(record.market_title);
+  if (!title) return false;
+  return (
+    Array.isArray(record.llm_outputs) ||
+    readNumberValue(record.fair_yes_probability_pct) !== null ||
+    readNumberValue(record.fair_no_probability_pct) !== null
+  );
+}
+
+function buildStageOutputLlmBreakdown(record: Record<string, unknown>) {
+  if (!Array.isArray(record.llm_outputs)) return [];
+
+  return record.llm_outputs
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      return {
+        provider: readSummaryString(item.provider) ?? "Unknown",
+        model: readSummaryString(item.model) ?? "Unknown",
+        jobId: null,
+        runId: null,
+        timestamp: readSummaryString(item.completed_at),
+        llmYesOdds: readNumberValue(item.llm_yes_odds),
+        llmNoOdds: readNumberValue(item.llm_no_odds),
+        yesDefinition: readSummaryString(record.yes_definition),
+        deadlineEt: readSummaryString(record.deadline_et),
+        hoursRemaining: readNumberValue(record.hours_remaining),
+        evidenceStatus:
+          readSummaryString(item.evidence_status) ??
+          readSummaryString(record.evidence_status),
+        eventState:
+          readSummaryString(item.event_state) ?? readSummaryString(record.event_state),
+        confidence:
+          readSummaryString(item.confidence) ?? readSummaryString(record.confidence),
+        keyEvidence: readStringArrayValue(item.key_evidence),
+        redFlags: readStringArrayValue(item.red_flags),
+        rationale: readSummaryString(item.rationale),
+        direction: null,
+        rationaleOddsMismatch: false,
+        rationaleOddsMismatchReason: null,
+        effectiveWeight: null,
+        webSearchUsed: null,
+        webSearchQueries: [],
+        webSources: [],
+        internetVerified: null,
+        evidenceBlockUsed: false,
+        staleFactDetected: false,
+        invalidReason: readSummaryString(item.error),
+        invalidStaleFact: false,
+        staleFactReason: null,
+      };
+    })
+    .filter((item): item is Record<string, unknown> => Boolean(item));
+}
+
+function buildStageOutputBreakdownSeed(record: Record<string, unknown>) {
+  const question = readSummaryString(record.question) ?? readSummaryString(record.market_title);
+  const llmYesOdds = readNumberValue(record.fair_yes_probability_pct);
+  const llmNoOdds = readNumberValue(record.fair_no_probability_pct);
+  const llmBreakdown = buildStageOutputLlmBreakdown(record);
+  const llmCompletedAt =
+    [...llmBreakdown]
+      .map((entry) => readSummaryString(entry.timestamp))
+      .filter((timestamp): timestamp is string => Boolean(timestamp))
+      .sort()
+      .at(-1) ?? null;
+  const singleBreakdown = llmBreakdown.length === 1 ? llmBreakdown[0] : null;
+
+  if (!question || (llmYesOdds === null && llmNoOdds === null && llmBreakdown.length === 0)) {
+    return null;
+  }
+
+  return {
+    id:
+      readSummaryString(record.position_key) ??
+      readSummaryString(record.market_id) ??
+      readSummaryString(record.slug) ??
+      question,
+    question,
+    closeTime: readSummaryString(record.close_time),
+    category:
+      readSummaryString(record.theme) ??
+      readSummaryString(record.source_kind) ??
+      "Bullpen Auto-Run",
+    yesOdds: readNumberValue(record.current_yes_odds),
+    noOdds: readNumberValue(record.current_no_odds),
+    currentOddsUpdatedAt: null,
+    investmentTableAddedAt: null,
+    volume: null,
+    liquidity: null,
+    sourceUrl: readSummaryString(record.market_url) ?? "",
+    slug: readSummaryString(record.slug),
+    marketUrl: readSummaryString(record.market_url),
+    outcomeLabels: ["Yes", "No"],
+    outcomeCount: 2,
+    isBinaryYesNo: true,
+    daysUntilClose: null,
+    rules: null,
+    marketContext: null,
+    resolutionSource: null,
+    llmYesOdds,
+    llmNoOdds,
+    llmDisagreementLevel: readSummaryString(record.disagreement_level),
+    llmDisagreementCategory: readSummaryString(record.disagreement_category),
+    llmRationaleMismatchCount: 0,
+    adjudicationRequired: readSummaryBoolean(record.adjudication_required),
+    evidenceStatus: readSummaryString(record.evidence_status),
+    eventState: readSummaryString(record.event_state),
+    llmNotes: null,
+    llmProvider: readSummaryString(singleBreakdown?.provider),
+    llmModel: readSummaryString(singleBreakdown?.model),
+    llmRunId: null,
+    llmCompletedAt,
+    preflightEvidenceBlock: null,
+    llmBreakdown,
+  };
+}
+
+function renderRecordValue({
+  value,
+  key,
+  record,
+  compact = false,
+  depth = 1,
+  onOpenBreakdown,
+}: {
+  value: unknown;
+  key: string;
+  record?: Record<string, unknown> | null;
+  compact?: boolean;
+  depth?: number;
+  onOpenBreakdown?: (record: Record<string, unknown>) => void;
+}) {
+  const baseValue = compact ? (
+    renderCompactValue(value, key)
+  ) : (
+    <StructuredValue value={value} fieldKey={key} depth={depth} />
+  );
+  if (
+    !record ||
+    !onOpenBreakdown ||
+    !isBreakdownProbabilityKey(key) ||
+    value === null ||
+    value === undefined ||
+    !canOpenLlmBreakdown(record)
+  ) {
+    return baseValue;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenBreakdown(record)}
+      className="inline-flex items-center rounded-md underline decoration-sky-300 underline-offset-4 transition hover:text-sky-700"
+    >
+      {baseValue}
+    </button>
+  );
+}
+
+function buildStageOutputEyebrow(stageTitle: string) {
+  const stageMatch = stageTitle.match(/(Stage\s+\d+)/i);
+  return stageMatch ? `${stageMatch[1]} Output` : "Stage Output";
 }
 
 function appendSummaryItem(
@@ -755,9 +956,11 @@ function buildInputSummaryItems(outputs: Record<string, unknown>) {
 function SummaryTable({
   rows,
   title,
+  onOpenBreakdown,
 }: {
   rows: Record<string, unknown>[];
   title: string;
+  onOpenBreakdown: (record: Record<string, unknown>) => void;
 }) {
   const columns = buildSummaryColumns(rows);
   if (columns.length === 0) return null;
@@ -785,7 +988,13 @@ function SummaryTable({
               <tr key={index} className="align-top hover:bg-slate-50/80">
                 {columns.map((column) => (
                   <td key={`${index}-${column}`} className="px-4 py-3">
-                    {renderCompactValue(row[column], column)}
+                    {renderRecordValue({
+                      value: row[column],
+                      key: column,
+                      record: row,
+                      compact: true,
+                      onOpenBreakdown,
+                    })}
                   </td>
                 ))}
               </tr>
@@ -837,8 +1046,10 @@ function SummaryCards({
 
 function MetricStrip({
   record,
+  onOpenBreakdown,
 }: {
   record: Record<string, unknown>;
+  onOpenBreakdown: (record: Record<string, unknown>) => void;
 }) {
   const metrics = METRIC_KEYS.filter((key) => record[key] !== null && record[key] !== undefined);
   if (metrics.length === 0) return null;
@@ -854,7 +1065,12 @@ function MetricStrip({
             {formatLabel(key)}
           </p>
           <div className="mt-2 text-sm font-semibold text-slate-900">
-            <StructuredValue value={record[key]} fieldKey={key} />
+            {renderRecordValue({
+              value: record[key],
+              key,
+              record,
+              onOpenBreakdown,
+            })}
           </div>
         </div>
       ))}
@@ -865,9 +1081,11 @@ function MetricStrip({
 function RecordDetailsCard({
   record,
   index,
+  onOpenBreakdown,
 }: {
   record: Record<string, unknown>;
   index: number;
+  onOpenBreakdown: (record: Record<string, unknown>) => void;
 }) {
   const title =
     (typeof record.question === "string" && record.question) ||
@@ -937,12 +1155,16 @@ function RecordDetailsCard({
       </div>
 
       <div className="mt-4">
-        <MetricStrip record={record} />
+        <MetricStrip record={record} onOpenBreakdown={onOpenBreakdown} />
       </div>
 
       {regularEntries.length > 0 ? (
         <div className="mt-4">
-          <KeyValueTable entries={regularEntries} />
+          <KeyValueTable
+            entries={regularEntries}
+            record={record}
+            onOpenBreakdown={onOpenBreakdown}
+          />
         </div>
       ) : null}
 
@@ -970,9 +1192,11 @@ function RecordDetailsCard({
 function RecordArraySection({
   sectionKey,
   rows,
+  onOpenBreakdown,
 }: {
   sectionKey: string;
   rows: Record<string, unknown>[];
+  onOpenBreakdown: (record: Record<string, unknown>) => void;
 }) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
@@ -991,7 +1215,11 @@ function RecordArraySection({
       </div>
 
       <div className="mt-4">
-        <SummaryTable rows={rows} title="Summary Table" />
+        <SummaryTable
+          rows={rows}
+          title="Summary Table"
+          onOpenBreakdown={onOpenBreakdown}
+        />
       </div>
 
       <div className="mt-4 space-y-4">
@@ -1000,6 +1228,7 @@ function RecordArraySection({
             key={`${sectionKey}-${index}-${String(row.market_id ?? row.question ?? row.slug ?? index)}`}
             record={row}
             index={index}
+            onOpenBreakdown={onOpenBreakdown}
           />
         ))}
       </div>
@@ -1010,12 +1239,20 @@ function RecordArraySection({
 function StructuredSection({
   sectionKey,
   value,
+  onOpenBreakdown,
 }: {
   sectionKey: string;
   value: unknown;
+  onOpenBreakdown: (record: Record<string, unknown>) => void;
 }) {
   if (Array.isArray(value) && value.every((item) => isRecord(item))) {
-    return <RecordArraySection sectionKey={sectionKey} rows={value as Record<string, unknown>[]} />;
+    return (
+      <RecordArraySection
+        sectionKey={sectionKey}
+        rows={value as Record<string, unknown>[]}
+        onOpenBreakdown={onOpenBreakdown}
+      />
+    );
   }
 
   return (
@@ -1040,11 +1277,15 @@ function StructuredSection({
 export function BullpenAutoRunStageOutputDialog({
   stageTitle,
   stageDetail,
-  eyebrow = "Stage Output",
+  eyebrow,
   outputs,
   outputLabel = "Outputs",
   onClose,
 }: BullpenAutoRunStageOutputDialogProps) {
+  const [breakdownDialogComponent, setBreakdownDialogComponent] =
+    useState<BreakdownDialogComponent | null>(null);
+  const [breakdownQuestion, setBreakdownQuestion] =
+    useState<Record<string, unknown> | null>(null);
   const entries = Object.entries(outputs);
   const inputSummaryItems = outputLabel === "Inputs" ? buildInputSummaryItems(outputs) : [];
   const overviewEntries = orderEntries(
@@ -1057,71 +1298,100 @@ export function BullpenAutoRunStageOutputDialog({
     if (isPrimitive(value)) return false;
     return !(Array.isArray(value) && value.every((item) => isPrimitive(item)));
   });
+  const resolvedEyebrow = eyebrow ?? buildStageOutputEyebrow(stageTitle);
+
+  const handleOpenBreakdown = async (record: Record<string, unknown>) => {
+    const seed = buildStageOutputBreakdownSeed(record);
+    if (!seed) return;
+
+    const [{ createBullpenQuestionRow }, { BullpenLlmBreakdownDialog }] =
+      await Promise.all([
+        import("@/lib/bullpen-ai"),
+        import("./BullpenLlmBreakdownDialog"),
+      ]);
+
+    setBreakdownDialogComponent(() => BullpenLlmBreakdownDialog);
+    setBreakdownQuestion(createBullpenQuestionRow(seed) as Record<string, unknown>);
+  };
+  const BreakdownDialog = breakdownDialogComponent;
 
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              {eyebrow}
-            </p>
-            <h3 className="text-lg font-semibold text-slate-950">{stageTitle}</h3>
-            <p className="max-w-3xl text-sm leading-6 text-slate-600">{stageDetail}</p>
+    <>
+      <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+        <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+          <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                {resolvedEyebrow}
+              </p>
+              <h3 className="text-lg font-semibold text-slate-950">{stageTitle}</h3>
+              <p className="max-w-3xl text-sm leading-6 text-slate-600">{stageDetail}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+              aria-label={`Close ${resolvedEyebrow.toLowerCase()}`}
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label={`Close ${eyebrow.toLowerCase()}`}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
 
-        <div className="overflow-y-auto px-6 py-5">
-          <div className="space-y-4">
-            {inputSummaryItems.length > 0 ? (
-              <SummaryCards items={inputSummaryItems} title="Input Summary" />
-            ) : null}
+          <div className="overflow-y-auto px-6 py-5">
+            <div className="space-y-4">
+              {inputSummaryItems.length > 0 ? (
+                <SummaryCards items={inputSummaryItems} title="Input Summary" />
+              ) : null}
 
-            {overviewEntries.length > 0 ? (
-              <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {outputLabel} Overview
-                  </p>
-                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                    Key fields
-                  </span>
+              {overviewEntries.length > 0 ? (
+                <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {outputLabel} Overview
+                    </p>
+                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                      Key fields
+                    </span>
+                  </div>
+                  <div className="mt-4">
+                    <KeyValueTable entries={overviewEntries} />
+                  </div>
+                </section>
+              ) : null}
+
+              {sectionEntries.map(([key, value]) => (
+                <StructuredSection
+                  key={key}
+                  sectionKey={key}
+                  value={value}
+                  onOpenBreakdown={handleOpenBreakdown}
+                />
+              ))}
+
+              {entries.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                  No structured {outputLabel.toLowerCase()} were recorded for this stage.
                 </div>
-                <div className="mt-4">
-                  <KeyValueTable entries={overviewEntries} />
-                </div>
-              </section>
-            ) : null}
+              ) : null}
 
-            {sectionEntries.map(([key, value]) => (
-              <StructuredSection key={key} sectionKey={key} value={value} />
-            ))}
-
-            {entries.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
-                No structured {outputLabel.toLowerCase()} were recorded for this stage.
-              </div>
-            ) : null}
-
-            <details className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
-              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Raw JSON
-              </summary>
-              <pre className="mt-4 overflow-x-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-white p-4 text-xs leading-6 text-slate-700">
-                {renderJson(outputs)}
-              </pre>
-            </details>
+              <details className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
+                <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  Raw JSON
+                </summary>
+                <pre className="mt-4 overflow-x-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-white p-4 text-xs leading-6 text-slate-700">
+                  {renderJson(outputs)}
+                </pre>
+              </details>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+      {BreakdownDialog && breakdownQuestion ? (
+        <BreakdownDialog
+          question={breakdownQuestion}
+          onClose={() => setBreakdownQuestion(null)}
+        />
+      ) : null}
+    </>
   );
 }

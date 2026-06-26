@@ -120,3 +120,43 @@ test("Bullpen auto-run stage dialog keeps primitive overview fields in a key-val
   assert.match(markup, /Candidate Decision Rows/);
   assert.match(markup, /market-1/);
 });
+
+test("Bullpen auto-run stage dialog renames Stage 2 LLM probability fields clearly", () => {
+  const { BullpenAutoRunStageOutputDialog } = loadStageOutputDialog();
+
+  const markup = renderToStaticMarkup(
+    React.createElement(BullpenAutoRunStageOutputDialog, {
+      stageTitle: "Stage 2 · Run LLM",
+      stageDetail: "LLM review outputs for the stage.",
+      onClose: () => {},
+      outputs: {
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-1",
+            question: "Will rates fall?",
+            fair_yes_probability_pct: 61,
+            fair_no_probability_pct: 39,
+            llm_outputs: [],
+          },
+        ],
+      },
+    }),
+  );
+
+  assert.match(markup, /Stage 2 Output/);
+  assert.match(markup, /LLM Yes %/);
+  assert.match(markup, /LLM No %/);
+});
+
+test("Bullpen auto-run stage dialog keeps Stage 2 probability cells wired to the LLM breakdown flow", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunStageOutputDialog.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /isBreakdownProbabilityKey/);
+  assert.match(source, /BullpenLlmBreakdownDialog/);
+});
