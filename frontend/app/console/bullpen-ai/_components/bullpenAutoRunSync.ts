@@ -2,8 +2,10 @@
 
 import {
   BULLPEN_SOURCE_URLS,
+  computeBullpenLlmConsensus,
   createBullpenScanFilters,
   createBullpenQuestionRow,
+  summarizeBullpenLlmNotes,
   type BullpenLlmDisagreementCategory,
   type BullpenLlmDisagreementLevel,
   type BullpenQuestionLlmBreakdownItem,
@@ -12,6 +14,7 @@ import {
   type BullpenSnapshotHistory,
   type ScanMode,
 } from "@/lib/bullpen-ai";
+import type { BullpenActivePositionLlmAnalysis } from "@/lib/bullpenActivePositions";
 import type {
   BullpenAutoLiveDecision,
   BullpenAutoLiveLlmOutput,
@@ -284,6 +287,141 @@ function buildDecisionBreakdownItem({
   };
 }
 
+function buildReviewedCandidateBreakdownItem({
+  llmOutput,
+  reviewedCandidate,
+}: {
+  llmOutput: BullpenAutoLiveLlmOutput;
+  reviewedCandidate: Record<string, unknown>;
+}): BullpenQuestionLlmBreakdownItem {
+  return {
+    provider: llmOutput.provider,
+    model: llmOutput.model,
+    jobId: null,
+    runId: null,
+    timestamp: readString(llmOutput.completed_at) ?? null,
+    llmYesOdds: readNumber(llmOutput.llm_yes_odds),
+    llmNoOdds: readNumber(llmOutput.llm_no_odds),
+    yesDefinition: readString(reviewedCandidate.yes_definition),
+    deadlineEt: readString(reviewedCandidate.deadline_et),
+    hoursRemaining: readNumber(reviewedCandidate.hours_remaining),
+    evidenceStatus:
+      readString(llmOutput.evidence_status) ??
+      readString(reviewedCandidate.evidence_status),
+    eventState:
+      readString(llmOutput.event_state) ?? readString(reviewedCandidate.event_state),
+    confidence:
+      readString(llmOutput.confidence) ?? readString(reviewedCandidate.confidence),
+    keyEvidence: readStringArray(llmOutput.key_evidence),
+    redFlags: readStringArray(llmOutput.red_flags),
+    rationale: readString(llmOutput.rationale),
+    direction: null,
+    rationaleOddsMismatch: false,
+    rationaleOddsMismatchReason: null,
+    effectiveWeight: null,
+    webSearchUsed: null,
+    webSearchQueries: [],
+    webSources: [],
+    internetVerified: null,
+    evidenceBlockUsed: false,
+    staleFactDetected: false,
+    invalidReason: readString(llmOutput.error),
+    invalidStaleFact: false,
+    staleFactReason: null,
+  };
+}
+
+function buildReviewedCandidateBreakdown(
+  reviewedCandidate: Record<string, unknown>,
+) {
+  if (!Array.isArray(reviewedCandidate.llm_outputs)) return [];
+
+  return reviewedCandidate.llm_outputs
+    .map((item) =>
+      isRecord(item)
+        ? buildReviewedCandidateBreakdownItem({
+            llmOutput: item as unknown as BullpenAutoLiveLlmOutput,
+            reviewedCandidate,
+          })
+        : null,
+    )
+    .filter(
+      (item): item is BullpenQuestionLlmBreakdownItem => Boolean(item),
+    );
+}
+
+function latestBreakdownTimestamp(
+  llmBreakdown: BullpenQuestionLlmBreakdownItem[],
+) {
+  return (
+    [...llmBreakdown]
+      .map((entry) => entry.timestamp)
+      .filter((timestamp): timestamp is string => Boolean(timestamp))
+      .sort()
+      .at(-1) ?? null
+  );
+}
+
+function buildActivePositionAnalysisFromReviewedCandidate(
+  reviewedCandidate: Record<string, unknown>,
+): BullpenActivePositionLlmAnalysis | null {
+  const llmBreakdown = buildReviewedCandidateBreakdown(reviewedCandidate);
+  const consensus = computeBullpenLlmConsensus(llmBreakdown);
+  const llmCompletedAt = latestBreakdownTimestamp(llmBreakdown);
+  const llmProvider =
+    llmBreakdown.length === 1 ? llmBreakdown[0]?.provider ?? null : null;
+  const llmModel =
+    llmBreakdown.length === 1 ? llmBreakdown[0]?.model ?? null : null;
+  const llmYesOdds =
+    readNumber(reviewedCandidate.fair_yes_probability_pct) ??
+    consensus.consensusYesOdds;
+  const llmNoOdds =
+    readNumber(reviewedCandidate.fair_no_probability_pct) ??
+    consensus.consensusNoOdds;
+
+  if (
+    llmYesOdds === null &&
+    llmNoOdds === null &&
+    llmBreakdown.length === 0 &&
+    !llmCompletedAt
+  ) {
+    return null;
+  }
+
+  return {
+    llmYesOdds,
+    llmNoOdds,
+    llmAverageYesOdds: consensus.llmAverageYesOdds,
+    llmMedianYesOdds: consensus.llmMedianYesOdds,
+    llmTrimmedMeanYesOdds: consensus.llmTrimmedMeanYesOdds,
+    llmIqrYesOdds: consensus.llmIqrYesOdds,
+    llmTrimmedRangeYesOdds: consensus.llmTrimmedRangeYesOdds,
+    llmMinYesOdds: consensus.llmMinYesOdds,
+    llmMaxYesOdds: consensus.llmMaxYesOdds,
+    llmSpreadYesOdds: consensus.llmSpreadYesOdds,
+    llmDisagreementCategory:
+      readDisagreementCategory(reviewedCandidate.disagreement_category) ??
+      consensus.llmDisagreementCategory,
+    llmDisagreementLevel:
+      readDisagreementLevel(reviewedCandidate.disagreement_level) ??
+      consensus.llmDisagreementLevel,
+    llmRationaleMismatchCount: consensus.llmRationaleMismatchCount,
+    adjudicationRequired:
+      readBoolean(reviewedCandidate.adjudication_required) ??
+      consensus.adjudicationRequired,
+    evidenceStatus: readString(reviewedCandidate.evidence_status),
+    eventState: readString(reviewedCandidate.event_state),
+    llmNotes:
+      llmBreakdown.length > 0 ? summarizeBullpenLlmNotes(llmBreakdown) : null,
+    llmProvider,
+    llmModel,
+    llmRunId: null,
+    llmCompletedAt,
+    preflightEvidenceBlock: null,
+    llmBreakdown,
+  };
+}
+
 function buildQuestionIdMaps(stage: BullpenAutoLiveStageResult | null) {
   const marketIdToQuestionId = new Map<string, string>();
   const slugToQuestionId = new Map<string, string>();
@@ -410,24 +548,48 @@ function applyStage2OutputsToSnapshot({
     if (!question) continue;
 
     const nextCloseTime = readString(reviewedCandidate.close_time) ?? question.closeTime;
+    const llmBreakdown = buildReviewedCandidateBreakdown(reviewedCandidate);
+    const consensus = computeBullpenLlmConsensus(llmBreakdown);
+    const llmCompletedAt =
+      latestBreakdownTimestamp(llmBreakdown) ??
+      stage2?.completed_at ??
+      question.llmCompletedAt;
     const nextQuestion = createBullpenQuestionRow({
       ...question,
       marketUrl: readString(reviewedCandidate.market_url) ?? question.marketUrl,
       closeTime: nextCloseTime,
       llmYesOdds:
-        readNumber(reviewedCandidate.fair_yes_probability_pct) ?? question.llmYesOdds,
+        readNumber(reviewedCandidate.fair_yes_probability_pct) ??
+        consensus.consensusYesOdds ??
+        question.llmYesOdds,
       llmNoOdds:
-        readNumber(reviewedCandidate.fair_no_probability_pct) ?? question.llmNoOdds,
+        readNumber(reviewedCandidate.fair_no_probability_pct) ??
+        consensus.consensusNoOdds ??
+        question.llmNoOdds,
       llmDisagreementLevel:
         readDisagreementLevel(reviewedCandidate.disagreement_level) ??
+        consensus.llmDisagreementLevel ??
         question.llmDisagreementLevel,
+      llmDisagreementCategory:
+        readDisagreementCategory(reviewedCandidate.disagreement_category) ??
+        consensus.llmDisagreementCategory ??
+        question.llmDisagreementCategory,
       adjudicationRequired:
         readBoolean(reviewedCandidate.adjudication_required) ??
         question.adjudicationRequired,
       evidenceStatus:
         readString(reviewedCandidate.evidence_status) ?? question.evidenceStatus,
       eventState: readString(reviewedCandidate.event_state) ?? question.eventState,
-      llmCompletedAt: stage2?.completed_at ?? question.llmCompletedAt,
+      llmNotes:
+        llmBreakdown.length > 0
+          ? summarizeBullpenLlmNotes(llmBreakdown)
+          : question.llmNotes,
+      llmProvider:
+        llmBreakdown.length === 1 ? llmBreakdown[0]?.provider ?? null : question.llmProvider,
+      llmModel:
+        llmBreakdown.length === 1 ? llmBreakdown[0]?.model ?? null : question.llmModel,
+      llmCompletedAt,
+      llmBreakdown: llmBreakdown.length > 0 ? llmBreakdown : question.llmBreakdown,
       daysUntilClose:
         calculateDaysUntilClose(nextCloseTime) ?? question.daysUntilClose,
     });
@@ -444,6 +606,43 @@ function applyStage2OutputsToSnapshot({
     ...snapshot,
     questions: snapshot.questions.map((question) => questionById.get(question.id) ?? question),
   };
+}
+
+export function syncBullpenAutoRunActivePositionAnalyses({
+  currentAnalyses,
+  run,
+}: {
+  currentAnalyses: Record<string, BullpenActivePositionLlmAnalysis>;
+  run: BullpenAutoLiveRun | null;
+}) {
+  if (!run) return currentAnalyses;
+
+  const stage2 = findWorkflowStage(run, "llm", 2);
+  const reviewedCandidates = readReviewedCandidates(stage2);
+  if (reviewedCandidates.length === 0) return currentAnalyses;
+
+  let changed = false;
+  const nextAnalyses = { ...currentAnalyses };
+
+  for (const reviewedCandidate of reviewedCandidates) {
+    if (!isRecord(reviewedCandidate)) continue;
+    if (readString(reviewedCandidate.source_kind) !== "active_position") continue;
+
+    const positionKey = readString(reviewedCandidate.position_key);
+    if (!positionKey) continue;
+
+    const analysis = buildActivePositionAnalysisFromReviewedCandidate(reviewedCandidate);
+    if (!analysis) continue;
+
+    if (JSON.stringify(nextAnalyses[positionKey]) === JSON.stringify(analysis)) {
+      continue;
+    }
+
+    nextAnalyses[positionKey] = analysis;
+    changed = true;
+  }
+
+  return changed ? nextAnalyses : currentAnalyses;
 }
 
 export function syncBullpenAutoRunSummarySnapshots({

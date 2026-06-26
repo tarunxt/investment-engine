@@ -296,3 +296,49 @@ test("Bullpen auto-run sync lets persisted decisions override Stage 2 summary ro
   assert.equal(syncedQuestion.llmBreakdown[0]?.provider, "openai");
   assert.equal(syncedQuestion.llmCompletedAt, "2026-06-25T12:02:00Z");
 });
+
+test("Bullpen auto-run sync stores Stage 2 active-position LLM odds for green rows", async () => {
+  const { syncBullpenAutoRunActivePositionAnalyses } =
+    await loadBullpenAutoRunSyncModule();
+
+  const nextAnalyses = syncBullpenAutoRunActivePositionAnalyses({
+    currentAnalyses: {},
+    run: createRun({
+      acceptedCandidates: [createAcceptedCandidate()],
+      reviewedCandidates: [
+        createReviewedCandidate({
+          source_kind: "active_position",
+          position_key: "market-1::NO",
+          position_side: "NO",
+          fair_yes_probability_pct: 14,
+          fair_no_probability_pct: 86,
+          llm_outputs: [
+            {
+              provider: "openai",
+              model: "gpt-4o-mini",
+              llm_yes_odds: 14,
+              llm_no_odds: 86,
+              confidence: "High",
+              evidence_status: "Strong",
+              event_state: "Watching",
+              key_evidence: ["No side remains favored."],
+              red_flags: [],
+              rationale: "Consensus stayed on the No side.",
+              completed_at: "2026-06-25T12:01:30Z",
+            },
+          ],
+        }),
+      ],
+      runId: "run-active-position-1",
+    }),
+  });
+
+  assert.equal(nextAnalyses["market-1::NO"]?.llmYesOdds, 14);
+  assert.equal(nextAnalyses["market-1::NO"]?.llmNoOdds, 86);
+  assert.equal(nextAnalyses["market-1::NO"]?.llmBreakdown.length, 1);
+  assert.equal(nextAnalyses["market-1::NO"]?.llmBreakdown[0]?.provider, "openai");
+  assert.equal(
+    nextAnalyses["market-1::NO"]?.llmCompletedAt,
+    "2026-06-25T12:01:30Z",
+  );
+});

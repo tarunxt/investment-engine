@@ -634,6 +634,101 @@ async def test_console_profile_reviews_all_stage1_events_before_building_ranked_
     assert all(decision.order_plan.side == "YES" for decision in buy_decisions)
 
 
+@pytest.mark.anyio
+async def test_console_profile_stage_2_reviews_active_positions_and_persists_llm_outputs(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    active_market = _market(
+        question="Will the active position get refreshed LLM odds?",
+        slug="active-stage-2-position",
+        close_time="2026-06-25T00:00:00+00:00",
+        current_yes_odds=20,
+        current_no_odds=80,
+    )
+    active_position = _console_wallet_position(
+        slug="active-stage-2-position",
+        market_title=active_market.question,
+        current_price_cents=80,
+        close_time="2026-06-25T00:00:00+00:00",
+        side="NO",
+        shares=5,
+        exposure_usd=4.0,
+    )
+
+    async def fake_read_console_wallet_positions():
+        return [active_position]
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[active_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=14, fair_no=86),
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    llm_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+    reviewed_position = llm_stage.outputs["llm_reviewed_candidates"][0]
+
+    assert llm_stage.outputs["active_position_rows_reviewed"] == 1
+    assert llm_stage.outputs["llm_candidate_count"] == 1
+    assert reviewed_position["source_kind"] == "active_position"
+    assert reviewed_position["position_key"] == "active-stage-2-position::NO"
+    assert reviewed_position["fair_yes_probability_pct"] == 14
+    assert reviewed_position["fair_no_probability_pct"] == 86
+    assert reviewed_position["llm_outputs"][0]["llm_no_odds"] == 86
+    assert result.decisions[0].decision == "HOLD"
+    assert result.decisions[0].llm_outputs[0].llm_no_odds == 86
+    assert result.decisions[0].fair_no_probability_pct == 86
+
+
 def test_auto_live_normalization_maps_raw_labels_to_strict_buckets():
     assert normalize_auto_live_evidence_status("conflicting_evidence") == "Moderate"
     assert normalize_auto_live_evidence_status("official") == "Strong"

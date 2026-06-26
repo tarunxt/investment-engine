@@ -319,6 +319,10 @@ test("Bullpen x AI active positions stay included in LLM runs and share the even
   );
   assert.match(
     bullpenAiPageSource,
+    /syncBullpenAutoRunActivePositionAnalyses/,
+  );
+  assert.match(
+    bullpenAiPageSource,
     /mergeQuestionWithLatestActivePositionAnalysis/,
   );
   assert.match(
