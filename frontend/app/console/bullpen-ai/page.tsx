@@ -650,6 +650,7 @@ function applySnapshotMarketUpdates(
   snapshot: BullpenScanSnapshot | null,
   snapshotId: string,
   marketUpdates: Record<string, Partial<PolymarketMarketRefresh>>,
+  updatedAt: string | null = null,
 ) {
   if (!snapshot || snapshot.snapshotId !== snapshotId) return snapshot;
 
@@ -681,6 +682,8 @@ function applySnapshotMarketUpdates(
         ? question.resolutionSource
         : marketUpdate.resolutionSource;
 
+    const oddsChanged = nextYesOdds !== question.yesOdds || nextNoOdds !== question.noOdds;
+
     if (
       nextSlug === question.slug &&
       nextMarketUrl === question.marketUrl &&
@@ -700,6 +703,8 @@ function applySnapshotMarketUpdates(
       marketUrl: nextMarketUrl,
       yesOdds: nextYesOdds,
       noOdds: nextNoOdds,
+      currentOddsUpdatedAt:
+        updatedAt && oddsChanged ? updatedAt : question.currentOddsUpdatedAt,
       rules: nextRules,
       marketContext: nextMarketContext,
       resolutionSource: nextResolutionSource,
@@ -2446,6 +2451,7 @@ export default function BullpenAiPage() {
       }
 
       const marketUpdates = payload.markets || {};
+      const currentOddsUpdatedAt = new Date().toISOString();
       const currentSnapshotId = activeCurrentSnapshot.snapshotId;
       const nextQuestions = activeCurrentSnapshot.questions.map((question) => {
         const update = marketUpdates[question.id];
@@ -2456,6 +2462,7 @@ export default function BullpenAiPage() {
           marketUrl: update.marketUrl ?? question.marketUrl,
           yesOdds: update.yesOdds ?? question.yesOdds,
           noOdds: update.noOdds ?? question.noOdds,
+          currentOddsUpdatedAt,
           rules: update.rules ?? question.rules,
           marketContext: update.marketContext ?? question.marketContext,
           resolutionSource:
@@ -2473,6 +2480,7 @@ export default function BullpenAiPage() {
             current[activeMode].current,
             currentSnapshotId,
             marketUpdates,
+            currentOddsUpdatedAt,
           ),
           history: current[activeMode].history,
         },
