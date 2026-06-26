@@ -132,6 +132,53 @@ test("Bullpen auto-run workflow view exposes Stage 2 and Stage 3 inputs", async 
   });
 });
 
+test("Bullpen auto-run workflow view derives Stage 2 and Stage 3 inputs from upstream outputs", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const acceptedCandidates = [{ question: "Will rates fall?", slug: "rates-fall" }];
+  const reviewedRows = [{ question: "Will rates fall?", llm_yes_odds: 64 }];
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-derived-inputs",
+    triggered_by: "manual",
+    status: "completed",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    completed_at: "2026-06-25T05:02:00Z",
+    summary: "All stages finished.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 1,
+    orders_planned: 1,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        accepted_candidates: acceptedCandidates,
+      }),
+      createStage(2, "Stage 2 reviewed candidates.", {
+        workflow_stage_key: "llm",
+        phase_status: "completed",
+        llm_reviewed_candidates: reviewedRows,
+      }),
+      createStage(3, "Stage 3 reviewed investments.", {
+        workflow_stage_key: "invest",
+        phase_status: "completed",
+      }),
+    ],
+  });
+
+  assert.deepEqual(view.stages[1].inputs, {
+    accepted_candidates: acceptedCandidates,
+  });
+  assert.deepEqual(view.stages[2].inputs, {
+    llm_review_rows: reviewedRows,
+  });
+});
+
 test("Bullpen auto-run workflow view ignores completed_at on an actively running stage", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 

@@ -141,6 +141,38 @@ function readOutputs(stage: BullpenAutoLiveStageResult | null) {
   return readStageRecord(stage?.outputs);
 }
 
+function buildDerivedInputs(
+  workflowDefinition: WorkflowDefinition,
+  previousStage: BullpenAutoLiveStageResult | null,
+) {
+  const previousOutputs = readOutputs(previousStage);
+
+  if (workflowDefinition.key === "llm") {
+    return Array.isArray(previousOutputs.accepted_candidates)
+      ? { accepted_candidates: previousOutputs.accepted_candidates }
+      : {};
+  }
+
+  if (workflowDefinition.key === "invest") {
+    return Array.isArray(previousOutputs.llm_reviewed_candidates)
+      ? { llm_review_rows: previousOutputs.llm_reviewed_candidates }
+      : {};
+  }
+
+  return {};
+}
+
+function readWorkflowInputs(
+  workflowDefinition: WorkflowDefinition,
+  stage: BullpenAutoLiveStageResult | null,
+  previousStage: BullpenAutoLiveStageResult | null,
+) {
+  const directInputs = readInputs(stage);
+  return Object.keys(directInputs).length > 0
+    ? directInputs
+    : buildDerivedInputs(workflowDefinition, previousStage);
+}
+
 function getPhaseStatus(stage: BullpenAutoLiveStageResult | null) {
   return readString(stage?.outputs?.phase_status);
 }
@@ -316,7 +348,10 @@ export function buildBullpenAutoRunWorkflowView(
       timerCompletedAt: stageTimerCompletedAt,
       scanCandidates:
         definition.key === "scan" && shouldShowStageData ? readScanCandidates(stage) : [],
-      inputs: shouldShowStageData ? readInputs(stage) : {},
+      inputs:
+        shouldShowStageData
+          ? readWorkflowInputs(definition, stage, index > 0 ? stageResults[index - 1] : null)
+          : {},
       outputs: shouldShowStageData ? readOutputs(stage) : {},
     } satisfies BullpenAutoRunWorkflowStageView;
   });
