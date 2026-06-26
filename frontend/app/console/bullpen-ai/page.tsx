@@ -614,6 +614,7 @@ function buildBullpenAutoRunRequest({
       snapshot_id: snapshot.snapshotId,
       mode,
       total_candidates: snapshot.totalCandidates,
+      reuse_saved_llm_outputs: false,
       candidate_rows: snapshot.questions.map((question) => ({
         question_id: question.id,
         market_id:

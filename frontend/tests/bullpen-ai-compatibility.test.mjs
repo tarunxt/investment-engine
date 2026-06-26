@@ -207,6 +207,7 @@ test("Bullpen x AI run-now request can reuse the current scan snapshot before ma
     bullpenAiPageSource,
     /if \(!snapshot \|\| snapshot\.questions\.length === 0\) \{/,
   );
+  assert.match(bullpenAiPageSource, /reuse_saved_llm_outputs:\s*false/);
 });
 
 test("Bullpen x AI auto-run errors render detail text alongside the main message", () => {

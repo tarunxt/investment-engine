@@ -248,6 +248,7 @@ class BullpenAutoLiveConsoleRunContext(BaseModel):
     snapshot_id: str | None = None
     mode: str | None = None
     total_candidates: int = Field(default=0, ge=0)
+    reuse_saved_llm_outputs: bool = True
     candidate_rows: list[BullpenAutoLiveConsoleCandidateInput] = Field(
         default_factory=list
     )

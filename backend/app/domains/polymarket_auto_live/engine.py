@@ -1914,6 +1914,11 @@ class BullpenAutoLiveEngine:
             manual_console_context.candidate_rows if manual_console_context else []
         )
         manual_console_rows_used = bool(manual_console_rows)
+        manual_console_reuse_saved_llm_outputs = (
+            manual_console_context.reuse_saved_llm_outputs
+            if manual_console_context is not None
+            else True
+        )
         manual_console_rows_have_reusable_llm = False
         selected_manual_candidate_ids: list[str] = []
         rejected_candidate_map: dict[str, BullpenAutoLiveRejectedCandidateDiagnostic] = {}
@@ -1971,9 +1976,13 @@ class BullpenAutoLiveEngine:
                 accepted_manual_pairs.append((row, market))
             accepted_manual_rows = [row for row, _ in accepted_manual_pairs]
             manual_markets = [market for _, market in accepted_manual_pairs]
-            manual_console_rows_have_reusable_llm = bool(accepted_manual_rows) and all(
-                row.llm_yes_odds is not None or row.llm_no_odds is not None
-                for row in accepted_manual_rows
+            manual_console_rows_have_reusable_llm = (
+                manual_console_reuse_saved_llm_outputs
+                and bool(accepted_manual_rows)
+                and all(
+                    row.llm_yes_odds is not None or row.llm_no_odds is not None
+                    for row in accepted_manual_rows
+                )
             )
             selected_manual_candidate_ids = [
                 row.market_id for row in accepted_manual_rows if row.selected
