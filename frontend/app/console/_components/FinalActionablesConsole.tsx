@@ -435,7 +435,7 @@ const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 
 const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 1;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 1;
-const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investor:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
+const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investment-engine:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
 
 type CachedFinalActionablesRuns = {
   version: number;
@@ -454,7 +454,7 @@ type CachedDashboardFinalActionables = {
 };
 
 function buildFinalActionablesCacheKey(portfolio: RebalancePortfolioKey, market: SwingTradeMarket) {
-  return `investor:final-actionables:runs:${portfolio}:${market}:v${FINAL_ACTIONABLES_RUN_CACHE_VERSION}`;
+  return `investment-engine:final-actionables:runs:${portfolio}:${market}:v${FINAL_ACTIONABLES_RUN_CACHE_VERSION}`;
 }
 
 function readFinalActionablesRunCache(cacheKey: string) {
@@ -783,9 +783,9 @@ export const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
   scoreSymbolThresholds: DEFAULT_SCORE_SYMBOL_THRESHOLDS,
 };
 
-const SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY = "investor:final-actionables:score-matrix-formula-config:v1";
+const SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY = "investment-engine:final-actionables:score-matrix-formula-config:v1";
 
-const DASHBOARD_WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
+const DASHBOARD_WORKFLOW_STORAGE_KEY = "investment-engine:rebalance-workflow-state:v1";
 
 type DashboardActionablesRefreshDetail = {
   market?: SwingTradeMarket;
@@ -4828,7 +4828,7 @@ const ACTIONABLES_CALCULATION_DEFAULT_WIDTHS: Record<ActionablesCalculationHeade
   }, {} as Record<ActionablesCalculationHeader, number>);
 
 function getActionablesCalculationLayoutStorageKey(market: SwingTradeMarket) {
-  return `investor:final-actionables:calculation-layout:${market}:v${ACTIONABLES_CALCULATION_LAYOUT_VERSION}`;
+  return `investment-engine:final-actionables:calculation-layout:${market}:v${ACTIONABLES_CALCULATION_LAYOUT_VERSION}`;
 }
 
 function isActionablesCalculationHeader(value: string): value is ActionablesCalculationHeader {
@@ -6047,7 +6047,7 @@ const FINAL_ACTIONABLE_MIN_COLUMN_WIDTH = 96;
 const FINAL_ACTIONABLE_MAX_COLUMN_WIDTH = 420;
 
 function getFinalActionableLayoutStorageKey() {
-  return `investor:final-actionable-table-layout:v${FINAL_ACTIONABLE_COLUMN_LAYOUT_VERSION}`;
+  return `investment-engine:final-actionable-table-layout:v${FINAL_ACTIONABLE_COLUMN_LAYOUT_VERSION}`;
 }
 
 function clampFinalActionableColumnWidth(width: number) {

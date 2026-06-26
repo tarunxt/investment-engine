@@ -208,7 +208,7 @@ type SavedModelMix = {
   targets: string[];
 };
 
-const MODEL_MIX_STORAGE_KEY = "investor:model-mixes:v1";
+const MODEL_MIX_STORAGE_KEY = "investment-engine:model-mixes:v1";
 const AUTO_REBALANCE_MIX_NAME = "Auto Rebalance Model Mix";
 const AUTO_REBALANCE_MIX_ALIASES = [
   AUTO_REBALANCE_MIX_NAME,
@@ -219,11 +219,11 @@ const POLL_INTERVAL_MS = 3000;
 const MAX_RUN_POLLS = 160;
 const MAX_JOB_POLLS = 120;
 const MAX_ZERODHA_SYNC_POLLS = 30;
-const WORKFLOW_STORAGE_KEY = "investor:rebalance-workflow-state:v1";
-const STAGE_LLM_SELECTION_STORAGE_KEY = "investor:dashboard-stage-llms:v1";
+const WORKFLOW_STORAGE_KEY = "investment-engine:rebalance-workflow-state:v1";
+const STAGE_LLM_SELECTION_STORAGE_KEY = "investment-engine:dashboard-stage-llms:v1";
 const WORKFLOW_COMPLETION_RESET_DELAY_MS = 10000;
 export const ZERODHA_DASHBOARD_SYNC_NOW_EVENT =
-  "investor:dashboard:zerodha-sync-now";
+  "investment-engine:dashboard:zerodha-sync-now";
 
 const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",

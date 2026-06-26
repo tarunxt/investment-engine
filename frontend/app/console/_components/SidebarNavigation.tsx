@@ -226,7 +226,7 @@ const TRADING_BOTS_ROUTES = [
     TRADING_BOTS_OVERVIEW_HREF,
     ...getNavigationChildRoutes(TRADING_BOTS_CHILDREN),
 ];
-const SIDEBAR_ORDER_UPDATED_EVENT = 'investor:sidebar-order-updated';
+const SIDEBAR_ORDER_UPDATED_EVENT = 'investment-engine:sidebar-order-updated';
 const navigationOrderSnapshotCache = new Map<string, { raw: string | null; value: string[] }>();
 
 function isNavigationGroup(item: NavigationEntry): item is NavigationGroup {
@@ -234,7 +234,7 @@ function isNavigationGroup(item: NavigationEntry): item is NavigationGroup {
 }
 
 function buildStorageKey(userId?: number | null) {
-    return `investor:console-sidebar-order:user:${userId ?? 'guest'}:v1`;
+    return `investment-engine:console-sidebar-order:user:${userId ?? 'guest'}:v1`;
 }
 
 function reconcileNavigationOrder(order: string[]) {

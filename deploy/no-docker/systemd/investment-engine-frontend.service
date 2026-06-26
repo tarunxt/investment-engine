@@ -1,0 +1,19 @@
+[Unit]
+Description=Investment Engine Next.js frontend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=investment-engine
+Group=investment-engine
+WorkingDirectory=/srv/investment-engine/frontend
+EnvironmentFile=/etc/investment-engine/frontend.env
+ExecStart=/srv/investment-engine/frontend/node_modules/.bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

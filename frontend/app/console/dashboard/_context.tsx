@@ -152,7 +152,7 @@ interface DashboardContextValue {
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
 
-const MODEL_MIX_STORAGE_KEY = 'investor:model-mixes:v1';
+const MODEL_MIX_STORAGE_KEY = 'investment-engine:model-mixes:v1';
 const COMPATIBLE_MODEL_MIX_ID = 'compatible-models-system';
 
 interface ModelMix {

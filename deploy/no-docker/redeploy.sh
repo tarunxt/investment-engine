@@ -3,10 +3,18 @@
 set -euo pipefail
 
 SCOPE="${1:-full}"
-APP_ROOT="${APP_ROOT:-/srv/investor}"
-APP_USER="${APP_USER:-investor}"
-BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-/etc/investor/backend.env}"
-FRONTEND_ENV_FILE="${FRONTEND_ENV_FILE:-/etc/investor/frontend.env}"
+DEFAULT_APP_ROOT="/srv/investment-engine"
+LEGACY_APP_ROOT="/srv/investor"
+DEFAULT_APP_USER="investment-engine"
+LEGACY_APP_USER="investor"
+DEFAULT_BACKEND_ENV_FILE="/etc/investment-engine/backend.env"
+LEGACY_BACKEND_ENV_FILE="/etc/investor/backend.env"
+DEFAULT_FRONTEND_ENV_FILE="/etc/investment-engine/frontend.env"
+LEGACY_FRONTEND_ENV_FILE="/etc/investor/frontend.env"
+APP_ROOT="${APP_ROOT:-$DEFAULT_APP_ROOT}"
+APP_USER="${APP_USER:-$DEFAULT_APP_USER}"
+BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-$DEFAULT_BACKEND_ENV_FILE}"
+FRONTEND_ENV_FILE="${FRONTEND_ENV_FILE:-$DEFAULT_FRONTEND_ENV_FILE}"
 SKIP_GIT_SYNC="${SKIP_GIT_SYNC:-false}"
 BULLPEN_VERSION="${BULLPEN_VERSION:-0.1.101}"
 
@@ -19,10 +27,43 @@ case "$SCOPE" in
     ;;
 esac
 
+if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+  APP_ROOT="$LEGACY_APP_ROOT"
+fi
+
+if ! id -u "$APP_USER" >/dev/null 2>&1 && id -u "$LEGACY_APP_USER" >/dev/null 2>&1; then
+  APP_USER="$LEGACY_APP_USER"
+fi
+
+if [[ ! -f "$BACKEND_ENV_FILE" && -f "$LEGACY_BACKEND_ENV_FILE" ]]; then
+  BACKEND_ENV_FILE="$LEGACY_BACKEND_ENV_FILE"
+fi
+
+if [[ ! -f "$FRONTEND_ENV_FILE" && -f "$LEGACY_FRONTEND_ENV_FILE" ]]; then
+  FRONTEND_ENV_FILE="$LEGACY_FRONTEND_ENV_FILE"
+fi
+
 if [[ ! -d "$APP_ROOT" ]]; then
   echo "App root not found: $APP_ROOT" >&2
   exit 1
 fi
+
+resolve_systemd_service_name() {
+  local primary="$1"
+  local legacy="$2"
+
+  if systemctl cat "$primary" >/dev/null 2>&1; then
+    printf '%s\n' "$primary"
+    return
+  fi
+
+  if systemctl cat "$legacy" >/dev/null 2>&1; then
+    printf '%s\n' "$legacy"
+    return
+  fi
+
+  printf '%s\n' "$primary"
+}
 
 looks_like_placeholder_url() {
   local value="${1:-}"
@@ -108,6 +149,19 @@ validate_backend_env_file() {
 run_as_app_user() {
   sudo -u "$APP_USER" -H bash -lc "$1"
 }
+
+BACKEND_SERVICE_NAME="$(
+  resolve_systemd_service_name "investment-engine-backend" "investor-backend"
+)"
+WORKER_SERVICE_NAME="$(
+  resolve_systemd_service_name "investment-engine-celery-worker" "investor-celery-worker"
+)"
+BEAT_SERVICE_NAME="$(
+  resolve_systemd_service_name "investment-engine-celery-beat" "investor-celery-beat"
+)"
+FRONTEND_SERVICE_NAME="$(
+  resolve_systemd_service_name "investment-engine-frontend" "investor-frontend"
+)"
 
 install_bullpen_cli_if_needed() {
   local bullpen_bin
@@ -242,19 +296,19 @@ fi
 
 echo "==> Restart services"
 sudo systemctl daemon-reload
-sudo systemctl restart investor-backend investor-celery-worker investor-celery-beat
+sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME"
 
 if [[ "$SCOPE" == "full" ]]; then
-  sudo systemctl restart investor-frontend
+  sudo systemctl restart "$FRONTEND_SERVICE_NAME"
 fi
 
 echo "==> Service status"
-sudo systemctl status investor-backend --no-pager
-sudo systemctl status investor-celery-worker --no-pager
-sudo systemctl status investor-celery-beat --no-pager
+sudo systemctl status "$BACKEND_SERVICE_NAME" --no-pager
+sudo systemctl status "$WORKER_SERVICE_NAME" --no-pager
+sudo systemctl status "$BEAT_SERVICE_NAME" --no-pager
 
 if [[ "$SCOPE" == "full" ]]; then
-  sudo systemctl status investor-frontend --no-pager
+  sudo systemctl status "$FRONTEND_SERVICE_NAME" --no-pager
 fi
 
 echo "==> Deploy complete"

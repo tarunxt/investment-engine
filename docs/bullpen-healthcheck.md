@@ -48,11 +48,11 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/srv/investor
-EnvironmentFile=/srv/investor/deploy/no-docker/frontend.env
-ExecStart=/usr/bin/node /srv/investor/scripts/bullpen-healthcheck.ts
-User=investor
-Group=investor
+WorkingDirectory=/srv/investment-engine
+EnvironmentFile=/srv/investment-engine/deploy/no-docker/frontend.env
+ExecStart=/usr/bin/node /srv/investment-engine/scripts/bullpen-healthcheck.ts
+User=investment-engine
+Group=investment-engine
 ```
 
 Create `/etc/systemd/system/credx-bullpen-healthcheck.timer`:
@@ -89,7 +89,7 @@ journalctl -u credx-bullpen-healthcheck.service -n 50 --no-pager
 If you prefer cron, add:
 
 ```cron
-*/5 * * * * cd /srv/investor && set -a && . /srv/investor/deploy/no-docker/frontend.env && set +a && /usr/bin/node scripts/bullpen-healthcheck.ts >> /var/log/credx-bullpen-healthcheck.log 2>&1
+*/5 * * * * cd /srv/investment-engine && set -a && . /srv/investment-engine/deploy/no-docker/frontend.env && set +a && /usr/bin/node scripts/bullpen-healthcheck.ts >> /var/log/credx-bullpen-healthcheck.log 2>&1
 ```
 
 ## Operator action

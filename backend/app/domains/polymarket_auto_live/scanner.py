@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
-POLYMARKET_HTTP_HEADERS = {"User-Agent": "investor-bullpen-auto-live/1.0"}
+POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-auto-live/1.0"}
 GAMMA_PAGE_SIZE = 500
 SCAN_LIMIT = 1_500
 

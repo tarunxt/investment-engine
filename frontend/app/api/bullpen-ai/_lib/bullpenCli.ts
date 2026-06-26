@@ -7,6 +7,7 @@ export const BULLPEN_BIN_CANDIDATES = Array.from(
       process.env.HOME ? `${process.env.HOME}/.bullpen/bin/bullpen` : null,
       "/opt/homebrew/bin/bullpen",
       "/usr/local/bin/bullpen",
+      "/home/investment-engine/.bullpen/bin/bullpen",
       "/home/investor/.bullpen/bin/bullpen",
       "/home/appuser/.bullpen/bin/bullpen",
       "bullpen",

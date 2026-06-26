@@ -45,7 +45,7 @@ import {
   type TradingBotsOverviewDetails,
 } from "./tradingBotsOverviewData";
 
-const OVERVIEW_CACHE_KEY = "investor:trading-bots-overview:v2";
+const OVERVIEW_CACHE_KEY = "investment-engine:trading-bots-overview:v2";
 const PREFERRED_OVERVIEW_TIMEOUT_MS = 2_000;
 const FAST_BOT_TIMEOUT_MS = 2_500;
 const BULLPEN_AI_TIMEOUT_MS = 2_500;

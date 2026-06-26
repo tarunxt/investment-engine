@@ -73,8 +73,16 @@ jobs:
           script: |
             set -euo pipefail
             APP="${{ secrets.APP_PATH }}"
+            APP_SERVICE_USER="${{ secrets.APP_SERVICE_USER }}"
+            if [[ -z "$APP_SERVICE_USER" ]]; then
+              if id -u investment-engine >/dev/null 2>&1; then
+                APP_SERVICE_USER="investment-engine"
+              else
+                APP_SERVICE_USER="investor"
+              fi
+            fi
             cd "$APP"
-            sudo -u investor -H bash -lc "cd '$APP' && git fetch origin main && git reset --hard origin/main"
+            sudo -u "$APP_SERVICE_USER" -H bash -lc "cd '$APP' && git fetch origin main && git reset --hard origin/main"
             SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" backend
 
   deploy-full:
@@ -98,6 +106,14 @@ jobs:
           script: |
             set -euo pipefail
             APP="${{ secrets.APP_PATH }}"
+            APP_SERVICE_USER="${{ secrets.APP_SERVICE_USER }}"
+            if [[ -z "$APP_SERVICE_USER" ]]; then
+              if id -u investment-engine >/dev/null 2>&1; then
+                APP_SERVICE_USER="investment-engine"
+              else
+                APP_SERVICE_USER="investor"
+              fi
+            fi
             cd "$APP"
-            sudo -u investor -H bash -lc "cd '$APP' && git fetch origin main && git reset --hard origin/main"
+            sudo -u "$APP_SERVICE_USER" -H bash -lc "cd '$APP' && git fetch origin main && git reset --hard origin/main"
             SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" full

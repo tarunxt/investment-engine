@@ -19,7 +19,7 @@ from app.domains.runs.schemas import (
 POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
 POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event"
 POLYMARKET_HTTP_HEADERS = {
-    "User-Agent": "investor-polymarket-event-preflight/1.0",
+    "User-Agent": "investment-engine-polymarket-event-preflight/1.0",
     "Accept": "application/json,text/html,application/xhtml+xml",
 }
 MARKET_CONTEXT_CAPTURE_CHARS = 40_000
