@@ -55,6 +55,8 @@ type ErrorState = {
 type ScanCandidateDialogState = {
   scanCompletedAt: string | null;
   candidates: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["scanCandidates"];
+  activePositions: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["activePositionsFound"];
+  activePositionCount: number;
 };
 
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
@@ -99,6 +101,16 @@ function formatOddsPercent(value: number | null) {
 function formatMoney(value: number | null) {
   if (value === null) return "—";
   return `$${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+function formatPriceCents(value: number | null) {
+  if (value === null) return "—";
+  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}c`;
+}
+
+function formatShares(value: number | null) {
+  if (value === null) return "—";
+  return value.toLocaleString("en-IN", { maximumFractionDigits: 6 });
 }
 
 function readStageOutputNumber(value: unknown) {
@@ -155,56 +167,171 @@ function StageOneOutputDialog({
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-5">
-          {state.candidates.length > 0 ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Candidate</th>
-                    <th className="px-4 py-3">Odds</th>
-                    <th className="px-4 py-3">Liquidity</th>
-                    <th className="px-4 py-3">Close time</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {state.candidates.map((candidate, index) => (
-                    <tr key={`${candidate.slug || candidate.question}-${index}`}>
-                      <td className="px-4 py-3 align-top">
-                        <div className="font-semibold text-slate-950">
-                          {candidate.marketUrl ? (
-                            <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">
-                              {candidate.question}
-                            </a>
-                          ) : (
-                            candidate.question
-                          )}
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                          {candidate.theme ? <span>{candidate.theme}</span> : null}
-                          {candidate.forceInclude ? <span>Force included</span> : null}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-700">
-                        Yes {formatOddsPercent(candidate.currentYesOdds)}<br />
-                        No {formatOddsPercent(candidate.currentNoOdds)}
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-700">
-                        Liquidity {formatMoney(candidate.liquidityUsd)}<br />
-                        Volume {formatMoney(candidate.volumeUsd)}
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-700">
-                        {formatIstDateTime(candidate.closeTime)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                New event candidates
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950">
+                {state.candidates.length}
+              </p>
             </div>
-          ) : (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-              No new event opportunity candidates were recorded for this Stage 1 scan.
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Active Bullpen positions found
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950">
+                {state.activePositionCount}
+              </p>
             </div>
-          )}
+          </div>
+
+          <div className="mt-5 space-y-5">
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Active Bullpen positions found
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    These live wallet positions were synced into the run before Stage 2 review.
+                  </p>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                  {state.activePositionCount} {state.activePositionCount === 1 ? "position" : "positions"}
+                </span>
+              </div>
+
+              {state.activePositions.length > 0 ? (
+                <div className="overflow-hidden rounded-2xl border border-slate-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Position</th>
+                        <th className="px-4 py-3">Side & size</th>
+                        <th className="px-4 py-3">Odds</th>
+                        <th className="px-4 py-3">Close time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {state.activePositions.map((position) => (
+                        <tr key={position.positionKey}>
+                          <td className="px-4 py-3 align-top">
+                            <div className="font-semibold text-slate-950">
+                              {position.marketUrl ? (
+                                <a
+                                  className="hover:text-sky-700 hover:underline"
+                                  href={position.marketUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {position.marketTitle}
+                                </a>
+                              ) : (
+                                position.marketTitle
+                              )}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                              {position.theme ? <span>{position.theme}</span> : null}
+                              {position.conditionId ? <span>{position.conditionId}</span> : null}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            {position.side ?? "—"}<br />
+                            Shares {formatShares(position.shares)}<br />
+                            Exposure {formatMoney(position.exposureUsd)}<br />
+                            Avg {formatPriceCents(position.averagePriceCents)}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            Yes {formatOddsPercent(position.currentYesOdds)}<br />
+                            No {formatOddsPercent(position.currentNoOdds)}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            {formatIstDateTime(position.closeTime)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : state.activePositionCount > 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+                  {state.activePositionCount} active Bullpen {state.activePositionCount === 1 ? "position was" : "positions were"} synced for this run, but the detailed rows were not stored in this run record.
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+                  No active Bullpen positions were recorded for this Stage 1 scan.
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    New event opportunity candidates
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Fresh Bullpen events that passed the Stage 1 scan filters.
+                  </p>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                  {state.candidates.length} {state.candidates.length === 1 ? "candidate" : "candidates"}
+                </span>
+              </div>
+
+              {state.candidates.length > 0 ? (
+                <div className="overflow-hidden rounded-2xl border border-slate-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Candidate</th>
+                        <th className="px-4 py-3">Odds</th>
+                        <th className="px-4 py-3">Liquidity</th>
+                        <th className="px-4 py-3">Close time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {state.candidates.map((candidate, index) => (
+                        <tr key={`${candidate.slug || candidate.question}-${index}`}>
+                          <td className="px-4 py-3 align-top">
+                            <div className="font-semibold text-slate-950">
+                              {candidate.marketUrl ? (
+                                <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">
+                                  {candidate.question}
+                                </a>
+                              ) : (
+                                candidate.question
+                              )}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                              {candidate.theme ? <span>{candidate.theme}</span> : null}
+                              {candidate.forceInclude ? <span>Force included</span> : null}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            Yes {formatOddsPercent(candidate.currentYesOdds)}<br />
+                            No {formatOddsPercent(candidate.currentNoOdds)}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            Liquidity {formatMoney(candidate.liquidityUsd)}<br />
+                            Volume {formatMoney(candidate.volumeUsd)}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            {formatIstDateTime(candidate.closeTime)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+                  No new event opportunity candidates were recorded for this Stage 1 scan.
+                </div>
+              )}
+            </section>
+          </div>
         </div>
       </div>
     </div>
@@ -925,6 +1052,11 @@ export function BullpenAutoRunScheduleCard({
                             setScanCandidateDialog({
                               scanCompletedAt: stage.timerCompletedAt,
                               candidates: stage.scanCandidates,
+                              activePositions: stage.activePositionsFound,
+                              activePositionCount:
+                                readStageOutputNumber(stage.outputs.active_wallet_positions) ??
+                                readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
+                                stage.activePositionsFound.length,
                             });
                             return;
                           }

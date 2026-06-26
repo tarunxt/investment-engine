@@ -767,6 +767,29 @@ def _serialize_rejected_scan_candidate(
     }
 
 
+def _serialize_active_wallet_position(
+    position: ConsoleWalletPosition,
+) -> dict[str, object]:
+    return {
+        "position_key": f"{position.market_id}::{position.side}",
+        "market_id": position.market_id,
+        "question": position.market_title,
+        "market_title": position.market_title,
+        "market_url": position.market_url,
+        "slug": position.slug,
+        "theme": position.theme,
+        "side": position.side,
+        "shares": position.shares,
+        "exposure_usd": position.exposure_usd,
+        "average_price_cents": position.average_price_cents,
+        "current_price_cents": position.current_price_cents,
+        "current_yes_odds": position.current_yes_odds,
+        "current_no_odds": position.current_no_odds,
+        "close_time": position.close_time,
+        "condition_id": position.condition_id,
+    }
+
+
 def _active_position_market(
     position: ConsoleWalletPosition,
     *,
@@ -2354,6 +2377,11 @@ class BullpenAutoLiveEngine:
                 outputs={
                     "live_wallet_positions": len(enriched_wallet_positions),
                     "active_wallet_positions": len(position_snapshots),
+                    "active_positions_found": [
+                        _serialize_active_wallet_position(position)
+                        for position in enriched_wallet_positions
+                        if not position.is_claimable
+                    ],
                     "scanned_candidates": scanned_total_candidates,
                     "active_position_rows_before_llm": active_position_rows_before_llm,
                     "candidate_rows_before_llm": candidate_rows_before_llm,
@@ -2524,6 +2552,11 @@ class BullpenAutoLiveEngine:
                     outputs={
                         "live_wallet_positions": len(enriched_wallet_positions),
                         "active_wallet_positions": len(position_snapshots),
+                        "active_positions_found": [
+                            _serialize_active_wallet_position(position)
+                            for position in enriched_wallet_positions
+                            if not position.is_claimable
+                        ],
                         "scanned_candidates": scanned_total_candidates,
                         "active_position_rows_before_llm": active_position_rows_before_llm,
                         "candidate_rows_before_llm": candidate_rows_before_llm,

@@ -17,6 +17,23 @@ export type BullpenAutoRunScanCandidateView = {
   forceInclude: boolean;
 };
 
+export type BullpenAutoRunActivePositionView = {
+  positionKey: string;
+  marketId: string;
+  marketTitle: string;
+  marketUrl: string | null;
+  slug: string | null;
+  theme: string | null;
+  side: string | null;
+  shares: number | null;
+  exposureUsd: number | null;
+  averagePriceCents: number | null;
+  currentYesOdds: number | null;
+  currentNoOdds: number | null;
+  closeTime: string | null;
+  conditionId: string | null;
+};
+
 export type BullpenAutoRunWorkflowStageView = {
   key: WorkflowStageKey;
   title: string;
@@ -30,6 +47,7 @@ export type BullpenAutoRunWorkflowStageView = {
   timerStartedAt: string | null;
   timerCompletedAt: string | null;
   scanCandidates: BullpenAutoRunScanCandidateView[];
+  activePositionsFound: BullpenAutoRunActivePositionView[];
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
 };
@@ -235,6 +253,40 @@ function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
     .filter((candidate): candidate is BullpenAutoRunScanCandidateView => Boolean(candidate));
 }
 
+function readActivePositionsFound(stage: BullpenAutoLiveStageResult | null) {
+  const rawPositions = stage?.outputs?.active_positions_found;
+  if (!Array.isArray(rawPositions)) return [];
+
+  return rawPositions
+    .map((position) => {
+      if (!position || typeof position !== "object") return null;
+      const record = position as Record<string, unknown>;
+      const marketId = readString(record.market_id);
+      const marketTitle = readString(record.market_title) ?? readString(record.question);
+      if (!marketId || !marketTitle) return null;
+
+      return {
+        positionKey:
+          readString(record.position_key) ??
+          `${marketId}::${readString(record.side) ?? "UNKNOWN"}`,
+        marketId,
+        marketTitle,
+        marketUrl: readString(record.market_url),
+        slug: readString(record.slug),
+        theme: readString(record.theme),
+        side: readString(record.side),
+        shares: readNumber(record.shares),
+        exposureUsd: readNumber(record.exposure_usd),
+        averagePriceCents: readNumber(record.average_price_cents),
+        currentYesOdds: readNumber(record.current_yes_odds),
+        currentNoOdds: readNumber(record.current_no_odds),
+        closeTime: readString(record.close_time),
+        conditionId: readString(record.condition_id),
+      } satisfies BullpenAutoRunActivePositionView;
+    })
+    .filter((position): position is BullpenAutoRunActivePositionView => Boolean(position));
+}
+
 function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -263,6 +315,7 @@ export function buildBullpenAutoRunWorkflowView(
 
   const stages = WORKFLOW_DEFINITIONS.map((definition, index) => {
     const stage = stageResults[index];
+    const previousStage = index > 0 ? stageResults[index - 1] : null;
     const explicitPhase = getPhaseStatus(stage);
     let state: WorkflowState;
     if (explicitPhase === "completed" || runStatus === "completed") {
@@ -281,6 +334,7 @@ export function buildBullpenAutoRunWorkflowView(
     const tone: WorkflowTone =
       state === "finished" ? "green" : state === "current" ? "yellow" : "blue";
     const shouldShowStageData = state !== "queued";
+    const stageInputs = readWorkflowInputs(definition, stage, previousStage);
     const completedItems = shouldShowStageData ? getCompletedItems(stage) : null;
     const totalItems = shouldShowStageData ? getTotalItems(stage) : null;
     const itemLabel = shouldShowStageData
@@ -348,10 +402,12 @@ export function buildBullpenAutoRunWorkflowView(
       timerCompletedAt: stageTimerCompletedAt,
       scanCandidates:
         definition.key === "scan" && shouldShowStageData ? readScanCandidates(stage) : [],
+      activePositionsFound:
+        definition.key === "scan" && shouldShowStageData
+          ? readActivePositionsFound(stage)
+          : [],
       inputs:
-        shouldShowStageData
-          ? readWorkflowInputs(definition, stage, index > 0 ? stageResults[index - 1] : null)
-          : {},
+        Object.keys(stageInputs).length > 0 ? stageInputs : {},
       outputs: shouldShowStageData ? readOutputs(stage) : {},
     } satisfies BullpenAutoRunWorkflowStageView;
   });

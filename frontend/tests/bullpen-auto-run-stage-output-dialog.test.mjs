@@ -76,6 +76,8 @@ test("Bullpen auto-run stage dialog renders candidate inputs as readable tables 
 
   assert.match(markup, /Summary Table/);
   assert.match(markup, /Detailed table view/);
+  assert.match(markup, /Input Summary/);
+  assert.match(markup, /Accepted Candidates Count/);
   assert.match(markup, /Will rates fall\?/);
   assert.match(markup, /Open market/);
   assert.match(markup, /Current Yes Odds/);

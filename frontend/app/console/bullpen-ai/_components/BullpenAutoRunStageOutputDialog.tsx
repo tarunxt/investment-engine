@@ -13,6 +13,11 @@ type BullpenAutoRunStageOutputDialogProps = {
 };
 
 type Tone = "slate" | "sky" | "emerald" | "amber" | "rose";
+type SummaryItem = {
+  key: string;
+  label: string;
+  value: unknown;
+};
 
 const SUMMARY_COLUMN_PRIORITY = [
   "question",
@@ -587,6 +592,166 @@ function buildSummaryColumns(rows: Record<string, unknown>[]) {
   return [...priorityKeys, ...extraKeys];
 }
 
+function readSummaryString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readSummaryBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return false;
+}
+
+function appendSummaryItem(
+  items: SummaryItem[],
+  nextItem: SummaryItem,
+  seenKeys: Set<string>,
+) {
+  if (seenKeys.has(nextItem.key)) return;
+  seenKeys.add(nextItem.key);
+  items.push(nextItem);
+}
+
+function buildArraySummaryItems(sectionKey: string, rows: Record<string, unknown>[]) {
+  const items: SummaryItem[] = [
+    {
+      key: `${sectionKey}_count`,
+      label: `${formatLabel(sectionKey)} Count`,
+      value: rows.length,
+    },
+  ];
+  const sourceKindCounts = new Map<string, number>();
+  const themes = new Set<string>();
+  let forceIncludedCount = 0;
+  let selectedCount = 0;
+  let linkedMarketsCount = 0;
+  let adjudicationRequiredCount = 0;
+
+  for (const row of rows) {
+    const sourceKind = readSummaryString(row.source_kind);
+    if (sourceKind) {
+      sourceKindCounts.set(sourceKind, (sourceKindCounts.get(sourceKind) ?? 0) + 1);
+    }
+
+    const theme = readSummaryString(row.theme);
+    if (theme) {
+      themes.add(theme);
+    }
+
+    if (readSummaryBoolean(row.force_include)) {
+      forceIncludedCount += 1;
+    }
+    if (readSummaryBoolean(row.selected)) {
+      selectedCount += 1;
+    }
+    if (readSummaryString(row.market_url)) {
+      linkedMarketsCount += 1;
+    }
+    if (readSummaryBoolean(row.adjudication_required)) {
+      adjudicationRequiredCount += 1;
+    }
+  }
+
+  const activePositionCount = sourceKindCounts.get("active_position") ?? 0;
+  if (activePositionCount > 0) {
+    items.push({
+      key: `${sectionKey}_active_positions`,
+      label: "Active Position Rows",
+      value: activePositionCount,
+    });
+  }
+
+  const candidateCount = sourceKindCounts.get("candidate") ?? 0;
+  if (candidateCount > 0) {
+    items.push({
+      key: `${sectionKey}_candidate_rows`,
+      label: "Candidate Rows",
+      value: candidateCount,
+    });
+  }
+
+  if (themes.size > 0) {
+    items.push({
+      key: `${sectionKey}_themes`,
+      label: "Unique Themes",
+      value: themes.size,
+    });
+  }
+
+  if (forceIncludedCount > 0) {
+    items.push({
+      key: `${sectionKey}_force_included`,
+      label: "Force Included",
+      value: forceIncludedCount,
+    });
+  }
+
+  if (selectedCount > 0) {
+    items.push({
+      key: `${sectionKey}_selected_rows`,
+      label: "Selected Rows",
+      value: selectedCount,
+    });
+  }
+
+  if (linkedMarketsCount > 0) {
+    items.push({
+      key: `${sectionKey}_market_links`,
+      label: "Market Links",
+      value: linkedMarketsCount,
+    });
+  }
+
+  if (adjudicationRequiredCount > 0) {
+    items.push({
+      key: `${sectionKey}_adjudication_required`,
+      label: "Adjudication Required",
+      value: adjudicationRequiredCount,
+    });
+  }
+
+  return items;
+}
+
+function buildInputSummaryItems(outputs: Record<string, unknown>) {
+  const items: SummaryItem[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const [key, value] of Object.entries(outputs)) {
+    if (Array.isArray(value) && value.every((item) => isRecord(item))) {
+      for (const item of buildArraySummaryItems(key, value as Record<string, unknown>[])) {
+        appendSummaryItem(items, item, seenKeys);
+      }
+      continue;
+    }
+
+    if (
+      isPrimitive(value) &&
+      (key.endsWith("_count") ||
+        key.endsWith("_rows") ||
+        key.startsWith("total_") ||
+        key.includes("candidate") ||
+        key.includes("position"))
+    ) {
+      appendSummaryItem(
+        items,
+        {
+          key,
+          label: formatLabel(key),
+          value,
+        },
+        seenKeys,
+      );
+    }
+  }
+
+  return items.slice(0, 8);
+}
+
 function SummaryTable({
   rows,
   title,
@@ -629,6 +794,44 @@ function SummaryTable({
         </table>
       </div>
     </div>
+  );
+}
+
+function SummaryCards({
+  items,
+  title,
+}: {
+  items: SummaryItem[];
+  title: string;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-sky-50/50 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          {title}
+        </p>
+        <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+          Quick read
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {items.map((item) => (
+          <div
+            key={item.key}
+            className="rounded-2xl border border-slate-200 bg-white px-3 py-3 shadow-sm"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+              {item.label}
+            </p>
+            <div className="mt-2 text-sm font-semibold text-slate-900">
+              <StructuredValue value={item.value} fieldKey={item.key} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -843,6 +1046,7 @@ export function BullpenAutoRunStageOutputDialog({
   onClose,
 }: BullpenAutoRunStageOutputDialogProps) {
   const entries = Object.entries(outputs);
+  const inputSummaryItems = outputLabel === "Inputs" ? buildInputSummaryItems(outputs) : [];
   const overviewEntries = orderEntries(
     entries.filter(([, value]) => {
       if (isPrimitive(value)) return true;
@@ -877,6 +1081,10 @@ export function BullpenAutoRunStageOutputDialog({
 
         <div className="overflow-y-auto px-6 py-5">
           <div className="space-y-4">
+            {inputSummaryItems.length > 0 ? (
+              <SummaryCards items={inputSummaryItems} title="Input Summary" />
+            ) : null}
+
             {overviewEntries.length > 0 ? (
               <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">

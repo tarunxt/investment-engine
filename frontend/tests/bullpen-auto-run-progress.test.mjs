@@ -499,6 +499,119 @@ test("Bullpen auto-run workflow view exposes Stage 1 output candidates", async (
   assert.deepEqual(view.stages[1].scanCandidates, []);
 });
 
+test("Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-active-positions",
+    triggered_by: "manual",
+    status: "completed",
+    dry_run: false,
+    started_at: "2026-06-25T05:00:00Z",
+    completed_at: "2026-06-25T05:02:00Z",
+    summary: "Candidate scan completed.",
+    live_execution_requested: true,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        active_positions_found: [
+          {
+            position_key: "market-1::YES",
+            market_id: "market-1",
+            market_title: "Will rates fall?",
+            market_url: "https://polymarket.com/event/rates-fall",
+            slug: "rates-fall",
+            theme: "Macro",
+            side: "YES",
+            shares: "12.5",
+            exposure_usd: 37.5,
+            average_price_cents: "42.5",
+            current_yes_odds: 55,
+            current_no_odds: "45",
+            close_time: "2026-06-25T12:30:00Z",
+            condition_id:
+              "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+          },
+        ],
+      }),
+    ],
+  });
+
+  assert.equal(view.stages[0].activePositionsFound.length, 1);
+  assert.deepEqual(view.stages[0].activePositionsFound[0], {
+    positionKey: "market-1::YES",
+    marketId: "market-1",
+    marketTitle: "Will rates fall?",
+    marketUrl: "https://polymarket.com/event/rates-fall",
+    slug: "rates-fall",
+    theme: "Macro",
+    side: "YES",
+    shares: 12.5,
+    exposureUsd: 37.5,
+    averagePriceCents: 42.5,
+    currentYesOdds: 55,
+    currentNoOdds: 45,
+    closeTime: "2026-06-25T12:30:00Z",
+    conditionId:
+      "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+  });
+});
+
+test("Bullpen auto-run workflow view keeps derived Stage 3 inputs even when Invest never started", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const reviewedRows = [
+    {
+      market_id: "market-1",
+      question: "Will rates fall?",
+      source_kind: "candidate",
+      fair_yes_probability_pct: 64,
+    },
+  ];
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage-3-inputs-queued",
+    triggered_by: "manual",
+    status: "failed",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    completed_at: "2026-06-25T05:02:00Z",
+    summary: "Auto-Live run failed before Stage 3 started.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: "stage-3-never-started",
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+      }),
+      createStage(2, "Stage 2 reviewed candidates.", {
+        workflow_stage_key: "llm",
+        phase_status: "completed",
+        llm_reviewed_candidates: reviewedRows,
+      }),
+    ],
+  });
+
+  assert.equal(view.stages[2].state, "queued");
+  assert.deepEqual(view.stages[2].inputs, {
+    llm_review_rows: reviewedRows,
+  });
+  assert.deepEqual(view.stages[2].outputs, {});
+});
+
 test("Bullpen auto-run workflow view keeps the failed stage highlighted when backend progress was persisted", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 
