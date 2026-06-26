@@ -3,6 +3,9 @@ name: Inspect Production AI Config
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   inspect:
     name: Inspect backend provider config
@@ -20,23 +23,27 @@ jobs:
           command_timeout: 900s
           script: |
             set -euo pipefail
-            APP="${{ secrets.APP_PATH }}"
+            APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP="/srv/investor"
+            if [[ ! -d "$APP" && -d "$LEGACY_APP" ]]; then
+              APP="$LEGACY_APP"
+            fi
             BACKEND_ENV_FILE="/etc/investment-engine/backend.env"
             if [[ ! -f "$BACKEND_ENV_FILE" && -f /etc/investor/backend.env ]]; then
               BACKEND_ENV_FILE="/etc/investor/backend.env"
             fi
-            APP_SERVICE_USER="${{ secrets.APP_SERVICE_USER }}"
-            if [[ -z "$APP_SERVICE_USER" ]]; then
-              if id -u investment-engine >/dev/null 2>&1; then
-                APP_SERVICE_USER="investment-engine"
-              else
-                APP_SERVICE_USER="investor"
-              fi
+            APP_SERVICE_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            if ! id "$APP_SERVICE_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then
+              APP_SERVICE_USER="investor"
             fi
             BACKEND_SERVICE_NAME="investment-engine-backend"
             if ! systemctl cat "$BACKEND_SERVICE_NAME" >/dev/null 2>&1; then
               BACKEND_SERVICE_NAME="investor-backend"
             fi
+
+            echo "==> App root"
+            sudo test -d "$APP/backend"
+            echo "$APP"
 
             echo "==> Backend env file presence"
             sudo test -f "$BACKEND_ENV_FILE"

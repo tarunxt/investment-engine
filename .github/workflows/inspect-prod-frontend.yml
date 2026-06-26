@@ -3,6 +3,9 @@ name: Inspect Production Frontend
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   inspect:
     name: Inspect frontend runtime
@@ -20,23 +23,27 @@ jobs:
           command_timeout: 900s
           script: |
             set -euo pipefail
-            APP="${{ secrets.APP_PATH }}"
+            APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP="/srv/investor"
+            if [[ ! -d "$APP" && -d "$LEGACY_APP" ]]; then
+              APP="$LEGACY_APP"
+            fi
             FRONTEND_ENV_FILE="/etc/investment-engine/frontend.env"
             if [[ ! -f "$FRONTEND_ENV_FILE" && -f /etc/investor/frontend.env ]]; then
               FRONTEND_ENV_FILE="/etc/investor/frontend.env"
             fi
-            APP_SERVICE_USER="${{ secrets.APP_SERVICE_USER }}"
-            if [[ -z "$APP_SERVICE_USER" ]]; then
-              if id -u investment-engine >/dev/null 2>&1; then
-                APP_SERVICE_USER="investment-engine"
-              else
-                APP_SERVICE_USER="investor"
-              fi
+            APP_SERVICE_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            if ! id "$APP_SERVICE_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then
+              APP_SERVICE_USER="investor"
             fi
             FRONTEND_SERVICE_NAME="investment-engine-frontend"
             if ! systemctl cat "$FRONTEND_SERVICE_NAME" >/dev/null 2>&1; then
               FRONTEND_SERVICE_NAME="investor-frontend"
             fi
+
+            echo "==> App root"
+            sudo test -d "$APP/frontend"
+            echo "$APP"
 
             echo "==> Frontend env file presence"
             sudo test -f "$FRONTEND_ENV_FILE"
