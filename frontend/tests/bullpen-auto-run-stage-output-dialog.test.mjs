@@ -27,10 +27,10 @@ function loadStageOutputDialog() {
     fileName: "BullpenAutoRunStageOutputDialog.tsx",
   });
 
-  const module = { exports: {} };
+  const moduleObj = { exports: {} };
   const context = vm.createContext({
-    module,
-    exports: module.exports,
+    module: moduleObj,
+    exports: moduleObj.exports,
     require,
     console,
     process,
@@ -39,7 +39,7 @@ function loadStageOutputDialog() {
     filename: "BullpenAutoRunStageOutputDialog.js",
   });
   script.runInContext(context);
-  return module.exports;
+  return moduleObj.exports;
 }
 
 test("Bullpen auto-run stage dialog renders candidate inputs as readable tables and cards", () => {
@@ -159,4 +159,57 @@ test("Bullpen auto-run stage dialog keeps Stage 2 probability cells wired to the
 
   assert.match(source, /isBreakdownProbabilityKey/);
   assert.match(source, /BullpenLlmBreakdownDialog/);
+  assert.match(source, /Open LLM odds breakdown/);
+});
+
+test("Bullpen auto-run stage dialog makes invest rationale fields clickable", () => {
+  const { BullpenAutoRunStageOutputDialog } = loadStageOutputDialog();
+
+  const markup = renderToStaticMarkup(
+    React.createElement(BullpenAutoRunStageOutputDialog, {
+      stageTitle: "Stage 3 · Invest",
+      stageDetail: "Event inputs being fed into Stage 3 · Invest.",
+      eyebrow: "Stage Input",
+      outputLabel: "Inputs",
+      onClose: () => {},
+      outputs: {
+        llm_review_rows: [
+          {
+            market_id: "market-1",
+            question: "Will rates fall?",
+            returns_per_day: 140.83,
+            selected_side: "NO",
+            confidence: "Low",
+            evidence_status: "Low",
+            event_state: "scheduled_not_occurred",
+            adjudication_required: false,
+            fair_yes_probability_pct: 12.75,
+            fair_no_probability_pct: 87.25,
+            reason: "Candidate qualifies for the Events to invest in table.",
+            llm_outputs: [],
+          },
+        ],
+      },
+    }),
+  );
+
+  assert.match(markup, /Open rationale for Returns Per Day/);
+  assert.match(markup, /Open rationale for Selected Side/);
+  assert.match(markup, /Open rationale for Confidence/);
+  assert.match(markup, /Open rationale for Evidence Status/);
+  assert.match(markup, /Open rationale for Event State/);
+  assert.match(markup, /Open rationale for Adjudication Required/);
+});
+
+test("Bullpen LLM breakdown dialog layers above the stage output dialog", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenLlmBreakdownDialog.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /z-\[140\]/);
+  assert.match(source, /z-\[150\]/);
 });

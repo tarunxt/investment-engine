@@ -22,6 +22,10 @@ type BreakdownDialogComponent = ComponentType<{
   question: Record<string, unknown>;
   onClose: () => void;
 }>;
+type ValueRationaleDialogState = {
+  fieldKey: string;
+  record: Record<string, unknown>;
+};
 
 const SUMMARY_COLUMN_PRIORITY = [
   "question",
@@ -109,6 +113,16 @@ const METRIC_KEYS = [
   "adjudication_required",
 ];
 
+const VALUE_RATIONALE_KEYS = new Set([
+  "returns_per_day",
+  "selected_side",
+  "confidence",
+  "evidence_status",
+  "event_state",
+  "adjudication_required",
+]);
+const STRONG_SIDE_THRESHOLD_PCT = 80;
+
 const LONG_TEXT_KEYS = new Set([
   "rules",
   "reason",
@@ -173,6 +187,16 @@ function looksLikeDateString(value: string) {
 
 function isLongTextField(key: string, value: unknown) {
   return typeof value === "string" && (LONG_TEXT_KEYS.has(key) || value.length > 160);
+}
+
+function formatPlainValue(value: unknown, key: string) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "number") return formatNumber(value, key);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return `${value.length} ${value.length === 1 ? "item" : "items"}`;
+  if (isRecord(value)) return `${Object.keys(value).length} fields`;
+  return String(value);
 }
 
 function formatNumber(value: number, key: string) {
@@ -539,11 +563,13 @@ function KeyValueTable({
   nested = false,
   record = null,
   onOpenBreakdown,
+  onOpenRationale,
 }: {
   entries: [string, unknown][];
   nested?: boolean;
   record?: Record<string, unknown> | null;
   onOpenBreakdown?: (record: Record<string, unknown>) => void;
+  onOpenRationale?: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
   return (
     <div className={`overflow-hidden rounded-2xl border ${nested ? "border-slate-200" : "border-slate-200 bg-white"}`}>
@@ -567,6 +593,7 @@ function KeyValueTable({
                   record,
                   depth: nested ? 2 : 1,
                   onOpenBreakdown,
+                  onOpenRationale,
                 })}
               </td>
             </tr>
@@ -760,6 +787,264 @@ function buildStageOutputBreakdownSeed(record: Record<string, unknown>) {
   };
 }
 
+function isRationaleFieldKey(key: string) {
+  return VALUE_RATIONALE_KEYS.has(key);
+}
+
+function getStageOutputRecordTitle(record: Record<string, unknown>) {
+  return (
+    readSummaryString(record.question) ??
+    readSummaryString(record.market_title) ??
+    readSummaryString(record.market_id) ??
+    readSummaryString(record.slug) ??
+    readSummaryString(record.position_key) ??
+    "This row"
+  );
+}
+
+function formatEnumLabel(value: string | null | undefined) {
+  if (!value) return "—";
+  return value
+    .split(/[_\s]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getEventStateDescription(value: string | null | undefined) {
+  switch ((value ?? "").toLowerCase()) {
+    case "already_occurred":
+      return "The review concluded that the underlying real-world event has already happened.";
+    case "scheduled_not_occurred":
+      return "The review concluded that the event is scheduled or expected, but has not happened yet.";
+    case "preparatory_only":
+      return "The signals pointed to setup or pre-event activity only, not the final event itself yet.";
+    case "rumour_only":
+    case "rumor_only":
+      return "The evidence looked rumor-based or weakly sourced rather than confirmed.";
+    case "no_confirmed_event":
+      return "The review did not find enough reliable evidence that a qualifying event is actually confirmed.";
+    case "conflicting":
+      return "Different evidence or model outputs pointed to materially different event states, so the row stayed conflicting.";
+    default:
+      return value ? `${formatEnumLabel(value)} was the consensus event-state label for this row.` : null;
+  }
+}
+
+function getConfidenceDescription(value: string | null | undefined) {
+  switch ((value ?? "").toLowerCase()) {
+    case "high":
+      return "High means the per-model review leaned strongly in one direction after normalization and consensus.";
+    case "medium":
+      return "Medium means the review had usable conviction, but not enough to be treated as the strongest confidence bucket.";
+    case "low":
+      return "Low means the review stayed cautious, mixed, or weak after normalization and consensus.";
+    default:
+      return value ? `${formatEnumLabel(value)} was the consensus confidence label for this row.` : null;
+  }
+}
+
+function getEvidenceStatusDescription(value: string | null | undefined) {
+  switch ((value ?? "").toLowerCase()) {
+    case "strong":
+      return "Strong means the underlying evidence looked verified, confirmed, or otherwise materially supportive.";
+    case "moderate":
+    case "medium":
+      return "Moderate means the evidence looked partial, mixed, or not fully conclusive.";
+    case "low":
+      return "Low means the evidence looked weak, incomplete, unverified, or not strong enough to clear higher buckets.";
+    default:
+      return value ? `${formatEnumLabel(value)} was the consensus evidence-strength label for this row.` : null;
+  }
+}
+
+function buildValueRationale(record: Record<string, unknown>, fieldKey: string) {
+  const stageReason = readSummaryString(record.reason);
+  const rulesFailReason = readSummaryString(record.rules_fail_reason);
+  const sourceKind = readSummaryString(record.source_kind);
+  const closeTime = readSummaryString(record.close_time);
+  const selectedSide = readSummaryString(record.selected_side);
+  const confidence = readSummaryString(record.confidence);
+  const evidenceStatus = readSummaryString(record.evidence_status);
+  const eventState = readSummaryString(record.event_state);
+  const disagreementLevel = readSummaryString(record.disagreement_level);
+  const disagreementCategory = readSummaryString(record.disagreement_category);
+  const fairYes = readNumberValue(record.fair_yes_probability_pct);
+  const fairNo = readNumberValue(record.fair_no_probability_pct);
+  const llmOutputs = Array.isArray(record.llm_outputs)
+    ? record.llm_outputs.filter((item) => isRecord(item))
+    : [];
+  const hasAdjudicationValue =
+    typeof record.adjudication_required === "boolean" ||
+    typeof record.adjudication_required === "string";
+  const adjudicationRequired = hasAdjudicationValue
+    ? readSummaryBoolean(record.adjudication_required)
+    : null;
+
+  let summary = "This value was carried forward from the previous Bullpen review stage.";
+  const supportingPoints: string[] = [];
+
+  if (sourceKind) {
+    supportingPoints.push(`Row type: ${formatEnumLabel(sourceKind)}.`);
+  }
+
+  switch (fieldKey) {
+    case "returns_per_day":
+      summary =
+        readNumberValue(record.returns_per_day) === null
+          ? "Returns Per Day is blank because the row did not have enough usable market timing/pricing data to carry a time-normalized ranking value into Invest."
+          : "Returns Per Day is shown because this row had enough usable market data to carry a time-normalized ranking value into Invest. Stage 3 uses that value to compare rows on the same per-day basis.";
+      if (closeTime) {
+        supportingPoints.push(`Close time was available for ranking: ${closeTime}.`);
+      }
+      if (selectedSide) {
+        supportingPoints.push(`The current stronger side on this row is ${selectedSide}.`);
+      }
+      break;
+    case "selected_side":
+      summary = selectedSide
+        ? `Selected Side is ${selectedSide} because that side had the stronger LLM fair probability. Bullpen only treats a side as selected once the stronger side clears the ${STRONG_SIDE_THRESHOLD_PCT}% threshold.`
+        : `Selected Side is blank because neither side cleared the ${STRONG_SIDE_THRESHOLD_PCT}% strong-side threshold, or the fair probabilities were unavailable.`;
+      if (fairYes !== null || fairNo !== null) {
+        supportingPoints.push(
+          `LLM fair odds on this row were Yes ${formatPlainValue(fairYes, "fair_yes_probability_pct")} and No ${formatPlainValue(fairNo, "fair_no_probability_pct")}.`,
+        );
+      }
+      break;
+    case "confidence":
+      summary = confidence
+        ? `Confidence is shown as ${confidence} because the per-model LLM outputs are normalized into Low / Medium / High buckets and then collapsed into one consensus label for the row.`
+        : "Confidence is blank because the LLM review did not produce a usable consensus confidence label for this row.";
+      {
+        const confidenceDescription = getConfidenceDescription(confidence);
+        if (confidenceDescription) {
+          supportingPoints.push(confidenceDescription);
+        }
+      }
+      if (llmOutputs.length > 0) {
+        supportingPoints.push(
+          `${llmOutputs.length} LLM output${llmOutputs.length === 1 ? "" : "s"} contributed to the consensus shown here.`,
+        );
+      }
+      break;
+    case "evidence_status":
+      summary = evidenceStatus
+        ? `Evidence Status is shown as ${evidenceStatus} because the LLM review converts per-model evidence labels into Low / Moderate / Strong and then chooses a consensus label for the row.`
+        : "Evidence Status is blank because the LLM review did not produce a usable evidence-strength label for this row.";
+      {
+        const evidenceDescription = getEvidenceStatusDescription(evidenceStatus);
+        if (evidenceDescription) {
+          supportingPoints.push(evidenceDescription);
+        }
+      }
+      if (llmOutputs.length > 0) {
+        supportingPoints.push(
+          `${llmOutputs.length} LLM output${llmOutputs.length === 1 ? "" : "s"} were available when building this evidence-status label.`,
+        );
+      }
+      break;
+    case "event_state":
+      summary = eventState
+        ? `Event State is shown as ${eventState} because the LLM review assigns a consensus label for the underlying event lifecycle before the row moves into Invest.`
+        : "Event State is blank because the LLM review did not settle on a usable event-state label for this row.";
+      {
+        const eventStateDescription = getEventStateDescription(eventState);
+        if (eventStateDescription) {
+          supportingPoints.push(eventStateDescription);
+        }
+      }
+      break;
+    case "adjudication_required":
+      summary =
+        adjudicationRequired === null
+          ? "Adjudication Required is blank because this row did not carry a manual-review flag."
+          : adjudicationRequired
+            ? "Adjudication Required is Yes because the consensus was flagged for manual review before being treated as clean conviction."
+            : "Adjudication Required is No because the consensus did not hit the manual-review / high-disagreement threshold.";
+      if (disagreementLevel) {
+        supportingPoints.push(`LLM disagreement level: ${disagreementLevel}.`);
+      }
+      if (disagreementCategory) {
+        supportingPoints.push(`Consensus signal: ${formatEnumLabel(disagreementCategory)}.`);
+      }
+      break;
+    default:
+      break;
+  }
+
+  if (stageReason) {
+    supportingPoints.push(`Stage note: ${stageReason}`);
+  }
+  if (rulesFailReason) {
+    supportingPoints.push(`Rules note: ${rulesFailReason}`);
+  }
+
+  return { summary, supportingPoints };
+}
+
+function ValueRationaleDialog({
+  state,
+  onClose,
+}: {
+  state: ValueRationaleDialogState;
+  onClose: () => void;
+}) {
+  const { fieldKey, record } = state;
+  const title = getStageOutputRecordTitle(record);
+  const fieldLabel = formatLabel(fieldKey);
+  const { summary, supportingPoints } = buildValueRationale(record, fieldKey);
+
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/40 p-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_70px_-24px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Value Rationale
+            </p>
+            <h3 className="text-lg font-semibold text-slate-950">{fieldLabel}</h3>
+            <p className="text-sm text-slate-600">{title}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label={`Close ${fieldLabel.toLowerCase()} rationale`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-5 px-6 py-5">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Current Value
+            </p>
+            <div className="mt-2 text-sm font-semibold text-slate-900">
+              <StructuredValue value={record[fieldKey]} fieldKey={fieldKey} />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
+            {summary}
+          </div>
+
+          {supportingPoints.length > 0 ? (
+            <div>
+              <h4 className="text-sm font-semibold text-slate-950">Supporting context</h4>
+              <ul className="mt-2 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-700">
+                {supportingPoints.map((point) => (
+                  <li key={point}>{point}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function renderRecordValue({
   value,
   key,
@@ -767,6 +1052,7 @@ function renderRecordValue({
   compact = false,
   depth = 1,
   onOpenBreakdown,
+  onOpenRationale,
 }: {
   value: unknown;
   key: string;
@@ -774,32 +1060,50 @@ function renderRecordValue({
   compact?: boolean;
   depth?: number;
   onOpenBreakdown?: (record: Record<string, unknown>) => void;
+  onOpenRationale?: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
   const baseValue = compact ? (
     renderCompactValue(value, key)
   ) : (
     <StructuredValue value={value} fieldKey={key} depth={depth} />
   );
+
   if (
-    !record ||
-    !onOpenBreakdown ||
-    !isBreakdownProbabilityKey(key) ||
-    value === null ||
-    value === undefined ||
-    !canOpenLlmBreakdown(record)
+    record &&
+    onOpenBreakdown &&
+    isBreakdownProbabilityKey(key) &&
+    value !== null &&
+    value !== undefined &&
+    canOpenLlmBreakdown(record)
   ) {
-    return baseValue;
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenBreakdown(record)}
+        className="inline-flex items-center rounded-md underline decoration-sky-300 underline-offset-4 transition hover:text-sky-700"
+        title="Open LLM odds breakdown"
+        aria-label={`Open LLM odds breakdown for ${formatLabel(key)}`}
+      >
+        {baseValue}
+      </button>
+    );
   }
 
-  return (
-    <button
-      type="button"
-      onClick={() => onOpenBreakdown(record)}
-      className="inline-flex items-center rounded-md underline decoration-sky-300 underline-offset-4 transition hover:text-sky-700"
-    >
-      {baseValue}
-    </button>
-  );
+  if (record && onOpenRationale && isRationaleFieldKey(key)) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenRationale(record, key)}
+        className="inline-flex items-center rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700"
+        title={`Open rationale for ${formatLabel(key)}`}
+        aria-label={`Open rationale for ${formatLabel(key)}`}
+      >
+        {baseValue}
+      </button>
+    );
+  }
+
+  return baseValue;
 }
 
 function buildStageOutputEyebrow(stageTitle: string) {
@@ -957,10 +1261,12 @@ function SummaryTable({
   rows,
   title,
   onOpenBreakdown,
+  onOpenRationale,
 }: {
   rows: Record<string, unknown>[];
   title: string;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
+  onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
   const columns = buildSummaryColumns(rows);
   if (columns.length === 0) return null;
@@ -994,6 +1300,7 @@ function SummaryTable({
                       record: row,
                       compact: true,
                       onOpenBreakdown,
+                      onOpenRationale,
                     })}
                   </td>
                 ))}
@@ -1047,9 +1354,11 @@ function SummaryCards({
 function MetricStrip({
   record,
   onOpenBreakdown,
+  onOpenRationale,
 }: {
   record: Record<string, unknown>;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
+  onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
   const metrics = METRIC_KEYS.filter((key) => record[key] !== null && record[key] !== undefined);
   if (metrics.length === 0) return null;
@@ -1070,6 +1379,7 @@ function MetricStrip({
               key,
               record,
               onOpenBreakdown,
+              onOpenRationale,
             })}
           </div>
         </div>
@@ -1082,10 +1392,12 @@ function RecordDetailsCard({
   record,
   index,
   onOpenBreakdown,
+  onOpenRationale,
 }: {
   record: Record<string, unknown>;
   index: number;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
+  onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
   const title =
     (typeof record.question === "string" && record.question) ||
@@ -1155,7 +1467,11 @@ function RecordDetailsCard({
       </div>
 
       <div className="mt-4">
-        <MetricStrip record={record} onOpenBreakdown={onOpenBreakdown} />
+        <MetricStrip
+          record={record}
+          onOpenBreakdown={onOpenBreakdown}
+          onOpenRationale={onOpenRationale}
+        />
       </div>
 
       {regularEntries.length > 0 ? (
@@ -1164,6 +1480,7 @@ function RecordDetailsCard({
             entries={regularEntries}
             record={record}
             onOpenBreakdown={onOpenBreakdown}
+            onOpenRationale={onOpenRationale}
           />
         </div>
       ) : null}
@@ -1193,10 +1510,12 @@ function RecordArraySection({
   sectionKey,
   rows,
   onOpenBreakdown,
+  onOpenRationale,
 }: {
   sectionKey: string;
   rows: Record<string, unknown>[];
   onOpenBreakdown: (record: Record<string, unknown>) => void;
+  onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
@@ -1219,6 +1538,7 @@ function RecordArraySection({
           rows={rows}
           title="Summary Table"
           onOpenBreakdown={onOpenBreakdown}
+          onOpenRationale={onOpenRationale}
         />
       </div>
 
@@ -1229,6 +1549,7 @@ function RecordArraySection({
             record={row}
             index={index}
             onOpenBreakdown={onOpenBreakdown}
+            onOpenRationale={onOpenRationale}
           />
         ))}
       </div>
@@ -1240,10 +1561,12 @@ function StructuredSection({
   sectionKey,
   value,
   onOpenBreakdown,
+  onOpenRationale,
 }: {
   sectionKey: string;
   value: unknown;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
+  onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
   if (Array.isArray(value) && value.every((item) => isRecord(item))) {
     return (
@@ -1251,6 +1574,7 @@ function StructuredSection({
         sectionKey={sectionKey}
         rows={value as Record<string, unknown>[]}
         onOpenBreakdown={onOpenBreakdown}
+        onOpenRationale={onOpenRationale}
       />
     );
   }
@@ -1286,6 +1610,8 @@ export function BullpenAutoRunStageOutputDialog({
     useState<{ Component: BreakdownDialogComponent } | null>(null);
   const [breakdownQuestion, setBreakdownQuestion] =
     useState<Record<string, unknown> | null>(null);
+  const [valueRationaleDialog, setValueRationaleDialog] =
+    useState<ValueRationaleDialogState | null>(null);
   const entries = Object.entries(outputs);
   const inputSummaryItems = outputLabel === "Inputs" ? buildInputSummaryItems(outputs) : [];
   const overviewEntries = orderEntries(
@@ -1367,6 +1693,9 @@ export function BullpenAutoRunStageOutputDialog({
                   sectionKey={key}
                   value={value}
                   onOpenBreakdown={handleOpenBreakdown}
+                  onOpenRationale={(record, fieldKey) =>
+                    setValueRationaleDialog({ record, fieldKey })
+                  }
                 />
               ))}
 
@@ -1392,6 +1721,12 @@ export function BullpenAutoRunStageOutputDialog({
         <BreakdownDialog
           question={breakdownQuestion}
           onClose={() => setBreakdownQuestion(null)}
+        />
+      ) : null}
+      {valueRationaleDialog ? (
+        <ValueRationaleDialog
+          state={valueRationaleDialog}
+          onClose={() => setValueRationaleDialog(null)}
         />
       ) : null}
     </>

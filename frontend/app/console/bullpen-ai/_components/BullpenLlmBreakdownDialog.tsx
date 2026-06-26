@@ -126,7 +126,7 @@ function HighDisagreementCriteriaDialog({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/40 p-4">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/40 p-4">
       <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_70px_-24px_rgba(15,23,42,0.45)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
@@ -212,7 +212,7 @@ export function BullpenLlmBreakdownDialog({
     buildBullpenQuestionPreflightEvidenceBlock(question);
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4">
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
