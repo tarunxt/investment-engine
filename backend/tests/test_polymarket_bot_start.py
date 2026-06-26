@@ -53,6 +53,16 @@ def test_auto_redeem_live_can_be_disabled(monkeypatch):
     assert load_polymarket_config().auto_redeem_live is False
 
 
+def test_polymarket_live_defaults_require_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("LIVE_TRADING", raising=False)
+    monkeypatch.delenv("POLYMARKET_AUTO_START", raising=False)
+
+    config = load_polymarket_config()
+
+    assert config.live_trading is False
+    assert config.auto_start is False
+
+
 def test_leaderboard_period_filter_rejects_stale_daily_and_weekly_rows():
     now = datetime(2026, 6, 14, tzinfo=timezone.utc)
     stale = normalize_fallback_trader_row(
@@ -168,6 +178,11 @@ class SlowProvider:
         return []
 
 
+class NeverCallDoctorExecutor:
+    async def doctor(self):
+        raise AssertionError("doctor should not run when LIVE_TRADING=false")
+
+
 @pytest.mark.anyio
 async def test_start_returns_before_initial_poll_finishes(tmp_path):
     config = load_polymarket_config().model_copy(
@@ -203,6 +218,40 @@ async def test_start_returns_before_initial_poll_finishes(tmp_path):
 
     bot._poll_task.cancel()
     await asyncio.gather(bot._poll_task, return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_start_skips_live_doctor_when_live_trading_is_disabled(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": False,
+            "live_trading": False,
+            "use_live_reads": True,
+            "poll_interval_ms": 1000,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = SlowProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=NeverCallDoctorExecutor(),
+        balance_reader=BullpenBalanceReader(),
+        logger=logger,
+    )
+
+    await bot.start()
+    state = await bot.get_state()
+
+    assert bot.active_mode == "live-read"
+    assert state.live.enabled_by_env is False
+
+    await bot.shutdown()
 
 
 class SlowDoctorExecutor:

@@ -2527,7 +2527,9 @@ class PolymarketPaperCopyBot:
         self.recent_activity = self.recent_activity[:20]
 
     def _wants_live_execution(self) -> bool:
-        return (not self.config.paper_trading) or self.config.live_trading
+        # Paper-trading only controls simulated trades in read-only mode.
+        # Live execution must be explicitly opted into.
+        return self.config.live_trading
 
     @staticmethod
     async def _cancel_task(task: asyncio.Task[None] | None) -> None:
