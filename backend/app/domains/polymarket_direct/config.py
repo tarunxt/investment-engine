@@ -45,12 +45,12 @@ def load_polymarket_config() -> PolymarketBotConfig:
 
     return PolymarketBotConfig(
         paper_trading=_bool_from_env("POLYMARKET_DIRECT_PAPER_TRADING", False),
-        live_trading=_bool_from_env("POLYMARKET_DIRECT_LIVE_TRADING", True),
+        live_trading=_bool_from_env("POLYMARKET_DIRECT_LIVE_TRADING", False),
         use_live_reads=_bool_from_env("POLYMARKET_DIRECT_USE_LIVE_READS", True),
         # Live-read trades should never wait for manual dashboard approval.
         # Keep the public config field for API compatibility, but force auto execution.
         auto_execute_live=True,
-        auto_start=_bool_from_env("POLYMARKET_DIRECT_AUTO_START", True),
+        auto_start=_bool_from_env("POLYMARKET_DIRECT_AUTO_START", False),
         live_unlock_mode=live_unlock_mode,
         require_manual_confirmation=False,
         poll_interval_ms=_int_from_env("POLYMARKET_DIRECT_POLL_INTERVAL_MS", 30_000),

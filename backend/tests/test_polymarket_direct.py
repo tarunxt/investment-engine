@@ -3,12 +3,22 @@ from pathlib import Path
 
 import pytest
 
+from app.domains.polymarket_direct.bot import PolymarketPaperCopyBot
 from app.domains.polymarket_direct.config import load_polymarket_config
 from app.domains.polymarket_direct.direct_polymarket import (
     DIRECT_EXECUTION_NOT_CONFIGURED,
     DirectPolymarketCommandError,
+    DirectPolymarketBalanceReader,
     DirectPolymarketLiveExecutor,
+    DirectPolymarketRedeemedTradesReader,
 )
+from app.domains.polymarket_direct.logger import PolymarketFileLogger
+from app.domains.polymarket_direct.schemas import (
+    PolymarketLiveTradeDecision,
+    PolymarketPaperTrade,
+)
+from app.domains.polymarket_direct.service import PolymarketDirectBotManager
+from app.domains.polymarket_direct.storage import JsonModelStore
 
 
 def test_direct_domain_does_not_import_bullpen_execution_symbols():
@@ -48,6 +58,17 @@ def test_direct_config_uses_direct_env_prefix(monkeypatch, tmp_path):
     assert config.data_dir == str(tmp_path)
     assert config.auto_start is False
     assert config.live_trading is False
+
+
+def test_direct_config_defaults_require_explicit_live_opt_in(monkeypatch, tmp_path):
+    monkeypatch.setenv("POLYMARKET_DIRECT_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("POLYMARKET_DIRECT_LIVE_TRADING", raising=False)
+    monkeypatch.delenv("POLYMARKET_DIRECT_AUTO_START", raising=False)
+
+    config = load_polymarket_config()
+
+    assert config.live_trading is False
+    assert config.auto_start is False
 
 
 def test_direct_live_guard_exposes_bot_state_counters(monkeypatch, tmp_path):
@@ -103,6 +124,83 @@ def _set_direct_env(monkeypatch):
     monkeypatch.setenv("POLYMARKET_DIRECT_MAX_LIVE_TRADES_PER_DAY", "5")
     monkeypatch.setenv("POLYMARKET_DIRECT_MAX_LIVE_DAILY_LOSS", "10")
     monkeypatch.setenv("POLYMARKET_DIRECT_MAX_LIVE_EXPOSURE_PER_MARKET", "5")
+
+
+class DirectSlowProvider:
+    async def get_top_traders(self):
+        await asyncio.sleep(30)
+        return []
+
+    async def get_recent_trades(self, traders):
+        return []
+
+
+class DirectNeverCallDoctorExecutor:
+    async def doctor(self):
+        raise AssertionError(
+            "doctor should not run when POLYMARKET_DIRECT_LIVE_TRADING=false"
+        )
+
+
+@pytest.mark.anyio
+async def test_direct_start_skips_live_doctor_when_live_trading_is_disabled(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": False,
+            "live_trading": False,
+            "use_live_reads": True,
+            "poll_interval_ms": 1000,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = DirectSlowProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=DirectNeverCallDoctorExecutor(),
+        balance_reader=DirectPolymarketBalanceReader(),
+        redeemed_trades_reader=DirectPolymarketRedeemedTradesReader(),
+        logger=logger,
+    )
+
+    await bot.start()
+    state = await bot.get_state()
+
+    assert bot.active_mode == "live-read"
+    assert state.live.enabled_by_env is False
+
+    await bot.shutdown()
+
+
+@pytest.mark.anyio
+async def test_direct_pause_and_stop_persist_for_recreated_user_bot(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("POLYMARKET_DIRECT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("POLYMARKET_DIRECT_AUTO_START", "false")
+    monkeypatch.setenv("POLYMARKET_DIRECT_LIVE_TRADING", "false")
+    monkeypatch.setenv("POLYMARKET_DIRECT_USE_LIVE_READS", "false")
+    monkeypatch.setenv("POLYMARKET_DIRECT_PAPER_TRADING", "true")
+
+    manager = PolymarketDirectBotManager()
+    bot = await manager.get_bot(42)
+    await bot.start()
+    await bot.pause()
+    await bot.stop()
+    await manager.shutdown()
+
+    recreated_manager = PolymarketDirectBotManager()
+    recreated_bot = await recreated_manager.get_bot(42)
+
+    assert recreated_bot.config.auto_start is False
+    assert recreated_bot.config.paused is True
+
+    await recreated_manager.shutdown()
 
 
 @pytest.mark.parametrize(

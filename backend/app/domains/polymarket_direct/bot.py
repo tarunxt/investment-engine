@@ -174,6 +174,17 @@ class PolymarketPaperCopyBot:
     def add_activity(self, message: str) -> None:
         self._add_activity(message)
 
+    async def _save_config_override_unlocked(self) -> None:
+        await self.config_store.save(
+            PolymarketUserConfigOverride(
+                max_live_trades_per_day=self.config.max_live_trades_per_day,
+                trader_invested_threshold_usd=self.config.trader_invested_threshold_usd,
+                max_live_exposure_per_market=self.config.max_live_exposure_per_market,
+                auto_start=self.config.auto_start,
+                paused=self.config.paused,
+            )
+        )
+
     async def shutdown(self) -> None:
         async with self._lock:
             if self.running and not self.stopped_at:
@@ -196,6 +207,7 @@ class PolymarketPaperCopyBot:
         async with self._lock:
             if self.running:
                 return
+            self.config.auto_start = True
             if self._wants_live_execution():
                 await self._refresh_doctor_for_start_unlocked()
                 await self._try_auto_unlock_live_unlocked("Start Bot")
@@ -233,6 +245,7 @@ class PolymarketPaperCopyBot:
             self.started_at = started_at
             self.stopped_at = None
             self.next_poll_at = started_at
+            await self._save_config_override_unlocked()
             await self.logger.info(f"Bot started. mode={self.active_mode}")
             self._add_activity(f"Bot started in {self.active_mode} mode.")
             self._ensure_poll_task(initial_delay=0)
@@ -242,21 +255,25 @@ class PolymarketPaperCopyBot:
             if self.running or not self.stopped_at:
                 self.stopped_at = utc_now()
             self.running = False
+            self.config.auto_start = False
             self.next_poll_at = None
             await self._cancel_task(self._poll_task)
             self._poll_task = None
+            await self._save_config_override_unlocked()
             await self.logger.info("Bot stopped.")
             self._add_activity("Bot stopped.")
 
     async def pause(self) -> None:
         async with self._lock:
             self.config.paused = True
+            await self._save_config_override_unlocked()
             await self.logger.info("Bot paused.")
             self._add_activity("Bot paused.")
 
     async def resume(self) -> None:
         async with self._lock:
             self.config.paused = False
+            await self._save_config_override_unlocked()
             await self.logger.info("Bot resumed.")
             self._add_activity("Bot resumed.")
 
@@ -368,13 +385,7 @@ class PolymarketPaperCopyBot:
             self.config.max_live_exposure_per_market = (
                 request.max_live_exposure_per_market
             )
-            await self.config_store.save(
-                PolymarketUserConfigOverride(
-                    max_live_trades_per_day=request.max_live_trades_per_day,
-                    trader_invested_threshold_usd=request.trader_invested_threshold_usd,
-                    max_live_exposure_per_market=request.max_live_exposure_per_market,
-                )
-            )
+            await self._save_config_override_unlocked()
             await self.logger.info(
                 "Updated live limits: "
                 f"max trades/day {request.max_live_trades_per_day}, "
@@ -2331,7 +2342,9 @@ class PolymarketPaperCopyBot:
         self.recent_activity = self.recent_activity[:20]
 
     def _wants_live_execution(self) -> bool:
-        return (not self.config.paper_trading) or self.config.live_trading
+        # Paper-trading only controls simulated trades in read-only mode.
+        # Live execution must be explicitly opted into.
+        return self.config.live_trading
 
     @staticmethod
     async def _cancel_task(task: asyncio.Task[None] | None) -> None:

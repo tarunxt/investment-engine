@@ -77,6 +77,8 @@ class PolymarketUserConfigOverride(BaseModel):
     max_live_trades_per_day: int | None = Field(default=None, ge=1, le=1000)
     trader_invested_threshold_usd: float | None = Field(default=None, ge=0)
     max_live_exposure_per_market: float | None = Field(default=None, gt=0)
+    auto_start: bool | None = None
+    paused: bool | None = None
 
 
 class PolymarketBotConfig(BaseModel):
