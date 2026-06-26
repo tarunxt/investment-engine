@@ -24,13 +24,13 @@ async function loadProgressModule() {
   );
 }
 
-function createStage(stageNumber, reason, outputs = {}) {
+function createStage(stageNumber, reason, outputs = {}, inputs = {}) {
   return {
     stage_number: stageNumber,
     stage_name: `Stage ${stageNumber}`,
     status: "pass",
     reason,
-    inputs: {},
+    inputs,
     outputs,
     guardrails_checked: [],
     hard_block: false,
@@ -84,6 +84,52 @@ test("Bullpen auto-run workflow view maps running stages to green, yellow, and b
   assert.equal(view.stages[0].timerStartedAt, "2026-06-25T05:00:00Z");
   assert.equal(view.stages[0].timerCompletedAt, "2026-06-25T05:01:00Z");
   assert.equal(view.stages[1].timerCompletedAt, null);
+});
+
+test("Bullpen auto-run workflow view exposes Stage 2 and Stage 3 inputs", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-inputs",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 3 is reviewing investment inputs.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+      }),
+      createStage(
+        2,
+        "Stage 2 reviewed candidates.",
+        { workflow_stage_key: "llm", phase_status: "completed" },
+        { accepted_candidates: [{ question: "Will rates fall?" }] },
+      ),
+      createStage(
+        3,
+        "Stage 3 is reviewing investments.",
+        { workflow_stage_key: "invest", phase_status: "running" },
+        { llm_review_rows: [{ question: "Will rates fall?", llm_yes_odds: 64 }] },
+      ),
+    ],
+  });
+
+  assert.deepEqual(view.stages[1].inputs, {
+    accepted_candidates: [{ question: "Will rates fall?" }],
+  });
+  assert.deepEqual(view.stages[2].inputs, {
+    llm_review_rows: [{ question: "Will rates fall?", llm_yes_odds: 64 }],
+  });
 });
 
 test("Bullpen auto-run workflow view ignores completed_at on an actively running stage", async () => {

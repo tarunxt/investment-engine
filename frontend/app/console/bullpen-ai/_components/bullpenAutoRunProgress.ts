@@ -30,6 +30,7 @@ export type BullpenAutoRunWorkflowStageView = {
   timerStartedAt: string | null;
   timerCompletedAt: string | null;
   scanCandidates: BullpenAutoRunScanCandidateView[];
+  inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
 };
 
@@ -125,11 +126,19 @@ function findWorkflowStageResult(
   );
 }
 
-function readOutputs(stage: BullpenAutoLiveStageResult | null) {
-  if (!stage?.outputs || typeof stage.outputs !== "object" || Array.isArray(stage.outputs)) {
+function readStageRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
   }
-  return stage.outputs as Record<string, unknown>;
+  return value as Record<string, unknown>;
+}
+
+function readInputs(stage: BullpenAutoLiveStageResult | null) {
+  return readStageRecord(stage?.inputs);
+}
+
+function readOutputs(stage: BullpenAutoLiveStageResult | null) {
+  return readStageRecord(stage?.outputs);
 }
 
 function getPhaseStatus(stage: BullpenAutoLiveStageResult | null) {
@@ -307,6 +316,7 @@ export function buildBullpenAutoRunWorkflowView(
       timerCompletedAt: stageTimerCompletedAt,
       scanCandidates:
         definition.key === "scan" && shouldShowStageData ? readScanCandidates(stage) : [],
+      inputs: shouldShowStageData ? readInputs(stage) : {},
       outputs: shouldShowStageData ? readOutputs(stage) : {},
     } satisfies BullpenAutoRunWorkflowStageView;
   });
