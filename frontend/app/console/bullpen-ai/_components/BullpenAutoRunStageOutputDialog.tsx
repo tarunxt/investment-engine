@@ -694,7 +694,7 @@ function buildStageOutputLlmBreakdown(record: Record<string, unknown>) {
         staleFactReason: null,
       };
     })
-    .filter((item): item is Record<string, unknown> => Boolean(item));
+    .filter(Boolean) as Record<string, unknown>[];
 }
 
 function buildStageOutputBreakdownSeed(record: Record<string, unknown>) {
@@ -1282,8 +1282,8 @@ export function BullpenAutoRunStageOutputDialog({
   outputLabel = "Outputs",
   onClose,
 }: BullpenAutoRunStageOutputDialogProps) {
-  const [breakdownDialogComponent, setBreakdownDialogComponent] =
-    useState<BreakdownDialogComponent | null>(null);
+  const [breakdownDialogState, setBreakdownDialogState] =
+    useState<{ Component: BreakdownDialogComponent } | null>(null);
   const [breakdownQuestion, setBreakdownQuestion] =
     useState<Record<string, unknown> | null>(null);
   const entries = Object.entries(outputs);
@@ -1310,10 +1310,12 @@ export function BullpenAutoRunStageOutputDialog({
         import("./BullpenLlmBreakdownDialog"),
       ]);
 
-    setBreakdownDialogComponent(() => BullpenLlmBreakdownDialog);
+    setBreakdownDialogState({
+      Component: BullpenLlmBreakdownDialog as BreakdownDialogComponent,
+    });
     setBreakdownQuestion(createBullpenQuestionRow(seed) as Record<string, unknown>);
   };
-  const BreakdownDialog = breakdownDialogComponent;
+  const BreakdownDialog = breakdownDialogState?.Component ?? null;
 
   return (
     <>
