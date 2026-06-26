@@ -12,6 +12,8 @@ export type BullpenQuestion = {
   category: string;
   yesOdds: number | null;
   noOdds: number | null;
+  currentOddsUpdatedAt?: string | null;
+  investmentTableAddedAt?: string | null;
   volume: string | null;
   liquidity: string | null;
   sourceUrl: string;
@@ -1153,6 +1155,10 @@ export function createBullpenQuestionRow(
     rules: question.rules ?? null,
     marketContext: question.marketContext ?? null,
     resolutionSource: question.resolutionSource ?? null,
+    currentOddsUpdatedAt:
+      (question as Partial<BullpenQuestion>).currentOddsUpdatedAt ?? null,
+    investmentTableAddedAt:
+      (question as Partial<BullpenQuestion>).investmentTableAddedAt ?? null,
     llmYesOdds,
     llmNoOdds,
   } as BullpenQuestionRow;
@@ -1178,6 +1184,10 @@ export function createBullpenQuestionRow(
     rules: question.rules ?? null,
     marketContext: question.marketContext ?? null,
     resolutionSource: question.resolutionSource ?? null,
+    currentOddsUpdatedAt:
+      (question as Partial<BullpenQuestion>).currentOddsUpdatedAt ?? null,
+    investmentTableAddedAt:
+      (question as Partial<BullpenQuestion>).investmentTableAddedAt ?? null,
     llmYesOdds,
     llmNoOdds,
     llmAverageYesOdds:
@@ -1254,7 +1264,13 @@ export function createBullpenScanSnapshot(
     ...result,
     snapshotId,
     archivedAt: null,
-    questions: result.questions.map((question) => createBullpenQuestionRow(question)),
+    questions: result.questions.map((question) =>
+      createBullpenQuestionRow({
+        ...question,
+        currentOddsUpdatedAt: question.currentOddsUpdatedAt ?? result.scannedAt,
+        investmentTableAddedAt: question.investmentTableAddedAt ?? result.scannedAt,
+      }),
+    ),
   };
 }
 

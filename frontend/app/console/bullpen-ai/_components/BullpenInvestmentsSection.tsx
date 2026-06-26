@@ -185,6 +185,29 @@ function LlmTimestamp({ completedAt }: { completedAt: string | null }) {
   return <span>Last LLM: {formatIstTimestamp(completedAt)}</span>;
 }
 
+function CurrentOddsMetric({
+  yesOdds,
+  noOdds,
+  updatedAt,
+}: {
+  yesOdds: number | null;
+  noOdds: number | null;
+  updatedAt: string | null;
+}) {
+  return (
+    <MetricCard
+      label="Current Yes / No"
+      footer={<span>Updated: {formatIstTimestamp(updatedAt)}</span>}
+    >
+      <OddsPairValue
+        yesOdds={yesOdds}
+        noOdds={noOdds}
+        accentClassName="text-rose-700"
+      />
+    </MetricCard>
+  );
+}
+
 function LlmOddsMetric({
   question,
   onOpenBreakdown,
@@ -543,13 +566,11 @@ export function BullpenInvestmentsSection({
                     </div>
 
                     <div className="grid min-w-full gap-3 text-sm md:min-w-[36rem] md:grid-cols-4 xl:min-w-[44rem]">
-                      <MetricCard label="Current Yes / No">
-                        <OddsPairValue
-                          yesOdds={position.yesOdds}
-                          noOdds={position.noOdds}
-                          accentClassName="text-rose-700"
-                        />
-                      </MetricCard>
+                      <CurrentOddsMetric
+                        yesOdds={position.yesOdds}
+                        noOdds={position.noOdds}
+                        updatedAt={positionsLastUpdatedAt}
+                      />
                       <LlmOddsMetric
                         question={question}
                         onOpenBreakdown={setBreakdownQuestion}
@@ -628,6 +649,7 @@ export function BullpenInvestmentsSection({
                           <span>Close: {formatDate(question.closeTime)}</span>
                           <span>Category: {question.category || "—"}</span>
                           <span>Outcome: Buy {investOutcome}</span>
+                          <span>Added: {formatIstTimestamp(question.investmentTableAddedAt ?? null)}</span>
                         </div>
                         {question.marketUrl ? (
                           <a
@@ -644,13 +666,11 @@ export function BullpenInvestmentsSection({
                     </div>
 
                     <div className="grid min-w-full gap-3 text-sm md:min-w-[36rem] md:grid-cols-4 xl:min-w-[44rem]">
-                      <MetricCard label="Current Yes / No">
-                        <OddsPairValue
-                          yesOdds={question.yesOdds}
-                          noOdds={question.noOdds}
-                          accentClassName="text-rose-700"
-                        />
-                      </MetricCard>
+                      <CurrentOddsMetric
+                        yesOdds={question.yesOdds}
+                        noOdds={question.noOdds}
+                        updatedAt={question.currentOddsUpdatedAt ?? null}
+                      />
                       <LlmOddsMetric
                         question={question}
                         onOpenBreakdown={setBreakdownQuestion}
@@ -739,9 +759,11 @@ export function BullpenInvestmentsSection({
                         </div>
 
                         <div className="grid min-w-full gap-3 text-sm md:min-w-[36rem] md:grid-cols-4 xl:min-w-[44rem]">
-                          <MetricCard label="Current Yes / No">
-                            <OddsPairValue yesOdds={position.yesOdds} noOdds={position.noOdds} accentClassName="text-rose-700" />
-                          </MetricCard>
+                          <CurrentOddsMetric
+                            yesOdds={position.yesOdds}
+                            noOdds={position.noOdds}
+                            updatedAt={positionsLastUpdatedAt}
+                          />
                           <LlmOddsMetric question={question} onOpenBreakdown={setBreakdownQuestion} />
                           <MetricCard label="Returns/day">
                             <div className="font-semibold text-slate-900">{formatReturnsPerDay(position.returnsPerDay)}</div>
