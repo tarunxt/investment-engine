@@ -6,6 +6,7 @@ import {
   CalendarClock,
   Clock3,
   Loader2,
+  LogIn,
   LogOut,
   PauseCircle,
   PlayCircle,
@@ -320,6 +321,7 @@ export function BullpenAutoRunScheduleCard({
   const [scanCandidateDialog, setScanCandidateDialog] =
     useState<ScanCandidateDialogState | null>(null);
   const [openStageKey, setOpenStageKey] = useState<"scan" | "llm" | "invest" | null>(null);
+  const [openInputStageKey, setOpenInputStageKey] = useState<"llm" | "invest" | null>(null);
 
   async function loadSummary(options?: {
     preserveLoading?: boolean;
@@ -529,6 +531,7 @@ export function BullpenAutoRunScheduleCard({
     action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
   const openStage = workflowView.stages.find((stage) => stage.key === openStageKey) ?? null;
+  const openInputStage = workflowView.stages.find((stage) => stage.key === openInputStageKey) ?? null;
   const activeWorkflowStage =
     workflowView.stages.find((stage) => stage.isCurrent) ?? null;
   const displayNotice =
@@ -803,14 +806,28 @@ export function BullpenAutoRunScheduleCard({
           <div className="mt-3 grid gap-3 lg:grid-cols-3">
             {workflowView.stages.map((stage) => {
               const toneClasses = getWorkflowToneClasses(stage.tone);
+              const canOpenInputs =
+                (stage.key === "llm" || stage.key === "invest") &&
+                Object.keys(stage.inputs).length > 0;
 
               return (
                 <div
                   key={stage.key}
-                  className={`rounded-2xl border p-4 shadow-sm transition ${toneClasses.container}`}
+                  className={`relative rounded-2xl border p-4 shadow-sm transition ${toneClasses.container}`}
                 >
+                  {canOpenInputs ? (
+                    <button
+                      type="button"
+                      onClick={() => setOpenInputStageKey(stage.key as "llm" | "invest")}
+                      className={`absolute left-4 top-4 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white/75 transition hover:-translate-y-0.5 hover:bg-white ${toneClasses.badge}`}
+                      aria-label={`Open ${stage.title} inputs`}
+                      title="Input"
+                    >
+                      <LogIn className="h-5 w-5" />
+                    </button>
+                  ) : null}
                   <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
+                    <div className={`space-y-1 ${canOpenInputs ? "pl-12" : ""}`}>
                       <p className={`text-sm font-semibold ${toneClasses.text}`}>
                         {stage.title}
                       </p>
@@ -971,6 +988,17 @@ export function BullpenAutoRunScheduleCard({
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading auto-run status...
           </div>
+        ) : null}
+
+        {openInputStage ? (
+          <BullpenAutoRunStageOutputDialog
+            eyebrow="Stage Input"
+            stageTitle={openInputStage.title}
+            stageDetail={`Event inputs being fed into ${openInputStage.title}.`}
+            outputs={openInputStage.inputs}
+            outputLabel="Inputs"
+            onClose={() => setOpenInputStageKey(null)}
+          />
         ) : null}
 
         {openStage ? (
