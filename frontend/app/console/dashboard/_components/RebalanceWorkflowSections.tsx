@@ -174,6 +174,7 @@ type ZerodhaBasketOrderKind = "Market" | "Limit" | "After market";
 type ZerodhaBasketOrderPercent = number;
 const ZERODHA_KITE_PUBLISHER_BATCH_SIZE = 5;
 type ZerodhaBasketSubmission = {
+  executionMode: ZerodhaExecutionMode;
   redirected: number;
   basketCount: number;
   clipboardCopied: boolean;
@@ -708,7 +709,6 @@ const ZERODHA_BASKET_SECTION_LABELS: Partial<Record<ActionCategory, string>> = {
 };
 const ZERODHA_BASKET_INCREASING_SCORE_ACTIONS = new Set<ActionCategory>(["Sell All", "Trim"]);
 const ZERODHA_BASKET_DECREASING_SCORE_ACTIONS = new Set<ActionCategory>(["Add more", "Buy New"]);
-const ZERODHA_MARKET_INTENT_ACTIONS = new Set<ActionCategory>(["Buy New", "Add more", "Sell All", "Trim"]);
 const ZERODHA_DEFAULT_MARKET_PROTECTION = "-1";
 type ZerodhaExecutionMode = "direct_market" | "publisher_limit";
 const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
@@ -758,10 +758,9 @@ function getIndiaMarketStatus(now = new Date()) {
 
 function getZerodhaBasketOrderExecution(order: ZerodhaBasketPreviewOrder, marketOpen: boolean, executionMode: ZerodhaExecutionMode = "publisher_limit") {
   const variety = order.orderKind === "After market" || !marketOpen ? "amo" as const : "regular" as const;
-  const isMarketIntent = order.orderKind !== "Limit" && ZERODHA_MARKET_INTENT_ACTIONS.has(order.action);
 
   return {
-    orderType: executionMode === "direct_market" && isMarketIntent ? "MARKET" as const : "LIMIT" as const,
+    orderType: executionMode === "direct_market" ? "MARKET" as const : "LIMIT" as const,
     variety,
   };
 }
@@ -969,6 +968,19 @@ function formatBasketPercent(value: number) {
   }).format(normalized)}%`;
 }
 
+function formatZerodhaLtpRefreshTime(value: string | null) {
+  if (!value) return "Using latest synced portfolio snapshot prices";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Using recently refreshed live LTP";
+  return `Live LTP refreshed ${new Intl.DateTimeFormat("en-IN", {
+    timeZone: INDIA_TIMEZONE,
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).format(parsed)} IST`;
+}
+
 function getZerodhaBasketBaseUnits(action: ActionCategory, estimate: ActionEstimate) {
   if (action === "Sell All" || action === "Trim") {
     return estimate.currentUnits !== null && estimate.currentUnits > 0
@@ -1031,6 +1043,48 @@ function applyZerodhaBasketUnitDelta(
     amount,
     percent,
   };
+}
+
+function applyZerodhaBasketLivePricing(
+  order: ZerodhaBasketPreviewOrder,
+  price: number | null,
+  lastPrice: number | null,
+): ZerodhaBasketPreviewOrder {
+  const pricedOrder = {
+    ...order,
+    price,
+    lastPrice,
+  };
+  const units = clampZerodhaBasketUnits(order.units, getZerodhaBasketUnitLimit(pricedOrder));
+  const amount = calculateZerodhaBasketAmount(units, price);
+  const percent = calculateZerodhaBasketPercent(
+    order.side,
+    units,
+    amount,
+    order.side === "SELL" ? (order.currentUnits ?? order.baseUnits) : order.baseUnits,
+    order.availableBalance,
+  );
+
+  return {
+    ...pricedOrder,
+    action: order.side === "SELL" ? (percent >= 100 ? "Sell All" : "Trim") : order.action,
+    units,
+    amount,
+    percent,
+  };
+}
+
+function mergePreparedZerodhaBasketOrders(
+  currentOrders: ZerodhaBasketPreviewOrder[],
+  preparedOrders: ZerodhaBasketPreviewOrder[],
+) {
+  const preparedById = new Map(preparedOrders.map((order) => [order.id, order] as const));
+  return currentOrders.map((order) => {
+    const prepared = preparedById.get(order.id);
+    return prepared
+      ? applyZerodhaBasketLivePricing(order, prepared.price, prepared.lastPrice)
+      : order;
+  });
 }
 
 function getZerodhaBasketScore(order: ZerodhaBasketPreviewOrder) {
@@ -2851,7 +2905,12 @@ function ZerodhaBasketPreviewDialog({
   onUnitsChange,
   onPlaceOrder,
   placing,
+  directMarketAvailable,
   executionMode,
+  onExecutionModeChange,
+  onRefreshLtp,
+  ltpRefreshing,
+  ltpRefreshedAt,
   submission,
   detailsData,
   formulaConfig,
@@ -2871,7 +2930,12 @@ function ZerodhaBasketPreviewDialog({
   onUnitsChange: (id: string, delta: number) => void;
   onPlaceOrder: () => void;
   placing: boolean;
+  directMarketAvailable: boolean;
   executionMode: ZerodhaExecutionMode;
+  onExecutionModeChange: (mode: ZerodhaExecutionMode) => void;
+  onRefreshLtp: () => void;
+  ltpRefreshing: boolean;
+  ltpRefreshedAt: string | null;
   submission: ZerodhaBasketSubmission | null;
   detailsData: StockDetailsData;
   formulaConfig: ScoreMatrixFormulaConfig;
@@ -2890,6 +2954,7 @@ function ZerodhaBasketPreviewDialog({
     .reduce((sum, order) => sum + (order.amount ?? 0), 0);
   const allSelected = orders.length > 0 && orders.every((order) => selectedIds.has(order.id));
   const marketStatus = getIndiaMarketStatus();
+  const canUseDirectMarket = directMarketAvailable && marketStatus.open;
   const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
@@ -2898,7 +2963,7 @@ function ZerodhaBasketPreviewDialog({
       .sort(compareZerodhaBasketOrdersByScore),
   })).filter((group) => group.orders.length > 0);
 
-  const buttonText = executionMode === "direct_market" ? "Place protected MARKET" : "Open Kite protected LIMIT basket";
+  const buttonText = executionMode === "direct_market" ? "Place protected MARKET orders" : "Open Kite protected LIMIT basket";
   const busyText = executionMode === "direct_market" ? "Placing…" : "Opening…";
   const renderPlaceOrderButton = (className?: string) => (
     <Button
@@ -2937,7 +3002,7 @@ function ZerodhaBasketPreviewDialog({
               />
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, then use the Publisher-safe protected LIMIT basket by default; direct Kite Connect protected MARKET is shown only when the backend is explicitly enabled for a Kite-whitelisted egress IP.
+              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, use the Publisher-safe protected LIMIT basket by default, or switch to protected MARKET for all selected stocks when direct Kite Connect access is enabled on the backend during regular market hours.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -2958,19 +3023,21 @@ function ZerodhaBasketPreviewDialog({
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> Preparing Zerodha basket…
             </div>
-          ) : error ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-              {error}
-            </div>
           ) : orders.length ? (
             <>
+              {error ? (
+                <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                  {error}
+                </div>
+              ) : null}
+
               <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm font-semibold", marketStatus.open ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800")}>
                 {marketStatus.label}
               </div>
 
               {submission ? (
                 <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                  {executionMode === "direct_market" ? (
+                  {submission.executionMode === "direct_market" ? (
                     <>
                       Placed {submission.redirected} protected MARKET order{submission.redirected === 1 ? "" : "s"} through direct Kite Connect.
                     </>
@@ -2983,6 +3050,68 @@ function ZerodhaBasketPreviewDialog({
                   )}
                 </div>
               ) : null}
+
+              <div className="mb-5 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Execution Mode</div>
+                  <div className="mt-2 inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => onExecutionModeChange("publisher_limit")}
+                      className={cn(
+                        "rounded-full px-4 py-2 text-sm font-semibold transition",
+                        executionMode === "publisher_limit"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-600 hover:bg-slate-100",
+                      )}
+                    >
+                      Protected LIMIT basket
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => canUseDirectMarket && onExecutionModeChange("direct_market")}
+                      disabled={!canUseDirectMarket}
+                      className={cn(
+                        "rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50",
+                        executionMode === "direct_market"
+                          ? "bg-emerald-600 text-white shadow-sm"
+                          : "text-slate-600 hover:bg-slate-100",
+                      )}
+                    >
+                      Protected MARKET for selected stocks
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    {canUseDirectMarket
+                      ? "Protected MARKET submits all selected rows directly with market_protection=-1. Per-row order type selectors still control the LIMIT basket fallback."
+                      : directMarketAvailable
+                        ? "Protected MARKET becomes available only while NSE/BSE regular trading is open."
+                        : "Protected MARKET requires backend direct-order access from a Kite-whitelisted server egress IP."}
+                  </p>
+                </div>
+
+                <div className="flex flex-col items-start gap-2 lg:items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onRefreshLtp}
+                    disabled={!orders.length || ltpRefreshing || placing}
+                    className="rounded-full border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700"
+                  >
+                    {ltpRefreshing ? (
+                      <>
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                        Refreshing LTP…
+                      </>
+                    ) : (
+                      "Refresh LTP"
+                    )}
+                  </Button>
+                  <div className="text-xs text-slate-500">
+                    {formatZerodhaLtpRefreshTime(ltpRefreshedAt)}
+                  </div>
+                </div>
+              </div>
 
               <div className="mb-5 grid gap-3 md:grid-cols-3">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -3000,7 +3129,7 @@ function ZerodhaBasketPreviewDialog({
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <table className="min-w-[84rem] w-full text-sm">
+                <table className="min-w-[92rem] w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                       <th className="px-4 py-3 font-semibold">
@@ -3022,7 +3151,8 @@ function ZerodhaBasketPreviewDialog({
                       <th className="px-4 py-3 font-semibold">Side</th>
                       <th className="px-4 py-3 font-semibold">Units</th>
                       <th className="px-4 py-3 font-semibold">%</th>
-                      <th className="px-4 py-3 font-semibold">Price</th>
+                      <th className="px-4 py-3 font-semibold">LTP</th>
+                      <th className="px-4 py-3 font-semibold">Limit Price</th>
                       <th className="px-4 py-3 font-semibold">Amount</th>
                       <th className="px-4 py-3 font-semibold">Order Type</th>
                       <th className="px-4 py-3 font-semibold">Status</th>
@@ -3035,7 +3165,7 @@ function ZerodhaBasketPreviewDialog({
                       return (
                         <Fragment key={group.action}>
                           <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
-                            <td className="px-4 py-3" colSpan={12}>
+                            <td className="px-4 py-3" colSpan={13}>
                               <label className="inline-flex items-center gap-3 text-sm font-black">
                                 <input
                                   type="checkbox"
@@ -3135,6 +3265,7 @@ function ZerodhaBasketPreviewDialog({
                                   </span>
                                 )}
                               </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.lastPrice)}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price)}</td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount)}</td>
                               <td className="px-4 py-3">
@@ -3152,7 +3283,7 @@ function ZerodhaBasketPreviewDialog({
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
                                 {submission?.orders.some((submittedOrder) => submittedOrder.id === order.id) ? (
-                                  <span className="text-blue-700">{executionMode === "direct_market" ? "Submitted direct" : "Sent to protected LIMIT tray"}</span>
+                                  <span className="text-blue-700">{submission.executionMode === "direct_market" ? "Submitted direct" : "Sent to protected LIMIT tray"}</span>
                                 ) : (
                                   <span>Pending</span>
                                 )}
@@ -3167,17 +3298,23 @@ function ZerodhaBasketPreviewDialog({
               </div>
             </>
           ) : (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
-              No Sell All, Trim, Add more, or Buy New Zerodha actionables are available yet.
-            </div>
+            error ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {error}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
+                No Sell All, Trim, Add more, or Buy New Zerodha actionables are available yet.
+              </div>
+            )
           )}
         </div>
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {executionMode === "direct_market"
-              ? "Protected MARKET mode places selected market-intent rows through the backend using Kite Connect with market_protection=-1 after this explicit in-app confirmation. Access tokens never reach the browser."
-              : `Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. Market-intent rows are converted to LTP-buffered circuit-safe LIMIT prices; stale recommendation prices are never used as execution prices.`}
+              ? "Protected MARKET mode submits every selected stock through the backend using Kite Connect with market_protection=-1 during regular NSE/BSE hours. Access tokens never reach the browser."
+              : "Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. Each limit price is refreshed from the latest available LTP before basket submission, so stale recommendation prices are never used as execution prices."}
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
@@ -4962,6 +5099,9 @@ export function RebalanceWorkflowSections({
   const [zerodhaBasketError, setZerodhaBasketError] = useState<string | null>(null);
   const [zerodhaBasketOrders, setZerodhaBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
   const [zerodhaExecutionMode, setZerodhaExecutionMode] = useState<ZerodhaExecutionMode>("publisher_limit");
+  const [zerodhaDirectMarketAvailable, setZerodhaDirectMarketAvailable] = useState(false);
+  const [zerodhaBasketLtpRefreshing, setZerodhaBasketLtpRefreshing] = useState(false);
+  const [zerodhaBasketLtpRefreshedAt, setZerodhaBasketLtpRefreshedAt] = useState<string | null>(null);
   const [zerodhaBasketDetailsData, setZerodhaBasketDetailsData] = useState<StockDetailsData>({
     portfolioSnapshot: null,
     eventsAnalysis: null,
@@ -5073,11 +5213,20 @@ export function RebalanceWorkflowSections({
           zerodhaBasketDetailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null,
         );
         const previousBySymbol = new Map(currentOrders.map((order) => [order.symbol, order]));
-        return rebuiltOrders.map((order) => ({
-          ...order,
-          orderKind: previousBySymbol.get(order.symbol)?.orderKind ?? order.orderKind,
-        }));
+        return rebuiltOrders.map((order) => {
+          const previousOrder = previousBySymbol.get(order.symbol);
+          if (!previousOrder) return order;
+          return applyZerodhaBasketLivePricing(
+            {
+              ...order,
+              orderKind: previousOrder.orderKind,
+            },
+            previousOrder.price ?? order.price,
+            previousOrder.lastPrice ?? order.lastPrice,
+          );
+        });
       });
+      setZerodhaBasketSubmission(null);
       return next;
     });
   }, [zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen]);
@@ -5093,6 +5242,8 @@ export function RebalanceWorkflowSections({
     setZerodhaBasketLoading(true);
     setZerodhaBasketError(null);
     setZerodhaBasketSubmission(null);
+    setZerodhaBasketLtpRefreshedAt(null);
+    setZerodhaDirectMarketAvailable(false);
     try {
       const [runs, overview, status, login] = await Promise.all([
         fetchAllFullRuns(),
@@ -5100,11 +5251,15 @@ export function RebalanceWorkflowSections({
         apiService.zerodhaStatus(),
         apiService.zerodhaLoginUrl(),
       ]);
-      setZerodhaExecutionMode(
-        status.connected && login.configured && status.direct_market_orders_enabled && login.direct_market_orders_enabled
-          ? "direct_market"
-          : "publisher_limit",
+      setZerodhaDirectMarketAvailable(
+        Boolean(
+          status.connected
+            && login.configured
+            && status.direct_market_orders_enabled
+            && login.direct_market_orders_enabled,
+        ),
       );
+      setZerodhaExecutionMode("publisher_limit");
       const [eventsResult, threatsResult] = await Promise.allSettled([
         apiService.zerodhaEventsLatest(),
         apiService.zerodhaThreatsLatest(),
@@ -5130,6 +5285,7 @@ export function RebalanceWorkflowSections({
       setSelectedZerodhaBasketIds(new Set(orders.map((order) => order.id)));
     } catch (error) {
       setZerodhaBasketOrders([]);
+      setZerodhaDirectMarketAvailable(false);
       setZerodhaBasketDetailsData((current) => ({
         ...current,
         error: normalizeError(error),
@@ -5178,6 +5334,7 @@ export function RebalanceWorkflowSections({
 
   const updateZerodhaBasketOrderKind = useCallback(
     (id: string, orderKind: ZerodhaBasketOrderKind) => {
+      setZerodhaBasketSubmission(null);
       setZerodhaBasketOrders((current) =>
         current.map((order) => (order.id === id ? { ...order, orderKind } : order)),
       );
@@ -5187,6 +5344,7 @@ export function RebalanceWorkflowSections({
 
   const updateZerodhaBasketPercent = useCallback(
     (id: string, percent: ZerodhaBasketOrderPercent) => {
+      setZerodhaBasketSubmission(null);
       setZerodhaBasketOrders((current) =>
         current.map((order) => (order.id === id ? applyZerodhaBasketPercent(order, percent) : order)),
       );
@@ -5196,12 +5354,35 @@ export function RebalanceWorkflowSections({
 
   const updateZerodhaBasketUnits = useCallback(
     (id: string, delta: number) => {
+      setZerodhaBasketSubmission(null);
       setZerodhaBasketOrders((current) =>
         current.map((order) => (order.id === id ? applyZerodhaBasketUnitDelta(order, delta) : order)),
       );
     },
     [],
   );
+
+  const refreshZerodhaBasketLtp = useCallback(async () => {
+    if (!zerodhaBasketOrders.length) return;
+    setZerodhaBasketLtpRefreshing(true);
+    setZerodhaBasketSubmission(null);
+    setZerodhaBasketError(null);
+    try {
+      const preparedOrders = await prepareZerodhaBasketOrdersForKite(zerodhaBasketOrders);
+      setZerodhaBasketOrders((current) => mergePreparedZerodhaBasketOrders(current, preparedOrders));
+      setZerodhaBasketLtpRefreshedAt(new Date().toISOString());
+    } catch (error) {
+      setZerodhaBasketError(`Could not refresh live LTP: ${normalizeError(error)}`);
+    } finally {
+      setZerodhaBasketLtpRefreshing(false);
+    }
+  }, [zerodhaBasketOrders]);
+
+  const changeZerodhaExecutionMode = useCallback((mode: ZerodhaExecutionMode) => {
+    setZerodhaExecutionMode(mode);
+    setZerodhaBasketSubmission(null);
+    setZerodhaBasketError(null);
+  }, []);
 
   const placeSelectedZerodhaBasketOrders = useCallback(async () => {
     const selectedOrders = zerodhaBasketOrders
@@ -5227,6 +5408,11 @@ ${zerodhaExecutionMode === "direct_market"
     setZerodhaBasketError(null);
 
     if (zerodhaExecutionMode === "direct_market") {
+      if (!marketStatus.open) {
+        setZerodhaBasketPlacing(false);
+        setZerodhaBasketError("Protected MARKET orders are available only during regular NSE/BSE trading hours. Switch back to the protected LIMIT basket after market close.");
+        return;
+      }
       try {
         const response = await apiService.zerodhaPlaceProtectedMarketOrders({
           orders: selectedOrders.map((order) => ({
@@ -5241,6 +5427,7 @@ ${zerodhaExecutionMode === "direct_market"
         });
         const failed = response.results.filter((result) => result.status === "failed");
         setZerodhaBasketSubmission({
+          executionMode: "direct_market",
           redirected: response.placed_count,
           basketCount: 0,
           clipboardCopied: false,
@@ -5285,6 +5472,8 @@ ${zerodhaExecutionMode === "direct_market"
       }
 
       const preparedOrders = await prepareZerodhaBasketOrdersForKite(selectedOrders);
+      setZerodhaBasketOrders((current) => mergePreparedZerodhaBasketOrders(current, preparedOrders));
+      setZerodhaBasketLtpRefreshedAt(new Date().toISOString());
       const preparedChunks = chunkZerodhaBasketOrders(preparedOrders);
 
       let clipboardCopied = false;
@@ -5299,6 +5488,7 @@ ${zerodhaExecutionMode === "direct_market"
       });
 
       setZerodhaBasketSubmission({
+        executionMode: "publisher_limit",
         redirected: preparedOrders.length,
         basketCount: preparedChunks.length,
         clipboardCopied,
@@ -7348,7 +7538,12 @@ ${zerodhaExecutionMode === "direct_market"
         onUnitsChange={updateZerodhaBasketUnits}
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
         placing={zerodhaBasketPlacing}
+        directMarketAvailable={zerodhaDirectMarketAvailable}
         executionMode={zerodhaExecutionMode}
+        onExecutionModeChange={changeZerodhaExecutionMode}
+        onRefreshLtp={refreshZerodhaBasketLtp}
+        ltpRefreshing={zerodhaBasketLtpRefreshing}
+        ltpRefreshedAt={zerodhaBasketLtpRefreshedAt}
         submission={zerodhaBasketSubmission}
         detailsData={zerodhaBasketDetailsData}
         formulaConfig={scoreMatrixFormulaConfig}
