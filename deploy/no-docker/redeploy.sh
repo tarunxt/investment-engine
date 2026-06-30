@@ -156,6 +156,9 @@ WORKER_SERVICE_NAME="$(
 BEAT_SERVICE_NAME="$(
   resolve_systemd_service_name "investor-celery-beat" "investment-engine-celery-beat"
 )"
+BEAT_WORKER_SERVICE_NAME="$(
+  resolve_systemd_service_name "investor-celery-beat-worker" "investment-engine-celery-beat-worker"
+)"
 FRONTEND_SERVICE_NAME="$(
   resolve_systemd_service_name "investor-frontend" "investment-engine-frontend"
 )"
