@@ -24,7 +24,7 @@ Remove any Zoho Sites records for website hosting, especially a `www` CNAME to Z
 
 ## Production environment values
 
-For the no-Docker production deployment, set these values in `/etc/investment-engine/frontend.env`:
+For the no-Docker production deployment, set these values in `/etc/investor/frontend.env`:
 
 ```bash
 NODE_ENV=production
@@ -35,7 +35,7 @@ NEXTAUTH_SECRET=<generate-strong-secret>
 AUTH_TRUST_HOST=true
 ```
 
-Set these domain values in `/etc/investment-engine/backend.env`:
+Set these domain values in `/etc/investor/backend.env`:
 
 ```bash
 FRONTEND_URL=https://alkraj.com
@@ -110,5 +110,5 @@ Expected results:
 1. If `www.alkraj.com` still shows Zoho, DNS for `www` still points to Zoho or browser/ISP DNS cache has not expired.
 2. If `alkraj.com` works but `www.alkraj.com` does not, confirm the `www` A record and the certificate covering `www.alkraj.com`.
 3. If the frontend loads but API calls fail, confirm `NEXT_PUBLIC_API_URL=https://api.alkraj.com`, `api.alkraj.com` DNS, and the backend service health.
-4. If Google OAuth fails, update the Google Cloud OAuth redirect URI to `https://alkraj.com/console/google-sheets/callback` and match `/etc/investment-engine/backend.env`.
+4. If Google OAuth fails, update the Google Cloud OAuth redirect URI to `https://alkraj.com/console/google-sheets/callback` and match `/etc/investor/backend.env`.
 5. If nginx fails to reload, run `sudo nginx -t` and fix the exact certificate or config path reported.

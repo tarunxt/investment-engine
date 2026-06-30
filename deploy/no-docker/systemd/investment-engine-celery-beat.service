@@ -8,7 +8,7 @@ Type=simple
 User=investment-engine
 Group=investment-engine
 WorkingDirectory=/srv/investment-engine/backend
-EnvironmentFile=/etc/investment-engine/backend.env
+EnvironmentFile=/etc/investor/backend.env
 ExecStart=/srv/investment-engine/backend/.venv/bin/celery -A app.infrastructure.messaging.celery_app beat --loglevel=info
 Restart=always
 RestartSec=5

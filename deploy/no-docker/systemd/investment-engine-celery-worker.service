@@ -8,7 +8,7 @@ Type=simple
 User=investment-engine
 Group=investment-engine
 WorkingDirectory=/srv/investment-engine/backend
-EnvironmentFile=/etc/investment-engine/backend.env
+EnvironmentFile=/etc/investor/backend.env
 ExecStart=/srv/investment-engine/backend/.venv/bin/celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=info --concurrency=4 --max-tasks-per-child=1000
 Restart=always
 RestartSec=5
