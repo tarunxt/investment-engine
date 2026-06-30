@@ -30,6 +30,12 @@ import {
   type SetupRow,
 } from "@/lib/technicalSetups";
 import { STANDARD_ACTION_ORDER, getStandardActionBadgeClass } from "@/lib/actionColorScheme";
+import {
+  calculateWeightedRationaleScore,
+  getScoreMatrixRowOutOfBoundsDenominatorWeight,
+  isScoreMatrixRowOutOfBounds,
+  type ScoreMatrixWeightedRow,
+} from "@/lib/scoreMatrixMath";
 import { getAutoRebalanceRunDisplayLabel } from "@/lib/runPresentation";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
@@ -135,19 +141,10 @@ type ScoreMatrixRuleEvaluation = {
   matched: boolean;
 };
 
-type DetailedRationaleScoreRow = {
+type DetailedRationaleScoreRow = ScoreMatrixWeightedRow & {
   id: string;
   parameter: string;
-  score: number | null;
-  multiplier: number;
-  denominatorWeight?: number;
   missingReason?: string;
-  validationRule?: {
-    min?: number;
-    max?: number;
-    integerOnly?: boolean;
-    actualValue?: number | null;
-  };
 };
 
 type ScoreMatrixValidationIssue = {
@@ -1319,8 +1316,27 @@ function getDetailedRationaleRowRangeIssue(row: DetailedRationaleScoreRow): Scor
   };
 }
 
+function getDetailedRationaleIgnoredCalculationMessage(row: DetailedRationaleScoreRow) {
+  if (!isScoreMatrixRowOutOfBounds(row) || row.multiplier === 0) return "";
+
+  const denominatorReduction = getScoreMatrixRowOutOfBoundsDenominatorWeight(row);
+  if (denominatorReduction > 0) {
+    return ` Ignored in final score calculation; multiplier treated as 0 and denominator reduced by ${formatScoreValue(denominatorReduction)}.`;
+  }
+
+  return " Ignored in final score calculation; multiplier treated as 0 and denominator is unchanged.";
+}
+
 function getDetailedRationaleRowIssue(row: DetailedRationaleScoreRow): ScoreMatrixValidationIssue | null {
-  return getDetailedRationaleRowRangeIssue(row) ?? (
+  const rangeIssue = getDetailedRationaleRowRangeIssue(row);
+  if (rangeIssue) {
+    return {
+      ...rangeIssue,
+      message: `${rangeIssue.message}${getDetailedRationaleIgnoredCalculationMessage(row)}`.trim(),
+    };
+  }
+
+  return (
     row.missingReason
       ? {
         id: row.id,
@@ -1337,8 +1353,11 @@ export function getScoreMatrixValidationSummary(detail: ScoreMatrixDetail): Scor
   const finalScoreOutOfRange = rawScore !== null
     && (rawScore < SCORE_GUARDRAIL_MIN || rawScore > SCORE_GUARDRAIL_MAX);
   const rangeIssues = detail.detailedRationaleRows
-    .map(getDetailedRationaleRowRangeIssue)
-    .filter((issue): issue is ScoreMatrixValidationIssue => issue !== null);
+    .flatMap((row) => {
+      const rangeIssue = getDetailedRationaleRowRangeIssue(row);
+      if (!rangeIssue) return [];
+      return [getDetailedRationaleRowIssue(row) ?? rangeIssue];
+    });
   const parameterIssues = detail.detailedRationaleRows
     .map(getDetailedRationaleRowIssue)
     .filter((issue): issue is ScoreMatrixValidationIssue => issue !== null);
@@ -1572,26 +1591,6 @@ function getAverageRationaleScoreCell(rows: LlmBreakupRow[], header: RebalanceHe
   );
 }
 
-function calculateWeightedRationaleScore(
-  rows: DetailedRationaleScoreRow[],
-  denominatorOverride?: number | null,
-) {
-  const weightedRows = rows.filter((row) => row.multiplier !== 0);
-  const defaultDenominator = weightedRows.reduce(
-    (sum, row) => sum + (row.denominatorWeight ?? Math.abs(row.multiplier)),
-    0,
-  );
-  const denominator = denominatorOverride !== undefined && denominatorOverride !== null
-    ? denominatorOverride
-    : defaultDenominator;
-  if (!denominator) return { finalScore: null, denominator };
-  const numerator = weightedRows.reduce(
-    (sum, row) => sum + (row.score ?? 0) * row.multiplier,
-    0,
-  );
-  return { finalScore: numerator / denominator, denominator };
-}
-
 function getTechnicalScanScoreMultiplier(
   technicalScan: TechnicalScanResult | null,
   row: CanonicalRow,
@@ -1730,6 +1729,7 @@ function buildDetailedRationaleScoreRows(
       score: technicalScan ? technicalConfidenceScore : null,
       multiplier: effectiveTechnicalConfidenceMultiplier,
       denominatorWeight: effectiveTechnicalConfidenceMultiplier === 0 ? 0 : 2,
+      outOfBoundsDenominatorWeight: effectiveTechnicalConfidenceMultiplier === 0 ? 0 : 3,
       missingReason: missingTechnicalScanReason || (technicalConfidenceScore === null ? `Technical Scan row was matched, but Confidence Score was empty or non-numeric: ${technicalConfidenceValue || "blank"}.` : undefined),
       validationRule: {
         min: TECHNICAL_SCAN_CONFIDENCE_MIN,
@@ -4106,6 +4106,7 @@ function DetailedRationaleScoreSection({
 
   const renderRow = (row: DetailedRationaleScoreRow) => {
     const rangeIssue = getDetailedRationaleRowRangeIssue(row);
+    const rowIssue = getDetailedRationaleRowIssue(row);
 
     return (
       <tr key={row.id} className={cn(rangeIssue ? "bg-rose-50/60" : "")}>
@@ -4127,7 +4128,7 @@ function DetailedRationaleScoreSection({
           ) : null}
           {rangeIssue ? (
             <p className="mt-1 max-w-2xl text-xs leading-5 text-rose-700">
-              Inconsistency: {rangeIssue.message}
+              Inconsistency: {rowIssue?.message ?? rangeIssue.message}
             </p>
           ) : null}
         </td>

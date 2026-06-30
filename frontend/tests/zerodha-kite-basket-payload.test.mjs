@@ -13,9 +13,12 @@ assert.match(source, /Protected MARKET for selected stocks/);
 assert.match(source, /Refresh LTP/);
 assert.match(source, /Quoted LTP refreshed/);
 assert.match(source, /Quoted LTP/);
+assert.match(source, /Buy Threshold/);
+assert.match(source, /Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold/);
 assert.match(source, /Publisher-safe fallback uses \/connect\/basket only for protected LIMIT orders/);
 assert.match(source, /Each limit price mirrors the latest available quoted LTP before basket submission/);
 assert.match(source, /Any Kite basket tabs already opened keep showing Zerodha/);
+assert.doesNotMatch(source, /Sell All, Trim, Buy New, and Buy More actionables are pre-selected/);
 assert.doesNotMatch(source, /Market with Zerodha auto protection/);
 
 const MARKET_INTENT_ACTIONS = new Set(["Buy New", "Add more", "Sell All", "Trim"]);

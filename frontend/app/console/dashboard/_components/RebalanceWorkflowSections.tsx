@@ -59,6 +59,12 @@ import {
   getSwingTradeDefaultInvestmentAmount,
   type SwingTradeMarket,
 } from "@/lib/swingTrade";
+import {
+  DEFAULT_ZERODHA_BUY_THRESHOLD,
+  buildDefaultZerodhaBasketSelection,
+  syncZerodhaBasketBuySelection,
+  type ZerodhaBasketSelectableOrder,
+} from "@/lib/zerodhaBasketSelection";
 import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import { APIError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
@@ -1090,6 +1096,16 @@ function mergePreparedZerodhaBasketOrders(
 
 function getZerodhaBasketScore(order: ZerodhaBasketPreviewOrder) {
   return order.detail.calculatedScore;
+}
+
+function getZerodhaBasketSelectableOrders(
+  orders: ZerodhaBasketPreviewOrder[],
+): ZerodhaBasketSelectableOrder[] {
+  return orders.map((order) => ({
+    id: order.id,
+    side: order.side,
+    score: getZerodhaBasketScore(order),
+  }));
 }
 
 function formatZerodhaBasketScore(value: number | null) {
@@ -2943,6 +2959,9 @@ function ZerodhaBasketPreviewDialog({
   detailsData,
   formulaConfig,
   onFormulaConfigChange,
+  buyThreshold,
+  buyThresholdDraft,
+  onBuyThresholdDraftChange,
 }: {
   open: boolean;
   loading: boolean;
@@ -2968,6 +2987,9 @@ function ZerodhaBasketPreviewDialog({
   detailsData: StockDetailsData;
   formulaConfig: ScoreMatrixFormulaConfig;
   onFormulaConfigChange: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
+  buyThreshold: number;
+  buyThresholdDraft: string;
+  onBuyThresholdDraftChange: (value: string) => void;
 }) {
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
 
@@ -3030,7 +3052,7 @@ function ZerodhaBasketPreviewDialog({
               />
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.
+              Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -3144,7 +3166,7 @@ function ZerodhaBasketPreviewDialog({
                 </div>
               </div>
 
-              <div className="mb-5 grid gap-3 md:grid-cols-3">
+              <div className="mb-5 grid gap-3 md:grid-cols-4">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Selected Orders</div>
                   <div className="mt-2 text-2xl font-black text-slate-950">{selectedOrders.length}/{orders.length}</div>
@@ -3156,6 +3178,23 @@ function ZerodhaBasketPreviewDialog({
                 <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
                   <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedSellAmount)}</div>
+                </div>
+                <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                  <label className="block text-xs font-bold uppercase tracking-wide text-blue-700" htmlFor="zerodha-buy-threshold">
+                    Buy Threshold
+                  </label>
+                  <input
+                    id="zerodha-buy-threshold"
+                    type="number"
+                    step="0.01"
+                    value={buyThresholdDraft}
+                    onChange={(event) => onBuyThresholdDraftChange(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-lg font-black text-slate-950 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    aria-label="Buy-side auto-select final score threshold"
+                  />
+                  <p className="mt-2 text-xs leading-5 text-blue-800">
+                    Buy New and Buy More rows stay selected only when Final Score is greater than {buyThreshold.toFixed(2)}.
+                  </p>
                 </div>
               </div>
 
@@ -5142,6 +5181,10 @@ export function RebalanceWorkflowSections({
     error: null,
   });
   const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
+  const [zerodhaBasketBuyThreshold, setZerodhaBasketBuyThreshold] = useState(DEFAULT_ZERODHA_BUY_THRESHOLD);
+  const [zerodhaBasketBuyThresholdDraft, setZerodhaBasketBuyThresholdDraft] = useState(
+    DEFAULT_ZERODHA_BUY_THRESHOLD.toFixed(2),
+  );
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const activeExecutionRefsRef = useRef<Array<{ kind: "run" | "job"; id: number }>>([]);
   const cancelRequestedRef = useRef(false);
@@ -5221,8 +5264,8 @@ export function RebalanceWorkflowSections({
   const handleScoreMatrixFormulaConfigChange = useCallback((updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => {
     setScoreMatrixFormulaConfig((current) => {
       const next = updater(current);
-      setZerodhaBasketOrders((currentOrders) => {
-        if (!zerodhaBasketOpen || currentOrders.length === 0) return currentOrders;
+      if (zerodhaBasketOpen && zerodhaBasketOrders.length > 0) {
+        const currentOrders = zerodhaBasketOrders;
 
         const stocksByKey = new Map<string, StockConsensus>();
         const technicalScansBySymbol: Record<string, TechnicalScanResult> = {};
@@ -5246,7 +5289,7 @@ export function RebalanceWorkflowSections({
           zerodhaBasketDetailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null,
         );
         const previousBySymbol = new Map(currentOrders.map((order) => [order.symbol, order]));
-        return rebuiltOrders.map((order) => {
+        const nextOrders = rebuiltOrders.map((order) => {
           const previousOrder = previousBySymbol.get(order.symbol);
           if (!previousOrder) return order;
           return applyZerodhaBasketLivePricing(
@@ -5258,11 +5301,18 @@ export function RebalanceWorkflowSections({
             previousOrder.lastPrice ?? order.lastPrice,
           );
         });
-      });
+        setZerodhaBasketOrders(nextOrders);
+        setSelectedZerodhaBasketIds(
+          buildDefaultZerodhaBasketSelection(
+            getZerodhaBasketSelectableOrders(nextOrders),
+            zerodhaBasketBuyThreshold,
+          ),
+        );
+      }
       setZerodhaBasketSubmission(null);
       return next;
     });
-  }, [zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen]);
+  }, [zerodhaBasketBuyThreshold, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen, zerodhaBasketOrders]);
 
   const closeAutoRebalanceCostHistory = useCallback(() => {
     setCostHistoryPortfolio(null);
@@ -5316,7 +5366,12 @@ export function RebalanceWorkflowSections({
         error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
       });
       setZerodhaBasketOrders(orders);
-      setSelectedZerodhaBasketIds(new Set(orders.map((order) => order.id)));
+      setSelectedZerodhaBasketIds(
+        buildDefaultZerodhaBasketSelection(
+          getZerodhaBasketSelectableOrders(orders),
+          zerodhaBasketBuyThreshold,
+        ),
+      );
     } catch (error) {
       setZerodhaBasketOrders([]);
       setZerodhaDirectMarketAvailable(false);
@@ -5329,7 +5384,26 @@ export function RebalanceWorkflowSections({
     } finally {
       setZerodhaBasketLoading(false);
     }
-  }, [scoreMatrixFormulaConfig]);
+  }, [scoreMatrixFormulaConfig, zerodhaBasketBuyThreshold]);
+
+  const updateZerodhaBasketBuyThresholdDraft = useCallback((value: string) => {
+    setZerodhaBasketBuyThresholdDraft(value);
+    const trimmedValue = value.trim();
+    if (!trimmedValue) return;
+
+    const parsed = Number(trimmedValue);
+    if (!Number.isFinite(parsed)) return;
+
+    setZerodhaBasketBuyThreshold(parsed);
+    setZerodhaBasketSubmission(null);
+    setSelectedZerodhaBasketIds((current) =>
+      syncZerodhaBasketBuySelection(
+        current,
+        getZerodhaBasketSelectableOrders(zerodhaBasketOrders),
+        parsed,
+      ),
+    );
+  }, [zerodhaBasketOrders]);
 
   const toggleZerodhaBasketOrder = useCallback((id: string) => {
     setSelectedZerodhaBasketIds((current) => {
@@ -7586,6 +7660,9 @@ ${zerodhaExecutionMode === "direct_market"
         detailsData={zerodhaBasketDetailsData}
         formulaConfig={scoreMatrixFormulaConfig}
         onFormulaConfigChange={handleScoreMatrixFormulaConfigChange}
+        buyThreshold={zerodhaBasketBuyThreshold}
+        buyThresholdDraft={zerodhaBasketBuyThresholdDraft}
+        onBuyThresholdDraftChange={updateZerodhaBasketBuyThresholdDraft}
       />
 
       {promptDialog ? (
