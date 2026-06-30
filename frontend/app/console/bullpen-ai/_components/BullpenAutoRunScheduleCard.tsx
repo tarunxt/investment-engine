@@ -38,6 +38,7 @@ import {
   type BullpenStage3AlreadyInvestedRecord,
   selectBullpenStage3OnlyInvestSource,
 } from "./bullpenAutoRunStage3Invest";
+import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
 import { formatElapsedRunTime, formatStageElapsedTime } from "./bullpenAutoRunTimers";
 
@@ -292,6 +293,16 @@ function getInvestStageExecutionStatus(
   stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
 ) {
   if (stage.key !== "invest") return null;
+
+  const immediateSuccess = getInvestStageImmediateSuccess(stage);
+  if (immediateSuccess) {
+    return {
+      label: "Execution complete",
+      message: immediateSuccess.message,
+      className: "border-emerald-200 bg-emerald-50/80 text-emerald-900",
+      detailClassName: "text-emerald-800",
+    };
+  }
 
   const executionGateReason = readStageOutputString(stage.outputs.execution_gate_reason);
   if (executionGateReason) {
@@ -1171,6 +1182,10 @@ export function BullpenAutoRunScheduleCard({
     workflowView.stages.find((stage) => stage.isCurrent) ?? null;
   const investWorkflowStage =
     workflowView.stages.find((stage) => stage.key === "invest") ?? null;
+  const investStageImmediateSuccess =
+    workflowRun?.status === "running"
+      ? getInvestStageImmediateSuccess(investWorkflowStage)
+      : null;
   const workflowDecisionCount =
     workflowRun !== null
       ? getInvestStageMetric(
@@ -1195,7 +1210,10 @@ export function BullpenAutoRunScheduleCard({
           workflowRun.orders_submitted,
         )
       : null;
+  const investOnlyActionCompleted =
+    action === "invest-now" && Boolean(investStageImmediateSuccess);
   const displayNotice =
+    investStageImmediateSuccess?.message ??
     notice ??
     (workflowRun?.status === "running"
       ? activeWorkflowStage?.detail ?? workflowView.statusCopy
@@ -1533,12 +1551,24 @@ export function BullpenAutoRunScheduleCard({
 
           <div className="mt-3 grid gap-3 lg:grid-cols-3">
             {workflowView.stages.map((stage) => {
-              const toneClasses = getWorkflowToneClasses(stage.tone);
+              const immediateSuccess = getInvestStageImmediateSuccess(stage);
+              const toneClasses = getWorkflowToneClasses(
+                immediateSuccess ? "green" : stage.tone,
+              );
               const canOpenInputs =
                 (stage.key === "llm" || stage.key === "invest") &&
                 Object.keys(stage.inputs).length > 0;
               const investStageCounters = getInvestStageCounters(stage);
               const investExecutionStatus = getInvestStageExecutionStatus(stage);
+              const stageStatusLabel = immediateSuccess
+                ? "Finished"
+                : stage.state === "current"
+                  ? "Working"
+                  : stage.state === "finished"
+                    ? "Finished"
+                    : "In Queue";
+              const stageProgressPercent = immediateSuccess ? 100 : stage.progressPercent;
+              const showStageSpinner = stage.isCurrent && !immediateSuccess;
 
               return (
                 <div
@@ -1569,11 +1599,7 @@ export function BullpenAutoRunScheduleCard({
                       <span
                         className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
                       >
-                        {stage.state === "current"
-                          ? "Working"
-                          : stage.state === "finished"
-                            ? "Finished"
-                            : "In Queue"}
+                        {stageStatusLabel}
                       </span>
                       <span
                         className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}
@@ -1674,12 +1700,19 @@ export function BullpenAutoRunScheduleCard({
                         }}
                         disabled={Boolean(investOnlyDisabledReason) || action !== null}
                         className={`inline-flex w-full items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition ${
-                          investOnlyDisabledReason || action !== null
+                          investOnlyActionCompleted
+                            ? "cursor-default border-emerald-200 bg-emerald-50 text-emerald-900"
+                            : investOnlyDisabledReason || action !== null
                             ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
                             : "border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
                         }`}
                       >
-                        {action === "invest-now" ? (
+                        {investOnlyActionCompleted ? (
+                          <>
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                            Invested
+                          </>
+                        ) : action === "invest-now" ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             Investing...
@@ -1741,7 +1774,7 @@ export function BullpenAutoRunScheduleCard({
                   <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
                     <div
                       className={`h-full rounded-full ${toneClasses.progress}`}
-                      style={{ width: `${stage.progressPercent}%` }}
+                      style={{ width: `${stageProgressPercent}%` }}
                     />
                   </div>
 
@@ -1749,7 +1782,7 @@ export function BullpenAutoRunScheduleCard({
                     <p className={`text-xs font-semibold ${toneClasses.text}`}>
                       {stage.progressLabel}
                     </p>
-                    {stage.isCurrent ? (
+                    {showStageSpinner ? (
                       <Loader2 className={`h-4 w-4 animate-spin ${toneClasses.text}`} />
                     ) : null}
                   </div>

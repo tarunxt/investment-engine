@@ -567,8 +567,18 @@ test("Stage 3 schedule card keeps the Invest button and reuse copy inside the ca
     ),
     "utf8",
   );
+  const statusSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/bullpenAutoRunStageStatus.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
 
   assert.match(source, />\s*Invest\s*</);
+  assert.match(source, /getInvestStageImmediateSuccess/);
+  assert.match(source, />\s*Invested\s*</);
+  assert.match(statusSource, /Investment complete\./);
   assert.match(source, /latest Stage 2-qualified rows/);
   assert.match(source, /skips the Bullpen rescan plus LLM rerun/);
   assert.match(source, /already invested and will be skipped/);
