@@ -2855,6 +2855,8 @@ export default function BullpenAiPage() {
 
       <BullpenAutoRunScheduleCard
         buildRunNowRequest={buildRunNowRequest}
+        activePositions={openActivePositions}
+        hasActivePositionsSnapshot={Boolean(positionsLastUpdatedAt)}
         onSummaryUpdated={({ summary, run }) => {
           setSnapshotsByMode((current) =>
             syncBullpenAutoRunSummarySnapshots({

@@ -5,6 +5,7 @@ import type {
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
 } from "@/types/api";
+import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 
 export type BullpenStage3OnlyInvestPlan = {
   request: BullpenAutoLiveRunOnceRequest | null;
@@ -17,10 +18,24 @@ export type BullpenStage3OnlyInvestSource = {
   plan: BullpenStage3OnlyInvestPlan;
 };
 
+export type BullpenStage3AlreadyInvestedSource =
+  | "live-position"
+  | "saved-run-position"
+  | "submitted-buy";
+
+export type BullpenStage3AlreadyInvestedRecord = {
+  marketId: string;
+  timestamp: string | null;
+  reason: string | null;
+  source: BullpenStage3AlreadyInvestedSource;
+};
+
 export type BullpenStage3OnlyInvestCandidatePreview = {
   candidate: BullpenAutoLiveConsoleCandidateInput;
   status: "ready" | "already-invested";
   reason: string | null;
+  investedAt: string | null;
+  investedSource: BullpenStage3AlreadyInvestedSource | null;
 };
 
 export type BullpenStage3OnlyInvestExecutionPlan = {
@@ -29,8 +44,14 @@ export type BullpenStage3OnlyInvestExecutionPlan = {
   readyCandidateCount: number;
   alreadyInvestedCandidateCount: number;
   alreadyInvestedMarketIds: string[];
+  alreadyInvestedRecords: BullpenStage3AlreadyInvestedRecord[];
   candidatePreviews: BullpenStage3OnlyInvestCandidatePreview[];
   blockedReason: string | null;
+};
+
+export type BullpenStage3OnlyInvestExecutionPlanOptions = {
+  activePositions?: BullpenActivePositionView[];
+  hasActivePositionsSnapshot?: boolean;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -266,7 +287,9 @@ export function buildBullpenStage3OnlyInvestPlan(
   };
 }
 
-function buildActivePositionMarketIdSet(run: BullpenAutoLiveRun | null): Set<string> {
+function buildSavedRunActivePositionMarketIdSet(
+  run: BullpenAutoLiveRun | null,
+): Set<string> {
   if (!run) return new Set<string>();
 
   const scanOutputs = workflowStageOutputs(run, "scan");
@@ -275,6 +298,17 @@ function buildActivePositionMarketIdSet(run: BullpenAutoLiveRun | null): Set<str
     .map((record) => readString(record?.market_id))
     .filter((marketId): marketId is string => Boolean(marketId));
   return new Set(marketIds);
+}
+
+function buildLiveActivePositionMarketIdSet(
+  activePositions: BullpenActivePositionView[],
+): Set<string> {
+  return new Set(
+    activePositions
+      .filter((position) => !position.isClaimable)
+      .map((position) => readString(position.marketId))
+      .filter((marketId): marketId is string => Boolean(marketId)),
+  );
 }
 
 function buildSubmittedBuyMarketIdSet(
@@ -295,9 +329,54 @@ function buildSubmittedBuyMarketIdSet(
   return new Set(marketIds);
 }
 
+function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision): string | null {
+  return (
+    readString(decision.order_plan?.executed_at) ??
+    readString(decision.updated_at) ??
+    readString(decision.created_at)
+  );
+}
+
+function buildLatestSubmittedBuyTimestampLookup(
+  decisions: BullpenAutoLiveDecision[],
+): Map<string, string> {
+  const lookup = new Map<string, string>();
+
+  for (const decision of decisions) {
+    if (
+      decision.order_plan?.status !== "submitted" ||
+      decision.order_plan.action !== "buy"
+    ) {
+      continue;
+    }
+
+    const marketId = readString(decision.market_id);
+    const timestamp = readDecisionExecutionTimestamp(decision);
+    if (!marketId || !timestamp) {
+      continue;
+    }
+
+    const current = lookup.get(marketId);
+    const currentMs = current ? Date.parse(current) : Number.NaN;
+    const nextMs = Date.parse(timestamp);
+
+    if (!current) {
+      lookup.set(marketId, timestamp);
+      continue;
+    }
+
+    if (Number.isFinite(nextMs) && (!Number.isFinite(currentMs) || nextMs >= currentMs)) {
+      lookup.set(marketId, timestamp);
+    }
+  }
+
+  return lookup;
+}
+
 export function buildBullpenStage3OnlyInvestExecutionPlan(
   run: BullpenAutoLiveRun | null,
   decisions: BullpenAutoLiveDecision[] = [],
+  options: BullpenStage3OnlyInvestExecutionPlanOptions = {},
 ): BullpenStage3OnlyInvestExecutionPlan {
   const plan = buildBullpenStage3OnlyInvestPlan(run);
   if (!plan.request?.console_profile) {
@@ -307,13 +386,25 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
       readyCandidateCount: 0,
       alreadyInvestedCandidateCount: 0,
       alreadyInvestedMarketIds: [],
+      alreadyInvestedRecords: [],
       candidatePreviews: [],
       blockedReason: plan.blockedReason,
     };
   }
 
-  const activePositionMarketIds = buildActivePositionMarketIdSet(run);
+  const {
+    activePositions = [],
+    hasActivePositionsSnapshot = false,
+  } = options;
+  const savedRunActivePositionMarketIds = buildSavedRunActivePositionMarketIdSet(run);
+  const liveActivePositionMarketIds = buildLiveActivePositionMarketIdSet(activePositions);
+  const activePositionMarketIds =
+    liveActivePositionMarketIds.size > 0 || hasActivePositionsSnapshot
+      ? liveActivePositionMarketIds
+      : savedRunActivePositionMarketIds;
   const submittedBuyMarketIds = buildSubmittedBuyMarketIdSet(run, decisions);
+  const latestSubmittedBuyTimestampByMarketId =
+    buildLatestSubmittedBuyTimestampLookup(decisions);
   const alreadyInvestedMarketIds = new Set([
     ...activePositionMarketIds,
     ...submittedBuyMarketIds,
@@ -321,20 +412,45 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
 
   const candidatePreviews = plan.request.console_profile.candidate_rows.map((candidate) => {
     const alreadyActive = activePositionMarketIds.has(candidate.market_id);
+    const alreadyActiveFromLive = liveActivePositionMarketIds.has(candidate.market_id);
     const alreadySubmitted = submittedBuyMarketIds.has(candidate.market_id);
-    const reason = alreadyActive
-      ? "Already present in the Bullpen wallet for this market."
+    const investedAt =
+      latestSubmittedBuyTimestampByMarketId.get(candidate.market_id) ?? null;
+    const investedSource = alreadyActive
+      ? alreadyActiveFromLive
+        ? "live-position"
+        : "saved-run-position"
       : alreadySubmitted
-        ? "A live Stage 3 buy from this saved run was already submitted."
+        ? "submitted-buy"
         : null;
+    const reason =
+      investedSource === "live-position" || investedSource === "saved-run-position"
+        ? "Already present in the Bullpen wallet for this market."
+        : investedSource === "submitted-buy"
+          ? "A live Stage 3 buy from this saved run was already submitted."
+          : null;
 
     return {
       candidate: cloneCandidateRow(candidate),
       status: reason ? "already-invested" : "ready",
       reason,
+      investedAt,
+      investedSource,
     } satisfies BullpenStage3OnlyInvestCandidatePreview;
   });
 
+  const alreadyInvestedRecords = candidatePreviews
+    .filter(
+      (preview): preview is BullpenStage3OnlyInvestCandidatePreview & {
+        investedSource: BullpenStage3AlreadyInvestedSource;
+      } => preview.status === "already-invested" && preview.investedSource !== null,
+    )
+    .map((preview) => ({
+      marketId: preview.candidate.market_id,
+      timestamp: preview.investedAt,
+      reason: preview.reason,
+      source: preview.investedSource,
+    }));
   const readyRows = candidatePreviews
     .filter((preview) => preview.status === "ready")
     .map((preview) => cloneCandidateRow(preview.candidate));
@@ -349,6 +465,7 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
       readyCandidateCount,
       alreadyInvestedCandidateCount,
       alreadyInvestedMarketIds: [...alreadyInvestedMarketIds],
+      alreadyInvestedRecords,
       candidatePreviews,
       blockedReason:
         alreadyInvestedCandidateCount > 0
@@ -369,6 +486,7 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
     readyCandidateCount,
     alreadyInvestedCandidateCount,
     alreadyInvestedMarketIds: [...alreadyInvestedMarketIds],
+    alreadyInvestedRecords,
     candidatePreviews,
     blockedReason: null,
   };

@@ -21,6 +21,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatApiTimestamp } from "@/lib/datetime";
+import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
@@ -34,6 +35,7 @@ import type {
 import { buildBullpenAutoRunWorkflowView } from "./bullpenAutoRunProgress";
 import {
   buildBullpenStage3OnlyInvestExecutionPlan,
+  type BullpenStage3AlreadyInvestedRecord,
   selectBullpenStage3OnlyInvestSource,
 } from "./bullpenAutoRunStage3Invest";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
@@ -45,6 +47,8 @@ type BullpenAutoRunScheduleCardProps = {
     | Promise<BullpenAutoLiveRunOnceRequest | null>
     | BullpenAutoLiveRunOnceRequest
     | null;
+  activePositions?: BullpenActivePositionView[];
+  hasActivePositionsSnapshot?: boolean;
   onSummaryUpdated?: (payload: {
     summary: BullpenAutoLiveSummaryResponse;
     run: BullpenAutoLiveRun | null;
@@ -147,6 +151,76 @@ function readStageOutputNumber(value: unknown) {
 
 function readStageOutputString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision) {
+  return (
+    decision.order_plan?.executed_at?.trim() ||
+    decision.updated_at?.trim() ||
+    decision.created_at?.trim() ||
+    null
+  );
+}
+
+function buildLatestSubmittedBuyTimestampsByMarketId(
+  decisions: BullpenAutoLiveDecision[],
+) {
+  const lookup = new Map<string, string>();
+
+  for (const decision of decisions) {
+    if (
+      decision.order_plan?.status !== "submitted" ||
+      decision.order_plan.action !== "buy"
+    ) {
+      continue;
+    }
+
+    const marketId = decision.market_id?.trim();
+    const timestamp = readDecisionExecutionTimestamp(decision);
+    if (!marketId || !timestamp) {
+      continue;
+    }
+
+    const current = lookup.get(marketId);
+    const currentMs = current ? Date.parse(current) : Number.NaN;
+    const nextMs = Date.parse(timestamp);
+    if (!current || (Number.isFinite(nextMs) && (!Number.isFinite(currentMs) || nextMs >= currentMs))) {
+      lookup.set(marketId, timestamp);
+    }
+  }
+
+  return lookup;
+}
+
+function buildLiveAlreadyInvestedRecords({
+  activePositions,
+  decisions,
+}: {
+  activePositions: BullpenActivePositionView[];
+  decisions: BullpenAutoLiveDecision[];
+}): BullpenStage3AlreadyInvestedRecord[] {
+  const latestSubmittedBuyTimestampsByMarketId =
+    buildLatestSubmittedBuyTimestampsByMarketId(decisions);
+  const records = new Map<string, BullpenStage3AlreadyInvestedRecord>();
+
+  for (const position of activePositions) {
+    if (position.isClaimable) {
+      continue;
+    }
+    const marketId = position.marketId?.trim();
+    if (!marketId) {
+      continue;
+    }
+
+    records.set(marketId, {
+      marketId,
+      timestamp: latestSubmittedBuyTimestampsByMarketId.get(marketId) ?? null,
+      reason: "Already present in the Bullpen wallet for this market.",
+      source: "live-position",
+    });
+  }
+
+  return [...records.values()];
 }
 
 function findGuardrailCheck(
@@ -734,6 +808,8 @@ function getWorkflowToneClasses(tone: "yellow" | "green" | "blue") {
 export function BullpenAutoRunScheduleCard({
   onRunCompleted,
   buildRunNowRequest,
+  activePositions = [],
+  hasActivePositionsSnapshot = false,
   onSummaryUpdated,
 }: BullpenAutoRunScheduleCardProps) {
   const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(null);
@@ -987,7 +1063,22 @@ export function BullpenAutoRunScheduleCard({
   const investOnlyPlan = buildBullpenStage3OnlyInvestExecutionPlan(
     investOnlySourceRun,
     summary?.recent_decisions ?? [],
+    {
+      activePositions,
+      hasActivePositionsSnapshot,
+    },
   );
+  const liveAlreadyInvestedRecords =
+    summary && hasActivePositionsSnapshot
+      ? buildLiveAlreadyInvestedRecords({
+          activePositions,
+          decisions: summary.recent_decisions ?? [],
+        })
+      : [];
+  const stageInputAlreadyInvestedRecords =
+    liveAlreadyInvestedRecords.length > 0
+      ? liveAlreadyInvestedRecords
+      : investOnlyPlan.alreadyInvestedRecords;
   const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
   const workflowView = buildBullpenAutoRunWorkflowView(
     workflowRun,
@@ -1685,15 +1776,9 @@ export function BullpenAutoRunScheduleCard({
             eyebrow="Stage Input"
             stageTitle={openInputStage.title}
             stageDetail={`Event inputs being fed into ${openInputStage.title}.`}
-            outputs={
-              openInputStage.key === "invest" &&
-              workflowRun?.id === investOnlySourceRun?.id &&
-              investOnlyPlan.alreadyInvestedMarketIds.length > 0
-                ? {
-                    ...openInputStage.inputs,
-                    already_invested_market_ids: investOnlyPlan.alreadyInvestedMarketIds,
-                  }
-                : openInputStage.inputs
+            outputs={openInputStage.inputs}
+            alreadyInvestedRecords={
+              openInputStage.key === "invest" ? stageInputAlreadyInvestedRecords : []
             }
             outputLabel="Inputs"
             onClose={() => setOpenInputStageKey(null)}

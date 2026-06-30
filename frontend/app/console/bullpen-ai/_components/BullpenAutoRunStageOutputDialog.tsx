@@ -8,6 +8,12 @@ type BullpenAutoRunStageOutputDialogProps = {
   stageDetail: string;
   eyebrow?: string;
   outputs: Record<string, unknown>;
+  alreadyInvestedRecords?: Array<{
+    marketId: string;
+    timestamp?: string | null;
+    reason?: string | null;
+    source?: string | null;
+  }>;
   outputLabel?: string;
   onClose: () => void;
 };
@@ -25,6 +31,12 @@ type BreakdownDialogComponent = ComponentType<{
 type ValueRationaleDialogState = {
   fieldKey: string;
   record: Record<string, unknown>;
+};
+type AlreadyInvestedRecord = {
+  marketId: string;
+  timestamp: string | null;
+  reason: string | null;
+  source: string | null;
 };
 
 const SUMMARY_COLUMN_PRIORITY = [
@@ -665,6 +677,75 @@ function readStringArrayValue(value: unknown) {
     .filter((item) => item.length > 0);
 }
 
+function buildAlreadyInvestedLookup({
+  explicitRecords = [],
+  outputs,
+}: {
+  explicitRecords?: BullpenAutoRunStageOutputDialogProps["alreadyInvestedRecords"];
+  outputs: Record<string, unknown>;
+}) {
+  const lookup = new Map<string, AlreadyInvestedRecord>();
+  const appendRecord = (record: AlreadyInvestedRecord) => {
+    if (!record.marketId) return;
+
+    const existing = lookup.get(record.marketId);
+    if (!existing) {
+      lookup.set(record.marketId, record);
+      return;
+    }
+
+    lookup.set(record.marketId, {
+      marketId: record.marketId,
+      timestamp: existing.timestamp ?? record.timestamp,
+      reason: existing.reason ?? record.reason,
+      source: existing.source ?? record.source,
+    });
+  };
+
+  for (const record of explicitRecords) {
+    const marketId = readSummaryString(record?.marketId);
+    if (!marketId) continue;
+    appendRecord({
+      marketId,
+      timestamp: readSummaryString(record?.timestamp),
+      reason: readSummaryString(record?.reason),
+      source: readSummaryString(record?.source),
+    });
+  }
+
+  if (lookup.size > 0) {
+    return lookup;
+  }
+
+  const serializedRecords = Array.isArray(outputs.already_invested_records)
+    ? outputs.already_invested_records
+    : [];
+  for (const item of serializedRecords) {
+    if (!isRecord(item)) continue;
+    const marketId =
+      readSummaryString(item.marketId) ?? readSummaryString(item.market_id);
+    if (!marketId) continue;
+    appendRecord({
+      marketId,
+      timestamp:
+        readSummaryString(item.timestamp) ?? readSummaryString(item.invested_at),
+      reason: readSummaryString(item.reason),
+      source: readSummaryString(item.source),
+    });
+  }
+
+  for (const marketId of readStringArrayValue(outputs.already_invested_market_ids)) {
+    appendRecord({
+      marketId,
+      timestamp: null,
+      reason: null,
+      source: null,
+    });
+  }
+
+  return lookup;
+}
+
 function isBreakdownProbabilityKey(key: string) {
   return key === "fair_yes_probability_pct" || key === "fair_no_probability_pct";
 }
@@ -1257,16 +1338,30 @@ function buildInputSummaryItems(outputs: Record<string, unknown>) {
   return items.slice(0, 8);
 }
 
+function InvestedPill({ record }: { record: AlreadyInvestedRecord }) {
+  return (
+    <div className="space-y-2">
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        Invested
+      </span>
+      {record.timestamp ? (
+        <p className="font-mono text-[11px] text-emerald-900">{record.timestamp}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function SummaryTable({
   rows,
   title,
-  alreadyInvestedMarketIds,
+  alreadyInvestedLookup,
   onOpenBreakdown,
   onOpenRationale,
 }: {
   rows: Record<string, unknown>[];
   title: string;
-  alreadyInvestedMarketIds?: Set<string>;
+  alreadyInvestedLookup?: Map<string, AlreadyInvestedRecord>;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
   onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
@@ -1294,9 +1389,9 @@ function SummaryTable({
           <tbody className="divide-y divide-slate-100 bg-white">
             {rows.map((row, index) => {
               const marketId = readSummaryString(row.market_id);
-              const alreadyInvested = Boolean(
-                marketId && alreadyInvestedMarketIds?.has(marketId),
-              );
+              const alreadyInvestedRecord =
+                marketId ? alreadyInvestedLookup?.get(marketId) ?? null : null;
+              const alreadyInvested = Boolean(alreadyInvestedRecord);
 
               return (
                 <tr
@@ -1309,12 +1404,9 @@ function SummaryTable({
                 >
                   {columns.map((column, columnIndex) => (
                     <td key={`${index}-${column}`} className="px-4 py-3">
-                      {alreadyInvested && columnIndex === 0 ? (
+                      {alreadyInvestedRecord && columnIndex === 0 ? (
                         <div className="space-y-2">
-                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900">
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Already invested
-                          </span>
+                          <InvestedPill record={alreadyInvestedRecord} />
                           {renderRecordValue({
                             value: row[column],
                             key: column,
@@ -1424,11 +1516,13 @@ function MetricStrip({
 function RecordDetailsCard({
   record,
   index,
+  alreadyInvestedRecord,
   onOpenBreakdown,
   onOpenRationale,
 }: {
   record: Record<string, unknown>;
   index: number;
+  alreadyInvestedRecord?: AlreadyInvestedRecord | null;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
   onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
@@ -1470,6 +1564,9 @@ function RecordDetailsCard({
               <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
                 {record.source_kind}
               </span>
+            ) : null}
+            {alreadyInvestedRecord ? (
+              <InvestedPill record={alreadyInvestedRecord} />
             ) : null}
           </div>
           <h4 className="text-lg font-semibold text-slate-950">{title}</h4>
@@ -1542,13 +1639,13 @@ function RecordDetailsCard({
 function RecordArraySection({
   sectionKey,
   rows,
-  alreadyInvestedMarketIds,
+  alreadyInvestedLookup,
   onOpenBreakdown,
   onOpenRationale,
 }: {
   sectionKey: string;
   rows: Record<string, unknown>[];
-  alreadyInvestedMarketIds?: Set<string>;
+  alreadyInvestedLookup?: Map<string, AlreadyInvestedRecord>;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
   onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
@@ -1572,22 +1669,28 @@ function RecordArraySection({
         <SummaryTable
           rows={rows}
           title="Summary Table"
-          alreadyInvestedMarketIds={alreadyInvestedMarketIds}
+          alreadyInvestedLookup={alreadyInvestedLookup}
           onOpenBreakdown={onOpenBreakdown}
           onOpenRationale={onOpenRationale}
         />
       </div>
 
       <div className="mt-4 space-y-4">
-        {rows.map((row, index) => (
-          <RecordDetailsCard
-            key={`${sectionKey}-${index}-${String(row.market_id ?? row.question ?? row.slug ?? index)}`}
-            record={row}
-            index={index}
-            onOpenBreakdown={onOpenBreakdown}
-            onOpenRationale={onOpenRationale}
-          />
-        ))}
+        {rows.map((row, index) => {
+          const marketId = readSummaryString(row.market_id);
+          return (
+            <RecordDetailsCard
+              key={`${sectionKey}-${index}-${String(row.market_id ?? row.question ?? row.slug ?? index)}`}
+              record={row}
+              index={index}
+              alreadyInvestedRecord={
+                marketId ? alreadyInvestedLookup?.get(marketId) ?? null : null
+              }
+              onOpenBreakdown={onOpenBreakdown}
+              onOpenRationale={onOpenRationale}
+            />
+          );
+        })}
       </div>
     </section>
   );
@@ -1596,13 +1699,13 @@ function RecordArraySection({
 function StructuredSection({
   sectionKey,
   value,
-  alreadyInvestedMarketIds,
+  alreadyInvestedLookup,
   onOpenBreakdown,
   onOpenRationale,
 }: {
   sectionKey: string;
   value: unknown;
-  alreadyInvestedMarketIds?: Set<string>;
+  alreadyInvestedLookup?: Map<string, AlreadyInvestedRecord>;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
   onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
@@ -1611,7 +1714,7 @@ function StructuredSection({
       <RecordArraySection
         sectionKey={sectionKey}
         rows={value as Record<string, unknown>[]}
-        alreadyInvestedMarketIds={alreadyInvestedMarketIds}
+        alreadyInvestedLookup={alreadyInvestedLookup}
         onOpenBreakdown={onOpenBreakdown}
         onOpenRationale={onOpenRationale}
       />
@@ -1642,6 +1745,7 @@ export function BullpenAutoRunStageOutputDialog({
   stageDetail,
   eyebrow,
   outputs,
+  alreadyInvestedRecords = [],
   outputLabel = "Outputs",
   onClose,
 }: BullpenAutoRunStageOutputDialogProps) {
@@ -1651,11 +1755,29 @@ export function BullpenAutoRunStageOutputDialog({
     useState<Record<string, unknown> | null>(null);
   const [valueRationaleDialog, setValueRationaleDialog] =
     useState<ValueRationaleDialogState | null>(null);
-  const alreadyInvestedMarketIds = new Set(
-    readStringArrayValue(outputs.already_invested_market_ids),
+  const alreadyInvestedLookup = buildAlreadyInvestedLookup({
+    explicitRecords: alreadyInvestedRecords,
+    outputs,
+  });
+  const visibleOutputs = Object.fromEntries(
+    Object.entries(outputs).filter(
+      ([key]) => key !== "already_invested_market_ids" && key !== "already_invested_records",
+    ),
   );
-  const entries = Object.entries(outputs);
-  const inputSummaryItems = outputLabel === "Inputs" ? buildInputSummaryItems(outputs) : [];
+  const entries = Object.entries(visibleOutputs);
+  const baseInputSummaryItems =
+    outputLabel === "Inputs" ? buildInputSummaryItems(visibleOutputs) : [];
+  const inputSummaryItems =
+    outputLabel === "Inputs" && alreadyInvestedLookup.size > 0
+      ? [
+          ...baseInputSummaryItems,
+          {
+            key: "already_invested_count",
+            label: "Invested",
+            value: alreadyInvestedLookup.size,
+          },
+        ].slice(0, 8)
+      : baseInputSummaryItems;
   const overviewEntries = orderEntries(
     entries.filter(([, value]) => {
       if (isPrimitive(value)) return true;
@@ -1734,7 +1856,7 @@ export function BullpenAutoRunStageOutputDialog({
                   key={key}
                   sectionKey={key}
                   value={value}
-                  alreadyInvestedMarketIds={alreadyInvestedMarketIds}
+                  alreadyInvestedLookup={alreadyInvestedLookup}
                   onOpenBreakdown={handleOpenBreakdown}
                   onOpenRationale={(record, fieldKey) =>
                     setValueRationaleDialog({ record, fieldKey })
@@ -1753,7 +1875,7 @@ export function BullpenAutoRunStageOutputDialog({
                   Raw JSON
                 </summary>
                 <pre className="mt-4 overflow-x-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-white p-4 text-xs leading-6 text-slate-700">
-                  {renderJson(outputs)}
+                  {renderJson(visibleOutputs)}
                 </pre>
               </details>
             </div>

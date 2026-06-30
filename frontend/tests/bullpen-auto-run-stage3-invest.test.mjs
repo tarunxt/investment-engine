@@ -499,7 +499,35 @@ test("Stage 3 invest execution plan keeps reuse enabled while skipping already i
       runId: "run-stage3-resume",
       marketId: "market-1",
     }),
-  ]);
+  ], {
+    activePositions: [
+      {
+        key: "market-1::NO",
+        marketId: "market-1",
+        conditionId: null,
+        marketTitle: "Will event one happen?",
+        outcome: "No",
+        shares: 6.097561,
+        averagePrice: 0.82,
+        costBasis: 5,
+        yesOdds: 18,
+        noOdds: 82,
+        currentPrice: 0.82,
+        currentValue: 5,
+        unrealizedPnl: 0,
+        unrealizedPnlPercent: 0,
+        marketUrl: "https://example.com/market-1",
+        closeTime: "2026-07-07T12:00:00Z",
+        isClaimable: false,
+        claimableValue: null,
+        returnsPerDay: 1.7,
+        rules: null,
+        marketContext: null,
+        resolutionSource: null,
+      },
+    ],
+    hasActivePositionsSnapshot: true,
+  });
 
   assert.equal(executionPlan.blockedReason, null);
   assert.equal(executionPlan.qualifiedCandidateCount, 2);
@@ -516,6 +544,18 @@ test("Stage 3 invest execution plan keeps reuse enabled while skipping already i
       (preview) => preview.candidate.market_id === "market-1",
     )?.status,
     "already-invested",
+  );
+  assert.equal(
+    executionPlan.candidatePreviews.find(
+      (preview) => preview.candidate.market_id === "market-1",
+    )?.investedAt,
+    "2026-06-30T12:05:31Z",
+  );
+  assert.equal(
+    executionPlan.candidatePreviews.find(
+      (preview) => preview.candidate.market_id === "market-1",
+    )?.investedSource,
+    "live-position",
   );
 });
 

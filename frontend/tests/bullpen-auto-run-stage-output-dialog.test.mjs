@@ -201,7 +201,7 @@ test("Bullpen auto-run stage dialog makes invest rationale fields clickable", ()
   assert.match(markup, /Open rationale for Adjudication Required/);
 });
 
-test("Bullpen auto-run stage dialog highlights already invested Stage 3 rows", () => {
+test("Bullpen auto-run stage dialog highlights invested Stage 3 rows with timestamps", () => {
   const { BullpenAutoRunStageOutputDialog } = loadStageOutputDialog();
 
   const markup = renderToStaticMarkup(
@@ -211,8 +211,15 @@ test("Bullpen auto-run stage dialog highlights already invested Stage 3 rows", (
       eyebrow: "Stage Input",
       outputLabel: "Inputs",
       onClose: () => {},
+      alreadyInvestedRecords: [
+        {
+          marketId: "market-1",
+          timestamp: "2026-06-30T12:05:31Z",
+          reason: "Already present in the Bullpen wallet for this market.",
+          source: "live-position",
+        },
+      ],
       outputs: {
-        already_invested_market_ids: ["market-1"],
         llm_review_rows: [
           {
             market_id: "market-1",
@@ -233,7 +240,8 @@ test("Bullpen auto-run stage dialog highlights already invested Stage 3 rows", (
     }),
   );
 
-  assert.match(markup, /Already invested/);
+  assert.match(markup, /Invested/);
+  assert.match(markup, /2026-06-30T12:05:31Z/);
   assert.match(markup, /Will rates fall\?/);
 });
 
