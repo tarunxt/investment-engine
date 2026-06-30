@@ -27,7 +27,10 @@ from app.domains.polymarket_auto_live.console_profile import (
     position_returns_per_day,
     read_console_wallet_positions,
 )
-from app.domains.polymarket_auto_live.config import auto_live_backend_allows_execution
+from app.domains.polymarket_auto_live.config import (
+    auto_live_backend_allows_execution,
+    auto_live_backend_execution_env_detail,
+)
 from app.domains.polymarket_auto_live.engine import (
     BullpenAutoLiveEngine,
     PositionSnapshot,
@@ -277,8 +280,30 @@ def test_auto_live_backend_execution_flag_defaults_false(monkeypatch):
     monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
     assert auto_live_backend_allows_execution() is True
 
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "1")
+    assert auto_live_backend_allows_execution() is True
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "yes")
+    assert auto_live_backend_allows_execution() is True
+
     monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "FALSE")
     assert auto_live_backend_allows_execution() is False
+
+
+def test_auto_live_backend_execution_env_detail_names_process_and_restart(monkeypatch):
+    monkeypatch.delenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", raising=False)
+    missing_detail = auto_live_backend_execution_env_detail()
+    assert "missing from this backend process" in missing_detail
+    assert "/etc/investor/backend.env" in missing_detail
+    assert "investor-celery-worker" in missing_detail
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "false")
+    blocked_detail = auto_live_backend_execution_env_detail()
+    assert "currently 'false'" in blocked_detail
+    assert "restart investor-backend" in blocked_detail
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "on")
+    assert "enabled" in auto_live_backend_execution_env_detail()
 
 
 def test_console_schedule_uses_fixed_ist_slots():

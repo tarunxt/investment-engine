@@ -7,7 +7,10 @@ from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     next_console_schedule_time,
 )
-from app.domains.polymarket_auto_live.config import auto_live_backend_allows_execution
+from app.domains.polymarket_auto_live.config import (
+    auto_live_backend_allows_execution,
+    auto_live_backend_execution_env_detail,
+)
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
     apply_run_to_record,
@@ -482,7 +485,7 @@ class BullpenAutoLiveBot:
                 status="pass" if auto_live_backend_allows_execution() else "watch",
                 detail="Backend environment allows live execution."
                 if auto_live_backend_allows_execution()
-                else "Backend environment still blocks live execution.",
+                else auto_live_backend_execution_env_detail(),
                 value="Allowed" if auto_live_backend_allows_execution() else "Blocked",
                 checked_at=checked_at,
             ),
