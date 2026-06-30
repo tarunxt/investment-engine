@@ -159,9 +159,6 @@ BEAT_SERVICE_NAME="$(
 FRONTEND_SERVICE_NAME="$(
   resolve_systemd_service_name "investor-frontend" "investment-engine-frontend"
 )"
-BEAT_WORKER_SERVICE_NAME="$(
-  resolve_systemd_service_name "investor-celery-beat-worker" "investment-engine-celery-beat-worker"
-)"
 
 smoke_check() {
   local label="$1"
