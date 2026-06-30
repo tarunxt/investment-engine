@@ -9,7 +9,8 @@ The project uses:
 - Queue: Redis
 - Workers: Celery
 - Database: PostgreSQL
-- Containerization: Docker
+- Local containerization: Docker
+- Production runtime: systemd / no-Docker
 
 ---
 
@@ -108,6 +109,14 @@ docker exec -it investor-backend-1 alembic upgrade head
 
 * Inside Docker DB host = `postgres`
 * Outside Docker DB host = `localhost`
+
+## Production Runtime Memory (No-Docker/Systemd)
+
+* This production server is a **systemd / no-Docker** deployment. Do not assume Docker for runtime operations unless the user explicitly says Docker.
+* The canonical backend environment file on production is `/etc/investor/backend.env`.
+* The canonical frontend environment file on production is `/etc/investor/frontend.env`.
+* Prefer the `investor-*` systemd service names when giving production commands: `investor-backend`, `investor-celery-worker`, `investor-celery-beat`, and `investor-frontend`.
+* For this systemd production deployment, always use `/etc/investor/*.env` paths when discussing environment files.
 
 
 # STRICT RULES
@@ -432,8 +441,8 @@ Backend:
 - PostgreSQL
 
 Deployment:
-- Docker
-- Docker Compose
+- Docker / Docker Compose for local or containerized environments
+- systemd / no-Docker for this production server
 
 ---
 

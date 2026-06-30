@@ -28,7 +28,7 @@ jobs:
             LEGACY_APP_ROOT="/srv/investor"
             APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
             LEGACY_APP_USER="investor"
-            BACKEND_ENV_FILE="/etc/investment-engine/backend.env"
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
 
             if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
               APP_ROOT="$LEGACY_APP_ROOT"
@@ -38,9 +38,6 @@ jobs:
               APP_USER="$LEGACY_APP_USER"
             fi
 
-            if [[ ! -f "$BACKEND_ENV_FILE" && -f /etc/investor/backend.env ]]; then
-              BACKEND_ENV_FILE="/etc/investor/backend.env"
-            fi
 
             resolve_systemd_service_name() {
               local primary="$1"
@@ -71,13 +68,13 @@ jobs:
             }
 
             BACKEND_SERVICE_NAME="$(
-              resolve_systemd_service_name "investment-engine-backend" "investor-backend"
+              resolve_systemd_service_name "investor-backend" "investment-engine-backend"
             )"
             WORKER_SERVICE_NAME="$(
-              resolve_systemd_service_name "investment-engine-celery-worker" "investor-celery-worker"
+              resolve_systemd_service_name "investor-celery-worker" "investment-engine-celery-worker"
             )"
             BEAT_SERVICE_NAME="$(
-              resolve_systemd_service_name "investment-engine-celery-beat" "investor-celery-beat"
+              resolve_systemd_service_name "investor-celery-beat" "investment-engine-celery-beat"
             )"
 
             echo "==> App root: $APP_ROOT"

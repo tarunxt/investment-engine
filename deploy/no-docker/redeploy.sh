@@ -7,10 +7,8 @@ DEFAULT_APP_ROOT="/srv/investment-engine"
 LEGACY_APP_ROOT="/srv/investor"
 DEFAULT_APP_USER="investment-engine"
 LEGACY_APP_USER="investor"
-DEFAULT_BACKEND_ENV_FILE="/etc/investment-engine/backend.env"
-LEGACY_BACKEND_ENV_FILE="/etc/investor/backend.env"
-DEFAULT_FRONTEND_ENV_FILE="/etc/investment-engine/frontend.env"
-LEGACY_FRONTEND_ENV_FILE="/etc/investor/frontend.env"
+DEFAULT_BACKEND_ENV_FILE="/etc/investor/backend.env"
+DEFAULT_FRONTEND_ENV_FILE="/etc/investor/frontend.env"
 APP_ROOT="${APP_ROOT:-$DEFAULT_APP_ROOT}"
 APP_USER="${APP_USER:-$DEFAULT_APP_USER}"
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-$DEFAULT_BACKEND_ENV_FILE}"
@@ -41,13 +39,6 @@ if ! id -u "$APP_USER" >/dev/null 2>&1 && id -u "$LEGACY_APP_USER" >/dev/null 2>
   APP_USER="$LEGACY_APP_USER"
 fi
 
-if [[ ! -f "$BACKEND_ENV_FILE" && -f "$LEGACY_BACKEND_ENV_FILE" ]]; then
-  BACKEND_ENV_FILE="$LEGACY_BACKEND_ENV_FILE"
-fi
-
-if [[ ! -f "$FRONTEND_ENV_FILE" && -f "$LEGACY_FRONTEND_ENV_FILE" ]]; then
-  FRONTEND_ENV_FILE="$LEGACY_FRONTEND_ENV_FILE"
-fi
 
 if [[ ! -d "$APP_ROOT" ]]; then
   echo "App root not found: $APP_ROOT" >&2
@@ -157,16 +148,19 @@ run_as_app_user() {
 }
 
 BACKEND_SERVICE_NAME="$(
-  resolve_systemd_service_name "investment-engine-backend" "investor-backend"
+  resolve_systemd_service_name "investor-backend" "investment-engine-backend"
 )"
 WORKER_SERVICE_NAME="$(
-  resolve_systemd_service_name "investment-engine-celery-worker" "investor-celery-worker"
+  resolve_systemd_service_name "investor-celery-worker" "investment-engine-celery-worker"
 )"
 BEAT_SERVICE_NAME="$(
-  resolve_systemd_service_name "investment-engine-celery-beat" "investor-celery-beat"
+  resolve_systemd_service_name "investor-celery-beat" "investment-engine-celery-beat"
 )"
 FRONTEND_SERVICE_NAME="$(
-  resolve_systemd_service_name "investment-engine-frontend" "investor-frontend"
+  resolve_systemd_service_name "investor-frontend" "investment-engine-frontend"
+)"
+BEAT_WORKER_SERVICE_NAME="$(
+  resolve_systemd_service_name "investor-celery-beat-worker" "investment-engine-celery-beat-worker"
 )"
 
 smoke_check() {
@@ -327,6 +321,12 @@ echo "==> Restart services"
 sudo systemctl daemon-reload
 sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME"
 
+if [[ -n "${BEAT_WORKER_SERVICE_NAME:-}" ]] && systemctl cat "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1; then
+  sudo systemctl restart "$BEAT_WORKER_SERVICE_NAME"
+else
+  echo "==> Optional beat queue worker service not installed: ${BEAT_WORKER_SERVICE_NAME:-investor-celery-beat-worker}"
+fi
+
 if [[ "$SCOPE" == "full" ]]; then
   sudo systemctl restart "$FRONTEND_SERVICE_NAME"
 fi
@@ -335,6 +335,10 @@ echo "==> Service status"
 sudo systemctl status "$BACKEND_SERVICE_NAME" --no-pager
 sudo systemctl status "$WORKER_SERVICE_NAME" --no-pager
 sudo systemctl status "$BEAT_SERVICE_NAME" --no-pager
+
+if [[ -n "${BEAT_WORKER_SERVICE_NAME:-}" ]] && systemctl cat "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1; then
+  sudo systemctl status "$BEAT_WORKER_SERVICE_NAME" --no-pager
+fi
 
 if [[ "$SCOPE" == "full" ]]; then
   sudo systemctl status "$FRONTEND_SERVICE_NAME" --no-pager
