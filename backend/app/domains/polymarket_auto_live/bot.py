@@ -511,7 +511,7 @@ class BullpenAutoLiveBot:
                 id="manual-confirmation",
                 label="Manual confirmation",
                 status="watch" if settings.require_manual_confirmation else "pass",
-                detail="Manual confirmation is still configured, but Auto-Live now relies on explicit live arming, dashboard unlock, and runtime health checks."
+                detail="Manual confirmation is still configured, but Auto-Live now relies on explicit live arming, runtime health checks, and any manual lock or emergency stop that is still active."
                 if settings.require_manual_confirmation
                 else "Manual confirmation is not configured for Auto-Live.",
                 value="Required" if settings.require_manual_confirmation else "Cleared",

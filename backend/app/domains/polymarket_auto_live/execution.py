@@ -92,23 +92,32 @@ async def refresh_live_controls(*, user_id: int) -> RefreshedLiveControls:
     unlock_mode = state.live.unlock_mode
     locked_reason = state.live.locked_reason
 
-    # Auto-Live has its own live-execution arming controls.  Do not let the
-    # copy-trading bot's paper-mode setting block Stage 3 after the live env,
-    # automatic unlock mode, doctor, balance, and emergency/manual locks pass.
-    if locked_reason == "PAPER_TRADING must be false.":
-        if (
-            state.config.live_trading
-            and state.config.use_live_reads
-            and state.config.live_unlock_mode == "automatic"
-            and not state.live.emergency_stopped
-            and not state.live.manually_locked
-            and state.live.doctor.ok
-            and state.live.balance.status == "ready"
-        ):
+    # Auto-Live has its own explicit live-execution arming controls. Do not let
+    # the copy-trading bot's paper-mode or dashboard-unlock state block Stage 3
+    # after the live env, health checks, and emergency/manual locks pass.
+    runtime_settings = await refresh_runtime_execution_settings(user_id=user_id)
+    auto_live_can_self_authorize = (
+        runtime_settings.auto_live_enabled
+        and runtime_settings.allow_live_execution
+        and not runtime_settings.dry_run
+        and not runtime_settings.emergency_stop
+        and not runtime_settings.paused
+        and state.config.live_trading
+        and state.config.use_live_reads
+        and not state.live.emergency_stopped
+        and not state.live.manually_locked
+        and state.live.doctor.ok
+        and state.live.balance.status == "ready"
+    )
+    if locked_reason in {
+        "PAPER_TRADING must be false.",
+        "Dashboard live unlock is required.",
+    }:
+        if auto_live_can_self_authorize:
             unlocked = True
             unlock_mode = "automatic"
             locked_reason = None
-        elif state.config.live_unlock_mode != "automatic":
+        elif locked_reason == "PAPER_TRADING must be false.":
             locked_reason = "Dashboard live unlock is required."
 
     return RefreshedLiveControls(

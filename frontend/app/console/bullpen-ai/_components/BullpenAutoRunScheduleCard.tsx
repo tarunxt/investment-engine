@@ -1051,9 +1051,10 @@ export function BullpenAutoRunScheduleCard({
             <AlertTitle>Live execution is still gated</AlertTitle>
             <AlertDescription>
               Scheduled runs can still queue and analyze markets, but live orders only
-              submit when the backend environment, Bullpen session unlock, and runtime
-              health checks all allow trading. Review the full controls if you need to
-              inspect the current gate.
+              submit when the backend environment, Auto-Live arming, and runtime
+              health checks all allow trading. Manual locks and emergency stops still
+              block Stage 3. Review the full controls if you need to inspect the
+              current gate.
             </AlertDescription>
           </Alert>
         ) : null}

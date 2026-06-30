@@ -3,6 +3,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -112,6 +113,18 @@ async def test_refresh_live_controls_allows_auto_live_stage3_when_copy_bot_is_pa
         "app.domains.polymarket_auto_live.execution.polymarket_bot_manager.get_bot",
         fake_get_bot,
     )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.execution.refresh_runtime_execution_settings",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                auto_live_enabled=True,
+                dry_run=False,
+                allow_live_execution=True,
+                emergency_stop=False,
+                paused=False,
+            )
+        ),
+    )
 
     controls = await refresh_live_controls(user_id=1)
 
@@ -121,7 +134,9 @@ async def test_refresh_live_controls_allows_auto_live_stage3_when_copy_bot_is_pa
 
 
 @pytest.mark.anyio
-async def test_refresh_live_controls_preserves_paper_gate_when_auto_unlock_is_off(monkeypatch):
+async def test_refresh_live_controls_allows_auto_live_stage3_without_dashboard_unlock_when_armed(
+    monkeypatch,
+):
     from app.domains.polymarket_auto_live.execution import refresh_live_controls
 
     class FakeBot:
@@ -156,12 +171,140 @@ async def test_refresh_live_controls_preserves_paper_gate_when_auto_unlock_is_of
         "app.domains.polymarket_auto_live.execution.polymarket_bot_manager.get_bot",
         fake_get_bot,
     )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.execution.refresh_runtime_execution_settings",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                auto_live_enabled=True,
+                dry_run=False,
+                allow_live_execution=True,
+                emergency_stop=False,
+                paused=False,
+            )
+        ),
+    )
+
+    controls = await refresh_live_controls(user_id=1)
+
+    assert controls.unlocked is True
+    assert controls.unlock_mode == "automatic"
+    assert controls.locked_reason is None
+
+
+@pytest.mark.anyio
+async def test_refresh_live_controls_keeps_dashboard_unlock_gate_when_auto_live_is_not_armed(
+    monkeypatch,
+):
+    from app.domains.polymarket_auto_live.execution import refresh_live_controls
+
+    class FakeBot:
+        async def refresh_doctor(self):
+            return None
+
+        async def refresh_balance(self):
+            return None
+
+        async def get_state(self):
+            return SimpleNamespace(
+                config=SimpleNamespace(
+                    live_trading=True,
+                    use_live_reads=True,
+                    live_unlock_mode="manual",
+                ),
+                live=SimpleNamespace(
+                    unlocked=False,
+                    unlock_mode="locked",
+                    locked_reason="Dashboard live unlock is required.",
+                    emergency_stopped=False,
+                    manually_locked=False,
+                    doctor=SimpleNamespace(ok=True),
+                    balance=SimpleNamespace(status="ready"),
+                ),
+            )
+
+    async def fake_get_bot(user_id):
+        return FakeBot()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.execution.polymarket_bot_manager.get_bot",
+        fake_get_bot,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.execution.refresh_runtime_execution_settings",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                auto_live_enabled=True,
+                dry_run=True,
+                allow_live_execution=False,
+                emergency_stop=False,
+                paused=False,
+            )
+        ),
+    )
 
     controls = await refresh_live_controls(user_id=1)
 
     assert controls.unlocked is False
     assert controls.unlock_mode == "locked"
     assert controls.locked_reason == "Dashboard live unlock is required."
+
+
+@pytest.mark.anyio
+async def test_refresh_live_controls_respects_manual_live_lock_when_auto_live_is_armed(
+    monkeypatch,
+):
+    from app.domains.polymarket_auto_live.execution import refresh_live_controls
+
+    class FakeBot:
+        async def refresh_doctor(self):
+            return None
+
+        async def refresh_balance(self):
+            return None
+
+        async def get_state(self):
+            return SimpleNamespace(
+                config=SimpleNamespace(
+                    live_trading=True,
+                    use_live_reads=True,
+                    live_unlock_mode="manual",
+                ),
+                live=SimpleNamespace(
+                    unlocked=False,
+                    unlock_mode="locked",
+                    locked_reason="Live locked manually.",
+                    emergency_stopped=False,
+                    manually_locked=True,
+                    doctor=SimpleNamespace(ok=True),
+                    balance=SimpleNamespace(status="ready"),
+                ),
+            )
+
+    async def fake_get_bot(user_id):
+        return FakeBot()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.execution.polymarket_bot_manager.get_bot",
+        fake_get_bot,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.execution.refresh_runtime_execution_settings",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                auto_live_enabled=True,
+                dry_run=False,
+                allow_live_execution=True,
+                emergency_stop=False,
+                paused=False,
+            )
+        ),
+    )
+
+    controls = await refresh_live_controls(user_id=1)
+
+    assert controls.unlocked is False
+    assert controls.unlock_mode == "locked"
+    assert controls.locked_reason == "Live locked manually."
 
 
 def test_auto_live_settings_enforce_cross_field_validation():
