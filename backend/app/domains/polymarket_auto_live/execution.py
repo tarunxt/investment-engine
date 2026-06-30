@@ -13,6 +13,11 @@ from app.domains.polymarket_auto_live.repository import (
 from app.domains.polymarket_auto_live.scanner import ScannedMarket, fetch_market_by_slug
 from app.infrastructure.database.session import AsyncSessionLocal
 
+AUTO_LIVE_UNLOCK_BYPASS_REASONS = {
+    "paper_trading must be false",
+    "dashboard live unlock is required",
+}
+
 
 @dataclass
 class RefreshedExecutionQuote:
@@ -83,6 +88,13 @@ def cents_to_decimal(cents: float) -> float:
     return round(cents / 100, 4)
 
 
+def _normalize_locked_reason(reason: str | None) -> str | None:
+    if reason is None:
+        return None
+    normalized = reason.strip().lower()
+    return normalized[:-1] if normalized.endswith(".") else normalized
+
+
 async def refresh_live_controls(*, user_id: int) -> RefreshedLiveControls:
     bot = await polymarket_bot_manager.get_bot(user_id)
     await bot.refresh_doctor()
@@ -102,22 +114,18 @@ async def refresh_live_controls(*, user_id: int) -> RefreshedLiveControls:
         and not runtime_settings.dry_run
         and not runtime_settings.emergency_stop
         and not runtime_settings.paused
-        and state.config.live_trading
-        and state.config.use_live_reads
         and not state.live.emergency_stopped
         and not state.live.manually_locked
         and state.live.doctor.ok
         and state.live.balance.status == "ready"
     )
-    if locked_reason in {
-        "PAPER_TRADING must be false.",
-        "Dashboard live unlock is required.",
-    }:
+    normalized_locked_reason = _normalize_locked_reason(locked_reason)
+    if normalized_locked_reason in AUTO_LIVE_UNLOCK_BYPASS_REASONS:
         if auto_live_can_self_authorize:
             unlocked = True
             unlock_mode = "automatic"
             locked_reason = None
-        elif locked_reason == "PAPER_TRADING must be false.":
+        elif normalized_locked_reason == "paper_trading must be false":
             locked_reason = "Dashboard live unlock is required."
 
     return RefreshedLiveControls(

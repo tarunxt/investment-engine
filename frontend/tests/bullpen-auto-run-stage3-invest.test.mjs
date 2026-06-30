@@ -54,9 +54,9 @@ function createStage(stageNumber, workflowStageKey, outputs, phaseStatus = "comp
   };
 }
 
-function createRun({ stageResults, ordersSubmitted = 0 } = {}) {
+function createRun({ id = "run-stage3-source", stageResults, ordersSubmitted = 0 } = {}) {
   return {
-    id: "run-stage3-source",
+    id,
     triggered_by: "manual",
     status: "failed",
     dry_run: false,
@@ -272,6 +272,76 @@ test("Stage 3 invest plan stays blocked when Stage 2 produced no qualified candi
   assert.equal(
     plan.blockedReason,
     "No Stage 2-qualified events are available to invest yet.",
+  );
+});
+
+test("Stage 3 invest source falls back to the latest persisted Stage 2-qualified run after a newer run is interrupted", async () => {
+  const { selectBullpenStage3OnlyInvestSource } = await loadStage3InvestModule();
+
+  const interruptedRun = createRun({
+    id: "run-stage3-interrupted",
+    stageResults: [
+      createStage(1, "scan", { accepted_candidates: [] }),
+      createStage(2, "llm", { llm_reviewed_candidates: [] }, "running"),
+    ],
+  });
+
+  const reusableRun = createRun({
+    id: "run-stage3-reusable",
+    stageResults: [
+      createStage(1, "scan", {
+        snapshot_id: "snapshot-older",
+        accepted_candidates: [
+          {
+            question_id: "question-older",
+            market_id: "market-older",
+            question: "Will the older event happen?",
+            market_title: "Will the older event happen?",
+            market_url: "https://example.com/market-older",
+            slug: "older-event",
+            close_time: "2026-07-09T12:00:00Z",
+            theme: "Macro",
+            current_yes_odds: 41,
+            current_no_odds: 59,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-older",
+            question: "Will the older event happen?",
+            market_url: "https://example.com/market-older",
+            slug: "older-event",
+            close_time: "2026-07-09T12:00:00Z",
+            returns_per_day: 2.1,
+            qualified: true,
+            fair_yes_probability_pct: 14,
+            fair_no_probability_pct: 86,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+        ],
+      }),
+      createStage(3, "invest", {}, "queued"),
+    ],
+  });
+
+  const selection = selectBullpenStage3OnlyInvestSource([
+    interruptedRun,
+    reusableRun,
+  ]);
+
+  assert.equal(selection.run?.id, reusableRun.id);
+  assert.equal(selection.plan.blockedReason, null);
+  assert.equal(selection.plan.qualifiedCandidateCount, 1);
+  assert.equal(
+    selection.plan.request?.console_profile?.candidate_rows[0]?.market_id,
+    "market-older",
   );
 });
 

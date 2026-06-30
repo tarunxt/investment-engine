@@ -149,14 +149,14 @@ async def test_refresh_live_controls_allows_auto_live_stage3_without_dashboard_u
         async def get_state(self):
             return SimpleNamespace(
                 config=SimpleNamespace(
-                    live_trading=True,
-                    use_live_reads=True,
+                    live_trading=False,
+                    use_live_reads=False,
                     live_unlock_mode="manual",
                 ),
                 live=SimpleNamespace(
                     unlocked=False,
                     unlock_mode="locked",
-                    locked_reason="PAPER_TRADING must be false.",
+                    locked_reason="Dashboard live unlock is required",
                     emergency_stopped=False,
                     manually_locked=False,
                     doctor=SimpleNamespace(ok=True),

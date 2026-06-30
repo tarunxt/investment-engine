@@ -30,7 +30,7 @@ import type {
 } from "@/types/api";
 
 import { buildBullpenAutoRunWorkflowView } from "./bullpenAutoRunProgress";
-import { buildBullpenStage3OnlyInvestPlan } from "./bullpenAutoRunStage3Invest";
+import { selectBullpenStage3OnlyInvestSource } from "./bullpenAutoRunStage3Invest";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
 import { formatElapsedRunTime, formatStageElapsedTime } from "./bullpenAutoRunTimers";
 
@@ -755,7 +755,15 @@ export function BullpenAutoRunScheduleCard({
   const workflowRun =
     visibleRun ??
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
-  const investOnlyPlan = buildBullpenStage3OnlyInvestPlan(workflowRun);
+  const investOnlySource = selectBullpenStage3OnlyInvestSource(
+    summary
+      ? [summary.latest_run, ...summary.recent_runs]
+      : workflowRun
+        ? [workflowRun]
+        : [],
+  );
+  const investOnlyPlan = investOnlySource.plan;
+  const investOnlySourceRun = investOnlySource.run;
   const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
   const workflowView = buildBullpenAutoRunWorkflowView(
     workflowRun,
@@ -816,11 +824,14 @@ export function BullpenAutoRunScheduleCard({
       (((backendExecutionGuardrail.value ?? "").toString().toLowerCase() === "blocked") ||
         /blocks auto-live execution/i.test(backendExecutionGuardrail.detail)),
   );
+  const investOnlyAlreadySubmitted =
+    (workflowRun?.orders_submitted ?? 0) > 0 ||
+    (investOnlySourceRun?.orders_submitted ?? 0) > 0;
   const investOnlyDisabledReason =
     pendingRunId !== null || visibleRun?.status === "running"
       ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
-      : workflowRun && workflowRun.orders_submitted > 0
-        ? "Latest run already submitted live orders, so Invest is locked to avoid duplicate buys."
+      : investOnlyAlreadySubmitted
+        ? "Latest reusable Stage 2 run already submitted live orders, so Invest is locked to avoid duplicate buys."
         : investOnlyPlan.blockedReason;
 
   useEffect(() => {

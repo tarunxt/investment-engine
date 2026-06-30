@@ -11,6 +11,11 @@ export type BullpenStage3OnlyInvestPlan = {
   blockedReason: string | null;
 };
 
+export type BullpenStage3OnlyInvestSource = {
+  run: BullpenAutoLiveRun | null;
+  plan: BullpenStage3OnlyInvestPlan;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -228,5 +233,50 @@ export function buildBullpenStage3OnlyInvestPlan(
     },
     qualifiedCandidateCount: candidateRows.length,
     blockedReason: null,
+  };
+}
+
+function uniqueRuns(
+  runs: Array<BullpenAutoLiveRun | null | undefined>,
+): BullpenAutoLiveRun[] {
+  const seen = new Set<string>();
+  const ordered: BullpenAutoLiveRun[] = [];
+  for (const run of runs) {
+    if (!run || seen.has(run.id)) {
+      continue;
+    }
+    seen.add(run.id);
+    ordered.push(run);
+  }
+  return ordered;
+}
+
+export function selectBullpenStage3OnlyInvestSource(
+  runs: Array<BullpenAutoLiveRun | null | undefined>,
+): BullpenStage3OnlyInvestSource {
+  const orderedRuns = uniqueRuns(runs);
+  if (orderedRuns.length === 0) {
+    return {
+      run: null,
+      plan: buildBullpenStage3OnlyInvestPlan(null),
+    };
+  }
+
+  const fallbackRun: BullpenAutoLiveRun | null = orderedRuns[0] ?? null;
+  const fallbackPlan = buildBullpenStage3OnlyInvestPlan(fallbackRun);
+
+  for (const run of orderedRuns) {
+    const plan = buildBullpenStage3OnlyInvestPlan(run);
+    if (plan.request) {
+      return {
+        run,
+        plan,
+      };
+    }
+  }
+
+  return {
+    run: fallbackRun,
+    plan: fallbackPlan,
   };
 }
