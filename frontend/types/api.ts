@@ -1625,6 +1625,46 @@ export interface BullpenAutoLiveLlmOutput {
   completed_at?: string | null;
 }
 
+export interface BullpenAutoLiveConsoleCandidateInput {
+  question_id: string;
+  market_id: string;
+  market_title: string;
+  slug?: string | null;
+  market_url?: string | null;
+  close_time?: string | null;
+  theme: string;
+  current_yes_odds?: number | null;
+  current_no_odds?: number | null;
+  llm_yes_odds?: number | null;
+  llm_no_odds?: number | null;
+  returns_per_day?: number | null;
+  amount_to_be_invested?: number | null;
+  llm_disagreement_level?: string | null;
+  llm_disagreement_category?: string | null;
+  adjudication_required: boolean;
+  confidence?: BullpenAutoLiveConfidence | string | null;
+  evidence_status?: BullpenAutoLiveEvidenceStatus | string | null;
+  event_state?: string | null;
+  rules?: string | null;
+  selected: boolean;
+  llm_outputs: BullpenAutoLiveLlmOutput[];
+}
+
+export interface BullpenAutoLiveConsoleRunContext {
+  source_label?: string | null;
+  source_url?: string | null;
+  scanned_at?: string | null;
+  snapshot_id?: string | null;
+  mode?: string | null;
+  total_candidates: number;
+  reuse_saved_llm_outputs: boolean;
+  candidate_rows: BullpenAutoLiveConsoleCandidateInput[];
+}
+
+export interface BullpenAutoLiveRunOnceRequest {
+  console_profile?: BullpenAutoLiveConsoleRunContext | null;
+}
+
 export interface BullpenAutoLiveOrderPlan {
   id: string;
   action: BullpenAutoLiveOrderAction;

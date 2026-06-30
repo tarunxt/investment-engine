@@ -32,6 +32,7 @@ import {
   BullpenAutoLiveSettings,
   BullpenAutoLiveSettingsUpdate,
   BullpenAutoLiveRun,
+  BullpenAutoLiveRunOnceRequest,
   BullpenAutoLiveDecision,
   BullpenAutoLiveState,
   BullpenAutoLiveSummaryResponse,
@@ -976,7 +977,7 @@ class apiServiceClass implements IApiService {
   }
 
   runBullpenAutoLiveOnce(
-    data?: Record<string, unknown>,
+    data?: BullpenAutoLiveRunOnceRequest,
   ): Promise<BullpenAutoLiveRun> {
     return this.post<BullpenAutoLiveRun>(URLs.bullpenAutoLive.runOnce(), data);
   }
@@ -1036,7 +1037,7 @@ class apiServiceClass implements IApiService {
   }
 
   bullpenAiAutoLiveRunOnce(
-    data?: Record<string, unknown>,
+    data?: BullpenAutoLiveRunOnceRequest,
   ): Promise<BullpenAutoLiveRun> {
     return this.runBullpenAutoLiveOnce(data);
   }

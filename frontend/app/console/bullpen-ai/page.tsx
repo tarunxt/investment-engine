@@ -63,6 +63,7 @@ import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type {
+  BullpenAutoLiveRunOnceRequest,
   PolymarketEventRunContext,
   PolymarketManualInvestOrderRequest,
   PolymarketManualInvestResponse,
@@ -609,7 +610,7 @@ function buildBullpenAutoRunRequest({
   mode: ScanMode;
   snapshot: BullpenScanSnapshot | null;
   selectedQuestionIds: Set<string>;
-}) {
+}): BullpenAutoLiveRunOnceRequest | null {
   if (!snapshot || snapshot.questions.length === 0) {
     return null;
   }

@@ -23,15 +23,20 @@ import { formatApiTimestamp } from "@/lib/datetime";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
-import type { BullpenAutoLiveRun, BullpenAutoLiveSummaryResponse } from "@/types/api";
+import type {
+  BullpenAutoLiveRun,
+  BullpenAutoLiveRunOnceRequest,
+  BullpenAutoLiveSummaryResponse,
+} from "@/types/api";
 
 import { buildBullpenAutoRunWorkflowView } from "./bullpenAutoRunProgress";
+import { buildBullpenStage3OnlyInvestPlan } from "./bullpenAutoRunStage3Invest";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
 import { formatElapsedRunTime, formatStageElapsedTime } from "./bullpenAutoRunTimers";
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
-  buildRunNowRequest?: () => Record<string, unknown> | null;
+  buildRunNowRequest?: () => BullpenAutoLiveRunOnceRequest | null;
   onSummaryUpdated?: (payload: {
     summary: BullpenAutoLiveSummaryResponse;
     run: BullpenAutoLiveRun | null;
@@ -41,6 +46,7 @@ type BullpenAutoRunScheduleCardProps = {
 
 type ActionState =
   | "enable"
+  | "invest-now"
   | "run-now"
   | "stop"
   | "pause-run"
@@ -646,9 +652,10 @@ export function BullpenAutoRunScheduleCard({
   }
 
   async function handleRunNow() {
+    const startedAt = new Date().toISOString();
     setAction("run-now");
-    setRunNowStartedAt(new Date().toISOString());
-    setTimerNowMs(Date.now());
+    setRunNowStartedAt(startedAt);
+    setTimerNowMs(Date.parse(startedAt));
     setNotice(null);
     setError(null);
 
@@ -658,6 +665,35 @@ export function BullpenAutoRunScheduleCard({
       const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
       setPendingRunId(run.id);
       setRunNowStartedAt(run.started_at ?? new Date().toISOString());
+      await loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+      setAction(null);
+      setPendingRunId(null);
+      setRunNowStartedAt(null);
+    }
+  }
+
+  async function handleInvestOnly(request: BullpenAutoLiveRunOnceRequest) {
+    const startedAt = new Date().toISOString();
+    setAction("invest-now");
+    setRunNowStartedAt(startedAt);
+    setTimerNowMs(Date.parse(startedAt));
+    setNotice(null);
+    setError(null);
+
+    try {
+      await apiService.updateBullpenAutoLiveSettings(buildConsoleSettingsUpdate());
+      const run = await apiService.runBullpenAutoLiveOnce(request);
+      const qualifiedCandidateCount =
+        request.console_profile?.candidate_rows.length ?? 0;
+      setPendingRunId(run.id);
+      setRunNowStartedAt(run.started_at ?? new Date().toISOString());
+      setNotice(
+        `Queued invest-only run for ${qualifiedCandidateCount} Stage 2-qualified ${
+          qualifiedCandidateCount === 1 ? "event" : "events"
+        }.`,
+      );
       await loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
     } catch (nextError) {
       setError(normalizeError(nextError));
@@ -716,6 +752,7 @@ export function BullpenAutoRunScheduleCard({
   const workflowRun =
     visibleRun ??
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
+  const investOnlyPlan = buildBullpenStage3OnlyInvestPlan(workflowRun);
   const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
   const workflowView = buildBullpenAutoRunWorkflowView(
     workflowRun,
@@ -723,10 +760,17 @@ export function BullpenAutoRunScheduleCard({
     runTimerStartedAt,
   );
   const hasActiveWorkflowStage = workflowView.stages.some((stage) => stage.isCurrent);
-  const showRunTimer = action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
+  const showRunTimer =
+    action === "run-now" ||
+    action === "invest-now" ||
+    pendingRunId !== null ||
+    visibleRun?.status === "running";
   const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;
   const showActiveRunControls =
-    action === "run-now" || pendingRunId !== null || visibleRun?.status === "running";
+    action === "run-now" ||
+    action === "invest-now" ||
+    pendingRunId !== null ||
+    visibleRun?.status === "running";
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
   const openStage = workflowView.stages.find((stage) => stage.key === openStageKey) ?? null;
   const openInputStage = workflowView.stages.find((stage) => stage.key === openInputStageKey) ?? null;
@@ -769,6 +813,12 @@ export function BullpenAutoRunScheduleCard({
       (((backendExecutionGuardrail.value ?? "").toString().toLowerCase() === "blocked") ||
         /blocks auto-live execution/i.test(backendExecutionGuardrail.detail)),
   );
+  const investOnlyDisabledReason =
+    pendingRunId !== null || visibleRun?.status === "running"
+      ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
+      : workflowRun && workflowRun.orders_submitted > 0
+        ? "Latest run already submitted live orders, so Invest is locked to avoid duplicate buys."
+        : investOnlyPlan.blockedReason;
 
   useEffect(() => {
     if (!shouldTickTimers) return;
@@ -1181,6 +1231,51 @@ export function BullpenAutoRunScheduleCard({
                       <p className={`mt-1 text-xs leading-5 ${investExecutionStatus.detailClassName}`}>
                         {investExecutionStatus.message}
                       </p>
+                    </div>
+                  ) : null}
+
+                  {stage.key === "invest" ? (
+                    <div className="mt-3 space-y-2 rounded-xl border border-white/60 bg-white/50 px-3 py-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (investOnlyPlan.request) {
+                            void handleInvestOnly(investOnlyPlan.request);
+                          }
+                        }}
+                        disabled={Boolean(investOnlyDisabledReason) || action !== null}
+                        className={`inline-flex w-full items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                          investOnlyDisabledReason || action !== null
+                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                            : "border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
+                        }`}
+                      >
+                        {action === "invest-now" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Investing...
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="mr-2 h-4 w-4" />
+                            Invest
+                          </>
+                        )}
+                      </button>
+                      <p className={`text-[11px] leading-5 ${toneClasses.muted}`}>
+                        Reuses the latest Stage 2-qualified rows and skips the Bullpen rescan plus LLM rerun.
+                      </p>
+                      {investOnlyDisabledReason ? (
+                        <p className={`text-[11px] leading-5 ${toneClasses.muted}`}>
+                          {investOnlyDisabledReason}
+                        </p>
+                      ) : investOnlyPlan.qualifiedCandidateCount > 0 ? (
+                        <p className={`text-[11px] leading-5 ${toneClasses.muted}`}>
+                          {investOnlyPlan.qualifiedCandidateCount} qualified{" "}
+                          {investOnlyPlan.qualifiedCandidateCount === 1 ? "event" : "events"} ready
+                          for this invest-only pass.
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
 
