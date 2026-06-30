@@ -1,0 +1,159 @@
+name: Enable Bullpen Auto-Live Execution
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_live_execution:
+        description: Type ENABLE_BULLPEN_AUTO_LIVE to confirm this can unlock real Bullpen order submission after guardrails pass.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  enable:
+    name: Enable backend Auto-Live execution flag
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Validate confirmation
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.confirm_live_execution }}" != "ENABLE_BULLPEN_AUTO_LIVE" ]]; then
+            echo "Confirmation input did not match ENABLE_BULLPEN_AUTO_LIVE." >&2
+            exit 1
+          fi
+
+      - name: Enable execution flag and restart services
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 1200s
+          command_timeout: 1200s
+          script: |
+            set -euo pipefail
+
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP_ROOT="/srv/investor"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            LEGACY_APP_USER="investor"
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
+            AUTO_LIVE_ENV_KEY="BULLPEN_AUTO_LIVE_ALLOW_EXECUTION"
+
+            if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+              APP_ROOT="$LEGACY_APP_ROOT"
+            fi
+
+            if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
+              APP_USER="$LEGACY_APP_USER"
+            fi
+
+            resolve_systemd_service_name() {
+              local primary="$1"
+              local legacy="$2"
+
+              if systemctl cat "$primary" >/dev/null 2>&1; then
+                printf '%s\n' "$primary"
+                return
+              fi
+
+              if systemctl cat "$legacy" >/dev/null 2>&1; then
+                printf '%s\n' "$legacy"
+                return
+              fi
+
+              printf '%s\n' "$primary"
+            }
+
+            restart_service_if_present() {
+              local service_name="$1"
+              if systemctl cat "$service_name" >/dev/null 2>&1; then
+                echo "==> Restarting $service_name"
+                sudo systemctl restart "$service_name"
+                sudo systemctl is-active "$service_name"
+              else
+                echo "==> Skipping missing service: $service_name"
+              fi
+            }
+
+            BACKEND_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-backend" "investment-engine-backend"
+            )"
+            WORKER_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-worker" "investment-engine-celery-worker"
+            )"
+            BEAT_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-beat" "investment-engine-celery-beat"
+            )"
+
+            echo "==> App root: $APP_ROOT"
+            echo "==> App user: $APP_USER"
+            echo "==> Backend env: $BACKEND_ENV_FILE"
+
+            sudo test -f "$BACKEND_ENV_FILE"
+            sudo cp "$BACKEND_ENV_FILE" "$BACKEND_ENV_FILE.bak.$(date +%Y%m%d%H%M%S)"
+
+            echo "==> Enabling $AUTO_LIVE_ENV_KEY in backend environment"
+            sudo env BACKEND_ENV_FILE="$BACKEND_ENV_FILE" AUTO_LIVE_ENV_KEY="$AUTO_LIVE_ENV_KEY" python3 - <<'PY'
+            import os
+            from pathlib import Path
+
+            path = Path(os.environ["BACKEND_ENV_FILE"])
+            key = os.environ["AUTO_LIVE_ENV_KEY"]
+            lines = path.read_text(encoding="utf-8").splitlines()
+            output: list[str] = []
+            wrote = False
+
+            for line in lines:
+                stripped = line.lstrip()
+                if not stripped or stripped.startswith("#") or "=" not in line:
+                    output.append(line)
+                    continue
+
+                current_key, _ = line.split("=", 1)
+                if current_key == key:
+                    output.append(f"{key}=true")
+                    wrote = True
+                else:
+                    output.append(line)
+
+            if not wrote:
+                output.append(f"{key}=true")
+
+            path.write_text("\n".join(output) + "\n", encoding="utf-8")
+            PY
+
+            restart_service_if_present "$BACKEND_SERVICE_NAME"
+            restart_service_if_present "$WORKER_SERVICE_NAME"
+            restart_service_if_present "$BEAT_SERVICE_NAME"
+
+            echo "==> Effective Auto-Live backend flag"
+            sudo env BACKEND_ENV_FILE="$BACKEND_ENV_FILE" AUTO_LIVE_ENV_KEY="$AUTO_LIVE_ENV_KEY" bash -lc '
+              grep -E "^${AUTO_LIVE_ENV_KEY}=" "$BACKEND_ENV_FILE"
+            '
+
+            echo "==> Backend runtime verification"
+            sudo -u "$APP_USER" -H bash -lc "
+              cd '$APP_ROOT/backend'
+              source .venv/bin/activate
+              set -a
+              source '$BACKEND_ENV_FILE'
+              set +a
+              python - <<'PY'
+              from app.domains.polymarket_auto_live.config import auto_live_backend_allows_execution
+
+              if not auto_live_backend_allows_execution():
+                  raise SystemExit('Backend runtime still blocks Auto-Live execution')
+              print('Backend runtime allows Auto-Live execution')
+              PY
+            "
+
+            echo "==> Backend readiness"
+            curl --fail --silent --show-error --location --max-time 20 http://127.0.0.1:8000/health/ready
+
+            echo "==> Recent backend logs"
+            sudo journalctl -u "$BACKEND_SERVICE_NAME" -n 40 --no-pager
