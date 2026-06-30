@@ -969,16 +969,16 @@ function formatBasketPercent(value: number) {
 }
 
 function formatZerodhaLtpRefreshTime(value: string | null) {
-  if (!value) return "Using latest synced portfolio snapshot prices";
+  if (!value) return "Using latest synced portfolio snapshot prices until the first quote refresh";
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Using recently refreshed live LTP";
-  return `Live LTP refreshed ${new Intl.DateTimeFormat("en-IN", {
+  if (Number.isNaN(parsed.getTime())) return "Using recently refreshed quoted LTP for the next basket";
+  return `Quoted LTP refreshed ${new Intl.DateTimeFormat("en-IN", {
     timeZone: INDIA_TIMEZONE,
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
     hour12: true,
-  }).format(parsed)} IST`;
+  }).format(parsed)} IST for the next basket`;
 }
 
 function getZerodhaBasketBaseUnits(action: ActionCategory, estimate: ActionEstimate) {
@@ -2969,7 +2969,7 @@ function ZerodhaBasketPreviewDialog({
     <Button
       type="button"
       onClick={onPlaceOrder}
-      disabled={!selectedOrders.length || placing}
+      disabled={!selectedOrders.length || placing || ltpRefreshing}
       className={cn(
         "shrink-0 rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50",
         className,
@@ -3110,6 +3110,9 @@ function ZerodhaBasketPreviewDialog({
                   <div className="text-xs text-slate-500">
                     {formatZerodhaLtpRefreshTime(ltpRefreshedAt)}
                   </div>
+                  <div className="max-w-sm text-xs leading-5 text-slate-500 lg:text-right">
+                    Refresh updates the preview and the next basket payload only. Any Kite basket tabs already opened keep showing Zerodha&apos;s own live LTP feed.
+                  </div>
                 </div>
               </div>
 
@@ -3129,172 +3132,174 @@ function ZerodhaBasketPreviewDialog({
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <table className="min-w-[92rem] w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                      <th className="px-4 py-3 font-semibold">
-                        <label className="inline-flex items-center gap-2 whitespace-nowrap">
-                          <input
-                            type="checkbox"
-                            checked={allSelected}
-                            onChange={onToggleAll}
-                            aria-label="Select or deselect all Zerodha basket orders"
-                            className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span>All Stocks</span>
-                        </label>
-                      </th>
-                      <th className="px-4 py-3 font-semibold">Stock</th>
-                      <th className="px-4 py-3 font-semibold">Score</th>
-                      <th className="px-4 py-3 font-semibold">Consensus</th>
-                      <th className="px-4 py-3 font-semibold">Action</th>
-                      <th className="px-4 py-3 font-semibold">Side</th>
-                      <th className="px-4 py-3 font-semibold">Units</th>
-                      <th className="px-4 py-3 font-semibold">%</th>
-                      <th className="px-4 py-3 font-semibold">LTP</th>
-                      <th className="px-4 py-3 font-semibold">Limit Price</th>
-                      <th className="px-4 py-3 font-semibold">Amount</th>
-                      <th className="px-4 py-3 font-semibold">Order Type</th>
-                      <th className="px-4 py-3 font-semibold">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {sectionGroups.map((group) => {
-                      const sectionSelected = group.orders.filter((order) => selectedIds.has(order.id)).length;
-                      const sectionAllSelected = sectionSelected === group.orders.length;
-                      return (
-                        <Fragment key={group.action}>
-                          <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
-                            <td className="px-4 py-3" colSpan={13}>
-                              <label className="inline-flex items-center gap-3 text-sm font-black">
-                                <input
-                                  type="checkbox"
-                                  checked={sectionAllSelected}
-                                  onChange={() => onToggleSection(group.action)}
-                                  aria-label={`Select or deselect ${group.label} Zerodha basket orders`}
-                                  className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                />
-                                <span>{group.label}</span>
-                                <span className="text-xs font-semibold text-slate-500">{sectionSelected}/{group.orders.length} selected</span>
-                              </label>
-                            </td>
-                          </tr>
-                          {group.orders.map((order) => (
-                            <tr key={order.id} className="bg-white">
-                              <td className="px-4 py-3">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedIds.has(order.id)}
-                                  onChange={() => onToggle(order.id)}
-                                  aria-label={`Select ${order.exchange} ${order.symbol}`}
-                                  className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                />
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950">
-                                <div className="inline-flex items-center gap-1.5">
-                                  <StockDetailsButton
-                                    stock={order.stock}
-                                    market="india"
-                                    technicalScan={order.technicalScan}
-                                    detailsData={detailsData}
+                <div className="overflow-x-auto overscroll-x-contain">
+                  <table className="min-w-[92rem] w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                        <th className="px-4 py-3 font-semibold">
+                          <label className="inline-flex items-center gap-2 whitespace-nowrap">
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={onToggleAll}
+                              aria-label="Select or deselect all Zerodha basket orders"
+                              className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>All Stocks</span>
+                          </label>
+                        </th>
+                        <th className="px-4 py-3 font-semibold">Stock</th>
+                        <th className="px-4 py-3 font-semibold">Score</th>
+                        <th className="px-4 py-3 font-semibold">Consensus</th>
+                        <th className="px-4 py-3 font-semibold">Action</th>
+                        <th className="px-4 py-3 font-semibold">Side</th>
+                        <th className="px-4 py-3 font-semibold">Units</th>
+                        <th className="px-4 py-3 font-semibold">%</th>
+                        <th className="px-4 py-3 font-semibold">Quoted LTP</th>
+                        <th className="px-4 py-3 font-semibold">Limit Price</th>
+                        <th className="px-4 py-3 font-semibold">Amount</th>
+                        <th className="px-4 py-3 font-semibold">Order Type</th>
+                        <th className="px-4 py-3 font-semibold">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {sectionGroups.map((group) => {
+                        const sectionSelected = group.orders.filter((order) => selectedIds.has(order.id)).length;
+                        const sectionAllSelected = sectionSelected === group.orders.length;
+                        return (
+                          <Fragment key={group.action}>
+                            <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
+                              <td className="px-4 py-3" colSpan={13}>
+                                <label className="inline-flex items-center gap-3 text-sm font-black">
+                                  <input
+                                    type="checkbox"
+                                    checked={sectionAllSelected}
+                                    onChange={() => onToggleSection(group.action)}
+                                    aria-label={`Select or deselect ${group.label} Zerodha basket orders`}
+                                    className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                   />
-                                  <span className="text-xs font-semibold text-slate-500">{order.exchange}</span>
-                                  <TradingViewSymbolLink
-                                    symbol={order.symbol}
-                                    market="india"
-                                    exchange={order.exchange}
-                                    className="underline-offset-4 transition hover:text-blue-700 hover:underline"
-                                  >
-                                    {order.symbol}
-                                  </TradingViewSymbolLink>
-                                </div>
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                                <ScoreMatrixButton detail={order.detail} onOpenDetail={setSelectedMatrixDetail} />
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-3">
-                                <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{getZerodhaBasketActionForPercent(order)}</td>
-                              <td className="px-4 py-3">
-                                <span className={cn(
-                                  "rounded-full px-3 py-1 text-xs font-bold",
-                                  order.side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
-                                )}>
-                                  {order.side}
-                                </span>
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                                <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold shadow-sm">
-                                  <button
-                                    type="button"
-                                    onClick={() => onUnitsChange(order.id, -1)}
-                                    disabled={(order.units ?? 0) <= 1}
-                                    className="px-2 py-1 text-slate-500 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
-                                    aria-label={`Decrease ${order.exchange} ${order.symbol} units`}
-                                  >
-                                    -
-                                  </button>
-                                  <span className="min-w-10 px-2 py-1 text-center text-slate-800">
-                                    {formatBasketQuantity(order.units)}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => onUnitsChange(order.id, 1)}
-                                    disabled={getZerodhaBasketUnitLimit(order) !== null && (order.units ?? 0) >= (getZerodhaBasketUnitLimit(order) ?? 0)}
-                                    className="px-2 py-1 text-slate-500 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
-                                    aria-label={`Increase ${order.exchange} ${order.symbol} units`}
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                {order.side === "SELL" ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => onPercentChange(order.id, order.percent >= 100 ? 50 : 100)}
-                                    className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                                    aria-label={`Toggle ${order.exchange} ${order.symbol} basket percentage between trim and sell all`}
-                                  >
-                                    {formatBasketPercent(order.percent)}
-                                  </button>
-                                ) : (
-                                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
-                                    {formatBasketPercent(order.percent)}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.lastPrice)}</td>
-                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price)}</td>
-                              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount)}</td>
-                              <td className="px-4 py-3">
-                                <select
-                                  value={order.orderKind}
-                                  onChange={(event) => onOrderKindChange(order.id, event.target.value as ZerodhaBasketOrderKind)}
-                                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                                >
-                                  {ZERODHA_ORDER_KINDS.map((orderKind) => (
-                                    <option key={orderKind} value={orderKind}>
-                                      {orderKind}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
-                                {submission?.orders.some((submittedOrder) => submittedOrder.id === order.id) ? (
-                                  <span className="text-blue-700">{submission.executionMode === "direct_market" ? "Submitted direct" : "Sent to protected LIMIT tray"}</span>
-                                ) : (
-                                  <span>Pending</span>
-                                )}
+                                  <span>{group.label}</span>
+                                  <span className="text-xs font-semibold text-slate-500">{sectionSelected}/{group.orders.length} selected</span>
+                                </label>
                               </td>
                             </tr>
-                          ))}
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            {group.orders.map((order) => (
+                              <tr key={order.id} className="bg-white">
+                                <td className="px-4 py-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedIds.has(order.id)}
+                                    onChange={() => onToggle(order.id)}
+                                    aria-label={`Select ${order.exchange} ${order.symbol}`}
+                                    className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950">
+                                  <div className="inline-flex items-center gap-1.5">
+                                    <StockDetailsButton
+                                      stock={order.stock}
+                                      market="india"
+                                      technicalScan={order.technicalScan}
+                                      detailsData={detailsData}
+                                    />
+                                    <span className="text-xs font-semibold text-slate-500">{order.exchange}</span>
+                                    <TradingViewSymbolLink
+                                      symbol={order.symbol}
+                                      market="india"
+                                      exchange={order.exchange}
+                                      className="underline-offset-4 transition hover:text-blue-700 hover:underline"
+                                    >
+                                      {order.symbol}
+                                    </TradingViewSymbolLink>
+                                  </div>
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                                  <ScoreMatrixButton detail={order.detail} onOpenDetail={setSelectedMatrixDetail} />
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3">
+                                  <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{getZerodhaBasketActionForPercent(order)}</td>
+                                <td className="px-4 py-3">
+                                  <span className={cn(
+                                    "rounded-full px-3 py-1 text-xs font-bold",
+                                    order.side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
+                                  )}>
+                                    {order.side}
+                                  </span>
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                                  <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold shadow-sm">
+                                    <button
+                                      type="button"
+                                      onClick={() => onUnitsChange(order.id, -1)}
+                                      disabled={(order.units ?? 0) <= 1}
+                                      className="px-2 py-1 text-slate-500 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                                      aria-label={`Decrease ${order.exchange} ${order.symbol} units`}
+                                    >
+                                      -
+                                    </button>
+                                    <span className="min-w-10 px-2 py-1 text-center text-slate-800">
+                                      {formatBasketQuantity(order.units)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => onUnitsChange(order.id, 1)}
+                                      disabled={getZerodhaBasketUnitLimit(order) !== null && (order.units ?? 0) >= (getZerodhaBasketUnitLimit(order) ?? 0)}
+                                      className="px-2 py-1 text-slate-500 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                                      aria-label={`Increase ${order.exchange} ${order.symbol} units`}
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  {order.side === "SELL" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => onPercentChange(order.id, order.percent >= 100 ? 50 : 100)}
+                                      className="rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                      aria-label={`Toggle ${order.exchange} ${order.symbol} basket percentage between trim and sell all`}
+                                    >
+                                      {formatBasketPercent(order.percent)}
+                                    </button>
+                                  ) : (
+                                    <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                                      {formatBasketPercent(order.percent)}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.lastPrice)}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price)}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount)}</td>
+                                <td className="px-4 py-3">
+                                  <select
+                                    value={order.orderKind}
+                                    onChange={(event) => onOrderKindChange(order.id, event.target.value as ZerodhaBasketOrderKind)}
+                                    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                  >
+                                    {ZERODHA_ORDER_KINDS.map((orderKind) => (
+                                      <option key={orderKind} value={orderKind}>
+                                        {orderKind}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
+                                  {submission?.orders.some((submittedOrder) => submittedOrder.id === order.id) ? (
+                                    <span className="text-blue-700">{submission.executionMode === "direct_market" ? "Submitted direct" : "Sent to protected LIMIT tray"}</span>
+                                  ) : (
+                                    <span>Pending</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </>
           ) : (
@@ -3314,7 +3319,7 @@ function ZerodhaBasketPreviewDialog({
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {executionMode === "direct_market"
               ? "Protected MARKET mode submits every selected stock through the backend using Kite Connect with market_protection=-1 during regular NSE/BSE hours. Access tokens never reach the browser."
-              : "Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. Each limit price is refreshed from the latest available LTP before basket submission, so stale recommendation prices are never used as execution prices."}
+              : "Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. Each limit price is refreshed from the latest available quoted LTP before basket submission, so stale recommendation prices are never used as execution prices. Kite can still show a newer live LTP after the basket page opens."}
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
