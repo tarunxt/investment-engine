@@ -88,10 +88,33 @@ async def refresh_live_controls(*, user_id: int) -> RefreshedLiveControls:
     await bot.refresh_doctor()
     await bot.refresh_balance()
     state = await bot.get_state()
+    unlocked = state.live.unlocked
+    unlock_mode = state.live.unlock_mode
+    locked_reason = state.live.locked_reason
+
+    # Auto-Live has its own live-execution arming controls.  Do not let the
+    # copy-trading bot's paper-mode setting block Stage 3 after the live env,
+    # automatic unlock mode, doctor, balance, and emergency/manual locks pass.
+    if locked_reason == "PAPER_TRADING must be false.":
+        if (
+            state.config.live_trading
+            and state.config.use_live_reads
+            and state.config.live_unlock_mode == "automatic"
+            and not state.live.emergency_stopped
+            and not state.live.manually_locked
+            and state.live.doctor.ok
+            and state.live.balance.status == "ready"
+        ):
+            unlocked = True
+            unlock_mode = "automatic"
+            locked_reason = None
+        elif state.config.live_unlock_mode != "automatic":
+            locked_reason = "Dashboard live unlock is required."
+
     return RefreshedLiveControls(
-        unlocked=state.live.unlocked,
-        unlock_mode=state.live.unlock_mode,
-        locked_reason=state.live.locked_reason,
+        unlocked=unlocked,
+        unlock_mode=unlock_mode,
+        locked_reason=locked_reason,
         emergency_stopped=state.live.emergency_stopped,
         doctor=state.live.doctor,
         balance=state.live.balance,
