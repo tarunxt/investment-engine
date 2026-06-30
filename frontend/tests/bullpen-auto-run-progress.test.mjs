@@ -374,6 +374,51 @@ test("Bullpen auto-run workflow view explains Stage 3 counts as combined review 
   assert.equal(view.stages[2].outputs.candidate_decision_rows, 9);
 });
 
+test("Bullpen auto-run workflow view appends the exact Stage 3 gate reason to the detail copy", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage-3-gated",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: false,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 3 is waiting on live execution controls.",
+    live_execution_requested: true,
+    live_execution_attempted: true,
+    decisions_count: 7,
+    orders_planned: 3,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+      }),
+      createStage(2, "Stage 2 reviewed all events.", {
+        workflow_stage_key: "llm",
+        phase_status: "completed",
+      }),
+      createStage(3, "Stage 3 reviewed all rows, but live execution is currently gated.", {
+        workflow_stage_key: "invest",
+        phase_status: "running",
+        completed_items: 7,
+        total_items: 7,
+        item_label: "rows",
+        execution_gate_reason:
+          "Dashboard live unlock is required; Bullpen doctor failed.",
+      }),
+    ],
+  });
+
+  assert.match(
+    view.stages[2].detail,
+    /Execution gate: Dashboard live unlock is required; Bullpen doctor failed\./,
+  );
+});
+
 test("Bullpen auto-run workflow view explains when Stage 2 reuses saved LLM outputs", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 

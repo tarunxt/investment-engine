@@ -95,6 +95,10 @@ function readString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function appendStageDetail(detail: string, suffix: string) {
+  return detail.endsWith(".") ? `${detail} ${suffix}` : `${detail}. ${suffix}`;
+}
+
 function readBoolean(value: unknown) {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -110,13 +114,29 @@ function buildStageDetail(
   detail: string,
   workflowDefinition: WorkflowDefinition,
 ) {
+  let nextDetail = detail;
   if (
     workflowDefinition.key === "llm" &&
     readBoolean(stage?.outputs?.reused_existing_llm_outputs)
   ) {
-    return `${detail} Reused the current Bullpen x AI table's saved LLM outputs instead of making fresh LLM calls.`;
+    nextDetail = appendStageDetail(
+      nextDetail,
+      "Reused the current Bullpen x AI table's saved LLM outputs instead of making fresh LLM calls.",
+    );
   }
-  return detail;
+  if (workflowDefinition.key === "invest") {
+    const executionGateReason = readString(stage?.outputs?.execution_gate_reason);
+    const executionModeReason = readString(stage?.outputs?.execution_mode_reason);
+    const investDetail = executionGateReason
+      ? `Execution gate: ${executionGateReason}`
+      : executionModeReason
+        ? `Execution mode: ${executionModeReason}`
+        : null;
+    if (investDetail && !nextDetail.includes(investDetail)) {
+      nextDetail = appendStageDetail(nextDetail, investDetail);
+    }
+  }
+  return nextDetail;
 }
 
 function readNumber(value: unknown) {

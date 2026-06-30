@@ -189,6 +189,9 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.match(autoRunCardSource, /Pause/);
   assert.match(autoRunCardSource, /Kill/);
   assert.match(autoRunCardSource, /Open .* output/);
+  assert.match(autoRunCardSource, /Execution gate/);
+  assert.match(autoRunCardSource, /BULLPEN_AUTO_LIVE_ALLOW_EXECUTION/);
+  assert.match(autoRunCardSource, /Backend live execution is disabled/);
   assert.match(autoRunCardSource, /BullpenAutoRunStageOutputDialog/);
   assert.match(autoRunProgressSource, /Stage 1 · Bullpen Scan/);
   assert.match(autoRunProgressSource, /Stage 2 · Run LLM/);

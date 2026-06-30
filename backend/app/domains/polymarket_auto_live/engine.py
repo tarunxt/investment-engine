@@ -3083,6 +3083,13 @@ class BullpenAutoLiveEngine:
 
         invest_stage_started_at = utc_now_iso()
         total_decision_rows = len(position_snapshots) + len(candidate_contexts)
+        decisions: list[BullpenAutoLiveDecision] = []
+        processed_decision_rows = 0
+        planned_orders = 0
+        submitted_orders = 0
+        execution_orders_processed = 0
+        execution_pause_reason: str | None = None
+        simulation_reason = _simulation_reason(settings)
 
         def report_invest_stage_progress(
             *,
@@ -3090,6 +3097,8 @@ class BullpenAutoLiveEngine:
             reason: str,
             completed_items: int,
             last_completed_market: ScannedMarket | None = None,
+            execution_gate_reason: str | None = None,
+            execution_mode_reason: str | None = None,
             completed_at: str | None | object = _DEFAULT_COMPLETED_AT,
         ) -> None:
             stage_outputs: dict[str, object] = {
@@ -3100,11 +3109,23 @@ class BullpenAutoLiveEngine:
                 "top_active_keys": sorted(top_active_keys),
                 "active_position_rows": len(position_snapshots),
                 "candidate_decision_rows": len(candidate_contexts),
+                "decisions_count": len(decisions),
+                "orders_planned": planned_orders,
+                "orders_submitted": submitted_orders,
             }
+            if execution_orders_processed > 0:
+                stage_outputs["orders_processed"] = execution_orders_processed
+            if execution_gate_reason:
+                stage_outputs["execution_gate_reason"] = execution_gate_reason
+            if execution_mode_reason:
+                stage_outputs["execution_mode_reason"] = execution_mode_reason
             if last_completed_market is not None:
                 stage_outputs["last_completed_market_id"] = last_completed_market.market_id
                 stage_outputs["last_completed_question"] = last_completed_market.question
                 stage_outputs["last_completed_market_url"] = last_completed_market.market_url
+            run.decisions_count = len(decisions)
+            run.orders_planned = planned_orders
+            run.orders_submitted = submitted_orders
             set_run_stage_result(
                 run,
                 build_workflow_stage_result(
@@ -3132,20 +3153,19 @@ class BullpenAutoLiveEngine:
                 else "No candidate or position rows were available for Stage 3."
             ),
             completed_items=0,
+            execution_mode_reason=simulation_reason if state.dry_run else None,
             completed_at=None,
         )
-
-        decisions: list[BullpenAutoLiveDecision] = []
-        processed_decision_rows = 0
 
         def record_invest_decision(
             decision: BullpenAutoLiveDecision,
             *,
             market: ScannedMarket,
         ) -> None:
-            nonlocal processed_decision_rows
+            nonlocal planned_orders, processed_decision_rows
             decisions.append(decision)
             processed_decision_rows += 1
+            planned_orders = sum(1 for current in decisions if current.order_plan is not None)
             report_invest_stage_progress(
                 phase_status="running",
                 reason=(
@@ -3154,6 +3174,7 @@ class BullpenAutoLiveEngine:
                 ),
                 completed_items=processed_decision_rows,
                 last_completed_market=market,
+                execution_mode_reason=simulation_reason if state.dry_run else None,
                 completed_at=None,
             )
 
@@ -3507,8 +3528,6 @@ class BullpenAutoLiveEngine:
             if decision.decision in {"BUY_NEW", "EXIT"}
         ]
         planned_orders = len(actionable_decisions)
-        submitted_orders = 0
-        execution_pause_reason: str | None = None
         execution_block_reasons: list[str] = []
         if actionable_decisions and not state.dry_run:
             live_controls = await refresh_live_controls(user_id=user_id)
@@ -3535,9 +3554,30 @@ class BullpenAutoLiveEngine:
                     state.paused = True
                 if not live_controls.doctor.ok and settings.pause_if_doctor_fails:
                     state.paused = True
+        if actionable_decisions:
+            report_invest_stage_progress(
+                phase_status="running",
+                reason=(
+                    f"Stage 3 reviewed all {total_decision_rows} rows and is preparing "
+                    f"{planned_orders} planned order{'s' if planned_orders != 1 else ''}."
+                    if not state.dry_run and not execution_pause_reason
+                    else (
+                        f"Stage 3 reviewed all {total_decision_rows} rows and is staying "
+                        "in simulation mode for execution planning."
+                    )
+                    if state.dry_run
+                    else (
+                        f"Stage 3 reviewed all {total_decision_rows} rows, but live "
+                        "execution is currently gated."
+                    )
+                ),
+                completed_items=processed_decision_rows,
+                execution_gate_reason=execution_pause_reason,
+                execution_mode_reason=simulation_reason if state.dry_run else None,
+                completed_at=None,
+            )
 
         executor = bullpen_module.BullpenLiveExecutor()
-        simulation_reason = _simulation_reason(settings)
         new_positions = position_snapshots[:]
         running_failed_orders = state.consecutive_failed_orders
 
@@ -3565,6 +3605,17 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders += 1
+                execution_orders_processed += 1
+                report_invest_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        f"Stage 3 blocked {execution_orders_processed} of {planned_orders} "
+                        f"planned orders. Latest: {decision.market_title}"
+                    ),
+                    completed_items=processed_decision_rows,
+                    execution_gate_reason=execution_pause_reason,
+                    completed_at=None,
+                )
                 continue
 
             quote = await refresh_execution_quote(slug=decision.slug, side=order_plan.side)
@@ -3582,6 +3633,18 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders += 1
+                execution_orders_processed += 1
+                report_invest_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        f"Stage 3 processed {execution_orders_processed} of {planned_orders} "
+                        f"planned orders. Latest: {decision.market_title}"
+                    ),
+                    completed_items=processed_decision_rows,
+                    execution_gate_reason=execution_pause_reason,
+                    execution_mode_reason=simulation_reason if state.dry_run else None,
+                    completed_at=None,
+                )
                 continue
 
             if order_plan.action == "buy":
@@ -3613,6 +3676,17 @@ class BullpenAutoLiveEngine:
                         reason=order_plan.detail,
                         outputs=order_plan.model_dump(mode="json"),
                     )
+                )
+                execution_orders_processed += 1
+                report_invest_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        f"Stage 3 simulated {execution_orders_processed} of {planned_orders} "
+                        f"planned orders. Latest: {decision.market_title}"
+                    ),
+                    completed_items=processed_decision_rows,
+                    execution_mode_reason=simulation_reason,
+                    completed_at=None,
                 )
                 continue
 
@@ -3683,6 +3757,22 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders += 1
+            execution_orders_processed += 1
+            report_invest_stage_progress(
+                phase_status="running",
+                reason=(
+                    f"Stage 3 submitted {submitted_orders} of {planned_orders} planned "
+                    f"orders. Latest: {decision.market_title}"
+                    if order_plan.status == "submitted"
+                    else (
+                        f"Stage 3 processed {execution_orders_processed} of "
+                        f"{planned_orders} planned orders. Latest: {decision.market_title}"
+                    )
+                ),
+                completed_items=processed_decision_rows,
+                execution_gate_reason=execution_pause_reason,
+                completed_at=None,
+            )
 
         state.consecutive_failed_orders = running_failed_orders
         for decision in decisions:
@@ -3754,6 +3844,9 @@ class BullpenAutoLiveEngine:
                     "decisions_count": len(decisions),
                     "orders_planned": planned_orders,
                     "orders_submitted": submitted_orders,
+                    "orders_processed": execution_orders_processed,
+                    "execution_gate_reason": execution_pause_reason,
+                    "execution_mode_reason": simulation_reason if state.dry_run else None,
                     "decision_summaries": [
                         {
                             "market_id": decision.market_id,

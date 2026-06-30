@@ -122,6 +122,77 @@ function readStageOutputNumber(value: unknown) {
   return null;
 }
 
+function readStageOutputString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function findGuardrailCheck(
+  summary: BullpenAutoLiveSummaryResponse | null,
+  guardrailId: string,
+) {
+  return (
+    summary?.latest_guardrail_checks.find((check) => check.id === guardrailId) ??
+    summary?.state.latest_guardrail_checks.find((check) => check.id === guardrailId) ??
+    null
+  );
+}
+
+function getInvestStageMetric(
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null,
+  key: string,
+  fallback: number,
+) {
+  if (!stage || stage.key !== "invest") return fallback;
+  return readStageOutputNumber(stage.outputs[key]) ?? fallback;
+}
+
+function getInvestStageExecutionStatus(
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
+) {
+  if (stage.key !== "invest") return null;
+
+  const executionGateReason = readStageOutputString(stage.outputs.execution_gate_reason);
+  if (executionGateReason) {
+    return {
+      label: "Execution gate",
+      message: executionGateReason,
+      className: "border-rose-200 bg-rose-50/80 text-rose-900",
+      detailClassName: "text-rose-800",
+    };
+  }
+
+  const executionModeReason = readStageOutputString(stage.outputs.execution_mode_reason);
+  if (executionModeReason) {
+    return {
+      label: "Execution mode",
+      message: executionModeReason,
+      className: "border-sky-200 bg-sky-50/80 text-sky-900",
+      detailClassName: "text-sky-800",
+    };
+  }
+
+  return null;
+}
+
+function getInvestStageCounters(
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
+) {
+  if (stage.key !== "invest") return [];
+
+  const decisions = readStageOutputNumber(stage.outputs.decisions_count);
+  const planned = readStageOutputNumber(stage.outputs.orders_planned);
+  const submitted = readStageOutputNumber(stage.outputs.orders_submitted);
+  if (decisions === null && planned === null && submitted === null) {
+    return [];
+  }
+
+  return [
+    { label: "Decisions", value: decisions ?? 0 },
+    { label: "Planned", value: planned ?? 0 },
+    { label: "Submitted", value: submitted ?? 0 },
+  ];
+}
+
 function formatInvestStageRowMix(
   stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
 ) {
@@ -661,11 +732,43 @@ export function BullpenAutoRunScheduleCard({
   const openInputStage = workflowView.stages.find((stage) => stage.key === openInputStageKey) ?? null;
   const activeWorkflowStage =
     workflowView.stages.find((stage) => stage.isCurrent) ?? null;
+  const investWorkflowStage =
+    workflowView.stages.find((stage) => stage.key === "invest") ?? null;
+  const workflowDecisionCount =
+    workflowRun !== null
+      ? getInvestStageMetric(
+          investWorkflowStage,
+          "decisions_count",
+          workflowRun.decisions_count,
+        )
+      : null;
+  const workflowPlannedOrderCount =
+    workflowRun !== null
+      ? getInvestStageMetric(
+          investWorkflowStage,
+          "orders_planned",
+          workflowRun.orders_planned,
+        )
+      : null;
+  const workflowSubmittedOrderCount =
+    workflowRun !== null
+      ? getInvestStageMetric(
+          investWorkflowStage,
+          "orders_submitted",
+          workflowRun.orders_submitted,
+        )
+      : null;
   const displayNotice =
     notice ??
     (workflowRun?.status === "running"
       ? activeWorkflowStage?.detail ?? workflowView.statusCopy
       : null);
+  const backendExecutionGuardrail = findGuardrailCheck(summary, "live-execution-env");
+  const backendExecutionBlocked = Boolean(
+    backendExecutionGuardrail &&
+      (((backendExecutionGuardrail.value ?? "").toString().toLowerCase() === "blocked") ||
+        /blocks auto-live execution/i.test(backendExecutionGuardrail.detail)),
+  );
 
   useEffect(() => {
     if (!shouldTickTimers) return;
@@ -866,7 +969,33 @@ export function BullpenAutoRunScheduleCard({
           </Alert>
         ) : null}
 
-        {summary && summary.state.mode !== "live-trading" ? (
+        {backendExecutionBlocked ? (
+          <Alert className="border-rose-200 bg-rose-50 text-rose-950">
+            <ShieldAlert className="h-4 w-4" />
+            <AlertTitle>Backend live execution is disabled</AlertTitle>
+            <AlertDescription>
+              <span>
+                <code className="rounded bg-rose-100 px-1 py-0.5 text-[11px] font-semibold">
+                  BULLPEN_AUTO_LIVE_ALLOW_EXECUTION
+                </code>{" "}
+                is off in the backend environment, so Stage 3 can review rows and
+                simulate order plans but it cannot submit live Bullpen orders.
+              </span>
+              <span className="mt-2 block text-xs leading-5 text-rose-800">
+                Set it to{" "}
+                <code className="rounded bg-rose-100 px-1 py-0.5 font-semibold">
+                  true
+                </code>{" "}
+                and restart the backend and Celery worker to unlock live execution.
+              </span>
+              {backendExecutionGuardrail?.detail ? (
+                <span className="mt-2 block text-xs leading-5 text-rose-800">
+                  {backendExecutionGuardrail.detail}
+                </span>
+              ) : null}
+            </AlertDescription>
+          </Alert>
+        ) : summary && summary.state.mode !== "live-trading" ? (
           <Alert className="border-sky-200 bg-sky-50 text-sky-950">
             <ShieldAlert className="h-4 w-4" />
             <AlertTitle>Live execution is still gated</AlertTitle>
@@ -911,13 +1040,13 @@ export function BullpenAutoRunScheduleCard({
               {workflowRun ? (
                 <>
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                    {workflowRun.decisions_count} decisions
+                    {workflowDecisionCount ?? workflowRun.decisions_count} decisions
                   </span>
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                    {workflowRun.orders_planned} planned
+                    {workflowPlannedOrderCount ?? workflowRun.orders_planned} planned
                   </span>
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                    {workflowRun.orders_submitted} submitted
+                    {workflowSubmittedOrderCount ?? workflowRun.orders_submitted} submitted
                   </span>
                 </>
               ) : null}
@@ -936,6 +1065,8 @@ export function BullpenAutoRunScheduleCard({
               const canOpenInputs =
                 (stage.key === "llm" || stage.key === "invest") &&
                 Object.keys(stage.inputs).length > 0;
+              const investStageCounters = getInvestStageCounters(stage);
+              const investExecutionStatus = getInvestStageExecutionStatus(stage);
 
               return (
                 <div
@@ -1023,6 +1154,35 @@ export function BullpenAutoRunScheduleCard({
                       </div>
                     ) : null}
                   </div>
+
+                  {investStageCounters.length > 0 ? (
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {investStageCounters.map((counter) => (
+                        <div
+                          key={counter.label}
+                          className="rounded-xl border border-white/70 bg-white/60 px-3 py-2"
+                        >
+                          <p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}>
+                            {counter.label}
+                          </p>
+                          <p className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}>
+                            {counter.value}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {investExecutionStatus ? (
+                    <div className={`mt-3 rounded-xl border px-3 py-2 ${investExecutionStatus.className}`}>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">
+                        {investExecutionStatus.label}
+                      </p>
+                      <p className={`mt-1 text-xs leading-5 ${investExecutionStatus.detailClassName}`}>
+                        {investExecutionStatus.message}
+                      </p>
+                    </div>
+                  ) : null}
 
                   <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
                     <div

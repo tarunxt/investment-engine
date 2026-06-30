@@ -535,6 +535,116 @@ async def test_console_profile_reports_incremental_stage_2_progress(monkeypatch)
 
 
 @pytest.mark.anyio
+async def test_console_profile_reports_incremental_stage_3_counters_and_mode_reason(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will the Stage 3 monitor surface live counters?",
+        slug="stage-3-counter-candidate",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        assert side == "NO"
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=candidate_market.current_no_odds,
+            spread_cents=2,
+        )
+
+    progress_runs: list[BullpenAutoLiveRun] = []
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+        progress_callback=lambda current_run, _state: progress_runs.append(
+            current_run.model_copy(deep=True)
+        ),
+    )
+
+    invest_running_stages = [
+        stage
+        for snapshot in progress_runs
+        for stage in snapshot.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+        and stage.outputs.get("phase_status") == "running"
+    ]
+
+    assert invest_running_stages
+    assert any(stage.outputs.get("decisions_count") == 1 for stage in invest_running_stages)
+    assert any(stage.outputs.get("orders_planned") == 1 for stage in invest_running_stages)
+    assert any(stage.outputs.get("orders_submitted") == 0 for stage in invest_running_stages)
+    assert any(
+        stage.outputs.get("execution_mode_reason") == "Dry-run is enabled."
+        for stage in invest_running_stages
+    )
+
+    invest_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+    assert invest_stage.outputs["orders_processed"] == 1
+    assert invest_stage.outputs["execution_mode_reason"] == "Dry-run is enabled."
+
+
+@pytest.mark.anyio
 async def test_console_profile_reviews_all_stage1_events_before_building_ranked_invest_table(
     monkeypatch,
 ):
