@@ -61,6 +61,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveConsoleRunContext,
     BullpenAutoLiveBotCardSummary,
     BullpenAutoLiveDecision,
+    BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveLlmOutput,
     BullpenAutoLiveOrderPlan,
     BullpenAutoLiveRun,
@@ -304,6 +305,40 @@ def test_auto_live_backend_execution_env_detail_names_process_and_restart(monkey
 
     monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "on")
     assert "enabled" in auto_live_backend_execution_env_detail()
+
+
+def test_synchronize_state_refreshes_stale_live_execution_guardrails(monkeypatch):
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
+
+    stale_state = BullpenAutoLiveState(
+        paused=False,
+        latest_guardrail_checks=[
+            BullpenAutoLiveGuardrailCheck(
+                id="live-execution-env",
+                label="Backend live execution",
+                status="watch",
+                detail="Backend environment blocks Auto-Live execution, so runs stay in simulation mode.",
+                value="Blocked",
+                checked_at="2026-06-30T00:00:00+00:00",
+            )
+        ],
+    )
+    settings = BullpenAutoLiveSettings(
+        auto_live_enabled=True,
+        dry_run=False,
+        allow_live_execution=True,
+    )
+
+    synchronized = BullpenAutoLiveBot(user_id=7)._synchronize_state(settings, stale_state)
+    guardrails = {check.id: check for check in synchronized.latest_guardrail_checks}
+
+    assert synchronized.live_armed is True
+    assert synchronized.mode == "live-trading"
+    assert guardrails["live-execution-env"].status == "pass"
+    assert guardrails["live-execution-env"].value == "Allowed"
+    assert "allows Auto-Live execution" in guardrails["live-execution-env"].detail
+    assert guardrails["live-armed"].value == "Armed"
+    assert guardrails["runtime-status"].value == "Ready"
 
 
 def test_console_schedule_uses_fixed_ist_slots():

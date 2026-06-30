@@ -464,9 +464,6 @@ class BullpenAutoLiveBot:
         settings: BullpenAutoLiveSettings,
         state: BullpenAutoLiveState,
     ) -> list[BullpenAutoLiveGuardrailCheck]:
-        if state.latest_guardrail_checks:
-            return state.latest_guardrail_checks
-
         checked_at = utc_now()
         return [
             BullpenAutoLiveGuardrailCheck(
@@ -483,19 +480,29 @@ class BullpenAutoLiveBot:
                 id="live-execution-env",
                 label="Backend live execution",
                 status="pass" if auto_live_backend_allows_execution() else "watch",
-                detail="Backend environment allows live execution."
+                detail="Backend environment allows Auto-Live execution."
                 if auto_live_backend_allows_execution()
                 else auto_live_backend_execution_env_detail(),
                 value="Allowed" if auto_live_backend_allows_execution() else "Blocked",
                 checked_at=checked_at,
             ),
             BullpenAutoLiveGuardrailCheck(
+                id="live-armed",
+                label="Live armed",
+                status="pass" if state.live_armed else "watch",
+                detail="Env plus Auto-Live settings are armed for live execution."
+                if state.live_armed
+                else "Live execution is not armed, so the engine will simulate decisions only.",
+                value="Armed" if state.live_armed else "Simulation",
+                checked_at=checked_at,
+            ),
+            BullpenAutoLiveGuardrailCheck(
                 id="limit-orders-only",
                 label="Limit orders only",
                 status="pass" if settings.limit_orders_only else "fail",
-                detail="Live trading is restricted to limit orders."
+                detail="Live execution is limited to explicit limit orders."
                 if settings.limit_orders_only
-                else "Live trading is blocked because limit orders only is disabled.",
+                else "Live execution is blocked because limit orders only is disabled.",
                 value="Required" if settings.limit_orders_only else "Blocked",
                 blocking=not settings.limit_orders_only,
                 checked_at=checked_at,
@@ -504,7 +511,7 @@ class BullpenAutoLiveBot:
                 id="manual-confirmation",
                 label="Manual confirmation",
                 status="watch" if settings.require_manual_confirmation else "pass",
-                detail="Manual confirmation is still configured, but Auto-Live now relies on explicit live arming, dashboard unlock, and backend runtime guards instead."
+                detail="Manual confirmation is still configured, but Auto-Live now relies on explicit live arming, dashboard unlock, and runtime health checks."
                 if settings.require_manual_confirmation
                 else "Manual confirmation is not configured for Auto-Live.",
                 value="Required" if settings.require_manual_confirmation else "Cleared",
@@ -519,6 +526,17 @@ class BullpenAutoLiveBot:
                 else "Emergency stop is clear.",
                 value="Active" if settings.emergency_stop else "Clear",
                 blocking=settings.emergency_stop,
+                checked_at=checked_at,
+            ),
+            BullpenAutoLiveGuardrailCheck(
+                id="runtime-status",
+                label="Runtime status",
+                status="watch" if state.paused else "pass",
+                detail="Auto-Live is paused."
+                if state.paused
+                else "Auto-Live can evaluate markets.",
+                value="Paused" if state.paused else "Ready",
+                blocking=state.paused,
                 checked_at=checked_at,
             ),
         ]
