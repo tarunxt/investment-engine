@@ -153,6 +153,51 @@ function readStageOutputString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isInvestMetricDecisionRow(value: unknown): value is BullpenAutoLiveDecision {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.run_id === "string" &&
+    typeof value.market_id === "string" &&
+    typeof value.market_title === "string" &&
+    typeof value.decision === "string" &&
+    typeof value.side === "string" &&
+    typeof value.reason === "string"
+  );
+}
+
+function readInvestStageDecisionRows(
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null,
+) {
+  if (!stage || stage.key !== "invest") return [];
+  const rawDecisionRows = stage.outputs.decision_rows;
+  if (!Array.isArray(rawDecisionRows)) return [];
+  return rawDecisionRows.filter(isInvestMetricDecisionRow);
+}
+
+function mergeInvestStageDecisionRows({
+  stage,
+  persistedDecisions,
+}: {
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null;
+  persistedDecisions: BullpenAutoLiveDecision[];
+}) {
+  const merged = new Map<string, BullpenAutoLiveDecision>();
+
+  for (const decision of readInvestStageDecisionRows(stage)) {
+    merged.set(decision.id, decision);
+  }
+  for (const decision of persistedDecisions) {
+    merged.set(decision.id, decision);
+  }
+
+  return [...merged.values()];
+}
+
 function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision) {
   return (
     decision.order_plan?.executed_at?.trim() ||
@@ -265,6 +310,28 @@ function getInvestStageExecutionStatus(
       message: executionModeReason,
       className: "border-sky-200 bg-sky-50/80 text-sky-900",
       detailClassName: "text-sky-800",
+    };
+  }
+
+  const latestOrderDecision = [...readInvestStageDecisionRows(stage)]
+    .reverse()
+    .find((decision) => decision.order_plan);
+  const latestOrderStatus = latestOrderDecision?.order_plan?.status ?? null;
+  const latestOrderDetail = latestOrderDecision?.order_plan?.detail?.trim() ?? null;
+  if (
+    latestOrderDecision &&
+    latestOrderStatus &&
+    latestOrderStatus !== "submitted" &&
+    latestOrderDetail
+  ) {
+    const isFailure = latestOrderStatus === "failed" || latestOrderStatus === "cancelled";
+    return {
+      label: "Latest order",
+      message: `${latestOrderDecision.market_title}: ${latestOrderDetail}`,
+      className: isFailure
+        ? "border-rose-200 bg-rose-50/80 text-rose-900"
+        : "border-amber-200 bg-amber-50/80 text-amber-900",
+      detailClassName: isFailure ? "text-rose-800" : "text-amber-800",
     };
   }
 
@@ -700,8 +767,8 @@ function InvestMetricDetailsDialog({
               </table>
             ) : (
               <div className="bg-slate-50 px-4 py-8 text-sm text-slate-600">
-                No persisted decision rows matched this Stage 3 metric yet. The
-                run counters may refresh before detailed decision rows are available.
+                Stage 3 has not emitted any decision rows for this metric yet.
+                The worker may still be preparing the first review row.
               </div>
             )}
           </div>
@@ -1141,7 +1208,12 @@ export function BullpenAutoRunScheduleCard({
   );
   const investRunDecisions =
     summary && workflowRun
-      ? summary.recent_decisions.filter((decision) => decision.run_id === workflowRun.id)
+      ? mergeInvestStageDecisionRows({
+          stage: investWorkflowStage,
+          persistedDecisions: summary.recent_decisions.filter(
+            (decision) => decision.run_id === workflowRun.id,
+          ),
+        })
       : [];
   const openInvestMetricDialog = (kind: InvestMetricDialogKind) => {
     if (!workflowRun) return;

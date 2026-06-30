@@ -947,6 +947,54 @@ def _serialize_llm_review_context(
     return payload
 
 
+def _serialize_stage3_decision_row(
+    decision: BullpenAutoLiveDecision,
+) -> dict[str, object]:
+    return {
+        "id": decision.id,
+        "run_id": decision.run_id,
+        "created_at": decision.created_at,
+        "updated_at": decision.updated_at,
+        "market_id": decision.market_id,
+        "market_title": decision.market_title,
+        "market_url": decision.market_url,
+        "slug": decision.slug,
+        "close_time": decision.close_time,
+        "theme": decision.theme,
+        "side": decision.side,
+        "decision": decision.decision,
+        "risk_status": decision.risk_status,
+        "price_cents": decision.price_cents,
+        "current_yes_odds": decision.current_yes_odds,
+        "current_no_odds": decision.current_no_odds,
+        "fair_probability_pct": decision.fair_probability_pct,
+        "fair_yes_probability_pct": decision.fair_yes_probability_pct,
+        "fair_no_probability_pct": decision.fair_no_probability_pct,
+        "edge_pp": decision.edge_pp,
+        "score": decision.score,
+        "confidence": decision.confidence,
+        "evidence_status": decision.evidence_status,
+        "event_state": decision.event_state,
+        "adjudication_required": decision.adjudication_required,
+        "disagreement_level": decision.disagreement_level,
+        "current_exposure_usd": decision.current_exposure_usd,
+        "target_exposure_usd": decision.target_exposure_usd,
+        "realized_pnl_usd": decision.realized_pnl_usd,
+        "hours_remaining": decision.hours_remaining,
+        "key_evidence": list(decision.key_evidence),
+        "red_flags": list(decision.red_flags),
+        "rationale": decision.rationale,
+        "reason": decision.reason,
+        "summary": decision.summary,
+        "order_plan": (
+            decision.order_plan.model_dump(mode="json") if decision.order_plan else None
+        ),
+        "llm_outputs": [],
+        "stage_results": [],
+        "guardrail_checks": [],
+    }
+
+
 class BullpenAutoLiveEngine:
     @staticmethod
     def _report_progress(
@@ -3125,6 +3173,9 @@ class BullpenAutoLiveEngine:
                 "decisions_count": len(decisions),
                 "orders_planned": planned_orders,
                 "orders_submitted": submitted_orders,
+                "decision_rows": [
+                    _serialize_stage3_decision_row(decision) for decision in decisions
+                ],
             }
             if execution_orders_processed > 0:
                 stage_outputs["orders_processed"] = execution_orders_processed
@@ -3891,6 +3942,9 @@ class BullpenAutoLiveEngine:
                     "orders_planned": planned_orders,
                     "orders_submitted": submitted_orders,
                     "orders_processed": execution_orders_processed,
+                    "decision_rows": [
+                        _serialize_stage3_decision_row(decision) for decision in decisions
+                    ],
                     "execution_gate_reason": execution_pause_reason,
                     "execution_mode_reason": simulation_reason if state.dry_run else None,
                     "decision_summaries": [

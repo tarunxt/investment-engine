@@ -936,6 +936,131 @@ async def test_console_profile_reports_incremental_stage_3_counters_and_mode_rea
 
 
 @pytest.mark.anyio
+async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_skipped_orders(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will the Stage 3 popup surface the skip reason?",
+        slug="stage-3-skip-reason-candidate",
+        current_yes_odds=18,
+        current_no_odds=82,
+    )
+    progress_runs: list[BullpenAutoLiveRun] = []
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="Bullpen console",
+            source_url="https://example.com/bullpen",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_live_controls(*, user_id: int):
+        assert user_id == 7
+        return _fake_live_controls()
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        assert side == "NO"
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=82,
+            spread_cents=9,
+        )
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda *_args, **_kwargs: 9.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_live_controls",
+        fake_refresh_live_controls,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=False,
+            allow_live_execution=True,
+            require_manual_confirmation=False,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(dry_run=False),
+        positions=[],
+        historical_decisions=[],
+        progress_callback=lambda current_run, _state: progress_runs.append(
+            current_run.model_copy(deep=True)
+        ),
+    )
+
+    invest_running_stage_with_decision_rows = next(
+        stage
+        for snapshot in progress_runs
+        for stage in snapshot.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+        and stage.outputs.get("phase_status") == "running"
+        and stage.outputs.get("orders_processed") == 1
+    )
+
+    decision_rows = invest_running_stage_with_decision_rows.outputs["decision_rows"]
+    assert len(decision_rows) == 1
+    assert decision_rows[0]["market_title"] == candidate_market.question
+    assert decision_rows[0]["order_plan"]["status"] == "skipped"
+    assert decision_rows[0]["order_plan"]["detail"] == (
+        "Bid/ask spread exceeds the configured maximum."
+    )
+
+    invest_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+    assert invest_stage.outputs["decision_rows"][0]["order_plan"]["status"] == "skipped"
+    assert result.decisions[0].order_plan is not None
+    assert result.decisions[0].order_plan.status == "skipped"
+
+
+@pytest.mark.anyio
 async def test_console_profile_reviews_all_stage1_events_before_building_ranked_invest_table(
     monkeypatch,
 ):
