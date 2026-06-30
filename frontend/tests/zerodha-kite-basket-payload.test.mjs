@@ -14,27 +14,25 @@ assert.match(source, /Refresh LTP/);
 assert.match(source, /Quoted LTP refreshed/);
 assert.match(source, /Quoted LTP/);
 assert.match(source, /Publisher-safe fallback uses \/connect\/basket only for protected LIMIT orders/);
-assert.match(source, /Each limit price is refreshed from the latest available quoted LTP before basket submission/);
+assert.match(source, /Each limit price mirrors the latest available quoted LTP before basket submission/);
 assert.match(source, /Any Kite basket tabs already opened keep showing Zerodha/);
 assert.doesNotMatch(source, /Market with Zerodha auto protection/);
 
 const MARKET_INTENT_ACTIONS = new Set(["Buy New", "Add more", "Sell All", "Trim"]);
 const staleRecommendationPrices = new Set([580, 5450, 778]);
 
-function ceilToTick(value, tick = 0.05) {
-  return Number((Math.ceil(value / tick) * tick).toFixed(2));
+function roundToTick(value, tick = 0.05) {
+  return Number((Math.round(value / tick) * tick).toFixed(2));
 }
-function floorToTick(value, tick = 0.05) {
-  return Number((Math.floor(value / tick) * tick).toFixed(2));
-}
-function protectedLimitPrice(order, protectionPct = 0.01) {
-  if (order.side === "BUY") return Math.min(ceilToTick(order.lastPrice * (1 + protectionPct)), order.upperCircuit);
-  return Math.max(floorToTick(order.lastPrice * (1 - protectionPct)), order.lowerCircuit);
+function mirroredLimitPrice(order) {
+  const livePrice = order.lastPrice ?? order.price;
+  const clampedPrice = Math.min(Math.max(livePrice, order.lowerCircuit), order.upperCircuit);
+  return roundToTick(clampedPrice);
 }
 function buildPublisherBasketPayload(orders, marketOpen = true) {
   return orders.map((order) => {
     const price = MARKET_INTENT_ACTIONS.has(order.action)
-      ? protectedLimitPrice(order)
+      ? mirroredLimitPrice(order)
       : order.price;
     return {
       variety: order.orderKind === "After market" || !marketOpen ? "amo" : "regular",
@@ -64,7 +62,7 @@ for (const order of payload) {
   assert.equal(Object.hasOwn(order, "market_protection"), false);
   assert.equal(staleRecommendationPrices.has(order.price), false);
 }
-assert.equal(payload[0].price, 435.35);
-assert.equal(payload[1].price, 4446.55);
-assert.equal(payload[2].price, 1022.05);
+assert.equal(payload[0].price, 431);
+assert.equal(payload[1].price, 4402.5);
+assert.equal(payload[2].price, 1011.9);
 assert.equal(payload.some((order) => order.order_type === "MARKET"), false);

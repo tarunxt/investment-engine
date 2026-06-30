@@ -3319,7 +3319,7 @@ function ZerodhaBasketPreviewDialog({
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {executionMode === "direct_market"
               ? "Protected MARKET mode submits every selected stock through the backend using Kite Connect with market_protection=-1 during regular NSE/BSE hours. Access tokens never reach the browser."
-              : "Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. Each limit price is refreshed from the latest available quoted LTP before basket submission, so stale recommendation prices are never used as execution prices. Kite can still show a newer live LTP after the basket page opens."}
+              : "Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. Each limit price mirrors the latest available quoted LTP before basket submission, so stale recommendation prices are never used as execution prices. Kite can still show a newer live LTP after the basket page opens."}
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>

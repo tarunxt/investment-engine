@@ -15,17 +15,17 @@ from app.domains.zerodha.schemas import (
 )
 
 
-def test_guard_rounds_sell_price_to_tick_multiple():
+def test_guard_matches_live_sell_price_to_tick_multiple():
     result = guard_zerodha_limit_price(
         ZerodhaPriceGuardInput(side="SELL", requested_price=143.78, last_price=143.70)
     )
 
-    assert result.price == 142.25
+    assert result.price == 143.70
     assert Decimal(str(result.price)) % Decimal("0.05") == 0
     assert result.adjusted is True
 
 
-def test_guard_clamps_buy_price_to_upper_circuit_and_tick():
+def test_guard_uses_live_buy_price_when_quote_is_available():
     result = guard_zerodha_limit_price(
         ZerodhaPriceGuardInput(
             side="BUY",
@@ -38,9 +38,9 @@ def test_guard_clamps_buy_price_to_upper_circuit_and_tick():
 
     assert result.price <= 257.25
     assert Decimal(str(result.price)) % Decimal("0.05") == 0
-    assert result.price == 234.95
+    assert result.price == 232.60
     assert result.adjusted is True
-    assert "using_ltp_derived_marketable_limit" in result.reasons
+    assert "using_live_ltp_as_limit_price" in result.reasons
 
 
 def test_guard_uses_requested_price_when_ltp_missing():
@@ -83,10 +83,10 @@ def test_prepare_basket_fallback_uses_client_last_price_when_quotes_forbidden():
 
     prepared = prepare_basket_order_from_request(order)
 
-    assert prepared.price == 433.70
+    assert prepared.price == 429.40
     assert prepared.last_price == 429.40
     assert prepared.adjusted is True
-    assert "using_ltp_derived_marketable_limit" in prepared.reasons
+    assert "using_live_ltp_as_limit_price" in prepared.reasons
     assert "live_quote_unavailable_using_client_last_price" in prepared.reasons
 
 def test_kite_quote_permission_error_detection_matches_reported_message():

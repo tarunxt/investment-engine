@@ -59,34 +59,14 @@ def _clamp_to_circuit(
     return value
 
 
-def _protection_pct(
-    last_price: Decimal, instrument_kind: Literal["EQ", "FUT", "OPT"]
-) -> Decimal:
-    """Return Zerodha default market-protection percentage as a ratio."""
-    if instrument_kind == "OPT":
-        if last_price < Decimal("10"):
-            return Decimal("0.05")
-        if last_price <= Decimal("100"):
-            return Decimal("0.03")
-        if last_price <= Decimal("500"):
-            return Decimal("0.02")
-        return Decimal("0.01")
-
-    # Zerodha default bands for equities and futures.
-    if last_price < Decimal("100"):
-        return Decimal("0.02")
-    if last_price <= Decimal("500"):
-        return Decimal("0.01")
-    return Decimal("0.005")
-
-
 def guard_zerodha_limit_price(order: ZerodhaPriceGuardInput) -> ZerodhaPriceGuardResult:
-    """Return a Kite-safe marketable limit price.
+    """Return a Kite-safe limit price anchored to the latest known quote.
 
     Zerodha Publisher baskets are submitted as LIMIT rows. The recommendation
-    price can be stale, off-circuit, or have arbitrary decimal precision, so the
-    safest executable value is derived from the current Kite LTP with a small
-    directional buffer and then constrained to exchange circuit/tick rules.
+    price can be stale, off-circuit, or have arbitrary decimal precision. When
+    a live LTP is available, keep the limit aligned with that quote so the
+    refreshed preview price matches the basket row opened in Kite, while still
+    respecting exchange circuit and tick rules.
     """
     tick_size = _decimal_or_none(order.tick_size) or DEFAULT_EQUITY_TICK_SIZE
     last_price = _decimal_or_none(order.last_price)
@@ -99,37 +79,21 @@ def guard_zerodha_limit_price(order: ZerodhaPriceGuardInput) -> ZerodhaPriceGuar
     if reference is None:
         raise ValueError("A positive last_price or requested_price is required")
 
-    if order.side == "BUY":
-        raw_price = (
-            reference
-            * (Decimal("1") + _protection_pct(reference, order.instrument_kind))
-            if last_price
-            else reference
-        )
-        rounding = ROUND_CEILING
-    else:
-        raw_price = (
-            reference
-            * (Decimal("1") - _protection_pct(reference, order.instrument_kind))
-            if last_price
-            else reference
-        )
-        rounding = ROUND_FLOOR
+    raw_price = reference
 
     if requested_price is not None and last_price is not None:
         requested_clamped = _clamp_to_circuit(requested_price, lower, upper)
-        requested_safe = _round_to_tick(requested_clamped, tick_size, rounding)
+        requested_safe = _round_to_tick(requested_clamped, tick_size, ROUND_HALF_UP)
         if requested_safe != requested_price:
             reasons.append("requested_price_not_exchange_safe")
-        # Always prefer LTP-derived marketable limit prices for Publisher rows.
         if abs(requested_price - raw_price) >= tick_size:
-            reasons.append("using_ltp_derived_marketable_limit")
+            reasons.append("using_live_ltp_as_limit_price")
 
     clamped = _clamp_to_circuit(raw_price, lower, upper)
     if clamped != raw_price:
         reasons.append("clamped_to_circuit_limit")
 
-    rounded = _round_to_tick(clamped, tick_size, rounding)
+    rounded = _round_to_tick(clamped, tick_size, ROUND_HALF_UP)
     if upper is not None and rounded > upper:
         rounded = _round_to_tick(upper, tick_size, ROUND_FLOOR)
         reasons.append("rounded_down_to_upper_circuit_tick")
