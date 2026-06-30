@@ -1477,8 +1477,20 @@ class PolymarketPaperCopyBot:
             return block_reason
         return f"{block_reason} Last doctor result: {doctor_message}"
 
+    async def _ensure_redeem_claim_available_unlocked(self) -> None:
+        # Redeeming resolved positions should not require live trading to be
+        # armed, but we still gate write commands on a healthy Bullpen doctor.
+        if not self.doctor_status.ok:
+            await self._refresh_doctor_unlocked()
+        if self.doctor_status.ok:
+            return
+        raise RuntimeError(
+            "Bullpen redeem is unavailable. "
+            f"{self._startup_block_message('Bullpen doctor must pass.')}"
+        )
+
     async def _auto_redeem_unlocked(self) -> None:
-        if not self.config.auto_redeem_live or not self._wants_live_execution():
+        if not self.config.auto_redeem_live or not self.doctor_status.ok:
             return
         try:
             await self._redeem_live_positions_unlocked(automatic=True)
@@ -1517,10 +1529,7 @@ class PolymarketPaperCopyBot:
         automatic: bool = False,
         condition_ids: list[str] | None = None,
     ) -> None:
-        if not self._wants_live_execution():
-            raise RuntimeError(
-                "Live execution is disabled; Bullpen redeem is unavailable."
-            )
+        await self._ensure_redeem_claim_available_unlocked()
         try:
             had_redeem_metadata_warning = (
                 await self._redeem_and_claim_completed_positions(
@@ -1551,9 +1560,7 @@ class PolymarketPaperCopyBot:
 
     async def _auto_redeem_background(self) -> None:
         async with self._lock:
-            should_redeem = (
-                self.config.auto_redeem_live and self._wants_live_execution()
-            )
+            should_redeem = self.config.auto_redeem_live and self.doctor_status.ok
         if not should_redeem:
             return
         await self._run_redeem_claim_background(
@@ -1562,7 +1569,7 @@ class PolymarketPaperCopyBot:
 
     async def _force_redeem_claim_background(self) -> None:
         async with self._lock:
-            should_redeem = self._wants_live_execution()
+            should_redeem = self.doctor_status.ok
         if not should_redeem:
             return
         await self._run_redeem_claim_background(
