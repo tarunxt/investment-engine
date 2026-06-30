@@ -26,6 +26,7 @@ import {
   getTechnicalScanForStock,
   loadScoreMatrixFormulaConfig,
   saveScoreMatrixFormulaConfig,
+  getScoreMatrixValidationSummary,
   type ScoreMatrixFormulaConfig,
   type ActionCategory,
   type ActionEstimate,
@@ -1089,6 +1090,33 @@ function mergePreparedZerodhaBasketOrders(
 
 function getZerodhaBasketScore(order: ZerodhaBasketPreviewOrder) {
   return order.detail.calculatedScore;
+}
+
+function formatZerodhaBasketScore(value: number | null) {
+  return value === null ? "—" : value.toFixed(2);
+}
+
+function buildZerodhaBasketScoreWarningMessage(orders: ZerodhaBasketPreviewOrder[]) {
+  const issueLines = orders.flatMap((order) => {
+    const summary = getScoreMatrixValidationSummary(order.detail);
+    if (!summary.finalScoreOutOfRange && summary.rangeIssues.length === 0) return [];
+
+    return [
+      `${order.exchange} ${order.symbol}: final score ${formatZerodhaBasketScore(summary.rawScore)}`,
+      ...(summary.finalScoreMessage ? [`- ${summary.finalScoreMessage}`] : []),
+      ...summary.rangeIssues.map((issue) => `- ${issue.parameter}: ${issue.message}`),
+      "",
+    ];
+  });
+
+  if (!issueLines.length) return null;
+
+  return [
+    "Warning: one or more selected Zerodha basket stocks have score inconsistencies.",
+    "",
+    ...issueLines,
+    "Review the inconsistent inputs before placing the basket.",
+  ].join("\n").trim();
 }
 
 function compareZerodhaBasketOrdersByScore(left: ZerodhaBasketPreviewOrder, right: ZerodhaBasketPreviewOrder) {
@@ -3002,7 +3030,7 @@ function ZerodhaBasketPreviewDialog({
               />
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, use the Publisher-safe protected LIMIT basket by default, or switch to protected MARKET for all selected stocks when direct Kite Connect access is enabled on the backend during regular market hours.
+              Sell All, Trim, Buy New, and Buy More actionables are pre-selected. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -5256,15 +5284,16 @@ export function RebalanceWorkflowSections({
         apiService.zerodhaStatus(),
         apiService.zerodhaLoginUrl(),
       ]);
-      setZerodhaDirectMarketAvailable(
-        Boolean(
-          status.connected
-            && login.configured
-            && status.direct_market_orders_enabled
-            && login.direct_market_orders_enabled,
-        ),
+      const directMarketEnabled = Boolean(
+        status.connected
+          && login.configured
+          && status.direct_market_orders_enabled
+          && login.direct_market_orders_enabled,
       );
-      setZerodhaExecutionMode("publisher_limit");
+      setZerodhaDirectMarketAvailable(
+        directMarketEnabled,
+      );
+      setZerodhaExecutionMode(directMarketEnabled && getIndiaMarketStatus().open ? "direct_market" : "publisher_limit");
       const [eventsResult, threatsResult] = await Promise.allSettled([
         apiService.zerodhaEventsLatest(),
         apiService.zerodhaThreatsLatest(),
@@ -5396,6 +5425,10 @@ export function RebalanceWorkflowSections({
     if (!selectedOrders.length) {
       window.alert("Select at least one Zerodha basket row before opening Kite.");
       return;
+    }
+    const scoreWarningMessage = buildZerodhaBasketScoreWarningMessage(selectedOrders);
+    if (scoreWarningMessage) {
+      window.alert(scoreWarningMessage);
     }
     const marketStatus = getIndiaMarketStatus();
     const orderChunks = chunkZerodhaBasketOrders(selectedOrders);

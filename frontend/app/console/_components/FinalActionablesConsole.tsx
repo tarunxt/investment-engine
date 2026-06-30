@@ -156,11 +156,12 @@ type ScoreMatrixValidationIssue = {
   message: string;
 };
 
-type ScoreMatrixValidationSummary = {
+export type ScoreMatrixValidationSummary = {
   rawScore: number | null;
   displayScore: number | null;
   finalScoreOutOfRange: boolean;
   finalScoreMessage: string | null;
+  rangeIssues: ScoreMatrixValidationIssue[];
   parameterIssues: ScoreMatrixValidationIssue[];
   hasIssues: boolean;
 };
@@ -1330,11 +1331,14 @@ function getDetailedRationaleRowIssue(row: DetailedRationaleScoreRow): ScoreMatr
   );
 }
 
-function getScoreMatrixValidationSummary(detail: ScoreMatrixDetail): ScoreMatrixValidationSummary {
+export function getScoreMatrixValidationSummary(detail: ScoreMatrixDetail): ScoreMatrixValidationSummary {
   const rawScore = detail.detailedRationaleFinalScore ?? detail.calculatedScore;
-  const displayScore = clampScoreToGuardrail(rawScore);
+  const displayScore = rawScore;
   const finalScoreOutOfRange = rawScore !== null
     && (rawScore < SCORE_GUARDRAIL_MIN || rawScore > SCORE_GUARDRAIL_MAX);
+  const rangeIssues = detail.detailedRationaleRows
+    .map(getDetailedRationaleRowRangeIssue)
+    .filter((issue): issue is ScoreMatrixValidationIssue => issue !== null);
   const parameterIssues = detail.detailedRationaleRows
     .map(getDetailedRationaleRowIssue)
     .filter((issue): issue is ScoreMatrixValidationIssue => issue !== null);
@@ -1344,8 +1348,9 @@ function getScoreMatrixValidationSummary(detail: ScoreMatrixDetail): ScoreMatrix
     displayScore,
     finalScoreOutOfRange,
     finalScoreMessage: finalScoreOutOfRange
-      ? `Final score ${formatActionScore(rawScore)} is outside the allowed range of ${formatActionScore(SCORE_GUARDRAIL_MIN)} to ${formatActionScore(SCORE_GUARDRAIL_MAX)}. Display is capped to ${formatActionScore(displayScore)} until the inconsistent input is fixed.`
+      ? `Final score ${formatActionScore(rawScore)} is outside the allowed range of ${formatActionScore(SCORE_GUARDRAIL_MIN)} to ${formatActionScore(SCORE_GUARDRAIL_MAX)}. Action mapping continues to use the bounded rule range until the inconsistent input is fixed.`
       : null,
+    rangeIssues,
     parameterIssues,
     hasIssues: finalScoreOutOfRange || parameterIssues.length > 0,
   };
@@ -6459,7 +6464,7 @@ function getDashboardActionSortValue(
     case "stock":
       return row.stock.symbol;
     case "score":
-      return clampScoreToGuardrail(row.formulaScore) ?? Number.POSITIVE_INFINITY;
+      return row.formulaScore ?? Number.POSITIVE_INFINITY;
     case "consensus":
       return row.stock.actionCounts[action] / Math.max(row.stock.totalSuggestions, 1);
     case "currentUnits":
