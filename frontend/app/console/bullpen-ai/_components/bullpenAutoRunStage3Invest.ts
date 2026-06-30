@@ -186,12 +186,15 @@ export function buildBullpenStage3OnlyInvestPlan(
 
   const candidateRows = asArray(llmOutputs.llm_reviewed_candidates)
     .map((item) => asRecord(item))
-    .filter(
-      (record): record is Record<string, unknown> =>
-        Boolean(record) &&
+    .filter((record): record is Record<string, unknown> => {
+      if (!record) {
+        return false;
+      }
+      return (
         readString(record.source_kind) !== "active_position" &&
-        readBoolean(record.qualified),
-    )
+        readBoolean(record.qualified)
+      );
+    })
     .map((record) => buildCandidateRow(record, acceptedCandidateByMarketId))
     .filter((row): row is BullpenAutoLiveConsoleCandidateInput => Boolean(row));
 
