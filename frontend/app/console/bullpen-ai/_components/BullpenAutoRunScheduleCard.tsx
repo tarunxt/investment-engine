@@ -24,6 +24,7 @@ import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type {
+  BullpenAutoLiveDecision,
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
   BullpenAutoLiveSummaryResponse,
@@ -59,6 +60,15 @@ type ActionState =
 type ErrorState = {
   message: string;
   details: string | null;
+};
+
+type InvestMetricDialogKind = "decisions" | "planned" | "submitted";
+
+type InvestMetricDialogState = {
+  kind: InvestMetricDialogKind;
+  run: BullpenAutoLiveRun;
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null;
+  decisions: BullpenAutoLiveDecision[];
 };
 
 type ScanCandidateDialogState = {
@@ -418,6 +428,211 @@ function StageOneOutputDialog({
   );
 }
 
+function getInvestMetricDialogTitle(kind: InvestMetricDialogKind) {
+  if (kind === "planned") return "Stage 3 planned orders";
+  if (kind === "submitted") return "Stage 3 submitted orders";
+  return "Stage 3 decisions";
+}
+
+function getInvestMetricDialogDescription(kind: InvestMetricDialogKind) {
+  if (kind === "planned") {
+    return "Decision rows where Stage 3 created an order plan for the selected side.";
+  }
+  if (kind === "submitted") {
+    return "Decision rows where the planned order reached submitted status.";
+  }
+  return "All investment decisions recorded for this Stage 3 run.";
+}
+
+function getInvestMetricRows(state: InvestMetricDialogState) {
+  if (state.kind === "planned") {
+    return state.decisions.filter((decision) => decision.order_plan);
+  }
+  if (state.kind === "submitted") {
+    return state.decisions.filter((decision) => decision.order_plan?.status === "submitted");
+  }
+  return state.decisions;
+}
+
+function formatInvestMetricOrderStatus(decision: BullpenAutoLiveDecision) {
+  if (!decision.order_plan) return "No order planned";
+  return decision.order_plan.status.replaceAll("_", " ");
+}
+
+function InvestMetricDetailsDialog({
+  state,
+  onClose,
+}: {
+  state: InvestMetricDialogState;
+  onClose: () => void;
+}) {
+  const rows = getInvestMetricRows(state);
+  const decisionsCount = getInvestStageMetric(state.stage, "decisions_count", state.run.decisions_count);
+  const plannedCount = getInvestStageMetric(state.stage, "orders_planned", state.run.orders_planned);
+  const submittedCount = getInvestStageMetric(state.stage, "orders_submitted", state.run.orders_submitted);
+  const activePositionRows = state.stage
+    ? readStageOutputNumber(state.stage.outputs.active_position_rows)
+    : null;
+  const candidateRows = state.stage
+    ? readStageOutputNumber(state.stage.outputs.candidate_decision_rows)
+    : null;
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 3 Details
+            </p>
+            <h2 className="text-xl font-semibold text-slate-950">
+              {getInvestMetricDialogTitle(state.kind)}
+            </h2>
+            <p className="text-sm text-slate-600">
+              {getInvestMetricDialogDescription(state.kind)}
+            </p>
+            <p className="text-xs text-slate-500">
+              Run {state.run.id} · started {formatIstDateTime(state.run.started_at)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close Stage 3 details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Decisions
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950">
+                {decisionsCount}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Planned
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950">
+                {plannedCount}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Submitted
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950">
+                {submittedCount}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Review rows
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-950">
+                {(activePositionRows ?? 0).toLocaleString("en-IN")} active +{" "}
+                {(candidateRows ?? 0).toLocaleString("en-IN")} candidate
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
+            {rows.length > 0 ? (
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Event</th>
+                    <th className="px-4 py-3">Decision</th>
+                    <th className="px-4 py-3">Edge & score</th>
+                    <th className="px-4 py-3">Exposure</th>
+                    <th className="px-4 py-3">Order</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {rows.map((decision) => (
+                    <tr key={decision.id}>
+                      <td className="px-4 py-3 align-top">
+                        <div className="font-semibold text-slate-950">
+                          {decision.market_url ? (
+                            <a
+                              className="hover:text-sky-700 hover:underline"
+                              href={decision.market_url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {decision.market_title}
+                            </a>
+                          ) : (
+                            decision.market_title
+                          )}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {decision.theme} · closes {formatIstDateTime(decision.close_time)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 align-top text-slate-700">
+                        <span className="font-semibold capitalize text-slate-950">
+                          {decision.decision.replaceAll("_", " ")}
+                        </span>
+                        <br />
+                        Side {decision.side} · {decision.confidence}
+                        <br />
+                        {decision.risk_status.replaceAll("_", " ")}
+                      </td>
+                      <td className="px-4 py-3 align-top text-slate-700">
+                        Edge {decision.edge_pp.toLocaleString("en-IN", { maximumFractionDigits: 2 })} pp
+                        <br />
+                        Score {decision.score.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                        <br />
+                        Fair {formatOddsPercent(decision.fair_probability_pct)}
+                      </td>
+                      <td className="px-4 py-3 align-top text-slate-700">
+                        Current {formatMoney(decision.current_exposure_usd)}
+                        <br />
+                        Target {formatMoney(decision.target_exposure_usd)}
+                      </td>
+                      <td className="px-4 py-3 align-top text-slate-700">
+                        <span className="font-semibold capitalize">
+                          {formatInvestMetricOrderStatus(decision)}
+                        </span>
+                        {decision.order_plan ? (
+                          <>
+                            <br />
+                            {formatMoney(decision.order_plan.order_size_usd)} at{" "}
+                            {formatPriceCents(decision.order_plan.limit_price_cents)}
+                            <br />
+                            {decision.order_plan.detail}
+                          </>
+                        ) : (
+                          <>
+                            <br />
+                            {decision.reason}
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="bg-slate-50 px-4 py-8 text-sm text-slate-600">
+                No persisted decision rows matched this Stage 3 metric yet. The
+                run counters may refresh before detailed decision rows are available.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildConsoleSettingsUpdate() {
   return {
     strategy_profile: "bullpen_console_top10" as const,
@@ -529,6 +744,8 @@ export function BullpenAutoRunScheduleCard({
     useState<ScanCandidateDialogState | null>(null);
   const [openStageKey, setOpenStageKey] = useState<"scan" | "llm" | "invest" | null>(null);
   const [openInputStageKey, setOpenInputStageKey] = useState<"llm" | "invest" | null>(null);
+  const [investMetricDialog, setInvestMetricDialog] =
+    useState<InvestMetricDialogState | null>(null);
 
   async function loadSummary(options?: {
     preserveLoading?: boolean;
@@ -827,6 +1044,19 @@ export function BullpenAutoRunScheduleCard({
   const investOnlyAlreadySubmitted =
     (workflowRun?.orders_submitted ?? 0) > 0 ||
     (investOnlySourceRun?.orders_submitted ?? 0) > 0;
+  const investRunDecisions =
+    summary && workflowRun
+      ? summary.recent_decisions.filter((decision) => decision.run_id === workflowRun.id)
+      : [];
+  const openInvestMetricDialog = (kind: InvestMetricDialogKind) => {
+    if (!workflowRun) return;
+    setInvestMetricDialog({
+      kind,
+      run: workflowRun,
+      stage: investWorkflowStage,
+      decisions: investRunDecisions,
+    });
+  };
   const investOnlyDisabledReason =
     pendingRunId !== null || visibleRun?.status === "running"
       ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
@@ -1104,15 +1334,27 @@ export function BullpenAutoRunScheduleCard({
               </span>
               {workflowRun ? (
                 <>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => openInvestMetricDialog("decisions")}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
+                  >
                     {workflowDecisionCount ?? workflowRun.decisions_count} decisions
-                  </span>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openInvestMetricDialog("planned")}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
+                  >
                     {workflowPlannedOrderCount ?? workflowRun.orders_planned} planned
-                  </span>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openInvestMetricDialog("submitted")}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
+                  >
                     {workflowSubmittedOrderCount ?? workflowRun.orders_submitted} submitted
-                  </span>
+                  </button>
                 </>
               ) : null}
             </div>
@@ -1223,9 +1465,16 @@ export function BullpenAutoRunScheduleCard({
                   {investStageCounters.length > 0 ? (
                     <div className="mt-3 grid grid-cols-3 gap-2">
                       {investStageCounters.map((counter) => (
-                        <div
+                        <button
                           key={counter.label}
-                          className="rounded-xl border border-white/70 bg-white/60 px-3 py-2"
+                          type="button"
+                          onClick={() =>
+                            openInvestMetricDialog(
+                              counter.label.toLowerCase() as InvestMetricDialogKind,
+                            )
+                          }
+                          className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left transition hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
+                          aria-label={`Open Stage 3 ${counter.label.toLowerCase()} details`}
                         >
                           <p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}>
                             {counter.label}
@@ -1233,7 +1482,7 @@ export function BullpenAutoRunScheduleCard({
                           <p className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}>
                             {counter.value}
                           </p>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   ) : null}
@@ -1354,6 +1603,13 @@ export function BullpenAutoRunScheduleCard({
           <StageOneOutputDialog
             state={scanCandidateDialog}
             onClose={() => setScanCandidateDialog(null)}
+          />
+        ) : null}
+
+        {investMetricDialog ? (
+          <InvestMetricDetailsDialog
+            state={investMetricDialog}
+            onClose={() => setInvestMetricDialog(null)}
           />
         ) : null}
 
