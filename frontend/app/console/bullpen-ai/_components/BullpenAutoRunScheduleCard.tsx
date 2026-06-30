@@ -36,7 +36,10 @@ import { formatElapsedRunTime, formatStageElapsedTime } from "./bullpenAutoRunTi
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
-  buildRunNowRequest?: () => BullpenAutoLiveRunOnceRequest | null;
+  buildRunNowRequest?: () =>
+    | Promise<BullpenAutoLiveRunOnceRequest | null>
+    | BullpenAutoLiveRunOnceRequest
+    | null;
   onSummaryUpdated?: (payload: {
     summary: BullpenAutoLiveSummaryResponse;
     run: BullpenAutoLiveRun | null;
@@ -660,7 +663,7 @@ export function BullpenAutoRunScheduleCard({
     setError(null);
 
     try {
-      const runNowRequest = buildRunNowRequest?.() ?? undefined;
+      const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
       await apiService.updateBullpenAutoLiveSettings(buildConsoleSettingsUpdate());
       const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
       setPendingRunId(run.id);

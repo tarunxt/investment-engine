@@ -2678,6 +2678,124 @@ async def test_console_profile_manual_selected_rows_rerun_llm_when_reuse_is_disa
 
 
 @pytest.mark.anyio
+async def test_console_profile_prefiltered_manual_rows_bypass_backend_filters(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_row = _manual_console_candidate_row(
+        market_id="candidate-market-1",
+        question_id="candidate-market-1",
+        market_title="Candidate market 1",
+        slug="candidate-market-1",
+        current_yes_odds=4,
+        current_no_odds=96,
+        llm_yes_odds=8,
+        llm_no_odds=92,
+        returns_per_day=4.1,
+        selected=True,
+    )
+    market_lookup = {
+        manual_row.slug: _market(
+            question=manual_row.market_title,
+            slug=manual_row.slug,
+            close_time=manual_row.close_time,
+            current_yes_odds=manual_row.current_yes_odds,
+            current_no_odds=manual_row.current_no_odds,
+        )
+    }
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    async def fail_scan_candidate_markets(**_kwargs):
+        raise AssertionError("Prefiltered Bullpen x AI rows should bypass the backend rescan.")
+
+    async def fail_scan_console_profile_markets(**_kwargs):
+        raise AssertionError("Prefiltered Bullpen x AI rows should bypass the console profile scan.")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_candidate_markets",
+        fail_scan_candidate_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fail_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=60),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=1,
+                    candidate_rows_prefiltered=True,
+                    reuse_saved_llm_outputs=False,
+                    candidate_rows=[manual_row],
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    assert result.run.decisions_count == 1
+    assert result.run.diagnostics.used_manual_console_rows is True
+    assert result.run.stage_results[0].outputs["accepted_candidates_count"] == 1
+    assert result.run.stage_results[0].outputs["rejected_candidates_count"] == 0
+    assert result.run.stage_results[0].outputs["accepted_candidates"][0]["market_id"] == (
+        "candidate-market-1"
+    )
+    assert result.run.stage_results[0].outputs["llm_candidate_count"] == 1
+
+
+@pytest.mark.anyio
 async def test_console_profile_manual_rows_exclude_trump_insult_markets_before_stage_2(
     monkeypatch,
 ):

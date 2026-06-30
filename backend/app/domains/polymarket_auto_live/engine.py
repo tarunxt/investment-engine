@@ -2094,7 +2094,14 @@ class BullpenAutoLiveEngine:
         manual_console_rows = (
             manual_console_context.candidate_rows if manual_console_context else []
         )
-        manual_console_rows_used = bool(manual_console_rows)
+        manual_console_rows_prefiltered = (
+            manual_console_context.candidate_rows_prefiltered
+            if manual_console_context is not None
+            else False
+        )
+        manual_console_rows_used = manual_console_context is not None and (
+            manual_console_rows_prefiltered or bool(manual_console_rows)
+        )
         manual_console_reuse_saved_llm_outputs = (
             manual_console_context.reuse_saved_llm_outputs
             if manual_console_context is not None
@@ -2133,30 +2140,33 @@ class BullpenAutoLiveEngine:
                 len(manual_console_rows),
             )
             manual_markets = [_manual_console_market(row) for row in manual_console_rows]
-            accepted_manual_pairs: list[
-                tuple[BullpenAutoLiveConsoleCandidateInput, ScannedMarket]
-            ] = []
-            for row, market in zip(manual_console_rows, manual_markets, strict=False):
-                rejection_reasons = console_market_filter_reasons(market, now=now)
-                if rejection_reasons:
-                    rejected = ScanRejectedMarket(
-                        market_id=market.market_id,
-                        question=market.question,
-                        slug=market.slug,
-                        market_url=market.market_url,
-                        reasons=rejection_reasons,
-                    )
-                    stage1_rejected_candidates.append(
-                        _serialize_rejected_scan_candidate(rejected)
-                    )
-                    for reason in rejection_reasons:
-                        _record_rejected_candidate(
-                            rejected_candidate_map,
-                            market=market,
-                            reason=reason,
+            if manual_console_rows_prefiltered:
+                accepted_manual_pairs = list(
+                    zip(manual_console_rows, manual_markets, strict=False)
+                )
+            else:
+                accepted_manual_pairs = []
+                for row, market in zip(manual_console_rows, manual_markets, strict=False):
+                    rejection_reasons = console_market_filter_reasons(market, now=now)
+                    if rejection_reasons:
+                        rejected = ScanRejectedMarket(
+                            market_id=market.market_id,
+                            question=market.question,
+                            slug=market.slug,
+                            market_url=market.market_url,
+                            reasons=rejection_reasons,
                         )
-                    continue
-                accepted_manual_pairs.append((row, market))
+                        stage1_rejected_candidates.append(
+                            _serialize_rejected_scan_candidate(rejected)
+                        )
+                        for reason in rejection_reasons:
+                            _record_rejected_candidate(
+                                rejected_candidate_map,
+                                market=market,
+                                reason=reason,
+                            )
+                        continue
+                    accepted_manual_pairs.append((row, market))
             accepted_manual_rows = [row for row, _ in accepted_manual_pairs]
             manual_markets = [market for _, market in accepted_manual_pairs]
             manual_console_rows_have_reusable_llm = (

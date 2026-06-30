@@ -206,10 +206,12 @@ test("Bullpen x AI run-now request can reuse the current scan snapshot before ma
   );
 
   assert.doesNotMatch(bullpenAiPageSource, /selectedQuestionIds\.size === 0/);
+  assert.match(bullpenAiPageSource, /const buildRunNowRequest = async \(\) =>/);
   assert.match(
     bullpenAiPageSource,
-    /if \(!snapshot \|\| snapshot\.questions\.length === 0\) \{/,
+    /if \(!snapshot\) \{/,
   );
+  assert.match(bullpenAiPageSource, /candidate_rows_prefiltered:\s*true/);
   assert.match(bullpenAiPageSource, /reuse_saved_llm_outputs:\s*false/);
 });
 

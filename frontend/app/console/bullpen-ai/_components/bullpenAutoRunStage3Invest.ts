@@ -221,6 +221,7 @@ export function buildBullpenStage3OnlyInvestPlan(
         snapshot_id: readString(scanOutputs?.snapshot_id) ?? run.id,
         mode: readString(scanOutputs?.mode) ?? "stage-3-invest-only",
         total_candidates: candidateRows.length,
+        candidate_rows_prefiltered: true,
         reuse_saved_llm_outputs: true,
         candidate_rows: candidateRows,
       },

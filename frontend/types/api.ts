@@ -1657,6 +1657,7 @@ export interface BullpenAutoLiveConsoleRunContext {
   snapshot_id?: string | null;
   mode?: string | null;
   total_candidates: number;
+  candidate_rows_prefiltered: boolean;
   reuse_saved_llm_outputs: boolean;
   candidate_rows: BullpenAutoLiveConsoleCandidateInput[];
 }

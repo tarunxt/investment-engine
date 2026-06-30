@@ -611,7 +611,7 @@ function buildBullpenAutoRunRequest({
   snapshot: BullpenScanSnapshot | null;
   selectedQuestionIds: Set<string>;
 }): BullpenAutoLiveRunOnceRequest | null {
-  if (!snapshot || snapshot.questions.length === 0) {
+  if (!snapshot) {
     return null;
   }
 
@@ -623,6 +623,7 @@ function buildBullpenAutoRunRequest({
       snapshot_id: snapshot.snapshotId,
       mode,
       total_candidates: snapshot.totalCandidates,
+      candidate_rows_prefiltered: true,
       reuse_saved_llm_outputs: false,
       candidate_rows: snapshot.questions.map((question) => ({
         question_id: question.id,
@@ -1425,12 +1426,20 @@ export default function BullpenAiPage() {
       (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
       ),
   );
-  const buildRunNowRequest = () =>
-    buildBullpenAutoRunRequest({
-      mode: activeMode,
-      snapshot: selectionEnabled ? activeCurrentSnapshot : null,
-      selectedQuestionIds: selectedInvestmentQuestionIdSet,
+  const buildRunNowRequest = async () => {
+    const { snapshot, error } = await executeBullpenScan({
+      resetSelections: true,
     });
+    if (error) {
+      throw new Error(error);
+    }
+
+    return buildBullpenAutoRunRequest({
+      mode: activeMode,
+      snapshot,
+      selectedQuestionIds: new Set<string>(),
+    });
+  };
 
   useEffect(() => {
     if (!isRunningLlm || !llmRunStartedAt) {
@@ -1893,7 +1902,44 @@ export default function BullpenAiPage() {
     }
   }
 
-  async function runScan() {
+  function syncBullpenScanSnapshot(
+    snapshot: BullpenScanSnapshot,
+    options?: { resetSelections?: boolean },
+  ) {
+    const resetSelections = options?.resetSelections ?? true;
+    setSnapshotsByMode((current) => {
+      const previousCurrent = current[activeMode].current;
+      return {
+        ...current,
+        [activeMode]: {
+          current: snapshot,
+          history: previousCurrent
+            ? [
+                archiveBullpenScanSnapshot(previousCurrent),
+                ...current[activeMode].history,
+              ].slice(0, MAX_BULLPEN_SNAPSHOT_HISTORY)
+            : current[activeMode].history,
+        },
+      };
+    });
+    setSelectedSnapshotIdByMode((current) => ({
+      ...current,
+      [activeMode]: null,
+    }));
+    if (!resetSelections) {
+      return;
+    }
+    setSelectedQuestionIdsByMode((current) => ({
+      ...current,
+      [activeMode]: [],
+    }));
+    setSelectedInvestmentQuestionIdsByMode((current) => ({
+      ...current,
+      [activeMode]: [],
+    }));
+  }
+
+  async function executeBullpenScan(options?: { resetSelections?: boolean }) {
     const params = buildBullpenScanQueryParams(activeMode, activeFilters);
     setScanningMode(activeMode);
     setMessagesByMode((current) => ({ ...current, [activeMode]: null }));
@@ -1911,61 +1957,55 @@ export default function BullpenAiPage() {
 
       await positionsRefreshTask;
 
-      if (isSuccessfulScan) {
-        const nextSnapshot = createBullpenScanSnapshot(payload);
-
-        setSnapshotsByMode((current) => {
-          const previousCurrent = current[activeMode].current;
-          return {
-            ...current,
-            [activeMode]: {
-              current: nextSnapshot,
-              history: previousCurrent
-                ? [
-                    archiveBullpenScanSnapshot(previousCurrent),
-                    ...current[activeMode].history,
-                  ].slice(0, MAX_BULLPEN_SNAPSHOT_HISTORY)
-                : current[activeMode].history,
-            },
-          };
+      const nextSnapshot = isSuccessfulScan
+        ? createBullpenScanSnapshot(payload)
+        : null;
+      if (nextSnapshot) {
+        syncBullpenScanSnapshot(nextSnapshot, {
+          resetSelections: options?.resetSelections,
         });
-        setSelectedSnapshotIdByMode((current) => ({
-          ...current,
-          [activeMode]: null,
-        }));
-        setSelectedQuestionIdsByMode((current) => ({
-          ...current,
-          [activeMode]: [],
-        }));
-        setSelectedInvestmentQuestionIdsByMode((current) => ({
-          ...current,
-          [activeMode]: [],
-        }));
       }
 
+      const message =
+        !response.ok || payload.error
+          ? payload.error || "Bullpen scan failed."
+          : payload.warning
+            ? payload.warning
+            : payload.questions.length === 0
+              ? "No Bullpen questions matched the current scan filters. Adjust the filters or rerun later."
+              : null;
       setMessagesByMode((current) => ({
         ...current,
-        [activeMode]:
-          !response.ok || payload.error
-            ? payload.error || "Bullpen scan failed."
-            : payload.warning
-              ? payload.warning
-              : payload.questions.length === 0
-                ? "No Bullpen questions matched the current scan filters. Adjust the filters or rerun later."
-                : null,
+        [activeMode]: message,
       }));
+
+      return {
+        snapshot: nextSnapshot,
+        error: !isSuccessfulScan
+          ? payload.error || "Bullpen scan failed."
+          : null,
+      };
     } catch (scanError) {
       await positionsRefreshTask;
+      const message =
+        scanError instanceof Error
+          ? scanError.message
+          : "Bullpen scan failed.";
       setMessagesByMode((current) => ({
         ...current,
-        [activeMode]:
-          scanError instanceof Error
-            ? scanError.message
-            : "Bullpen scan failed.",
+        [activeMode]: message,
       }));
+      return {
+        snapshot: null,
+        error: message,
+      };
     } finally {
       setScanningMode(null);
     }
+  }
+
+  async function runScan() {
+    await executeBullpenScan({ resetSelections: true });
   }
 
   async function runLlm(targets: ProviderModelTarget[]) {
