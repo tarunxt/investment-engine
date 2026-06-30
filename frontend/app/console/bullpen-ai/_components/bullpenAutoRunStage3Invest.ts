@@ -1,5 +1,6 @@
 import type {
   BullpenAutoLiveConsoleCandidateInput,
+  BullpenAutoLiveDecision,
   BullpenAutoLiveLlmOutput,
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
@@ -14,6 +15,22 @@ export type BullpenStage3OnlyInvestPlan = {
 export type BullpenStage3OnlyInvestSource = {
   run: BullpenAutoLiveRun | null;
   plan: BullpenStage3OnlyInvestPlan;
+};
+
+export type BullpenStage3OnlyInvestCandidatePreview = {
+  candidate: BullpenAutoLiveConsoleCandidateInput;
+  status: "ready" | "already-invested";
+  reason: string | null;
+};
+
+export type BullpenStage3OnlyInvestExecutionPlan = {
+  request: BullpenAutoLiveRunOnceRequest | null;
+  qualifiedCandidateCount: number;
+  readyCandidateCount: number;
+  alreadyInvestedCandidateCount: number;
+  alreadyInvestedMarketIds: string[];
+  candidatePreviews: BullpenStage3OnlyInvestCandidatePreview[];
+  blockedReason: string | null;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -61,6 +78,19 @@ function workflowStageOutputs(
     }
   }
   return null;
+}
+
+function cloneCandidateRow(
+  row: BullpenAutoLiveConsoleCandidateInput,
+): BullpenAutoLiveConsoleCandidateInput {
+  return {
+    ...row,
+    llm_outputs: row.llm_outputs.map((output) => ({
+      ...output,
+      key_evidence: [...output.key_evidence],
+      red_flags: [...output.red_flags],
+    })),
+  };
 }
 
 function buildAcceptedCandidateLookup(
@@ -232,6 +262,114 @@ export function buildBullpenStage3OnlyInvestPlan(
       },
     },
     qualifiedCandidateCount: candidateRows.length,
+    blockedReason: null,
+  };
+}
+
+function buildActivePositionMarketIdSet(run: BullpenAutoLiveRun | null): Set<string> {
+  if (!run) return new Set<string>();
+
+  const scanOutputs = workflowStageOutputs(run, "scan");
+  const marketIds = asArray(scanOutputs?.active_positions_found)
+    .map((item) => asRecord(item))
+    .map((record) => readString(record?.market_id))
+    .filter((marketId): marketId is string => Boolean(marketId));
+  return new Set(marketIds);
+}
+
+function buildSubmittedBuyMarketIdSet(
+  run: BullpenAutoLiveRun | null,
+  decisions: BullpenAutoLiveDecision[],
+): Set<string> {
+  if (!run) return new Set<string>();
+
+  const marketIds = decisions
+    .filter(
+      (decision) =>
+        decision.run_id === run.id &&
+        decision.order_plan?.status === "submitted" &&
+        decision.order_plan.action === "buy",
+    )
+    .map((decision) => decision.market_id)
+    .filter((marketId) => typeof marketId === "string" && marketId.trim().length > 0);
+  return new Set(marketIds);
+}
+
+export function buildBullpenStage3OnlyInvestExecutionPlan(
+  run: BullpenAutoLiveRun | null,
+  decisions: BullpenAutoLiveDecision[] = [],
+): BullpenStage3OnlyInvestExecutionPlan {
+  const plan = buildBullpenStage3OnlyInvestPlan(run);
+  if (!plan.request?.console_profile) {
+    return {
+      request: null,
+      qualifiedCandidateCount: plan.qualifiedCandidateCount,
+      readyCandidateCount: 0,
+      alreadyInvestedCandidateCount: 0,
+      alreadyInvestedMarketIds: [],
+      candidatePreviews: [],
+      blockedReason: plan.blockedReason,
+    };
+  }
+
+  const activePositionMarketIds = buildActivePositionMarketIdSet(run);
+  const submittedBuyMarketIds = buildSubmittedBuyMarketIdSet(run, decisions);
+  const alreadyInvestedMarketIds = new Set([
+    ...activePositionMarketIds,
+    ...submittedBuyMarketIds,
+  ]);
+
+  const candidatePreviews = plan.request.console_profile.candidate_rows.map((candidate) => {
+    const alreadyActive = activePositionMarketIds.has(candidate.market_id);
+    const alreadySubmitted = submittedBuyMarketIds.has(candidate.market_id);
+    const reason = alreadyActive
+      ? "Already present in the Bullpen wallet for this market."
+      : alreadySubmitted
+        ? "A live Stage 3 buy from this saved run was already submitted."
+        : null;
+
+    return {
+      candidate: cloneCandidateRow(candidate),
+      status: reason ? "already-invested" : "ready",
+      reason,
+    } satisfies BullpenStage3OnlyInvestCandidatePreview;
+  });
+
+  const readyRows = candidatePreviews
+    .filter((preview) => preview.status === "ready")
+    .map((preview) => cloneCandidateRow(preview.candidate));
+  const readyCandidateCount = readyRows.length;
+  const alreadyInvestedCandidateCount =
+    candidatePreviews.length - readyCandidateCount;
+
+  if (readyCandidateCount === 0) {
+    return {
+      request: null,
+      qualifiedCandidateCount: plan.qualifiedCandidateCount,
+      readyCandidateCount,
+      alreadyInvestedCandidateCount,
+      alreadyInvestedMarketIds: [...alreadyInvestedMarketIds],
+      candidatePreviews,
+      blockedReason:
+        alreadyInvestedCandidateCount > 0
+          ? "All Stage 2-qualified events from the latest reusable run are already invested or already submitted."
+          : plan.blockedReason,
+    };
+  }
+
+  return {
+    request: {
+      console_profile: {
+        ...plan.request.console_profile,
+        total_candidates: readyCandidateCount,
+        candidate_rows: readyRows,
+      },
+    },
+    qualifiedCandidateCount: plan.qualifiedCandidateCount,
+    readyCandidateCount,
+    alreadyInvestedCandidateCount,
+    alreadyInvestedMarketIds: [...alreadyInvestedMarketIds],
+    candidatePreviews,
     blockedReason: null,
   };
 }

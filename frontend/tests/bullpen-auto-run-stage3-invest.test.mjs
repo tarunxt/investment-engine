@@ -75,6 +75,72 @@ function createRun({ id = "run-stage3-source", stageResults, ordersSubmitted = 0
   };
 }
 
+function createSubmittedBuyDecision({
+  runId = "run-stage3-source",
+  marketId = "market-1",
+  marketTitle = "Will event one happen?",
+} = {}) {
+  return {
+    id: `decision-${runId}-${marketId}`,
+    run_id: runId,
+    created_at: "2026-06-30T12:05:30Z",
+    updated_at: "2026-06-30T12:05:30Z",
+    market_id: marketId,
+    market_title: marketTitle,
+    market_url: `https://example.com/${marketId}`,
+    slug: marketId,
+    close_time: "2026-07-07T12:00:00Z",
+    theme: "Politics",
+    side: "NO",
+    decision: "BUY_NEW",
+    risk_status: "Ready",
+    price_cents: 82,
+    current_yes_odds: 18,
+    current_no_odds: 82,
+    fair_probability_pct: 82,
+    fair_yes_probability_pct: 18,
+    fair_no_probability_pct: 82,
+    edge_pp: 0,
+    score: 5,
+    confidence: "High",
+    evidence_status: "Strong",
+    event_state: "Watching",
+    adjudication_required: false,
+    disagreement_level: "Low",
+    current_exposure_usd: 0,
+    target_exposure_usd: 5,
+    realized_pnl_usd: null,
+    hours_remaining: null,
+    key_evidence: [],
+    red_flags: [],
+    rationale: null,
+    reason: "Submitted from a prior Stage 3 attempt.",
+    summary: "Submitted from a prior Stage 3 attempt.",
+    order_plan: {
+      id: `order-${runId}-${marketId}`,
+      action: "buy",
+      side: "NO",
+      order_type: "limit",
+      status: "submitted",
+      market_id: marketId,
+      market_title: marketTitle,
+      order_size_usd: 5,
+      shares: 6.097561,
+      limit_price_cents: 82,
+      refreshed_market_price_cents: 82,
+      max_slippage_cents: 2,
+      dry_run: false,
+      detail: "Limit order submitted successfully.",
+      execution_response: null,
+      created_at: "2026-06-30T12:05:30Z",
+      executed_at: "2026-06-30T12:05:31Z",
+    },
+    llm_outputs: [],
+    stage_results: [],
+    guardrail_checks: [],
+  };
+}
+
 test("Stage 3 invest plan reuses only Stage 2-qualified candidate rows", async () => {
   const { buildBullpenStage3OnlyInvestPlan } = await loadStage3InvestModule();
 
@@ -345,6 +411,114 @@ test("Stage 3 invest source falls back to the latest persisted Stage 2-qualified
   );
 });
 
+test("Stage 3 invest execution plan keeps reuse enabled while skipping already invested candidates", async () => {
+  const { buildBullpenStage3OnlyInvestExecutionPlan } = await loadStage3InvestModule();
+
+  const run = createRun({
+    id: "run-stage3-resume",
+    stageResults: [
+      createStage(1, "scan", {
+        snapshot_id: "snapshot-9",
+        active_positions_found: [
+          {
+            market_id: "market-1",
+            market_title: "Will event one happen?",
+            side: "NO",
+          },
+        ],
+        accepted_candidates: [
+          {
+            question_id: "question-1",
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_title: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            theme: "Politics",
+            current_yes_odds: 43,
+            current_no_odds: 57,
+          },
+          {
+            question_id: "question-2",
+            market_id: "market-2",
+            question: "Will event two happen?",
+            market_title: "Will event two happen?",
+            market_url: "https://example.com/market-2",
+            slug: "event-two",
+            close_time: "2026-07-08T12:00:00Z",
+            theme: "Sports",
+            current_yes_odds: 51,
+            current_no_odds: 49,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            returns_per_day: 1.7,
+            qualified: true,
+            fair_yes_probability_pct: 18,
+            fair_no_probability_pct: 82,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+          {
+            market_id: "market-2",
+            question: "Will event two happen?",
+            market_url: "https://example.com/market-2",
+            slug: "event-two",
+            close_time: "2026-07-08T12:00:00Z",
+            returns_per_day: 1.4,
+            qualified: true,
+            fair_yes_probability_pct: 73,
+            fair_no_probability_pct: 27,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+        ],
+      }),
+    ],
+  });
+
+  const executionPlan = buildBullpenStage3OnlyInvestExecutionPlan(run, [
+    createSubmittedBuyDecision({
+      runId: "run-stage3-resume",
+      marketId: "market-1",
+    }),
+  ]);
+
+  assert.equal(executionPlan.blockedReason, null);
+  assert.equal(executionPlan.qualifiedCandidateCount, 2);
+  assert.equal(executionPlan.readyCandidateCount, 1);
+  assert.equal(executionPlan.alreadyInvestedCandidateCount, 1);
+  assert.deepEqual(executionPlan.alreadyInvestedMarketIds, ["market-1"]);
+  assert.equal(executionPlan.request?.console_profile?.candidate_rows.length, 1);
+  assert.equal(
+    executionPlan.request?.console_profile?.candidate_rows[0]?.market_id,
+    "market-2",
+  );
+  assert.equal(
+    executionPlan.candidatePreviews.find(
+      (preview) => preview.candidate.market_id === "market-1",
+    )?.status,
+    "already-invested",
+  );
+});
+
 test("Stage 3 schedule card keeps the Invest button and reuse copy inside the card", () => {
   const source = readFileSync(
     new URL(
@@ -357,4 +531,6 @@ test("Stage 3 schedule card keeps the Invest button and reuse copy inside the ca
   assert.match(source, />\s*Invest\s*</);
   assert.match(source, /latest Stage 2-qualified rows/);
   assert.match(source, /skips the Bullpen rescan plus LLM rerun/);
+  assert.match(source, /already invested and will be skipped/);
+  assert.match(source, /CheckCircle2/);
 });

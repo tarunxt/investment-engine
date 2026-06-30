@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useEffectEvent, useState } from "react";
 import {
   CalendarClock,
+  CheckCircle2,
   Clock3,
   Loader2,
   LogIn,
@@ -31,7 +32,10 @@ import type {
 } from "@/types/api";
 
 import { buildBullpenAutoRunWorkflowView } from "./bullpenAutoRunProgress";
-import { selectBullpenStage3OnlyInvestSource } from "./bullpenAutoRunStage3Invest";
+import {
+  buildBullpenStage3OnlyInvestExecutionPlan,
+  selectBullpenStage3OnlyInvestSource,
+} from "./bullpenAutoRunStage3Invest";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
 import { formatElapsedRunTime, formatStageElapsedTime } from "./bullpenAutoRunTimers";
 
@@ -979,8 +983,11 @@ export function BullpenAutoRunScheduleCard({
         ? [workflowRun]
         : [],
   );
-  const investOnlyPlan = investOnlySource.plan;
   const investOnlySourceRun = investOnlySource.run;
+  const investOnlyPlan = buildBullpenStage3OnlyInvestExecutionPlan(
+    investOnlySourceRun,
+    summary?.recent_decisions ?? [],
+  );
   const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
   const workflowView = buildBullpenAutoRunWorkflowView(
     workflowRun,
@@ -1041,9 +1048,6 @@ export function BullpenAutoRunScheduleCard({
       (((backendExecutionGuardrail.value ?? "").toString().toLowerCase() === "blocked") ||
         /blocks auto-live execution/i.test(backendExecutionGuardrail.detail)),
   );
-  const investOnlyAlreadySubmitted =
-    (workflowRun?.orders_submitted ?? 0) > 0 ||
-    (investOnlySourceRun?.orders_submitted ?? 0) > 0;
   const investRunDecisions =
     summary && workflowRun
       ? summary.recent_decisions.filter((decision) => decision.run_id === workflowRun.id)
@@ -1060,9 +1064,7 @@ export function BullpenAutoRunScheduleCard({
   const investOnlyDisabledReason =
     pendingRunId !== null || visibleRun?.status === "running"
       ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
-      : investOnlyAlreadySubmitted
-        ? "Latest reusable Stage 2 run already submitted live orders, so Invest is locked to avoid duplicate buys."
-        : investOnlyPlan.blockedReason;
+      : investOnlyPlan.blockedReason;
 
   useEffect(() => {
     if (!shouldTickTimers) return;
@@ -1533,12 +1535,42 @@ export function BullpenAutoRunScheduleCard({
                         <p className={`text-[11px] leading-5 ${toneClasses.muted}`}>
                           {investOnlyDisabledReason}
                         </p>
-                      ) : investOnlyPlan.qualifiedCandidateCount > 0 ? (
+                      ) : investOnlyPlan.readyCandidateCount > 0 ? (
                         <p className={`text-[11px] leading-5 ${toneClasses.muted}`}>
-                          {investOnlyPlan.qualifiedCandidateCount} qualified{" "}
-                          {investOnlyPlan.qualifiedCandidateCount === 1 ? "event" : "events"} ready
+                          {investOnlyPlan.readyCandidateCount} qualified{" "}
+                          {investOnlyPlan.readyCandidateCount === 1 ? "event is" : "events are"} ready
                           for this invest-only pass.
                         </p>
+                      ) : null}
+                      {investOnlyPlan.alreadyInvestedCandidateCount > 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-[11px] font-semibold leading-5 text-emerald-800">
+                            {investOnlyPlan.alreadyInvestedCandidateCount} qualified{" "}
+                            {investOnlyPlan.alreadyInvestedCandidateCount === 1 ? "event is" : "events are"} already invested and will be skipped.
+                          </p>
+                          <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                            {investOnlyPlan.candidatePreviews
+                              .filter((preview) => preview.status === "already-invested")
+                              .map((preview) => (
+                                <div
+                                  key={preview.candidate.market_id}
+                                  className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900"
+                                >
+                                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                                  <div className="min-w-0">
+                                    <p className="font-semibold">
+                                      {preview.candidate.market_title}
+                                    </p>
+                                    {preview.reason ? (
+                                      <p className="leading-5 text-emerald-800">
+                                        {preview.reason}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
                       ) : null}
                     </div>
                   ) : null}
@@ -1653,7 +1685,16 @@ export function BullpenAutoRunScheduleCard({
             eyebrow="Stage Input"
             stageTitle={openInputStage.title}
             stageDetail={`Event inputs being fed into ${openInputStage.title}.`}
-            outputs={openInputStage.inputs}
+            outputs={
+              openInputStage.key === "invest" &&
+              workflowRun?.id === investOnlySourceRun?.id &&
+              investOnlyPlan.alreadyInvestedMarketIds.length > 0
+                ? {
+                    ...openInputStage.inputs,
+                    already_invested_market_ids: investOnlyPlan.alreadyInvestedMarketIds,
+                  }
+                : openInputStage.inputs
+            }
             outputLabel="Inputs"
             onClose={() => setOpenInputStageKey(null)}
           />

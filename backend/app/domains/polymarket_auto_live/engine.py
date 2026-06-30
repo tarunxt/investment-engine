@@ -3319,6 +3319,9 @@ class BullpenAutoLiveEngine:
             for context in active_position_contexts
             if context.get("position_key") is not None
         }
+        active_position_market_ids = {
+            snapshot.market_id for snapshot in position_snapshots if snapshot.market_id
+        }
 
         for position in enriched_wallet_positions:
             if position.is_claimable:
@@ -3448,6 +3451,36 @@ class BullpenAutoLiveEngine:
             stage_results = list(context["stage_results"])
             llm_outputs = context["llm_outputs"]
             llm_consensus = context["llm_consensus"]
+            if market.market_id in active_position_market_ids:
+                skip_reason = (
+                    "Candidate already has an active Bullpen position and will not be bought again."
+                )
+                _record_rejected_candidate(
+                    rejected_candidate_map,
+                    market=market,
+                    reason=skip_reason,
+                )
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="pass",
+                        reason=skip_reason,
+                        outputs={"returns_per_day": returns_per_day},
+                    )
+                )
+                record_invest_decision(
+                    _build_decision(
+                        market=market,
+                        decision_action="SKIP",
+                        reason=skip_reason,
+                        stage_results=stage_results,
+                        side_to_trade=context.get("selected_side"),
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                    ),
+                    market=market,
+                )
+                continue
             if not context["qualified"]:
                 _record_rejected_candidate(
                     rejected_candidate_map,

@@ -2315,6 +2315,126 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
 
 
 @pytest.mark.anyio
+async def test_console_profile_manual_table_rows_skip_candidates_already_in_active_positions(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_rows = [
+        _manual_console_candidate_row(
+            market_id="candidate-market-1",
+            question_id="candidate-market-1",
+            market_title="Candidate market 1",
+            slug="candidate-market-1",
+            current_yes_odds=18,
+            current_no_odds=82,
+            llm_yes_odds=8,
+            llm_no_odds=92,
+            returns_per_day=9.5,
+            selected=True,
+        ),
+        _manual_console_candidate_row(
+            market_id="candidate-market-2",
+            question_id="candidate-market-2",
+            market_title="Candidate market 2",
+            slug="candidate-market-2",
+            current_yes_odds=22,
+            current_no_odds=78,
+            llm_yes_odds=91,
+            llm_no_odds=9,
+            returns_per_day=7.2,
+            selected=True,
+            evidence_status="conflicting_evidence",
+        ),
+    ]
+    market_lookup = {
+        row.slug: _market(
+            question=row.market_title,
+            slug=row.slug,
+            close_time=row.close_time,
+            current_yes_odds=row.current_yes_odds,
+            current_no_odds=row.current_no_odds,
+        )
+        for row in manual_rows
+        if row.slug
+    }
+
+    async def fake_read_console_wallet_positions():
+        return [
+            _console_wallet_position(
+                slug="candidate-market-1",
+                market_title="Candidate market 1",
+                current_price_cents=82,
+                side="NO",
+                exposure_usd=5,
+            )
+        ]
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=2,
+                    candidate_rows=manual_rows,
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+    skipped_decisions = [decision for decision in result.decisions if decision.decision == "SKIP"]
+
+    assert [decision.market_id for decision in buy_decisions] == ["candidate-market-2"]
+    assert any(
+        decision.market_id == "candidate-market-1"
+        and "active Bullpen position" in decision.reason
+        for decision in skipped_decisions
+    )
+    assert all(
+        not (decision.decision == "BUY_NEW" and decision.market_id == "candidate-market-1")
+        for decision in result.decisions
+    )
+
+
+@pytest.mark.anyio
 async def test_console_profile_manual_rows_skip_unsupported_wallet_position_sides(
     monkeypatch,
 ):

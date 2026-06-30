@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ComponentType, type ReactNode } from "react";
-import { ExternalLink, X } from "lucide-react";
+import { CheckCircle2, ExternalLink, X } from "lucide-react";
 
 type BullpenAutoRunStageOutputDialogProps = {
   stageTitle: string;
@@ -1260,11 +1260,13 @@ function buildInputSummaryItems(outputs: Record<string, unknown>) {
 function SummaryTable({
   rows,
   title,
+  alreadyInvestedMarketIds,
   onOpenBreakdown,
   onOpenRationale,
 }: {
   rows: Record<string, unknown>[];
   title: string;
+  alreadyInvestedMarketIds?: Set<string>;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
   onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
@@ -1290,22 +1292,53 @@ function SummaryTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
-            {rows.map((row, index) => (
-              <tr key={index} className="align-top hover:bg-slate-50/80">
-                {columns.map((column) => (
-                  <td key={`${index}-${column}`} className="px-4 py-3">
-                    {renderRecordValue({
-                      value: row[column],
-                      key: column,
-                      record: row,
-                      compact: true,
-                      onOpenBreakdown,
-                      onOpenRationale,
-                    })}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {rows.map((row, index) => {
+              const marketId = readSummaryString(row.market_id);
+              const alreadyInvested = Boolean(
+                marketId && alreadyInvestedMarketIds?.has(marketId),
+              );
+
+              return (
+                <tr
+                  key={index}
+                  className={`align-top ${
+                    alreadyInvested
+                      ? "bg-emerald-50/80 hover:bg-emerald-100/60"
+                      : "hover:bg-slate-50/80"
+                  }`}
+                >
+                  {columns.map((column, columnIndex) => (
+                    <td key={`${index}-${column}`} className="px-4 py-3">
+                      {alreadyInvested && columnIndex === 0 ? (
+                        <div className="space-y-2">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            Already invested
+                          </span>
+                          {renderRecordValue({
+                            value: row[column],
+                            key: column,
+                            record: row,
+                            compact: true,
+                            onOpenBreakdown,
+                            onOpenRationale,
+                          })}
+                        </div>
+                      ) : (
+                        renderRecordValue({
+                          value: row[column],
+                          key: column,
+                          record: row,
+                          compact: true,
+                          onOpenBreakdown,
+                          onOpenRationale,
+                        })
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1509,11 +1542,13 @@ function RecordDetailsCard({
 function RecordArraySection({
   sectionKey,
   rows,
+  alreadyInvestedMarketIds,
   onOpenBreakdown,
   onOpenRationale,
 }: {
   sectionKey: string;
   rows: Record<string, unknown>[];
+  alreadyInvestedMarketIds?: Set<string>;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
   onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
@@ -1537,6 +1572,7 @@ function RecordArraySection({
         <SummaryTable
           rows={rows}
           title="Summary Table"
+          alreadyInvestedMarketIds={alreadyInvestedMarketIds}
           onOpenBreakdown={onOpenBreakdown}
           onOpenRationale={onOpenRationale}
         />
@@ -1560,11 +1596,13 @@ function RecordArraySection({
 function StructuredSection({
   sectionKey,
   value,
+  alreadyInvestedMarketIds,
   onOpenBreakdown,
   onOpenRationale,
 }: {
   sectionKey: string;
   value: unknown;
+  alreadyInvestedMarketIds?: Set<string>;
   onOpenBreakdown: (record: Record<string, unknown>) => void;
   onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
@@ -1573,6 +1611,7 @@ function StructuredSection({
       <RecordArraySection
         sectionKey={sectionKey}
         rows={value as Record<string, unknown>[]}
+        alreadyInvestedMarketIds={alreadyInvestedMarketIds}
         onOpenBreakdown={onOpenBreakdown}
         onOpenRationale={onOpenRationale}
       />
@@ -1612,6 +1651,9 @@ export function BullpenAutoRunStageOutputDialog({
     useState<Record<string, unknown> | null>(null);
   const [valueRationaleDialog, setValueRationaleDialog] =
     useState<ValueRationaleDialogState | null>(null);
+  const alreadyInvestedMarketIds = new Set(
+    readStringArrayValue(outputs.already_invested_market_ids),
+  );
   const entries = Object.entries(outputs);
   const inputSummaryItems = outputLabel === "Inputs" ? buildInputSummaryItems(outputs) : [];
   const overviewEntries = orderEntries(
@@ -1692,6 +1734,7 @@ export function BullpenAutoRunStageOutputDialog({
                   key={key}
                   sectionKey={key}
                   value={value}
+                  alreadyInvestedMarketIds={alreadyInvestedMarketIds}
                   onOpenBreakdown={handleOpenBreakdown}
                   onOpenRationale={(record, fieldKey) =>
                     setValueRationaleDialog({ record, fieldKey })

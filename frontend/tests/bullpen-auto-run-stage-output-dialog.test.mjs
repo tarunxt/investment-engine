@@ -201,6 +201,42 @@ test("Bullpen auto-run stage dialog makes invest rationale fields clickable", ()
   assert.match(markup, /Open rationale for Adjudication Required/);
 });
 
+test("Bullpen auto-run stage dialog highlights already invested Stage 3 rows", () => {
+  const { BullpenAutoRunStageOutputDialog } = loadStageOutputDialog();
+
+  const markup = renderToStaticMarkup(
+    React.createElement(BullpenAutoRunStageOutputDialog, {
+      stageTitle: "Stage 3 · Invest",
+      stageDetail: "Event inputs being fed into Stage 3 · Invest.",
+      eyebrow: "Stage Input",
+      outputLabel: "Inputs",
+      onClose: () => {},
+      outputs: {
+        already_invested_market_ids: ["market-1"],
+        llm_review_rows: [
+          {
+            market_id: "market-1",
+            question: "Will rates fall?",
+            returns_per_day: 140.83,
+            selected_side: "NO",
+            confidence: "Low",
+            evidence_status: "Low",
+            event_state: "scheduled_not_occurred",
+            adjudication_required: false,
+            fair_yes_probability_pct: 12.75,
+            fair_no_probability_pct: 87.25,
+            reason: "Candidate qualifies for the Events to invest in table.",
+            llm_outputs: [],
+          },
+        ],
+      },
+    }),
+  );
+
+  assert.match(markup, /Already invested/);
+  assert.match(markup, /Will rates fall\?/);
+});
+
 test("Bullpen LLM breakdown dialog layers above the stage output dialog", () => {
   const source = readFileSync(
     new URL(
