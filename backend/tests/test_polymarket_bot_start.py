@@ -990,6 +990,31 @@ async def test_pause_and_stop_persist_for_recreated_user_bot(tmp_path, monkeypat
     await recreated_manager.shutdown()
 
 
+def test_manager_recreates_cached_bot_when_event_loop_changes(tmp_path, monkeypatch):
+    from app.domains.polymarket.service import PolymarketBotManager
+
+    monkeypatch.setenv("POLYMARKET_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("POLYMARKET_AUTO_START", "false")
+    monkeypatch.setenv("LIVE_TRADING", "false")
+    monkeypatch.setenv("USE_LIVE_READS", "false")
+    monkeypatch.setenv("PAPER_TRADING", "true")
+
+    manager = PolymarketBotManager()
+
+    async def first_loop():
+        return await manager.get_bot(42)
+
+    async def second_loop():
+        bot = await manager.get_bot(42)
+        await bot.get_state()
+        return bot
+
+    first_bot = asyncio.run(first_loop())
+    second_bot = asyncio.run(second_loop())
+
+    assert second_bot is not first_bot
+
+
 class RedeemTrackingExecutor:
     def __init__(self, redeem_error: Exception | None = None):
         self.redeem_calls = 0

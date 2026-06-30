@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.domains.polymarket.bot import PolymarketPaperCopyBot
@@ -21,16 +22,35 @@ from app.domains.polymarket.schemas import (
 from app.domains.polymarket.storage import JsonModelStore, JsonObjectStore
 
 
+@dataclass
+class _LoopBoundBot:
+    bot: PolymarketPaperCopyBot
+    loop: asyncio.AbstractEventLoop
+
+
 class PolymarketBotManager:
     def __init__(self) -> None:
-        self._bots: dict[int, PolymarketPaperCopyBot] = {}
-        self._lock = asyncio.Lock()
+        self._bots: dict[int, _LoopBoundBot] = {}
+        self._lock: asyncio.Lock | None = None
+        self._lock_loop: asyncio.AbstractEventLoop | None = None
+
+    def _lock_for_current_loop(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        # Celery's asyncio.run creates a fresh event loop per task, so cached
+        # bot instances must stay scoped to the loop that created their locks/tasks.
+        if self._lock is None or self._lock_loop is not loop:
+            self._lock = asyncio.Lock()
+            self._lock_loop = loop
+        return self._lock
 
     async def get_bot(self, user_id: int) -> PolymarketPaperCopyBot:
-        async with self._lock:
+        loop = asyncio.get_running_loop()
+        async with self._lock_for_current_loop():
             existing = self._bots.get(user_id)
-            if existing:
-                return existing
+            if existing and existing.loop is loop:
+                return existing.bot
+            if existing and existing.loop is not loop:
+                self._bots.pop(user_id, None)
 
             base_config = load_polymarket_config()
             user_data_dir = Path(base_config.data_dir) / f"user-{user_id}"
@@ -74,7 +94,7 @@ class PolymarketBotManager:
                 ),
             )
             await bot.init()
-            self._bots[user_id] = bot
+            self._bots[user_id] = _LoopBoundBot(bot=bot, loop=loop)
             if user_config.auto_start:
                 asyncio.create_task(self._auto_start_bot(bot))
             return bot
@@ -89,11 +109,14 @@ class PolymarketBotManager:
             bot.add_activity(f"Auto-start failed: {sanitized_error}.")
 
     async def shutdown(self) -> None:
-        async with self._lock:
+        loop = asyncio.get_running_loop()
+        async with self._lock_for_current_loop():
             bots = list(self._bots.values())
             self._bots.clear()
-        for bot in bots:
-            await bot.shutdown()
+        for entry in bots:
+            if entry.loop is not loop:
+                continue
+            await entry.bot.shutdown()
 
 
 polymarket_bot_manager = PolymarketBotManager()
