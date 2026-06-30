@@ -318,6 +318,12 @@ echo "==> Restart services"
 sudo systemctl daemon-reload
 sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME"
 
+if systemctl cat "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1; then
+  sudo systemctl restart "$BEAT_WORKER_SERVICE_NAME"
+else
+  echo "==> Optional beat queue worker service not installed: $BEAT_WORKER_SERVICE_NAME"
+fi
+
 if [[ "$SCOPE" == "full" ]]; then
   sudo systemctl restart "$FRONTEND_SERVICE_NAME"
 fi
@@ -326,6 +332,10 @@ echo "==> Service status"
 sudo systemctl status "$BACKEND_SERVICE_NAME" --no-pager
 sudo systemctl status "$WORKER_SERVICE_NAME" --no-pager
 sudo systemctl status "$BEAT_SERVICE_NAME" --no-pager
+
+if systemctl cat "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1; then
+  sudo systemctl status "$BEAT_WORKER_SERVICE_NAME" --no-pager
+fi
 
 if [[ "$SCOPE" == "full" ]]; then
   sudo systemctl status "$FRONTEND_SERVICE_NAME" --no-pager
