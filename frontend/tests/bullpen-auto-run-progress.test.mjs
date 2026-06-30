@@ -490,6 +490,77 @@ test("Bullpen auto-run workflow view treats legacy completed runs as fully finis
   assert.match(view.stages[2].detail, /Console schedule simulated/);
 });
 
+test("Bullpen auto-run workflow settled helper hides active controls once every stage is finished", async () => {
+  const {
+    buildBullpenAutoRunWorkflowView,
+    isBullpenAutoRunWorkflowSettled,
+  } = await loadProgressModule();
+
+  const settledView = buildBullpenAutoRunWorkflowView({
+    id: "run-running-but-finished",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: false,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "All stages finished.",
+    live_execution_requested: true,
+    live_execution_attempted: true,
+    decisions_count: 2,
+    orders_planned: 1,
+    orders_submitted: 1,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+      }),
+      createStage(2, "Stage 2 reviewed candidates.", {
+        workflow_stage_key: "llm",
+        phase_status: "completed",
+      }),
+      createStage(3, "Stage 3 submitted the final orders.", {
+        workflow_stage_key: "invest",
+        phase_status: "completed",
+      }),
+    ],
+  });
+  const queuedView = buildBullpenAutoRunWorkflowView({
+    id: "run-still-queued",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: false,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 2 is still running.",
+    live_execution_requested: true,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+      }),
+      createStage(2, "Stage 2 is processing candidates.", {
+        workflow_stage_key: "llm",
+        phase_status: "running",
+      }),
+      createStage(3, "Stage 3 is waiting for Stage 2.", {
+        workflow_stage_key: "invest",
+        phase_status: "queued",
+      }),
+    ],
+  });
+
+  assert.equal(isBullpenAutoRunWorkflowSettled(settledView), true);
+  assert.equal(isBullpenAutoRunWorkflowSettled(queuedView), false);
+});
+
 test("Bullpen auto-run workflow view does not show a failed run as actively working", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 

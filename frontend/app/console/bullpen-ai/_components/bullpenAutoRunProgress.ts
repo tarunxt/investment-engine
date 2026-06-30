@@ -59,6 +59,13 @@ export type BullpenAutoRunWorkflowView = {
   runStatus: BullpenAutoLiveRun["status"] | "idle";
 };
 
+export function isBullpenAutoRunWorkflowSettled(
+  workflowView: BullpenAutoRunWorkflowView,
+) {
+  const hasQueuedStage = workflowView.stages.some((stage) => stage.state === "queued");
+  return !hasQueuedStage && workflowView.stages.every((stage) => stage.state === "finished");
+}
+
 type WorkflowDefinition = {
   key: WorkflowStageKey;
   title: string;

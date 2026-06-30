@@ -32,7 +32,10 @@ import type {
   BullpenAutoLiveSummaryResponse,
 } from "@/types/api";
 
-import { buildBullpenAutoRunWorkflowView } from "./bullpenAutoRunProgress";
+import {
+  buildBullpenAutoRunWorkflowView,
+  isBullpenAutoRunWorkflowSettled,
+} from "./bullpenAutoRunProgress";
 import {
   buildBullpenStage3OnlyInvestExecutionPlan,
   type BullpenStage3AlreadyInvestedRecord,
@@ -1163,6 +1166,7 @@ export function BullpenAutoRunScheduleCard({
     pendingRunId,
     runTimerStartedAt,
   );
+  const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
   const hasActiveWorkflowStage = workflowView.stages.some((stage) => stage.isCurrent);
   const showRunTimer =
     action === "run-now" ||
@@ -1171,10 +1175,11 @@ export function BullpenAutoRunScheduleCard({
     visibleRun?.status === "running";
   const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;
   const showActiveRunControls =
-    action === "run-now" ||
-    action === "invest-now" ||
-    pendingRunId !== null ||
-    visibleRun?.status === "running";
+    !workflowSettled &&
+    (action === "run-now" ||
+      action === "invest-now" ||
+      pendingRunId !== null ||
+      visibleRun?.status === "running");
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
   const openStage = workflowView.stages.find((stage) => stage.key === openStageKey) ?? null;
   const openInputStage = workflowView.stages.find((stage) => stage.key === openInputStageKey) ?? null;
