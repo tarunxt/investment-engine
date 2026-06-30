@@ -5,11 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=investor
-Group=investor
+User=investment-engine
+Group=investment-engine
 WorkingDirectory=/srv/investor/backend
 EnvironmentFile=/etc/investor/backend.env
-ExecStart=/srv/investor/backend/.venv/bin/celery -A app.infrastructure.messaging.celery_app worker -n beat-worker@%h -Q beat --loglevel=info --concurrency=1 --max-tasks-per-child=1000
+ExecStart=/srv/investor/backend/.venv/bin/celery -A app.infrastructure.messaging.celery_app worker -Q beat --loglevel=info --concurrency=1 --max-tasks-per-child=1000
 Restart=always
 RestartSec=5
 TimeoutStartSec=60

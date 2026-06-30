@@ -159,9 +159,6 @@ BEAT_SERVICE_NAME="$(
 FRONTEND_SERVICE_NAME="$(
   resolve_systemd_service_name "investor-frontend" "investment-engine-frontend"
 )"
-BEAT_WORKER_SERVICE_NAME="$(
-  resolve_systemd_service_name "investor-celery-beat-worker" "investment-engine-celery-beat-worker"
-)"
 
 smoke_check() {
   local label="$1"
@@ -321,10 +318,10 @@ echo "==> Restart services"
 sudo systemctl daemon-reload
 sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME"
 
-if [[ -n "${BEAT_WORKER_SERVICE_NAME:-}" ]] && systemctl cat "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1; then
+if systemctl cat "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1; then
   sudo systemctl restart "$BEAT_WORKER_SERVICE_NAME"
 else
-  echo "==> Optional beat queue worker service not installed: ${BEAT_WORKER_SERVICE_NAME:-investor-celery-beat-worker}"
+  echo "==> Optional beat queue worker service not installed: $BEAT_WORKER_SERVICE_NAME"
 fi
 
 if [[ "$SCOPE" == "full" ]]; then
@@ -336,7 +333,7 @@ sudo systemctl status "$BACKEND_SERVICE_NAME" --no-pager
 sudo systemctl status "$WORKER_SERVICE_NAME" --no-pager
 sudo systemctl status "$BEAT_SERVICE_NAME" --no-pager
 
-if [[ -n "${BEAT_WORKER_SERVICE_NAME:-}" ]] && systemctl cat "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1; then
+if systemctl cat "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1; then
   sudo systemctl status "$BEAT_WORKER_SERVICE_NAME" --no-pager
 fi
 
