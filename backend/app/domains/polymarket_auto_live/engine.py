@@ -25,7 +25,10 @@ from app.domains.polymarket_auto_live.console_profile import (
     read_console_wallet_positions,
     scan_console_profile_markets,
 )
-from app.domains.polymarket_auto_live.config import auto_live_backend_allows_execution
+from app.domains.polymarket_auto_live.config import (
+    auto_live_backend_allows_execution,
+    auto_live_backend_execution_env_detail,
+)
 from app.domains.polymarket_auto_live.evidence import EvidencePacket, build_evidence_packet
 from app.domains.polymarket_auto_live.execution import (
     buy_limit_price_cents,
@@ -553,7 +556,7 @@ def _run_guardrails(
             status="pass" if auto_live_backend_allows_execution() else "watch",
             detail="Backend environment allows Auto-Live execution."
             if auto_live_backend_allows_execution()
-            else "Backend environment blocks Auto-Live execution, so runs stay in simulation mode.",
+            else auto_live_backend_execution_env_detail(),
             value="Allowed" if auto_live_backend_allows_execution() else "Blocked",
             checked_at=checked_at,
         ),
