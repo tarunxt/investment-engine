@@ -28,17 +28,14 @@ jobs:
             if [[ ! -d "$APP" && -d "$LEGACY_APP" ]]; then
               APP="$LEGACY_APP"
             fi
-            BACKEND_ENV_FILE="/etc/investment-engine/backend.env"
-            if [[ ! -f "$BACKEND_ENV_FILE" && -f /etc/investor/backend.env ]]; then
-              BACKEND_ENV_FILE="/etc/investor/backend.env"
-            fi
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
             APP_SERVICE_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
             if ! id "$APP_SERVICE_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then
               APP_SERVICE_USER="investor"
             fi
-            BACKEND_SERVICE_NAME="investment-engine-backend"
+            BACKEND_SERVICE_NAME="investor-backend"
             if ! systemctl cat "$BACKEND_SERVICE_NAME" >/dev/null 2>&1; then
-              BACKEND_SERVICE_NAME="investor-backend"
+              BACKEND_SERVICE_NAME="investment-engine-backend"
             fi
 
             echo "==> App root"
