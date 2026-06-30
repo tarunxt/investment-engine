@@ -76,6 +76,94 @@ from app.domains.trading_bots.service import (
 )
 
 
+@pytest.mark.anyio
+async def test_refresh_live_controls_allows_auto_live_stage3_when_copy_bot_is_paper(monkeypatch):
+    from app.domains.polymarket_auto_live.execution import refresh_live_controls
+
+    class FakeBot:
+        async def refresh_doctor(self):
+            return None
+
+        async def refresh_balance(self):
+            return None
+
+        async def get_state(self):
+            return SimpleNamespace(
+                config=SimpleNamespace(
+                    live_trading=True,
+                    use_live_reads=True,
+                    live_unlock_mode="automatic",
+                ),
+                live=SimpleNamespace(
+                    unlocked=False,
+                    unlock_mode="locked",
+                    locked_reason="PAPER_TRADING must be false.",
+                    emergency_stopped=False,
+                    manually_locked=False,
+                    doctor=SimpleNamespace(ok=True),
+                    balance=SimpleNamespace(status="ready"),
+                ),
+            )
+
+    async def fake_get_bot(user_id):
+        return FakeBot()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.execution.polymarket_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    controls = await refresh_live_controls(user_id=1)
+
+    assert controls.unlocked is True
+    assert controls.unlock_mode == "automatic"
+    assert controls.locked_reason is None
+
+
+@pytest.mark.anyio
+async def test_refresh_live_controls_preserves_paper_gate_when_auto_unlock_is_off(monkeypatch):
+    from app.domains.polymarket_auto_live.execution import refresh_live_controls
+
+    class FakeBot:
+        async def refresh_doctor(self):
+            return None
+
+        async def refresh_balance(self):
+            return None
+
+        async def get_state(self):
+            return SimpleNamespace(
+                config=SimpleNamespace(
+                    live_trading=True,
+                    use_live_reads=True,
+                    live_unlock_mode="manual",
+                ),
+                live=SimpleNamespace(
+                    unlocked=False,
+                    unlock_mode="locked",
+                    locked_reason="PAPER_TRADING must be false.",
+                    emergency_stopped=False,
+                    manually_locked=False,
+                    doctor=SimpleNamespace(ok=True),
+                    balance=SimpleNamespace(status="ready"),
+                ),
+            )
+
+    async def fake_get_bot(user_id):
+        return FakeBot()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.execution.polymarket_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    controls = await refresh_live_controls(user_id=1)
+
+    assert controls.unlocked is False
+    assert controls.unlock_mode == "locked"
+    assert controls.locked_reason == "Dashboard live unlock is required."
+
+
 def test_auto_live_settings_enforce_cross_field_validation():
     with pytest.raises(ValidationError, match="max_single_trade_pct_bankroll"):
         BullpenAutoLiveSettings(
