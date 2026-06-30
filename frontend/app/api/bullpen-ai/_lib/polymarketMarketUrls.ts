@@ -7,7 +7,7 @@ import {
   BULLPEN_BIN_CANDIDATES,
   buildBullpenProcessEnv,
   parseBullpenJsonOutput,
-} from "./bullpenCli";
+} from "./bullpenCli.ts";
 
 const POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";

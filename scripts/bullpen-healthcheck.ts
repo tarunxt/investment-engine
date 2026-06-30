@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import {
+  autoClaimBullpenResolvedPositions,
   buildBullpenHealthReport,
   readLastSuccessfulBullpenLiveSnapshot,
   syncBullpenLiveSnapshot,
@@ -25,12 +26,25 @@ async function postWebhook(report: unknown) {
 }
 
 async function main() {
-  const liveResult = await syncBullpenLiveSnapshot();
+  let liveResult = await syncBullpenLiveSnapshot();
+  let autoClaim = null;
+
+  if (liveResult.ok && liveResult.snapshot) {
+    autoClaim = await autoClaimBullpenResolvedPositions(liveResult.snapshot);
+    if (autoClaim.submitted) {
+      const refreshedLiveResult = await syncBullpenLiveSnapshot();
+      if (refreshedLiveResult.ok && refreshedLiveResult.snapshot) {
+        liveResult = refreshedLiveResult;
+      }
+    }
+  }
+
   const snapshot =
     liveResult.snapshot || (await readLastSuccessfulBullpenLiveSnapshot());
   const report = buildBullpenHealthReport({
     health: liveResult.health,
     snapshot,
+    autoClaim,
   });
 
   await writeBullpenHealthReport(report);
@@ -38,7 +52,7 @@ async function main() {
 
   console.log(JSON.stringify(report, null, 2));
 
-  if (!liveResult.ok) {
+  if (!liveResult.ok || (autoClaim?.attempted && autoClaim.error)) {
     process.exitCode = 1;
   }
 }

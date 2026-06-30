@@ -16,12 +16,14 @@ import {
 import {
   aggregateBullpenCliPositions,
   applyBullpenPositionMarketData,
+  buildClaimableBullpenSignature,
   normalizeBullpenPosition,
   summarizeBullpenPositions,
   type BullpenCliPosition,
   type BullpenCliPositionsPayload,
   type BullpenLiveSnapshot,
 } from "../../../../lib/bullpenPositions.ts";
+import { redactBullpenSensitiveText } from "./bullpenHealthCore.ts";
 import {
   buildPolymarketEventUrl,
   resolvePolymarketMarketsWithQuestionFallback,
@@ -30,8 +32,11 @@ import {
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
+const DEFAULT_REDEEM_TIMEOUT_MS = 180_000;
+const DEFAULT_AUTO_CLAIM_RETRY_COOLDOWN_MS = 60_000;
 const SNAPSHOT_FILE_NAME = "last-successful-live-snapshot.json";
 const HEALTH_FILE_NAME = "bullpen-health.json";
+const AUTO_CLAIM_STATE_FILE_NAME = "bullpen-auto-claim.json";
 
 export type BullpenLiveSnapshotSyncResult = {
   ok: boolean;
@@ -45,12 +50,38 @@ export type BullpenHealthReport = {
   liveAvailable: boolean;
   checkedAt: string;
   health: BullpenCliHealth;
+  autoClaim: BullpenAutoClaimResult | null;
   lastSuccessfulLiveSnapshot: {
     fetchedAt: string;
     source: "live-cli";
     positionsCount: number;
     claimableCount: number;
   } | null;
+};
+
+export type BullpenAutoClaimResult = {
+  enabled: boolean;
+  attempted: boolean;
+  submitted: boolean;
+  skippedReason: string | null;
+  attemptedAt: string | null;
+  claimableCount: number;
+  claimableSignature: string | null;
+  error: string | null;
+};
+
+type BullpenAutoClaimState = {
+  lastClaimableSignature: string | null;
+  lastAttemptedAt: string | null;
+  lastSubmittedAt: string | null;
+  lastError: string | null;
+};
+
+const EMPTY_AUTO_CLAIM_STATE: BullpenAutoClaimState = {
+  lastClaimableSignature: null,
+  lastAttemptedAt: null,
+  lastSubmittedAt: null,
+  lastError: null,
 };
 
 function getBullpenStateDir() {
@@ -72,6 +103,7 @@ function getBullpenStatePaths() {
     dir,
     snapshotFilePath: path.join(dir, SNAPSHOT_FILE_NAME),
     healthFilePath: path.join(dir, HEALTH_FILE_NAME),
+    autoClaimStateFilePath: path.join(dir, AUTO_CLAIM_STATE_FILE_NAME),
   };
 }
 
@@ -144,6 +176,122 @@ async function buildBullpenLiveSnapshot(
   } satisfies BullpenLiveSnapshot;
 }
 
+function isBullpenAutoClaimEnabled() {
+  const configured = process.env.BULLPEN_AUTO_CLAIM_RESOLVED?.trim().toLowerCase();
+  if (!configured) {
+    return true;
+  }
+
+  return configured === "true";
+}
+
+function getBullpenAutoClaimRetryCooldownMs() {
+  const raw = process.env.BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS?.trim();
+  if (!raw) {
+    return DEFAULT_AUTO_CLAIM_RETRY_COOLDOWN_MS;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_AUTO_CLAIM_RETRY_COOLDOWN_MS;
+  }
+
+  return parsed;
+}
+
+function isBullpenAutoClaimState(value: unknown): value is BullpenAutoClaimState {
+  if (!value || typeof value !== "object") return false;
+
+  const record = value as Record<string, unknown>;
+  const fields = [
+    "lastClaimableSignature",
+    "lastAttemptedAt",
+    "lastSubmittedAt",
+    "lastError",
+  ] as const;
+
+  return fields.every((field) => {
+    const current = record[field];
+    return current === null || typeof current === "string";
+  });
+}
+
+async function readBullpenAutoClaimState() {
+  try {
+    const { autoClaimStateFilePath } = getBullpenStatePaths();
+    const raw = await readFile(autoClaimStateFilePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return isBullpenAutoClaimState(parsed) ? parsed : EMPTY_AUTO_CLAIM_STATE;
+  } catch {
+    return EMPTY_AUTO_CLAIM_STATE;
+  }
+}
+
+async function writeBullpenAutoClaimState(state: BullpenAutoClaimState) {
+  const { autoClaimStateFilePath } = getBullpenStatePaths();
+  await writeJsonAtomic(autoClaimStateFilePath, state);
+}
+
+function isMissingBullpenCommandError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /enoent|not found|no such file or directory/i.test(message);
+}
+
+function buildBullpenRedeemErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    const processError = error as Error & {
+      stdout?: string;
+      stderr?: string;
+    };
+    return (
+      redactBullpenSensitiveText(processError.stderr)?.trim() ||
+      redactBullpenSensitiveText(processError.stdout)?.trim() ||
+      redactBullpenSensitiveText(processError.message)?.trim() ||
+      "Bullpen redeem failed."
+    );
+  }
+
+  return redactBullpenSensitiveText(String(error))?.trim() || "Bullpen redeem failed.";
+}
+
+async function runBullpenRedeemCommand({
+  commandCandidates = BULLPEN_BIN_CANDIDATES,
+  execFileImpl = execBullpenCommand,
+  timeoutMs = DEFAULT_REDEEM_TIMEOUT_MS,
+  maxBuffer = DEFAULT_MAX_BUFFER,
+}: {
+  commandCandidates?: string[];
+  execFileImpl?: BullpenCliExecImplementation;
+  timeoutMs?: number;
+  maxBuffer?: number;
+}) {
+  const env = buildBullpenProcessEnv({ readOnly: false });
+  let lastError: unknown = null;
+
+  for (const candidate of commandCandidates) {
+    try {
+      await execFileImpl(
+        candidate,
+        ["polymarket", "redeem", "--yes", "--non-interactive", "--output", "json"],
+        {
+          env,
+          timeoutMs,
+          maxBuffer,
+        },
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+      if (isMissingBullpenCommandError(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || new Error("Bullpen redeem command is unavailable.");
+}
+
 function isBullpenLiveSnapshot(value: unknown): value is BullpenLiveSnapshot {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
@@ -176,15 +324,18 @@ export async function writeLastSuccessfulBullpenLiveSnapshot(
 export function buildBullpenHealthReport({
   health,
   snapshot,
+  autoClaim = null,
 }: {
   health: BullpenCliHealth;
   snapshot: BullpenLiveSnapshot | null;
+  autoClaim?: BullpenAutoClaimResult | null;
 }): BullpenHealthReport {
   return {
     ok: health.ok,
     liveAvailable: health.ok,
     checkedAt: health.timestamp,
     health,
+    autoClaim,
     lastSuccessfulLiveSnapshot: snapshot
       ? {
           fetchedAt: snapshot.fetchedAt,
@@ -200,6 +351,129 @@ export function buildBullpenHealthReport({
 export async function writeBullpenHealthReport(report: BullpenHealthReport) {
   const { healthFilePath } = getBullpenStatePaths();
   await writeJsonAtomic(healthFilePath, report);
+}
+
+export async function autoClaimBullpenResolvedPositions(
+  snapshot: BullpenLiveSnapshot,
+  {
+    commandCandidates = BULLPEN_BIN_CANDIDATES,
+    execFileImpl = execBullpenCommand,
+    maxBuffer = DEFAULT_MAX_BUFFER,
+    now = () => new Date().toISOString(),
+  }: {
+    commandCandidates?: string[];
+    execFileImpl?: BullpenCliExecImplementation;
+    maxBuffer?: number;
+    now?: () => string;
+  } = {},
+): Promise<BullpenAutoClaimResult> {
+  const enabled = isBullpenAutoClaimEnabled();
+  const claimableSignature = buildClaimableBullpenSignature(snapshot.positions) || null;
+  const claimableCount = snapshot.positions.filter((position) => position.isClaimable).length;
+
+  if (!enabled) {
+    return {
+      enabled,
+      attempted: false,
+      submitted: false,
+      skippedReason: "disabled",
+      attemptedAt: null,
+      claimableCount,
+      claimableSignature,
+      error: null,
+    };
+  }
+
+  if (!claimableSignature || claimableCount === 0) {
+    const existingState = await readBullpenAutoClaimState();
+    if (
+      existingState.lastClaimableSignature ||
+      existingState.lastAttemptedAt ||
+      existingState.lastSubmittedAt ||
+      existingState.lastError
+    ) {
+      await writeBullpenAutoClaimState(EMPTY_AUTO_CLAIM_STATE);
+    }
+    return {
+      enabled,
+      attempted: false,
+      submitted: false,
+      skippedReason: "no-claimable-positions",
+      attemptedAt: null,
+      claimableCount: 0,
+      claimableSignature: null,
+      error: null,
+    };
+  }
+
+  const currentState = await readBullpenAutoClaimState();
+  const attemptedAt = now();
+  const cooldownMs = getBullpenAutoClaimRetryCooldownMs();
+  const lastAttemptMs = currentState.lastAttemptedAt
+    ? Date.parse(currentState.lastAttemptedAt)
+    : Number.NaN;
+  const attemptedAtMs = Date.parse(attemptedAt);
+  const sameSignature = currentState.lastClaimableSignature === claimableSignature;
+
+  if (
+    sameSignature &&
+    Number.isFinite(lastAttemptMs) &&
+    Number.isFinite(attemptedAtMs) &&
+    attemptedAtMs - lastAttemptMs < cooldownMs
+  ) {
+    return {
+      enabled,
+      attempted: false,
+      submitted: false,
+      skippedReason: "cooldown",
+      attemptedAt: currentState.lastAttemptedAt,
+      claimableCount,
+      claimableSignature,
+      error: currentState.lastError,
+    };
+  }
+
+  try {
+    await runBullpenRedeemCommand({
+      commandCandidates,
+      execFileImpl,
+      maxBuffer,
+    });
+    await writeBullpenAutoClaimState({
+      lastClaimableSignature: claimableSignature,
+      lastAttemptedAt: attemptedAt,
+      lastSubmittedAt: attemptedAt,
+      lastError: null,
+    });
+    return {
+      enabled,
+      attempted: true,
+      submitted: true,
+      skippedReason: null,
+      attemptedAt,
+      claimableCount,
+      claimableSignature,
+      error: null,
+    };
+  } catch (error) {
+    const message = buildBullpenRedeemErrorMessage(error);
+    await writeBullpenAutoClaimState({
+      lastClaimableSignature: claimableSignature,
+      lastAttemptedAt: attemptedAt,
+      lastSubmittedAt: currentState.lastSubmittedAt,
+      lastError: message,
+    });
+    return {
+      enabled,
+      attempted: true,
+      submitted: false,
+      skippedReason: null,
+      attemptedAt,
+      claimableCount,
+      claimableSignature,
+      error: message,
+    };
+  }
 }
 
 export async function syncBullpenLiveSnapshot({

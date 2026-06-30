@@ -6,7 +6,7 @@ Cred-X now exposes:
 - `GET /api/bullpen-ai/positions`
 - `scripts/bullpen-healthcheck.ts`
 
-The healthcheck script runs the Bullpen CLI in read-only mode, refreshes the last successful live wallet snapshot when the CLI succeeds, writes a JSON health report, and optionally posts the report to `BULLPEN_HEALTH_WEBHOOK_URL`.
+The healthcheck script reads the live Bullpen wallet snapshot, retries Bullpen redeem/claim whenever resolved positions are still claimable, writes a JSON health report, and optionally posts the report to `BULLPEN_HEALTH_WEBHOOK_URL`.
 
 ## Required env
 
@@ -18,6 +18,8 @@ BULLPEN_HOME=/var/lib/credx/bullpen
 BULLPEN_CREDENTIALS_HOME=/var/lib/credx/bullpen
 BULLPEN_HEALTH_STATE_DIR=/var/lib/credx/bullpen-health
 BULLPEN_HEALTH_WEBHOOK_URL=
+BULLPEN_AUTO_CLAIM_RESOLVED=true
+BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS=60000
 ```
 
 `BULLPEN_HOME` / `BULLPEN_CREDENTIALS_HOME` should point at the same credential HOME used for the Bullpen login on the server.
@@ -34,8 +36,9 @@ The script writes:
 
 - `${BULLPEN_HEALTH_STATE_DIR}/bullpen-health.json`
 - `${BULLPEN_HEALTH_STATE_DIR}/last-successful-live-snapshot.json`
+- `${BULLPEN_HEALTH_STATE_DIR}/bullpen-auto-claim.json`
 
-If the live CLI check fails, the script exits non-zero so `systemd`, `cron`, or external monitoring can alert.
+If the live CLI check fails, or if an automatic redeem/claim attempt fails, the script exits non-zero so `systemd`, `cron`, or external monitoring can alert.
 
 ## systemd every 5 minutes
 

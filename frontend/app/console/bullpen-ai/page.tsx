@@ -127,6 +127,7 @@ const BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY =
 const MAX_BULLPEN_SNAPSHOT_HISTORY = 10;
 const RUN_POLL_INTERVAL_MS = 4_000;
 const MAX_RUN_POLLS = 90;
+const AUTO_CLAIM_RETRY_COOLDOWN_MS = 60_000;
 const DEFAULT_SORT_STATE: BullpenTableSortState = {
   key: "closeTime",
   direction: "asc",
@@ -148,6 +149,11 @@ type BullpenCurrentOddsRefreshResponse = {
   markets?: Record<string, PolymarketMarketRefresh>;
   unresolvedQuestionIds?: string[];
   error?: string;
+};
+
+type BullpenAutoClaimAttempt = {
+  signature: string;
+  attemptedAt: number;
 };
 
 type RefreshBullpenPositionsResult = {
@@ -1157,7 +1163,7 @@ export default function BullpenAiPage() {
   const [isScanFiltersOpen, setIsScanFiltersOpen] = useState(false);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   const claimPositionsTaskRef = useRef<Promise<void> | null>(null);
-  const lastAutoClaimSignatureRef = useRef<string | null>(null);
+  const lastAutoClaimAttemptRef = useRef<BullpenAutoClaimAttempt | null>(null);
   const scanFiltersMenuRef = useRef<HTMLDivElement | null>(null);
   const canonicalizedSnapshotIdsRef = useRef<Record<ScanMode, Set<string>>>({
     "30-days": new Set<string>(),
@@ -1797,11 +1803,20 @@ export default function BullpenAiPage() {
         setClaimPositionsStatus(
           "Bullpen redeem/claim submitted. Refreshing the popup with the latest wallet data.",
         );
-        await refreshBullpenPositions({ suppressAutoClaim: true });
+        const refreshedPositionsResult = await refreshBullpenPositions({
+          suppressAutoClaim: true,
+        });
+        const remainingClaimablePositions = refreshedPositionsResult.positions.filter(
+          (position) => position.isClaimable,
+        );
         setClaimPositionsStatus(
-          automatic
-            ? "Bullpen automatically submitted the resolved positions for claim."
-            : "Bullpen submitted the resolved positions for claim.",
+          remainingClaimablePositions.length > 0
+            ? automatic
+              ? `Bullpen auto-claim submitted, but ${formatCountLabel(remainingClaimablePositions.length, "resolved position")} still ${remainingClaimablePositions.length === 1 ? "shows" : "show"} as claimable. Cred-X will retry automatically on the next refresh.`
+              : `Bullpen submitted the claim, but ${formatCountLabel(remainingClaimablePositions.length, "resolved position")} still ${remainingClaimablePositions.length === 1 ? "shows" : "show"} as claimable in the latest wallet refresh.`
+            : automatic
+              ? "Bullpen automatically submitted the resolved positions for claim."
+              : "Bullpen submitted the resolved positions for claim.",
         );
       } catch (error) {
         setClaimPositionsStatus(null);
@@ -1862,7 +1877,7 @@ export default function BullpenAiPage() {
       );
 
       if (!livePositionsPayload.liveAvailable) {
-        lastAutoClaimSignatureRef.current = null;
+        lastAutoClaimAttemptRef.current = null;
         return {
           positions: livePositions,
           error: livePositionsPayload.error || null,
@@ -1871,19 +1886,27 @@ export default function BullpenAiPage() {
 
       const claimableSignature = buildClaimableBullpenSignature(livePositions);
       if (!claimableSignature) {
-        lastAutoClaimSignatureRef.current = null;
-      } else if (
-        !options?.suppressAutoClaim &&
-        claimableSignature !== lastAutoClaimSignatureRef.current
-      ) {
-        lastAutoClaimSignatureRef.current = claimableSignature;
-        void claimBullpenResolvedPositions({
-          automatic: true,
-          positions: livePositions,
-        });
+        lastAutoClaimAttemptRef.current = null;
+      } else if (!options?.suppressAutoClaim) {
+        const lastAttempt = lastAutoClaimAttemptRef.current;
+        const shouldAutoClaim =
+          !lastAttempt ||
+          lastAttempt.signature !== claimableSignature ||
+          Date.now() - lastAttempt.attemptedAt >=
+            AUTO_CLAIM_RETRY_COOLDOWN_MS;
+        if (shouldAutoClaim) {
+          lastAutoClaimAttemptRef.current = {
+            signature: claimableSignature,
+            attemptedAt: Date.now(),
+          };
+          void claimBullpenResolvedPositions({
+            automatic: true,
+            positions: livePositions,
+          });
+        }
       }
       if (!livePositionsResponse.ok) {
-        lastAutoClaimSignatureRef.current = null;
+        lastAutoClaimAttemptRef.current = null;
       }
       return {
         positions: livePositions,

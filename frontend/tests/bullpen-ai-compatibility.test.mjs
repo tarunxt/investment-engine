@@ -394,6 +394,23 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
   assert.match(marketUrlsSource, /noOdds: resolved\.noOdds/);
 });
 
+test("Bullpen x AI keeps retrying auto-claim while the same resolved positions remain claimable", () => {
+  const bullpenAiPageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    bullpenAiPageSource,
+    /const AUTO_CLAIM_RETRY_COOLDOWN_MS = 60_000;/,
+  );
+  assert.match(bullpenAiPageSource, /lastAutoClaimAttemptRef/);
+  assert.match(
+    bullpenAiPageSource,
+    /Cred-X will retry automatically on the next refresh\./,
+  );
+});
+
 test("Bullpen x AI LLM breakdown dialog shows the preflight evidence block", () => {
   const dialogSource = readFileSync(
     new URL(
