@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, Triangle, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, Triangle, X } from "lucide-react";
 
 import {
   parseInvestmentRecommendationContent,
@@ -15,6 +15,7 @@ import { ScanHistoryButton } from "@/components/shared/ScanHistoryButton";
 import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -141,6 +142,27 @@ type DetailedRationaleScoreRow = {
   multiplier: number;
   denominatorWeight?: number;
   missingReason?: string;
+  validationRule?: {
+    min?: number;
+    max?: number;
+    integerOnly?: boolean;
+    actualValue?: number | null;
+  };
+};
+
+type ScoreMatrixValidationIssue = {
+  id: string;
+  parameter: string;
+  message: string;
+};
+
+type ScoreMatrixValidationSummary = {
+  rawScore: number | null;
+  displayScore: number | null;
+  finalScoreOutOfRange: boolean;
+  finalScoreMessage: string | null;
+  parameterIssues: ScoreMatrixValidationIssue[];
+  hasIssues: boolean;
 };
 
 type TechnicalScanMultiplierKey = "bullish" | "bearish";
@@ -738,6 +760,11 @@ const DEFAULT_DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY: Record<ActionCategory
   "Add more": 2.5,
 };
 
+const SCORE_GUARDRAIL_MIN = -3;
+const SCORE_GUARDRAIL_MAX = 3;
+const TECHNICAL_SCAN_CONFIDENCE_MIN = 0;
+const TECHNICAL_SCAN_CONFIDENCE_MAX = 10;
+
 const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; key: TechnicalScanMultiplierKey }> = [
   { label: "Bullish", key: "bullish" },
   { label: "Bearish", key: "bearish" },
@@ -1246,6 +1273,84 @@ function formatActionScore(value: number | null) {
   return value === null ? "—" : value.toFixed(2);
 }
 
+function clampScoreToGuardrail(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return null;
+  return Math.max(SCORE_GUARDRAIL_MIN, Math.min(SCORE_GUARDRAIL_MAX, value));
+}
+
+function formatScoreExpectation(rule: NonNullable<DetailedRationaleScoreRow["validationRule"]>) {
+  const integerPrefix = rule.integerOnly ? "an integer " : "";
+  if (rule.min !== undefined && rule.max !== undefined) {
+    return `${integerPrefix}from ${formatScoreValue(rule.min)} to ${formatScoreValue(rule.max)}`;
+  }
+  if (rule.min !== undefined) {
+    return `${integerPrefix}of at least ${formatScoreValue(rule.min)}`;
+  }
+  if (rule.max !== undefined) {
+    return `${integerPrefix}of at most ${formatScoreValue(rule.max)}`;
+  }
+  return rule.integerOnly ? "an integer" : "a valid number";
+}
+
+function getDetailedRationaleRowRangeIssue(row: DetailedRationaleScoreRow): ScoreMatrixValidationIssue | null {
+  const rule = row.validationRule;
+  if (!rule) return null;
+
+  const actualValue = rule.actualValue ?? row.score;
+  if (actualValue === null || !Number.isFinite(actualValue)) return null;
+
+  const belowMin = rule.min !== undefined && actualValue < rule.min;
+  const aboveMax = rule.max !== undefined && actualValue > rule.max;
+  const invalidInteger = Boolean(rule.integerOnly && !Number.isInteger(actualValue));
+
+  if (!belowMin && !aboveMax && !invalidInteger) return null;
+
+  const expected = formatScoreExpectation(rule);
+  let message = `Expected ${expected}, received ${formatScoreValue(actualValue)}.`;
+  if (row.score !== null && Math.abs(actualValue - row.score) > 1e-9) {
+    message += ` Display is capped to ${formatScoreValue(row.score)}.`;
+  }
+
+  return {
+    id: row.id,
+    parameter: row.parameter,
+    message,
+  };
+}
+
+function getDetailedRationaleRowIssue(row: DetailedRationaleScoreRow): ScoreMatrixValidationIssue | null {
+  return getDetailedRationaleRowRangeIssue(row) ?? (
+    row.missingReason
+      ? {
+        id: row.id,
+        parameter: row.parameter,
+        message: row.missingReason,
+      }
+      : null
+  );
+}
+
+function getScoreMatrixValidationSummary(detail: ScoreMatrixDetail): ScoreMatrixValidationSummary {
+  const rawScore = detail.detailedRationaleFinalScore ?? detail.calculatedScore;
+  const displayScore = clampScoreToGuardrail(rawScore);
+  const finalScoreOutOfRange = rawScore !== null
+    && (rawScore < SCORE_GUARDRAIL_MIN || rawScore > SCORE_GUARDRAIL_MAX);
+  const parameterIssues = detail.detailedRationaleRows
+    .map(getDetailedRationaleRowIssue)
+    .filter((issue): issue is ScoreMatrixValidationIssue => issue !== null);
+
+  return {
+    rawScore,
+    displayScore,
+    finalScoreOutOfRange,
+    finalScoreMessage: finalScoreOutOfRange
+      ? `Final score ${formatActionScore(rawScore)} is outside the allowed range of ${formatActionScore(SCORE_GUARDRAIL_MIN)} to ${formatActionScore(SCORE_GUARDRAIL_MAX)}. Display is capped to ${formatActionScore(displayScore)} until the inconsistent input is fixed.`
+      : null,
+    parameterIssues,
+    hasIssues: finalScoreOutOfRange || parameterIssues.length > 0,
+  };
+}
+
 type ScoreSymbolDefinition = {
   id: string;
   rangeLabel: string;
@@ -1329,7 +1434,7 @@ const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
 function getScoreSymbolDefinition(score: number | null, formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG) {
   if (score === null || !Number.isFinite(score)) return null;
   const thresholds = formulaConfig.scoreSymbolThresholds;
-  const boundedScore = Math.max(thresholds.strongNegative, Math.min(3, score));
+  const boundedScore = Math.max(thresholds.strongNegative, Math.min(SCORE_GUARDRAIL_MAX, score));
   return SCORE_SYMBOL_MATRIX_ROWS.find((row) => row.matches(boundedScore, thresholds)) ?? null;
 }
 
@@ -1408,6 +1513,13 @@ export function ScoreMatrixButton({
   className?: string;
 }) {
   const configuredDetail = applyScoreMatrixFormulaConfig(detail, formulaConfig);
+  const validationSummary = getScoreMatrixValidationSummary(configuredDetail);
+  const displayScore = validationSummary.displayScore;
+  const warningTitle = validationSummary.finalScoreOutOfRange
+    ? validationSummary.finalScoreMessage
+    : validationSummary.parameterIssues.length
+      ? `${validationSummary.parameterIssues.length} score input ${validationSummary.parameterIssues.length === 1 ? "inconsistency" : "inconsistencies"} detected.`
+      : null;
 
   return (
     <button
@@ -1417,13 +1529,26 @@ export function ScoreMatrixButton({
         onOpenDetail(configuredDetail);
       }}
       className={cn(
-        "cursor-pointer rounded px-1.5 py-0.5 transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500",
+        "cursor-pointer rounded px-1.5 py-0.5 transition focus:outline-none focus:ring-2",
+        validationSummary.hasIssues
+          ? "border border-rose-200 bg-rose-50/80 hover:bg-rose-100 focus:ring-rose-300"
+          : "hover:bg-blue-50 focus:ring-blue-500",
         className,
       )}
       aria-label={`Open consolidated score matrix for ${detail.stockSymbol}`}
-      title={`Open consolidated score matrix for ${detail.stockSymbol}`}
+      title={warningTitle
+        ? `Open consolidated score matrix for ${detail.stockSymbol}. Warning: ${warningTitle}`
+        : `Open consolidated score matrix for ${detail.stockSymbol}`}
     >
-      <ScoreSymbol score={configuredDetail.calculatedScore} formulaConfig={formulaConfig} />
+      {validationSummary.hasIssues ? (
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-rose-700">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          <ScoreTriangleIcon score={displayScore} className="text-rose-700" />
+          <span>{formatActionScore(displayScore)}</span>
+        </span>
+      ) : (
+        <ScoreSymbol score={configuredDetail.calculatedScore} formulaConfig={formulaConfig} />
+      )}
     </button>
   );
 }
@@ -1518,6 +1643,10 @@ function buildDetailedRationaleScoreRows(
     : buildMissingTechnicalScanReason(stock, technicalScanSourceLabel);
   const technicalConfidenceValue = getTechnicalScanConfidence(technicalScan, stock.representative);
   const technicalConfidenceScore = parseNumericCell(technicalConfidenceValue);
+  const premarketTrendRawValue = technicalScan?.premarketTrend ?? null;
+  const premarketTrendActualValue = parseNumericCell(normalizeEmptyTechnicalValue(premarketTrendRawValue));
+  const last5CandlesTrendRawValue = technicalScan?.last5CandlesTrend ?? null;
+  const last5CandlesTrendActualValue = parseNumericCell(normalizeEmptyTechnicalValue(last5CandlesTrendRawValue));
   const technicalConfidenceMultiplier = getTechnicalScanScoreMultiplier(
     technicalScan,
     stock.representative,
@@ -1535,36 +1664,60 @@ function buildDetailedRationaleScoreRows(
       parameter: "Average of Score Rationale Cruxx",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale Cruxx"),
       multiplier: config.detailedRationaleMultipliers.cruxx,
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "technical-short",
       parameter: "Average of Score Rationale - Technical Setup (Short Term 1–3 Months)",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale Technical Setup Short Term 1–3 Months"),
       multiplier: config.detailedRationaleMultipliers["technical-short"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "technical-medium",
       parameter: "Average of Score Rationale - Technical Setup (Medium Term)",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Technical Setup (Medium Term)"),
       multiplier: config.detailedRationaleMultipliers["technical-medium"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "technical-long",
       parameter: "Average of Score Rationale - Technical Setup (Long Term)",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Technical Setup (Long Term)"),
       multiplier: config.detailedRationaleMultipliers["technical-long"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "fundamentals-short",
       parameter: "Average of Score Rationale - Fundamentals Short Term",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Fundamentals Short Term"),
       multiplier: config.detailedRationaleMultipliers["fundamentals-short"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "fundamentals-medium-long",
       parameter: "Average of Score Rationale - Fundamentals Medium/Long Term",
       score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
       multiplier: config.detailedRationaleMultipliers["fundamentals-medium-long"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "technical-scan-confidence",
@@ -1573,6 +1726,11 @@ function buildDetailedRationaleScoreRows(
       multiplier: effectiveTechnicalConfidenceMultiplier,
       denominatorWeight: effectiveTechnicalConfidenceMultiplier === 0 ? 0 : 2,
       missingReason: missingTechnicalScanReason || (technicalConfidenceScore === null ? `Technical Scan row was matched, but Confidence Score was empty or non-numeric: ${technicalConfidenceValue || "blank"}.` : undefined),
+      validationRule: {
+        min: TECHNICAL_SCAN_CONFIDENCE_MIN,
+        max: TECHNICAL_SCAN_CONFIDENCE_MAX,
+        actualValue: technicalScan ? technicalConfidenceScore : null,
+      },
     },
     {
       id: "premarket-trend",
@@ -1580,6 +1738,12 @@ function buildDetailedRationaleScoreRows(
       score: technicalScan ? getTechnicalTrendScore(technicalScan.premarketTrend) : null,
       multiplier: technicalScan ? config.detailedRationaleMultipliers["premarket-trend"] : 0,
       missingReason: missingTechnicalScanReason || (technicalScan && getTechnicalTrendScore(technicalScan.premarketTrend) === null ? `Technical Scan row was matched, but Premarket trend was empty or non-numeric: ${technicalScan.premarketTrend || "blank"}.` : undefined),
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+        integerOnly: true,
+        actualValue: premarketTrendActualValue,
+      },
     },
     {
       id: "last-5-candles-trend",
@@ -1587,12 +1751,22 @@ function buildDetailedRationaleScoreRows(
       score: technicalScan ? getTechnicalTrendScore(technicalScan.last5CandlesTrend) : null,
       multiplier: technicalScan ? config.detailedRationaleMultipliers["last-5-candles-trend"] : 0,
       missingReason: missingTechnicalScanReason || (technicalScan && getTechnicalTrendScore(technicalScan.last5CandlesTrend) === null ? `Technical Scan row was matched, but Last 5 candles trend was empty or non-numeric: ${technicalScan.last5CandlesTrend || "blank"}.` : undefined),
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+        integerOnly: true,
+        actualValue: last5CandlesTrendActualValue,
+      },
     },
     {
       id: "mean-mode-action",
       parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in final Consolidated (Mean and Mode) row",
       score: meanModeActionScore,
       multiplier: config.detailedRationaleMultipliers["mean-mode-action"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
   ];
 }
@@ -1697,7 +1871,7 @@ function resolveMatrixUnitsForAction(
 }
 
 function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
-  const meanScore = Math.max(-3, Math.min(3, context.calculatedScore ?? context.meanScore ?? 0));
+  const meanScore = clampScoreToGuardrail(context.calculatedScore ?? context.meanScore ?? 0) ?? 0;
   const hasPosition = (context.currentUnits ?? 0) > 0;
   const positiveAction: ActionCategory = hasPosition ? "Add more" : "Buy New";
   const positiveUnitsStrategy = hasPosition
@@ -3788,6 +3962,7 @@ function ScoreMatrixSection({
     [formulaConfig, stock, technicalScan],
   );
   const matchedRule = detail.rules.find((rule) => rule.matched);
+  const validationSummary = useMemo(() => getScoreMatrixValidationSummary(detail), [detail]);
 
   return (
     <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
@@ -3804,6 +3979,22 @@ function ScoreMatrixSection({
           <div className="mt-2 text-xs font-medium text-blue-700">
             Matched rule: {matchedRule.label}
           </div>
+        ) : null}
+        {validationSummary.hasIssues ? (
+          <Alert className="mt-3 border-rose-200 bg-rose-50 text-rose-950">
+            <AlertTriangle className="size-4" />
+            <AlertTitle>
+              {validationSummary.finalScoreOutOfRange ? "Final score warning" : "Score input inconsistency"}
+            </AlertTitle>
+            <AlertDescription className="space-y-1 text-rose-900">
+              {validationSummary.finalScoreMessage ? <p>{validationSummary.finalScoreMessage}</p> : null}
+              {validationSummary.parameterIssues.slice(0, 2).map((issue) => (
+                <p key={issue.id}>
+                  <span className="font-semibold">{issue.parameter}:</span> {issue.message}
+                </p>
+              ))}
+            </AlertDescription>
+          </Alert>
         ) : null}
       </div>
 
@@ -3850,7 +4041,9 @@ function ScoreMatrixSection({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 align-top text-slate-700">
-                  {formatActionScore(row.actionScore)}
+                  {row.isCalculated
+                    ? formatActionScore(validationSummary.displayScore)
+                    : formatActionScore(row.actionScore)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 align-top font-medium text-slate-700">
                   {formatSignedQuantity(row.unitsChange)}
@@ -3882,6 +4075,7 @@ function DetailedRationaleScoreSection({
   onDenominatorChange?: (value: string) => void;
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
+  const validationSummary = useMemo(() => getScoreMatrixValidationSummary(detail), [detail]);
   const openCalculationColumn = (row: DetailedRationaleScoreRow) => {
     const header = getDetailedRationaleCalculationHeader(row);
     if (!header) return;
@@ -3905,51 +4099,60 @@ function DetailedRationaleScoreSection({
     (row) => !rebalanceRows.includes(row) && !technicalScanRows.includes(row),
   );
 
-  const renderRow = (row: DetailedRationaleScoreRow) => (
-    <tr key={row.id}>
-      <td className="min-w-[24rem] px-4 py-2 text-slate-900">
-        {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
-          <button
-            type="button"
-            className="cursor-pointer rounded px-1 py-0.5 text-left underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
-            onClick={() => openCalculationColumn(row)}
-            title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
-          >
-            {row.parameter}
-          </button>
-        ) : row.parameter}
-        {row.missingReason ? (
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-amber-700">
-            Not updated: {row.missingReason}
-          </p>
-        ) : null}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
-        {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
-          <button
-            type="button"
-            className="cursor-pointer rounded px-1.5 py-0.5 font-semibold underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
-            onClick={() => openCalculationColumn(row)}
-            title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
-          >
-            {formatScoreValue(row.score)}
-          </button>
-        ) : formatScoreValue(row.score)}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
-        {onMultiplierChange ? (
-          <input
-            type="number"
-            step="0.1"
-            value={multiplierDrafts?.[row.id] ?? String(row.multiplier)}
-            onChange={(event) => onMultiplierChange(row.id, event.target.value)}
-            className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            aria-label={`Multiplier for ${row.parameter}`}
-          />
-        ) : row.multiplier}
-      </td>
-    </tr>
-  );
+  const renderRow = (row: DetailedRationaleScoreRow) => {
+    const rangeIssue = getDetailedRationaleRowRangeIssue(row);
+
+    return (
+      <tr key={row.id} className={cn(rangeIssue ? "bg-rose-50/60" : "")}>
+        <td className="min-w-[24rem] px-4 py-2 text-slate-900">
+          {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
+            <button
+              type="button"
+              className="cursor-pointer rounded px-1 py-0.5 text-left underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onClick={() => openCalculationColumn(row)}
+              title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
+            >
+              {row.parameter}
+            </button>
+          ) : row.parameter}
+          {row.missingReason ? (
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-amber-700">
+              Not updated: {row.missingReason}
+            </p>
+          ) : null}
+          {rangeIssue ? (
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-rose-700">
+              Inconsistency: {rangeIssue.message}
+            </p>
+          ) : null}
+        </td>
+        <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
+          {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
+            <button
+              type="button"
+              className="cursor-pointer rounded px-1.5 py-0.5 font-semibold underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onClick={() => openCalculationColumn(row)}
+              title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
+            >
+              {formatScoreValue(row.score)}
+            </button>
+          ) : formatScoreValue(row.score)}
+        </td>
+        <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
+          {onMultiplierChange ? (
+            <input
+              type="number"
+              step="0.1"
+              value={multiplierDrafts?.[row.id] ?? String(row.multiplier)}
+              onChange={(event) => onMultiplierChange(row.id, event.target.value)}
+              className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              aria-label={`Multiplier for ${row.parameter}`}
+            />
+          ) : row.multiplier}
+        </td>
+      </tr>
+    );
+  };
 
   const renderSourceTag = (label: string | null, runId: number | null, stage: "rebalance" | "technical") => {
     if (!label) return null;
@@ -4031,10 +4234,21 @@ function DetailedRationaleScoreSection({
         "Final consolidated action score used by the weighted formula.",
         remainingRows,
       )}
-      <section className="rounded-xl border border-slate-200 bg-slate-50">
+      <section className={cn(
+        "rounded-xl border",
+        validationSummary.finalScoreOutOfRange
+          ? "border-rose-300 bg-rose-50/80"
+          : "border-slate-200 bg-slate-50",
+      )}>
         <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-4 py-3 text-sm font-semibold text-slate-950">
           <div className="text-right">Final score</div>
-          <div className="whitespace-nowrap text-right">{formatActionScore(detail.detailedRationaleFinalScore)}</div>
+          <div className={cn(
+            "whitespace-nowrap text-right",
+            validationSummary.finalScoreOutOfRange ? "text-rose-700" : "",
+          )}
+          >
+            {formatActionScore(validationSummary.displayScore)}
+          </div>
           <div className="whitespace-nowrap text-right">
             {onDenominatorChange ? (
               <div className="inline-flex items-center justify-end gap-1">
@@ -4051,6 +4265,11 @@ function DetailedRationaleScoreSection({
             ) : (`/ ${detail.detailedRationaleDenominator || "—"}`)}
           </div>
         </div>
+        {validationSummary.finalScoreMessage ? (
+          <div className="border-t border-rose-200 px-4 py-3 text-sm font-semibold text-rose-800">
+            {validationSummary.finalScoreMessage}
+          </div>
+        ) : null}
       </section>
     </div>
   );
@@ -4315,11 +4534,14 @@ export function ScoreMatrixModal({
     () => (configuredDetail ? applyScoreMatrixEdits(configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts) : null),
     [configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts],
   );
+  const validationSummary = useMemo(
+    () => (editedDetail ? getScoreMatrixValidationSummary(editedDetail) : null),
+    [editedDetail],
+  );
 
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
 
-  if (!editedDetail) return null;
-
+  if (!editedDetail || !validationSummary) return null;
   const matchedRule = editedDetail.rules.find((rule) => rule.matched) ?? null;
   const sourceRows = editedDetail.rows.filter((row) => !row.isSummary);
 
@@ -4351,7 +4573,7 @@ export function ScoreMatrixModal({
               <span className="text-lg font-bold text-slate-800">{editedDetail.stockName}</span>
             </div>
             <p className="mt-1 text-sm text-slate-500">
-              {editedDetail.stockExchange || "Unknown exchange"} · {editedDetail.stockSymbol} · calculated score {formatActionScore(editedDetail.detailedRationaleFinalScore)} maps to{" "}
+              {editedDetail.stockExchange || "Unknown exchange"} · {editedDetail.stockSymbol} · calculated score {formatActionScore(validationSummary.displayScore)} maps to{" "}
               <FinalActionTag action={editedDetail.calculatedAction} />
               {" "}with units change {formatSignedQuantity(editedDetail.calculatedUnitsChange)}.
             </p>
@@ -4381,6 +4603,26 @@ export function ScoreMatrixModal({
         </div>
 
         <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
+          {validationSummary.hasIssues ? (
+            <Alert className="border-rose-300 bg-rose-50 text-rose-950">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>
+                {validationSummary.finalScoreOutOfRange ? "Final score guardrail breached" : "Score matrix inconsistency detected"}
+              </AlertTitle>
+              <AlertDescription className="space-y-1 text-rose-900">
+                {validationSummary.finalScoreMessage ? (
+                  <p>{validationSummary.finalScoreMessage}</p>
+                ) : (
+                  <p>One or more score inputs are outside the allowed range for this matrix.</p>
+                )}
+                {validationSummary.parameterIssues.map((issue) => (
+                  <p key={issue.id}>
+                    <span className="font-semibold">{issue.parameter}:</span> {issue.message}
+                  </p>
+                ))}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           <DetailedRationaleScoreSection
             detail={editedDetail}
             multiplierDrafts={multiplierDrafts}
@@ -5071,6 +5313,7 @@ function buildActionablesCalculationRows(
       ACTIONABLES_CALCULATION_HEADERS.forEach((header) => {
         if (header === "Stock Info" || header === "Job / Run No (Timestamp)" || header === "LLMs") return;
         if (header === ACTION_HEADER && source.isFormula && source.detail) {
+          const validationSummary = getScoreMatrixValidationSummary(source.detail);
           values[header] = (
             <div className="flex flex-wrap items-center gap-3">
               <button
@@ -5081,9 +5324,19 @@ function buildActionablesCalculationRows(
                 <FinalActionTag action={source.detail.calculatedAction} />
                 <span className="text-[11px] font-semibold text-blue-700">Matrix</span>
               </button>
-              <span className="whitespace-nowrap text-xs font-bold text-blue-700">
-                Final Score = {formatActionScore(source.detail.calculatedScore)}
+              <span className={cn(
+                "whitespace-nowrap text-xs font-bold",
+                validationSummary.hasIssues ? "text-rose-700" : "text-blue-700",
+              )}
+              >
+                Final Score = {formatActionScore(validationSummary.displayScore)}
               </span>
+              {validationSummary.hasIssues ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700">
+                  <AlertTriangle className="size-3 shrink-0" />
+                  {validationSummary.finalScoreOutOfRange ? "Outside -3 to 3" : "Input inconsistency"}
+                </span>
+              ) : null}
             </div>
           );
           sortValues[header] = ACTION_CATEGORY_LABEL[source.detail.calculatedAction];
@@ -6206,7 +6459,7 @@ function getDashboardActionSortValue(
     case "stock":
       return row.stock.symbol;
     case "score":
-      return row.formulaScore ?? Number.POSITIVE_INFINITY;
+      return clampScoreToGuardrail(row.formulaScore) ?? Number.POSITIVE_INFINITY;
     case "consensus":
       return row.stock.actionCounts[action] / Math.max(row.stock.totalSuggestions, 1);
     case "currentUnits":
