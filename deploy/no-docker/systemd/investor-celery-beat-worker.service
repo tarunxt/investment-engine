@@ -1,5 +1,5 @@
 [Unit]
-Description=Investment Engine Celery beat scheduler
+Description=Investor Celery beat queue worker
 After=network-online.target
 Wants=network-online.target
 
@@ -7,9 +7,9 @@ Wants=network-online.target
 Type=simple
 User=investment-engine
 Group=investment-engine
-WorkingDirectory=/srv/investment-engine/backend
+WorkingDirectory=/srv/investor/backend
 EnvironmentFile=/etc/investor/backend.env
-ExecStart=/srv/investment-engine/backend/.venv/bin/celery -A app.infrastructure.messaging.celery_app beat --loglevel=info
+ExecStart=/srv/investor/backend/.venv/bin/celery -A app.infrastructure.messaging.celery_app worker -Q beat --loglevel=info --concurrency=1 --max-tasks-per-child=1000
 Restart=always
 RestartSec=5
 TimeoutStartSec=60
