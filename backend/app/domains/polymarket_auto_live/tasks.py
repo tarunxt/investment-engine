@@ -46,7 +46,7 @@ _PENDING_STAGE3_ORDER_DETAIL = "Order planned but not executed yet."
 _WORKFLOW_STAGE_LABELS = {
     "scan": "Stage 1 · Bullpen Scan",
     "llm": "Stage 2 · Run LLM",
-    "invest": "Stage 3 · Invest",
+    "invest": "Stage 3 · Rebalance and Invest",
 }
 
 

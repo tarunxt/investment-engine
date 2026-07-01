@@ -578,7 +578,7 @@ test("Stage 3 schedule card keeps the Invest button and reuse copy inside the ca
   assert.match(source, />\s*Invest\s*</);
   assert.match(source, /getInvestStageImmediateSuccess/);
   assert.match(source, />\s*Invested\s*</);
-  assert.match(statusSource, /Investment complete\./);
+  assert.match(statusSource, /Rebalance and investment complete\./);
   assert.match(source, /latest Stage 2-qualified rows/);
   assert.match(source, /skips the Bullpen rescan plus LLM rerun/);
   assert.match(source, /already invested and will be skipped/);

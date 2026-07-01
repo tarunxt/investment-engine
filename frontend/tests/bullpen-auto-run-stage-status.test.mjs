@@ -30,8 +30,9 @@ function createInvestStage({
 } = {}) {
   return {
     key: "invest",
-    title: "Stage 3 · Invest",
-    subtitle: "Plans buys and exits, then submits orders when the guardrails allow live execution.",
+    title: "Stage 3 · Rebalance and Invest",
+    subtitle:
+      "Step 1 sells active positions outside the top 10, then Step 2 invests in the Stage 3 planned orders when the guardrails allow live execution.",
     tone: "yellow",
     state: "current",
     detail: "Stage 3 submitted 1 of 1 planned orders.",
@@ -75,7 +76,7 @@ test("invest stage success is surfaced as soon as all planned orders are submitt
 
   assert.equal(success?.submittedOrders, 1);
   assert.equal(success?.plannedOrders, 1);
-  assert.match(success?.message ?? "", /Investment complete\./);
+  assert.match(success?.message ?? "", /Rebalance and investment complete\./);
   assert.match(success?.message ?? "", /Will Claude Fable 5 be restored for US customers by July 2/);
 });
 

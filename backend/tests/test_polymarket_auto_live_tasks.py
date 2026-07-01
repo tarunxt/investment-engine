@@ -85,7 +85,7 @@ def test_finalize_failed_run_progress_marks_inflight_stage3_orders_as_failed():
 
     assert (
         summary
-        == "Auto-Live run failed during Stage 3 · Invest: Future attached to a different loop"
+        == "Auto-Live run failed during Stage 3 · Rebalance and Invest: Future attached to a different loop"
     )
     invest_stage = run.stage_results[-1]
     assert invest_stage.status == "fail"

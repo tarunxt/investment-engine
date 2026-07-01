@@ -3146,11 +3146,163 @@ class BullpenAutoLiveEngine:
         total_decision_rows = len(position_snapshots) + len(candidate_contexts)
         decisions: list[BullpenAutoLiveDecision] = []
         processed_decision_rows = 0
-        planned_orders = 0
-        submitted_orders = 0
-        execution_orders_processed = 0
         execution_pause_reason: str | None = None
         simulation_reason = _simulation_reason(settings)
+
+        def _current_stage3_order_counts() -> dict[str, int]:
+            sell_planned = 0
+            sell_processed = 0
+            sell_submitted = 0
+            buy_planned = 0
+            buy_processed = 0
+            buy_submitted = 0
+
+            for current in decisions:
+                order_plan = current.order_plan
+                if order_plan is None:
+                    continue
+                is_sell = order_plan.action == "sell"
+                if is_sell:
+                    sell_planned += 1
+                else:
+                    buy_planned += 1
+                if order_plan.status != "planned":
+                    if is_sell:
+                        sell_processed += 1
+                    else:
+                        buy_processed += 1
+                if order_plan.status == "submitted":
+                    if is_sell:
+                        sell_submitted += 1
+                    else:
+                        buy_submitted += 1
+
+            return {
+                "sell_planned": sell_planned,
+                "sell_processed": sell_processed,
+                "sell_submitted": sell_submitted,
+                "buy_planned": buy_planned,
+                "buy_processed": buy_processed,
+                "buy_submitted": buy_submitted,
+                "planned": sell_planned + buy_planned,
+                "processed": sell_processed + buy_processed,
+                "submitted": sell_submitted + buy_submitted,
+            }
+
+        def _build_stage3_execution_steps(
+            *,
+            current_step_key: str | None,
+            current_step_detail: str | None,
+            execution_gate_reason: str | None,
+            execution_mode_reason: str | None,
+        ) -> tuple[dict[str, int], list[dict[str, object]]]:
+            counts = _current_stage3_order_counts()
+            sell_planned = counts["sell_planned"]
+            sell_processed = counts["sell_processed"]
+            sell_submitted = counts["sell_submitted"]
+            buy_planned = counts["buy_planned"]
+            buy_processed = counts["buy_processed"]
+            buy_submitted = counts["buy_submitted"]
+
+            steps: list[dict[str, object]] = []
+            is_sell_step_complete = sell_processed >= sell_planned
+
+            if sell_planned == 0:
+                sell_status = "completed"
+                sell_detail = (
+                    "No Step 1 sells were needed from SELL | Events outside Top 10 by Returns/day."
+                )
+            elif current_step_key == "sell":
+                if execution_gate_reason:
+                    sell_status = "blocked"
+                    sell_detail = execution_gate_reason
+                elif execution_mode_reason:
+                    sell_status = "running"
+                    sell_detail = current_step_detail or (
+                        "Simulation mode is reviewing the Step 1 sells that would free capital."
+                    )
+                else:
+                    sell_status = "running"
+                    sell_detail = current_step_detail or (
+                        "Selling the Step 1 events from SELL | Events outside Top 10 by Returns/day."
+                    )
+            elif is_sell_step_complete:
+                sell_status = "completed"
+                sell_detail = (
+                    "Step 1 finished processing the SELL | Events outside Top 10 by Returns/day list."
+                )
+            elif execution_gate_reason:
+                sell_status = "blocked"
+                sell_detail = execution_gate_reason
+            else:
+                sell_status = "pending"
+                sell_detail = (
+                    "Step 1 will sell the SELL | Events outside Top 10 by Returns/day rows first."
+                )
+
+            steps.append(
+                {
+                    "key": "sell",
+                    "step_number": 1,
+                    "step_total": 2,
+                    "label": "Sell outside Top 10",
+                    "status": sell_status,
+                    "detail": sell_detail,
+                    "planned_orders": sell_planned,
+                    "processed_orders": sell_processed,
+                    "submitted_orders": sell_submitted,
+                }
+            )
+
+            if buy_planned == 0:
+                buy_status = "completed"
+                buy_detail = "No Step 2 Stage 3 planned orders were created."
+            elif current_step_key == "buy":
+                if execution_gate_reason:
+                    buy_status = "blocked"
+                    buy_detail = execution_gate_reason
+                elif execution_mode_reason:
+                    buy_status = "running"
+                    buy_detail = current_step_detail or (
+                        "Simulation mode is reviewing the Step 2 Stage 3 planned orders."
+                    )
+                else:
+                    buy_status = "running"
+                    buy_detail = current_step_detail or (
+                        "Investing in the Step 2 Stage 3 planned orders."
+                    )
+            elif not is_sell_step_complete and sell_planned > 0:
+                buy_status = "pending"
+                buy_detail = (
+                    "Step 2 is waiting for Step 1 sells to free capital before buying."
+                )
+            elif buy_processed >= buy_planned:
+                buy_status = "completed"
+                buy_detail = "Step 2 finished processing the Stage 3 planned orders."
+            elif execution_gate_reason:
+                buy_status = "blocked"
+                buy_detail = execution_gate_reason
+            else:
+                buy_status = "pending"
+                buy_detail = (
+                    "Step 2 will invest in the Stage 3 planned orders after Step 1 is clear."
+                )
+
+            steps.append(
+                {
+                    "key": "buy",
+                    "step_number": 2,
+                    "step_total": 2,
+                    "label": "Invest planned orders",
+                    "status": buy_status,
+                    "detail": buy_detail,
+                    "planned_orders": buy_planned,
+                    "processed_orders": buy_processed,
+                    "submitted_orders": buy_submitted,
+                }
+            )
+
+            return counts, steps
 
         def report_invest_stage_progress(
             *,
@@ -3160,8 +3312,16 @@ class BullpenAutoLiveEngine:
             last_completed_market: ScannedMarket | None = None,
             execution_gate_reason: str | None = None,
             execution_mode_reason: str | None = None,
+            current_step_key: str | None = None,
+            current_step_detail: str | None = None,
             completed_at: str | None | object = _DEFAULT_COMPLETED_AT,
         ) -> None:
+            counts, execution_steps = _build_stage3_execution_steps(
+                current_step_key=current_step_key,
+                current_step_detail=current_step_detail,
+                execution_gate_reason=execution_gate_reason,
+                execution_mode_reason=execution_mode_reason,
+            )
             stage_outputs: dict[str, object] = {
                 "top_table_size": len(top_rows),
                 "active_rows_ranked": len(active_rank_rows),
@@ -3171,14 +3331,33 @@ class BullpenAutoLiveEngine:
                 "active_position_rows": len(position_snapshots),
                 "candidate_decision_rows": len(candidate_contexts),
                 "decisions_count": len(decisions),
-                "orders_planned": planned_orders,
-                "orders_submitted": submitted_orders,
+                "orders_planned": counts["planned"],
+                "orders_submitted": counts["submitted"],
+                "orders_processed": counts["processed"],
+                "sell_orders_planned": counts["sell_planned"],
+                "sell_orders_processed": counts["sell_processed"],
+                "sell_orders_submitted": counts["sell_submitted"],
+                "buy_orders_planned": counts["buy_planned"],
+                "buy_orders_processed": counts["buy_processed"],
+                "buy_orders_submitted": counts["buy_submitted"],
+                "execution_steps": execution_steps,
+                "execution_step_key": current_step_key,
+                "execution_step_label": (
+                    "Step 1 · Sell outside Top 10"
+                    if current_step_key == "sell"
+                    else "Step 2 · Invest planned orders"
+                    if current_step_key == "buy"
+                    else None
+                ),
+                "execution_step_number": (
+                    1 if current_step_key == "sell" else 2 if current_step_key == "buy" else None
+                ),
+                "execution_step_total": 2,
+                "execution_step_detail": current_step_detail,
                 "decision_rows": [
                     _serialize_stage3_decision_row(decision) for decision in decisions
                 ],
             }
-            if execution_orders_processed > 0:
-                stage_outputs["orders_processed"] = execution_orders_processed
             if execution_gate_reason:
                 stage_outputs["execution_gate_reason"] = execution_gate_reason
             if execution_mode_reason:
@@ -3188,8 +3367,8 @@ class BullpenAutoLiveEngine:
                 stage_outputs["last_completed_question"] = last_completed_market.question
                 stage_outputs["last_completed_market_url"] = last_completed_market.market_url
             run.decisions_count = len(decisions)
-            run.orders_planned = planned_orders
-            run.orders_submitted = submitted_orders
+            run.orders_planned = counts["planned"]
+            run.orders_submitted = counts["submitted"]
             set_run_stage_result(
                 run,
                 build_workflow_stage_result(
@@ -3212,7 +3391,9 @@ class BullpenAutoLiveEngine:
         report_invest_stage_progress(
             phase_status="running",
             reason=(
-                "Stage 3 started. Planning buys and exits from the ranked Bullpen table."
+                "Stage 3 started. Step 1 will sell the SELL | Events outside Top 10 by "
+                "Returns/day rows first, then Step 2 will invest in the Stage 3 planned "
+                "orders."
                 if total_decision_rows > 0
                 else "No candidate or position rows were available for Stage 3."
             ),
@@ -3226,10 +3407,9 @@ class BullpenAutoLiveEngine:
             *,
             market: ScannedMarket,
         ) -> None:
-            nonlocal planned_orders, processed_decision_rows
+            nonlocal processed_decision_rows
             decisions.append(decision)
             processed_decision_rows += 1
-            planned_orders = sum(1 for current in decisions if current.order_plan is not None)
             report_invest_stage_progress(
                 phase_status="running",
                 reason=(
@@ -3619,12 +3799,21 @@ class BullpenAutoLiveEngine:
                 market=market,
             )
 
-        actionable_decisions = [
+        sell_execution_decisions = [
             decision
             for decision in decisions
-            if decision.decision in {"BUY_NEW", "EXIT"}
+            if decision.order_plan is not None and decision.order_plan.action == "sell"
         ]
-        planned_orders = len(actionable_decisions)
+        buy_execution_decisions = [
+            decision
+            for decision in decisions
+            if decision.order_plan is not None and decision.order_plan.action == "buy"
+        ]
+        actionable_decisions = [*sell_execution_decisions, *buy_execution_decisions]
+        planned_order_counts = _current_stage3_order_counts()
+        planned_orders = planned_order_counts["planned"]
+        sell_planned_orders = planned_order_counts["sell_planned"]
+        buy_planned_orders = planned_order_counts["buy_planned"]
         execution_block_reasons: list[str] = []
         if actionable_decisions and not state.dry_run:
             live_controls = await refresh_live_controls(user_id=user_id)
@@ -3652,24 +3841,40 @@ class BullpenAutoLiveEngine:
                 if not live_controls.doctor.ok and settings.pause_if_doctor_fails:
                     state.paused = True
         if actionable_decisions:
+            if state.dry_run:
+                preparation_reason = (
+                    f"Stage 3 reviewed all {total_decision_rows} rows and is staying in "
+                    "simulation mode while it walks Step 1 sells and Step 2 planned buys."
+                )
+            elif execution_pause_reason:
+                preparation_reason = (
+                    f"Stage 3 reviewed all {total_decision_rows} rows, but live execution "
+                    "is currently gated before Step 1 can start."
+                )
+            elif sell_planned_orders > 0 and buy_planned_orders > 0:
+                preparation_reason = (
+                    f"Stage 3 reviewed all {total_decision_rows} rows. Step 1 will sell "
+                    f"{sell_planned_orders} event{'s' if sell_planned_orders != 1 else ''} "
+                    "from SELL | Events outside Top 10 by Returns/day so capital becomes "
+                    f"free, then Step 2 will buy {buy_planned_orders} Stage 3 planned "
+                    f"order{'s' if buy_planned_orders != 1 else ''}."
+                )
+            elif sell_planned_orders > 0:
+                preparation_reason = (
+                    f"Stage 3 reviewed all {total_decision_rows} rows. Step 1 will sell "
+                    f"{sell_planned_orders} event{'s' if sell_planned_orders != 1 else ''} "
+                    "from SELL | Events outside Top 10 by Returns/day. No Step 2 buys are "
+                    "planned."
+                )
+            else:
+                preparation_reason = (
+                    f"Stage 3 reviewed all {total_decision_rows} rows. No Step 1 sells are "
+                    f"needed, so Step 2 will buy {buy_planned_orders} Stage 3 planned "
+                    f"order{'s' if buy_planned_orders != 1 else ''}."
+                )
             report_invest_stage_progress(
                 phase_status="running",
-                reason=(
-                    f"Stage 3 reviewed all {total_decision_rows} rows and is preparing "
-                    f"{planned_orders} planned order{'s' if planned_orders != 1 else ''}. "
-                    "Bullpen submits orders one at a time, so this stage can take a few "
-                    "minutes when multiple orders are planned."
-                    if not state.dry_run and not execution_pause_reason
-                    else (
-                        f"Stage 3 reviewed all {total_decision_rows} rows and is staying "
-                        "in simulation mode for execution planning."
-                    )
-                    if state.dry_run
-                    else (
-                        f"Stage 3 reviewed all {total_decision_rows} rows, but live "
-                        "execution is currently gated."
-                    )
-                ),
+                reason=preparation_reason,
                 completed_items=processed_decision_rows,
                 execution_gate_reason=execution_pause_reason,
                 execution_mode_reason=simulation_reason if state.dry_run else None,
@@ -3690,7 +3895,54 @@ class BullpenAutoLiveEngine:
                         reason="No execution was needed for this row.",
                     )
                 )
-                continue
+
+        def _stage3_step_number(step_key: str) -> int:
+            return 1 if step_key == "sell" else 2
+
+        def _stage3_step_counts(step_key: str) -> tuple[int, int, int]:
+            counts = _current_stage3_order_counts()
+            return (
+                counts["sell_planned"] if step_key == "sell" else counts["buy_planned"],
+                counts["sell_processed"] if step_key == "sell" else counts["buy_processed"],
+                counts["sell_submitted"] if step_key == "sell" else counts["buy_submitted"],
+            )
+
+        async def _execute_actionable_decision(
+            decision: BullpenAutoLiveDecision,
+            *,
+            step_key: str,
+        ) -> None:
+            nonlocal new_positions, running_failed_orders
+
+            order_plan = decision.order_plan
+            if order_plan is None:
+                return
+
+            step_number = _stage3_step_number(step_key)
+            step_total_orders, step_processed_orders, _ = _stage3_step_counts(step_key)
+            global_counts = _current_stage3_order_counts()
+            pending_order_number = global_counts["processed"] + 1
+            pending_step_order_number = step_processed_orders + 1
+            in_flight_detail = (
+                f"Step {step_number} of 2 is submitting "
+                f"{'sell' if step_key == 'sell' else 'buy'} order "
+                f"{pending_step_order_number} of {step_total_orders}."
+            )
+            order_plan.detail = in_flight_detail
+            report_invest_stage_progress(
+                phase_status="running",
+                reason=(
+                    f"Stage 3 Step {step_number} of 2 is submitting planned order "
+                    f"{pending_order_number} of {planned_orders}. Latest: {decision.market_title}"
+                ),
+                completed_items=processed_decision_rows,
+                execution_gate_reason=execution_pause_reason,
+                execution_mode_reason=simulation_reason if state.dry_run else None,
+                current_step_key=step_key,
+                current_step_detail=in_flight_detail,
+                completed_at=None,
+            )
+
             if execution_pause_reason and not state.dry_run:
                 order_plan.status = "failed"
                 order_plan.detail = execution_pause_reason
@@ -3704,31 +3956,22 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders += 1
-                execution_orders_processed += 1
+                _, step_processed, _ = _stage3_step_counts(step_key)
                 report_invest_stage_progress(
                     phase_status="running",
                     reason=(
-                        f"Stage 3 blocked {execution_orders_processed} of {planned_orders} "
-                        f"planned orders. Latest: {decision.market_title}"
+                        f"Stage 3 Step {step_number} of 2 blocked {step_processed} of "
+                        f"{step_total_orders} {'sell' if step_key == 'sell' else 'buy'} "
+                        f"orders. Latest: {decision.market_title}"
                     ),
                     completed_items=processed_decision_rows,
                     execution_gate_reason=execution_pause_reason,
+                    current_step_key=step_key,
+                    current_step_detail=execution_pause_reason,
                     completed_at=None,
                 )
-                continue
+                return
 
-            pending_order_number = execution_orders_processed + 1
-            report_invest_stage_progress(
-                phase_status="running",
-                reason=(
-                    f"Stage 3 is submitting planned order {pending_order_number} of "
-                    f"{planned_orders}. Latest: {decision.market_title}"
-                ),
-                completed_items=processed_decision_rows,
-                execution_gate_reason=execution_pause_reason,
-                execution_mode_reason=simulation_reason if state.dry_run else None,
-                completed_at=None,
-            )
             quote = await refresh_execution_quote(slug=decision.slug, side=order_plan.side)
             quote_price_cents = quote.current_price_cents or order_plan.limit_price_cents
             if quote.spread_cents is not None and quote.spread_cents > settings.max_bid_ask_spread_cents:
@@ -3744,19 +3987,22 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders += 1
-                execution_orders_processed += 1
+                _, step_processed, _ = _stage3_step_counts(step_key)
                 report_invest_stage_progress(
                     phase_status="running",
                     reason=(
-                        f"Stage 3 processed {execution_orders_processed} of {planned_orders} "
-                        f"planned orders. Latest: {decision.market_title}"
+                        f"Stage 3 Step {step_number} of 2 processed {step_processed} of "
+                        f"{step_total_orders} {'sell' if step_key == 'sell' else 'buy'} "
+                        f"orders. Latest: {decision.market_title}"
                     ),
                     completed_items=processed_decision_rows,
                     execution_gate_reason=execution_pause_reason,
                     execution_mode_reason=simulation_reason if state.dry_run else None,
+                    current_step_key=step_key,
+                    current_step_detail=order_plan.detail,
                     completed_at=None,
                 )
-                continue
+                return
 
             if order_plan.action == "buy":
                 order_plan.limit_price_cents = buy_limit_price_cents(
@@ -3788,18 +4034,21 @@ class BullpenAutoLiveEngine:
                         outputs=order_plan.model_dump(mode="json"),
                     )
                 )
-                execution_orders_processed += 1
+                _, step_processed, _ = _stage3_step_counts(step_key)
                 report_invest_stage_progress(
                     phase_status="running",
                     reason=(
-                        f"Stage 3 simulated {execution_orders_processed} of {planned_orders} "
-                        f"planned orders. Latest: {decision.market_title}"
+                        f"Stage 3 Step {step_number} of 2 simulated {step_processed} of "
+                        f"{step_total_orders} {'sell' if step_key == 'sell' else 'buy'} "
+                        f"orders. Latest: {decision.market_title}"
                     ),
                     completed_items=processed_decision_rows,
                     execution_mode_reason=simulation_reason,
+                    current_step_key=step_key,
+                    current_step_detail=order_plan.detail,
                     completed_at=None,
                 )
-                continue
+                return
 
             try:
                 market_id_for_execution = decision.slug or decision.market_id
@@ -3853,7 +4102,6 @@ class BullpenAutoLiveEngine:
                         outputs=order_plan.model_dump(mode="json"),
                     )
                 )
-                submitted_orders += 1
                 running_failed_orders = 0
             except Exception as exc:
                 order_plan.status = "failed"
@@ -3868,22 +4116,32 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders += 1
-            execution_orders_processed += 1
+
+            _, step_processed, step_submitted = _stage3_step_counts(step_key)
             report_invest_stage_progress(
                 phase_status="running",
                 reason=(
-                    f"Stage 3 submitted {submitted_orders} of {planned_orders} planned "
-                    f"orders. Latest: {decision.market_title}"
+                    f"Stage 3 Step {step_number} of 2 submitted {step_submitted} of "
+                    f"{step_total_orders} {'sell' if step_key == 'sell' else 'buy'} orders. "
+                    f"Latest: {decision.market_title}"
                     if order_plan.status == "submitted"
                     else (
-                        f"Stage 3 processed {execution_orders_processed} of "
-                        f"{planned_orders} planned orders. Latest: {decision.market_title}"
+                        f"Stage 3 Step {step_number} of 2 processed {step_processed} of "
+                        f"{step_total_orders} {'sell' if step_key == 'sell' else 'buy'} "
+                        f"orders. Latest: {decision.market_title}"
                     )
                 ),
                 completed_items=processed_decision_rows,
                 execution_gate_reason=execution_pause_reason,
+                current_step_key=step_key,
+                current_step_detail=order_plan.detail,
                 completed_at=None,
             )
+
+        for decision in sell_execution_decisions:
+            await _execute_actionable_decision(decision, step_key="sell")
+        for decision in buy_execution_decisions:
+            await _execute_actionable_decision(decision, step_key="buy")
 
         state.consecutive_failed_orders = running_failed_orders
         for decision in decisions:
@@ -3905,10 +4163,16 @@ class BullpenAutoLiveEngine:
             state.today_skipped_orders,
         ) = _today_order_counts(historical_and_current_decisions, now=now)
         state.last_execution_at = _latest_execution_at(historical_and_current_decisions)
+        final_order_counts, final_execution_steps = _build_stage3_execution_steps(
+            current_step_key=None,
+            current_step_detail=None,
+            execution_gate_reason=execution_pause_reason,
+            execution_mode_reason=simulation_reason if state.dry_run else None,
+        )
         run.decisions_count = len(decisions)
         run.decision_ids = [decision.id for decision in decisions]
-        run.orders_planned = planned_orders
-        run.orders_submitted = submitted_orders
+        run.orders_planned = final_order_counts["planned"]
+        run.orders_submitted = final_order_counts["submitted"]
         run.live_execution_requested = bool(
             actionable_decisions and live_execution_requested(settings)
         )
@@ -3920,14 +4184,15 @@ class BullpenAutoLiveEngine:
         if state.dry_run:
             run.summary = (
                 f"Console schedule simulated {len(decisions)} decisions with "
-                f"{planned_orders} planned orders. {simulation_reason}"
+                f"{final_order_counts['planned']} planned orders. {simulation_reason}"
             )
         elif state.paused:
             run.summary = execution_pause_reason or "Console schedule paused."
         else:
             run.summary = (
                 f"Console schedule completed with {len(decisions)} decisions, "
-                f"{planned_orders} planned orders, and {submitted_orders} submitted orders."
+                f"{final_order_counts['planned']} planned orders, and "
+                f"{final_order_counts['submitted']} submitted orders."
             )
         set_run_stage_result(
             run,
@@ -3937,7 +4202,7 @@ class BullpenAutoLiveEngine:
                 phase_status="completed",
                 status="pass" if len(decisions) > 0 else "warning",
                 reason=(
-                    "Investment planning and execution finished for the ranked Bullpen table."
+                    "Rebalance and investment planning/execution finished for the ranked Bullpen table."
                     if len(decisions) > 0
                     else "Stage 3 finished without any decisions to process."
                 ),
@@ -3953,9 +4218,39 @@ class BullpenAutoLiveEngine:
                     "active_position_rows": len(position_snapshots),
                     "candidate_decision_rows": len(candidate_contexts),
                     "decisions_count": len(decisions),
-                    "orders_planned": planned_orders,
-                    "orders_submitted": submitted_orders,
-                    "orders_processed": execution_orders_processed,
+                    "orders_planned": final_order_counts["planned"],
+                    "orders_submitted": final_order_counts["submitted"],
+                    "orders_processed": final_order_counts["processed"],
+                    "sell_orders_planned": final_order_counts["sell_planned"],
+                    "sell_orders_processed": final_order_counts["sell_processed"],
+                    "sell_orders_submitted": final_order_counts["sell_submitted"],
+                    "buy_orders_planned": final_order_counts["buy_planned"],
+                    "buy_orders_processed": final_order_counts["buy_processed"],
+                    "buy_orders_submitted": final_order_counts["buy_submitted"],
+                    "execution_steps": final_execution_steps,
+                    "execution_step_key": (
+                        "blocked"
+                        if actionable_decisions and state.paused
+                        else "completed"
+                        if actionable_decisions
+                        else None
+                    ),
+                    "execution_step_label": (
+                        "Stage 3 blocked"
+                        if actionable_decisions and state.paused
+                        else "Stage 3 complete"
+                        if actionable_decisions
+                        else None
+                    ),
+                    "execution_step_number": None,
+                    "execution_step_total": 2,
+                    "execution_step_detail": (
+                        execution_pause_reason
+                        if actionable_decisions and state.paused
+                        else "Step 1 sells and Step 2 planned buys finished processing."
+                        if actionable_decisions
+                        else None
+                    ),
                     "decision_rows": [
                         _serialize_stage3_decision_row(decision) for decision in decisions
                     ],

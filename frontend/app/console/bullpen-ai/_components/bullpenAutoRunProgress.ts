@@ -91,9 +91,10 @@ const WORKFLOW_DEFINITIONS: WorkflowDefinition[] = [
   },
   {
     key: "invest",
-    title: "Stage 3 · Invest",
-    subtitle: "Plans buys and exits, then submits orders when the guardrails allow live execution.",
-    defaultDetail: "Waiting for Stage 2 to finish before investment planning starts.",
+    title: "Stage 3 · Rebalance and Invest",
+    subtitle:
+      "Step 1 sells active positions outside the top 10, then Step 2 invests in the Stage 3 planned orders when the guardrails allow live execution.",
+    defaultDetail: "Waiting for Stage 2 to finish before rebalance and investment planning starts.",
     defaultItemLabel: "rows",
   },
 ];
@@ -479,15 +480,15 @@ export function buildBullpenAutoRunWorkflowView(
     runStatus === "failed"
       ? normalizedRun?.summary ||
         normalizedRun?.error_message ||
-        "The latest Bullpen Scan + LLM + Invest run failed before finishing."
+        "The latest Bullpen Scan + LLM + Rebalance and Invest run failed before finishing."
       : currentStage
         ? `Current stage: ${currentStage.title}`
         : runStatus === "completed"
-          ? "The latest Bullpen Scan + LLM + Invest run finished all 3 stages."
+          ? "The latest Bullpen Scan + LLM + Rebalance and Invest run finished all 3 stages."
           : runStatus === "skipped"
           ? normalizedRun?.summary ||
-            "The latest Bullpen Scan + LLM + Invest run was skipped."
-          : "The next Bullpen Scan + LLM + Invest run is waiting in queue.";
+            "The latest Bullpen Scan + LLM + Rebalance and Invest run was skipped."
+          : "The next Bullpen Scan + LLM + Rebalance and Invest run is waiting in queue.";
 
   return {
     stages,

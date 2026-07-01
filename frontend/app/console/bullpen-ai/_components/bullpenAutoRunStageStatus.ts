@@ -74,8 +74,8 @@ export function getInvestStageImmediateSuccess(
     ) ?? null;
   const orderLabel = plannedOrders === 1 ? "order" : "orders";
   const message = latestSubmittedDecision
-    ? `Investment complete. Bullpen submitted ${submittedOrders} of ${plannedOrders} planned ${orderLabel}. Latest: ${latestSubmittedDecision.market_title}.`
-    : `Investment complete. Bullpen submitted ${submittedOrders} of ${plannedOrders} planned ${orderLabel}.`;
+    ? `Rebalance and investment complete. Bullpen submitted ${submittedOrders} of ${plannedOrders} planned ${orderLabel}. Latest: ${latestSubmittedDecision.market_title}.`
+    : `Rebalance and investment complete. Bullpen submitted ${submittedOrders} of ${plannedOrders} planned ${orderLabel}.`;
 
   return {
     submittedOrders,

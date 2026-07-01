@@ -319,7 +319,10 @@ test("Bullpen auto-run workflow view hides queued Stage 3 progress when Stage 2 
   assert.equal(view.stages[2].state, "queued");
   assert.equal(view.stages[2].progressLabel, "Queued");
   assert.equal(view.stages[2].timerStartedAt, null);
-  assert.equal(view.stages[2].detail, "Waiting for Stage 2 to finish before investment planning starts.");
+  assert.equal(
+    view.stages[2].detail,
+    "Waiting for Stage 2 to finish before rebalance and investment planning starts.",
+  );
   assert.deepEqual(view.stages[2].outputs, {});
 });
 
@@ -368,7 +371,7 @@ test("Bullpen auto-run workflow view explains Stage 3 counts as combined review 
     ],
   });
 
-  assert.equal(view.currentStageLabel, "Stage 3 · Invest");
+  assert.equal(view.currentStageLabel, "Stage 3 · Rebalance and Invest");
   assert.equal(view.stages[2].progressLabel, "18/18 review rows");
   assert.equal(view.stages[2].outputs.active_position_rows, 9);
   assert.equal(view.stages[2].outputs.candidate_decision_rows, 9);

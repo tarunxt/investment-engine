@@ -292,6 +292,121 @@ function getInvestStageMetric(
   return readStageOutputNumber(stage.outputs[key]) ?? fallback;
 }
 
+type InvestExecutionStepStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "blocked";
+
+type InvestExecutionStepView = {
+  key: "sell" | "buy";
+  stepNumber: number;
+  stepTotal: number;
+  label: string;
+  status: InvestExecutionStepStatus;
+  detail: string | null;
+  plannedOrders: number;
+  processedOrders: number;
+  submittedOrders: number;
+};
+
+function normalizeInvestExecutionStepStatus(
+  value: unknown,
+): InvestExecutionStepStatus | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "pending" ||
+    normalized === "running" ||
+    normalized === "completed" ||
+    normalized === "blocked"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function getInvestStageExecutionSteps(
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
+) {
+  if (stage.key !== "invest") return [];
+
+  const rawSteps = stage.outputs.execution_steps;
+  if (!Array.isArray(rawSteps)) return [];
+
+  return rawSteps
+    .map((step) => {
+      if (!isRecord(step)) return null;
+      const key = readStageOutputString(step.key);
+      const label = readStageOutputString(step.label);
+      const status = normalizeInvestExecutionStepStatus(step.status);
+      const stepNumber = readStageOutputNumber(step.step_number);
+      const stepTotal = readStageOutputNumber(step.step_total);
+      if (
+        (key !== "sell" && key !== "buy") ||
+        !label ||
+        !status ||
+        stepNumber === null ||
+        stepTotal === null
+      ) {
+        return null;
+      }
+
+      return {
+        key,
+        stepNumber,
+        stepTotal,
+        label,
+        status,
+        detail: readStageOutputString(step.detail),
+        plannedOrders: readStageOutputNumber(step.planned_orders) ?? 0,
+        processedOrders: readStageOutputNumber(step.processed_orders) ?? 0,
+        submittedOrders: readStageOutputNumber(step.submitted_orders) ?? 0,
+      } satisfies InvestExecutionStepView;
+    })
+    .filter((step): step is InvestExecutionStepView => Boolean(step));
+}
+
+function getInvestExecutionStepClasses(status: InvestExecutionStepStatus) {
+  if (status === "completed") {
+    return {
+      container: "border-emerald-200 bg-emerald-50/80",
+      badge: "border-emerald-200 bg-emerald-100 text-emerald-900",
+      text: "text-emerald-950",
+      muted: "text-emerald-900/80",
+    };
+  }
+  if (status === "blocked") {
+    return {
+      container: "border-rose-200 bg-rose-50/80",
+      badge: "border-rose-200 bg-rose-100 text-rose-900",
+      text: "text-rose-950",
+      muted: "text-rose-900/80",
+    };
+  }
+  if (status === "running") {
+    return {
+      container: "border-amber-200 bg-amber-50/80",
+      badge: "border-amber-200 bg-amber-100 text-amber-900",
+      text: "text-amber-950",
+      muted: "text-amber-900/80",
+    };
+  }
+  return {
+    container: "border-slate-200 bg-slate-50/80",
+    badge: "border-slate-200 bg-slate-100 text-slate-700",
+    text: "text-slate-950",
+    muted: "text-slate-600",
+  };
+}
+
+function getInvestExecutionStepStatusLabel(status: InvestExecutionStepStatus) {
+  if (status === "completed") return "Finished";
+  if (status === "blocked") return "Blocked";
+  if (status === "running") return "Working";
+  return "Pending";
+}
+
 function getInvestStageExecutionStatus(
   stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
 ) {
@@ -391,6 +506,67 @@ function formatInvestStageRowMix(
   if (activePositionRows === null && candidateRows === null) return null;
 
   return `${activePositionRows ?? 0} Bullpen position ${activePositionRows === 1 ? "row" : "rows"} + ${candidateRows ?? 0} candidate ${candidateRows === 1 ? "row" : "rows"}`;
+}
+
+function InvestExecutionStepsSummary({
+  steps,
+}: {
+  steps: InvestExecutionStepView[];
+}) {
+  if (steps.length === 0) return null;
+
+  return (
+    <div className="grid gap-2 md:grid-cols-2">
+      {steps.map((step) => {
+        const toneClasses = getInvestExecutionStepClasses(step.status);
+        return (
+          <div
+            key={step.key}
+            className={`rounded-xl border px-3 py-3 ${toneClasses.container}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}>
+                  Step {step.stepNumber} of {step.stepTotal}
+                </p>
+                <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
+                  {step.label}
+                </p>
+              </div>
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
+              >
+                {getInvestExecutionStepStatusLabel(step.status)}
+              </span>
+            </div>
+            <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
+              {step.detail ?? "Waiting for the worker to update this step."}
+            </p>
+            <div className={`mt-3 grid grid-cols-3 gap-2 text-xs ${toneClasses.muted}`}>
+              <div className="rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                <p className="uppercase tracking-[0.14em]">Planned</p>
+                <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
+                  {step.plannedOrders}
+                </p>
+              </div>
+              <div className="rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                <p className="uppercase tracking-[0.14em]">Processed</p>
+                <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
+                  {step.processedOrders}
+                </p>
+              </div>
+              <div className="rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                <p className="uppercase tracking-[0.14em]">Submitted</p>
+                <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
+                  {step.submittedOrders}
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function StageOneOutputDialog({
@@ -654,6 +830,7 @@ function InvestMetricDetailsDialog({
       ? state.run.error_message.trim()
       : null);
   const hasPendingOrders = plannedCount > submittedCount;
+  const executionSteps = state.stage ? getInvestStageExecutionSteps(state.stage) : [];
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
@@ -730,6 +907,12 @@ function InvestMetricDetailsDialog({
             <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
               Stage 3 submits Bullpen orders one at a time, so multiple planned
               orders can take a few minutes when Bullpen is slow or retrying.
+            </div>
+          ) : null}
+
+          {executionSteps.length > 0 ? (
+            <div className="mt-5">
+              <InvestExecutionStepsSummary steps={executionSteps} />
             </div>
           ) : null}
 
@@ -1314,14 +1497,15 @@ export function BullpenAutoRunScheduleCard({
             </div>
             <div>
               <h2 className="text-xl font-semibold text-slate-950">
-                Bullpen Scan + LLM + Invest runs every 6 hours in IST
+                Bullpen Scan + LLM + Rebalance and Invest runs every 6 hours in IST
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-700">
                 Scheduled runs use the Bullpen console top-10 profile: scan upcoming
-                markets, run LLM consensus on every Stage 1 event, buy{" "}
-                <span className="font-semibold">$5</span> of each new opportunity on
-                the stronger LLM side when it ranks inside the top 10 by returns/day,
-                and exit active positions that fall out of that top 10 list.
+                markets, run LLM consensus on every Stage 1 event, sell active
+                positions that fall out of the top 10 by returns/day so capital is
+                freed first, and then buy <span className="font-semibold">$5</span> of
+                each new opportunity on the stronger LLM side when it ranks inside
+                that top 10 list.
               </p>
             </div>
           </div>
@@ -1596,6 +1780,7 @@ export function BullpenAutoRunScheduleCard({
                 (stage.key === "llm" || stage.key === "invest") &&
                 Object.keys(stage.inputs).length > 0;
               const investStageCounters = getInvestStageCounters(stage);
+              const investExecutionSteps = getInvestStageExecutionSteps(stage);
               const investExecutionStatus = getInvestStageExecutionStatus(stage);
               const stageStatusLabel = immediateSuccess
                 ? "Finished"
@@ -1712,6 +1897,12 @@ export function BullpenAutoRunScheduleCard({
                           </p>
                         </button>
                       ))}
+                    </div>
+                  ) : null}
+
+                  {investExecutionSteps.length > 0 ? (
+                    <div className="mt-3">
+                      <InvestExecutionStepsSummary steps={investExecutionSteps} />
                     </div>
                   ) : null}
 
