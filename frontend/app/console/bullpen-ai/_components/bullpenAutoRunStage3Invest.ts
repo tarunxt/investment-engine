@@ -512,7 +512,7 @@ export function buildBullpenStage3InvestPreviewSteps(
   const readyLabel =
     plan.readyCandidateCount === 1 ? "event is" : "events are";
   const sellDetail =
-    "Stage 3 first checks active Bullpen positions outside the top 10 and only sells when capital needs to be freed.";
+    "Stage 3 first evaluates Event Exits, combining the existing ranking / LLM exit logic with the new capital-aware forced-exit safety checks.";
   const buyStatus: BullpenStage3InvestPreviewStepStatus =
     plan.blockedReason && plan.readyCandidateCount === 0 ? "blocked" : "pending";
   const buyDetail =
@@ -526,7 +526,7 @@ export function buildBullpenStage3InvestPreviewSteps(
       key: "sell",
       stepNumber: 1,
       stepTotal: 2,
-      label: "Sell outside Top 10",
+      label: "Event Exits",
       status: "pending",
       detail: sellDetail,
       plannedOrders: null,

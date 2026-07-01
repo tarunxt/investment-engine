@@ -4,11 +4,14 @@ export type BullpenActivePositionView = {
   conditionId: string | null;
   marketTitle: string;
   outcome: string;
+  heldSide?: "YES" | "NO" | null;
   shares: number;
   averagePrice: number | null;
   costBasis: number;
   yesOdds: number | null;
   noOdds: number | null;
+  bestBidPrice?: number | null;
+  bestAskPrice?: number | null;
   currentPrice: number | null;
   currentValue: number | null;
   unrealizedPnl: number | null;
@@ -141,6 +144,8 @@ export type BullpenTrackedPositionInput = {
 export type BullpenTrackedMarketRefresh = {
   yesOdds?: number | null;
   noOdds?: number | null;
+  bestBidPrice?: number | null;
+  bestAskPrice?: number | null;
   marketUrl?: string | null;
   rules?: string | null;
   marketContext?: string | null;
@@ -225,6 +230,14 @@ function readBoolean(value: unknown) {
 
 function round(value: number, digits: number) {
   return Number(value.toFixed(digits));
+}
+
+function deriveHeldSide(outcome: string) {
+  const normalized = outcome.trim().toUpperCase();
+  if (normalized === "YES" || normalized === "NO") {
+    return normalized;
+  }
+  return null;
 }
 
 function getEasternUtcOffset(value: Date) {
@@ -550,11 +563,14 @@ export function normalizeBullpenPosition(
     conditionId,
     marketTitle,
     outcome,
+    heldSide: deriveHeldSide(outcome),
     shares: round(shares, 4),
     averagePrice: averagePrice === null ? null : round(averagePrice, 4),
     costBasis: round(costBasis, 2),
     yesOdds,
     noOdds,
+    bestBidPrice: null,
+    bestAskPrice: null,
     currentPrice: currentPrice === null ? null : round(currentPrice, 4),
     currentValue: currentValue === null ? null : round(currentValue, 2),
     unrealizedPnl: unrealizedPnl === null ? null : round(unrealizedPnl, 2),
@@ -629,9 +645,12 @@ function mergeBullpenPositionViews(
       existing.marketTitle && existing.marketTitle !== existing.marketId
         ? existing.marketTitle
         : incoming.marketTitle,
+    heldSide: existing.heldSide ?? incoming.heldSide,
     shares,
     averagePrice,
     costBasis,
+    bestBidPrice: existing.bestBidPrice ?? incoming.bestBidPrice,
+    bestAskPrice: existing.bestAskPrice ?? incoming.bestAskPrice,
     currentPrice,
     currentValue,
     unrealizedPnl,
@@ -692,6 +711,8 @@ export function applyBullpenPositionMarketData(
   marketData: {
     yesOdds?: number | null;
     noOdds?: number | null;
+    bestBidPrice?: number | null;
+    bestAskPrice?: number | null;
     marketUrl?: string | null;
     rules?: string | null;
     marketContext?: string | null;
@@ -723,6 +744,8 @@ export function applyBullpenPositionMarketData(
     ...position,
     yesOdds,
     noOdds,
+    bestBidPrice: marketData.bestBidPrice ?? position.bestBidPrice,
+    bestAskPrice: marketData.bestAskPrice ?? position.bestAskPrice,
     currentPrice,
     currentValue,
     unrealizedPnl,
@@ -757,11 +780,14 @@ export function buildTrackedBullpenPositionViews(
         conditionId: null,
         marketTitle: position.market_title,
         outcome: position.outcome,
+        heldSide: deriveHeldSide(position.outcome),
         shares: position.shares,
         averagePrice: round(position.average_price, 4),
         costBasis: round(position.cost_basis, 2),
         yesOdds: marketUpdate?.yesOdds ?? null,
         noOdds: marketUpdate?.noOdds ?? null,
+        bestBidPrice: marketUpdate?.bestBidPrice ?? null,
+        bestAskPrice: marketUpdate?.bestAskPrice ?? null,
         currentPrice: null,
         currentValue: null,
         unrealizedPnl: null,

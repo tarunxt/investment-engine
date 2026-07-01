@@ -570,6 +570,20 @@ class SyncPolymarketAutoLiveRepository:
                         "average_price_cents": position.average_price_cents,
                         "close_time": position.close_time,
                         "current_price_cents": position.current_price_cents,
+                        "current_yes_odds": position.current_yes_odds,
+                        "current_no_odds": position.current_no_odds,
+                        "best_bid_cents": position.best_bid_cents,
+                        "best_ask_cents": position.best_ask_cents,
+                        "price_history": [
+                            snapshot.model_dump(mode="json")
+                            for snapshot in position.price_history
+                        ],
+                        "exit_signals": [
+                            signal.model_dump(mode="json")
+                            for signal in position.exit_signals
+                        ],
+                        "exit_state": position.exit_state,
+                        "estimated_freeable_value_usd": position.estimated_freeable_value_usd,
                         "opened_at": position.opened_at.astimezone(UTC).isoformat(),
                         "updated_at": position.updated_at.astimezone(UTC).isoformat(),
                     },

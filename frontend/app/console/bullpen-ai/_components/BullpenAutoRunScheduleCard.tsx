@@ -44,6 +44,7 @@ import {
   selectBullpenStage3OnlyInvestSource,
 } from "./bullpenAutoRunStage3Invest";
 import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
+import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
 import { formatElapsedRunTime, formatStageElapsedTime } from "./bullpenAutoRunTimers";
 
@@ -310,6 +311,9 @@ type InvestExecutionStepView = {
   plannedOrders: number | null;
   processedOrders: number | null;
   submittedOrders: number | null;
+  eventExitRows?: number | null;
+  rankingLlmPlannedOrders?: number | null;
+  forcedExitPlannedOrders?: number | null;
 };
 
 function normalizeInvestExecutionStepStatus(
@@ -364,6 +368,13 @@ function getInvestStageExecutionSteps(
         plannedOrders: readStageOutputNumber(step.planned_orders) ?? 0,
         processedOrders: readStageOutputNumber(step.processed_orders) ?? 0,
         submittedOrders: readStageOutputNumber(step.submitted_orders) ?? 0,
+        eventExitRows: readStageOutputNumber(step.event_exit_rows),
+        rankingLlmPlannedOrders: readStageOutputNumber(
+          step.ranking_llm_planned_orders,
+        ),
+        forcedExitPlannedOrders: readStageOutputNumber(
+          step.forced_exit_planned_orders,
+        ),
       };
     })
     .filter((step): step is InvestExecutionStepView => step !== null);
@@ -513,9 +524,11 @@ function formatInvestStageRowMix(
 function InvestExecutionStepsSummary({
   steps,
   compact = false,
+  onOpenEventExitInfo,
 }: {
   steps: InvestExecutionStepView[];
   compact?: boolean;
+  onOpenEventExitInfo?: () => void;
 }) {
   if (steps.length === 0) return null;
 
@@ -535,9 +548,22 @@ function InvestExecutionStepsSummary({
                 <p className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}>
                   Step {step.stepNumber} of {step.stepTotal}
                 </p>
-                <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                  {step.label}
-                </p>
+                <div className="mt-1 flex items-center gap-2">
+                  <p className={`text-sm font-semibold ${toneClasses.text}`}>
+                    {step.label}
+                  </p>
+                  {step.key === "sell" && onOpenEventExitInfo ? (
+                    <button
+                      type="button"
+                      onClick={onOpenEventExitInfo}
+                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/80 bg-white/70 ${toneClasses.text}`}
+                      aria-label="Explain Event Exit strategies"
+                      title="Explain Event Exit strategies"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <span
                 className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
@@ -568,6 +594,30 @@ function InvestExecutionStepsSummary({
                 </p>
               </div>
             </div>
+            {step.key === "sell" ? (
+              <div className={`mt-3 grid gap-2 text-xs ${toneClasses.muted}`}>
+                <div className="rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.1em]">Exit rows</p>
+                  <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
+                    {step.eventExitRows ?? "—"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <div className="min-w-[8rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.1em]">Ranking / LLM</p>
+                    <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
+                      {step.rankingLlmPlannedOrders ?? "—"}
+                    </p>
+                  </div>
+                  <div className="min-w-[8rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.1em]">Forced Exit</p>
+                    <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
+                      {step.forcedExitPlannedOrders ?? "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         );
       })}
@@ -813,9 +863,11 @@ function formatInvestMetricOrderStatus(decision: BullpenAutoLiveDecision) {
 function InvestMetricDetailsDialog({
   state,
   onClose,
+  onOpenEventExitInfo,
 }: {
   state: InvestMetricDialogState;
   onClose: () => void;
+  onOpenEventExitInfo?: () => void;
 }) {
   const rows = getInvestMetricRows(state);
   const decisionsCount = getInvestStageMetric(state.stage, "decisions_count", state.run.decisions_count);
@@ -918,7 +970,10 @@ function InvestMetricDetailsDialog({
 
           {executionSteps.length > 0 ? (
             <div className="mt-5">
-              <InvestExecutionStepsSummary steps={executionSteps} />
+              <InvestExecutionStepsSummary
+                steps={executionSteps}
+                onOpenEventExitInfo={onOpenEventExitInfo}
+              />
             </div>
           ) : null}
 
@@ -1129,6 +1184,8 @@ export function BullpenAutoRunScheduleCard({
   const [investMetricDialog, setInvestMetricDialog] =
     useState<InvestMetricDialogState | null>(null);
   const [isScheduleInfoDialogOpen, setIsScheduleInfoDialogOpen] = useState(false);
+  const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
+    useState(false);
 
   async function loadSummary(options?: {
     preserveLoading?: boolean;
@@ -1941,6 +1998,7 @@ export function BullpenAutoRunScheduleCard({
                       <InvestExecutionStepsSummary
                         steps={displayedInvestSteps}
                         compact
+                        onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
                       />
                     </div>
                   ) : null}
@@ -2128,15 +2186,22 @@ export function BullpenAutoRunScheduleCard({
               <div className="px-6 py-5 text-sm leading-6 text-slate-700">
                 <p>
                   Scheduled runs use the Bullpen console top-10 profile: scan upcoming
-                  markets, run LLM consensus on every Stage 1 event, sell active
-                  positions that fall out of the top 10 by returns/day so capital is
-                  freed first, and then buy <span className="font-semibold">$5</span> of
-                  each new opportunity on the stronger LLM side when it ranks inside
-                  that top 10 list.
+                  markets, run LLM consensus on every Stage 1 event, process Event
+                  Exits from both the ranking / LLM strategy and the capital-aware
+                  forced-exit strategy so capital is freed first, and then buy{" "}
+                  <span className="font-semibold">$5</span> of each new opportunity on
+                  the stronger LLM side when it ranks inside the investable top 10
+                  list.
                 </p>
               </div>
             </div>
           </div>
+        ) : null}
+
+        {isEventExitStrategiesDialogOpen ? (
+          <BullpenEventExitStrategiesDialog
+            onClose={() => setIsEventExitStrategiesDialogOpen(false)}
+          />
         ) : null}
 
         {scanCandidateDialog ? (
@@ -2150,6 +2215,7 @@ export function BullpenAutoRunScheduleCard({
           <InvestMetricDetailsDialog
             state={investMetricDialog}
             onClose={() => setInvestMetricDialog(null)}
+            onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
           />
         ) : null}
 

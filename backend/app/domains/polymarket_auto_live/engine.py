@@ -30,6 +30,18 @@ from app.domains.polymarket_auto_live.config import (
     auto_live_backend_execution_env_detail,
 )
 from app.domains.polymarket_auto_live.evidence import EvidencePacket, build_evidence_packet
+from app.domains.polymarket_auto_live.event_exit import (
+    DEFAULT_FORCED_EXIT_CONFIG,
+    EventExitContext,
+    EventExitSnapshot,
+    ExitSignal,
+    PositionPriceSnapshot,
+    RankingAndLlmExitContext,
+    build_position_price_snapshot,
+    evaluate_event_exits,
+    merge_price_history,
+    summarize_exit_labels,
+)
 from app.domains.polymarket_auto_live.execution import (
     buy_limit_price_cents,
     cents_to_decimal,
@@ -228,6 +240,14 @@ class PositionSnapshot:
     close_time: str | None = None
     current_price_cents: float | None = None
     condition_id: str | None = None
+    current_yes_odds: float | None = None
+    current_no_odds: float | None = None
+    best_bid_cents: float | None = None
+    best_ask_cents: float | None = None
+    price_history: list[PositionPriceSnapshot] = field(default_factory=list)
+    exit_signals: list[ExitSignal] = field(default_factory=list)
+    exit_state: str = "ACTIVE"
+    estimated_freeable_value_usd: float | None = None
 
 
 @dataclass
@@ -327,6 +347,58 @@ def _disagreement_weight(consensus: LlmConsensus | None, settings: BullpenAutoLi
 
 def _current_price_for_side(market: ScannedMarket, side: str) -> float | None:
     return market.current_yes_odds if side == "YES" else market.current_no_odds
+
+
+def _probability_from_percent(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(min(1.0, max(0.0, value / 100)), 4)
+
+
+def _held_probability_for_side(
+    *,
+    held_side: str | None,
+    yes_probability: float | None,
+    no_probability: float | None,
+) -> float | None:
+    if held_side == "YES":
+        return yes_probability
+    if held_side == "NO":
+        return no_probability
+    return None
+
+
+def _held_best_bid_for_side(
+    *,
+    held_side: str | None,
+    best_bid_cents: float | None,
+    best_ask_cents: float | None,
+    fallback_probability: float | None,
+) -> float | None:
+    if held_side == "YES":
+        if best_bid_cents is not None:
+            return round(min(1.0, max(0.0, best_bid_cents / 100)), 4)
+        return fallback_probability
+    if held_side == "NO":
+        if best_ask_cents is not None:
+            return round(min(1.0, max(0.0, (100 - best_ask_cents) / 100)), 4)
+        return fallback_probability
+    return None
+
+
+def _estimated_freeable_value(
+    *,
+    shares: float,
+    held_best_bid: float | None,
+) -> float | None:
+    if held_best_bid is None:
+        return None
+    return round(max(0.0, shares * held_best_bid), 6)
+
+
+def _event_exit_reason(signals: list[ExitSignal], fallback: str) -> str:
+    labels = summarize_exit_labels(signals)
+    return labels if labels else fallback
 
 
 def _stronger_probability_side(
@@ -989,6 +1061,11 @@ def _serialize_stage3_decision_row(
         "order_plan": (
             decision.order_plan.model_dump(mode="json") if decision.order_plan else None
         ),
+        "exit_signals": [
+            signal.model_dump(mode="json")
+            for signal in decision.exit_signals
+        ],
+        "exit_state": decision.exit_state,
         "llm_outputs": [],
         "stage_results": [],
         "guardrail_checks": [],
@@ -2460,26 +2537,74 @@ class BullpenAutoLiveEngine:
             )
             for position in live_wallet_positions
         ]
-        position_snapshots = [
-            PositionSnapshot(
-                market_id=position.market_id,
-                slug=position.slug,
-                market_title=position.market_title,
-                market_url=position.market_url,
-                theme=position.theme,
-                side=position.side,
-                exposure_usd=position.exposure_usd,
-                shares=position.shares,
-                average_price_cents=position.average_price_cents,
-                opened_at=now,
-                updated_at=now,
-                close_time=position.close_time,
-                current_price_cents=position.current_price_cents,
-                condition_id=position.condition_id,
+        persisted_positions_by_key = {
+            f"{position.market_id}::{position.side}": position for position in positions
+        }
+        position_snapshots: list[PositionSnapshot] = []
+        for position in enriched_wallet_positions:
+            if position.is_claimable:
+                continue
+            position_key = f"{position.market_id}::{position.side}"
+            persisted_position = persisted_positions_by_key.get(position_key)
+            matched_market = market_by_slug.get(position.slug) or market_by_id.get(position.market_id)
+            position_snapshots.append(
+                PositionSnapshot(
+                    market_id=position.market_id,
+                    slug=position.slug,
+                    market_title=position.market_title,
+                    market_url=position.market_url,
+                    theme=position.theme,
+                    side=position.side,
+                    exposure_usd=position.exposure_usd,
+                    shares=position.shares,
+                    average_price_cents=position.average_price_cents,
+                    opened_at=now,
+                    updated_at=now,
+                    close_time=position.close_time,
+                    current_price_cents=position.current_price_cents,
+                    condition_id=position.condition_id,
+                    current_yes_odds=(
+                        matched_market.current_yes_odds
+                        if matched_market is not None
+                        else position.current_yes_odds
+                    ),
+                    current_no_odds=(
+                        matched_market.current_no_odds
+                        if matched_market is not None
+                        else position.current_no_odds
+                    ),
+                    best_bid_cents=(
+                        matched_market.best_bid_cents
+                        if matched_market is not None
+                        else persisted_position.best_bid_cents
+                        if persisted_position is not None
+                        else None
+                    ),
+                    best_ask_cents=(
+                        matched_market.best_ask_cents
+                        if matched_market is not None
+                        else persisted_position.best_ask_cents
+                        if persisted_position is not None
+                        else None
+                    ),
+                    price_history=(
+                        list(persisted_position.price_history)
+                        if persisted_position is not None
+                        else []
+                    ),
+                    exit_signals=(
+                        list(persisted_position.exit_signals)
+                        if persisted_position is not None
+                        else []
+                    ),
+                    exit_state=persisted_position.exit_state if persisted_position is not None else "ACTIVE",
+                    estimated_freeable_value_usd=(
+                        persisted_position.estimated_freeable_value_usd
+                        if persisted_position is not None
+                        else None
+                    ),
+                )
             )
-            for position in enriched_wallet_positions
-            if not position.is_claimable
-        ]
         active_position_rows_before_llm = len(position_snapshots)
 
         set_run_stage_result(
@@ -3099,17 +3224,20 @@ class BullpenAutoLiveEngine:
                 row["market_id"],
             ),
         )
-        top_rows = combined_rank_rows[:CONSOLE_RANKED_EVENT_LIMIT]
-        top_active_keys = {
+        ranking_top_rows = combined_rank_rows[:CONSOLE_RANKED_EVENT_LIMIT]
+        ranking_top_active_keys = {
             str(row["key"])
-            for row in top_rows
+            for row in ranking_top_rows
             if row["kind"] == "active"
         }
-        top_candidate_market_ids = {
+        ranking_top_candidate_market_ids = {
             str(row["market_id"])
-            for row in top_rows
+            for row in ranking_top_rows
             if row["kind"] == "candidate"
         }
+        top_rows = ranking_top_rows
+        top_active_keys = ranking_top_active_keys
+        top_candidate_market_ids = ranking_top_candidate_market_ids
 
         run.stage_results.append(
             build_stage_result(
@@ -3117,11 +3245,11 @@ class BullpenAutoLiveEngine:
                 status="pass",
                 reason="Ranked active positions and new qualified candidates into the fixed top-10 table.",
                 outputs={
-                    "top_table_size": len(top_rows),
+                    "top_table_size": len(ranking_top_rows),
                     "active_rows_ranked": len(active_rank_rows),
                     "qualified_candidate_rows": len(candidate_rank_rows),
-                    "top_candidate_market_ids": sorted(top_candidate_market_ids),
-                    "top_active_keys": sorted(top_active_keys),
+                    "top_candidate_market_ids": sorted(ranking_top_candidate_market_ids),
+                    "top_active_keys": sorted(ranking_top_active_keys),
                     "rejected_candidates": [
                         diagnostic.model_dump(mode="json")
                         for diagnostic in rejected_candidate_map.values()
@@ -3135,7 +3263,7 @@ class BullpenAutoLiveEngine:
         run.diagnostics.candidate_rows_before_llm = candidate_rows_before_llm
         run.diagnostics.llm_candidate_count = llm_candidate_count
         run.diagnostics.qualified_candidate_rows = len(candidate_rank_rows)
-        run.diagnostics.top_candidate_market_ids = sorted(top_candidate_market_ids)
+        run.diagnostics.top_candidate_market_ids = sorted(ranking_top_candidate_market_ids)
         run.diagnostics.rejected_candidates = list(rejected_candidate_map.values())
         run.diagnostics.scan_source_label = scan_source_label
         run.diagnostics.scan_source_url = scan_source_url
@@ -3156,14 +3284,27 @@ class BullpenAutoLiveEngine:
             buy_planned = 0
             buy_processed = 0
             buy_submitted = 0
+            event_exit_rows = 0
+            ranking_llm_sell_planned = 0
+            forced_exit_sell_planned = 0
 
             for current in decisions:
+                if current.exit_state in {"EVENT_EXIT_PLANNED", "DUST_LOST"}:
+                    event_exit_rows += 1
                 order_plan = current.order_plan
                 if order_plan is None:
                     continue
                 is_sell = order_plan.action == "sell"
                 if is_sell:
                     sell_planned += 1
+                    strategies = {signal.strategy for signal in current.exit_signals}
+                    if strategies & {
+                        "OUTSIDE_TOP_10_RETURNS_DAY",
+                        "LLM_OR_ODDS_FILTER_EXIT",
+                    }:
+                        ranking_llm_sell_planned += 1
+                    if "CAPITAL_AWARE_FORCED_EXIT" in strategies:
+                        forced_exit_sell_planned += 1
                 else:
                     buy_planned += 1
                 if order_plan.status != "planned":
@@ -3181,6 +3322,9 @@ class BullpenAutoLiveEngine:
                 "sell_planned": sell_planned,
                 "sell_processed": sell_processed,
                 "sell_submitted": sell_submitted,
+                "event_exit_rows": event_exit_rows,
+                "ranking_llm_sell_planned": ranking_llm_sell_planned,
+                "forced_exit_sell_planned": forced_exit_sell_planned,
                 "buy_planned": buy_planned,
                 "buy_processed": buy_processed,
                 "buy_submitted": buy_submitted,
@@ -3209,9 +3353,7 @@ class BullpenAutoLiveEngine:
 
             if sell_planned == 0:
                 sell_status = "completed"
-                sell_detail = (
-                    "No Step 1 sells were needed from SELL | Events outside Top 10 by Returns/day."
-                )
+                sell_detail = "No executable Step 1 Event Exits were needed."
             elif current_step_key == "sell":
                 if execution_gate_reason:
                     sell_status = "blocked"
@@ -3219,38 +3361,37 @@ class BullpenAutoLiveEngine:
                 elif execution_mode_reason:
                     sell_status = "running"
                     sell_detail = current_step_detail or (
-                        "Simulation mode is reviewing the Step 1 sells that would free capital."
+                        "Simulation mode is reviewing the Step 1 Event Exits that would free capital."
                     )
                 else:
                     sell_status = "running"
                     sell_detail = current_step_detail or (
-                        "Selling the Step 1 events from SELL | Events outside Top 10 by Returns/day."
+                        "Processing the Step 1 Event Exits before new investments."
                     )
             elif is_sell_step_complete:
                 sell_status = "completed"
-                sell_detail = (
-                    "Step 1 finished processing the SELL | Events outside Top 10 by Returns/day list."
-                )
+                sell_detail = "Step 1 finished processing the Event Exits list."
             elif execution_gate_reason:
                 sell_status = "blocked"
                 sell_detail = execution_gate_reason
             else:
                 sell_status = "pending"
-                sell_detail = (
-                    "Step 1 will sell the SELL | Events outside Top 10 by Returns/day rows first."
-                )
+                sell_detail = "Step 1 will process Event Exits first."
 
             steps.append(
                 {
                     "key": "sell",
                     "step_number": 1,
                     "step_total": 2,
-                    "label": "Sell outside Top 10",
+                    "label": "Event Exits",
                     "status": sell_status,
                     "detail": sell_detail,
                     "planned_orders": sell_planned,
                     "processed_orders": sell_processed,
                     "submitted_orders": sell_submitted,
+                    "event_exit_rows": counts["event_exit_rows"],
+                    "ranking_llm_planned_orders": counts["ranking_llm_sell_planned"],
+                    "forced_exit_planned_orders": counts["forced_exit_sell_planned"],
                 }
             )
 
@@ -3274,7 +3415,7 @@ class BullpenAutoLiveEngine:
             elif not is_sell_step_complete and sell_planned > 0:
                 buy_status = "pending"
                 buy_detail = (
-                    "Step 2 is waiting for Step 1 sells to free capital before buying."
+                    "Step 2 is waiting for Step 1 Event Exits to free capital before buying."
                 )
             elif buy_processed >= buy_planned:
                 buy_status = "completed"
@@ -3334,6 +3475,12 @@ class BullpenAutoLiveEngine:
                 "orders_planned": counts["planned"],
                 "orders_submitted": counts["submitted"],
                 "orders_processed": counts["processed"],
+                "event_exit_rows": counts["event_exit_rows"],
+                "event_exit_planned": counts["sell_planned"],
+                "event_exit_processed": counts["sell_processed"],
+                "event_exit_submitted": counts["sell_submitted"],
+                "event_exit_ranking_llm_planned": counts["ranking_llm_sell_planned"],
+                "event_exit_forced_planned": counts["forced_exit_sell_planned"],
                 "sell_orders_planned": counts["sell_planned"],
                 "sell_orders_processed": counts["sell_processed"],
                 "sell_orders_submitted": counts["sell_submitted"],
@@ -3343,7 +3490,7 @@ class BullpenAutoLiveEngine:
                 "execution_steps": execution_steps,
                 "execution_step_key": current_step_key,
                 "execution_step_label": (
-                    "Step 1 · Sell outside Top 10"
+                    "Step 1 · Event Exits"
                     if current_step_key == "sell"
                     else "Step 2 · Invest planned orders"
                     if current_step_key == "buy"
@@ -3388,20 +3535,6 @@ class BullpenAutoLiveEngine:
             )
             self._report_progress(progress_callback, run, state)
 
-        report_invest_stage_progress(
-            phase_status="running",
-            reason=(
-                "Stage 3 started. Step 1 will sell the SELL | Events outside Top 10 by "
-                "Returns/day rows first, then Step 2 will invest in the Stage 3 planned "
-                "orders."
-                if total_decision_rows > 0
-                else "No candidate or position rows were available for Stage 3."
-            ),
-            completed_items=0,
-            execution_mode_reason=simulation_reason if state.dry_run else None,
-            completed_at=None,
-        )
-
         def record_invest_decision(
             decision: BullpenAutoLiveDecision,
             *,
@@ -3436,6 +3569,9 @@ class BullpenAutoLiveEngine:
             order_shares: float = 0,
             llm_outputs: list[BullpenAutoLiveLlmOutput] | None = None,
             llm_consensus: LlmConsensus | None = None,
+            exit_signals: list[ExitSignal] | None = None,
+            exit_state: str = "ACTIVE",
+            include_order_plan: bool = True,
         ) -> BullpenAutoLiveDecision:
             fair_no = llm_consensus.fair_no_probability_pct if llm_consensus else None
             fair_yes = llm_consensus.fair_yes_probability_pct if llm_consensus else None
@@ -3459,6 +3595,15 @@ class BullpenAutoLiveEngine:
                 market,
                 side if decision_action == "BUY_NEW" else current_position.side if current_position else side,
             )
+            if decision_action == "EXIT" and current_position is not None:
+                executable_bid = _held_best_bid_for_side(
+                    held_side=current_position.side,
+                    best_bid_cents=current_position.best_bid_cents,
+                    best_ask_cents=current_position.best_ask_cents,
+                    fallback_probability=_probability_from_percent(price_cents),
+                )
+                if executable_bid is not None:
+                    price_cents = round(executable_bid * 100, 2)
             fair_probability_pct = (
                 fair_yes
                 if side == "YES"
@@ -3472,7 +3617,7 @@ class BullpenAutoLiveEngine:
                 else 0
             )
             order_plan = None
-            if decision_action in {"BUY_NEW", "EXIT"}:
+            if include_order_plan and decision_action in {"BUY_NEW", "EXIT"}:
                 order_plan = BullpenAutoLiveOrderPlan(
                     id=f"order-{run.id}-{market.market_id}-{decision_action.lower()}",
                     action="buy" if decision_action == "BUY_NEW" else "sell",
@@ -3540,6 +3685,8 @@ class BullpenAutoLiveEngine:
                 reason=reason,
                 summary=reason,
                 order_plan=order_plan,
+                exit_signals=exit_signals or [],
+                exit_state=exit_state,  # type: ignore[arg-type]
                 llm_outputs=llm_outputs or [],
                 stage_results=stage_results,
                 guardrail_checks=global_guardrails,
@@ -3553,6 +3700,11 @@ class BullpenAutoLiveEngine:
         active_position_market_ids = {
             snapshot.market_id for snapshot in position_snapshots if snapshot.market_id
         }
+        position_snapshot_by_key = {
+            f"{snapshot.market_id}::{snapshot.side}": snapshot
+            for snapshot in position_snapshots
+        }
+        evaluated_active_positions: list[dict[str, object]] = []
 
         for position in enriched_wallet_positions:
             if position.is_claimable:
@@ -3596,15 +3748,198 @@ class BullpenAutoLiveEngine:
                 if review_context and review_context.get("llm_consensus") is not None
                 else None
             )
-            current_position = next(
-                (
-                    snapshot
-                    for snapshot in position_snapshots
-                    if snapshot.market_id == position.market_id and snapshot.side == position.side
-                ),
-                None,
+            current_position = position_snapshot_by_key.get(key)
+            if current_position is not None:
+                current_position.market_url = market.market_url or current_position.market_url
+                current_position.close_time = market.close_time or current_position.close_time
+                current_position.current_yes_odds = (
+                    market.current_yes_odds
+                    if market.current_yes_odds is not None
+                    else current_position.current_yes_odds
+                )
+                current_position.current_no_odds = (
+                    market.current_no_odds
+                    if market.current_no_odds is not None
+                    else current_position.current_no_odds
+                )
+                current_position.best_bid_cents = (
+                    market.best_bid_cents
+                    if market.best_bid_cents is not None
+                    else current_position.best_bid_cents
+                )
+                current_position.best_ask_cents = (
+                    market.best_ask_cents
+                    if market.best_ask_cents is not None
+                    else current_position.best_ask_cents
+                )
+
+            if returns_per_day is not None and current_position is not None:
+                selected_side = (
+                    review_context.get("selected_side")
+                    if review_context and isinstance(review_context.get("selected_side"), str)
+                    else None
+                )
+                if selected_side is None and llm_consensus is not None:
+                    selected_side, _ = _stronger_probability_side(
+                        yes_probability=llm_consensus.fair_yes_probability_pct,
+                        no_probability=llm_consensus.fair_no_probability_pct,
+                        minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                    )
+
+                current_yes_probability = _probability_from_percent(
+                    current_position.current_yes_odds
+                )
+                current_no_probability = _probability_from_percent(
+                    current_position.current_no_odds
+                )
+                held_probability = _held_probability_for_side(
+                    held_side=current_position.side,
+                    yes_probability=current_yes_probability,
+                    no_probability=current_no_probability,
+                )
+                adverse_probability = _held_probability_for_side(
+                    held_side="NO" if current_position.side == "YES" else "YES",
+                    yes_probability=current_yes_probability,
+                    no_probability=current_no_probability,
+                )
+                held_best_bid = _held_best_bid_for_side(
+                    held_side=current_position.side,
+                    best_bid_cents=current_position.best_bid_cents,
+                    best_ask_cents=current_position.best_ask_cents,
+                    fallback_probability=held_probability,
+                )
+                llm_probability_held = _held_probability_for_side(
+                    held_side=current_position.side,
+                    yes_probability=_probability_from_percent(
+                        llm_consensus.fair_yes_probability_pct if llm_consensus else None
+                    ),
+                    no_probability=_probability_from_percent(
+                        llm_consensus.fair_no_probability_pct if llm_consensus else None
+                    ),
+                )
+                event_exit_snapshot = EventExitSnapshot(
+                    position_id=key,
+                    market_id=position.market_id,
+                    token_id=current_position.condition_id or key,
+                    held_side=current_position.side,
+                    shares=current_position.shares,
+                    avg_price=round(current_position.average_price_cents / 100, 4),
+                    current_yes_probability=current_yes_probability,
+                    current_no_probability=current_no_probability,
+                    held_best_bid=held_best_bid,
+                    close_time=current_position.close_time,
+                    llm_probability_held=llm_probability_held,
+                )
+                current_price_snapshot = build_position_price_snapshot(
+                    event_exit_snapshot,
+                    held_probability=held_probability,
+                    adverse_probability=adverse_probability,
+                    timestamp=now.isoformat(),
+                )
+                current_position.price_history = merge_price_history(
+                    current_position.price_history,
+                    current_price_snapshot,
+                )
+                exit_evaluation = evaluate_event_exits(
+                    EventExitContext(
+                        ranking=RankingAndLlmExitContext(
+                            top_active_position_keys=ranking_top_active_keys,
+                            current_position_key=key,
+                            current_yes_probability=current_yes_probability,
+                            current_no_probability=current_no_probability,
+                            selected_side=selected_side,
+                            held_side=current_position.side,
+                            minimum_market_probability=CONSOLE_MIN_MARKET_ODDS / 100,
+                            now=now,
+                        ),
+                        snapshot=event_exit_snapshot,
+                        price_history=current_position.price_history,
+                        config=DEFAULT_FORCED_EXIT_CONFIG,
+                        now=now,
+                    )
+                )
+                current_position.exit_signals = exit_evaluation.exit_signals
+                current_position.exit_state = exit_evaluation.exit_state
+                current_position.estimated_freeable_value_usd = _estimated_freeable_value(
+                    shares=current_position.shares,
+                    held_best_bid=held_best_bid,
+                )
+
+            evaluated_active_positions.append(
+                {
+                    "position": position,
+                    "position_key": key,
+                    "market": market,
+                    "returns_per_day": returns_per_day,
+                    "stage_results": stage_results,
+                    "llm_outputs": llm_outputs,
+                    "llm_consensus": llm_consensus,
+                    "current_position": current_position,
+                }
             )
-            if returns_per_day is None or current_position is None:
+
+        investable_active_rank_rows = [
+            {
+                "kind": "active",
+                "key": entry["position_key"],
+                "market_id": str(entry["position_key"]).split("::", 1)[0],
+                "returns_per_day": entry["returns_per_day"],
+                "position": entry["position"],
+            }
+            for entry in evaluated_active_positions
+            if isinstance(entry.get("returns_per_day"), (int, float))
+            and isinstance(entry.get("current_position"), PositionSnapshot)
+            and entry["current_position"].exit_state not in {"EVENT_EXIT_PLANNED", "DUST_LOST"}
+        ]
+        top_rows = sorted(
+            [*investable_active_rank_rows, *candidate_rank_rows],
+            key=lambda row: (
+                -float(row["returns_per_day"]),
+                row["market_id"],
+            ),
+        )[:CONSOLE_RANKED_EVENT_LIMIT]
+        top_active_keys = {
+            str(row["key"])
+            for row in top_rows
+            if row["kind"] == "active"
+        }
+        top_candidate_market_ids = {
+            str(row["market_id"])
+            for row in top_rows
+            if row["kind"] == "candidate"
+        }
+        run.diagnostics.top_candidate_market_ids = sorted(top_candidate_market_ids)
+
+        report_invest_stage_progress(
+            phase_status="running",
+            reason=(
+                "Stage 3 started. Step 1 will process Event Exits first, then Step 2 will invest in the remaining Stage 3 planned orders."
+                if total_decision_rows > 0
+                else "No candidate or position rows were available for Stage 3."
+            ),
+            completed_items=0,
+            execution_mode_reason=simulation_reason if state.dry_run else None,
+            completed_at=None,
+        )
+
+        for entry in evaluated_active_positions:
+            position = entry["position"]
+            market = entry["market"]
+            returns_per_day = entry["returns_per_day"]
+            stage_results = entry["stage_results"]
+            llm_outputs = entry["llm_outputs"]
+            llm_consensus = entry["llm_consensus"]
+            current_position = entry["current_position"]
+
+            if not isinstance(position, ConsoleWalletPosition) or not isinstance(
+                market,
+                ScannedMarket,
+            ):
+                continue
+            if not isinstance(stage_results, list):
+                stage_results = []
+
+            if returns_per_day is None or not isinstance(current_position, PositionSnapshot):
                 stage_results.append(
                     build_stage_result(
                         stage_number=6,
@@ -3627,12 +3962,145 @@ class BullpenAutoLiveEngine:
                     market=market,
                 )
                 continue
-            if key in top_active_keys:
+
+            exit_signals = current_position.exit_signals
+            exit_labels = [signal.label for signal in exit_signals]
+            exit_reason_codes = [signal.reasonCode for signal in exit_signals]
+            estimated_freeable_value_usd = current_position.estimated_freeable_value_usd
+            actionable_exit = (
+                estimated_freeable_value_usd is not None
+                and estimated_freeable_value_usd >= DEFAULT_FORCED_EXIT_CONFIG.min_net_proceeds
+            )
+
+            if current_position.exit_state == "DUST_LOST":
+                reason = (
+                    "Position is now treated as dust and removed from active investable positions."
+                )
+                if exit_signals:
+                    reason = f"{_event_exit_reason(exit_signals, reason)}. {reason}"
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason=reason,
+                        outputs={
+                            "returns_per_day": returns_per_day,
+                            "exit_state": current_position.exit_state,
+                            "estimated_freeable_value_usd": estimated_freeable_value_usd,
+                            "exit_labels": exit_labels,
+                            "exit_reason_codes": exit_reason_codes,
+                        },
+                    )
+                )
+                record_invest_decision(
+                    _build_decision(
+                        market=market,
+                        decision_action="EXIT",
+                        reason=reason,
+                        stage_results=stage_results,
+                        current_position=current_position,
+                        current_exposure_usd=position.exposure_usd,
+                        target_exposure_usd=0,
+                        order_usd=0,
+                        order_shares=position.shares,
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                        exit_signals=exit_signals,
+                        exit_state=current_position.exit_state,
+                        include_order_plan=False,
+                    ),
+                    market=market,
+                )
+                continue
+
+            if current_position.exit_state == "EVENT_EXIT_PLANNED":
+                reason = (
+                    "Position moved to Event Exits and will be processed before new investments."
+                )
+                if exit_signals:
+                    reason = f"{_event_exit_reason(exit_signals, reason)}. {reason}"
+                if not actionable_exit:
+                    reason = (
+                        f"{reason.rstrip('.')} It has no meaningful executable bid right now, so it "
+                        "is tracked for exit without submitting a sell order yet."
+                    )
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason=reason,
+                        outputs={
+                            "returns_per_day": returns_per_day,
+                            "exit_state": current_position.exit_state,
+                            "estimated_freeable_value_usd": estimated_freeable_value_usd,
+                            "exit_labels": exit_labels,
+                            "exit_reason_codes": exit_reason_codes,
+                        },
+                    )
+                )
+                record_invest_decision(
+                    _build_decision(
+                        market=market,
+                        decision_action="EXIT",
+                        reason=reason,
+                        stage_results=stage_results,
+                        current_position=current_position,
+                        current_exposure_usd=position.exposure_usd,
+                        target_exposure_usd=0,
+                        order_usd=estimated_freeable_value_usd or 0,
+                        order_shares=position.shares,
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                        exit_signals=exit_signals,
+                        exit_state=current_position.exit_state,
+                        include_order_plan=actionable_exit,
+                    ),
+                    market=market,
+                )
+                continue
+
+            if current_position.exit_state == "WATCH_FAST":
+                reason = (
+                    "Position remains active but is flagged WATCH_FAST because the held-side odds are deteriorating quickly."
+                )
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason=reason,
+                        outputs={
+                            "returns_per_day": returns_per_day,
+                            "exit_state": current_position.exit_state,
+                            "estimated_freeable_value_usd": estimated_freeable_value_usd,
+                            "exit_labels": exit_labels,
+                            "exit_reason_codes": exit_reason_codes,
+                        },
+                    )
+                )
+                record_invest_decision(
+                    _build_decision(
+                        market=market,
+                        decision_action="HOLD",
+                        reason=reason,
+                        stage_results=stage_results,
+                        current_position=current_position,
+                        current_exposure_usd=position.exposure_usd,
+                        target_exposure_usd=position.exposure_usd,
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                        exit_signals=exit_signals,
+                        exit_state=current_position.exit_state,
+                    ),
+                    market=market,
+                )
+                continue
+
+            if entry["position_key"] in top_active_keys:
                 stage_results.append(
                     build_stage_result(
                         stage_number=6,
                         status="pass",
-                        reason="Active position remains inside the top-10 returns/day table.",
+                        reason="Active position remains inside the top-10 returns/day table after Event Exit evaluation.",
                         outputs={"returns_per_day": returns_per_day},
                     )
                 )
@@ -3640,7 +4108,7 @@ class BullpenAutoLiveEngine:
                     _build_decision(
                         market=market,
                         decision_action="HOLD",
-                        reason="Active position remains inside the top-10 returns/day table.",
+                        reason="Active position remains inside the top-10 returns/day table after Event Exit evaluation.",
                         stage_results=stage_results,
                         current_position=current_position,
                         current_exposure_usd=position.exposure_usd,
@@ -3651,27 +4119,28 @@ class BullpenAutoLiveEngine:
                     market=market,
                 )
                 continue
+
             stage_results.append(
                 build_stage_result(
                     stage_number=6,
-                    status="warning",
-                    reason="Active position fell outside the top-10 returns/day table and will be exited.",
+                    status="pass",
+                    reason="Active position remains active after Event Exit evaluation.",
                     outputs={"returns_per_day": returns_per_day},
                 )
             )
             record_invest_decision(
                 _build_decision(
                     market=market,
-                    decision_action="EXIT",
-                    reason="Active position fell outside the top-10 returns/day table and will be exited.",
+                    decision_action="HOLD",
+                    reason="Active position remains active after Event Exit evaluation.",
                     stage_results=stage_results,
                     current_position=current_position,
                     current_exposure_usd=position.exposure_usd,
-                    target_exposure_usd=0,
-                    order_usd=position.exposure_usd,
-                    order_shares=position.shares,
+                    target_exposure_usd=position.exposure_usd,
                     llm_outputs=llm_outputs,
                     llm_consensus=llm_consensus,
+                    exit_signals=exit_signals,
+                    exit_state=current_position.exit_state,
                 ),
                 market=market,
             )
@@ -3844,7 +4313,7 @@ class BullpenAutoLiveEngine:
             if state.dry_run:
                 preparation_reason = (
                     f"Stage 3 reviewed all {total_decision_rows} rows and is staying in "
-                    "simulation mode while it walks Step 1 sells and Step 2 planned buys."
+                    "simulation mode while it walks Step 1 Event Exits and Step 2 planned buys."
                 )
             elif execution_pause_reason:
                 preparation_reason = (
@@ -3853,22 +4322,20 @@ class BullpenAutoLiveEngine:
                 )
             elif sell_planned_orders > 0 and buy_planned_orders > 0:
                 preparation_reason = (
-                    f"Stage 3 reviewed all {total_decision_rows} rows. Step 1 will sell "
-                    f"{sell_planned_orders} event{'s' if sell_planned_orders != 1 else ''} "
-                    "from SELL | Events outside Top 10 by Returns/day so capital becomes "
-                    f"free, then Step 2 will buy {buy_planned_orders} Stage 3 planned "
+                    f"Stage 3 reviewed all {total_decision_rows} rows. Step 1 will process "
+                    f"{sell_planned_orders} Event Exit order{'s' if sell_planned_orders != 1 else ''} "
+                    f"so capital becomes free, then Step 2 will buy {buy_planned_orders} Stage 3 planned "
                     f"order{'s' if buy_planned_orders != 1 else ''}."
                 )
             elif sell_planned_orders > 0:
                 preparation_reason = (
-                    f"Stage 3 reviewed all {total_decision_rows} rows. Step 1 will sell "
-                    f"{sell_planned_orders} event{'s' if sell_planned_orders != 1 else ''} "
-                    "from SELL | Events outside Top 10 by Returns/day. No Step 2 buys are "
+                    f"Stage 3 reviewed all {total_decision_rows} rows. Step 1 will process "
+                    f"{sell_planned_orders} Event Exit order{'s' if sell_planned_orders != 1 else ''}. No Step 2 buys are "
                     "planned."
                 )
             else:
                 preparation_reason = (
-                    f"Stage 3 reviewed all {total_decision_rows} rows. No Step 1 sells are "
+                    f"Stage 3 reviewed all {total_decision_rows} rows. No Step 1 Event Exits are "
                     f"needed, so Step 2 will buy {buy_planned_orders} Stage 3 planned "
                     f"order{'s' if buy_planned_orders != 1 else ''}."
                 )
@@ -4023,6 +4490,45 @@ class BullpenAutoLiveEngine:
                 )
             order_plan.refreshed_market_price_cents = quote_price_cents
 
+            if (
+                order_plan.action == "sell"
+                and (
+                    order_plan.shares <= 0
+                    or (
+                        cents_to_decimal(order_plan.limit_price_cents) * order_plan.shares
+                    )
+                    < DEFAULT_FORCED_EXIT_CONFIG.min_net_proceeds
+                )
+            ):
+                order_plan.status = "skipped"
+                order_plan.detail = (
+                    "Exit is tracked, but the refreshed executable value is below the minimum net proceeds threshold."
+                )
+                decision.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status="skipped",
+                        reason=order_plan.detail,
+                        outputs=order_plan.model_dump(mode="json"),
+                    )
+                )
+                _, step_processed, _ = _stage3_step_counts(step_key)
+                report_invest_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        f"Stage 3 Step {step_number} of 2 processed {step_processed} of "
+                        f"{step_total_orders} {'sell' if step_key == 'sell' else 'buy'} "
+                        f"orders. Latest: {decision.market_title}"
+                    ),
+                    completed_items=processed_decision_rows,
+                    execution_gate_reason=execution_pause_reason,
+                    execution_mode_reason=simulation_reason if state.dry_run else None,
+                    current_step_key=step_key,
+                    current_step_detail=order_plan.detail,
+                    completed_at=None,
+                )
+                return
+
             if state.dry_run:
                 order_plan.status = "skipped"
                 order_plan.detail = f"Simulation only: {simulation_reason}"
@@ -4074,6 +4580,18 @@ class BullpenAutoLiveEngine:
                             updated_at=now,
                             close_time=decision.close_time,
                             current_price_cents=order_plan.limit_price_cents,
+                            current_yes_odds=decision.current_yes_odds,
+                            current_no_odds=decision.current_no_odds,
+                            best_bid_cents=(
+                                order_plan.limit_price_cents if order_plan.side == "YES" else None
+                            ),
+                            best_ask_cents=(
+                                round(100 - order_plan.limit_price_cents, 2)
+                                if order_plan.side == "NO"
+                                else None
+                            ),
+                            exit_signals=[],
+                            exit_state="ACTIVE",
                         )
                     )
                 else:
@@ -4202,7 +4720,7 @@ class BullpenAutoLiveEngine:
                 phase_status="completed",
                 status="pass" if len(decisions) > 0 else "warning",
                 reason=(
-                    "Rebalance and investment planning/execution finished for the ranked Bullpen table."
+                    "Rebalance, Event Exit processing, and investment planning/execution finished for the ranked Bullpen table."
                     if len(decisions) > 0
                     else "Stage 3 finished without any decisions to process."
                 ),
@@ -4247,7 +4765,7 @@ class BullpenAutoLiveEngine:
                     "execution_step_detail": (
                         execution_pause_reason
                         if actionable_decisions and state.paused
-                        else "Step 1 sells and Step 2 planned buys finished processing."
+                        else "Step 1 Event Exits and Step 2 planned buys finished processing."
                         if actionable_decisions
                         else None
                     ),
@@ -4335,6 +4853,18 @@ class BullpenAutoLiveEngine:
                         updated_at=now,
                         close_time=candidate.market.close_time,
                         current_price_cents=order_plan.limit_price_cents,
+                        current_yes_odds=candidate.market.current_yes_odds,
+                        current_no_odds=candidate.market.current_no_odds,
+                        best_bid_cents=(
+                            order_plan.limit_price_cents if order_plan.side == "YES" else None
+                        ),
+                        best_ask_cents=(
+                            round(100 - order_plan.limit_price_cents, 2)
+                            if order_plan.side == "NO"
+                            else None
+                        ),
+                        exit_signals=[],
+                        exit_state="ACTIVE",
                     )
                 )
                 return
@@ -4353,6 +4883,11 @@ class BullpenAutoLiveEngine:
             existing.updated_at = now
             existing.close_time = candidate.market.close_time or existing.close_time
             existing.current_price_cents = order_plan.limit_price_cents
+            existing.current_yes_odds = candidate.market.current_yes_odds
+            existing.current_no_odds = candidate.market.current_no_odds
+            existing.exit_signals = []
+            existing.exit_state = "ACTIVE"
+            existing.estimated_freeable_value_usd = None
             return
 
         current = candidate.current_position
@@ -4366,6 +4901,9 @@ class BullpenAutoLiveEngine:
         current.shares = round(max(0.0, current.shares - sell_shares), 6)
         current.exposure_usd = round(max(0.0, current.exposure_usd - realized_basis), 2)
         current.updated_at = now
+        current.exit_signals = []
+        current.exit_state = "ACTIVE"
+        current.estimated_freeable_value_usd = None
         positions[:] = [position for position in positions if position.shares > 0 and position.exposure_usd > 0]
 
     def _to_decision(self, run_id: str, candidate: CandidateEvaluation) -> BullpenAutoLiveDecision:

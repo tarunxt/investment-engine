@@ -41,6 +41,25 @@ async function loadBullpenInvestmentsModule() {
     "utf8",
   );
 
+  const bullpenEventExitsSource = readFileSync(
+    new URL("../lib/bullpenEventExits.ts", import.meta.url),
+    "utf8",
+  );
+  const bullpenEventExitsPath = path.join(tempDir, "bullpenEventExits.mjs");
+  writeFileSync(
+    bullpenEventExitsPath,
+    transpileModuleSource(bullpenEventExitsSource, "bullpenEventExits.ts")
+      .replace(
+        'from "@/lib/bullpen-ai";',
+        `from ${JSON.stringify(pathToFileURL(bullpenAiPath).href)};`,
+      )
+      .replace(
+        'from "@/lib/bullpenPositions";',
+        `from ${JSON.stringify(pathToFileURL(bullpenPositionsPath).href)};`,
+      ),
+    "utf8",
+  );
+
   const investmentsSource = readFileSync(
     new URL("../lib/bullpenInvestments.ts", import.meta.url),
     "utf8",
@@ -56,6 +75,10 @@ async function loadBullpenInvestmentsModule() {
     .replace(
       'from "@/lib/bullpenPositions";',
       `from ${JSON.stringify(pathToFileURL(bullpenPositionsPath).href)};`,
+    )
+    .replace(
+      'from "@/lib/bullpenEventExits";',
+      `from ${JSON.stringify(pathToFileURL(bullpenEventExitsPath).href)};`,
     );
   const investmentsModulePath = path.join(tempDir, "bullpenInvestments.mjs");
   writeFileSync(investmentsModulePath, rewrittenInvestmentsSource, "utf8");
@@ -74,11 +97,14 @@ function createActivePosition({
     conditionId: null,
     marketTitle,
     outcome: "No",
+    heldSide: "NO",
     shares: 5,
     averagePrice: 0.2,
     costBasis: 1,
     yesOdds: 80,
     noOdds: 20,
+    bestBidPrice: 0.2,
+    bestAskPrice: 0.8,
     currentPrice: 0.2,
     currentValue: 1,
     unrealizedPnl: 0,
@@ -221,7 +247,7 @@ test("Bullpen investment display excludes attention positions from green rows wi
   const attentionByKey = new Map(
     display.activePositionsNeedingAttention.map((entry) => [
       entry.position.key,
-      entry.reasons,
+      entry.reasonBadges,
     ]),
   );
 
@@ -230,12 +256,14 @@ test("Bullpen investment display excludes attention positions from green rows wi
   assert.equal(topRowKeys.includes(strongIncludedActive.key), true);
   assert.equal(topRowKeys.includes(strongOutsideTopTenActive.key), false);
   assert.deepEqual(attentionByKey.get(weakLlmActive.key), [
-    "LLM Yes/No odds are not above 80%",
+    "LLM Filter",
   ]);
   assert.deepEqual(attentionByKey.get(strongOutsideTopTenActive.key), [
-    "not in the top 10 by returns/day",
+    "Outside Top 10",
   ]);
   assert.equal(attentionByKey.has(strongIncludedActive.key), false);
+  assert.equal(display.eventExitCounts.total, 2);
+  assert.equal(display.watchFastPositionKeys.size, 0);
 
   for (const [positionKey] of attentionByKey) {
     assert.equal(topRowKeys.includes(positionKey), false);

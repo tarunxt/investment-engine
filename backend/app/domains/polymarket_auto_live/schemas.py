@@ -18,6 +18,42 @@ AutoLiveOrderAction = Literal["buy", "sell", "hold"]
 AutoLiveOutcomeSide = Literal["YES", "NO"]
 AutoLiveTriggeredBy = Literal["manual", "scheduler", "start", "resume"]
 AutoLiveStrategyProfile = Literal["guardrail_kelly", "bullpen_console_top10"]
+AutoLiveExitStrategy = Literal[
+    "OUTSIDE_TOP_10_RETURNS_DAY",
+    "LLM_OR_ODDS_FILTER_EXIT",
+    "CAPITAL_AWARE_FORCED_EXIT",
+]
+AutoLiveExitSeverity = Literal[
+    "INFO",
+    "WATCH_FAST",
+    "PLANNED_EXIT",
+    "IMMEDIATE_EXIT",
+    "DUST_LOST",
+]
+AutoLiveExitReasonCode = Literal[
+    "OUTSIDE_TOP_10_BY_RETURNS_DAY",
+    "LLM_FILTER_FAILED",
+    "ODDS_FILTER_FAILED",
+    "ADVERSE_MARKET_99_5",
+    "ADVERSE_MARKET_99",
+    "HELD_SIDE_BID_BELOW_0_5_CENTS",
+    "HELD_SIDE_DROP_10_POINTS_1M",
+    "HELD_SIDE_DROP_15_POINTS_1M",
+    "HELD_SIDE_DROP_25_POINTS_5M",
+    "EVENT_CLOSE_PASSED",
+    "LOW_EXECUTABLE_VALUE",
+    "NO_BID_AVAILABLE",
+]
+AutoLiveExitState = Literal[
+    "ACTIVE",
+    "WATCH_FAST",
+    "EVENT_EXIT_PLANNED",
+    "SELL_SUBMITTED",
+    "PARTIALLY_FILLED",
+    "SOLD",
+    "DUST_LOST",
+    "FAILED",
+]
 TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 TradingBotMode = Literal["paper", "live-read", "live-trading", "dry-run", "analysis-only"]
 TradingBotGuardrailTone = Literal["neutral", "positive", "warning", "critical"]
@@ -304,6 +340,45 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     executed_at: str | None = None
 
 
+class BullpenAutoLiveExitSignalMetrics(BaseModel):
+    currentYes: float | None = Field(default=None, ge=0, le=1)
+    currentNo: float | None = Field(default=None, ge=0, le=1)
+    heldProbability: float | None = Field(default=None, ge=0, le=1)
+    adverseProbability: float | None = Field(default=None, ge=0, le=1)
+    heldBestBid: float | None = Field(default=None, ge=0)
+    shares: float | None = Field(default=None, ge=0)
+    avgPrice: float | None = Field(default=None, ge=0)
+    estimatedFreeableValue: float | None = None
+    drop1m: float | None = None
+    drop5m: float | None = None
+    adverseRise1m: float | None = None
+    adverseRise5m: float | None = None
+    timeToCloseHours: float | None = None
+
+
+class BullpenAutoLiveExitSignal(BaseModel):
+    strategy: AutoLiveExitStrategy
+    severity: AutoLiveExitSeverity
+    reasonCode: AutoLiveExitReasonCode
+    label: str
+    description: str
+    score: float | None = None
+    createdAt: str
+    metrics: BullpenAutoLiveExitSignalMetrics | None = None
+
+
+class BullpenAutoLivePositionPriceSnapshot(BaseModel):
+    positionId: str
+    marketId: str
+    tokenId: str
+    timestamp: str
+    currentYes: float = Field(ge=0, le=1)
+    currentNo: float = Field(ge=0, le=1)
+    heldProbability: float = Field(ge=0, le=1)
+    adverseProbability: float = Field(ge=0, le=1)
+    heldBestBid: float | None = Field(default=None, ge=0)
+
+
 class BullpenAutoLiveStageResult(BaseModel):
     stage_number: int = Field(ge=1, le=7)
     stage_name: str
@@ -355,6 +430,8 @@ class BullpenAutoLiveDecision(BaseModel):
     reason: str
     summary: str
     order_plan: BullpenAutoLiveOrderPlan | None = None
+    exit_signals: list[BullpenAutoLiveExitSignal] = Field(default_factory=list)
+    exit_state: AutoLiveExitState = "ACTIVE"
     llm_outputs: list[BullpenAutoLiveLlmOutput] = Field(default_factory=list)
     stage_results: list[BullpenAutoLiveStageResult] = Field(default_factory=list)
     guardrail_checks: list[BullpenAutoLiveGuardrailCheck] = Field(default_factory=list)

@@ -30,6 +30,8 @@ export type ResolvedPolymarketMarket = {
   marketUrl: string | null;
   yesOdds: number | null;
   noOdds: number | null;
+  bestBidPrice: number | null;
+  bestAskPrice: number | null;
   rules: string | null;
   marketContext: string | null;
   resolutionSource: string | null;
@@ -80,6 +82,13 @@ function normalizeOdds(value: number | null) {
   if (value === null || value < 0) return null;
   if (value <= 1) return Number((value * 100).toFixed(2));
   return Number(value.toFixed(2));
+}
+
+function normalizePrice(value: number | null) {
+  if (value === null || value < 0) return null;
+  if (value <= 1) return Number(value.toFixed(4));
+  if (value <= 100) return Number((value / 100).toFixed(4));
+  return null;
 }
 
 function normalizeText(value: string | null) {
@@ -406,6 +415,8 @@ function normalizeResolvedMarket(
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
   const { yesOdds, noOdds } = readOutcomeOdds(record);
   const rules = extractRulesText(record);
+  const bestBidPrice = normalizePrice(parseNumber(record.bestBid));
+  const bestAskPrice = normalizePrice(parseNumber(record.bestAsk));
 
   if (!id) return null;
 
@@ -415,6 +426,8 @@ function normalizeResolvedMarket(
     marketUrl: buildPolymarketEventUrl(eventSlug),
     yesOdds,
     noOdds,
+    bestBidPrice,
+    bestAskPrice,
     rules,
     marketContext: null,
     resolutionSource: extractResolutionSourceText(record, rules),
@@ -606,6 +619,8 @@ async function searchBullpenMarketByQuestion(question: string) {
         marketUrl: fallbackMarket.marketUrl,
         yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
         noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
+        bestBidPrice: null,
+        bestAskPrice: null,
         rules: null,
         marketContext: null,
         resolutionSource: null,

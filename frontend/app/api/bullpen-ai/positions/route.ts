@@ -7,8 +7,10 @@ import {
 import { redactBullpenSensitiveText } from "../_lib/bullpenHealthCore.ts";
 import { resolvePolymarketMarketsWithQuestionFallback } from "../_lib/polymarketMarketUrls";
 import {
+  applyBullpenPositionMarketData,
   buildTrackedBullpenPositionViews,
   summarizeBullpenPositions,
+  type BullpenActivePositionView,
   type BullpenPositionsResponse,
 } from "@/lib/bullpenPositions";
 import type { PolymarketBotState } from "@/types/api";
@@ -120,18 +122,51 @@ function buildFallbackResponse({
   } satisfies NonNullable<BullpenPositionsResponse["fallback"]>;
 }
 
+async function enrichPositionsWithPolymarketData(
+  positions: BullpenActivePositionView[] | undefined,
+) {
+  const normalizedPositions = Array.isArray(positions) ? positions : [];
+  if (normalizedPositions.length === 0) {
+    return normalizedPositions;
+  }
+
+  try {
+    const marketUpdates = await resolvePolymarketMarketsWithQuestionFallback(
+      normalizedPositions.map((position) => ({
+        id: position.key,
+        slug: position.marketId,
+        marketUrl: position.marketUrl,
+        question: position.marketTitle,
+      })),
+    );
+
+    return normalizedPositions.map((position) =>
+      applyBullpenPositionMarketData(position, marketUpdates[position.key] || {}),
+    );
+  } catch {
+    return normalizedPositions;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const liveResult = await syncBullpenLiveSnapshot();
 
   if (liveResult.ok && liveResult.snapshot) {
+    const enrichedPositions = await enrichPositionsWithPolymarketData(
+      liveResult.snapshot.positions,
+    );
     return NextResponse.json({
-      positions: liveResult.snapshot.positions,
-      summary: liveResult.snapshot.summary,
+      positions: enrichedPositions,
+      summary: summarizeBullpenPositions(enrichedPositions, liveResult.snapshot.summary),
       fetchedAt: liveResult.snapshot.fetchedAt,
       liveAvailable: true,
       positionsSource: "live-cli",
       health: liveResult.health,
-      lastSuccessfulLiveSnapshot: liveResult.snapshot,
+      lastSuccessfulLiveSnapshot: {
+        ...liveResult.snapshot,
+        positions: enrichedPositions,
+        summary: summarizeBullpenPositions(enrichedPositions, liveResult.snapshot.summary),
+      },
       fallback: buildFallbackResponse({
         source: null,
         message: null,

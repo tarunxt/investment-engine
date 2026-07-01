@@ -16,6 +16,7 @@ from app.domains.polymarket_auto_live.bot import (
     effective_dry_run,
     live_execution_requested,
 )
+from app.domains.polymarket_auto_live.event_exit import ExitSignal, PositionPriceSnapshot
 from app.domains.polymarket_auto_live.engine import BullpenAutoLiveEngine, PositionSnapshot
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveRunRecord,
@@ -71,6 +72,42 @@ def _position_snapshot_from_record(record) -> PositionSnapshot:
             else None
         ),
         condition_id=payload.get("condition_id") if isinstance(payload.get("condition_id"), str) else None,
+        current_yes_odds=(
+            float(payload["current_yes_odds"])
+            if isinstance(payload.get("current_yes_odds"), (int, float))
+            else None
+        ),
+        current_no_odds=(
+            float(payload["current_no_odds"])
+            if isinstance(payload.get("current_no_odds"), (int, float))
+            else None
+        ),
+        best_bid_cents=(
+            float(payload["best_bid_cents"])
+            if isinstance(payload.get("best_bid_cents"), (int, float))
+            else None
+        ),
+        best_ask_cents=(
+            float(payload["best_ask_cents"])
+            if isinstance(payload.get("best_ask_cents"), (int, float))
+            else None
+        ),
+        price_history=[
+            PositionPriceSnapshot.model_validate(snapshot)
+            for snapshot in payload.get("price_history", [])
+            if isinstance(snapshot, dict)
+        ],
+        exit_signals=[
+            ExitSignal.model_validate(signal)
+            for signal in payload.get("exit_signals", [])
+            if isinstance(signal, dict)
+        ],
+        exit_state=payload.get("exit_state") if isinstance(payload.get("exit_state"), str) else "ACTIVE",
+        estimated_freeable_value_usd=(
+            float(payload["estimated_freeable_value_usd"])
+            if isinstance(payload.get("estimated_freeable_value_usd"), (int, float))
+            else None
+        ),
     )
 
 

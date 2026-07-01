@@ -170,6 +170,8 @@ type PolymarketMarketRefresh = {
   marketUrl: string | null;
   yesOdds: number | null;
   noOdds: number | null;
+  bestBidPrice: number | null;
+  bestAskPrice: number | null;
   rules: string | null;
   marketContext: string | null;
   resolutionSource: string | null;
@@ -1395,6 +1397,8 @@ function BullpenAiPageContent() {
   }, []);
 
   useEffect(() => {
+    // TODO(bullpen-event-exits): layer in a dedicated 15s / 5s active-odds poll for
+    // Event Exit tracking without turning every tick into a full wallet sync or LLM run.
     const intervalId = window.setInterval(() => {
       pollBullpenPositions();
     }, 60_000);

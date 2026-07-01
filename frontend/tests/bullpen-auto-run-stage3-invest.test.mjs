@@ -623,12 +623,12 @@ test("Stage 3 preview steps summarize the sell-first then invest flow before exe
       label: step.label,
     })),
     [
-      { key: "sell", status: "pending", label: "Sell outside Top 10" },
+      { key: "sell", status: "pending", label: "Event Exits" },
       { key: "buy", status: "pending", label: "Invest planned orders" },
     ],
   );
   assert.equal(previewSteps[0].plannedOrders, null);
   assert.equal(previewSteps[1].plannedOrders, 2);
-  assert.match(previewSteps[0].detail, /outside the top 10/i);
+  assert.match(previewSteps[0].detail, /capital-aware forced-exit/i);
   assert.match(previewSteps[1].detail, /Stage 2-qualified/);
 });

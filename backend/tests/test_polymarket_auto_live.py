@@ -1225,7 +1225,7 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
     assert invest_stage.outputs["buy_orders_processed"] == 1
     assert invest_stage.outputs["buy_orders_submitted"] == 1
     assert invest_stage.reason == (
-        "Rebalance and investment planning/execution finished for the ranked Bullpen table."
+        "Rebalance, Event Exit processing, and investment planning/execution finished for the ranked Bullpen table."
     )
     assert result.run.orders_planned == 2
     assert result.run.orders_submitted == 2

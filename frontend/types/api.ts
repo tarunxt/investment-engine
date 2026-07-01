@@ -1699,6 +1699,69 @@ export interface BullpenAutoLiveStageResult {
   completed_at?: string | null;
 }
 
+export type BullpenAutoLiveExitStrategy =
+  | "OUTSIDE_TOP_10_RETURNS_DAY"
+  | "LLM_OR_ODDS_FILTER_EXIT"
+  | "CAPITAL_AWARE_FORCED_EXIT";
+
+export type BullpenAutoLiveExitSeverity =
+  | "INFO"
+  | "WATCH_FAST"
+  | "PLANNED_EXIT"
+  | "IMMEDIATE_EXIT"
+  | "DUST_LOST";
+
+export type BullpenAutoLiveExitReasonCode =
+  | "OUTSIDE_TOP_10_BY_RETURNS_DAY"
+  | "LLM_FILTER_FAILED"
+  | "ODDS_FILTER_FAILED"
+  | "ADVERSE_MARKET_99_5"
+  | "ADVERSE_MARKET_99"
+  | "HELD_SIDE_BID_BELOW_0_5_CENTS"
+  | "HELD_SIDE_DROP_10_POINTS_1M"
+  | "HELD_SIDE_DROP_15_POINTS_1M"
+  | "HELD_SIDE_DROP_25_POINTS_5M"
+  | "EVENT_CLOSE_PASSED"
+  | "LOW_EXECUTABLE_VALUE"
+  | "NO_BID_AVAILABLE";
+
+export type BullpenAutoLiveExitState =
+  | "ACTIVE"
+  | "WATCH_FAST"
+  | "EVENT_EXIT_PLANNED"
+  | "SELL_SUBMITTED"
+  | "PARTIALLY_FILLED"
+  | "SOLD"
+  | "DUST_LOST"
+  | "FAILED";
+
+export interface BullpenAutoLiveExitSignalMetrics {
+  currentYes?: number | null;
+  currentNo?: number | null;
+  heldProbability?: number | null;
+  adverseProbability?: number | null;
+  heldBestBid?: number | null;
+  shares?: number | null;
+  avgPrice?: number | null;
+  estimatedFreeableValue?: number | null;
+  drop1m?: number | null;
+  drop5m?: number | null;
+  adverseRise1m?: number | null;
+  adverseRise5m?: number | null;
+  timeToCloseHours?: number | null;
+}
+
+export interface BullpenAutoLiveExitSignal {
+  strategy: BullpenAutoLiveExitStrategy;
+  severity: BullpenAutoLiveExitSeverity;
+  reasonCode: BullpenAutoLiveExitReasonCode;
+  label: string;
+  description: string;
+  score?: number | null;
+  createdAt: string;
+  metrics?: BullpenAutoLiveExitSignalMetrics | null;
+}
+
 export interface BullpenAutoLiveDecision {
   id: string;
   run_id: string;
@@ -1736,6 +1799,8 @@ export interface BullpenAutoLiveDecision {
   reason: string;
   summary: string;
   order_plan?: BullpenAutoLiveOrderPlan | null;
+  exit_signals: BullpenAutoLiveExitSignal[];
+  exit_state: BullpenAutoLiveExitState;
   llm_outputs: BullpenAutoLiveLlmOutput[];
   stage_results: BullpenAutoLiveStageResult[];
   guardrail_checks: BullpenAutoLiveGuardrailCheck[];

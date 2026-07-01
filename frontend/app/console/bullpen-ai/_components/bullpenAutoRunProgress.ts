@@ -93,7 +93,7 @@ const WORKFLOW_DEFINITIONS: WorkflowDefinition[] = [
     key: "invest",
     title: "Stage 3 · Rebalance and Invest",
     subtitle:
-      "Step 1 sells active positions outside the top 10, then Step 2 invests in the Stage 3 planned orders when the guardrails allow live execution.",
+      "Step 1 processes Event Exits from both the ranking / LLM strategy and the capital-aware forced-exit strategy, then Step 2 invests in the Stage 3 planned orders when the guardrails allow live execution.",
     defaultDetail: "Waiting for Stage 2 to finish before rebalance and investment planning starts.",
     defaultItemLabel: "rows",
   },

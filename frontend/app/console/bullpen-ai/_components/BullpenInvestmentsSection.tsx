@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ExternalLink,
+  Info,
   Loader2,
 } from "lucide-react";
 
@@ -29,6 +30,7 @@ import type {
 import { cn } from "@/lib/utils";
 import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
+import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
 import { BullpenPositionsDialog } from "./BullpenPositionsDialog";
 
 type BullpenInvestmentsSectionProps = {
@@ -125,10 +127,12 @@ function EventsSectionHeader({
   title,
   tone,
   description,
+  titleAccessory,
 }: {
   title: string;
   tone: "active" | "candidate" | "attention";
   description?: string;
+  titleAccessory?: ReactNode;
 }) {
   return (
     <div
@@ -143,7 +147,7 @@ function EventsSectionHeader({
     >
       <div
         className={cn(
-          "text-sm font-semibold",
+          "flex items-center gap-2 text-sm font-semibold",
           tone === "active"
             ? "text-emerald-900"
             : tone === "candidate"
@@ -151,7 +155,8 @@ function EventsSectionHeader({
               : "text-red-900",
         )}
       >
-        {title}
+        <span>{title}</span>
+        {titleAccessory ? <span>{titleAccessory}</span> : null}
       </div>
       {description ? (
         <p
@@ -168,6 +173,27 @@ function EventsSectionHeader({
         </p>
       ) : null}
     </div>
+  );
+}
+
+function AttentionBadge({
+  label,
+  tone = "red",
+}: {
+  label: string;
+  tone?: "red" | "amber";
+}) {
+  return (
+    <span
+      className={cn(
+        "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+        tone === "amber"
+          ? "bg-amber-100 text-amber-900"
+          : "bg-red-100 text-red-900",
+      )}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -356,11 +382,15 @@ export function BullpenInvestmentsSection({
     position?: BullpenActivePositionView;
   } | null>(null);
   const [isPositionsDialogOpen, setIsPositionsDialogOpen] = useState(false);
+  const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
+    useState(false);
   const openActivePositions = activePositions.filter((position) => !position.isClaimable);
   const {
     activePositionQuestionByKey,
     activePositionsNeedingAttention,
+    eventExitCounts,
     topInvestmentRows,
+    watchFastPositionKeys,
   } = useMemo(
     () =>
       buildBullpenInvestmentDisplay({
@@ -418,12 +448,12 @@ export function BullpenInvestmentsSection({
             <p className="max-w-3xl text-sm text-slate-600">
               Green rows show active Bullpen positions, pink rows show new
               scanned opportunities, and red rows show active positions that
-              need exit attention. The green and pink sections reflect the
-              current top 10 rows ranked by <span className="font-semibold">returns/day</span>{" "}
-              when either <span className="font-semibold">LLM Yes Odds &gt; 80%</span>{" "}
-              or <span className="font-semibold">LLM No Odds &gt; 80%</span>. The
-              Invest action buys the stronger LLM side in Bullpen with a fixed{" "}
-              <span className="font-semibold">$5</span> order per new opportunity.
+              are now in the Event Exits pipeline. The green and pink sections
+              reflect the current top 10 rows ranked by{" "}
+              <span className="font-semibold">returns/day</span> after Event Exit
+              evaluation. The Invest action buys the stronger LLM side in
+              Bullpen with a fixed <span className="font-semibold">$5</span>{" "}
+              order per new opportunity.
             </p>
           </div>
           {!isReadOnly && hasRows ? (
@@ -557,6 +587,11 @@ export function BullpenInvestmentsSection({
                             <div className="block font-medium text-slate-950">
                               {position.marketTitle}
                             </div>
+                            {watchFastPositionKeys.has(position.key) ? (
+                              <div className="flex flex-wrap gap-2">
+                                <AttentionBadge label="Watch Fast" tone="amber" />
+                              </div>
+                            ) : null}
                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                               <span>Close: {formatDate(position.closeTime)}</span>
                               <span>Held outcome: {position.outcome || "—"}</span>
@@ -712,11 +747,29 @@ export function BullpenInvestmentsSection({
               {activePositionsNeedingAttention.length > 0 ? (
                 <div className="space-y-3 pt-2">
                   <EventsSectionHeader
-                    title="SELL | Events outside Top 10 by Returns/day"
+                    title="Event Exits"
                     tone="attention"
-                    description="Includes active positions outside the top 10 by returns/day or without LLM Yes/No odds above 80%."
+                    description={`Includes the union of ranking / LLM exits and capital-aware forced exits. Planned: ${eventExitCounts.total} · Ranking/LLM: ${eventExitCounts.rankingOrLlm} · Forced Exit: ${eventExitCounts.forced}.`}
+                    titleAccessory={
+                      <button
+                        type="button"
+                        onClick={() => setIsEventExitStrategiesDialogOpen(true)}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-red-300 bg-white/80 text-red-700 transition hover:bg-white hover:text-red-900"
+                        aria-label="Explain Event Exit strategies"
+                        title="Explain Event Exit strategies"
+                      >
+                        <Info className="h-3.5 w-3.5" />
+                      </button>
+                    }
                   />
-                  {activePositionsNeedingAttention.map(({ position, question, reasons }) => {
+                  {activePositionsNeedingAttention.map(
+                    ({
+                      position,
+                      question,
+                      reasonBadges,
+                      estimatedFreeableValue,
+                      exitState,
+                    }) => {
                     return (
                       <RowShell key={`active-position-outside-top-${position.key}`} attention>
                         <div className="flex items-start gap-3">
@@ -730,6 +783,14 @@ export function BullpenInvestmentsSection({
                           <div className="space-y-2">
                             <div className="block font-medium text-slate-950">
                               {position.marketTitle}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {reasonBadges.map((reasonBadge) => (
+                                <AttentionBadge key={`${position.key}-${reasonBadge}`} label={reasonBadge} />
+                              ))}
+                              {exitState === "DUST_LOST" ? (
+                                <AttentionBadge label="Dust" />
+                              ) : null}
                             </div>
                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                               <span>Close: {formatDate(position.closeTime)}</span>
@@ -745,7 +806,9 @@ export function BullpenInvestmentsSection({
                               <span>{position.shares.toLocaleString()} shares</span>
                             </div>
                             <div className="rounded-xl border border-red-200 bg-white/70 px-3 py-2 text-xs font-semibold text-red-800">
-                              Attention: {reasons.join("; ")}
+                              {estimatedFreeableValue !== null
+                                ? `Executable exit value: ${formatMoney(estimatedFreeableValue)}`
+                                : "Executable exit value is not currently available."}
                             </div>
                           </div>
                         </div>
@@ -780,6 +843,12 @@ export function BullpenInvestmentsSection({
         <BullpenLlmBreakdownDialog
           question={breakdownQuestion}
           onClose={() => setBreakdownQuestion(null)}
+        />
+      ) : null}
+
+      {isEventExitStrategiesDialogOpen ? (
+        <BullpenEventExitStrategiesDialog
+          onClose={() => setIsEventExitStrategiesDialogOpen(false)}
         />
       ) : null}
 
