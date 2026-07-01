@@ -248,13 +248,6 @@ function createEmptySortMap(): Record<ScanMode, BullpenTableSortState> {
   };
 }
 
-function createEmptySnapshotViewMap(): Record<ScanMode, string | null> {
-  return {
-    "30-days": null,
-    "end-of-month": null,
-  };
-}
-
 function createEmptySnapshotSourceMap(): Record<ScanMode, BullpenSnapshotSource> {
   return {
     "30-days": "manual",
@@ -481,24 +474,6 @@ function getModeDescription(mode: ScanMode, filters: BullpenScanFilters) {
   }
 
   return `Bullpen questions closing within ${filters.maxClosingDays} days.`;
-}
-
-function getFilterBadgeLabels(mode: ScanMode, filters: BullpenScanFilters) {
-  const badges = [
-    mode === "30-days"
-      ? `Closes within ${filters.maxClosingDays} day${filters.maxClosingDays === 1 ? "" : "s"}`
-      : `Target date: ${formatDateOnly(filters.targetDate)}`,
-    `Yes >= ${filters.minYesOdds}%`,
-    `No >= ${filters.minNoOdds}%`,
-  ];
-
-  if (filters.excludeSports) badges.push("No sports");
-  if (filters.excludeWeather) badges.push("No weather");
-  if (filters.excludeMarketPredictions) badges.push("No market predictions");
-  if (filters.excludeTweetCountQuestions) badges.push("No tweet counts");
-  if (filters.onlyBinaryYesNo) badges.push("Yes / No only");
-
-  return badges;
 }
 
 function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
@@ -1195,11 +1170,6 @@ function BullpenAiPageContent() {
   const [autoSnapshotsByMode, setAutoSnapshotsByMode] = useState<
     Record<ScanMode, BullpenSnapshotHistory>
   >(createEmptySnapshotHistory);
-  const [selectedSnapshotIdByMode, setSelectedSnapshotIdByMode] = useState<
-    Record<ScanMode, string | null>
-  >(createEmptySnapshotViewMap);
-  const [selectedAutoSnapshotIdByMode, setSelectedAutoSnapshotIdByMode] =
-    useState<Record<ScanMode, string | null>>(createEmptySnapshotViewMap);
   const [snapshotSourceByMode, setSnapshotSourceByMode] = useState<
     Record<ScanMode, BullpenSnapshotSource>
   >(createEmptySnapshotSourceMap);
@@ -1311,6 +1281,7 @@ function BullpenAiPageContent() {
       "end-of-month": new Set<string>(),
     },
   });
+  const activeSnapshotSource = snapshotSourceByMode[activeMode];
 
   useEffect(() => {
     const storedSnapshots = readBullpenSnapshotsFromStorage();
@@ -1382,7 +1353,7 @@ function BullpenAiPageContent() {
   useEffect(() => {
     setIsScanFiltersOpen(false);
     setOpenFilterDetailsId(null);
-  }, [activeMode, snapshotSourceByMode[activeMode]]);
+  }, [activeMode, activeSnapshotSource]);
 
   useEffect(() => {
     if (!isScanFiltersOpen || openFilterDetailsId) return;
@@ -1471,31 +1442,14 @@ function BullpenAiPageContent() {
   const activeFilters = filtersByMode[activeMode];
   const activeSnapshots = snapshotsByMode[activeMode];
   const activeAutoSnapshots = autoSnapshotsByMode[activeMode];
-  const activeSnapshotSource = snapshotSourceByMode[activeMode];
   const isManualScanView = activeSnapshotSource === "manual";
   const activeCurrentSnapshot = activeSnapshots.current;
-  const activeSelectedSnapshotId = selectedSnapshotIdByMode[activeMode];
   const activeAutoCurrentSnapshot = activeAutoSnapshots.current;
-  const activeSelectedAutoSnapshotId = selectedAutoSnapshotIdByMode[activeMode];
-  const visibleSnapshots = isManualScanView ? activeSnapshots : activeAutoSnapshots;
   const visibleCurrentSnapshot = isManualScanView
     ? activeCurrentSnapshot
     : activeAutoCurrentSnapshot;
-  const visibleSelectedSnapshotId = isManualScanView
-    ? activeSelectedSnapshotId
-    : activeSelectedAutoSnapshotId;
-  const activeVisibleSnapshot =
-    !visibleSelectedSnapshotId ||
-    visibleCurrentSnapshot?.snapshotId === visibleSelectedSnapshotId
-      ? visibleCurrentSnapshot
-      : visibleSnapshots.history.find(
-          (snapshot) => snapshot.snapshotId === visibleSelectedSnapshotId,
-        ) || visibleCurrentSnapshot;
-  const isViewingHistory = Boolean(
-    activeVisibleSnapshot &&
-      visibleCurrentSnapshot &&
-      activeVisibleSnapshot.snapshotId !== visibleCurrentSnapshot.snapshotId,
-  );
+  const activeVisibleSnapshot = visibleCurrentSnapshot;
+  const isViewingHistory = false;
   const hasStaleResult =
     isManualScanView &&
     activeCurrentSnapshot !== null &&
@@ -1509,7 +1463,7 @@ function BullpenAiPageContent() {
   const llmRunStartedAt = llmRunStartedAtByMode[activeMode];
   const isInvesting = investingMode === activeMode;
   const isRefreshingCurrentOdds = refreshingCurrentOddsMode === activeMode;
-  const selectionEnabled = isManualScanView && Boolean(activeCurrentSnapshot && !isViewingHistory);
+  const selectionEnabled = isManualScanView && Boolean(activeCurrentSnapshot);
   const selectedQuestionIds = selectionEnabled
     ? selectedQuestionIdsByMode[activeMode].filter((questionId) =>
         activeCurrentSnapshot?.questions.some((question) => question.id === questionId),
@@ -1517,7 +1471,6 @@ function BullpenAiPageContent() {
     : [];
   const selectedQuestionIdSet = new Set(selectedQuestionIds);
   const selectedQuestionCount = selectedQuestionIds.length;
-  const activeFilterBadges = getFilterBadgeLabels(activeMode, activeFilters);
   const openActivePositions = activePositions.filter((position) => !position.isClaimable);
   const getBullpenSelectionConstraint = (
     provider: ProviderInfo,
@@ -2139,10 +2092,6 @@ function BullpenAiPageContent() {
         },
       };
     });
-    setSelectedSnapshotIdByMode((current) => ({
-      ...current,
-      [activeMode]: null,
-    }));
     if (!resetSelections) {
       return;
     }
@@ -3119,54 +3068,11 @@ function BullpenAiPageContent() {
           <CardDescription>
             {getModeDescription(activeMode, activeFilters)}
           </CardDescription>
-          <div className="flex flex-wrap gap-2 pt-1">
-            {SNAPSHOT_SOURCE_TABS.map((tab) => (
-              <button
-                key={tab.source}
-                type="button"
-                onClick={() =>
-                  setSnapshotSourceByMode((current) => ({
-                    ...current,
-                    [activeMode]: tab.source,
-                  }))
-                }
-                className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${activeSnapshotSource === tab.source ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-950"}`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-slate-500">
-            {
-              SNAPSHOT_SOURCE_TABS.find((tab) => tab.source === activeSnapshotSource)
-                ?.description
-            }
-          </p>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Current Filters
-              </p>
-              <p className="mt-2 text-sm text-slate-700">
-                {isManualScanView
-                  ? "Open the scan menu to edit the time window, odds floors, and market exclusions for the next Bullpen run."
-                  : "Auto Scan replays the latest completed auto-run snapshot for this time window. Switch to Manual Scan to change filters or run a new manual scan."}
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {activeFilterBadges.map((badge) => (
-                  <span
-                    key={badge}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700"
-                  >
-                    {badge}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-2xl">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                   Source
                 </p>
@@ -3176,7 +3082,7 @@ function BullpenAiPageContent() {
                     : "Auto Scan snapshots are populated by the Run Scans and Invest Now flow above and kept separate from the manual scan table."}
                 </p>
               </div>
-              <div className="space-y-2">
+              <div className="w-full max-w-[26rem] space-y-2">
                 <div ref={scanFiltersMenuRef} className="relative">
                   <div className="flex items-center">
                     <Button
@@ -3651,65 +3557,9 @@ function BullpenAiPageContent() {
             </div>
           ) : null}
 
-          {visibleCurrentSnapshot ? (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Saved Snapshots
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    isManualScanView
-                      ? setSelectedSnapshotIdByMode((current) => ({
-                          ...current,
-                          [activeMode]: null,
-                        }))
-                      : setSelectedAutoSnapshotIdByMode((current) => ({
-                          ...current,
-                          [activeMode]: null,
-                        }))
-                  }
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${!isViewingHistory ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}
-                >
-                  Current · {formatDate(visibleCurrentSnapshot.scannedAt)}
-                </button>
-                {visibleSnapshots.history.map((snapshot, index) => (
-                  <button
-                    key={snapshot.snapshotId}
-                    type="button"
-                    onClick={() =>
-                      isManualScanView
-                        ? setSelectedSnapshotIdByMode((current) => ({
-                            ...current,
-                            [activeMode]: snapshot.snapshotId,
-                          }))
-                        : setSelectedAutoSnapshotIdByMode((current) => ({
-                            ...current,
-                            [activeMode]: snapshot.snapshotId,
-                          }))
-                    }
-                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${visibleSelectedSnapshotId === snapshot.snapshotId ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}
-                  >
-                    Saved {index + 1} · {formatDate(snapshot.scannedAt)}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-3 text-xs text-slate-600">
-                {isViewingHistory
-                  ? "Viewing a saved history version. Switch back to Current to inspect the latest snapshot for this tab."
-                  : isManualScanView
-                    ? "The current table is saved locally with its scan timestamp and will remain visible after refresh."
-                    : "Auto snapshots are saved separately from manual scans so the latest auto-run results stay visible here."}
-              </p>
-            </div>
-          ) : null}
-
           {activeVisibleSnapshot ? (
             <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-              <span>
-                {isViewingHistory ? "Viewing saved version" : "Viewing current version"}
-              </span>
+              <span>Current snapshot</span>
               <span>{activeVisibleSnapshot.questions.length} matches</span>
               <span>{activeVisibleSnapshot.totalCandidates} markets scanned</span>
               <span>Source used: {activeVisibleSnapshot.sourceLabel}</span>
@@ -3770,7 +3620,7 @@ function BullpenAiPageContent() {
                 {selectionEnabled
                   ? `${formatCountLabel(openActivePositions.length, "active position")} auto-included and ${formatCountLabel(selectedQuestionCount, "scan question")} selected for LLM analysis.`
                   : isManualScanView
-                    ? "History view is read-only; switch back to Current to select questions."
+                    ? "Run Bullpen Scan first to select questions for LLM analysis."
                     : "Auto Scan is read-only here; switch to Manual Scan to select questions or run LLM analysis."}
               </span>
               {isManualScanView && lastLlmTargets.length > 0 ? (
@@ -3784,6 +3634,34 @@ function BullpenAiPageContent() {
           <BullpenQuestionsTable
             snapshot={activeVisibleSnapshot}
             emptyMessage={currentTableEmptyMessage}
+            headerContent={
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {SNAPSHOT_SOURCE_TABS.map((tab) => (
+                    <button
+                      key={tab.source}
+                      type="button"
+                      onClick={() =>
+                        setSnapshotSourceByMode((current) => ({
+                          ...current,
+                          [activeMode]: tab.source,
+                        }))
+                      }
+                      className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${activeSnapshotSource === tab.source ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-950"}`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  {
+                    SNAPSHOT_SOURCE_TABS.find(
+                      (tab) => tab.source === activeSnapshotSource,
+                    )?.description
+                  }
+                </p>
+              </>
+            }
             isLoading={isManualScanView && isScanning}
             onSortChange={setActiveSort}
             selectedQuestionIds={visibleSelectedQuestionIdSet}

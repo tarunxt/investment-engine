@@ -451,6 +451,7 @@ function LlmOddsDisplay({
 export function BullpenQuestionsTable({
   snapshot,
   emptyMessage,
+  headerContent,
   isLoading,
   onSortChange,
   selectedQuestionIds,
@@ -461,6 +462,7 @@ export function BullpenQuestionsTable({
 }: {
   snapshot: BullpenScanSnapshot | null;
   emptyMessage: string;
+  headerContent?: ReactNode;
   isLoading: boolean;
   onSortChange: (key: BullpenTableSortKey) => void;
   selectedQuestionIds: Set<string>;
@@ -586,11 +588,16 @@ export function BullpenQuestionsTable({
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-200 bg-white px-4 py-3 text-left">
-        <h2 className="text-sm font-semibold text-slate-950">Fresh Bullpen Opportunities</h2>
-        <span className="text-xs font-medium text-slate-500">
-          Updated {updatedAtLabel}
-        </span>
+      <div className="border-b border-slate-200 bg-white px-4 py-3 text-left">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h2 className="text-sm font-semibold text-slate-950">
+            Fresh Bullpen Opportunities
+          </h2>
+          <span className="text-xs font-medium text-slate-500">
+            Updated {updatedAtLabel}
+          </span>
+        </div>
+        {headerContent ? <div className="mt-3">{headerContent}</div> : null}
       </div>
       <div className="overflow-x-auto">
         <table

@@ -237,6 +237,8 @@ test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {
     bullpenAiPageSource,
     /Auto Scan is read-only here\.\s+Switch to Manual Scan to run\s+Bullpen scans, LLM analysis, or manual investing\./,
   );
+  assert.doesNotMatch(bullpenAiPageSource, /Current Filters/);
+  assert.doesNotMatch(bullpenAiPageSource, /Saved Snapshots/);
   assert.match(bullpenAiPageSource, /setAutoSnapshotsByMode/);
   assert.match(
     bullpenAiPageSource,
