@@ -90,11 +90,7 @@ function getBullpenStateDir() {
     return configured;
   }
 
-  return path.join(
-    /* turbopackIgnore: true */ process.cwd(),
-    ".runtime",
-    "bullpen-ai",
-  );
+  return path.join("/tmp", "investment-engine", "bullpen-ai");
 }
 
 function getBullpenStatePaths() {
