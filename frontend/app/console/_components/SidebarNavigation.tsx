@@ -36,6 +36,7 @@ import {
 } from 'react-icons/hi';
 import type { User } from '@/hooks/useAuth';
 import { URLs } from '@/lib/urls';
+import { SidebarThemeToggle } from './SidebarThemeToggle';
 
 type NavigationItem = {
     id: string;
@@ -726,7 +727,11 @@ export function SidebarNavigation({
                 </SortableContext>
             </DndContext>
 
-            <div className="mx-3 mt-4 rounded-2xl border border-sidebar-border bg-sidebar-accent p-3">
+            <div className="mt-4">
+                <SidebarThemeToggle />
+            </div>
+
+            <div className="mx-3 rounded-2xl border border-sidebar-border bg-sidebar-accent p-3">
                 <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-600 to-purple-600 text-sm font-semibold text-white">
                         {user?.full_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'}

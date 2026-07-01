@@ -489,8 +489,8 @@ export function BullpenAiAutoLiveConsole() {
 
   if (loading && !summary) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.10),_transparent_35%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] px-6">
-        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-600 shadow-sm">
+      <div className="flex min-h-[60vh] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.10),_transparent_35%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] px-6 dark:bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.08),_transparent_24%),linear-gradient(180deg,_rgba(15,23,42,0.96)_0%,_rgba(2,6,23,1)_100%)]">
+        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-700/80 dark:bg-slate-950/85 dark:text-slate-300">
           <Loader2 className="size-4 animate-spin" />
           Loading Bullpen AI Auto-Live state...
         </div>
@@ -500,8 +500,8 @@ export function BullpenAiAutoLiveConsole() {
 
   if (!summary) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.10),_transparent_35%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] px-6">
-        <Card className="w-full max-w-2xl border-slate-200 bg-white/95 shadow-sm">
+      <div className="flex min-h-[60vh] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.10),_transparent_35%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] px-6 dark:bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.08),_transparent_24%),linear-gradient(180deg,_rgba(15,23,42,0.96)_0%,_rgba(2,6,23,1)_100%)]">
+        <Card className="w-full max-w-2xl border-slate-200 bg-white/95 shadow-sm dark:border-slate-700/80 dark:bg-slate-950/85">
           <CardHeader>
             <CardTitle className="text-xl text-slate-950">
               Bullpen AI Auto-Live data is unavailable
@@ -558,11 +558,11 @@ export function BullpenAiAutoLiveConsole() {
 
   return (
     <>
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.12),_transparent_28%),radial-gradient(circle_at_right,_rgba(16,185,129,0.10),_transparent_30%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)]">
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.12),_transparent_28%),radial-gradient(circle_at_right,_rgba(16,185,129,0.10),_transparent_30%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] dark:bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.08),_transparent_24%),radial-gradient(circle_at_right,_rgba(16,185,129,0.08),_transparent_28%),linear-gradient(180deg,_rgba(15,23,42,0.98)_0%,_rgba(2,6,23,1)_100%)]">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <div className="space-y-6">
-            <Card className="overflow-hidden border-slate-200 bg-white/90 shadow-sm backdrop-blur">
-              <div className="border-b border-slate-200 bg-[linear-gradient(135deg,_rgba(15,23,42,0.03),_rgba(251,191,36,0.10))] px-6 py-6">
+            <Card className="overflow-hidden border-slate-200 bg-white/90 shadow-sm backdrop-blur dark:border-slate-700/80 dark:bg-slate-950/72">
+              <div className="border-b border-slate-200 bg-[linear-gradient(135deg,_rgba(15,23,42,0.03),_rgba(251,191,36,0.10))] px-6 py-6 dark:border-slate-700/80 dark:bg-[linear-gradient(135deg,_rgba(148,163,184,0.06),_rgba(245,158,11,0.08))]">
                 <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                   <div className="max-w-3xl">
                     <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">

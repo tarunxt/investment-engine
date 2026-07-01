@@ -228,39 +228,43 @@ function getRoleTheme(botId: TradingBotSummary["id"]) {
     case "bullpen-x-polymarket":
       return {
         card:
-          "border-sky-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.08),_transparent_30%),#ffffff]",
+          "border-sky-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.08),_transparent_30%),#ffffff] dark:border-slate-700/80 dark:bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.18),_transparent_34%),linear-gradient(180deg,_rgba(15,23,42,0.92)_0%,_rgba(2,6,23,0.98)_100%)]",
         icon:
-          "border-sky-200 bg-sky-50 text-sky-700 shadow-[0_12px_30px_-20px_rgba(2,132,199,0.8)]",
-        panel: "border-sky-200 bg-sky-50/70 text-sky-900",
-        label: "text-sky-800",
+          "border-sky-200 bg-sky-50 text-sky-700 shadow-[0_12px_30px_-20px_rgba(2,132,199,0.8)] dark:border-sky-400/30 dark:bg-sky-500/10 dark:text-sky-100",
+        panel:
+          "border-sky-200 bg-sky-50/70 text-sky-900 dark:border-sky-400/25 dark:bg-sky-500/10 dark:text-sky-100",
+        label: "text-sky-800 dark:text-sky-200",
       };
     case "polymarket-direct":
       return {
         card:
-          "border-cyan-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),_transparent_30%),#ffffff]",
+          "border-cyan-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),_transparent_30%),#ffffff] dark:border-slate-700/80 dark:bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.18),_transparent_34%),linear-gradient(180deg,_rgba(15,23,42,0.92)_0%,_rgba(2,6,23,0.98)_100%)]",
         icon:
-          "border-cyan-200 bg-cyan-50 text-cyan-700 shadow-[0_12px_30px_-20px_rgba(8,145,178,0.8)]",
-        panel: "border-cyan-200 bg-cyan-50/70 text-cyan-900",
-        label: "text-cyan-800",
+          "border-cyan-200 bg-cyan-50 text-cyan-700 shadow-[0_12px_30px_-20px_rgba(8,145,178,0.8)] dark:border-cyan-400/30 dark:bg-cyan-500/10 dark:text-cyan-100",
+        panel:
+          "border-cyan-200 bg-cyan-50/70 text-cyan-900 dark:border-cyan-400/25 dark:bg-cyan-500/10 dark:text-cyan-100",
+        label: "text-cyan-800 dark:text-cyan-200",
       };
     case "bullpen-x-ai":
       return {
         card:
-          "border-indigo-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.10),_transparent_32%),#ffffff]",
+          "border-indigo-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.10),_transparent_32%),#ffffff] dark:border-slate-700/80 dark:bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.18),_transparent_34%),linear-gradient(180deg,_rgba(15,23,42,0.92)_0%,_rgba(2,6,23,0.98)_100%)]",
         icon:
-          "border-indigo-200 bg-indigo-50 text-indigo-700 shadow-[0_12px_30px_-20px_rgba(79,70,229,0.85)]",
-        panel: "border-indigo-200 bg-indigo-50/75 text-indigo-900",
-        label: "text-indigo-800",
+          "border-indigo-200 bg-indigo-50 text-indigo-700 shadow-[0_12px_30px_-20px_rgba(79,70,229,0.85)] dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-100",
+        panel:
+          "border-indigo-200 bg-indigo-50/75 text-indigo-900 dark:border-indigo-400/25 dark:bg-indigo-500/10 dark:text-indigo-100",
+        label: "text-indigo-800 dark:text-indigo-200",
       };
     case "bullpen-ai-auto-live":
     default:
       return {
         card:
-          "border-emerald-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.10),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(251,191,36,0.10),_transparent_34%),#ffffff]",
+          "border-emerald-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.10),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(251,191,36,0.10),_transparent_34%),#ffffff] dark:border-slate-700/80 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_32%),radial-gradient(circle_at_top_right,_rgba(245,158,11,0.14),_transparent_34%),linear-gradient(180deg,_rgba(15,23,42,0.92)_0%,_rgba(2,6,23,0.98)_100%)]",
         icon:
-          "border-emerald-200 bg-emerald-50 text-emerald-700 shadow-[0_12px_30px_-20px_rgba(5,150,105,0.85)]",
-        panel: "border-emerald-200 bg-emerald-50/75 text-emerald-950",
-        label: "text-emerald-800",
+          "border-emerald-200 bg-emerald-50 text-emerald-700 shadow-[0_12px_30px_-20px_rgba(5,150,105,0.85)] dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100",
+        panel:
+          "border-emerald-200 bg-emerald-50/75 text-emerald-950 dark:border-emerald-400/25 dark:bg-emerald-500/10 dark:text-emerald-100",
+        label: "text-emerald-800 dark:text-emerald-200",
       };
   }
 }
@@ -1017,7 +1021,7 @@ export function TradingBotsOverviewPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-8">
-      <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.12),_transparent_30%),linear-gradient(180deg,_rgba(255,255,255,0.98)_0%,_rgba(248,250,252,0.98)_100%)] px-6 py-6 shadow-[0_26px_70px_-42px_rgba(15,23,42,0.45)] sm:px-7">
+      <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.12),_transparent_30%),linear-gradient(180deg,_rgba(255,255,255,0.98)_0%,_rgba(248,250,252,0.98)_100%)] px-6 py-6 shadow-[0_26px_70px_-42px_rgba(15,23,42,0.45)] dark:border-slate-700/80 dark:bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.14),_transparent_30%),linear-gradient(180deg,_rgba(15,23,42,0.96)_0%,_rgba(2,6,23,1)_100%)] dark:shadow-[0_26px_70px_-42px_rgba(2,6,23,0.92)] sm:px-7">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-3">
             <div className="inline-flex items-center rounded-full border border-white/80 bg-white/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600 shadow-sm">
