@@ -1078,8 +1078,23 @@ export function isBullpenQuestionInvestmentCandidate(
     question.amountToBeInvested !== null &&
     question.llmDisagreementLevel !== "High" &&
     !question.adjudicationRequired &&
-    ((question.llmYesOdds !== null && question.llmYesOdds > 80) ||
-      (question.llmNoOdds !== null && question.llmNoOdds > 80))
+    hasBullpenStrongLlmOdds(question)
+  );
+}
+
+export function hasBullpenStrongLlmOdds(
+  question:
+    | Pick<BullpenQuestionRow, "llmYesOdds" | "llmNoOdds">
+    | null
+    | undefined,
+) {
+  return Boolean(
+    (question?.llmYesOdds !== null &&
+      question?.llmYesOdds !== undefined &&
+      question.llmYesOdds > 80) ||
+      (question?.llmNoOdds !== null &&
+        question?.llmNoOdds !== undefined &&
+        question.llmNoOdds > 80),
   );
 }
 

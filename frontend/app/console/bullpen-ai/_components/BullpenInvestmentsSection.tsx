@@ -14,6 +14,7 @@ import {
   hasBullpenLlmAnalysis,
   type BullpenQuestionRow,
 } from "@/lib/bullpen-ai";
+import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
 import { formatApiTimestamp } from "@/lib/datetime";
 import type {
   BullpenActivePositionView,
@@ -321,52 +322,19 @@ export function BullpenInvestmentsSection({
   } | null>(null);
   const [isPositionsDialogOpen, setIsPositionsDialogOpen] = useState(false);
   const openActivePositions = activePositions.filter((position) => !position.isClaimable);
-  const activePositionQuestionByKey = useMemo(
+  const {
+    activePositionQuestionByKey,
+    activePositionsNeedingAttention,
+    topInvestmentRows,
+  } = useMemo(
     () =>
-      new Map(
-        activePositionQuestions.map((question) => [question.id, question] as const),
-      ),
-    [activePositionQuestions],
+      buildBullpenInvestmentDisplay({
+        activePositions: openActivePositions,
+        activePositionQuestions,
+        candidates,
+      }),
+    [activePositionQuestions, candidates, openActivePositions],
   );
-  const topInvestmentRows = [
-    ...openActivePositions.map((position) => ({
-      kind: "active" as const,
-      key: position.key,
-      returnsPerDay: position.returnsPerDay,
-      position,
-    })),
-    ...candidates.map((question) => ({
-      kind: "candidate" as const,
-      key: question.id,
-      returnsPerDay: question.returnsPerDay,
-      question,
-    })),
-  ]
-    .sort((left, right) => (right.returnsPerDay ?? -Infinity) - (left.returnsPerDay ?? -Infinity))
-    .slice(0, 10);
-  const topActivePositionKeys = new Set(
-    topInvestmentRows
-      .filter((row) => row.kind === "active")
-      .map((row) => row.key),
-  );
-  const activePositionsNeedingAttention = openActivePositions
-    .map((position) => {
-      const question = activePositionQuestionByKey.get(position.key);
-      const hasStrongLlmOdds =
-        (question?.llmYesOdds !== null &&
-          question?.llmYesOdds !== undefined &&
-          question.llmYesOdds > 80) ||
-        (question?.llmNoOdds !== null &&
-          question?.llmNoOdds !== undefined &&
-          question.llmNoOdds > 80);
-      const reasons = [
-        !topActivePositionKeys.has(position.key) ? "not in the top 10 by returns/day" : null,
-        !hasStrongLlmOdds ? "LLM Yes/No odds are not above 80%" : null,
-      ].filter((reason): reason is string => Boolean(reason));
-
-      return { position, question, reasons };
-    })
-    .filter((entry) => entry.reasons.length > 0);
   const selectedCount = candidates.filter((question) =>
     selectedQuestionIds.has(question.id),
   ).length;
