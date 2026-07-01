@@ -371,33 +371,33 @@ function getInvestStageExecutionSteps(
 function getInvestExecutionStepClasses(status: InvestExecutionStepStatus) {
   if (status === "completed") {
     return {
-      container: "border-emerald-200 bg-emerald-50/80",
-      badge: "border-emerald-200 bg-emerald-100 text-emerald-900",
-      text: "text-emerald-950",
-      muted: "text-emerald-900/80",
+      container: "border-emerald-200 bg-emerald-50/80 dark:border-emerald-400/30 dark:bg-emerald-950/35",
+      badge: "border-emerald-200 bg-emerald-100 text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100",
+      text: "text-emerald-950 dark:text-emerald-50",
+      muted: "text-emerald-900/80 dark:text-emerald-100/75",
     };
   }
   if (status === "blocked") {
     return {
-      container: "border-rose-200 bg-rose-50/80",
-      badge: "border-rose-200 bg-rose-100 text-rose-900",
-      text: "text-rose-950",
-      muted: "text-rose-900/80",
+      container: "border-rose-200 bg-rose-50/80 dark:border-rose-400/30 dark:bg-rose-950/35",
+      badge: "border-rose-200 bg-rose-100 text-rose-900 dark:border-rose-400/30 dark:bg-rose-500/10 dark:text-rose-100",
+      text: "text-rose-950 dark:text-rose-50",
+      muted: "text-rose-900/80 dark:text-rose-100/75",
     };
   }
   if (status === "running") {
     return {
-      container: "border-amber-200 bg-amber-50/80",
-      badge: "border-amber-200 bg-amber-100 text-amber-900",
-      text: "text-amber-950",
-      muted: "text-amber-900/80",
+      container: "border-amber-200 bg-amber-50/80 dark:border-amber-400/30 dark:bg-amber-950/35",
+      badge: "border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100",
+      text: "text-amber-950 dark:text-amber-50",
+      muted: "text-amber-900/80 dark:text-amber-100/75",
     };
   }
   return {
-    container: "border-slate-200 bg-slate-50/80",
-    badge: "border-slate-200 bg-slate-100 text-slate-700",
-    text: "text-slate-950",
-    muted: "text-slate-600",
+    container: "border-slate-200 bg-slate-50/80 dark:border-slate-700/80 dark:bg-slate-950/60",
+    badge: "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-200",
+    text: "text-slate-950 dark:text-slate-50",
+    muted: "text-slate-600 dark:text-slate-300",
   };
 }
 
@@ -909,7 +909,7 @@ function InvestMetricDetailsDialog({
           ) : null}
 
           {hasPendingOrders ? (
-            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:text-sky-50">
               Stage 3 submits Bullpen orders one at a time, so multiple planned
               orders can take a few minutes when Bullpen is slow or retrying.
             </div>
@@ -1078,31 +1078,31 @@ function getVisibleRun(summary: BullpenAutoLiveSummaryResponse | null, pendingRu
 function getWorkflowToneClasses(tone: "yellow" | "green" | "blue") {
   if (tone === "yellow") {
     return {
-      container: "border-amber-300 bg-amber-50/90",
-      badge: "border-amber-300 bg-amber-100 text-amber-900",
-      text: "text-amber-950",
-      muted: "text-amber-900/80",
+      container: "border-amber-300 bg-amber-50/90 dark:border-amber-400/35 dark:bg-amber-950/45",
+      badge: "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100",
+      text: "text-amber-950 dark:text-amber-50",
+      muted: "text-amber-900/80 dark:text-amber-100/75",
       progress: "bg-amber-500",
-      progressTrack: "bg-amber-200/80",
+      progressTrack: "bg-amber-200/80 dark:bg-amber-500/20",
     };
   }
   if (tone === "green") {
     return {
-      container: "border-emerald-300 bg-emerald-50/90",
-      badge: "border-emerald-300 bg-emerald-100 text-emerald-900",
-      text: "text-emerald-950",
-      muted: "text-emerald-900/80",
+      container: "border-emerald-300 bg-emerald-50/90 dark:border-emerald-400/35 dark:bg-emerald-950/45",
+      badge: "border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-100",
+      text: "text-emerald-950 dark:text-emerald-50",
+      muted: "text-emerald-900/80 dark:text-emerald-100/75",
       progress: "bg-emerald-500",
-      progressTrack: "bg-emerald-200/80",
+      progressTrack: "bg-emerald-200/80 dark:bg-emerald-500/20",
     };
   }
   return {
-    container: "border-sky-300 bg-sky-50/90",
-    badge: "border-sky-300 bg-sky-100 text-sky-900",
-    text: "text-sky-950",
-    muted: "text-sky-900/80",
+    container: "border-sky-300 bg-sky-50/90 dark:border-sky-400/35 dark:bg-sky-950/45",
+    badge: "border-sky-300 bg-sky-100 text-sky-900 dark:border-sky-400/35 dark:bg-sky-500/10 dark:text-sky-100",
+    text: "text-sky-950 dark:text-sky-50",
+    muted: "text-sky-900/80 dark:text-sky-100/75",
     progress: "bg-sky-500",
-    progressTrack: "bg-sky-200/80",
+    progressTrack: "bg-sky-200/80 dark:bg-sky-500/20",
   };
 }
 
@@ -1678,7 +1678,7 @@ export function BullpenAutoRunScheduleCard({
         </div>
 
         {!consoleProfileSelected && summary ? (
-          <Alert className="border-amber-200 bg-amber-50 text-amber-950">
+          <Alert className="border-amber-200 bg-amber-50 text-amber-950 dark:text-amber-50">
             <ShieldAlert className="h-4 w-4" />
             <AlertTitle>Another profile is currently selected</AlertTitle>
             <AlertDescription>
@@ -1715,7 +1715,7 @@ export function BullpenAutoRunScheduleCard({
             </AlertDescription>
           </Alert>
         ) : summary && summary.state.mode !== "live-trading" ? (
-          <Alert className="border-sky-200 bg-sky-50 text-sky-950">
+          <Alert className="border-sky-200 bg-sky-50 text-sky-950 dark:text-sky-50">
             <ShieldAlert className="h-4 w-4" />
             <AlertTitle>Live execution is still gated</AlertTitle>
             <AlertDescription>
@@ -1728,7 +1728,7 @@ export function BullpenAutoRunScheduleCard({
           </Alert>
         ) : null}
 
-        <div className="rounded-3xl border border-slate-200/80 bg-white/70 p-4 shadow-sm">
+        <div className="rounded-3xl border border-slate-200/80 bg-white/70 p-4 shadow-sm dark:border-slate-700/80 dark:bg-slate-950/65">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -1833,7 +1833,7 @@ export function BullpenAutoRunScheduleCard({
                     <button
                       type="button"
                       onClick={() => setOpenInputStageKey(stage.key as "llm" | "invest")}
-                      className={`absolute left-4 top-4 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white/75 transition hover:-translate-y-0.5 hover:bg-white ${toneClasses.badge}`}
+                      className={`absolute left-4 top-4 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white/75 transition hover:-translate-y-0.5 hover:bg-white dark:bg-slate-950/80 dark:hover:bg-slate-900 ${toneClasses.badge}`}
                       aria-label={`Open ${stage.title} inputs`}
                       title="Input"
                     >
@@ -1871,7 +1871,7 @@ export function BullpenAutoRunScheduleCard({
                   </div>
 
                   <div
-                    className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-[11px] leading-5 ${toneClasses.muted}`}
+                    className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-950/70 text-[11px] leading-5 ${toneClasses.muted}`}
                   >
                     <div>
                       Last stage run:{" "}
@@ -1918,7 +1918,7 @@ export function BullpenAutoRunScheduleCard({
                               counter.label.toLowerCase() as InvestMetricDialogKind,
                             )
                           }
-                          className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left transition hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
+                          className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-950/70 text-left transition hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
                           aria-label={`Open Stage 3 ${counter.label.toLowerCase()} details`}
                         >
                           <p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}>
@@ -1953,7 +1953,7 @@ export function BullpenAutoRunScheduleCard({
                   ) : null}
 
                   {stage.key === "invest" ? (
-                    <div className="mt-3 space-y-2 rounded-xl border border-white/60 bg-white/50 px-3 py-3">
+                    <div className="mt-3 space-y-2 rounded-xl border border-white/60 bg-white/50 px-3 py-3 dark:border-slate-700/80 dark:bg-slate-950/70">
                       <button
                         type="button"
                         onClick={() => {
@@ -2072,7 +2072,7 @@ export function BullpenAutoRunScheduleCard({
                           }
                           setOpenStageKey(stage.key);
                         }}
-                        className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white/75 transition hover:-translate-y-0.5 hover:bg-white ${toneClasses.badge}`}
+                        className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white/75 transition hover:-translate-y-0.5 hover:bg-white dark:bg-slate-950/80 dark:hover:bg-slate-900 ${toneClasses.badge}`}
                         aria-label={
                           stage.key === "scan"
                             ? "Open Stage 1 output candidates"
