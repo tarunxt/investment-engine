@@ -186,6 +186,9 @@ type ZerodhaBasketSubmission = {
   basketCount: number;
   clipboardCopied: boolean;
   orders: ZerodhaBasketPreviewOrder[];
+  placedOrderIds?: string[];
+  failedMessages?: string[];
+  portfolioRefreshedAt?: string | null;
 };
 type ZerodhaBasketPreviewOrder = {
   id: string;
@@ -3005,6 +3008,8 @@ function ZerodhaBasketPreviewDialog({
   const allSelected = orders.length > 0 && orders.every((order) => selectedIds.has(order.id));
   const marketStatus = getIndiaMarketStatus();
   const canUseDirectMarket = directMarketAvailable && marketStatus.open;
+  const submittedOrderIds = new Set(submission?.orders.map((order) => order.id) ?? []);
+  const placedOrderIds = new Set(submission?.placedOrderIds ?? []);
   const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
@@ -3086,11 +3091,18 @@ function ZerodhaBasketPreviewDialog({
               </div>
 
               {submission ? (
-                <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm", submission.executionMode === "direct_market" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-blue-200 bg-blue-50 text-blue-800")}>
                   {submission.executionMode === "direct_market" ? (
-                    <>
-                      Placed {submission.redirected} protected MARKET order{submission.redirected === 1 ? "" : "s"} through direct Kite Connect.
-                    </>
+                    <div className="flex flex-col gap-1">
+                      <div className="font-bold">Success: {submission.redirected} protected MARKET order{submission.redirected === 1 ? "" : "s"} completed in Kite.</div>
+                      <div>Executed rows are highlighted green below so you can see which Trim/Sell/Buy transactions finished.</div>
+                      {submission.portfolioRefreshedAt ? (
+                        <div>Portfolio snapshot refreshed after execution; the latest holdings are available for the next Trim calculation.</div>
+                      ) : null}
+                      {submission.failedMessages?.length ? (
+                        <div className="font-semibold text-amber-800">Failed: {submission.failedMessages.join("; ")}</div>
+                      ) : null}
+                    </div>
                   ) : (
                     <>
                       Created {submission.basketCount} Kite protected LIMIT basket tray{submission.basketCount === 1 ? "" : "s"} for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
@@ -3250,8 +3262,11 @@ function ZerodhaBasketPreviewDialog({
                                 </label>
                               </td>
                             </tr>
-                            {group.orders.map((order) => (
-                              <tr key={order.id} className="bg-white">
+                            {group.orders.map((order) => {
+                              const isSubmitted = submittedOrderIds.has(order.id);
+                              const isPlaced = placedOrderIds.has(order.id) || (submission?.executionMode === "publisher_limit" && isSubmitted);
+                              return (
+                              <tr key={order.id} className={cn("transition", isPlaced ? "bg-emerald-50/80 ring-1 ring-inset ring-emerald-100" : isSubmitted ? "bg-amber-50/70" : "bg-white")}>
                                 <td className="px-4 py-3">
                                   <input
                                     type="checkbox"
@@ -3353,14 +3368,17 @@ function ZerodhaBasketPreviewDialog({
                                   </select>
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
-                                  {submission?.orders.some((submittedOrder) => submittedOrder.id === order.id) ? (
-                                    <span className="text-blue-700">{submission.executionMode === "direct_market" ? "Submitted direct" : "Sent to protected LIMIT tray"}</span>
+                                  {isPlaced ? (
+                                    <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 font-bold text-emerald-800">{submission?.executionMode === "direct_market" ? "Completed in Kite" : "Sent to protected LIMIT tray"}</span>
+                                  ) : isSubmitted ? (
+                                    <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 font-bold text-amber-800">Failed / check Kite</span>
                                   ) : (
                                     <span>Pending</span>
                                   )}
                                 </td>
                               </tr>
-                            ))}
+                              );
+                            })}
                           </Fragment>
                         );
                       })}
@@ -5538,15 +5556,44 @@ ${zerodhaExecutionMode === "direct_market"
           })),
         });
         const failed = response.results.filter((result) => result.status === "failed");
+        const placedResultKeys = new Set(
+          response.results
+            .filter((result) => result.status === "placed")
+            .map((result) => `${result.exchange.toUpperCase()}:${result.tradingsymbol.toUpperCase()}:${result.transaction_type}`),
+        );
+        const placedOrders = selectedOrders.filter((order) =>
+          placedResultKeys.has(`${order.exchange.toUpperCase()}:${order.symbol.toUpperCase()}:${order.side}`),
+        );
+        const failedMessages = failed.map((result) => `${result.tradingsymbol}: ${result.error || "unknown error"}`);
+        let portfolioRefreshedAt: string | null = null;
+
+        if (response.placed_count > 0) {
+          try {
+            const previousOverview = await apiService.zerodhaPortfolioOverview();
+            await apiService.zerodhaSyncPortfolio();
+            const overview = await waitForZerodhaPortfolioSync(previousOverview.latest?.captured_at);
+            portfolioRefreshedAt = overview.latest?.captured_at ?? null;
+            setZerodhaBasketDetailsData((current) => ({
+              ...current,
+              portfolioSnapshot: overview.latest,
+            }));
+          } catch (syncError) {
+            failedMessages.push(`Portfolio refresh after order placement did not complete: ${normalizeError(syncError)}`);
+          }
+        }
+
         setZerodhaBasketSubmission({
           executionMode: "direct_market",
           redirected: response.placed_count,
           basketCount: 0,
           clipboardCopied: false,
           orders: selectedOrders,
+          placedOrderIds: placedOrders.map((order) => order.id),
+          failedMessages,
+          portfolioRefreshedAt,
         });
         if (failed.length) {
-          setZerodhaBasketError(`Placed ${response.placed_count} protected MARKET order${response.placed_count === 1 ? "" : "s"}; ${response.failed_count} failed: ${failed.map((result) => `${result.tradingsymbol}: ${result.error || "unknown error"}`).join("; ")}`);
+          setZerodhaBasketError(`Placed ${response.placed_count} protected MARKET order${response.placed_count === 1 ? "" : "s"}; ${response.failed_count} failed: ${failedMessages.join("; ")}`);
         }
       } catch (error) {
         setZerodhaBasketError(`Could not place protected MARKET orders: ${normalizeError(error)}. Use the Publisher-safe protected LIMIT fallback if direct order placement is unavailable.`);
