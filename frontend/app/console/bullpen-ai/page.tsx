@@ -7,9 +7,11 @@ import {
   AlertTriangle,
   ExternalLink,
   FileText,
+  Info,
   Loader2,
   Menu,
   RefreshCw,
+  X,
 } from "lucide-react";
 
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
@@ -2994,6 +2996,8 @@ function BullpenAiPageContent() {
       : isManualScanView
         ? "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions."
         : "No auto scan results yet. Run Scans and Invest Now above to populate this tab.";
+  const [isBullpenIntroDialogOpen, setIsBullpenIntroDialogOpen] = useState(false);
+
   const investmentEmptyMessage = !activeVisibleSnapshot
     ? isManualScanView
       ? "Run Bullpen Scan first to load the current questions table."
@@ -3015,15 +3019,62 @@ function BullpenAiPageContent() {
         <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
           Copy Trading Bots
         </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">
-          Bullpen x AI
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Run Bullpen scans inside the selected time window, tune the scan
-          filters from the menu, then inspect the matching markets in a saved
-          table that persists across refresh.
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-950">
+            Bullpen x AI
+          </h1>
+          <button
+            type="button"
+            onClick={() => setIsBullpenIntroDialogOpen(true)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-purple-200 bg-white text-purple-700 shadow-sm transition hover:border-purple-300 hover:bg-purple-50 hover:text-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2"
+            aria-label="Show Bullpen x AI overview"
+          >
+            <Info className="h-4 w-4" />
+          </button>
+        </div>
       </div>
+
+      {isBullpenIntroDialogOpen ? (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsBullpenIntroDialogOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bullpen-ai-overview-title"
+            className="w-full max-w-xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-purple-600">
+                  Bullpen x AI
+                </p>
+                <h2 id="bullpen-ai-overview-title" className="mt-2 text-xl font-semibold text-slate-950">
+                  Scan workspace overview
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBullpenIntroDialogOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                aria-label="Close Bullpen x AI overview"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-6 py-5 text-sm leading-6 text-slate-700">
+              <p>
+                Run Bullpen scans inside the selected time window, tune the scan
+                filters from the menu, then inspect the matching markets in a saved
+                table that persists across refresh.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <BullpenAutoRunScheduleCard
         buildRunNowRequest={buildRunNowRequest}
