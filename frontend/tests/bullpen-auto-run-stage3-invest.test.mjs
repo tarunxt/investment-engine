@@ -577,10 +577,58 @@ test("Stage 3 schedule card keeps the Invest button and reuse copy inside the ca
 
   assert.match(source, />\s*Invest\s*</);
   assert.match(source, /getInvestStageImmediateSuccess/);
+  assert.match(source, /buildBullpenStage3InvestPreviewSteps/);
   assert.match(source, />\s*Invested\s*</);
+  assert.match(source, /border-blue-950 bg-blue-950 text-white hover:bg-blue-900/);
   assert.match(statusSource, /Rebalance and investment complete\./);
   assert.match(source, /latest Stage 2-qualified rows/);
   assert.match(source, /skips the Bullpen rescan plus LLM rerun/);
   assert.match(source, /already invested and will be skipped/);
   assert.match(source, /CheckCircle2/);
+});
+
+test("Stage 3 preview steps summarize the sell-first then invest flow before execution starts", async () => {
+  const {
+    buildBullpenStage3InvestPreviewSteps,
+  } = await loadStage3InvestModule();
+
+  const previewSteps = buildBullpenStage3InvestPreviewSteps({
+    request: {
+      console_profile: {
+        source_label: "Saved Stage 2 output",
+        source_url: null,
+        scanned_at: "2026-06-30T11:59:00Z",
+        snapshot_id: "snapshot-9",
+        mode: "stage-3-invest-only",
+        total_candidates: 2,
+        candidate_rows_prefiltered: true,
+        reuse_saved_llm_outputs: true,
+        candidate_rows: [],
+      },
+    },
+    qualifiedCandidateCount: 2,
+    readyCandidateCount: 2,
+    alreadyInvestedCandidateCount: 0,
+    alreadyInvestedMarketIds: [],
+    alreadyInvestedRecords: [],
+    candidatePreviews: [],
+    blockedReason: null,
+  });
+
+  assert.equal(previewSteps.length, 2);
+  assert.deepEqual(
+    previewSteps.map((step) => ({
+      key: step.key,
+      status: step.status,
+      label: step.label,
+    })),
+    [
+      { key: "sell", status: "pending", label: "Sell outside Top 10" },
+      { key: "buy", status: "pending", label: "Invest planned orders" },
+    ],
+  );
+  assert.equal(previewSteps[0].plannedOrders, null);
+  assert.equal(previewSteps[1].plannedOrders, 2);
+  assert.match(previewSteps[0].detail, /outside the top 10/i);
+  assert.match(previewSteps[1].detail, /Stage 2-qualified/);
 });

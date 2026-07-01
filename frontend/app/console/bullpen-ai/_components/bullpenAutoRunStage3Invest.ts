@@ -49,6 +49,20 @@ export type BullpenStage3OnlyInvestExecutionPlan = {
   blockedReason: string | null;
 };
 
+export type BullpenStage3InvestPreviewStepStatus = "pending" | "blocked";
+
+export type BullpenStage3InvestPreviewStep = {
+  key: "sell" | "buy";
+  stepNumber: number;
+  stepTotal: number;
+  label: string;
+  status: BullpenStage3InvestPreviewStepStatus;
+  detail: string;
+  plannedOrders: number | null;
+  processedOrders: number | null;
+  submittedOrders: number | null;
+};
+
 export type BullpenStage3OnlyInvestExecutionPlanOptions = {
   activePositions?: BullpenActivePositionView[];
   hasActivePositionsSnapshot?: boolean;
@@ -490,6 +504,47 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
     candidatePreviews,
     blockedReason: null,
   };
+}
+
+export function buildBullpenStage3InvestPreviewSteps(
+  plan: BullpenStage3OnlyInvestExecutionPlan,
+): BullpenStage3InvestPreviewStep[] {
+  const readyLabel =
+    plan.readyCandidateCount === 1 ? "event is" : "events are";
+  const sellDetail =
+    "Stage 3 first checks active Bullpen positions outside the top 10 and only sells when capital needs to be freed.";
+  const buyStatus: BullpenStage3InvestPreviewStepStatus =
+    plan.blockedReason && plan.readyCandidateCount === 0 ? "blocked" : "pending";
+  const buyDetail =
+    plan.blockedReason ??
+    (plan.readyCandidateCount > 0
+      ? `${plan.readyCandidateCount} Stage 2-qualified ${readyLabel} ready for the invest-only pass after Step 1 clears.`
+      : "Stage 3 will invest the planned orders after Step 1 clears.");
+
+  return [
+    {
+      key: "sell",
+      stepNumber: 1,
+      stepTotal: 2,
+      label: "Sell outside Top 10",
+      status: "pending",
+      detail: sellDetail,
+      plannedOrders: null,
+      processedOrders: null,
+      submittedOrders: null,
+    },
+    {
+      key: "buy",
+      stepNumber: 2,
+      stepTotal: 2,
+      label: "Invest planned orders",
+      status: buyStatus,
+      detail: buyDetail,
+      plannedOrders: plan.readyCandidateCount,
+      processedOrders: 0,
+      submittedOrders: 0,
+    },
+  ];
 }
 
 function uniqueRuns(

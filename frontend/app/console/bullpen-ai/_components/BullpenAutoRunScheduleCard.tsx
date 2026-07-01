@@ -37,6 +37,7 @@ import {
   isBullpenAutoRunWorkflowSettled,
 } from "./bullpenAutoRunProgress";
 import {
+  buildBullpenStage3InvestPreviewSteps,
   buildBullpenStage3OnlyInvestExecutionPlan,
   type BullpenStage3AlreadyInvestedRecord,
   selectBullpenStage3OnlyInvestSource,
@@ -305,9 +306,9 @@ type InvestExecutionStepView = {
   label: string;
   status: InvestExecutionStepStatus;
   detail: string | null;
-  plannedOrders: number;
-  processedOrders: number;
-  submittedOrders: number;
+  plannedOrders: number | null;
+  processedOrders: number | null;
+  submittedOrders: number | null;
 };
 
 function normalizeInvestExecutionStepStatus(
@@ -510,13 +511,17 @@ function formatInvestStageRowMix(
 
 function InvestExecutionStepsSummary({
   steps,
+  compact = false,
 }: {
   steps: InvestExecutionStepView[];
+  compact?: boolean;
 }) {
   if (steps.length === 0) return null;
 
+  const gridClasses = compact ? "grid gap-2" : "grid gap-2 md:grid-cols-2";
+
   return (
-    <div className="grid gap-2 md:grid-cols-2">
+    <div className={gridClasses}>
       {steps.map((step) => {
         const toneClasses = getInvestExecutionStepClasses(step.status);
         return (
@@ -542,23 +547,23 @@ function InvestExecutionStepsSummary({
             <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
               {step.detail ?? "Waiting for the worker to update this step."}
             </p>
-            <div className={`mt-3 grid grid-cols-3 gap-2 text-xs ${toneClasses.muted}`}>
-              <div className="rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
-                <p className="uppercase tracking-[0.14em]">Planned</p>
+            <div className={`mt-3 flex flex-wrap gap-2 text-xs ${toneClasses.muted}`}>
+              <div className="min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                <p className="text-[10px] uppercase tracking-[0.1em]">Planned</p>
                 <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                  {step.plannedOrders}
+                  {step.plannedOrders ?? "—"}
                 </p>
               </div>
-              <div className="rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
-                <p className="uppercase tracking-[0.14em]">Processed</p>
+              <div className="min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                <p className="text-[10px] uppercase tracking-[0.1em]">Processed</p>
                 <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                  {step.processedOrders}
+                  {step.processedOrders ?? "—"}
                 </p>
               </div>
-              <div className="rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
-                <p className="uppercase tracking-[0.14em]">Submitted</p>
+              <div className="min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                <p className="text-[10px] uppercase tracking-[0.1em]">Submitted</p>
                 <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                  {step.submittedOrders}
+                  {step.submittedOrders ?? "—"}
                 </p>
               </div>
             </div>
@@ -1210,6 +1215,22 @@ export function BullpenAutoRunScheduleCard({
     };
   }, [trackedRunId]);
 
+  const pollScheduledSummary = useEffectEvent(async () => {
+    await loadSummary({ preserveLoading: true });
+  });
+
+  useEffect(() => {
+    if (!summary?.settings.auto_live_enabled || trackedRunId) return;
+
+    const intervalId = window.setInterval(() => {
+      void pollScheduledSummary();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [summary?.settings.auto_live_enabled, trackedRunId]);
+
   async function handleEnableAutoRuns() {
     setAction("enable");
     setNotice(null);
@@ -1781,6 +1802,17 @@ export function BullpenAutoRunScheduleCard({
                 Object.keys(stage.inputs).length > 0;
               const investStageCounters = getInvestStageCounters(stage);
               const investExecutionSteps = getInvestStageExecutionSteps(stage);
+              const investPreviewSteps =
+                stage.key === "invest" &&
+                investExecutionSteps.length === 0 &&
+                stage.state === "queued" &&
+                Array.isArray(stage.inputs.llm_review_rows)
+                  ? buildBullpenStage3InvestPreviewSteps(investOnlyPlan)
+                  : [];
+              const displayedInvestSteps =
+                investExecutionSteps.length > 0
+                  ? investExecutionSteps
+                  : investPreviewSteps;
               const investExecutionStatus = getInvestStageExecutionStatus(stage);
               const stageStatusLabel = immediateSuccess
                 ? "Finished"
@@ -1900,9 +1932,12 @@ export function BullpenAutoRunScheduleCard({
                     </div>
                   ) : null}
 
-                  {investExecutionSteps.length > 0 ? (
+                  {displayedInvestSteps.length > 0 ? (
                     <div className="mt-3">
-                      <InvestExecutionStepsSummary steps={investExecutionSteps} />
+                      <InvestExecutionStepsSummary
+                        steps={displayedInvestSteps}
+                        compact
+                      />
                     </div>
                   ) : null}
 
@@ -1932,7 +1967,7 @@ export function BullpenAutoRunScheduleCard({
                             ? "cursor-default border-emerald-200 bg-emerald-50 text-emerald-900"
                             : investOnlyDisabledReason || action !== null
                             ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
-                            : "border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
+                            : "border-blue-950 bg-blue-950 text-white hover:bg-blue-900"
                         }`}
                       >
                         {investOnlyActionCompleted ? (
