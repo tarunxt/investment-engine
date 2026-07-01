@@ -336,7 +336,7 @@ function getInvestStageExecutionSteps(
   if (!Array.isArray(rawSteps)) return [];
 
   return rawSteps
-    .map((step) => {
+    .map((step): InvestExecutionStepView | null => {
       if (!isRecord(step)) return null;
       const key = readStageOutputString(step.key);
       const label = readStageOutputString(step.label);
@@ -363,9 +363,9 @@ function getInvestStageExecutionSteps(
         plannedOrders: readStageOutputNumber(step.planned_orders) ?? 0,
         processedOrders: readStageOutputNumber(step.processed_orders) ?? 0,
         submittedOrders: readStageOutputNumber(step.submitted_orders) ?? 0,
-      } satisfies InvestExecutionStepView;
+      };
     })
-    .filter((step): step is InvestExecutionStepView => Boolean(step));
+    .filter((step): step is InvestExecutionStepView => step !== null);
 }
 
 function getInvestExecutionStepClasses(status: InvestExecutionStepStatus) {
