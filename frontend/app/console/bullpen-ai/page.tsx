@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { Suspense, useEffect, useEffectEvent, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -1085,7 +1085,23 @@ function FilterToggle({
   );
 }
 
+function BullpenAiPageFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600" />
+    </div>
+  );
+}
+
 export default function BullpenAiPage() {
+  return (
+    <Suspense fallback={<BullpenAiPageFallback />}>
+      <BullpenAiPageContent />
+    </Suspense>
+  );
+}
+
+function BullpenAiPageContent() {
   const searchParams = useSearchParams();
   const usdInrRate = useUsdInrRate();
   const activeMode: ScanMode =
