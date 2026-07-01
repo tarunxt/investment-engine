@@ -14,7 +14,10 @@ import {
   hasBullpenLlmAnalysis,
   type BullpenQuestionRow,
 } from "@/lib/bullpen-ai";
-import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
+import {
+  buildBullpenInvestmentDisplay,
+  type BullpenInvestmentRow,
+} from "@/lib/bullpenInvestments";
 import { formatApiTimestamp } from "@/lib/datetime";
 import type {
   BullpenActivePositionView,
@@ -96,42 +99,73 @@ function formatMoney(value: number | null) {
 
 function MetricCard({
   label,
-  accent = false,
   children,
   footer,
 }: {
   label: string;
-  accent?: boolean;
   children: ReactNode;
   footer?: ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        "rounded-xl px-3 py-2",
-        accent ? "bg-fuchsia-500 text-slate-950" : "bg-slate-50",
-      )}
-    >
-      <div
-        className={cn(
-          "text-[11px] font-semibold uppercase tracking-[0.12em]",
-          accent ? "text-slate-900/80" : "text-slate-500",
-        )}
-      >
+    <div className="rounded-xl bg-slate-50 px-3 py-2">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
         {label}
       </div>
       <div className="mt-1">{children}</div>
       {footer ? (
-        <div
-          className={cn(
-            "mt-2 border-t pt-2 text-[10px] font-medium leading-4",
-            accent
-              ? "border-slate-900/20 text-slate-900/80"
-              : "border-slate-200 text-slate-500",
-          )}
-        >
+        <div className="mt-2 border-t border-slate-200 pt-2 text-[10px] font-medium leading-4 text-slate-500">
           {footer}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EventsSectionHeader({
+  title,
+  tone,
+  description,
+}: {
+  title: string;
+  tone: "active" | "candidate" | "attention";
+  description?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border px-4 py-3",
+        tone === "active"
+          ? "border-emerald-200 bg-emerald-50"
+          : tone === "candidate"
+            ? "border-fuchsia-200 bg-fuchsia-50"
+            : "border-red-200 bg-red-50",
+      )}
+    >
+      <div
+        className={cn(
+          "text-sm font-semibold",
+          tone === "active"
+            ? "text-emerald-900"
+            : tone === "candidate"
+              ? "text-fuchsia-900"
+              : "text-red-900",
+        )}
+      >
+        {title}
+      </div>
+      {description ? (
+        <p
+          className={cn(
+            "mt-1 text-xs leading-5",
+            tone === "active"
+              ? "text-emerald-800"
+              : tone === "candidate"
+                ? "text-fuchsia-800"
+                : "text-red-800",
+          )}
+        >
+          {description}
+        </p>
       ) : null}
     </div>
   );
@@ -318,7 +352,6 @@ export function BullpenInvestmentsSection({
   const [breakdownQuestion, setBreakdownQuestion] =
     useState<BullpenQuestionRow | null>(null);
   const [calculationDialog, setCalculationDialog] = useState<{
-    focus: "returnsPerDay" | "amountToBeInvested";
     question?: BullpenQuestionRow;
     position?: BullpenActivePositionView;
   } | null>(null);
@@ -356,6 +389,18 @@ export function BullpenInvestmentsSection({
   }
 
   const hasRows = candidates.length > 0 || openActivePositions.length > 0;
+  const activeInvestmentRows = topInvestmentRows.filter(
+    (
+      row,
+    ): row is Extract<BullpenInvestmentRow, { kind: "active" }> =>
+      row.kind === "active",
+  );
+  const candidateInvestmentRows = topInvestmentRows.filter(
+    (
+      row,
+    ): row is Extract<BullpenInvestmentRow, { kind: "candidate" }> =>
+      row.kind === "candidate",
+  );
 
   return (
     <>
@@ -367,16 +412,18 @@ export function BullpenInvestmentsSection({
                 Events to invest in
               </p>
               <h3 className="mt-1 text-lg font-semibold text-slate-950">
-                Green rows from active positions and pink rows from the current
-                Bullpen snapshot
+                Grouped Bullpen events by action
               </h3>
             </div>
             <p className="max-w-3xl text-sm text-slate-600">
-              Rows appear here when either <span className="font-semibold">LLM Yes Odds &gt; 80%</span>{" "}
-              or <span className="font-semibold">LLM No Odds &gt; 80%</span>. The Invest action
-              buys the stronger LLM side in Bullpen with a fixed <span className="font-semibold">$5</span>{" "}
-              order per new opportunity. The combined table shows at most 10 rows ranked by{" "}
-              <span className="font-semibold">returns/day</span>.
+              Green rows show active Bullpen positions, pink rows show new
+              scanned opportunities, and red rows show active positions that
+              need exit attention. The green and pink sections reflect the
+              current top 10 rows ranked by <span className="font-semibold">returns/day</span>{" "}
+              when either <span className="font-semibold">LLM Yes Odds &gt; 80%</span>{" "}
+              or <span className="font-semibold">LLM No Odds &gt; 80%</span>. The
+              Invest action buys the stronger LLM side in Bullpen with a fixed{" "}
+              <span className="font-semibold">$5</span> order per new opportunity.
             </p>
           </div>
           {!isReadOnly && hasRows ? (
@@ -489,215 +536,186 @@ export function BullpenInvestmentsSection({
               </span>
             </div>
 
-            <div className="mt-4 space-y-3">
-              {topInvestmentRows.map((row) => {
-                if (row.kind === "candidate") return null;
-                const position = row.position;
-                const question = activePositionQuestionByKey.get(position.key);
-                return (
-                  <RowShell key={`active-position-${position.key}`} active>
-                    <div className="flex items-start gap-3">
-                      <span
-                        className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
-                        aria-label="Active position"
-                        title="Active position"
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                      </span>
-                      <div className="space-y-2">
-                        <div className="block font-medium text-slate-950">
-                          {position.marketTitle}
-                        </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                          <span>Close: {formatDate(position.closeTime)}</span>
-                          <span>Held outcome: {position.outcome || "—"}</span>
-                          <span>
-                            Avg price:{" "}
-                            {formatOdds(
-                              position.averagePrice === null
-                                ? null
-                                : position.averagePrice * 100,
-                            )}
+            <div className="mt-4 space-y-6">
+              {activeInvestmentRows.length > 0 ? (
+                <div className="space-y-3">
+                  <EventsSectionHeader title="Active Bullpen Positions" tone="active" />
+                  {activeInvestmentRows.map((row) => {
+                    const position = row.position;
+                    const question = activePositionQuestionByKey.get(position.key);
+                    return (
+                      <RowShell key={`active-position-${position.key}`} active>
+                        <div className="flex items-start gap-3">
+                          <span
+                            className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+                            aria-label="Active position"
+                            title="Active position"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
                           </span>
-                          <span>{position.shares.toLocaleString()} shares</span>
+                          <div className="space-y-2">
+                            <div className="block font-medium text-slate-950">
+                              {position.marketTitle}
+                            </div>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                              <span>Close: {formatDate(position.closeTime)}</span>
+                              <span>Held outcome: {position.outcome || "—"}</span>
+                              <span>
+                                Avg price:{" "}
+                                {formatOdds(
+                                  position.averagePrice === null
+                                    ? null
+                                    : position.averagePrice * 100,
+                                )}
+                              </span>
+                              <span>{position.shares.toLocaleString()} shares</span>
+                            </div>
+                            {position.marketUrl ? (
+                              <a
+                                href={position.marketUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 hover:text-purple-900"
+                              >
+                                Open market
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </a>
+                            ) : null}
+                          </div>
                         </div>
-                        {position.marketUrl ? (
-                          <a
-                            href={position.marketUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 hover:text-purple-900"
-                          >
-                            Open market
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        ) : null}
-                      </div>
-                    </div>
 
-                    <div className="grid min-w-full gap-3 text-sm md:min-w-[36rem] md:grid-cols-4 xl:min-w-[44rem]">
-                      <CurrentOddsMetric
-                        yesOdds={position.yesOdds}
-                        noOdds={position.noOdds}
-                        updatedAt={positionsLastUpdatedAt}
-                      />
-                      <LlmOddsMetric
-                        question={question}
-                        onOpenBreakdown={setBreakdownQuestion}
-                      />
-                      <MetricCard label="Returns/day">
-                        <div className="font-semibold text-slate-900">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setCalculationDialog({
-                                focus: "returnsPerDay",
-                                position,
-                              })
-                            }
-                            className="rounded-md text-left underline decoration-slate-300 underline-offset-4 transition hover:text-slate-700"
-                          >
-                            {formatReturnsPerDay(position.returnsPerDay)}
-                          </button>
+                        <div className="grid min-w-full gap-3 text-sm md:min-w-[28rem] md:grid-cols-3 xl:min-w-[36rem]">
+                          <CurrentOddsMetric
+                            yesOdds={position.yesOdds}
+                            noOdds={position.noOdds}
+                            updatedAt={positionsLastUpdatedAt}
+                          />
+                          <LlmOddsMetric
+                            question={question}
+                            onOpenBreakdown={setBreakdownQuestion}
+                          />
+                          <MetricCard label="Returns/day">
+                            <div className="font-semibold text-slate-900">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setCalculationDialog({
+                                    position,
+                                  })
+                                }
+                                className="rounded-md text-left underline decoration-slate-300 underline-offset-4 transition hover:text-slate-700"
+                              >
+                                {formatReturnsPerDay(position.returnsPerDay)}
+                              </button>
+                            </div>
+                          </MetricCard>
                         </div>
-                      </MetricCard>
-                      <MetricCard label="Capital" accent>
-                        <div className="font-semibold">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setCalculationDialog({
-                                focus: "amountToBeInvested",
-                                position,
-                              })
-                            }
-                            className="rounded-md text-left underline decoration-slate-900/30 underline-offset-4 transition hover:text-slate-800"
-                          >
-                            {formatMoney(position.currentValue ?? position.costBasis)}
-                          </button>
-                        </div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-900/80">
-                          Current value
-                        </div>
-                      </MetricCard>
-                    </div>
-                  </RowShell>
-                );
-              })}
+                      </RowShell>
+                    );
+                  })}
+                </div>
+              ) : null}
 
-              {topInvestmentRows.map((row) => {
-                if (row.kind === "active") return null;
-                const question = row.question;
-                const checkboxId = `bullpen-investment-${question.id}`;
-                const investOutcome =
-                  question.llmYesOdds !== null &&
-                  question.llmYesOdds > 80 &&
-                  (question.llmNoOdds === null || question.llmYesOdds >= question.llmNoOdds)
-                    ? "Yes"
-                    : "No";
-                return (
-                  <RowShell
-                    key={question.id}
-                    selected={selectedQuestionIds.has(question.id)}
-                  >
-                    <div className="flex items-start gap-3">
-                      <input
-                        id={checkboxId}
-                        type="checkbox"
-                        checked={selectedQuestionIds.has(question.id)}
-                        onChange={() => onToggleQuestion(question.id)}
-                        className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400"
-                      />
-                      <div className="space-y-2">
-                        <label
-                          htmlFor={checkboxId}
-                          className="block cursor-pointer font-medium text-slate-950"
-                        >
-                          {question.question}
-                        </label>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                          <span>Close: {formatDate(question.closeTime)}</span>
-                          <span>Category: {question.category || "—"}</span>
-                          <span>Outcome: Buy {investOutcome}</span>
-                          <span>Added: {formatIstTimestamp(question.investmentTableAddedAt ?? null)}</span>
-                        </div>
-                        {question.marketUrl ? (
-                          <a
-                            href={question.marketUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 hover:text-purple-900"
-                          >
-                            Open market
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="grid min-w-full gap-3 text-sm md:min-w-[36rem] md:grid-cols-4 xl:min-w-[44rem]">
-                      <CurrentOddsMetric
-                        yesOdds={question.yesOdds}
-                        noOdds={question.noOdds}
-                        updatedAt={question.currentOddsUpdatedAt ?? null}
-                      />
-                      <LlmOddsMetric
-                        question={question}
-                        onOpenBreakdown={setBreakdownQuestion}
-                      />
-                      <MetricCard label="Returns/day">
-                        <div className="font-semibold text-slate-900">
-                          {question.returnsPerDay === null ? (
-                            formatReturnsPerDay(question.returnsPerDay)
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setCalculationDialog({
-                                  focus: "returnsPerDay",
-                                  question,
-                                })
-                              }
-                              className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-slate-700"
+              {candidateInvestmentRows.length > 0 ? (
+                <div className="space-y-3">
+                  <EventsSectionHeader
+                    title="New Scanned Opportunities"
+                    tone="candidate"
+                  />
+                  {candidateInvestmentRows.map((row) => {
+                    const question = row.question;
+                    const checkboxId = `bullpen-investment-${question.id}`;
+                    const investOutcome =
+                      question.llmYesOdds !== null &&
+                      question.llmYesOdds > 80 &&
+                      (question.llmNoOdds === null || question.llmYesOdds >= question.llmNoOdds)
+                        ? "Yes"
+                        : "No";
+                    return (
+                      <RowShell
+                        key={question.id}
+                        selected={selectedQuestionIds.has(question.id)}
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            id={checkboxId}
+                            type="checkbox"
+                            checked={selectedQuestionIds.has(question.id)}
+                            onChange={() => onToggleQuestion(question.id)}
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400"
+                          />
+                          <div className="space-y-2">
+                            <label
+                              htmlFor={checkboxId}
+                              className="block cursor-pointer font-medium text-slate-950"
                             >
-                              {formatReturnsPerDay(question.returnsPerDay)}
-                            </button>
-                          )}
+                              {question.question}
+                            </label>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                              <span>Close: {formatDate(question.closeTime)}</span>
+                              <span>Category: {question.category || "—"}</span>
+                              <span>Outcome: Buy {investOutcome}</span>
+                              <span>
+                                Added: {formatIstTimestamp(question.investmentTableAddedAt ?? null)}
+                              </span>
+                            </div>
+                            {question.marketUrl ? (
+                              <a
+                                href={question.marketUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 hover:text-purple-900"
+                              >
+                                Open market
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </a>
+                            ) : null}
+                          </div>
                         </div>
-                      </MetricCard>
-                      <MetricCard label="Capital" accent>
-                        <div className="font-semibold">
-                          {question.amountToBeInvested === null ? (
-                            formatMoney(question.amountToBeInvested)
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setCalculationDialog({
-                                  focus: "amountToBeInvested",
-                                  question,
-                                })
-                              }
-                              className="rounded-md underline decoration-slate-900/30 underline-offset-4 transition hover:text-slate-800"
-                            >
-                              {formatMoney(question.amountToBeInvested)}
-                            </button>
-                          )}
+
+                        <div className="grid min-w-full gap-3 text-sm md:min-w-[28rem] md:grid-cols-3 xl:min-w-[36rem]">
+                          <CurrentOddsMetric
+                            yesOdds={question.yesOdds}
+                            noOdds={question.noOdds}
+                            updatedAt={question.currentOddsUpdatedAt ?? null}
+                          />
+                          <LlmOddsMetric
+                            question={question}
+                            onOpenBreakdown={setBreakdownQuestion}
+                          />
+                          <MetricCard label="Returns/day">
+                            <div className="font-semibold text-slate-900">
+                              {question.returnsPerDay === null ? (
+                                formatReturnsPerDay(question.returnsPerDay)
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setCalculationDialog({
+                                      question,
+                                    })
+                                  }
+                                  className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-slate-700"
+                                >
+                                  {formatReturnsPerDay(question.returnsPerDay)}
+                                </button>
+                              )}
+                            </div>
+                          </MetricCard>
                         </div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-900/80">
-                          Buy amount
-                        </div>
-                      </MetricCard>
-                    </div>
-                  </RowShell>
-                );
-              })}
+                      </RowShell>
+                    );
+                  })}
+                </div>
+              ) : null}
 
               {activePositionsNeedingAttention.length > 0 ? (
                 <div className="space-y-3 pt-2">
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-900">
-                    Active positions below need attention because they are outside the top 10 by returns/day or do not have LLM Yes/No odds above 80%.
-                  </div>
+                  <EventsSectionHeader
+                    title="SELL | Events outside Top 10 by Returns/day"
+                    tone="attention"
+                    description="Includes active positions outside the top 10 by returns/day or without LLM Yes/No odds above 80%."
+                  />
                   {activePositionsNeedingAttention.map(({ position, question, reasons }) => {
                     return (
                       <RowShell key={`active-position-outside-top-${position.key}`} attention>
@@ -717,30 +735,35 @@ export function BullpenInvestmentsSection({
                               <span>Close: {formatDate(position.closeTime)}</span>
                               <span>Held outcome: {position.outcome || "—"}</span>
                               <span>
-                                Avg price: {formatOdds(position.averagePrice === null ? null : position.averagePrice * 100)}
+                                Avg price:{" "}
+                                {formatOdds(
+                                  position.averagePrice === null
+                                    ? null
+                                    : position.averagePrice * 100,
+                                )}
                               </span>
                               <span>{position.shares.toLocaleString()} shares</span>
                             </div>
                             <div className="rounded-xl border border-red-200 bg-white/70 px-3 py-2 text-xs font-semibold text-red-800">
                               Attention: {reasons.join("; ")}
                             </div>
-
                           </div>
                         </div>
 
-                        <div className="grid min-w-full gap-3 text-sm md:min-w-[36rem] md:grid-cols-4 xl:min-w-[44rem]">
+                        <div className="grid min-w-full gap-3 text-sm md:min-w-[28rem] md:grid-cols-3 xl:min-w-[36rem]">
                           <CurrentOddsMetric
                             yesOdds={position.yesOdds}
                             noOdds={position.noOdds}
                             updatedAt={positionsLastUpdatedAt}
                           />
-                          <LlmOddsMetric question={question} onOpenBreakdown={setBreakdownQuestion} />
+                          <LlmOddsMetric
+                            question={question}
+                            onOpenBreakdown={setBreakdownQuestion}
+                          />
                           <MetricCard label="Returns/day">
-                            <div className="font-semibold text-slate-900">{formatReturnsPerDay(position.returnsPerDay)}</div>
-                          </MetricCard>
-                          <MetricCard label="Capital" accent>
-                            <div className="font-semibold">{formatMoney(position.currentValue ?? position.costBasis)}</div>
-                            <div className="mt-1 text-[11px] font-medium text-slate-900/80">Current value</div>
+                            <div className="font-semibold text-slate-900">
+                              {formatReturnsPerDay(position.returnsPerDay)}
+                            </div>
                           </MetricCard>
                         </div>
                       </RowShell>
@@ -762,7 +785,7 @@ export function BullpenInvestmentsSection({
 
       {calculationDialog ? (
         <BullpenInvestmentMathDialog
-          focus={calculationDialog.focus}
+          focus="returnsPerDay"
           question={calculationDialog.question}
           position={calculationDialog.position}
           onClose={() => setCalculationDialog(null)}
