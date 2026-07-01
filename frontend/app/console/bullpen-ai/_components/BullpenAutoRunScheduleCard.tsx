@@ -307,6 +307,16 @@ function getInvestStageExecutionStatus(
     };
   }
 
+  const stageError = readStageOutputString(stage.outputs.error_message);
+  if (stageError) {
+    return {
+      label: "Worker error",
+      message: stageError,
+      className: "border-rose-200 bg-rose-50/80 text-rose-900",
+      detailClassName: "text-rose-800",
+    };
+  }
+
   const executionGateReason = readStageOutputString(stage.outputs.execution_gate_reason);
   if (executionGateReason) {
     return {
@@ -635,6 +645,15 @@ function InvestMetricDetailsDialog({
   const candidateRows = state.stage
     ? readStageOutputNumber(state.stage.outputs.candidate_decision_rows)
     : null;
+  const stageError = state.stage
+    ? readStageOutputString(state.stage.outputs.error_message)
+    : null;
+  const runError =
+    stageError ??
+    (typeof state.run.error_message === "string" && state.run.error_message.trim().length > 0
+      ? state.run.error_message.trim()
+      : null);
+  const hasPendingOrders = plannedCount > submittedCount;
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
@@ -700,6 +719,19 @@ function InvestMetricDetailsDialog({
               </p>
             </div>
           </div>
+
+          {runError ? (
+            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950">
+              <span className="font-semibold">Latest worker error:</span> {runError}
+            </div>
+          ) : null}
+
+          {hasPendingOrders ? (
+            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+              Stage 3 submits Bullpen orders one at a time, so multiple planned
+              orders can take a few minutes when Bullpen is slow or retrying.
+            </div>
+          ) : null}
 
           <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
             {rows.length > 0 ? (

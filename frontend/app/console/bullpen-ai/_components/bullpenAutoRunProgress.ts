@@ -120,6 +120,7 @@ function buildStageDetail(
   stage: BullpenAutoLiveStageResult | null,
   detail: string,
   workflowDefinition: WorkflowDefinition,
+  run: BullpenAutoLiveRun | null,
 ) {
   let nextDetail = detail;
   if (
@@ -141,6 +142,25 @@ function buildStageDetail(
         : null;
     if (investDetail && !nextDetail.includes(investDetail)) {
       nextDetail = appendStageDetail(nextDetail, investDetail);
+    }
+  }
+  const stageError = readString(stage?.outputs?.error_message);
+  if (stageError) {
+    const failureDetail = `Worker error: ${stageError}`;
+    if (!nextDetail.includes(failureDetail)) {
+      nextDetail = appendStageDetail(nextDetail, failureDetail);
+    }
+  } else if (
+    run?.status === "failed" &&
+    (stage?.completed_at === null || getPhaseStatus(stage) === "running")
+  ) {
+    const fallbackFailure =
+      readString(run.error_message) ?? readString(run.summary);
+    if (fallbackFailure) {
+      const failureDetail = `Worker error: ${fallbackFailure}`;
+      if (!nextDetail.includes(failureDetail)) {
+        nextDetail = appendStageDetail(nextDetail, failureDetail);
+      }
     }
   }
   return nextDetail;
@@ -419,7 +439,7 @@ export function buildBullpenAutoRunWorkflowView(
     ) {
       detail = normalizedRun.summary;
     }
-    detail = buildStageDetail(stage, detail, definition);
+    detail = buildStageDetail(stage, detail, definition, normalizedRun);
 
     return {
       key: definition.key,
@@ -455,17 +475,19 @@ export function buildBullpenAutoRunWorkflowView(
         : runStatus === "skipped"
           ? "Last run was skipped"
       : "Queued for the next auto-run";
-  const statusCopy = currentStage
-    ? `Current stage: ${currentStage.title}`
-    : runStatus === "completed"
-      ? "The latest Bullpen Scan + LLM + Invest run finished all 3 stages."
-      : runStatus === "failed"
-        ? normalizedRun?.summary ||
-          "The latest Bullpen Scan + LLM + Invest run failed before finishing."
-        : runStatus === "skipped"
+  const statusCopy =
+    runStatus === "failed"
+      ? normalizedRun?.summary ||
+        normalizedRun?.error_message ||
+        "The latest Bullpen Scan + LLM + Invest run failed before finishing."
+      : currentStage
+        ? `Current stage: ${currentStage.title}`
+        : runStatus === "completed"
+          ? "The latest Bullpen Scan + LLM + Invest run finished all 3 stages."
+          : runStatus === "skipped"
           ? normalizedRun?.summary ||
             "The latest Bullpen Scan + LLM + Invest run was skipped."
-      : "The next Bullpen Scan + LLM + Invest run is waiting in queue.";
+          : "The next Bullpen Scan + LLM + Invest run is waiting in queue.";
 
   return {
     stages,

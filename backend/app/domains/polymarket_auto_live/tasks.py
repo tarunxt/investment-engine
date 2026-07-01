@@ -8,6 +8,7 @@ from celery.exceptions import MaxRetriesExceededError
 from sqlalchemy import and_, select
 
 from app.core.logging import get_logger
+from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
     build_initial_run_summary,
@@ -41,6 +42,14 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+_PENDING_STAGE3_ORDER_DETAIL = "Order planned but not executed yet."
+_WORKFLOW_STAGE_LABELS = {
+    "scan": "Stage 1 · Bullpen Scan",
+    "llm": "Stage 2 · Run LLM",
+    "invest": "Stage 3 · Invest",
+}
+
+
 def _position_snapshot_from_record(record) -> PositionSnapshot:
     payload = record.payload or {}
     return PositionSnapshot(
@@ -63,6 +72,128 @@ def _position_snapshot_from_record(record) -> PositionSnapshot:
         ),
         condition_id=payload.get("condition_id") if isinstance(payload.get("condition_id"), str) else None,
     )
+
+
+def _read_output_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = int(value)
+        except ValueError:
+            return None
+        return parsed
+    return None
+
+
+def _append_failure_reason(reason: str, failure_message: str) -> str:
+    normalized_reason = reason.strip()
+    failure_suffix = f"Worker error: {failure_message}"
+    if not normalized_reason:
+        return failure_suffix
+    if failure_message in normalized_reason or failure_suffix in normalized_reason:
+        return normalized_reason
+    separator = " " if normalized_reason.endswith((".", "!", "?")) else ". "
+    return f"{normalized_reason}{separator}{failure_suffix}"
+
+
+def _workflow_stage_label(stage) -> str:
+    workflow_stage_key = stage.outputs.get("workflow_stage_key")
+    if isinstance(workflow_stage_key, str):
+        normalized_key = workflow_stage_key.strip().lower()
+        if normalized_key in _WORKFLOW_STAGE_LABELS:
+            return _WORKFLOW_STAGE_LABELS[normalized_key]
+    return f"Stage {stage.stage_number}"
+
+
+def _mark_stage3_decision_rows_failed(
+    outputs: dict[str, object],
+    *,
+    failure_message: str,
+) -> dict[str, object]:
+    raw_decision_rows = outputs.get("decision_rows")
+    if not isinstance(raw_decision_rows, list):
+        return outputs
+
+    updated_rows: list[object] = []
+    failed_orders = 0
+    processed_orders = 0
+
+    for row in raw_decision_rows:
+        if not isinstance(row, dict):
+            updated_rows.append(row)
+            continue
+
+        next_row = dict(row)
+        raw_order_plan = next_row.get("order_plan")
+        if isinstance(raw_order_plan, dict):
+            next_order_plan = dict(raw_order_plan)
+            order_status = str(next_order_plan.get("status") or "").strip().lower()
+            if order_status == "planned":
+                next_order_plan["status"] = "failed"
+                detail = str(next_order_plan.get("detail") or "").strip()
+                if not detail or detail == _PENDING_STAGE3_ORDER_DETAIL:
+                    next_order_plan["detail"] = failure_message
+                next_row["order_plan"] = next_order_plan
+                failed_orders += 1
+
+            final_status = str(next_order_plan.get("status") or "").strip().lower()
+            if final_status and final_status != "planned":
+                processed_orders += 1
+
+        updated_rows.append(next_row)
+
+    outputs["decision_rows"] = updated_rows
+    if failed_orders > 0:
+        outputs["orders_failed"] = max(
+            failed_orders,
+            _read_output_int(outputs.get("orders_failed")) or 0,
+        )
+        outputs["orders_processed"] = max(
+            processed_orders,
+            _read_output_int(outputs.get("orders_processed")) or 0,
+        )
+    return outputs
+
+
+def _finalize_failed_run_progress(
+    run: BullpenAutoLiveRun,
+    *,
+    failure_message: str,
+    completed_at: str,
+) -> str:
+    active_stage = next(
+        (
+            stage
+            for stage in sorted(run.stage_results, key=lambda item: item.stage_number, reverse=True)
+            if stage.completed_at is None
+            or str(stage.outputs.get("phase_status") or "").strip().lower() == "running"
+        ),
+        None,
+    )
+    if active_stage is None:
+        return f"Auto-Live run failed: {failure_message}"
+
+    stage_outputs = dict(active_stage.outputs)
+    stage_outputs["phase_status"] = "failed"
+    stage_outputs["error_message"] = failure_message
+    stage_outputs["failure_message"] = failure_message
+    if str(stage_outputs.get("workflow_stage_key") or "").strip().lower() == "invest":
+        stage_outputs = _mark_stage3_decision_rows_failed(
+            stage_outputs,
+            failure_message=failure_message,
+        )
+
+    active_stage.outputs = stage_outputs
+    active_stage.status = "fail"
+    active_stage.reason = _append_failure_reason(active_stage.reason, failure_message)
+    active_stage.completed_at = completed_at
+
+    return f"Auto-Live run failed during {_workflow_stage_label(active_stage)}: {failure_message}"
 
 
 def _synchronize_state(
@@ -123,12 +254,20 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
             )
         except Exception as exc:
             logger.exception("Auto-Live run %s failed before completion", run_id)
+            sanitized_error = redact_secrets(str(exc))
+            completed_at = datetime.now(UTC).isoformat()
             run.status = "failed"
-            run.completed_at = datetime.now(UTC).isoformat()
-            run.error_message = str(exc)
-            run.summary = f"Auto-Live run failed: {exc}"
+            run.completed_at = completed_at
+            run.error_message = sanitized_error
+            run.summary = _finalize_failed_run_progress(
+                run,
+                failure_message=sanitized_error,
+                completed_at=completed_at,
+            )
             state.last_error = run.summary
             state.last_action = run.summary
+            state.last_run_id = run.id
+            state.last_run_at = completed_at
             repo.save_run(user_id, run)
             repo.save_state(user_id, state)
             session.commit()

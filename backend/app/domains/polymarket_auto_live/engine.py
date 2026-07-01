@@ -3656,7 +3656,9 @@ class BullpenAutoLiveEngine:
                 phase_status="running",
                 reason=(
                     f"Stage 3 reviewed all {total_decision_rows} rows and is preparing "
-                    f"{planned_orders} planned order{'s' if planned_orders != 1 else ''}."
+                    f"{planned_orders} planned order{'s' if planned_orders != 1 else ''}. "
+                    "Bullpen submits orders one at a time, so this stage can take a few "
+                    "minutes when multiple orders are planned."
                     if not state.dry_run and not execution_pause_reason
                     else (
                         f"Stage 3 reviewed all {total_decision_rows} rows and is staying "
@@ -3715,6 +3717,18 @@ class BullpenAutoLiveEngine:
                 )
                 continue
 
+            pending_order_number = execution_orders_processed + 1
+            report_invest_stage_progress(
+                phase_status="running",
+                reason=(
+                    f"Stage 3 is submitting planned order {pending_order_number} of "
+                    f"{planned_orders}. Latest: {decision.market_title}"
+                ),
+                completed_items=processed_decision_rows,
+                execution_gate_reason=execution_pause_reason,
+                execution_mode_reason=simulation_reason if state.dry_run else None,
+                completed_at=None,
+            )
             quote = await refresh_execution_quote(slug=decision.slug, side=order_plan.side)
             quote_price_cents = quote.current_price_cents or order_plan.limit_price_cents
             if quote.spread_cents is not None and quote.spread_cents > settings.max_bid_ask_spread_cents:
