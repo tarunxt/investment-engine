@@ -3384,7 +3384,7 @@ export function ConsensusBreakupButton({
         >
           <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl" style={draggableStyle} onClick={(event) => event.stopPropagation()}>
             <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4" {...dragHandleProps}>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-600">Consensus breakup</p>
                 <h2 className="mt-1 flex flex-wrap items-baseline gap-2 text-2xl font-bold text-gray-900">
                   <span>{stock.symbol} · {consensusText}</span>
@@ -3397,7 +3397,7 @@ export function ConsensusBreakupButton({
                 </p>
                 <PopupDragHint />
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close consensus breakup">
+              <button type="button" onClick={() => setOpen(false)} className="shrink-0 rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close consensus breakup">
                 <X className="h-5 w-5" />
               </button>
             </div>
