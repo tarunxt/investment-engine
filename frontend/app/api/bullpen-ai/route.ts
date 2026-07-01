@@ -20,6 +20,15 @@ import {
   type BullpenScanFilters,
   type ScanMode,
 } from "@/lib/bullpen-ai";
+import {
+  MARKET_CATEGORY_KEYWORDS,
+  MARKET_PREDICTION_PATTERNS,
+  MARKET_QUESTION_KEYWORDS,
+  SOCIAL_POST_COUNT_KEYWORDS,
+  SOCIAL_POST_COUNT_PATTERNS,
+  SPORTS_KEYWORDS,
+  WEATHER_KEYWORDS,
+} from "@/lib/bullpenScanExclusions";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -80,120 +89,6 @@ const EVENT_SLUG_KEYS = [
   "urlSlug",
 ];
 const OUTCOME_LABEL_KEYS = ["name", "label", "outcome", "title", "side"];
-const SPORTS_KEYWORDS = [
-  "sports",
-  "esports",
-  "games",
-  "match",
-  "tournament",
-  "nba",
-  "nfl",
-  "mlb",
-  "nhl",
-  "ncaa",
-  "soccer",
-  "football",
-  "baseball",
-  "basketball",
-  "cricket",
-  "tennis",
-  "wimbledon",
-  "atp",
-  "wta",
-  "grand slam",
-  "roland garros",
-  "french open",
-  "australian open",
-  "davis cup",
-  "billie jean king cup",
-  "golf",
-  "pga",
-  "u.s. open",
-  "us open",
-  "mma",
-  "ufc",
-  "boxing",
-  "formula 1",
-  "f1",
-  "dota",
-  "counter-strike",
-  "cs2",
-  "iem",
-  "world cup",
-  "premier league",
-  "champions league",
-  "la liga",
-];
-const WEATHER_KEYWORDS = [
-  "weather",
-  "temperature",
-  "rain",
-  "snow",
-  "hurricane",
-  "storm",
-  "tornado",
-  "heatwave",
-  "forecast",
-  "climate",
-  "wind",
-  "precipitation",
-  "monsoon",
-];
-const MARKET_CATEGORY_KEYWORDS = [
-  "finance",
-  "business",
-  "markets",
-  "crypto",
-  "economy",
-  "economics",
-  "stocks",
-  "commodities",
-  "forex",
-];
-const MARKET_QUESTION_KEYWORDS = [
-  "bitcoin",
-  "ethereum",
-  "solana",
-  "dogecoin",
-  "memecoin",
-  "crypto",
-  "stock",
-  "stocks",
-  "share price",
-  "nasdaq",
-  "s&p",
-  "dow",
-  "oil",
-  "gold",
-  "silver",
-  "yield",
-  "bond",
-  "bonds",
-  "commodity",
-  "commodities",
-  "forex",
-  "inflation",
-  "interest rate",
-  "fed",
-  "etf",
-];
-const SOCIAL_POST_COUNT_KEYWORDS = [
-  "tweet",
-  "tweets",
-  "x post",
-  "x posts",
-  "posts on x",
-  "truth social post",
-  "truth social posts",
-  "truths",
-];
-const SOCIAL_POST_COUNT_PATTERNS = [
-  /\bhow many (?:tweets?|posts?|truths?)\b/i,
-  /\bnumber of (?:tweets?|posts?|truths?)\b/i,
-  /\b(?:at least|at most|more than|less than|over|under|between)\s+\d+[\w\s-]*(?:tweets?|posts?|truths?)\b/i,
-  /\b\d+\s*(?:-|to)\s*\d+\s+(?:tweets?|posts?|truths?)\b/i,
-  /\b\d+\+?\s+(?:tweets?|posts?|truths?)\b/i,
-];
 const INSULT_MARKET_PATTERNS = [
   /\b(?:donald\s+)?trump\b.{0,80}\bpublic(?:ly)?\s+insult(?:s|ed|ing)?\b/i,
   /\bpublic(?:ly)?\s+insult(?:s|ed|ing)?\s+(?:someone|somebody|anyone)\b/i,
@@ -531,7 +426,7 @@ function matchesKeyword(text: string, keyword: string) {
   return new RegExp(`(^|\\W)${escapeRegExp(keyword)}(?=$|\\W)`, "i").test(text);
 }
 
-function includesAnyKeyword(text: string, keywords: string[]) {
+function includesAnyKeyword(text: string, keywords: readonly string[]) {
   return keywords.some((keyword) => matchesKeyword(text, keyword));
 }
 
@@ -559,7 +454,8 @@ function isMarketPredictionQuestion(question: BullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
     includesAnyKeyword(question.category.toLowerCase(), MARKET_CATEGORY_KEYWORDS) ||
-    includesAnyKeyword(searchText, MARKET_QUESTION_KEYWORDS)
+    includesAnyKeyword(searchText, MARKET_QUESTION_KEYWORDS) ||
+    MARKET_PREDICTION_PATTERNS.some((pattern) => pattern.test(searchText))
   );
 }
 

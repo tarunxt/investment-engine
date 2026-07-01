@@ -1629,6 +1629,20 @@ def test_candidate_filter_reasons_block_trump_insult_markets():
     assert "Excluded insult or name-calling market." in reasons
 
 
+def test_candidate_filter_reasons_block_market_cap_leadership_markets():
+    market = _market(
+        question=(
+            "Will Company A be the largest company in the world by market cap "
+            "on July 31, 2026?"
+        ),
+        theme="AI",
+    )
+
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+    assert "Excluded market-prediction or finance market." in reasons
+
+
 def test_candidate_filter_reasons_block_unclear_social_count_market():
     market = _market(
         question="How many tweets will candidate X post this week?",

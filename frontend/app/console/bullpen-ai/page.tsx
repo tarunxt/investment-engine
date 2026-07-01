@@ -49,6 +49,10 @@ import {
   validateBullpenStaleFacts,
 } from "@/lib/bullpen-ai";
 import {
+  BULLPEN_SCAN_FILTER_DETAILS,
+  type BullpenScanFilterDetailId,
+} from "@/lib/bullpenScanExclusions";
+import {
   buildBullpenLlmTargetId,
   buildBullpenLlmRunTargetSet,
   buildBullpenQuestionRowFromActivePosition,
@@ -79,6 +83,7 @@ import {
 } from "./_components/BullpenQuestionsTable";
 import { BullpenAutoRunScheduleCard } from "./_components/BullpenAutoRunScheduleCard";
 import { BullpenInvestmentsSection } from "./_components/BullpenInvestmentsSection";
+import { BullpenScanFilterDetailsDialog } from "./_components/BullpenScanFilterDetailsDialog";
 import { BullpenPromptEditorDialog } from "./_components/BullpenPromptEditorDialog";
 import {
   syncBullpenAutoRunActivePositionAnalyses,
@@ -1020,36 +1025,63 @@ function FilterToggle({
   label,
   description,
   onChange,
+  onOpenDetails,
   className,
 }: {
   checked: boolean;
   label: string;
   description: string;
   onChange: (checked: boolean) => void;
+  onOpenDetails?: () => void;
   className?: string;
 }) {
+  const isDetailCard = typeof onOpenDetails === "function";
+
   return (
-    <label
+    <div
+      role={isDetailCard ? "button" : undefined}
+      tabIndex={isDetailCard ? 0 : undefined}
+      onClick={onOpenDetails}
+      onKeyDown={(event) => {
+        if (!isDetailCard) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpenDetails();
+        }
+      }}
       className={cn(
-        "flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3",
+        "rounded-2xl border border-slate-200 bg-slate-50 p-3",
+        isDetailCard
+          ? "cursor-pointer transition hover:border-slate-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-slate-300"
+          : "",
         className,
       )}
     >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400"
-      />
-      <span className="space-y-1">
-        <span className="block text-sm font-semibold text-slate-900">
-          {label}
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={checked}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          onChange={(event) => onChange(event.target.checked)}
+          aria-label={`Toggle ${label}`}
+          className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400"
+        />
+        <span className="space-y-1">
+          <span className="block text-sm font-semibold text-slate-900">
+            {label}
+          </span>
+          <span className="block text-xs leading-5 text-slate-600">
+            {description}
+          </span>
+          {isDetailCard ? (
+            <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Click card for exact rules
+            </span>
+          ) : null}
         </span>
-        <span className="block text-xs leading-5 text-slate-600">
-          {description}
-        </span>
-      </span>
-    </label>
+      </div>
+    </div>
   );
 }
 
@@ -1161,6 +1193,8 @@ export default function BullpenAiPage() {
   ] = useState(false);
   const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
   const [isScanFiltersOpen, setIsScanFiltersOpen] = useState(false);
+  const [openFilterDetailsId, setOpenFilterDetailsId] =
+    useState<BullpenScanFilterDetailId | null>(null);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   const claimPositionsTaskRef = useRef<Promise<void> | null>(null);
   const lastAutoClaimAttemptRef = useRef<BullpenAutoClaimAttempt | null>(null);
@@ -1227,10 +1261,11 @@ export default function BullpenAiPage() {
 
   useEffect(() => {
     setIsScanFiltersOpen(false);
+    setOpenFilterDetailsId(null);
   }, [activeMode]);
 
   useEffect(() => {
-    if (!isScanFiltersOpen) return;
+    if (!isScanFiltersOpen || openFilterDetailsId) return;
 
     function handlePointerDown(event: MouseEvent) {
       if (!scanFiltersMenuRef.current) return;
@@ -1251,7 +1286,7 @@ export default function BullpenAiPage() {
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isScanFiltersOpen]);
+  }, [isScanFiltersOpen, openFilterDetailsId]);
 
   const pollBullpenPositions = useEffectEvent(() => {
     if (typeof document !== "undefined" && document.visibilityState !== "visible") {
@@ -3098,13 +3133,25 @@ export default function BullpenAiPage() {
                         </div>
 
                         <div className="grid gap-3 sm:grid-cols-2">
+                          <p className="text-xs leading-5 text-slate-500 sm:col-span-2">
+                            Use the checkbox to toggle a rule. Click any card to
+                            inspect the exact matching algorithm.
+                          </p>
                           <FilterToggle
                             checked={activeFilters.excludeSports}
                             onChange={(checked) =>
                               updateActiveFilters({ excludeSports: checked })
                             }
-                            label="Exclude sports"
-                            description="Remove sports leagues, teams, games, tournaments, and match-result markets, including tennis tours and Wimbledon-style questions."
+                            onOpenDetails={() =>
+                              setOpenFilterDetailsId("excludeSports")
+                            }
+                            label={
+                              BULLPEN_SCAN_FILTER_DETAILS.excludeSports.label
+                            }
+                            description={
+                              BULLPEN_SCAN_FILTER_DETAILS.excludeSports
+                                .description
+                            }
                             className="h-full"
                           />
                           <FilterToggle
@@ -3112,8 +3159,16 @@ export default function BullpenAiPage() {
                             onChange={(checked) =>
                               updateActiveFilters({ excludeWeather: checked })
                             }
-                            label="Exclude weather"
-                            description="Remove temperature, storm, rainfall, hurricane, and climate-style markets."
+                            onOpenDetails={() =>
+                              setOpenFilterDetailsId("excludeWeather")
+                            }
+                            label={
+                              BULLPEN_SCAN_FILTER_DETAILS.excludeWeather.label
+                            }
+                            description={
+                              BULLPEN_SCAN_FILTER_DETAILS.excludeWeather
+                                .description
+                            }
                             className="h-full"
                           />
                           <FilterToggle
@@ -3123,8 +3178,19 @@ export default function BullpenAiPage() {
                                 excludeMarketPredictions: checked,
                               })
                             }
-                            label="Exclude market predictions"
-                            description="Remove finance, macro, stocks, commodities, and crypto-price style questions."
+                            onOpenDetails={() =>
+                              setOpenFilterDetailsId(
+                                "excludeMarketPredictions",
+                              )
+                            }
+                            label={
+                              BULLPEN_SCAN_FILTER_DETAILS
+                                .excludeMarketPredictions.label
+                            }
+                            description={
+                              BULLPEN_SCAN_FILTER_DETAILS
+                                .excludeMarketPredictions.description
+                            }
                             className="h-full"
                           />
                           <FilterToggle
@@ -3134,8 +3200,19 @@ export default function BullpenAiPage() {
                                 excludeTweetCountQuestions: checked,
                               })
                             }
-                            label="Exclude tweet counts"
-                            description="Remove questions asking how many tweets or social posts someone will make."
+                            onOpenDetails={() =>
+                              setOpenFilterDetailsId(
+                                "excludeTweetCountQuestions",
+                              )
+                            }
+                            label={
+                              BULLPEN_SCAN_FILTER_DETAILS
+                                .excludeTweetCountQuestions.label
+                            }
+                            description={
+                              BULLPEN_SCAN_FILTER_DETAILS
+                                .excludeTweetCountQuestions.description
+                            }
                             className="h-full"
                           />
                           <FilterToggle
@@ -3143,8 +3220,16 @@ export default function BullpenAiPage() {
                             onChange={(checked) =>
                               updateActiveFilters({ onlyBinaryYesNo: checked })
                             }
-                            label="Only Yes / No"
-                            description="Keep only binary markets that resolve between a Yes and No outcome."
+                            onOpenDetails={() =>
+                              setOpenFilterDetailsId("onlyBinaryYesNo")
+                            }
+                            label={
+                              BULLPEN_SCAN_FILTER_DETAILS.onlyBinaryYesNo.label
+                            }
+                            description={
+                              BULLPEN_SCAN_FILTER_DETAILS.onlyBinaryYesNo
+                                .description
+                            }
                             className="h-full sm:col-span-2"
                           />
                         </div>
@@ -3494,6 +3579,13 @@ export default function BullpenAiPage() {
           value={bullpenLlmPromptTemplate}
           onClose={() => setIsPromptEditorOpen(false)}
           onSave={handlePromptTemplateSave}
+        />
+      ) : null}
+
+      {openFilterDetailsId ? (
+        <BullpenScanFilterDetailsDialog
+          detailId={openFilterDetailsId}
+          onClose={() => setOpenFilterDetailsId(null)}
         />
       ) : null}
     </div>

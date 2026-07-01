@@ -290,13 +290,60 @@ test("Bullpen x AI investment candidates include strong LLM Yes or No odds", asy
 });
 
 test("Bullpen x AI sports filter catches Games category markets", () => {
+  const exclusionsSource = readFileSync(
+    new URL("../lib/bullpenScanExclusions.ts", import.meta.url),
+    "utf8",
+  );
   const routeSource = readFileSync(
     new URL("../app/api/bullpen-ai/route.ts", import.meta.url),
     "utf8",
   );
 
-  assert.match(routeSource, /const SPORTS_KEYWORDS = \[[\s\S]*"games"/);
+  assert.match(exclusionsSource, /SPORTS_KEYWORD_GROUPS[\s\S]*"games"/);
   assert.match(routeSource, /question\.category/);
+});
+
+test("Bullpen x AI market prediction filter excludes largest-company-by-market-cap questions", () => {
+  const exclusionsSource = readFileSync(
+    new URL("../lib/bullpenScanExclusions.ts", import.meta.url),
+    "utf8",
+  );
+  const backendScannerSource = readFileSync(
+    new URL(
+      "../../backend/app/domains/polymarket_auto_live/scanner.py",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    exclusionsSource,
+    /largest company in the world by market cap/,
+  );
+  assert.match(exclusionsSource, /excludeMarketPredictions/);
+  assert.match(
+    backendScannerSource,
+    /largest company in the world by market cap/,
+  );
+});
+
+test("Bullpen x AI exclusions dialog includes exact-rule copy for tile drilldowns", () => {
+  const pageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const dialogSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenScanFilterDetailsDialog.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(pageSource, /Click any card to/);
+  assert.match(pageSource, /setOpenFilterDetailsId/);
+  assert.match(dialogSource, /Exact exclusion algorithm/);
+  assert.match(dialogSource, /Exact keep algorithm/);
 });
 
 test("Bullpen x AI active positions stay included in LLM runs and share the events-table layout", () => {

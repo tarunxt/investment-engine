@@ -91,6 +91,10 @@ MARKET_PREDICTION_KEYWORDS = (
     "fed",
     "etf",
 )
+MARKET_PREDICTION_PATTERNS = (
+    re.compile(r"\blargest company in the world by market cap\b", re.IGNORECASE),
+    re.compile(r"\blargest company by market cap\b", re.IGNORECASE),
+)
 TWEET_COUNT_KEYWORDS = (
     "tweet",
     "tweets",
@@ -322,7 +326,9 @@ def _evaluate_filter_reasons(
         reasons.append("Excluded sports market.")
     if _includes_any(search_text, WEATHER_KEYWORDS):
         reasons.append("Excluded weather market.")
-    if _includes_any(search_text, MARKET_PREDICTION_KEYWORDS):
+    if _includes_any(search_text, MARKET_PREDICTION_KEYWORDS) or any(
+        pattern.search(search_text) for pattern in MARKET_PREDICTION_PATTERNS
+    ):
         reasons.append("Excluded market-prediction or finance market.")
     if _includes_any(search_text, TWEET_COUNT_KEYWORDS) and any(
         pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS
