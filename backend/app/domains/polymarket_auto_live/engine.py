@@ -1114,6 +1114,7 @@ class BullpenAutoLiveEngine:
                 settings=settings,
                 state=state,
                 run=run,
+                positions=positions,
                 historical_decisions=historical_decisions,
                 global_guardrails=global_guardrails,
                 now=now,
@@ -2205,6 +2206,7 @@ class BullpenAutoLiveEngine:
         settings: BullpenAutoLiveSettings,
         state: BullpenAutoLiveState,
         run: BullpenAutoLiveRun,
+        positions: list[PositionSnapshot],
         historical_decisions: list[BullpenAutoLiveDecision],
         global_guardrails: list[BullpenAutoLiveGuardrailCheck],
         now: datetime,
@@ -3685,7 +3687,10 @@ class BullpenAutoLiveEngine:
                 reason=reason,
                 summary=reason,
                 order_plan=order_plan,
-                exit_signals=exit_signals or [],
+            exit_signals=[
+                signal.model_dump(mode="json") if hasattr(signal, "model_dump") else signal
+                for signal in (exit_signals or [])
+            ],
                 exit_state=exit_state,  # type: ignore[arg-type]
                 llm_outputs=llm_outputs or [],
                 stage_results=stage_results,
@@ -4439,56 +4444,61 @@ class BullpenAutoLiveEngine:
                 )
                 return
 
-            quote = await refresh_execution_quote(slug=decision.slug, side=order_plan.side)
-            quote_price_cents = quote.current_price_cents or order_plan.limit_price_cents
-            if quote.spread_cents is not None and quote.spread_cents > settings.max_bid_ask_spread_cents:
-                order_plan.status = "skipped"
-                order_plan.detail = "Bid/ask spread exceeds the configured maximum."
-                decision.stage_results.append(
-                    build_stage_result(
-                        stage_number=7,
-                        status="fail",
-                        reason=order_plan.detail,
-                        outputs=order_plan.model_dump(mode="json"),
-                        hard_block=True,
+            quote_price_cents = order_plan.limit_price_cents
+            if not state.dry_run:
+                quote = await refresh_execution_quote(slug=decision.slug, side=order_plan.side)
+                quote_price_cents = quote.current_price_cents or order_plan.limit_price_cents
+                if (
+                    quote.spread_cents is not None
+                    and quote.spread_cents > settings.max_bid_ask_spread_cents
+                ):
+                    order_plan.status = "skipped"
+                    order_plan.detail = "Bid/ask spread exceeds the configured maximum."
+                    decision.stage_results.append(
+                        build_stage_result(
+                            stage_number=7,
+                            status="fail",
+                            reason=order_plan.detail,
+                            outputs=order_plan.model_dump(mode="json"),
+                            hard_block=True,
+                        )
                     )
-                )
-                running_failed_orders += 1
-                _, step_processed, _ = _stage3_step_counts(step_key)
-                report_invest_stage_progress(
-                    phase_status="running",
-                    reason=(
-                        f"Stage 3 Step {step_number} of 2 processed {step_processed} of "
-                        f"{step_total_orders} {'sell' if step_key == 'sell' else 'buy'} "
-                        f"orders. Latest: {decision.market_title}"
-                    ),
-                    completed_items=processed_decision_rows,
-                    execution_gate_reason=execution_pause_reason,
-                    execution_mode_reason=simulation_reason if state.dry_run else None,
-                    current_step_key=step_key,
-                    current_step_detail=order_plan.detail,
-                    completed_at=None,
-                )
-                return
+                    running_failed_orders += 1
+                    _, step_processed, _ = _stage3_step_counts(step_key)
+                    report_invest_stage_progress(
+                        phase_status="running",
+                        reason=(
+                            f"Stage 3 Step {step_number} of 2 processed {step_processed} of "
+                            f"{step_total_orders} {'sell' if step_key == 'sell' else 'buy'} "
+                            f"orders. Latest: {decision.market_title}"
+                        ),
+                        completed_items=processed_decision_rows,
+                        execution_gate_reason=execution_pause_reason,
+                        execution_mode_reason=simulation_reason if state.dry_run else None,
+                        current_step_key=step_key,
+                        current_step_detail=order_plan.detail,
+                        completed_at=None,
+                    )
+                    return
 
-            if order_plan.action == "buy":
-                order_plan.limit_price_cents = buy_limit_price_cents(
-                    current_price_cents=quote_price_cents,
-                    original_price_cents=order_plan.limit_price_cents or quote_price_cents,
-                    max_slippage_cents=settings.max_slippage_cents,
-                )
-                order_plan.shares = round(
-                    order_plan.order_size_usd
-                    / max(0.01, cents_to_decimal(order_plan.limit_price_cents)),
-                    6,
-                )
-            else:
-                order_plan.limit_price_cents = sell_limit_price_cents(
-                    current_price_cents=quote_price_cents,
-                    original_price_cents=order_plan.limit_price_cents or quote_price_cents,
-                    max_slippage_cents=settings.max_slippage_cents,
-                )
-            order_plan.refreshed_market_price_cents = quote_price_cents
+                if order_plan.action == "buy":
+                    order_plan.limit_price_cents = buy_limit_price_cents(
+                        current_price_cents=quote_price_cents,
+                        original_price_cents=order_plan.limit_price_cents or quote_price_cents,
+                        max_slippage_cents=settings.max_slippage_cents,
+                    )
+                    order_plan.shares = round(
+                        order_plan.order_size_usd
+                        / max(0.01, cents_to_decimal(order_plan.limit_price_cents)),
+                        6,
+                    )
+                else:
+                    order_plan.limit_price_cents = sell_limit_price_cents(
+                        current_price_cents=quote_price_cents,
+                        original_price_cents=order_plan.limit_price_cents or quote_price_cents,
+                        max_slippage_cents=settings.max_slippage_cents,
+                    )
+                order_plan.refreshed_market_price_cents = quote_price_cents
 
             if (
                 order_plan.action == "sell"

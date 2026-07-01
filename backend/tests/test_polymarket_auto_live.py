@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -1929,7 +1929,7 @@ def _market(
     description: str | None = (
         'This market will resolve to "Yes" if candidate X wins. Otherwise, it resolves to No.'
     ),
-    close_time: str | None = "2026-06-30T23:59:00+00:00",
+    close_time: str | None = None,
     theme: str = "Politics",
     liquidity_usd: float | None = 5_000,
     slug: str | None = "candidate-x-win",
@@ -1937,6 +1937,8 @@ def _market(
     current_yes_odds: float | None = 54,
     current_no_odds: float | None = 46,
 ) -> ScannedMarket:
+    if close_time is None:
+        close_time = (datetime.now(UTC) + timedelta(days=7)).isoformat()
     return ScannedMarket(
         market_id=slug or "market-1",
         question=question,
@@ -1966,9 +1968,11 @@ def _console_wallet_position(
     shares: float = 10,
     average_price_cents: float = 45,
     exposure_usd: float = 4.5,
-    close_time: str = "2026-06-25T00:00:00+00:00",
+    close_time: str | None = None,
     side: str = "NO",
 ) -> ConsoleWalletPosition:
+    if close_time is None:
+        close_time = (datetime.now(UTC) + timedelta(days=7)).isoformat()
     return ConsoleWalletPosition(
         market_id=slug,
         slug=slug,
@@ -2002,14 +2006,17 @@ def _manual_console_candidate_row(
     selected: bool,
     confidence: str = "High",
     evidence_status: str = "Strong",
+    close_time: str | None = None,
 ) -> BullpenAutoLiveConsoleCandidateInput:
+    if close_time is None:
+        close_time = (datetime.now(UTC) + timedelta(days=7)).isoformat()
     return BullpenAutoLiveConsoleCandidateInput(
         question_id=question_id,
         market_id=market_id,
         market_title=market_title,
         slug=slug,
         market_url=f"https://polymarket.com/event/{slug}",
-        close_time="2026-06-25T00:00:00+00:00",
+        close_time=close_time,
         theme="Politics",
         current_yes_odds=current_yes_odds,
         current_no_odds=current_no_odds,
