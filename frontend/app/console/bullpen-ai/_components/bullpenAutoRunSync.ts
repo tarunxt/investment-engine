@@ -2,6 +2,7 @@
 
 import {
   BULLPEN_SOURCE_URLS,
+  archiveBullpenScanSnapshot,
   computeBullpenLlmConsensus,
   createBullpenScanFilters,
   createBullpenQuestionRow,
@@ -25,6 +26,7 @@ import type {
 
 type SnapshotMap = Record<ScanMode, BullpenSnapshotHistory>;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const MAX_SYNCED_SNAPSHOT_HISTORY = 10;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -726,11 +728,21 @@ export function syncBullpenAutoRunSummarySnapshots({
     return snapshotsByMode;
   }
 
+  const nextHistory =
+    currentSnapshot && currentSnapshot.snapshotId !== nextSnapshot.snapshotId
+      ? [
+          archiveBullpenScanSnapshot(currentSnapshot),
+          ...currentHistory.history.filter(
+            (snapshot) => snapshot.snapshotId !== currentSnapshot.snapshotId,
+          ),
+        ].slice(0, MAX_SYNCED_SNAPSHOT_HISTORY)
+      : currentHistory.history;
+
   return {
     ...snapshotsByMode,
     [mode]: {
-      ...currentHistory,
       current: nextSnapshot,
+      history: nextHistory,
     },
   };
 }

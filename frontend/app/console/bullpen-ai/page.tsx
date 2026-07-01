@@ -118,7 +118,29 @@ const TABS: {
   },
 ];
 
-const BULLPEN_SNAPSHOT_STORAGE_KEY = "investment-engine:bullpen-ai:snapshots:v1";
+type BullpenSnapshotSource = "manual" | "auto";
+
+const SNAPSHOT_SOURCE_TABS: {
+  source: BullpenSnapshotSource;
+  label: string;
+  description: string;
+}[] = [
+  {
+    source: "manual",
+    label: "Manual Scan",
+    description: "Shows results from the Run Bullpen Scan button in this section.",
+  },
+  {
+    source: "auto",
+    label: "Auto Scan",
+    description:
+      "Shows results produced by the Run Scans and Invest Now flow above.",
+  },
+];
+
+const BULLPEN_SNAPSHOT_STORAGE_LEGACY_KEY =
+  "investment-engine:bullpen-ai:snapshots:v1";
+const BULLPEN_SNAPSHOT_STORAGE_KEY = "investment-engine:bullpen-ai:snapshots:v2";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investment-engine:bullpen-ai:last-llm-target:v1";
 const BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY =
@@ -138,6 +160,7 @@ const DEFAULT_SORT_STATE: BullpenTableSortState = {
   direction: "asc",
 };
 const INVESTMENT_PROGRESS_POLL_MS = 1_500;
+const EMPTY_SELECTED_IDS = new Set<string>();
 
 type PolymarketMarketRefresh = {
   id: string;
@@ -232,6 +255,13 @@ function createEmptySnapshotViewMap(): Record<ScanMode, string | null> {
   };
 }
 
+function createEmptySnapshotSourceMap(): Record<ScanMode, BullpenSnapshotSource> {
+  return {
+    "30-days": "manual",
+    "end-of-month": "manual",
+  };
+}
+
 function hasSavedBullpenActivePositionAnalysis(
   analysis: BullpenActivePositionLlmAnalysis | null | undefined,
 ) {
@@ -291,26 +321,28 @@ function pickNewerBullpenActivePositionAnalysis(
 }
 
 function buildSnapshotBackfilledActivePositionAnalyses(
-  snapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>,
+  snapshotCollections: Record<ScanMode, BullpenSnapshotHistory>[],
 ) {
   const analysesByTargetId = new Map<string, BullpenActivePositionLlmAnalysis>();
 
-  for (const mode of ["30-days", "end-of-month"] as const) {
-    const snapshots = [
-      snapshotsByMode[mode].current,
-      ...snapshotsByMode[mode].history,
-    ].filter((snapshot): snapshot is BullpenScanSnapshot => Boolean(snapshot));
+  for (const snapshotsByMode of snapshotCollections) {
+    for (const mode of ["30-days", "end-of-month"] as const) {
+      const snapshots = [
+        snapshotsByMode[mode].current,
+        ...snapshotsByMode[mode].history,
+      ].filter((snapshot): snapshot is BullpenScanSnapshot => Boolean(snapshot));
 
-    for (const snapshot of snapshots) {
-      for (const question of snapshot.questions) {
-        const analysis = extractBullpenActivePositionLlmAnalysis(question);
-        if (!hasSavedBullpenActivePositionAnalysis(analysis)) continue;
+      for (const snapshot of snapshots) {
+        for (const question of snapshot.questions) {
+          const analysis = extractBullpenActivePositionLlmAnalysis(question);
+          if (!hasSavedBullpenActivePositionAnalysis(analysis)) continue;
 
-        const targetId = buildBullpenLlmTargetId(question);
-        const current = analysesByTargetId.get(targetId);
-        const newer = pickNewerBullpenActivePositionAnalysis(current, analysis);
-        if (newer) {
-          analysesByTargetId.set(targetId, newer);
+          const targetId = buildBullpenLlmTargetId(question);
+          const current = analysesByTargetId.get(targetId);
+          const newer = pickNewerBullpenActivePositionAnalysis(current, analysis);
+          if (newer) {
+            analysesByTargetId.set(targetId, newer);
+          }
         }
       }
     }
@@ -322,15 +354,20 @@ function buildSnapshotBackfilledActivePositionAnalyses(
 function buildMergedActivePositionAnalyses({
   activePositions,
   currentAnalyses,
-  snapshotsByMode,
+  manualSnapshotsByMode,
+  autoSnapshotsByMode,
 }: {
   activePositions: BullpenActivePositionView[];
   currentAnalyses: Record<string, BullpenActivePositionLlmAnalysis>;
-  snapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+  manualSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+  autoSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
 }) {
   const next: Record<string, BullpenActivePositionLlmAnalysis> = {};
   const snapshotAnalysesByTargetId =
-    buildSnapshotBackfilledActivePositionAnalyses(snapshotsByMode);
+    buildSnapshotBackfilledActivePositionAnalyses([
+      manualSnapshotsByMode,
+      autoSnapshotsByMode,
+    ]);
 
   for (const position of activePositions.filter((item) => !item.isClaimable)) {
     const targetId = buildBullpenLlmTargetId(
@@ -779,54 +816,93 @@ function normalizeSnapshot(
   } satisfies BullpenScanSnapshot;
 }
 
+function readSnapshotHistoryByModeFromStorageValue(value: unknown) {
+  const next = createEmptySnapshotHistory();
+
+  const parsed = value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+
+  for (const mode of ["30-days", "end-of-month"] as const) {
+    const entry = parsed?.[mode];
+    if (!entry || typeof entry !== "object") continue;
+
+    const current = normalizeSnapshot(
+      (entry as Record<string, unknown>).current as
+        | BullpenScanSnapshot
+        | Record<string, unknown>
+        | null,
+    );
+    const history = Array.isArray((entry as Record<string, unknown>).history)
+      ? ((entry as Record<string, unknown>).history as Record<string, unknown>[])
+          .map((snapshot) => normalizeSnapshot(snapshot))
+          .filter((snapshot): snapshot is BullpenScanSnapshot => Boolean(snapshot))
+      : [];
+
+    next[mode] = {
+      current,
+      history,
+    };
+  }
+
+  return next;
+}
+
 function readBullpenSnapshotsFromStorage() {
-  if (typeof window === "undefined") return createEmptySnapshotHistory();
+  if (typeof window === "undefined") {
+    return {
+      manual: createEmptySnapshotHistory(),
+      auto: createEmptySnapshotHistory(),
+    };
+  }
 
   try {
     const raw = window.localStorage.getItem(BULLPEN_SNAPSHOT_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    const next = createEmptySnapshotHistory();
-
-    for (const mode of ["30-days", "end-of-month"] as const) {
-      const entry =
-        parsed && typeof parsed === "object"
-          ? (parsed as Record<string, unknown>)[mode]
-          : null;
-      if (!entry || typeof entry !== "object") continue;
-
-      const current = normalizeSnapshot(
-        (entry as Record<string, unknown>).current as
-          | BullpenScanSnapshot
-          | Record<string, unknown>
-          | null,
-      );
-      const history = Array.isArray((entry as Record<string, unknown>).history)
-        ? ((entry as Record<string, unknown>).history as Record<string, unknown>[])
-            .map((snapshot) => normalizeSnapshot(snapshot))
-            .filter((snapshot): snapshot is BullpenScanSnapshot => Boolean(snapshot))
-        : [];
-
-      next[mode] = {
-        current,
-        history,
-      };
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      if (record.manual || record.auto) {
+        return {
+          manual: readSnapshotHistoryByModeFromStorageValue(record.manual),
+          auto: readSnapshotHistoryByModeFromStorageValue(record.auto),
+        };
+      }
     }
-
-    return next;
   } catch {
-    return createEmptySnapshotHistory();
+    // Fall back to the legacy manual-only snapshot cache.
+  }
+
+  try {
+    const raw = window.localStorage.getItem(BULLPEN_SNAPSHOT_STORAGE_LEGACY_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return {
+      manual: readSnapshotHistoryByModeFromStorageValue(parsed),
+      auto: createEmptySnapshotHistory(),
+    };
+  } catch {
+    return {
+      manual: createEmptySnapshotHistory(),
+      auto: createEmptySnapshotHistory(),
+    };
   }
 }
 
-function writeBullpenSnapshotsToStorage(
-  snapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>,
-) {
+function writeBullpenSnapshotsToStorage({
+  manualSnapshotsByMode,
+  autoSnapshotsByMode,
+}: {
+  manualSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+  autoSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+}) {
   if (typeof window === "undefined") return;
 
   try {
     window.localStorage.setItem(
       BULLPEN_SNAPSHOT_STORAGE_KEY,
-      JSON.stringify(snapshotsByMode),
+      JSON.stringify({
+        manual: manualSnapshotsByMode,
+        auto: autoSnapshotsByMode,
+      }),
     );
   } catch {
     // Keep the screen usable even when localStorage is unavailable.
@@ -1116,9 +1192,17 @@ function BullpenAiPageContent() {
   const [snapshotsByMode, setSnapshotsByMode] = useState<
     Record<ScanMode, BullpenSnapshotHistory>
   >(createEmptySnapshotHistory);
+  const [autoSnapshotsByMode, setAutoSnapshotsByMode] = useState<
+    Record<ScanMode, BullpenSnapshotHistory>
+  >(createEmptySnapshotHistory);
   const [selectedSnapshotIdByMode, setSelectedSnapshotIdByMode] = useState<
     Record<ScanMode, string | null>
   >(createEmptySnapshotViewMap);
+  const [selectedAutoSnapshotIdByMode, setSelectedAutoSnapshotIdByMode] =
+    useState<Record<ScanMode, string | null>>(createEmptySnapshotViewMap);
+  const [snapshotSourceByMode, setSnapshotSourceByMode] = useState<
+    Record<ScanMode, BullpenSnapshotSource>
+  >(createEmptySnapshotSourceMap);
   const [selectedQuestionIdsByMode, setSelectedQuestionIdsByMode] = useState<
     Record<ScanMode, string[]>
   >(createEmptySelectionMap);
@@ -1215,13 +1299,23 @@ function BullpenAiPageContent() {
   const claimPositionsTaskRef = useRef<Promise<void> | null>(null);
   const lastAutoClaimAttemptRef = useRef<BullpenAutoClaimAttempt | null>(null);
   const scanFiltersMenuRef = useRef<HTMLDivElement | null>(null);
-  const canonicalizedSnapshotIdsRef = useRef<Record<ScanMode, Set<string>>>({
-    "30-days": new Set<string>(),
-    "end-of-month": new Set<string>(),
+  const canonicalizedSnapshotIdsRef = useRef<
+    Record<BullpenSnapshotSource, Record<ScanMode, Set<string>>>
+  >({
+    manual: {
+      "30-days": new Set<string>(),
+      "end-of-month": new Set<string>(),
+    },
+    auto: {
+      "30-days": new Set<string>(),
+      "end-of-month": new Set<string>(),
+    },
   });
 
   useEffect(() => {
-    setSnapshotsByMode(readBullpenSnapshotsFromStorage());
+    const storedSnapshots = readBullpenSnapshotsFromStorage();
+    setSnapshotsByMode(storedSnapshots.manual);
+    setAutoSnapshotsByMode(storedSnapshots.auto);
     setLastLlmTargets(readLastLlmTargetsFromStorage());
     setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
     setActivePositionAnalysesByKey(readActivePositionAnalysesFromStorage());
@@ -1236,8 +1330,11 @@ function BullpenAiPageContent() {
 
   useEffect(() => {
     if (!hasLoadedStorage) return;
-    writeBullpenSnapshotsToStorage(snapshotsByMode);
-  }, [hasLoadedStorage, snapshotsByMode]);
+    writeBullpenSnapshotsToStorage({
+      manualSnapshotsByMode: snapshotsByMode,
+      autoSnapshotsByMode,
+    });
+  }, [autoSnapshotsByMode, hasLoadedStorage, snapshotsByMode]);
 
   useEffect(() => {
     if (!hasLoadedStorage) return;
@@ -1266,19 +1363,26 @@ function BullpenAiPageContent() {
       const next = buildMergedActivePositionAnalyses({
         activePositions,
         currentAnalyses: current,
-        snapshotsByMode,
+        manualSnapshotsByMode: snapshotsByMode,
+        autoSnapshotsByMode,
       });
       if (activePositionAnalysesEqual(current, next)) {
         return current;
       }
       return next;
     });
-  }, [activePositions, hasLoadedPositions, hasLoadedStorage, snapshotsByMode]);
+  }, [
+    activePositions,
+    autoSnapshotsByMode,
+    hasLoadedPositions,
+    hasLoadedStorage,
+    snapshotsByMode,
+  ]);
 
   useEffect(() => {
     setIsScanFiltersOpen(false);
     setOpenFilterDetailsId(null);
-  }, [activeMode]);
+  }, [activeMode, snapshotSourceByMode[activeMode]]);
 
   useEffect(() => {
     if (!isScanFiltersOpen || openFilterDetailsId) return;
@@ -1366,21 +1470,34 @@ function BullpenAiPageContent() {
 
   const activeFilters = filtersByMode[activeMode];
   const activeSnapshots = snapshotsByMode[activeMode];
+  const activeAutoSnapshots = autoSnapshotsByMode[activeMode];
+  const activeSnapshotSource = snapshotSourceByMode[activeMode];
+  const isManualScanView = activeSnapshotSource === "manual";
   const activeCurrentSnapshot = activeSnapshots.current;
   const activeSelectedSnapshotId = selectedSnapshotIdByMode[activeMode];
+  const activeAutoCurrentSnapshot = activeAutoSnapshots.current;
+  const activeSelectedAutoSnapshotId = selectedAutoSnapshotIdByMode[activeMode];
+  const visibleSnapshots = isManualScanView ? activeSnapshots : activeAutoSnapshots;
+  const visibleCurrentSnapshot = isManualScanView
+    ? activeCurrentSnapshot
+    : activeAutoCurrentSnapshot;
+  const visibleSelectedSnapshotId = isManualScanView
+    ? activeSelectedSnapshotId
+    : activeSelectedAutoSnapshotId;
   const activeVisibleSnapshot =
-    !activeSelectedSnapshotId ||
-    activeCurrentSnapshot?.snapshotId === activeSelectedSnapshotId
-      ? activeCurrentSnapshot
-      : activeSnapshots.history.find(
-          (snapshot) => snapshot.snapshotId === activeSelectedSnapshotId,
-        ) || activeCurrentSnapshot;
+    !visibleSelectedSnapshotId ||
+    visibleCurrentSnapshot?.snapshotId === visibleSelectedSnapshotId
+      ? visibleCurrentSnapshot
+      : visibleSnapshots.history.find(
+          (snapshot) => snapshot.snapshotId === visibleSelectedSnapshotId,
+        ) || visibleCurrentSnapshot;
   const isViewingHistory = Boolean(
     activeVisibleSnapshot &&
-      activeCurrentSnapshot &&
-      activeVisibleSnapshot.snapshotId !== activeCurrentSnapshot.snapshotId,
+      visibleCurrentSnapshot &&
+      activeVisibleSnapshot.snapshotId !== visibleCurrentSnapshot.snapshotId,
   );
   const hasStaleResult =
+    isManualScanView &&
     activeCurrentSnapshot !== null &&
     !filtersEqual(activeCurrentSnapshot.filters, activeFilters);
   const notice = messagesByMode[activeMode];
@@ -1392,7 +1509,7 @@ function BullpenAiPageContent() {
   const llmRunStartedAt = llmRunStartedAtByMode[activeMode];
   const isInvesting = investingMode === activeMode;
   const isRefreshingCurrentOdds = refreshingCurrentOddsMode === activeMode;
-  const selectionEnabled = Boolean(activeCurrentSnapshot && !isViewingHistory);
+  const selectionEnabled = isManualScanView && Boolean(activeCurrentSnapshot && !isViewingHistory);
   const selectedQuestionIds = selectionEnabled
     ? selectedQuestionIdsByMode[activeMode].filter((questionId) =>
         activeCurrentSnapshot?.questions.some((question) => question.id === questionId),
@@ -1466,6 +1583,18 @@ function BullpenAiPageContent() {
             return isBullpenQuestionInvestmentCandidate(question);
           })
       : [];
+  const visibleInvestmentCandidates = activeVisibleSnapshot
+    ? activeVisibleSnapshot.questions
+        .map((question) =>
+          mergeQuestionWithLatestActivePositionAnalysis(
+            question,
+            activePositionQuestionByTargetId,
+          ),
+        )
+        .filter((question) => {
+          return isBullpenQuestionInvestmentCandidate(question);
+        })
+    : [];
   const activeInvestmentCandidateIds = new Set(
     activeInvestmentCandidates.map((question) => question.id),
   );
@@ -1475,14 +1604,22 @@ function BullpenAiPageContent() {
       )
     : [];
   const selectedInvestmentQuestionIdSet = new Set(selectedInvestmentQuestionIds);
-  const activeHasAnyLlmOdds = Boolean(
+  const visibleSelectedQuestionIdSet = selectionEnabled
+    ? selectedQuestionIdSet
+    : EMPTY_SELECTED_IDS;
+  const visibleSelectedInvestmentQuestionIdSet =
+    selectionEnabled && !isViewingHistory
+      ? selectedInvestmentQuestionIdSet
+      : EMPTY_SELECTED_IDS;
+  const visibleHasAnyLlmOdds = Boolean(
     activePositionQuestionsForLlm.some(
       (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
     ) ||
-      activeCurrentSnapshot?.questions.some(
-      (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
+      activeVisibleSnapshot?.questions.some(
+        (question) => question.llmYesOdds !== null || question.llmNoOdds !== null,
       ),
   );
+  const isReadOnlySnapshotView = !isManualScanView || isViewingHistory;
   const buildRunNowRequest = async () => {
     const { snapshot, error } = await executeBullpenScan({
       resetSelections: true,
@@ -1555,17 +1692,15 @@ function BullpenAiPageContent() {
 
   useEffect(() => {
     if (!hasLoadedStorage || !activeVisibleSnapshot) return;
+    const canonicalizedIds =
+      canonicalizedSnapshotIdsRef.current[activeSnapshotSource][activeMode];
     if (
-      canonicalizedSnapshotIdsRef.current[activeMode].has(
-        activeVisibleSnapshot.snapshotId,
-      )
+      canonicalizedIds.has(activeVisibleSnapshot.snapshotId)
     ) {
       return;
     }
 
-    canonicalizedSnapshotIdsRef.current[activeMode].add(
-      activeVisibleSnapshot.snapshotId,
-    );
+    canonicalizedIds.add(activeVisibleSnapshot.snapshotId);
     const snapshotId = activeVisibleSnapshot.snapshotId;
 
     const questions = activeVisibleSnapshot.questions
@@ -1607,7 +1742,9 @@ function BullpenAiPageContent() {
           ]),
         );
 
-        setSnapshotsByMode((current) => {
+        const updateSnapshotStore = (
+          current: Record<ScanMode, BullpenSnapshotHistory>,
+        ) => {
           const nextCurrent = applySnapshotMarketUpdates(
             current[activeMode].current,
             snapshotId,
@@ -1637,7 +1774,13 @@ function BullpenAiPageContent() {
               history: nextHistory,
             },
           };
-        });
+        };
+
+        if (activeSnapshotSource === "manual") {
+          setSnapshotsByMode(updateSnapshotStore);
+        } else {
+          setAutoSnapshotsByMode(updateSnapshotStore);
+        }
       } catch {
         // Best effort only. Existing saved snapshots will continue using stored URLs.
       }
@@ -1648,7 +1791,7 @@ function BullpenAiPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [activeMode, activeVisibleSnapshot, hasLoadedStorage]);
+  }, [activeMode, activeSnapshotSource, activeVisibleSnapshot, hasLoadedStorage]);
 
   function updateActiveFilters(patch: Partial<BullpenScanFilters>) {
     setFiltersByMode((current) => ({
@@ -2895,15 +3038,21 @@ function BullpenAiPageContent() {
     }
   }
 
-  const currentTableEmptyMessage = isScanning
+  const currentTableEmptyMessage = isManualScanView && isScanning
     ? "Scanning Bullpen..."
     : activeVisibleSnapshot
       ? "No saved questions are available in this snapshot."
-      : "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions.";
-  const investmentEmptyMessage = !activeCurrentSnapshot
-    ? "Run Bullpen Scan first to load the current questions table."
-    : !activeHasAnyLlmOdds
-      ? "Run LLM analysis first. Pink invest rows appear after LLM Yes or No Odds qualify."
+      : isManualScanView
+        ? "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions."
+        : "No auto scan results yet. Run Scans and Invest Now above to populate this tab.";
+  const investmentEmptyMessage = !activeVisibleSnapshot
+    ? isManualScanView
+      ? "Run Bullpen Scan first to load the current questions table."
+      : "Run Scans and Invest Now above to generate Auto Scan results."
+    : !visibleHasAnyLlmOdds
+      ? isManualScanView
+        ? "Run LLM analysis first. Pink invest rows appear after LLM Yes or No Odds qualify."
+        : "This Auto Scan snapshot does not have qualifying LLM odds yet."
       : "No rows are currently pink. Rows appear here when LLM Yes or No Odds is above 80%.";
 
   function handlePromptTemplateSave(template: string) {
@@ -2932,7 +3081,7 @@ function BullpenAiPageContent() {
         activePositions={openActivePositions}
         hasActivePositionsSnapshot={Boolean(positionsLastUpdatedAt)}
         onSummaryUpdated={({ summary, run }) => {
-          setSnapshotsByMode((current) =>
+          setAutoSnapshotsByMode((current) =>
             syncBullpenAutoRunSummarySnapshots({
               snapshotsByMode: current,
               summary,
@@ -2970,6 +3119,29 @@ function BullpenAiPageContent() {
           <CardDescription>
             {getModeDescription(activeMode, activeFilters)}
           </CardDescription>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {SNAPSHOT_SOURCE_TABS.map((tab) => (
+              <button
+                key={tab.source}
+                type="button"
+                onClick={() =>
+                  setSnapshotSourceByMode((current) => ({
+                    ...current,
+                    [activeMode]: tab.source,
+                  }))
+                }
+                className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${activeSnapshotSource === tab.source ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-950"}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500">
+            {
+              SNAPSHOT_SOURCE_TABS.find((tab) => tab.source === activeSnapshotSource)
+                ?.description
+            }
+          </p>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -2978,8 +3150,9 @@ function BullpenAiPageContent() {
                 Current Filters
               </p>
               <p className="mt-2 text-sm text-slate-700">
-                Open the scan menu to edit the time window, odds floors, and
-                market exclusions for the next Bullpen run.
+                {isManualScanView
+                  ? "Open the scan menu to edit the time window, odds floors, and market exclusions for the next Bullpen run."
+                  : "Auto Scan replays the latest completed auto-run snapshot for this time window. Switch to Manual Scan to change filters or run a new manual scan."}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {activeFilterBadges.map((badge) => (
@@ -2998,8 +3171,9 @@ function BullpenAiPageContent() {
                   Source
                 </p>
                 <p className="mt-2 text-sm text-slate-700">
-                  Scan Bullpen&apos;s trending source for this tab, then fall back to
-                  alternate market feeds only if Bullpen access fails.
+                  {isManualScanView
+                    ? "Scan Bullpen&apos;s trending source for this tab, then fall back to alternate market feeds only if Bullpen access fails."
+                    : "Auto Scan snapshots are populated by the Run Scans and Invest Now flow above and kept separate from the manual scan table."}
                 </p>
               </div>
               <div className="space-y-2">
@@ -3010,7 +3184,7 @@ function BullpenAiPageContent() {
                         setIsScanFiltersOpen(false);
                         void runScan();
                       }}
-                      disabled={isScanning}
+                      disabled={!isManualScanView || isScanning}
                       className="min-w-0 flex-1 rounded-r-none gap-2 whitespace-nowrap"
                     >
                       {isScanning ? (
@@ -3026,6 +3200,7 @@ function BullpenAiPageContent() {
                       onClick={() =>
                         setIsScanFiltersOpen((current) => !current)
                       }
+                      disabled={!isManualScanView}
                       title="Open scan filters"
                       aria-label="Open scan filters"
                       aria-expanded={isScanFiltersOpen}
@@ -3034,7 +3209,7 @@ function BullpenAiPageContent() {
                       <Menu className="h-4 w-4" />
                     </Button>
                   </div>
-                  {isScanFiltersOpen ? (
+                  {isManualScanView && isScanFiltersOpen ? (
                     <div className="absolute right-0 top-full z-20 mt-2 w-[min(34rem,calc(100vw-3rem))] rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
@@ -3258,6 +3433,7 @@ function BullpenAiPageContent() {
                     size="icon"
                     className="h-10 w-10 border-r border-primary-foreground/15"
                     onClick={() => setIsPromptEditorOpen(true)}
+                    disabled={!isManualScanView}
                     title="Open Bullpen LLM prompt"
                     aria-label="Open Bullpen LLM prompt"
                   >
@@ -3268,6 +3444,7 @@ function BullpenAiPageContent() {
                     containerClassName="gap-0"
                     defaultTargets={getDefaultBullpenLlmTargets(lastLlmTargets)}
                     disabled={
+                      !isManualScanView ||
                       !activeCurrentSnapshot ||
                       isViewingHistory ||
                       (selectedQuestionCount === 0 && openActivePositions.length === 0)
@@ -3286,7 +3463,7 @@ function BullpenAiPageContent() {
                     pickerButtonClassName="h-10 w-10 rounded-none border border-l-0 border-transparent bg-primary text-primary-foreground hover:bg-primary/80 focus:outline-none focus:ring-2 focus:ring-ring/30"
                   />
                 </div>
-                {isRunningLlm ? (
+                {isManualScanView && isRunningLlm ? (
                   <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-900">
                     <div className="flex flex-wrap items-center gap-2 font-semibold">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -3313,11 +3490,18 @@ function BullpenAiPageContent() {
                     </p>
                   </div>
                 ) : null}
+                {!isManualScanView ? (
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">
+                    Auto Scan is read-only here. Switch to Manual Scan to run
+                    Bullpen scans, LLM analysis, or manual investing.
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => resetActiveFilters()}
+                    disabled={!isManualScanView}
                   >
                     Reset Filters
                   </Button>
@@ -3334,7 +3518,7 @@ function BullpenAiPageContent() {
             </div>
           </div>
 
-          {notice ? (
+          {isManualScanView && notice ? (
             <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="space-y-1">
@@ -3347,7 +3531,7 @@ function BullpenAiPageContent() {
             </div>
           ) : null}
 
-          {llmNotice ? (
+          {isManualScanView && llmNotice ? (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
               {typeof llmNotice === "string" ? (
                 llmNotice
@@ -3459,7 +3643,7 @@ function BullpenAiPageContent() {
             </div>
           ) : null}
 
-          {hasStaleResult ? (
+          {isManualScanView && hasStaleResult ? (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
               Filters changed for this tab after the last saved scan. The table
               below is still showing the previous saved snapshot until you run
@@ -3467,7 +3651,7 @@ function BullpenAiPageContent() {
             </div>
           ) : null}
 
-          {activeCurrentSnapshot ? (
+          {visibleCurrentSnapshot ? (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -3476,26 +3660,36 @@ function BullpenAiPageContent() {
                 <button
                   type="button"
                   onClick={() =>
-                    setSelectedSnapshotIdByMode((current) => ({
-                      ...current,
-                      [activeMode]: null,
-                    }))
+                    isManualScanView
+                      ? setSelectedSnapshotIdByMode((current) => ({
+                          ...current,
+                          [activeMode]: null,
+                        }))
+                      : setSelectedAutoSnapshotIdByMode((current) => ({
+                          ...current,
+                          [activeMode]: null,
+                        }))
                   }
                   className={`rounded-full px-3 py-1 text-xs font-semibold transition ${!isViewingHistory ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}
                 >
-                  Current · {formatDate(activeCurrentSnapshot.scannedAt)}
+                  Current · {formatDate(visibleCurrentSnapshot.scannedAt)}
                 </button>
-                {activeSnapshots.history.map((snapshot, index) => (
+                {visibleSnapshots.history.map((snapshot, index) => (
                   <button
                     key={snapshot.snapshotId}
                     type="button"
                     onClick={() =>
-                      setSelectedSnapshotIdByMode((current) => ({
-                        ...current,
-                        [activeMode]: snapshot.snapshotId,
-                      }))
+                      isManualScanView
+                        ? setSelectedSnapshotIdByMode((current) => ({
+                            ...current,
+                            [activeMode]: snapshot.snapshotId,
+                          }))
+                        : setSelectedAutoSnapshotIdByMode((current) => ({
+                            ...current,
+                            [activeMode]: snapshot.snapshotId,
+                          }))
                     }
-                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${activeSelectedSnapshotId === snapshot.snapshotId ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${visibleSelectedSnapshotId === snapshot.snapshotId ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}
                   >
                     Saved {index + 1} · {formatDate(snapshot.scannedAt)}
                   </button>
@@ -3503,8 +3697,10 @@ function BullpenAiPageContent() {
               </div>
               <p className="mt-3 text-xs text-slate-600">
                 {isViewingHistory
-                  ? "Viewing a saved history version. Switch back to Current to select questions or run LLM analysis."
-                  : "The current table is saved locally with its scan timestamp and will remain visible after refresh."}
+                  ? "Viewing a saved history version. Switch back to Current to inspect the latest snapshot for this tab."
+                  : isManualScanView
+                    ? "The current table is saved locally with its scan timestamp and will remain visible after refresh."
+                    : "Auto snapshots are saved separately from manual scans so the latest auto-run results stay visible here."}
               </p>
             </div>
           ) : null}
@@ -3529,12 +3725,19 @@ function BullpenAiPageContent() {
               activePositions={activePositions}
               activePositionQuestions={activePositionQuestionsForLlm}
               activePositionsCount={hasLoadedPositions ? activePositions.length : null}
-              candidates={activeInvestmentCandidates}
+              candidates={
+                selectionEnabled ? activeInvestmentCandidates : visibleInvestmentCandidates
+              }
               claimError={claimPositionsError}
               claimStatusMessage={claimPositionsStatus}
               emptyMessage={investmentEmptyMessage}
               isClaimingPositions={isClaimingPositions}
-              isHistoryView={isViewingHistory}
+              isReadOnly={isReadOnlySnapshotView}
+              readOnlyMessage={
+                isViewingHistory
+                  ? "Switch back to the current snapshot to select events and place Bullpen orders."
+                  : "Auto Scan is read-only here. Switch to Manual Scan to run LLM analysis or place manual Bullpen orders."
+              }
               isInvesting={isInvesting}
               isLoadingPositions={isLoadingPositions}
               isRefreshingCurrentOdds={isRefreshingCurrentOdds}
@@ -3555,20 +3758,22 @@ function BullpenAiPageContent() {
               positionsHealth={positionsHealth}
               positionsLastUpdatedAt={positionsLastUpdatedAt}
               positionsSource={positionsSource}
-              progressMessage={investmentProgress}
-              resultMessage={investmentNotice}
-              selectedQuestionIds={selectedInvestmentQuestionIdSet}
+              progressMessage={isManualScanView ? investmentProgress : null}
+              resultMessage={isManualScanView ? investmentNotice : null}
+              selectedQuestionIds={visibleSelectedInvestmentQuestionIdSet}
             />
           ) : null}
 
-          {activeCurrentSnapshot ? (
+          {visibleCurrentSnapshot ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
               <span>
                 {selectionEnabled
                   ? `${formatCountLabel(openActivePositions.length, "active position")} auto-included and ${formatCountLabel(selectedQuestionCount, "scan question")} selected for LLM analysis.`
-                  : "History view is read-only; switch back to Current to select questions."}
+                  : isManualScanView
+                    ? "History view is read-only; switch back to Current to select questions."
+                    : "Auto Scan is read-only here; switch to Manual Scan to select questions or run LLM analysis."}
               </span>
-              {lastLlmTargets.length > 0 ? (
+              {isManualScanView && lastLlmTargets.length > 0 ? (
                 <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
                   Last LLMs: {formatTargetSummary(lastLlmTargets)}
                 </span>
@@ -3579,9 +3784,9 @@ function BullpenAiPageContent() {
           <BullpenQuestionsTable
             snapshot={activeVisibleSnapshot}
             emptyMessage={currentTableEmptyMessage}
-            isLoading={isScanning}
+            isLoading={isManualScanView && isScanning}
             onSortChange={setActiveSort}
-            selectedQuestionIds={selectedQuestionIdSet}
+            selectedQuestionIds={visibleSelectedQuestionIdSet}
             selectionEnabled={selectionEnabled}
             sortState={sortByMode[activeMode]}
             onToggleQuestion={toggleQuestionSelection}

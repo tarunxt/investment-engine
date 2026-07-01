@@ -36,7 +36,8 @@ type BullpenInvestmentsSectionProps = {
   claimError: string | null;
   claimStatusMessage: string | null;
   emptyMessage: string;
-  isHistoryView: boolean;
+  isReadOnly: boolean;
+  readOnlyMessage: string | null;
   isClaimingPositions: boolean;
   isInvesting: boolean;
   isLoadingPositions: boolean;
@@ -291,7 +292,8 @@ export function BullpenInvestmentsSection({
   claimError,
   claimStatusMessage,
   emptyMessage,
-  isHistoryView,
+  isReadOnly,
+  readOnlyMessage,
   isClaimingPositions,
   isInvesting,
   isLoadingPositions,
@@ -377,7 +379,7 @@ export function BullpenInvestmentsSection({
               <span className="font-semibold">returns/day</span>.
             </p>
           </div>
-          {!isHistoryView && hasRows ? (
+          {!isReadOnly && hasRows ? (
             <div className="flex w-full flex-col items-start gap-2">
               <div className="flex w-full flex-wrap items-center gap-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -454,9 +456,9 @@ export function BullpenInvestmentsSection({
           ) : null}
         </div>
 
-        {isHistoryView ? (
+        {isReadOnly ? (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Switch back to the current snapshot to select events and place Bullpen orders.
+            {readOnlyMessage || "This snapshot is read-only."}
           </div>
         ) : !hasRows ? (
           <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">

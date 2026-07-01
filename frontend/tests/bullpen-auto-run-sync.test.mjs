@@ -91,6 +91,7 @@ function createRun({
   acceptedCandidates,
   reviewedCandidates,
   runId = "run-1",
+  snapshotId = "auto-snapshot-1",
 } = {}) {
   return {
     id: runId,
@@ -114,7 +115,7 @@ function createRun({
         "scan",
         {
           mode: "30-days",
-          snapshot_id: "auto-snapshot-1",
+          snapshot_id: snapshotId,
           scan_source_label: "Bullpen Auto-Run",
           scan_source_url: "https://example.com/bullpen",
           scanned_at: "2026-06-25T12:00:00Z",
@@ -295,6 +296,55 @@ test("Bullpen auto-run sync lets persisted decisions override Stage 2 summary ro
   assert.equal(syncedQuestion.llmBreakdown.length, 1);
   assert.equal(syncedQuestion.llmBreakdown[0]?.provider, "openai");
   assert.equal(syncedQuestion.llmCompletedAt, "2026-06-25T12:02:00Z");
+});
+
+test("Bullpen auto-run sync archives the previous auto snapshot when a newer run completes", async () => {
+  const { syncBullpenAutoRunSummarySnapshots } =
+    await loadBullpenAutoRunSyncModule();
+
+  const firstSnapshots = syncBullpenAutoRunSummarySnapshots({
+    snapshotsByMode: createEmptySnapshots(),
+    summary: { recent_decisions: [] },
+    run: createRun({
+      runId: "run-1",
+      snapshotId: "auto-snapshot-1",
+      acceptedCandidates: [createAcceptedCandidate()],
+      reviewedCandidates: [createReviewedCandidate()],
+    }),
+  });
+  const secondSnapshots = syncBullpenAutoRunSummarySnapshots({
+    snapshotsByMode: firstSnapshots,
+    summary: { recent_decisions: [] },
+    run: createRun({
+      runId: "run-2",
+      snapshotId: "auto-snapshot-2",
+      acceptedCandidates: [
+        createAcceptedCandidate({
+          question_id: "question-2",
+          market_id: "market-2",
+          question: "Will event two happen?",
+          market_title: "Will event two happen?",
+          market_url: "https://example.com/market-2",
+          slug: "market-2",
+        }),
+      ],
+      reviewedCandidates: [
+        createReviewedCandidate({
+          market_id: "market-2",
+          question: "Will event two happen?",
+          market_url: "https://example.com/market-2",
+        }),
+      ],
+    }),
+  });
+
+  assert.equal(secondSnapshots["30-days"].current?.snapshotId, "auto-snapshot-2");
+  assert.equal(secondSnapshots["30-days"].history.length, 1);
+  assert.equal(
+    secondSnapshots["30-days"].history[0]?.questions[0]?.id,
+    "question-1",
+  );
+  assert.ok(secondSnapshots["30-days"].history[0]?.archivedAt);
 });
 
 test("Bullpen auto-run sync stores Stage 2 active-position LLM odds for green rows", async () => {

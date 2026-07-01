@@ -151,7 +151,10 @@ test("Bullpen x AI investment result is shown below the Invest button", () => {
   assert.match(bullpenAiPageSource, /Investing was successful/);
   assert.match(bullpenAiPageSource, /Investing was partially successful/);
   assert.match(bullpenAiPageSource, /Investing was not successful/);
-  assert.match(bullpenAiPageSource, /resultMessage=\{investmentNotice\}/);
+  assert.match(
+    bullpenAiPageSource,
+    /resultMessage=\{isManualScanView \? investmentNotice : null\}/,
+  );
   assert.match(investmentsSectionSource, /resultMessage: string \| null/);
   assert.match(investmentsSectionSource, /!isInvesting && resultMessage/);
   assert.match(investmentsSectionSource, /\{resultMessage\}/);
@@ -213,6 +216,34 @@ test("Bullpen x AI run-now request can reuse the current scan snapshot before ma
   );
   assert.match(bullpenAiPageSource, /candidate_rows_prefiltered:\s*true/);
   assert.match(bullpenAiPageSource, /reuse_saved_llm_outputs:\s*false/);
+});
+
+test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {
+  const bullpenAiPageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const investmentsSectionSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenInvestmentsSection.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(bullpenAiPageSource, /Manual Scan/);
+  assert.match(bullpenAiPageSource, /Auto Scan/);
+  assert.match(
+    bullpenAiPageSource,
+    /Auto Scan is read-only here\.\s+Switch to Manual Scan to run\s+Bullpen scans, LLM analysis, or manual investing\./,
+  );
+  assert.match(bullpenAiPageSource, /setAutoSnapshotsByMode/);
+  assert.match(
+    bullpenAiPageSource,
+    /syncBullpenAutoRunSummarySnapshots\(\{\s*snapshotsByMode: current,/,
+  );
+  assert.match(investmentsSectionSource, /isReadOnly: boolean;/);
+  assert.match(investmentsSectionSource, /readOnlyMessage: string \| null;/);
 });
 
 test("Bullpen x AI auto-run errors render detail text alongside the main message", () => {
