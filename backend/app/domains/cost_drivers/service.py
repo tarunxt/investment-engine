@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os, time, calendar
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Any
 from sqlalchemy import desc
 from app.core.logging import get_logger
@@ -11,7 +11,7 @@ from .models import TrafficCostRollup
 from .recommendations import generateDataTransferRecommendation, generateTransferFamilyRecommendation, generateUnattachedEbsRecommendation, sort_recommendations
 
 logger = get_logger(__name__)
-_CACHE: dict[str, object] = {"expires": 0, "data": None, "last_refresh": None}
+_CACHE: dict[str, dict[str, object]] = {}
 
 FREE_TRANSFER_GB = 100.0
 TRANSFER_RATE_PER_GB_DEFAULT = 0.09
@@ -22,9 +22,26 @@ def _env_float(name: str, default: float) -> float:
     except ValueError: return default
 
 
-def _days() -> tuple[datetime, int, int]:
+def _month_window(month: str | None = None) -> tuple[datetime, int, int, date, date, bool, str]:
     now = datetime.now(timezone.utc)
-    return now, max(now.day, 1), calendar.monthrange(now.year, now.month)[1]
+    if month:
+        try:
+            year, month_number = (int(part) for part in month.split("-", 1))
+            selected = datetime(year, month_number, 1, tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            raise ValueError("month must use YYYY-MM format")
+    else:
+        selected = now.replace(day=1)
+    selected = selected.replace(hour=0, minute=0, second=0, microsecond=0)
+    days = calendar.monthrange(selected.year, selected.month)[1]
+    is_current_month = selected.year == now.year and selected.month == now.month
+    elapsed = max(now.day, 1) if is_current_month else days
+    start = selected.date()
+    if is_current_month:
+        end = now.date() + timedelta(days=1)
+    else:
+        end = (selected.replace(day=days) + timedelta(days=1)).date()
+    return selected, elapsed, days, start, end, is_current_month, f"{selected.year}-{selected.month:02d}"
 
 
 def _aws_client(service: str, region: str):
@@ -36,9 +53,9 @@ def _aws_client(service: str, region: str):
     return boto3.client(service, region_name=region, config=Config(connect_timeout=3, read_timeout=8, retries={"max_attempts": 2}))
 
 
-def _collect_cost_explorer(now: datetime, elapsed: int, days: int, diagnostics: list[dict[str, str]]) -> dict[str, Any]:
-    start = now.replace(day=1).date().isoformat()
-    end = (now.date() + timedelta(days=1)).isoformat()
+def _collect_cost_explorer(now: datetime, elapsed: int, days: int, diagnostics: list[dict[str, str]], start_date: date, end_date: date) -> dict[str, Any]:
+    start = start_date.isoformat()
+    end = end_date.isoformat()
     region = os.getenv("AWS_REGION", "ap-south-1")
     empty = {"mtd_cost": 0.0, "top_services": [], "top_usage_types": [], "daily_cost": [], "transfer_gb": 0.0}
     try:
@@ -105,12 +122,15 @@ def _collect_inventory(diagnostics: list[dict[str, str]]) -> dict[str, Any]:
     return inventory
 
 
-def _collect_traffic_rollups(diagnostics: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _collect_traffic_rollups(diagnostics: list[dict[str, str]], start_at: datetime | None = None, end_at: datetime | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     try:
         db = SyncSessionLocal()
         try:
-            records = db.query(TrafficCostRollup).order_by(desc(TrafficCostRollup.period_end), desc(TrafficCostRollup.response_bytes)).limit(20).all()
+            query = db.query(TrafficCostRollup)
+            if start_at is not None and end_at is not None:
+                query = query.filter(TrafficCostRollup.period_start < end_at, TrafficCostRollup.period_end >= start_at)
+            records = query.order_by(desc(TrafficCostRollup.period_end), desc(TrafficCostRollup.response_bytes)).limit(20).all()
         finally:
             db.close()
         for r in records:
@@ -131,10 +151,8 @@ def _traffic_recommendation(cls: str) -> str:
     if cls == "bots/crawlers": return "Add robots.txt, rate limits, WAF/Cloudflare rules, or block abusive agents."
     return "Add cache headers and reduce payload size."
 
-def _mock_dashboard() -> dict:
-    now = datetime.now(timezone.utc)
-    days = calendar.monthrange(now.year, now.month)[1]
-    elapsed = max(now.day, 1)
+def _mock_dashboard(month: str | None = None) -> dict:
+    now, elapsed, days, _start, _end, _is_current, selected_month = _month_window(month)
     mtd_cost = 42.39
     transfer_gb = 89.15
     transfer = estimate_data_transfer_cost(transfer_gb, elapsed, days, 100, _env_float("DATA_TRANSFER_OUT_RATE_PER_GB", 0.09))
@@ -172,18 +190,19 @@ def _mock_dashboard() -> dict:
     drivers = []
     for idx, s in enumerate(top_services, 1):
         drivers.append({"rank":idx,"driver":s["name"],"source":"Cost Explorer" if idx < 4 else "Inventory estimate","monthToDateCost":s["cost"],"projectedMonthEndCost":estimate_projected_month_end(s["cost"], elapsed, days),"usageQuantity":s["usageQuantity"],"unit":s["unit"],"confidence":"actual" if idx < 4 else "estimated","severity":"high" if idx in (1,5) else "medium","whyItCostsMoney":"AWS bills this resource by usage, storage, processed bytes, or endpoint hours.","suggestedAction":"Review utilization and apply the matching recommendation below.","estimatedMonthlySavings":round(s["cost"]*.35,2),"linkToAWSConsole":"https://console.aws.amazon.com/costmanagement/home?region=us-east-1#/cost-explorer"})
-    return {"summary":{"monthToDateAwsCost":mtd_cost,"projectedMonthEndCost":projected,"dataTransferUsedGb":transfer_gb,"freeTransferRemainingGb":transfer["remainingFreeGb"],"estimatedOverageGb":transfer["estimatedOverageGb"],"ec2RunningInstances":1,"unattachedEbsGb":32,"activePublicIpv4Count":1,"activeHighRiskResources":{"transferFamily":1,"natGateways":1,"loadBalancers":1}},"dailyCostTrend":[{"date":f"{now.year}-{now.month:02d}-{d:02d}","cost":round(mtd_cost/elapsed*d/2,2),"projected":round(projected/elapsed*d/2,2)} for d in range(1, elapsed+1)],"dataTransferTrend":[{"date":f"{now.year}-{now.month:02d}-{d:02d}","gb":round(transfer_gb/elapsed*d,2),"freeTierGb":100} for d in range(1, elapsed+1)],"topServices":top_services,"topUsageTypes":[{"name":"DataTransfer-Out-Bytes","cost":18.4,"usageQuantity":transfer_gb,"unit":"GB"},{"name":"BoxUsage:t3.small","cost":12.8,"usageQuantity":420,"unit":"Hrs"},{"name":"EBS:VolumeUsage.gp3","cost":4.9,"usageQuantity":80,"unit":"GB-Mo"}],"costDrivers":drivers,"traffic":traffic_rows,"recommendations":recs,"inventory":{"instances":[{"instanceId":"i-demo123","name":"cred-x-web","instanceType":"t3.small","state":"running","networkOutGb":54.2,"cpuAveragePct":7.1,"publicIpv4":True}],"volumes":[{"volumeId":"vol-demo","sizeGb":32,"type":"gp3","state":"available","unattached":True}],"logGroups":[{"name":"/cred-x/backend","retentionDays":None,"storedGb":2.1}],"missingPermissions":[]},"debug":{"mockMode":True,"demoDataNotice":"Demo data — not real AWS account findings.","lastAwsRefreshTime":_CACHE.get("last_refresh"),"awsRegion":os.getenv("AWS_REGION","ap-south-1"),"costExplorerLabel":"AWS actuals, delayed about 24 hours","cloudWatchLabel":"near-real-time metrics","appLogsLabel":"near-real-time website attribution","cacheTtlSeconds":int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS","3600"))}}
+    return {"summary":{"monthToDateAwsCost":mtd_cost,"projectedMonthEndCost":projected,"dataTransferUsedGb":transfer_gb,"freeTransferRemainingGb":transfer["remainingFreeGb"],"estimatedOverageGb":transfer["estimatedOverageGb"],"ec2RunningInstances":1,"unattachedEbsGb":32,"activePublicIpv4Count":1,"activeHighRiskResources":{"transferFamily":1,"natGateways":1,"loadBalancers":1}},"dailyCostTrend":[{"date":f"{now.year}-{now.month:02d}-{d:02d}","cost":round(mtd_cost/elapsed*d/2,2),"projected":round(projected/elapsed*d/2,2)} for d in range(1, elapsed+1)],"dataTransferTrend":[{"date":f"{now.year}-{now.month:02d}-{d:02d}","gb":round(transfer_gb/elapsed*d,2),"freeTierGb":100} for d in range(1, elapsed+1)],"topServices":top_services,"topUsageTypes":[{"name":"DataTransfer-Out-Bytes","cost":18.4,"usageQuantity":transfer_gb,"unit":"GB"},{"name":"BoxUsage:t3.small","cost":12.8,"usageQuantity":420,"unit":"Hrs"},{"name":"EBS:VolumeUsage.gp3","cost":4.9,"usageQuantity":80,"unit":"GB-Mo"}],"costDrivers":drivers,"traffic":traffic_rows,"recommendations":recs,"inventory":{"instances":[{"instanceId":"i-demo123","name":"cred-x-web","instanceType":"t3.small","state":"running","networkOutGb":54.2,"cpuAveragePct":7.1,"publicIpv4":True}],"volumes":[{"volumeId":"vol-demo","sizeGb":32,"type":"gp3","state":"available","unattached":True}],"logGroups":[{"name":"/cred-x/backend","retentionDays":None,"storedGb":2.1}],"missingPermissions":[]},"debug":{"mockMode":True,"selectedMonth":selected_month,"demoDataNotice":"Demo data — not real AWS account findings.","lastAwsRefreshTime":_CACHE.get("last_refresh"),"awsRegion":os.getenv("AWS_REGION","ap-south-1"),"costExplorerLabel":"AWS actuals, delayed about 24 hours","cloudWatchLabel":"near-real-time metrics","appLogsLabel":"near-real-time website attribution","cacheTtlSeconds":int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS","3600"))}}
 
-def _empty_live_dashboard() -> dict:
+def _empty_live_dashboard(month: str | None = None) -> dict:
+    selected, _elapsed, _days, _start, _end, _is_current, selected_month = _month_window(month)
     now = datetime.now(timezone.utc).isoformat()
-    return {"summary":{"monthToDateAwsCost":0,"projectedMonthEndCost":0,"dataTransferUsedGb":0,"freeTransferRemainingGb":100,"estimatedOverageGb":0,"ec2RunningInstances":0,"unattachedEbsGb":0,"activePublicIpv4Count":0,"activeHighRiskResources":{}},"dailyCostTrend":[],"dataTransferTrend":[],"topServices":[],"topUsageTypes":[],"costDrivers":[],"traffic":[],"recommendations":[],"inventory":{"instances":[],"volumes":[],"logGroups":[],"missingPermissions":[]},"diagnostics":[{"service":"Cost Explorer","status":"not_checked","message":"Live Cost Explorer collector is not configured in this build."},{"service":"EC2","status":"not_checked","message":"Live EC2 inventory collector is not configured in this build."},{"service":"EBS","status":"not_checked","message":"Live EBS inventory collector is not configured in this build."},{"service":"CloudWatch Logs","status":"not_checked","message":"Live CloudWatch Logs collector is not configured in this build."},{"service":"Transfer Family","status":"not_checked","message":"Live Transfer Family collector is not configured in this build."},{"service":"App traffic logs","status":"unavailable","message":"App traffic logs unavailable."}],"debug":{"mockMode":False,"lastAwsRefreshTime":now,"awsRegion":os.getenv("AWS_REGION","ap-south-1"),"costExplorerLabel":"not checked","cloudWatchLabel":"not checked","appLogsLabel":"unavailable","cacheTtlSeconds":int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS","3600"))}}
+    return {"summary":{"monthToDateAwsCost":0,"projectedMonthEndCost":0,"dataTransferUsedGb":0,"freeTransferRemainingGb":100,"estimatedOverageGb":0,"ec2RunningInstances":0,"unattachedEbsGb":0,"activePublicIpv4Count":0,"activeHighRiskResources":{}},"dailyCostTrend":[],"dataTransferTrend":[],"topServices":[],"topUsageTypes":[],"costDrivers":[],"traffic":[],"recommendations":[],"inventory":{"instances":[],"volumes":[],"logGroups":[],"missingPermissions":[]},"diagnostics":[{"service":"Cost Explorer","status":"not_checked","message":"Live Cost Explorer collector is not configured in this build."},{"service":"EC2","status":"not_checked","message":"Live EC2 inventory collector is not configured in this build."},{"service":"EBS","status":"not_checked","message":"Live EBS inventory collector is not configured in this build."},{"service":"CloudWatch Logs","status":"not_checked","message":"Live CloudWatch Logs collector is not configured in this build."},{"service":"Transfer Family","status":"not_checked","message":"Live Transfer Family collector is not configured in this build."},{"service":"App traffic logs","status":"unavailable","message":"App traffic logs unavailable."}],"debug":{"mockMode":False,"selectedMonth":selected_month,"lastAwsRefreshTime":now,"awsRegion":os.getenv("AWS_REGION","ap-south-1"),"costExplorerLabel":"not checked","cloudWatchLabel":"not checked","appLogsLabel":"unavailable","cacheTtlSeconds":int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS","3600"))}}
 
-def _live_dashboard() -> dict:
-    now, elapsed, days = _days()
+def _live_dashboard(month: str | None = None) -> dict:
+    now, elapsed, days, start_date, end_date, _is_current, selected_month = _month_window(month)
     diagnostics: list[dict[str, str]] = []
-    ce = _collect_cost_explorer(now, elapsed, days, diagnostics)
+    ce = _collect_cost_explorer(now, elapsed, days, diagnostics, start_date, end_date)
     inventory = _collect_inventory(diagnostics)
-    traffic = _collect_traffic_rollups(diagnostics)
+    traffic = _collect_traffic_rollups(diagnostics, datetime.combine(start_date, datetime.min.time()), datetime.combine(end_date, datetime.min.time()))
     transfer_gb = max(float(ce.get("transfer_gb") or 0), sum(float(t.get("totalGB") or 0) for t in traffic))
     transfer = estimate_data_transfer_cost(transfer_gb, elapsed, days, FREE_TRANSFER_GB, _env_float("DATA_TRANSFER_OUT_RATE_PER_GB", TRANSFER_RATE_PER_GB_DEFAULT))
     mtd_cost = float(ce.get("mtd_cost") or 0)
@@ -199,19 +218,21 @@ def _live_dashboard() -> dict:
         generateDataTransferRecommendation({"usedGb": transfer_gb, "projectedGb": transfer["projectedGb"], "source": "cost_explorer" if ce.get("transfer_gb") else "app_traffic_logs", "topBandwidthPath": traffic[0]["path"] if traffic else None}),
         generateUnattachedEbsRecommendation({"volumes": inventory.get("volumes", []), "lastCheckedAt": now.isoformat()}),
     ] if r]
-    return {"summary":{"monthToDateAwsCost":mtd_cost,"projectedMonthEndCost":projected,"dataTransferUsedGb":transfer_gb,"freeTransferRemainingGb":transfer["remainingFreeGb"],"estimatedOverageGb":transfer["estimatedOverageGb"],"ec2RunningInstances":len(inventory.get("instances", [])),"unattachedEbsGb":unattached_gb,"activePublicIpv4Count":public_ipv4,"activeHighRiskResources":{"transferFamily":0,"natGateways":0,"loadBalancers":0}},"dailyCostTrend":ce.get("daily_cost") or [],"dataTransferTrend":[{"date":f"{now.year}-{now.month:02d}-{d:02d}","gb":round(transfer_gb/elapsed*d,2),"freeTierGb":FREE_TRANSFER_GB} for d in range(1, elapsed+1)] if transfer_gb else [],"topServices":top_services,"topUsageTypes":ce.get("top_usage_types") or [],"costDrivers":drivers,"traffic":traffic,"recommendations":sort_recommendations(recs),"inventory":inventory,"diagnostics":diagnostics,"debug":{"mockMode":False,"lastAwsRefreshTime":_CACHE.get("last_refresh"),"awsRegion":os.getenv("AWS_REGION","ap-south-1"),"costExplorerLabel":"AWS actuals loaded" if ce.get("daily_cost") or top_services else "not available — see diagnostics", "cloudWatchLabel":"live checks attempted", "appLogsLabel":"database rollups loaded" if traffic else "no traffic rollups stored", "cacheTtlSeconds":int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS","3600")), "diagnostics": diagnostics}}
+    return {"summary":{"monthToDateAwsCost":mtd_cost,"projectedMonthEndCost":projected,"dataTransferUsedGb":transfer_gb,"freeTransferRemainingGb":transfer["remainingFreeGb"],"estimatedOverageGb":transfer["estimatedOverageGb"],"ec2RunningInstances":len(inventory.get("instances", [])),"unattachedEbsGb":unattached_gb,"activePublicIpv4Count":public_ipv4,"activeHighRiskResources":{"transferFamily":0,"natGateways":0,"loadBalancers":0}},"dailyCostTrend":ce.get("daily_cost") or [],"dataTransferTrend":[{"date":f"{now.year}-{now.month:02d}-{d:02d}","gb":round(transfer_gb/elapsed*d,2),"freeTierGb":FREE_TRANSFER_GB} for d in range(1, elapsed+1)] if transfer_gb else [],"topServices":top_services,"topUsageTypes":ce.get("top_usage_types") or [],"costDrivers":drivers,"traffic":traffic,"recommendations":sort_recommendations(recs),"inventory":inventory,"diagnostics":diagnostics,"debug":{"mockMode":False,"selectedMonth":selected_month,"lastAwsRefreshTime":None,"awsRegion":os.getenv("AWS_REGION","ap-south-1"),"costExplorerLabel":"AWS actuals loaded" if ce.get("daily_cost") or top_services else "not available — see diagnostics", "cloudWatchLabel":"live checks attempted", "appLogsLabel":"database rollups loaded" if traffic else "no traffic rollups stored", "cacheTtlSeconds":int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS","3600")), "diagnostics": diagnostics}}
 
-def get_dashboard(force_refresh: bool=False) -> dict:
+def get_dashboard(force_refresh: bool=False, month: str | None = None) -> dict:
     ttl = int(os.getenv("COST_DASHBOARD_CACHE_TTL_SECONDS", "3600"))
     mock = os.getenv("COST_DASHBOARD_MOCK_MODE", "false").lower() == "true"
-    if not force_refresh and _CACHE["data"] and time.time() < float(_CACHE["expires"]):
-        return _CACHE["data"]  # type: ignore
+    _selected, _elapsed, _days, _start, _end, _is_current, selected_month = _month_window(month)
+    cache_key = f"{selected_month}:{'mock' if mock else 'live'}"
+    cached = _CACHE.get(cache_key)
+    if not force_refresh and cached and cached.get("data") and time.time() < float(cached.get("expires", 0)):
+        return cached["data"]  # type: ignore
     if not mock:
-        data = _live_dashboard()
-        _CACHE.update({"data": data, "expires": time.time()+ttl, "last_refresh": datetime.now(timezone.utc).isoformat()})
-        data["debug"]["lastAwsRefreshTime"] = _CACHE["last_refresh"]
-        return data
-    data = _mock_dashboard(); data["debug"]["mockMode"] = mock
-    _CACHE.update({"data": data, "expires": time.time()+ttl, "last_refresh": datetime.now(timezone.utc).isoformat()})
-    data["debug"]["lastAwsRefreshTime"] = _CACHE["last_refresh"]
+        data = _live_dashboard(selected_month)
+    else:
+        data = _mock_dashboard(selected_month); data["debug"]["mockMode"] = mock
+    last_refresh = datetime.now(timezone.utc).isoformat()
+    _CACHE[cache_key] = {"data": data, "expires": time.time()+ttl, "last_refresh": last_refresh}
+    data["debug"]["lastAwsRefreshTime"] = last_refresh
     return data

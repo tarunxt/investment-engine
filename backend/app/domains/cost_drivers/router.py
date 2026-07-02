@@ -1,9 +1,10 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User, UserRole
 from .schemas import CostDriversDashboard
 from .service import get_dashboard
+import re
 import time
 
 router = APIRouter(prefix="/api/admin/cost-drivers", tags=["cost-drivers"])
@@ -19,9 +20,19 @@ def _allowed_admin(user: User = Depends(get_current_user)) -> User:
         return user
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cost dashboard admin access required")
 
+def _month_param(month: str | None) -> str | None:
+    if month is None or month == "":
+        return None
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="month must use YYYY-MM format")
+    year, month_number = (int(part) for part in month.split("-", 1))
+    if month_number < 1 or month_number > 12 or year < 2000 or year > 2100:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="month must use YYYY-MM format")
+    return month
+
 @router.get("/summary", response_model=CostDriversDashboard)
-async def summary(_: User = Depends(_allowed_admin)):
-    return get_dashboard()
+async def summary(month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"), _: User = Depends(_allowed_admin)):
+    return get_dashboard(month=_month_param(month))
 
 @router.get("/aws")
 async def aws(_: User = Depends(_allowed_admin)):
@@ -36,10 +47,10 @@ async def recommendations(_: User = Depends(_allowed_admin)):
     return {"recommendations": get_dashboard()["recommendations"]}
 
 @router.post("/refresh", response_model=CostDriversDashboard)
-async def refresh(_: User = Depends(_allowed_admin)):
+async def refresh(month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"), _: User = Depends(_allowed_admin)):
     global _LAST_REFRESH
     now = time.time()
     if now - _LAST_REFRESH < 60:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Refresh is rate-limited to once per minute")
     _LAST_REFRESH = now
-    return get_dashboard(force_refresh=True)
+    return get_dashboard(force_refresh=True, month=_month_param(month))
