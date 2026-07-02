@@ -190,8 +190,14 @@ export const URLs = {
   },
 
   costDrivers: {
-    summary: () => `${resolveApiBaseUrl()}/api/admin/cost-drivers/summary`,
-    refresh: () => `${resolveApiBaseUrl()}/api/admin/cost-drivers/refresh`,
+    summary: (month?: string) => {
+      const query = month ? `?month=${encodeURIComponent(month)}` : "";
+      return `${resolveApiBaseUrl()}/api/admin/cost-drivers/summary${query}`;
+    },
+    refresh: (month?: string) => {
+      const query = month ? `?month=${encodeURIComponent(month)}` : "";
+      return `${resolveApiBaseUrl()}/api/admin/cost-drivers/refresh${query}`;
+    },
   },
 
   // Health Check endpoints

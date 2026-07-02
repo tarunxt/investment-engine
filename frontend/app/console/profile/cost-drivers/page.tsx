@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +21,20 @@ const savings = (v?: number | null) => v == null ? "Not enough data" : money(v);
 const gb = (v: number) => `${Number(v || 0).toFixed(2)} GB`;
 const severityClass = (severity: string) => severity === "critical" ? "bg-red-100 text-red-700" : severity === "high" ? "bg-orange-100 text-orange-700" : severity === "medium" ? "bg-yellow-100 text-yellow-800" : severity === "info" ? "bg-sky-100 text-sky-700" : "bg-emerald-100 text-emerald-700";
 const confidenceClass = (confidence: string) => confidence === "confirmed" ? "bg-emerald-100 text-emerald-700" : confidence === "demo" ? "bg-purple-100 text-purple-700" : confidence === "not_checked" ? "bg-slate-100 text-slate-700" : "bg-blue-100 text-blue-700";
+
+const monthValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+const monthLabel = (value: string) => {
+  const [year, month] = value.split("-").map(Number);
+  return new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+};
+const monthOptions = () => {
+  const current = new Date();
+  return Array.from({ length: 13 }, (_, index) => {
+    const optionDate = new Date(current.getFullYear(), current.getMonth() - index, 1);
+    const value = monthValue(optionDate);
+    return { value, label: monthLabel(value) };
+  });
+};
 
 function RecommendationCard({ recommendation }: { recommendation: Recommendation }) {
   const actions = recommendation.recommendedActions?.length ? recommendation.recommendedActions : recommendation.suggestedAction ? [recommendation.suggestedAction] : [];
@@ -51,8 +65,10 @@ export default function PlatformCostDriversPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const months = useMemo(() => monthOptions(), []);
+  const [selectedMonth, setSelectedMonth] = useState(() => monthValue(new Date()));
 
-  async function load(refresh = false) {
+  const load = useCallback(async (refresh = false) => {
     setError(null);
     if (refresh) {
       setRefreshing(true);
@@ -60,7 +76,7 @@ export default function PlatformCostDriversPage() {
       setLoading(true);
     }
     try {
-      const response = refresh ? await apiService.post<Dashboard>(URLs.costDrivers.refresh()) : await apiService.get<Dashboard>(URLs.costDrivers.summary());
+      const response = refresh ? await apiService.post<Dashboard>(URLs.costDrivers.refresh(selectedMonth)) : await apiService.get<Dashboard>(URLs.costDrivers.summary(selectedMonth));
       setData(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load cost drivers");
@@ -71,14 +87,16 @@ export default function PlatformCostDriversPage() {
         setLoading(false);
       }
     }
-  }
+  }, [selectedMonth]);
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [load]);
+
+  const selectedMonthLabel = monthLabel(selectedMonth);
 
   const summaryCards = useMemo(() => data ? [
-    ["Month-to-date AWS actual cost", money(data.summary.monthToDateAwsCost as number), "AWS actuals, delayed"],
+    ["Selected month AWS actual cost", money(data.summary.monthToDateAwsCost as number), "AWS actuals, delayed"],
     ["Projected end-of-month cost", money(data.summary.projectedMonthEndCost as number), "Run-rate estimate"],
     ["Data transfer used", gb(data.summary.dataTransferUsedGb as number), "100 GB free tier watch"],
     ["Free transfer remaining", gb(data.summary.freeTransferRemainingGb as number), "Regional free tier"],
@@ -94,8 +112,14 @@ export default function PlatformCostDriversPage() {
 
   return <div className="w-full max-w-7xl space-y-6">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div><h3 className="text-lg font-medium">Platform Cost Drivers</h3><p className="text-sm text-muted-foreground">Read-only AWS billing actuals plus website route/asset attribution for Cred-x bandwidth, bots, media, API traffic, EC2, storage, logs, and hidden resources.</p></div>
-      <Button onClick={() => load(true)} disabled={refreshing} size="sm"><RefreshCw className="mr-2 h-4 w-4" />{refreshing ? "Refreshing" : "Refresh now"}</Button>
+      <div><h3 className="text-lg font-medium">Platform Cost Drivers</h3><p className="text-sm text-muted-foreground">Read-only AWS billing actuals plus website route/asset attribution for Cred-x bandwidth, bots, media, API traffic, EC2, storage, logs, and hidden resources.</p><p className="mt-1 text-xs text-muted-foreground">Showing all cost details for {selectedMonthLabel}.</p></div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground" htmlFor="cost-driver-month">Month</label>
+        <select id="cost-driver-month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring">
+          {months.map((month) => <option key={month.value} value={month.value}>{month.label}</option>)}
+        </select>
+        <Button onClick={() => load(true)} disabled={refreshing} size="sm"><RefreshCw className="mr-2 h-4 w-4" />{refreshing ? "Refreshing" : "Refresh now"}</Button>
+      </div>
     </div>
     <Separator />
     {error && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
