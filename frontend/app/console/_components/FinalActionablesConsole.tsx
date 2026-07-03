@@ -3461,12 +3461,18 @@ export function StockDetailsButton({
   technicalScan,
   detailsData,
   onFocusCalculation,
+  historicalRows = [],
+  formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+  onMatrixDetailOpen,
 }: {
   stock: StockConsensus;
   market: SwingTradeMarket;
   technicalScan: TechnicalScanResult | null;
   detailsData: StockDetailsData;
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
+  historicalRows?: Array<DashboardActionRow & { coveredAt: string; runId: number }>;
+  formulaConfig?: ScoreMatrixFormulaConfig;
+  onMatrixDetailOpen?: (detail: ScoreMatrixDetail) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [zerodhaOrders, setZerodhaOrders] = useState<ZerodhaOrder[]>([]);
@@ -3482,6 +3488,10 @@ export function StockDetailsButton({
     stock,
   );
   const threatRows = getAnalysisTableRowsForStock(detailsData.threatsAnalysis?.report?.tables, stock);
+  const matchingHistoricalRows = useMemo(
+    () => historicalRows.filter((row) => row.stock.key === stock.key),
+    [historicalRows, stock.key],
+  );
 
   useEffect(() => {
     if (!open || market !== "india" || !zerodhaHolding) return;
@@ -3611,6 +3621,91 @@ export function StockDetailsButton({
                     ["Invalidation level", technicalScan?.invalidationLevel || "—"],
                   ]}
                 />
+              </section>
+
+
+
+              <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <h3 className="mb-3 font-semibold text-slate-950">Historical LLM suggestions</h3>
+                {matchingHistoricalRows.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white/80">
+                    <table className="min-w-[70rem] text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                          <th className="px-3 py-2 font-semibold">Stock</th>
+                          <th className="px-3 py-2 font-semibold">Timestamp covered</th>
+                          {FINAL_ACTIONABLE_COLUMNS.filter((column) => column !== "stock").map((column) => (
+                            <th key={`historical-${column}`} className={cn("px-3 py-2 font-semibold", column === "currentValue" ? "bg-blue-50 text-blue-950" : "")}>
+                              {FINAL_ACTIONABLE_COLUMN_LABELS[column]}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {matchingHistoricalRows.map((historicalRow) => {
+                          const historicalStock = historicalRow.stock;
+                          const historicalAction = historicalRow.formulaAction;
+                          const historicalEstimate = historicalRow.formulaEstimate;
+                          const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(historicalAction);
+                          const renderHistoricalColumn = (column: Exclude<FinalActionableColumnKey, "stock">) => {
+                            if (column === "score") {
+                              return onMatrixDetailOpen ? (
+                                <ScoreMatrixButton detail={historicalRow.detail} formulaConfig={formulaConfig} onOpenDetail={onMatrixDetailOpen} />
+                              ) : (
+                                formatScoreValue(historicalRow.formulaScore)
+                              );
+                            }
+                            if (column === "consensus") return <ConsensusBreakupButton stock={historicalStock} action={historicalAction} />;
+                            if (column === "currentValue") return formatDisplayAmount(historicalEstimate.currentInvestmentAmount ?? getCurrentValueAmount(historicalStock.representative), market);
+                            if (column === "actionCurrentUnits") {
+                              const actionUnits = showActionColumns ? formatQuantity(historicalEstimate.units) : "0";
+                              return `${actionUnits}/${formatQuantity(historicalEstimate.currentUnits)}`;
+                            }
+                            return showActionColumns ? formatDisplayAmount(historicalEstimate.amount, market) : "—";
+                          };
+                          return (
+                            <tr key={`${historicalRow.runId}-${historicalStock.key}`} className="bg-white/40">
+                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                <span className="inline-flex items-center">
+                                  <StockDetailsButton
+                                    stock={historicalStock}
+                                    market={market}
+                                    technicalScan={technicalScan}
+                                    detailsData={detailsData}
+                                    onFocusCalculation={onFocusCalculation}
+                                    historicalRows={historicalRows}
+                                    formulaConfig={formulaConfig}
+                                    onMatrixDetailOpen={onMatrixDetailOpen}
+                                  />
+                                  <TradingViewSymbolLink
+                                    symbol={historicalStock.symbol}
+                                    market={market}
+                                    exchange={historicalStock.exchange}
+                                    className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
+                                  >
+                                    {historicalStock.symbol}
+                                  </TradingViewSymbolLink>
+                                </span>
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                <RunJobLink runId={historicalRow.runId}>{formatDateTime(historicalRow.coveredAt)}</RunJobLink>
+                              </td>
+                              {FINAL_ACTIONABLE_COLUMNS.filter((column) => column !== "stock").map((column) => (
+                                <td key={`${historicalRow.runId}-${historicalStock.key}-${column}`} className={cn("px-3 py-2 align-top text-gray-700", column === "score" ? "font-semibold text-gray-800" : "")}>
+                                  <div className="truncate">{renderHistoricalColumn(column)}</div>
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-slate-200 bg-white/75 p-3 text-slate-600">
+                    No prior Final Actionables suggestions were found for this stock.
+                  </p>
+                )}
               </section>
 
               <section className="rounded-xl border border-violet-100 bg-violet-50/70 p-4">
@@ -6355,6 +6450,26 @@ type DashboardActionSortState = {
   direction: "asc" | "desc";
 };
 
+function buildHistoricalDashboardActionRows(
+  runs: RunResponse[],
+  market: SwingTradeMarket,
+  portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+  technicalScans: TechnicalScanMap,
+  formulaConfig: ScoreMatrixFormulaConfig,
+) {
+  return runs
+    .filter((run) => isCompletedRebalanceRun(run, market))
+    .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at))
+    .flatMap((run) =>
+      buildDashboardActionRows(
+        buildConsensusRows([run], market, portfolioSnapshot),
+        market,
+        technicalScans,
+        formulaConfig,
+      ).map((row) => ({ ...row, coveredAt: run.created_at, runId: run.id })),
+    );
+}
+
 function getDefaultDashboardActionSortState(action: ActionCategory): DashboardActionSortState {
   return {
     key: "score",
@@ -6788,6 +6903,13 @@ export function DashboardFinalActionablesTables() {
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
+    const historicalActionRows = buildHistoricalDashboardActionRows(
+      runs,
+      market,
+      market === "india" ? portfolioSnapshots.india : portfolioSnapshots.us,
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    );
     const detailsData = detailsDataByMarket[market];
     const latestRebalanceAt = getLatestMatchingRuns(runs, market)[0]?.created_at ?? null;
     const latestTechnicalAt = Object.values(technicalScans)
@@ -6970,6 +7092,9 @@ export function DashboardFinalActionablesTables() {
                                           setCalculationFocusTarget(target);
                                           setCalculationsMarket(market);
                                         }}
+                                        historicalRows={historicalActionRows}
+                                        formulaConfig={scoreMatrixFormulaConfig}
+                                        onMatrixDetailOpen={setSelectedMatrixDetail}
                                       />
                                       <TradingViewSymbolLink
                                         symbol={stock.symbol}
