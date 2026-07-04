@@ -10,7 +10,9 @@ The healthcheck script reads the live Bullpen wallet snapshot, retries Bullpen r
 
 ## Required env
 
-Configure these in the frontend runtime env on the server:
+Configure these in both `/etc/investor/backend.env` and `/etc/investor/frontend.env`
+on the server so the backend worker and frontend health checks read the same Bullpen
+credential store:
 
 ```env
 BULLPEN_BIN=/usr/local/bin/bullpen
@@ -22,7 +24,10 @@ BULLPEN_AUTO_CLAIM_RESOLVED=true
 BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS=60000
 ```
 
-`BULLPEN_HOME` / `BULLPEN_CREDENTIALS_HOME` should point at the same credential HOME used for the Bullpen login on the server.
+`BULLPEN_HOME` / `BULLPEN_CREDENTIALS_HOME` should point at the same credential HOME
+used for the Bullpen login on the server. If the backend worker reads a different
+`HOME`, Cred-X can still show `Session expired` even when a manual Bullpen login
+looked successful in another shell context.
 
 ## Manual run
 
@@ -111,6 +116,7 @@ If the UI shows `AUTH_EXPIRED`, re-login on the server using the configured `HOM
 ```bash
 sudo -u investor env HOME=/var/lib/credx/bullpen bullpen login
 sudo -u investor env HOME=/var/lib/credx/bullpen bullpen polymarket positions --output json
+sudo systemctl restart investor-backend investor-celery-worker
 ```
 
 Do not trade or auto-claim based on tracked fallback data or a stale cached live snapshot.
