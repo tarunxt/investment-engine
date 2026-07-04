@@ -53,7 +53,10 @@ test("Bullpen CLI health classifies auth-expired stderr and redacts token-like v
   assert.equal(result.ok, false);
   assert.equal(result.health.classification, "AUTH_EXPIRED");
   assert.match(result.health.message, /HOME=\/var\/lib\/credx\/bullpen/);
-  assert.match(result.health.actionNeeded || "", /Re-login/i);
+  assert.match(
+    result.health.actionNeeded || "",
+    /env HOME=\/var\/lib\/credx\/bullpen bullpen login/i,
+  );
   assert.doesNotMatch(result.health.stderr || "", new RegExp(fakeJwt.replace(/\./g, "\\.")));
   assert.match(result.health.stderr || "", /\[REDACTED/i);
 });

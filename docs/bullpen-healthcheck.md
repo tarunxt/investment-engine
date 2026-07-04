@@ -109,7 +109,8 @@ The health endpoint and Bullpen popup will classify failures as:
 If the UI shows `AUTH_EXPIRED`, re-login on the server using the configured `HOME`:
 
 ```bash
-HOME=/var/lib/credx/bullpen bullpen login
+sudo -u investor env HOME=/var/lib/credx/bullpen bullpen login
+sudo -u investor env HOME=/var/lib/credx/bullpen bullpen polymarket positions --output json
 ```
 
 Do not trade or auto-claim based on tracked fallback data or a stale cached live snapshot.

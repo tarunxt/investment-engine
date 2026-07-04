@@ -563,9 +563,13 @@ const BULLPEN_ACCOUNT_URL =
   "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3";
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
+const DEFAULT_SYSTEMD_BULLPEN_LOGIN_COMMAND =
+  "sudo -u investor env HOME=/var/lib/credx/bullpen bullpen login";
+const DEFAULT_SYSTEMD_BULLPEN_VERIFY_COMMAND =
+  "sudo -u investor env HOME=/var/lib/credx/bullpen bullpen polymarket positions --output json";
 const DEFAULT_EC2_COMMANDS = [
-  "sudo -u investment-engine -H bullpen login",
-  "bullpen status",
+  DEFAULT_SYSTEMD_BULLPEN_LOGIN_COMMAND,
+  DEFAULT_SYSTEMD_BULLPEN_VERIFY_COMMAND,
   "cd /home/deploy/apps/myapp sudo docker compose --env-file .env.prod -f docker-compose.prod.yml exec frontend sh -lc 'HOME=/var/lib/credx/bullpen /usr/local/bin/bullpen login'",
 ];
 const EC2_COMMANDS_STORAGE_KEY = "polymarketBot.ec2Commands";
@@ -3045,9 +3049,10 @@ export default function PolymarketBotPage() {
                   </span>
                   Run{" "}
                   <code className="rounded bg-amber-100 px-1.5 py-0.5">
-                    sudo -u investment-engine -H bullpen login
+                    {DEFAULT_SYSTEMD_BULLPEN_LOGIN_COMMAND}
                   </code>
-                  .
+                  {" "}so Bullpen writes the session into the same credential HOME
+                  the app reads.
                 </li>
                 <li className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3">
                   <span className="mr-2 inline-flex size-6 items-center justify-center rounded-full bg-amber-200 text-xs font-black">
