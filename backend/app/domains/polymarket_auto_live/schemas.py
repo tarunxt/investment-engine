@@ -70,6 +70,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     min_cash_reserve_pct_bankroll: float = Field(default=40, ge=0, le=100)
     min_order_usd: float = Field(default=1, gt=0)
     max_order_usd: float = Field(default=25, gt=0)
+    console_order_usd: float = Field(default=5, gt=0)
     min_liquidity_usd: float = Field(default=1_000, ge=0)
 
     min_independent_active_markets: int = Field(default=10, ge=1)
@@ -172,6 +173,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     min_cash_reserve_pct_bankroll: float | None = Field(default=None, ge=0, le=100)
     min_order_usd: float | None = Field(default=None, gt=0)
     max_order_usd: float | None = Field(default=None, gt=0)
+    console_order_usd: float | None = Field(default=None, gt=0)
     min_liquidity_usd: float | None = Field(default=None, ge=0)
 
     min_independent_active_markets: int | None = Field(default=None, ge=1)

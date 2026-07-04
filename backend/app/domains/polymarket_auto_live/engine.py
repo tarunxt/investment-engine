@@ -8,7 +8,7 @@ from typing import Callable
 from app.core.logging import get_logger
 from app.domains.polymarket import bullpen as bullpen_module
 from app.domains.polymarket_auto_live.console_profile import (
-    CONSOLE_FIXED_ORDER_USD,
+    DEFAULT_CONSOLE_ORDER_USD,
     CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
     CONSOLE_MIN_MARKET_ODDS,
     CONSOLE_PROFILE_ID,
@@ -114,6 +114,10 @@ def round_money(value: float | None) -> float | None:
     if value is None:
         return None
     return round(value, 2)
+
+
+def console_order_usd(settings: BullpenAutoLiveSettings) -> float:
+    return round(settings.console_order_usd or DEFAULT_CONSOLE_ORDER_USD, 2)
 
 
 def score_rank(value: str | None, mapping: dict[str, int]) -> int:
@@ -1919,9 +1923,13 @@ class BullpenAutoLiveEngine:
                 and quote.spread_cents > settings.max_bid_ask_spread_cents
             ):
                 hard_block_reasons.append("Bid/ask spread exceeds the configured maximum.")
-            if candidate.order_usd < settings.min_order_usd:
+            is_console_buy_order = (
+                settings.strategy_profile == CONSOLE_PROFILE_ID
+                and candidate.decision_action == "BUY_NEW"
+            )
+            if not is_console_buy_order and candidate.order_usd < settings.min_order_usd:
                 hard_block_reasons.append("Order is below the minimum order size.")
-            if candidate.order_usd > settings.max_order_usd:
+            if not is_console_buy_order and candidate.order_usd > settings.max_order_usd:
                 hard_block_reasons.append("Order exceeds the maximum order size.")
 
             if order_plan.action == "buy" and quote.current_price_cents is not None:
@@ -2212,6 +2220,7 @@ class BullpenAutoLiveEngine:
         now: datetime,
         progress_callback: ProgressCallback | None = None,
     ) -> EngineResult:
+        saved_console_order_usd = console_order_usd(settings)
         live_wallet_positions_task = asyncio.create_task(read_console_wallet_positions())
         manual_console_context = (
             run.request_context.console_profile
@@ -4245,8 +4254,11 @@ class BullpenAutoLiveEngine:
                 build_stage_result(
                     stage_number=5,
                     status="pass",
-                    reason="New opportunity receives the fixed $5 order size.",
-                    outputs={"order_usd": CONSOLE_FIXED_ORDER_USD},
+                    reason=(
+                        "New opportunity receives the saved "
+                        f"${saved_console_order_usd:g} order size."
+                    ),
+                    outputs={"order_usd": saved_console_order_usd},
                 )
             )
             stage_results.append(
@@ -4265,8 +4277,8 @@ class BullpenAutoLiveEngine:
                     stage_results=stage_results,
                     side_to_trade=context.get("selected_side"),
                     current_exposure_usd=0,
-                    target_exposure_usd=CONSOLE_FIXED_ORDER_USD,
-                    order_usd=CONSOLE_FIXED_ORDER_USD,
+                    target_exposure_usd=saved_console_order_usd,
+                    order_usd=saved_console_order_usd,
                     llm_outputs=llm_outputs,
                     llm_consensus=llm_consensus,
                 ),

@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useEffectEvent, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from "react";
 import {
   CalendarClock,
   CheckCircle2,
@@ -94,6 +100,7 @@ type ScanCandidateDialogState = {
 };
 
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
+const DEFAULT_CONSOLE_ORDER_USD = 5;
 const POLL_INTERVAL_MS = 4_000;
 const RUN_TIMER_INTERVAL_MS = 1_000;
 const AUTO_RUN_TIMINGS = [
@@ -135,6 +142,18 @@ function formatOddsPercent(value: number | null) {
 function formatMoney(value: number | null) {
   if (value === null) return "—";
   return `$${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+function formatEditableAmount(value: number) {
+  return value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function parseConsoleOrderAmount(value: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const rounded = Number(parsed.toFixed(2));
+  if (rounded <= 0) return null;
+  return rounded;
 }
 
 function formatPriceCents(value: number | null) {
@@ -1068,9 +1087,10 @@ function InvestMetricDetailsDialog({
   );
 }
 
-function buildConsoleSettingsUpdate() {
+function buildConsoleSettingsUpdate(consoleOrderUsd: number) {
   return {
     strategy_profile: "bullpen_console_top10" as const,
+    console_order_usd: consoleOrderUsd,
     auto_live_enabled: true,
     dry_run: false,
     allow_live_execution: true,
@@ -1186,6 +1206,81 @@ export function BullpenAutoRunScheduleCard({
   const [isScheduleInfoDialogOpen, setIsScheduleInfoDialogOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
+  const [consoleOrderInput, setConsoleOrderInput] = useState(() =>
+    formatEditableAmount(DEFAULT_CONSOLE_ORDER_USD),
+  );
+  const [consoleOrderDirty, setConsoleOrderDirty] = useState(false);
+  const [consoleOrderSaveBusy, setConsoleOrderSaveBusy] = useState(false);
+  const [consoleOrderFieldError, setConsoleOrderFieldError] =
+    useState<string | null>(null);
+
+  const savedConsoleOrderUsd =
+    summary?.settings.console_order_usd ?? DEFAULT_CONSOLE_ORDER_USD;
+
+  useEffect(() => {
+    if (consoleOrderDirty) return;
+    setConsoleOrderInput(formatEditableAmount(savedConsoleOrderUsd));
+    setConsoleOrderFieldError(null);
+  }, [consoleOrderDirty, savedConsoleOrderUsd]);
+
+  function resolveConsoleOrderAmount() {
+    const parsedAmount = parseConsoleOrderAmount(consoleOrderInput);
+    if (parsedAmount === null) {
+      setConsoleOrderFieldError("Enter an amount greater than $0.");
+      return null;
+    }
+    return parsedAmount;
+  }
+
+  async function saveConsoleOrderAmount(options?: { silentSuccess?: boolean }) {
+    const nextConsoleOrderUsd = resolveConsoleOrderAmount();
+    if (nextConsoleOrderUsd === null) {
+      return null;
+    }
+    if (!consoleOrderDirty && nextConsoleOrderUsd === savedConsoleOrderUsd) {
+      return nextConsoleOrderUsd;
+    }
+
+    setConsoleOrderSaveBusy(true);
+    setError(null);
+    try {
+      await apiService.updateBullpenAutoLiveSettings({
+        console_order_usd: nextConsoleOrderUsd,
+      });
+      setConsoleOrderDirty(false);
+      setConsoleOrderFieldError(null);
+      setConsoleOrderInput(formatEditableAmount(nextConsoleOrderUsd));
+      await loadSummary({ preserveLoading: true });
+      if (!options?.silentSuccess) {
+        setNotice(
+          `Future Bullpen x AI trades and automations will use ${formatMoney(nextConsoleOrderUsd)} per trade.`,
+        );
+      }
+      return nextConsoleOrderUsd;
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+      return null;
+    } finally {
+      setConsoleOrderSaveBusy(false);
+    }
+  }
+
+  function handleConsoleOrderInputChange(event: ChangeEvent<HTMLInputElement>) {
+    setConsoleOrderInput(event.target.value);
+    setConsoleOrderDirty(true);
+    setConsoleOrderFieldError(null);
+  }
+
+  function handleConsoleOrderInputBlur() {
+    if (!consoleOrderDirty || consoleOrderSaveBusy || action !== null) return;
+    void saveConsoleOrderAmount({ silentSuccess: true });
+  }
+
+  function handleConsoleOrderInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void saveConsoleOrderAmount();
+  }
 
   async function loadSummary(options?: {
     preserveLoading?: boolean;
@@ -1291,12 +1386,22 @@ export function BullpenAutoRunScheduleCard({
   }, [summary?.settings.auto_live_enabled, trackedRunId]);
 
   async function handleEnableAutoRuns() {
+    const nextConsoleOrderUsd = resolveConsoleOrderAmount();
+    if (nextConsoleOrderUsd === null) {
+      return;
+    }
+
     setAction("enable");
     setNotice(null);
     setError(null);
 
     try {
-      await apiService.updateBullpenAutoLiveSettings(buildConsoleSettingsUpdate());
+      await apiService.updateBullpenAutoLiveSettings(
+        buildConsoleSettingsUpdate(nextConsoleOrderUsd),
+      );
+      setConsoleOrderDirty(false);
+      setConsoleOrderFieldError(null);
+      setConsoleOrderInput(formatEditableAmount(nextConsoleOrderUsd));
       await apiService.startBullpenAutoLive();
       const nextSummary = await loadSummary({ preserveLoading: true });
       setNotice(
@@ -1328,6 +1433,11 @@ export function BullpenAutoRunScheduleCard({
   }
 
   async function handleRunNow() {
+    const nextConsoleOrderUsd = resolveConsoleOrderAmount();
+    if (nextConsoleOrderUsd === null) {
+      return;
+    }
+
     const startedAt = new Date().toISOString();
     setAction("run-now");
     setRunNowStartedAt(startedAt);
@@ -1337,7 +1447,12 @@ export function BullpenAutoRunScheduleCard({
 
     try {
       const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
-      await apiService.updateBullpenAutoLiveSettings(buildConsoleSettingsUpdate());
+      await apiService.updateBullpenAutoLiveSettings(
+        buildConsoleSettingsUpdate(nextConsoleOrderUsd),
+      );
+      setConsoleOrderDirty(false);
+      setConsoleOrderFieldError(null);
+      setConsoleOrderInput(formatEditableAmount(nextConsoleOrderUsd));
       const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
       setPendingRunId(run.id);
       setRunNowStartedAt(run.started_at ?? new Date().toISOString());
@@ -1351,6 +1466,11 @@ export function BullpenAutoRunScheduleCard({
   }
 
   async function handleInvestOnly(request: BullpenAutoLiveRunOnceRequest) {
+    const nextConsoleOrderUsd = resolveConsoleOrderAmount();
+    if (nextConsoleOrderUsd === null) {
+      return;
+    }
+
     const startedAt = new Date().toISOString();
     setAction("invest-now");
     setRunNowStartedAt(startedAt);
@@ -1359,7 +1479,12 @@ export function BullpenAutoRunScheduleCard({
     setError(null);
 
     try {
-      await apiService.updateBullpenAutoLiveSettings(buildConsoleSettingsUpdate());
+      await apiService.updateBullpenAutoLiveSettings(
+        buildConsoleSettingsUpdate(nextConsoleOrderUsd),
+      );
+      setConsoleOrderDirty(false);
+      setConsoleOrderFieldError(null);
+      setConsoleOrderInput(formatEditableAmount(nextConsoleOrderUsd));
       const run = await apiService.runBullpenAutoLiveOnce(request);
       const qualifiedCandidateCount =
         request.console_profile?.candidate_rows.length ?? 0;
@@ -1546,6 +1671,18 @@ export function BullpenAutoRunScheduleCard({
     pendingRunId !== null || visibleRun?.status === "running"
       ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
       : investOnlyPlan.blockedReason;
+  const consoleOrderSaveDisabled =
+    action !== null ||
+    consoleOrderSaveBusy ||
+    !consoleOrderDirty ||
+    parseConsoleOrderAmount(consoleOrderInput) === null;
+  const consoleOrderHelperMessage = consoleOrderFieldError
+    ? consoleOrderFieldError
+    : consoleOrderSaveBusy
+      ? "Saving trade amount..."
+      : consoleOrderDirty
+        ? "Press Enter, click Save, or start a run to apply this amount to future trades."
+        : `Saved amount: ${formatMoney(savedConsoleOrderUsd)} will be used for future Bullpen x AI trades and auto runs.`;
 
   useEffect(() => {
     if (!shouldTickTimers) return;
@@ -1650,6 +1787,65 @@ export function BullpenAutoRunScheduleCard({
                   {elapsedRunTime}
                 </div>
               ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[16rem] flex-1">
+              <label
+                htmlFor="bullpen-auto-run-trade-amount"
+                className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
+              >
+                Trade amount per new opportunity
+              </label>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div className="flex h-11 min-w-[13rem] flex-1 items-center rounded-xl border border-slate-200 bg-white px-3 shadow-sm">
+                  <span className="mr-2 text-sm font-semibold text-slate-500">$</span>
+                  <input
+                    id="bullpen-auto-run-trade-amount"
+                    type="number"
+                    inputMode="decimal"
+                    min="0.01"
+                    step="0.01"
+                    value={consoleOrderInput}
+                    onChange={handleConsoleOrderInputChange}
+                    onBlur={handleConsoleOrderInputBlur}
+                    onKeyDown={handleConsoleOrderInputKeyDown}
+                    disabled={action !== null || consoleOrderSaveBusy}
+                    className="h-full w-full border-0 bg-transparent p-0 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
+                    placeholder={String(DEFAULT_CONSOLE_ORDER_USD)}
+                    aria-describedby="bullpen-auto-run-trade-amount-help"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    void saveConsoleOrderAmount();
+                  }}
+                  disabled={consoleOrderSaveDisabled}
+                  className="min-w-[5.5rem]"
+                >
+                  {consoleOrderSaveBusy ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save"
+                  )}
+                </Button>
+              </div>
+              <p
+                id="bullpen-auto-run-trade-amount-help"
+                className={`mt-2 text-xs leading-5 ${
+                  consoleOrderFieldError ? "text-rose-700" : "text-slate-600"
+                }`}
+              >
+                Default is $5. {consoleOrderHelperMessage}
+              </p>
             </div>
           </div>
         </div>
@@ -2189,9 +2385,11 @@ export function BullpenAutoRunScheduleCard({
                   markets, run LLM consensus on every Stage 1 event, process Event
                   Exits from both the ranking / LLM strategy and the capital-aware
                   forced-exit strategy so capital is freed first, and then buy{" "}
-                  <span className="font-semibold">$5</span> of each new opportunity on
-                  the stronger LLM side when it ranks inside the investable top 10
-                  list.
+                  <span className="font-semibold">
+                    {formatMoney(savedConsoleOrderUsd)}
+                  </span>{" "}
+                  of each new opportunity on the stronger LLM side when it ranks
+                  inside the investable top 10 list.
                 </p>
               </div>
             </div>

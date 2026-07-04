@@ -936,6 +936,104 @@ async def test_console_profile_reports_incremental_stage_3_counters_and_mode_rea
 
 
 @pytest.mark.anyio
+async def test_console_profile_uses_saved_console_order_amount_for_new_buys(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will the saved console order amount be used?",
+        slug="saved-console-order-amount",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        assert side == "NO"
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=candidate_market.current_no_odds,
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda *_args, **_kwargs: 9.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            console_order_usd=12.75,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decision = next(
+        decision for decision in result.decisions if decision.decision == "BUY_NEW"
+    )
+    stage5 = next(
+        stage for stage in buy_decision.stage_results if stage.stage_number == 5
+    )
+
+    assert stage5.outputs["order_usd"] == 12.75
+    assert stage5.reason == "New opportunity receives the saved $12.75 order size."
+    assert buy_decision.target_exposure_usd == 12.75
+    assert buy_decision.order_plan is not None
+    assert buy_decision.order_plan.order_size_usd == 12.75
+
+
+@pytest.mark.anyio
 async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_skipped_orders(
     monkeypatch,
 ):
