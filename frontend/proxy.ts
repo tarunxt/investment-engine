@@ -8,17 +8,34 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type { Session } from "next-auth";
 
-export const proxy = auth((req: NextRequest & { auth: Session | null }) => {
+const protectedRoutePrefixes = ["/console", "/dashboard", "/profile"] as const;
+const authRoutePrefixes = [
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+] as const;
+
+function pathMatchesPrefix(path: string, prefix: string) {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+function isProtectedAppPath(path: string) {
+  return protectedRoutePrefixes.some((prefix) => pathMatchesPrefix(path, prefix));
+}
+
+function isAuthPath(path: string) {
+  return authRoutePrefixes.some((prefix) => pathMatchesPrefix(path, prefix));
+}
+
+type AuthenticatedProxyHandler = (
+  request: NextRequest,
+) => ReturnType<typeof authenticatedProxy>;
+
+const authenticatedProxy = auth((req: NextRequest & { auth: Session | null }) => {
   const path = req.nextUrl.pathname;
-  const isAuthRoute =
-    path === "/login" ||
-    path === "/register" ||
-    path === "/forgot-password" ||
-    path.startsWith("/reset-password");
-  const isProtectedAppRoute =
-    path.startsWith("/console") ||
-    path.startsWith("/dashboard") ||
-    path.startsWith("/profile");
+  const isAuthRoute = isAuthPath(path);
+  const isProtectedAppRoute = isProtectedAppPath(path);
 
   if (isProtectedAppRoute && req.nextUrl.searchParams.has("redirectTo")) {
     const cleanedPath = stripRedirectToFromCurrentUrl(
@@ -86,6 +103,29 @@ export const proxy = auth((req: NextRequest & { auth: Session | null }) => {
 
   return NextResponse.next();
 });
+
+export async function proxy(req: NextRequest) {
+  try {
+    const runAuthenticatedProxy =
+      authenticatedProxy as AuthenticatedProxyHandler;
+    return await runAuthenticatedProxy(req);
+  } catch (error) {
+    console.error("Authentication proxy failed:", error);
+
+    if (isProtectedAppPath(req.nextUrl.pathname)) {
+      const loginHref = buildLoginRedirectHref(
+        req.nextUrl.pathname,
+        req.nextUrl.searchParams.toString(),
+      );
+      const response = NextResponse.redirect(new URL(loginHref, req.url));
+      response.cookies.delete("authjs.session-token");
+      response.cookies.delete("__Secure-authjs.session-token");
+      return response;
+    }
+
+    return NextResponse.next();
+  }
+}
 
 export const config = {
   matcher: [
