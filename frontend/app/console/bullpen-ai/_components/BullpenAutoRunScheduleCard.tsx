@@ -540,6 +540,104 @@ function formatInvestStageRowMix(
   return `${activePositionRows ?? 0} Bullpen position ${activePositionRows === 1 ? "row" : "rows"} + ${candidateRows ?? 0} candidate ${candidateRows === 1 ? "row" : "rows"}`;
 }
 
+
+type InvestProgressLogEntry = {
+  tone: "info" | "warning" | "error" | "success";
+  label: string;
+  detail: string;
+};
+
+function getInvestProgressLogEntries({
+  stage,
+  run,
+  decisions,
+  steps,
+}: {
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null;
+  run: BullpenAutoLiveRun;
+  decisions: BullpenAutoLiveDecision[];
+  steps: InvestExecutionStepView[];
+}): InvestProgressLogEntry[] {
+  const entries: InvestProgressLogEntry[] = [];
+  if (!stage) return entries;
+
+  const stageError = readStageOutputString(stage.outputs.error_message);
+  const runError = readStageOutputString(run.error_message);
+  const executionGateReason = readStageOutputString(stage.outputs.execution_gate_reason);
+  const executionModeReason = readStageOutputString(stage.outputs.execution_mode_reason);
+  const executionStepLabel = readStageOutputString(stage.outputs.execution_step_label);
+  const executionStepDetail = readStageOutputString(stage.outputs.execution_step_detail);
+
+  if (stageError || runError) {
+    entries.push({
+      tone: "error",
+      label: "Worker error",
+      detail: stageError ?? runError ?? "The worker reported an error.",
+    });
+  }
+  if (executionGateReason) {
+    entries.push({
+      tone: "error",
+      label: "Execution gate",
+      detail: executionGateReason,
+    });
+  }
+  if (executionModeReason) {
+    entries.push({
+      tone: "info",
+      label: "Execution mode",
+      detail: executionModeReason,
+    });
+  }
+  if (executionStepDetail) {
+    entries.push({
+      tone: "warning",
+      label: executionStepLabel ?? "Current worker step",
+      detail: executionStepDetail,
+    });
+  }
+
+  for (const step of steps) {
+    if (step.status === "running" || step.status === "blocked") {
+      entries.push({
+        tone: step.status === "blocked" ? "error" : "warning",
+        label: `Step ${step.stepNumber} of ${step.stepTotal} · ${step.label}`,
+        detail: `${step.processedOrders} processed / ${step.plannedOrders} planned / ${step.submittedOrders} submitted. ${step.detail ?? "Waiting for the next worker update."}`,
+      });
+    }
+  }
+
+  for (const decision of [...decisions].reverse()) {
+    const orderPlan = decision.order_plan;
+    if (!orderPlan) continue;
+    const status = orderPlan.status?.trim().toLowerCase();
+    const detail = orderPlan.detail?.trim();
+    if (!status || !detail) continue;
+    if (status === "planned" || status === "failed" || status === "skipped" || status === "cancelled") {
+      entries.push({
+        tone: status === "failed" || status === "cancelled" ? "error" : status === "skipped" ? "warning" : "info",
+        label: `${status.replaceAll("_", " ")} · ${decision.market_title}`,
+        detail,
+      });
+    }
+    if (entries.length >= 8) break;
+  }
+
+  const completedItems = readStageOutputNumber(stage.outputs.completed_items);
+  const totalItems = readStageOutputNumber(stage.outputs.total_items);
+  if (stage.state === "current" && entries.length === 0) {
+    entries.push({
+      tone: "info",
+      label: "Waiting for worker update",
+      detail: totalItems
+        ? `Stage 3 has reviewed ${completedItems ?? 0} of ${totalItems} rows. This panel refreshes as the worker saves each step.`
+        : "This panel refreshes as the worker saves progress, errors, and order results.",
+    });
+  }
+
+  return entries.slice(0, 8);
+}
+
 function InvestExecutionStepsSummary({
   steps,
   compact = false,
@@ -908,6 +1006,12 @@ function InvestMetricDetailsDialog({
       : null);
   const hasPendingOrders = plannedCount > submittedCount;
   const executionSteps = state.stage ? getInvestStageExecutionSteps(state.stage) : [];
+  const progressLogEntries = getInvestProgressLogEntries({
+    stage: state.stage,
+    run: state.run,
+    decisions: rows,
+    steps: executionSteps,
+  });
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
@@ -993,6 +1097,45 @@ function InvestMetricDetailsDialog({
                 steps={executionSteps}
                 onOpenEventExitInfo={onOpenEventExitInfo}
               />
+            </div>
+          ) : null}
+
+          {progressLogEntries.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Live progress / error log
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    When a step takes a while, this shows the latest worker checkpoint, gate, and order error details saved for this run.
+                  </p>
+                </div>
+                {state.stage?.state === "current" ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Updating
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-4 space-y-2">
+                {progressLogEntries.map((entry, index) => {
+                  const toneClass =
+                    entry.tone === "error"
+                      ? "border-rose-200 bg-rose-50 text-rose-950"
+                      : entry.tone === "warning"
+                        ? "border-amber-200 bg-amber-50 text-amber-950"
+                        : entry.tone === "success"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                          : "border-sky-200 bg-sky-50 text-sky-950";
+                  return (
+                    <div key={`${entry.label}-${index}`} className={`rounded-xl border px-3 py-2.5 text-sm ${toneClass}`}>
+                      <p className="font-semibold capitalize">{entry.label}</p>
+                      <p className="mt-1 leading-5">{entry.detail}</p>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
 

@@ -98,6 +98,7 @@ HIGH_LLM_PROVIDER_ERROR_RATE = 0.5
 SUPPORTED_OUTCOME_SIDES = {"YES", "NO"}
 
 logger = get_logger("app.domains.polymarket_auto_live.engine")
+BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS = 60
 
 ProgressCallback = Callable[[BullpenAutoLiveRun, BullpenAutoLiveState], None]
 
@@ -2158,6 +2159,24 @@ class BullpenAutoLiveEngine:
                         execution_halted_reason = (
                             "Post-trade balance refresh failed. No further live orders were started."
                         )
+            except TimeoutError:
+                order_plan.status = "failed"
+                order_plan.detail = (
+                    f"Bullpen order submission timed out after "
+                    f"{BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS} seconds. "
+                    "The worker will continue with the next planned order and surface this row in the progress log."
+                )
+                candidate.order_plan = order_plan
+                running_failed_orders += 1
+                candidate.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status="fail",
+                        reason=order_plan.detail,
+                        outputs=order_plan.model_dump(mode="json"),
+                        hard_block=True,
+                    )
+                )
             except Exception as exc:
                 order_plan.status = "failed"
                 order_plan.detail = str(exc)
@@ -4662,11 +4681,14 @@ class BullpenAutoLiveEngine:
             try:
                 market_id_for_execution = decision.slug or decision.market_id
                 if order_plan.action == "buy":
-                    order_plan.execution_response = await executor.buy_limit(
-                        market_id=market_id_for_execution,
-                        outcome="Yes" if order_plan.side == "YES" else "No",
-                        amount_usd=order_plan.order_size_usd,
-                        max_price=cents_to_decimal(order_plan.limit_price_cents),
+                    order_plan.execution_response = await asyncio.wait_for(
+                        executor.buy_limit(
+                            market_id=market_id_for_execution,
+                            outcome="Yes" if order_plan.side == "YES" else "No",
+                            amount_usd=order_plan.order_size_usd,
+                            max_price=cents_to_decimal(order_plan.limit_price_cents),
+                        ),
+                        timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
                     )
                     new_positions.append(
                         PositionSnapshot(
@@ -4698,11 +4720,14 @@ class BullpenAutoLiveEngine:
                         )
                     )
                 else:
-                    order_plan.execution_response = await executor.sell_limit(
-                        market_id=market_id_for_execution,
-                        outcome="Yes" if order_plan.side == "YES" else "No",
-                        shares=order_plan.shares,
-                        min_price=cents_to_decimal(order_plan.limit_price_cents),
+                    order_plan.execution_response = await asyncio.wait_for(
+                        executor.sell_limit(
+                            market_id=market_id_for_execution,
+                            outcome="Yes" if order_plan.side == "YES" else "No",
+                            shares=order_plan.shares,
+                            min_price=cents_to_decimal(order_plan.limit_price_cents),
+                        ),
+                        timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
                     )
                     new_positions = [
                         position
@@ -4724,6 +4749,23 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders = 0
+            except TimeoutError:
+                order_plan.status = "failed"
+                order_plan.detail = (
+                    f"Bullpen order submission timed out after "
+                    f"{BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS} seconds. "
+                    "The worker will continue with the next planned order and surface this row in the progress log."
+                )
+                decision.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status="fail",
+                        reason=order_plan.detail,
+                        outputs=order_plan.model_dump(mode="json"),
+                        hard_block=True,
+                    )
+                )
+                running_failed_orders += 1
             except Exception as exc:
                 order_plan.status = "failed"
                 order_plan.detail = str(exc)
