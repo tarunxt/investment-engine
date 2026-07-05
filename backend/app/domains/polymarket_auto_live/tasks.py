@@ -8,6 +8,9 @@ from celery.exceptions import MaxRetriesExceededError
 from sqlalchemy import and_, select
 
 from app.core.logging import get_logger
+from app.domains.bullpen_trade_analysis.service import (
+    sync_auto_live_position_snapshots_sync,
+)
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
@@ -319,6 +322,17 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
         repo.replace_positions(user_id, engine_result.positions)
         repo.save_state(user_id, engine_result.state)
         session.commit()
+        try:
+            sync_auto_live_position_snapshots_sync(
+                user_id=user_id,
+                positions=engine_result.positions,
+            )
+        except Exception:
+            logger.warning(
+                "Auto-Live trade-analysis periodic snapshot sync failed for run %s.",
+                run_id,
+                exc_info=True,
+            )
 
 
 @celery.task(

@@ -92,6 +92,7 @@ class PolymarketManualInvestOrderRequest(BaseModel):
     price: float = Field(gt=0, lt=1)
     event_end_at: str | None = None
     market_url: str | None = Field(default=None, max_length=1000)
+    analysis_context: "PolymarketManualInvestAnalysisContext | None" = None
 
     @field_validator("question_id", "market_id", "market_title", "outcome")
     @classmethod
@@ -122,6 +123,57 @@ class PolymarketManualInvestOrderResult(BaseModel):
     message: str
     trade_id: str | None = None
     executed_at: str | None = None
+
+
+class PolymarketManualInvestAnalysisLlmOutput(BaseModel):
+    provider: str
+    model: str
+    llm_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_no_odds: float | None = Field(default=None, ge=0, le=100)
+    confidence: str | None = None
+    evidence_status: str | None = None
+    event_state: str | None = None
+    key_evidence: list[str] = Field(default_factory=list)
+    red_flags: list[str] = Field(default_factory=list)
+    rationale: str | None = None
+    completed_at: str | None = None
+    raw_output: str | None = None
+    prompt_version: str | None = None
+
+
+class PolymarketManualInvestAnalysisContext(BaseModel):
+    snapshot_id: str | None = None
+    snapshot_mode: str | None = None
+    scanned_at: str | None = None
+    source_label: str | None = None
+    source_url: str | None = None
+    category: str | None = None
+    topic: str | None = None
+    event_slug: str | None = None
+    event_description: str | None = None
+    yes_odds: float | None = Field(default=None, ge=0, le=100)
+    no_odds: float | None = Field(default=None, ge=0, le=100)
+    volume_usd: float | None = Field(default=None, ge=0)
+    liquidity_usd: float | None = Field(default=None, ge=0)
+    best_bid_cents: float | None = Field(default=None, ge=0, le=100)
+    best_ask_cents: float | None = Field(default=None, ge=0, le=100)
+    spread_cents: float | None = Field(default=None, ge=0)
+    rules: str | None = None
+    market_context: str | None = None
+    resolution_source: str | None = None
+    llm_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_no_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_disagreement_level: str | None = None
+    llm_disagreement_category: str | None = None
+    confidence: str | None = None
+    evidence_status: str | None = None
+    event_state: str | None = None
+    llm_notes: str | None = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    llm_completed_at: str | None = None
+    preflight_evidence_block: str | None = None
+    llm_outputs: list[PolymarketManualInvestAnalysisLlmOutput] = Field(default_factory=list)
 
 
 class PolymarketManualInvestResponse(BaseModel):
@@ -285,6 +337,7 @@ class PolymarketLiveTradeDecision(BaseModel):
     status: LiveTradeStatus
     command: Literal["buy", "sell"] | None = None
     failure_reason: str | None = None
+    execution_response: str | None = None
     executed_at: str | None = None
     source: TradeSource
 
@@ -479,4 +532,5 @@ class PolymarketDiscoveryDebugReport(BaseModel):
     errors: list[PolymarketDiscoveryDebugError] = Field(default_factory=list)
 
 
+PolymarketManualInvestOrderRequest.model_rebuild()
 PolymarketManualInvestResponse.model_rebuild()

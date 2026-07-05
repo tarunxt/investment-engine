@@ -172,6 +172,13 @@ const bullpenAutoLiveApiUrls = {
   clearEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/clear-emergency-stop`,
 };
 
+const bullpenTradeAnalysisApiUrls = {
+  list: () => `${resolveApiBaseUrl()}/bullpen-ai/trade-analysis`,
+  detail: (tradeId: string) => `${resolveApiBaseUrl()}/bullpen-ai/trade-analysis/${tradeId}`,
+  recompute: (tradeId: string) =>
+    `${resolveApiBaseUrl()}/bullpen-ai/trade-analysis/${tradeId}/post-trade-analysis`,
+};
+
 const tradingBotsApiUrls = {
   summary: () => `${resolveApiBaseUrl()}/trading-bots/summary`,
   overview: () => `${resolveApiBaseUrl()}/trading-bots/overview`,
@@ -343,6 +350,7 @@ export const URLs = {
   },
 
   bullpenAutoLive: bullpenAutoLiveApiUrls,
+  bullpenTradeAnalysis: bullpenTradeAnalysisApiUrls,
   polymarketAutoLive: bullpenAutoLiveApiUrls,
 
   tradingBots: tradingBotsApiUrls,
@@ -439,6 +447,9 @@ export const URLs = {
       polymarketBot: () => "/console/polymarket-bot",
       polymarketDirectBot: () => "/console/polymarket-direct-bot",
       bullpenAi: () => "/console/bullpen-ai",
+      bullpenAiAnalyseEvents: () => "/console/bullpen-ai/analyse-events",
+      bullpenAiAnalyseEventDetail: (tradeId: string) =>
+        `/console/bullpen-ai/analyse-events/${tradeId}`,
       bullpenAiAutoLive: () => "/console/trading-bots/bullpen-ai-auto-live",
       bullpenAi30Days: () => "/console/bullpen-ai?tab=30-days",
       bullpenAiEndOfMonth: () => "/console/bullpen-ai?tab=end-of-month",

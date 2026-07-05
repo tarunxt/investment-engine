@@ -264,6 +264,11 @@ class BullpenAutoLiveConsoleCandidateInput(BaseModel):
     theme: str = "Uncategorized"
     current_yes_odds: float | None = Field(default=None, ge=0, le=100)
     current_no_odds: float | None = Field(default=None, ge=0, le=100)
+    volume_usd: float | None = Field(default=None, ge=0)
+    liquidity_usd: float | None = Field(default=None, ge=0)
+    best_bid_cents: float | None = Field(default=None, ge=0, le=100)
+    best_ask_cents: float | None = Field(default=None, ge=0, le=100)
+    spread_cents: float | None = Field(default=None, ge=0)
     llm_yes_odds: float | None = Field(default=None, ge=0, le=100)
     llm_no_odds: float | None = Field(default=None, ge=0, le=100)
     returns_per_day: float | None = None
@@ -275,6 +280,10 @@ class BullpenAutoLiveConsoleCandidateInput(BaseModel):
     evidence_status: str | None = None
     event_state: str | None = None
     rules: str | None = None
+    market_context: str | None = None
+    resolution_source: str | None = None
+    event_description: str | None = None
+    preflight_evidence_block: str | None = None
     selected: bool = False
     llm_outputs: list[BullpenAutoLiveLlmOutput] = Field(default_factory=list)
 

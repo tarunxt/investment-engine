@@ -573,6 +573,14 @@ function buildBullpenHistoricalCostMapInr(
   return costs;
 }
 
+function parseBullpenNumericMetric(value: string | null) {
+  if (!value) return null;
+  const cleaned = value.replace(/[$,%]/g, "").replace(/,/g, "").trim();
+  if (!cleaned) return null;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function buildBullpenManualInvestOrder(
   question: BullpenQuestionRow,
 ): PolymarketManualInvestOrderRequest | null {
@@ -609,6 +617,37 @@ function buildBullpenManualInvestOrder(
     price: Number((outcomeOdds / 100).toFixed(4)),
     event_end_at: question.closeTime,
     market_url: question.marketUrl,
+    analysis_context: {
+      snapshot_mode: null,
+      category: question.category,
+      topic: question.category,
+      event_slug: question.slug,
+      event_description: question.marketContext ?? question.rules ?? null,
+      yes_odds: question.yesOdds,
+      no_odds: question.noOdds,
+      volume_usd: parseBullpenNumericMetric(question.volume),
+      liquidity_usd: parseBullpenNumericMetric(question.liquidity),
+      best_bid_cents: null,
+      best_ask_cents: null,
+      spread_cents: null,
+      rules: question.rules,
+      market_context: question.marketContext,
+      resolution_source: question.resolutionSource,
+      llm_yes_odds: question.llmYesOdds,
+      llm_no_odds: question.llmNoOdds,
+      llm_disagreement_level: question.llmDisagreementLevel,
+      llm_disagreement_category: question.llmDisagreementCategory,
+      confidence:
+        question.llmBreakdown.find((entry) => entry.confidence)?.confidence ?? null,
+      evidence_status: question.evidenceStatus,
+      event_state: question.eventState,
+      llm_notes: question.llmNotes,
+      llm_provider: question.llmProvider,
+      llm_model: question.llmModel,
+      llm_completed_at: question.llmCompletedAt,
+      preflight_evidence_block: question.preflightEvidenceBlock ?? null,
+      llm_outputs: buildBullpenAutoRunLlmOutputs(question.llmBreakdown),
+    },
   };
 }
 
@@ -666,6 +705,11 @@ function buildBullpenAutoRunRequest({
         theme: question.category || "Uncategorized",
         current_yes_odds: question.yesOdds,
         current_no_odds: question.noOdds,
+        volume_usd: parseBullpenNumericMetric(question.volume),
+        liquidity_usd: parseBullpenNumericMetric(question.liquidity),
+        best_bid_cents: null,
+        best_ask_cents: null,
+        spread_cents: null,
         llm_yes_odds: question.llmYesOdds,
         llm_no_odds: question.llmNoOdds,
         returns_per_day: question.returnsPerDay,
@@ -678,6 +722,10 @@ function buildBullpenAutoRunRequest({
         evidence_status: question.evidenceStatus,
         event_state: question.eventState,
         rules: question.rules,
+        market_context: question.marketContext,
+        resolution_source: question.resolutionSource,
+        event_description: question.marketContext ?? question.rules ?? null,
+        preflight_evidence_block: question.preflightEvidenceBlock ?? null,
         selected: selectedQuestionIds.has(question.id),
         llm_outputs: buildBullpenAutoRunLlmOutputs(question.llmBreakdown),
       })),
@@ -3023,23 +3071,30 @@ function BullpenAiPageContent() {
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
-          Copy Trading Bots
-        </p>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <h1 className="text-3xl font-bold tracking-tight text-slate-950">
-            Bullpen x AI
-          </h1>
-          <button
-            type="button"
-            onClick={() => setIsBullpenIntroDialogOpen(true)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-purple-200 bg-white text-purple-700 shadow-sm transition hover:border-purple-300 hover:bg-purple-50 hover:text-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2"
-            aria-label="Show Bullpen x AI overview"
-          >
-            <Info className="h-4 w-4" />
-          </button>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
+            Copy Trading Bots
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <h1 className="text-3xl font-bold tracking-tight text-slate-950">
+              Bullpen x AI
+            </h1>
+            <button
+              type="button"
+              onClick={() => setIsBullpenIntroDialogOpen(true)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-purple-200 bg-white text-purple-700 shadow-sm transition hover:border-purple-300 hover:bg-purple-50 hover:text-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2"
+              aria-label="Show Bullpen x AI overview"
+            >
+              <Info className="h-4 w-4" />
+            </button>
+          </div>
         </div>
+        <Button asChild className="mt-1">
+          <Link href={URLs.routes.console.bullpenAiAnalyseEvents()}>
+            Analyse Events
+          </Link>
+        </Button>
       </div>
 
       {isBullpenIntroDialogOpen ? (

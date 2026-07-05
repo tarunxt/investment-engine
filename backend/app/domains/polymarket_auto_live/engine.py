@@ -6,6 +6,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Callable
 
 from app.core.logging import get_logger
+from app.domains.bullpen_trade_analysis.helpers import (
+    bounded_score,
+    parse_float,
+    sanitize_json_value,
+)
+from app.domains.bullpen_trade_analysis.service import (
+    capture_auto_live_buy_pre_submit_sync,
+    capture_auto_live_buy_result_sync,
+    capture_auto_live_exit_pre_submit_sync,
+    capture_auto_live_exit_result_sync,
+)
 from app.domains.polymarket import bullpen as bullpen_module
 from app.domains.polymarket_auto_live.console_profile import (
     DEFAULT_CONSOLE_ORDER_USD,
@@ -826,16 +837,21 @@ def _manual_console_market(
         theme=row.theme,
         current_yes_odds=row.current_yes_odds,
         current_no_odds=row.current_no_odds,
-        volume_usd=None,
-        liquidity_usd=None,
-        description=row.rules,
+        volume_usd=row.volume_usd,
+        liquidity_usd=row.liquidity_usd,
+        description=row.event_description or row.rules,
         outcome_labels=["Yes", "No"],
         event_slug=None,
-        best_bid_cents=None,
-        best_ask_cents=None,
-        spread_cents=None,
+        best_bid_cents=row.best_bid_cents,
+        best_ask_cents=row.best_ask_cents,
+        spread_cents=row.spread_cents,
         force_include=False,
-        raw={"question_id": row.question_id},
+        raw={
+            "question_id": row.question_id,
+            "market_context": row.market_context,
+            "resolution_source": row.resolution_source,
+            "preflight_evidence_block": row.preflight_evidence_block,
+        },
     )
 
 
@@ -1156,6 +1172,499 @@ def _serialize_stage3_decision_row(
         "stage_results": [],
         "guardrail_checks": [],
     }
+
+
+def _trade_analysis_llm_payloads(
+    outputs: list[BullpenAutoLiveLlmOutput],
+) -> list[dict[str, object]]:
+    return [item.model_dump(mode="json") for item in outputs]
+
+
+def _trade_analysis_event_snapshot(market: ScannedMarket) -> dict[str, object]:
+    raw = market.raw if isinstance(market.raw, dict) else {}
+    return sanitize_json_value(
+        {
+            "market_id": market.market_id,
+            "question": market.question,
+            "slug": market.slug,
+            "market_url": market.market_url,
+            "theme": market.theme,
+            "close_time": market.close_time,
+            "event_slug": market.event_slug,
+            "description": market.description,
+            "market_context": raw.get("market_context"),
+            "resolution_source": raw.get("resolution_source"),
+            "preflight_evidence_block": raw.get("preflight_evidence_block"),
+            "raw": raw,
+        }
+    )
+
+
+def _trade_analysis_market_snapshot(market: ScannedMarket) -> dict[str, object]:
+    return sanitize_json_value(
+        {
+            "market_id": market.market_id,
+            "question": market.question,
+            "current_yes_odds": market.current_yes_odds,
+            "current_no_odds": market.current_no_odds,
+            "volume_usd": market.volume_usd,
+            "liquidity_usd": market.liquidity_usd,
+            "description": market.description,
+            "outcome_labels": market.outcome_labels,
+            "raw": market.raw or {},
+        }
+    )
+
+
+def _trade_analysis_order_book_snapshot(market: ScannedMarket) -> dict[str, object]:
+    return sanitize_json_value(
+        {
+            "best_bid_cents": market.best_bid_cents,
+            "best_ask_cents": market.best_ask_cents,
+            "spread_cents": market.spread_cents,
+        }
+    )
+
+
+def _trade_analysis_event_snapshot_from_decision(
+    decision: BullpenAutoLiveDecision,
+    refreshed_market: ScannedMarket | None,
+) -> dict[str, object]:
+    if refreshed_market is not None:
+        return _trade_analysis_event_snapshot(refreshed_market)
+    return sanitize_json_value(
+        {
+            "market_id": decision.market_id,
+            "question": decision.market_title,
+            "slug": decision.slug,
+            "market_url": decision.market_url,
+            "theme": decision.theme,
+            "close_time": decision.close_time,
+            "event_slug": decision.slug,
+            "description": None,
+            "raw": {},
+        }
+    )
+
+
+def _trade_analysis_market_snapshot_from_decision(
+    decision: BullpenAutoLiveDecision,
+    refreshed_market: ScannedMarket | None,
+) -> dict[str, object]:
+    if refreshed_market is not None:
+        return _trade_analysis_market_snapshot(refreshed_market)
+    return sanitize_json_value(
+        {
+            "market_id": decision.market_id,
+            "question": decision.market_title,
+            "current_yes_odds": decision.current_yes_odds,
+            "current_no_odds": decision.current_no_odds,
+            "volume_usd": None,
+            "liquidity_usd": None,
+            "description": None,
+            "outcome_labels": ["Yes", "No"],
+            "raw": {},
+        }
+    )
+
+
+def _trade_analysis_order_book_snapshot_from_decision(
+    decision: BullpenAutoLiveDecision,
+    refreshed_market: ScannedMarket | None,
+    *,
+    quote_price_cents: float | None,
+    limit_price_cents: float | None,
+) -> dict[str, object]:
+    if refreshed_market is not None:
+        snapshot = dict(_trade_analysis_order_book_snapshot(refreshed_market))
+    else:
+        snapshot = {}
+    snapshot.setdefault("current_price_cents", quote_price_cents)
+    snapshot.setdefault("limit_price_cents", limit_price_cents)
+    return sanitize_json_value(snapshot)
+
+
+def _trade_analysis_exit_type_from_signals(
+    signals: list[ExitSignal],
+) -> str:
+    for signal in signals:
+        if signal.reasonCode == "EVENT_CLOSE_PASSED":
+            return "EXPIRY"
+        if signal.strategy == "CAPITAL_AWARE_FORCED_EXIT":
+            return "FORCED_EXIT"
+    return "SELL"
+
+
+def _trade_analysis_position_snapshot(
+    position: PositionSnapshot | None,
+) -> dict[str, object]:
+    if position is None:
+        return {}
+    return sanitize_json_value(
+        {
+            "market_id": position.market_id,
+            "side": position.side,
+            "shares": position.shares,
+            "exposure_usd": position.exposure_usd,
+            "average_price_cents": position.average_price_cents,
+            "current_price_cents": position.current_price_cents,
+            "close_time": position.close_time,
+            "exit_state": position.exit_state,
+            "estimated_freeable_value_usd": position.estimated_freeable_value_usd,
+            "price_history": [
+                snapshot.model_dump(mode="json") for snapshot in position.price_history
+            ],
+        }
+    )
+
+
+def _trade_analysis_buy_context_from_candidate(
+    *,
+    run_id: str,
+    settings: BullpenAutoLiveSettings,
+    candidate: CandidateEvaluation,
+    order_plan: BullpenAutoLiveOrderPlan,
+) -> dict[str, object]:
+    market = candidate.market
+    market_probability = (
+        market.current_yes_odds if order_plan.side == "YES" else market.current_no_odds
+    )
+    fair_probability = (
+        candidate.llm_consensus.fair_yes_probability_pct
+        if candidate.llm_consensus and order_plan.side == "YES"
+        else candidate.llm_consensus.fair_no_probability_pct
+        if candidate.llm_consensus
+        else None
+    )
+    return {
+        "source_variant": "auto-live-console-profile",
+        "bot_name": "Bullpen x AI",
+        "strategy_name": "Bullpen Console Top 10",
+        "strategy_version": settings.strategy_profile,
+        "run_id": run_id,
+        "event_id": market.market_id,
+        "event_slug": market.slug,
+        "market_id": market.market_id,
+        "outcome_name": order_plan.side,
+        "title": market.question,
+        "event_question": market.question,
+        "event_description": market.description,
+        "category": market.theme,
+        "topic": market.theme,
+        "source_url": market.market_url,
+        "market_url": market.market_url,
+        "event_close_time": market.close_time,
+        "requested_amount": order_plan.order_size_usd,
+        "requested_price": cents_to_decimal(order_plan.limit_price_cents),
+        "requested_shares": order_plan.shares,
+        "buy_probability_estimate": fair_probability,
+        "market_probability": market_probability,
+        "confidence": candidate.confidence,
+        "risk_score": candidate.evidence_status,
+        "expected_edge": candidate.edge_pp,
+        "expected_value": (
+            round(((fair_probability or 0) - (market_probability or 0)) * order_plan.order_size_usd / 100, 6)
+            if fair_probability is not None and market_probability is not None
+            else None
+        ),
+        "liquidity_score": bounded_score(market.liquidity_usd, lower=250, upper=25_000),
+        "volume_score": bounded_score(market.volume_usd, lower=250, upper=100_000),
+        "spread_score": bounded_score(market.spread_cents, lower=1, upper=15, inverse=True),
+        "volatility_score": bounded_score(
+            candidate.llm_consensus.spread_yes if candidate.llm_consensus else None,
+            lower=0,
+            upper=25,
+        ),
+        "evidence_status": candidate.evidence_status,
+        "event_state": candidate.event_state,
+        "decision_summary": candidate.reason,
+        "buy_reason": candidate.reason,
+        "selected_by_rule": candidate.rules is not None and not candidate.rules.ambiguous,
+        "selected_by_llm": bool(candidate.llm_outputs),
+        "selected_by_hybrid": bool(candidate.llm_outputs),
+        "llm_payloads": _trade_analysis_llm_payloads(candidate.llm_outputs),
+        "bullpen_snapshot_json": {"run_id": run_id, "decision_action": candidate.decision_action},
+        "event_snapshot_json": _trade_analysis_event_snapshot(market),
+        "market_snapshot_json": _trade_analysis_market_snapshot(market),
+        "order_book_snapshot_json": _trade_analysis_order_book_snapshot(market),
+        "positions_snapshot_json": _trade_analysis_position_snapshot(candidate.current_position),
+        "raw_api_response_json": {},
+        "log_metadata": {
+            "decision_action": candidate.decision_action,
+            "order_plan_id": order_plan.id,
+            "edge_pp": candidate.edge_pp,
+            "score": candidate.score,
+        },
+    }
+
+
+def _trade_analysis_buy_context_from_decision(
+    *,
+    run_id: str,
+    settings: BullpenAutoLiveSettings,
+    decision: BullpenAutoLiveDecision,
+    order_plan: BullpenAutoLiveOrderPlan,
+    market_snapshot: dict[str, object],
+    event_snapshot: dict[str, object],
+    order_book_snapshot: dict[str, object],
+    positions_snapshot: dict[str, object],
+) -> dict[str, object]:
+    market_probability = (
+        decision.current_yes_odds if order_plan.side == "YES" else decision.current_no_odds
+    )
+    fair_probability = (
+        decision.fair_yes_probability_pct
+        if order_plan.side == "YES"
+        else decision.fair_no_probability_pct
+    )
+    return {
+        "source_variant": "auto-live-stage3",
+        "bot_name": "Bullpen x AI",
+        "strategy_name": "Bullpen x AI Auto-Live",
+        "strategy_version": settings.strategy_profile,
+        "run_id": run_id,
+        "event_id": decision.market_id,
+        "event_slug": decision.slug,
+        "market_id": decision.market_id,
+        "outcome_name": order_plan.side,
+        "title": decision.market_title,
+        "event_question": decision.market_title,
+        "event_description": None,
+        "category": decision.theme,
+        "topic": decision.theme,
+        "source_url": decision.market_url,
+        "market_url": decision.market_url,
+        "event_close_time": decision.close_time,
+        "requested_amount": order_plan.order_size_usd,
+        "requested_price": cents_to_decimal(order_plan.limit_price_cents),
+        "requested_shares": order_plan.shares,
+        "buy_probability_estimate": fair_probability,
+        "market_probability": market_probability,
+        "confidence": decision.confidence,
+        "risk_score": decision.risk_status,
+        "expected_edge": decision.edge_pp,
+        "expected_value": (
+            round(((fair_probability or 0) - (market_probability or 0)) * order_plan.order_size_usd / 100, 6)
+            if fair_probability is not None and market_probability is not None
+            else None
+        ),
+        "liquidity_score": bounded_score(
+            parse_float(market_snapshot.get("liquidity_usd")),
+            lower=250,
+            upper=25_000,
+        ),
+        "volume_score": bounded_score(
+            parse_float(market_snapshot.get("volume_usd")),
+            lower=250,
+            upper=100_000,
+        ),
+        "spread_score": bounded_score(
+            parse_float(order_book_snapshot.get("spread_cents")),
+            lower=1,
+            upper=15,
+            inverse=True,
+        ),
+        "volatility_score": bounded_score(
+            15 if decision.disagreement_level else None,
+            lower=0,
+            upper=25,
+        ),
+        "evidence_status": decision.evidence_status,
+        "event_state": decision.event_state,
+        "decision_summary": decision.reason,
+        "buy_reason": decision.reason,
+        "selected_by_rule": True,
+        "selected_by_llm": bool(decision.llm_outputs),
+        "selected_by_hybrid": bool(decision.llm_outputs),
+        "llm_payloads": _trade_analysis_llm_payloads(decision.llm_outputs),
+        "bullpen_snapshot_json": {"run_id": run_id, "decision_id": decision.id},
+        "event_snapshot_json": event_snapshot,
+        "market_snapshot_json": market_snapshot,
+        "order_book_snapshot_json": order_book_snapshot,
+        "positions_snapshot_json": positions_snapshot,
+        "raw_api_response_json": {},
+        "log_metadata": {
+            "decision_id": decision.id,
+            "decision": decision.decision,
+            "order_plan_id": order_plan.id,
+        },
+    }
+
+
+def _trade_analysis_exit_context_from_candidate(
+    *,
+    run_id: str,
+    candidate: CandidateEvaluation,
+    order_plan: BullpenAutoLiveOrderPlan,
+    market_snapshot: dict[str, object],
+    event_snapshot: dict[str, object],
+    order_book_snapshot: dict[str, object],
+    positions_snapshot: dict[str, object],
+) -> dict[str, object]:
+    market_probability = (
+        candidate.market.current_yes_odds
+        if order_plan.side == "YES"
+        else candidate.market.current_no_odds
+    )
+    fair_probability = (
+        candidate.llm_consensus.fair_yes_probability_pct
+        if candidate.llm_consensus and order_plan.side == "YES"
+        else candidate.llm_consensus.fair_no_probability_pct
+        if candidate.llm_consensus
+        else None
+    )
+    return {
+        "run_id": run_id,
+        "market_id": candidate.market.market_id,
+        "outcome_name": order_plan.side,
+        "title": candidate.market.question,
+        "event_question": candidate.market.question,
+        "requested_amount": order_plan.order_size_usd,
+        "requested_shares": order_plan.shares,
+        "requested_price": cents_to_decimal(order_plan.limit_price_cents),
+        "probability_estimate": fair_probability,
+        "market_probability": market_probability,
+        "confidence": candidate.confidence,
+        "risk_score": candidate.evidence_status,
+        "expected_edge": candidate.edge_pp,
+        "expected_value": (
+            round(((fair_probability or 0) - (market_probability or 0)) * order_plan.order_size_usd / 100, 6)
+            if fair_probability is not None and market_probability is not None
+            else None
+        ),
+        "liquidity_score": bounded_score(
+            parse_float(market_snapshot.get("liquidity_usd")),
+            lower=250,
+            upper=25_000,
+        ),
+        "volume_score": bounded_score(
+            parse_float(market_snapshot.get("volume_usd")),
+            lower=250,
+            upper=100_000,
+        ),
+        "spread_score": bounded_score(
+            parse_float(order_book_snapshot.get("spread_cents")),
+            lower=1,
+            upper=15,
+            inverse=True,
+        ),
+        "volatility_score": bounded_score(
+            candidate.llm_consensus.spread_yes if candidate.llm_consensus else None,
+            lower=0,
+            upper=25,
+        ),
+        "decision_summary": candidate.reason,
+        "sell_reason": candidate.reason,
+        "evidence_status": candidate.evidence_status,
+        "event_state": candidate.event_state,
+        "llm_payloads": _trade_analysis_llm_payloads(candidate.llm_outputs),
+        "bullpen_snapshot_json": {"run_id": run_id, "decision_action": candidate.decision_action},
+        "event_snapshot_json": event_snapshot,
+        "market_snapshot_json": market_snapshot,
+        "order_book_snapshot_json": order_book_snapshot,
+        "positions_snapshot_json": positions_snapshot,
+        "raw_api_response_json": {},
+        "log_metadata": {
+            "decision_action": candidate.decision_action,
+            "order_plan_id": order_plan.id,
+            "edge_pp": candidate.edge_pp,
+            "score": candidate.score,
+        },
+    }
+
+
+def _trade_analysis_exit_context_from_decision(
+    *,
+    decision: BullpenAutoLiveDecision,
+    order_plan: BullpenAutoLiveOrderPlan,
+    market_snapshot: dict[str, object],
+    event_snapshot: dict[str, object],
+    order_book_snapshot: dict[str, object],
+    positions_snapshot: dict[str, object],
+) -> dict[str, object]:
+    market_probability = (
+        decision.current_yes_odds if order_plan.side == "YES" else decision.current_no_odds
+    )
+    fair_probability = (
+        decision.fair_yes_probability_pct
+        if order_plan.side == "YES"
+        else decision.fair_no_probability_pct
+    )
+    return {
+        "market_id": decision.market_id,
+        "outcome_name": order_plan.side,
+        "title": decision.market_title,
+        "event_question": decision.market_title,
+        "requested_amount": order_plan.order_size_usd,
+        "requested_shares": order_plan.shares,
+        "requested_price": cents_to_decimal(order_plan.limit_price_cents),
+        "probability_estimate": fair_probability,
+        "market_probability": market_probability,
+        "confidence": decision.confidence,
+        "risk_score": decision.risk_status,
+        "expected_edge": decision.edge_pp,
+        "expected_value": (
+            round(((fair_probability or 0) - (market_probability or 0)) * order_plan.order_size_usd / 100, 6)
+            if fair_probability is not None and market_probability is not None
+            else None
+        ),
+        "liquidity_score": bounded_score(
+            parse_float(market_snapshot.get("liquidity_usd")),
+            lower=250,
+            upper=25_000,
+        ),
+        "volume_score": bounded_score(
+            parse_float(market_snapshot.get("volume_usd")),
+            lower=250,
+            upper=100_000,
+        ),
+        "spread_score": bounded_score(
+            parse_float(order_book_snapshot.get("spread_cents")),
+            lower=1,
+            upper=15,
+            inverse=True,
+        ),
+        "volatility_score": bounded_score(
+            15 if decision.disagreement_level else None,
+            lower=0,
+            upper=25,
+        ),
+        "decision_summary": decision.reason,
+        "sell_reason": decision.reason,
+        "evidence_status": decision.evidence_status,
+        "event_state": decision.event_state,
+        "llm_payloads": _trade_analysis_llm_payloads(decision.llm_outputs),
+        "bullpen_snapshot_json": {"run_id": decision.run_id, "decision_id": decision.id},
+        "event_snapshot_json": event_snapshot,
+        "market_snapshot_json": market_snapshot,
+        "order_book_snapshot_json": order_book_snapshot,
+        "positions_snapshot_json": positions_snapshot,
+        "raw_api_response_json": {},
+        "log_metadata": {
+            "decision_id": decision.id,
+            "decision": decision.decision,
+            "order_plan_id": order_plan.id,
+            "exit_state": decision.exit_state,
+            "exit_signals": [
+                signal.model_dump(mode="json") for signal in decision.exit_signals
+            ],
+        },
+    }
+
+
+def _safe_trade_analysis_capture(
+    action: str,
+    capture_fn: Callable[..., None],
+    **kwargs,
+) -> None:
+    try:
+        capture_fn(**kwargs)
+    except Exception:
+        logger.warning(
+            "Bullpen trade-analysis capture failed during %s.",
+            action,
+            exc_info=True,
+        )
 
 
 class BullpenAutoLiveEngine:
@@ -2088,6 +2597,71 @@ class BullpenAutoLiveEngine:
                 )
                 continue
 
+            trade_analysis_reference = f"auto-live-order:{order_plan.id}"
+            refreshed_market = quote.market or candidate.market
+            exit_type = _trade_analysis_exit_type_from_signals(
+                candidate.current_position.exit_signals
+                if candidate.current_position is not None
+                else []
+            )
+            if order_plan.action == "buy":
+                buy_context = _trade_analysis_buy_context_from_candidate(
+                    run_id=run.id,
+                    settings=settings,
+                    candidate=candidate,
+                    order_plan=order_plan,
+                )
+                buy_context.update(
+                    {
+                        "captured_at": utc_now_iso(),
+                        "event_close_time": refreshed_market.close_time,
+                        "market_probability": (
+                            refreshed_market.current_yes_odds
+                            if order_plan.side == "YES"
+                            else refreshed_market.current_no_odds
+                        ),
+                        "event_snapshot_json": _trade_analysis_event_snapshot(refreshed_market),
+                        "market_snapshot_json": _trade_analysis_market_snapshot(refreshed_market),
+                        "order_book_snapshot_json": _trade_analysis_order_book_snapshot(refreshed_market),
+                        "positions_snapshot_json": _trade_analysis_position_snapshot(candidate.current_position),
+                    }
+                )
+                _safe_trade_analysis_capture(
+                    "auto-live buy pre-submit",
+                    capture_auto_live_buy_pre_submit_sync,
+                    user_id=user_id,
+                    entry_reference=trade_analysis_reference,
+                    context=buy_context,
+                )
+            else:
+                exit_context = _trade_analysis_exit_context_from_candidate(
+                    run_id=run.id,
+                    candidate=candidate,
+                    order_plan=order_plan,
+                    market_snapshot=_trade_analysis_market_snapshot(refreshed_market),
+                    event_snapshot=_trade_analysis_event_snapshot(refreshed_market),
+                    order_book_snapshot=_trade_analysis_order_book_snapshot(refreshed_market),
+                    positions_snapshot=_trade_analysis_position_snapshot(candidate.current_position),
+                )
+                exit_context.update(
+                    {
+                        "captured_at": utc_now_iso(),
+                        "exit_type": exit_type,
+                        "market_probability": (
+                            refreshed_market.current_yes_odds
+                            if order_plan.side == "YES"
+                            else refreshed_market.current_no_odds
+                        ),
+                    }
+                )
+                _safe_trade_analysis_capture(
+                    "auto-live exit pre-submit",
+                    capture_auto_live_exit_pre_submit_sync,
+                    user_id=user_id,
+                    exit_reference=trade_analysis_reference,
+                    context=exit_context,
+                )
+
             try:
                 if order_plan.action == "buy":
                     order_plan.execution_response = await executor.buy_limit(
@@ -2118,6 +2692,27 @@ class BullpenAutoLiveEngine:
                 )
                 submitted_orders += 1
                 running_failed_orders = 0
+                if order_plan.action == "buy":
+                    _safe_trade_analysis_capture(
+                        "auto-live buy execution",
+                        capture_auto_live_buy_result_sync,
+                        user_id=user_id,
+                        entry_reference=trade_analysis_reference,
+                        raw_execution_response=order_plan.execution_response,
+                    )
+                else:
+                    _safe_trade_analysis_capture(
+                        "auto-live exit execution",
+                        capture_auto_live_exit_result_sync,
+                        user_id=user_id,
+                        exit_reference=trade_analysis_reference,
+                        market_id=candidate.market.market_id,
+                        outcome_name=order_plan.side,
+                        title=candidate.market.question,
+                        raw_execution_response=order_plan.execution_response,
+                        exit_type=exit_type,
+                        sell_reason=candidate.reason,
+                    )
                 if candidate.decision_action == "BUY_NEW":
                     new_markets_opened += 1
                 self._apply_position_update(new_positions, candidate, order_plan)
@@ -2154,6 +2749,31 @@ class BullpenAutoLiveEngine:
                 )
                 candidate.order_plan = order_plan
                 running_failed_orders += 1
+                if order_plan.action == "buy":
+                    _safe_trade_analysis_capture(
+                        "auto-live buy timeout",
+                        capture_auto_live_buy_result_sync,
+                        user_id=user_id,
+                        entry_reference=trade_analysis_reference,
+                        raw_execution_response=None,
+                        failed=True,
+                        failure_reason=order_plan.detail,
+                    )
+                else:
+                    _safe_trade_analysis_capture(
+                        "auto-live exit timeout",
+                        capture_auto_live_exit_result_sync,
+                        user_id=user_id,
+                        exit_reference=trade_analysis_reference,
+                        market_id=candidate.market.market_id,
+                        outcome_name=order_plan.side,
+                        title=candidate.market.question,
+                        raw_execution_response=None,
+                        exit_type=exit_type,
+                        failed=True,
+                        failure_reason=order_plan.detail,
+                        sell_reason=candidate.reason,
+                    )
                 candidate.stage_results.append(
                     build_stage_result(
                         stage_number=7,
@@ -2168,6 +2788,31 @@ class BullpenAutoLiveEngine:
                 order_plan.detail = str(exc)
                 candidate.order_plan = order_plan
                 running_failed_orders += 1
+                if order_plan.action == "buy":
+                    _safe_trade_analysis_capture(
+                        "auto-live buy failure",
+                        capture_auto_live_buy_result_sync,
+                        user_id=user_id,
+                        entry_reference=trade_analysis_reference,
+                        raw_execution_response=None,
+                        failed=True,
+                        failure_reason=order_plan.detail,
+                    )
+                else:
+                    _safe_trade_analysis_capture(
+                        "auto-live exit failure",
+                        capture_auto_live_exit_result_sync,
+                        user_id=user_id,
+                        exit_reference=trade_analysis_reference,
+                        market_id=candidate.market.market_id,
+                        outcome_name=order_plan.side,
+                        title=candidate.market.question,
+                        raw_execution_response=None,
+                        exit_type=exit_type,
+                        failed=True,
+                        failure_reason=order_plan.detail,
+                        sell_reason=candidate.reason,
+                    )
                 candidate.stage_results.append(
                     build_stage_result(
                         stage_number=7,
@@ -4656,6 +5301,71 @@ class BullpenAutoLiveEngine:
                 )
                 return
 
+            trade_analysis_reference = f"auto-live-order:{order_plan.id}"
+            refreshed_market = quote.market
+            current_position_snapshot = next(
+                (
+                    position
+                    for position in new_positions
+                    if position.market_id == decision.market_id
+                    and position.side == order_plan.side
+                ),
+                None,
+            )
+            event_snapshot = _trade_analysis_event_snapshot_from_decision(
+                decision,
+                refreshed_market,
+            )
+            market_snapshot = _trade_analysis_market_snapshot_from_decision(
+                decision,
+                refreshed_market,
+            )
+            order_book_snapshot = _trade_analysis_order_book_snapshot_from_decision(
+                decision,
+                refreshed_market,
+                quote_price_cents=quote_price_cents,
+                limit_price_cents=order_plan.limit_price_cents,
+            )
+            positions_snapshot = _trade_analysis_position_snapshot(current_position_snapshot)
+            exit_type = _trade_analysis_exit_type_from_signals(decision.exit_signals)
+            if order_plan.action == "buy":
+                buy_context = _trade_analysis_buy_context_from_decision(
+                    run_id=run.id,
+                    settings=settings,
+                    decision=decision,
+                    order_plan=order_plan,
+                    market_snapshot=market_snapshot,
+                    event_snapshot=event_snapshot,
+                    order_book_snapshot=order_book_snapshot,
+                    positions_snapshot=positions_snapshot,
+                )
+                buy_context["captured_at"] = utc_now_iso()
+                _safe_trade_analysis_capture(
+                    "auto-live stage3 buy pre-submit",
+                    capture_auto_live_buy_pre_submit_sync,
+                    user_id=user_id,
+                    entry_reference=trade_analysis_reference,
+                    context=buy_context,
+                )
+            else:
+                exit_context = _trade_analysis_exit_context_from_decision(
+                    decision=decision,
+                    order_plan=order_plan,
+                    market_snapshot=market_snapshot,
+                    event_snapshot=event_snapshot,
+                    order_book_snapshot=order_book_snapshot,
+                    positions_snapshot=positions_snapshot,
+                )
+                exit_context["captured_at"] = utc_now_iso()
+                exit_context["exit_type"] = exit_type
+                _safe_trade_analysis_capture(
+                    "auto-live stage3 exit pre-submit",
+                    capture_auto_live_exit_pre_submit_sync,
+                    user_id=user_id,
+                    exit_reference=trade_analysis_reference,
+                    context=exit_context,
+                )
+
             try:
                 market_id_for_execution = decision.slug or decision.market_id
                 if order_plan.action == "buy":
@@ -4728,6 +5438,27 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders = 0
+                if order_plan.action == "buy":
+                    _safe_trade_analysis_capture(
+                        "auto-live stage3 buy execution",
+                        capture_auto_live_buy_result_sync,
+                        user_id=user_id,
+                        entry_reference=trade_analysis_reference,
+                        raw_execution_response=order_plan.execution_response,
+                    )
+                else:
+                    _safe_trade_analysis_capture(
+                        "auto-live stage3 exit execution",
+                        capture_auto_live_exit_result_sync,
+                        user_id=user_id,
+                        exit_reference=trade_analysis_reference,
+                        market_id=decision.market_id,
+                        outcome_name=order_plan.side,
+                        title=decision.market_title,
+                        raw_execution_response=order_plan.execution_response,
+                        exit_type=exit_type,
+                        sell_reason=decision.reason,
+                    )
             except TimeoutError:
                 order_plan.status = "failed"
                 order_plan.detail = (
@@ -4745,6 +5476,31 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders += 1
+                if order_plan.action == "buy":
+                    _safe_trade_analysis_capture(
+                        "auto-live stage3 buy timeout",
+                        capture_auto_live_buy_result_sync,
+                        user_id=user_id,
+                        entry_reference=trade_analysis_reference,
+                        raw_execution_response=None,
+                        failed=True,
+                        failure_reason=order_plan.detail,
+                    )
+                else:
+                    _safe_trade_analysis_capture(
+                        "auto-live stage3 exit timeout",
+                        capture_auto_live_exit_result_sync,
+                        user_id=user_id,
+                        exit_reference=trade_analysis_reference,
+                        market_id=decision.market_id,
+                        outcome_name=order_plan.side,
+                        title=decision.market_title,
+                        raw_execution_response=None,
+                        exit_type=exit_type,
+                        failed=True,
+                        failure_reason=order_plan.detail,
+                        sell_reason=decision.reason,
+                    )
             except Exception as exc:
                 order_plan.status = "failed"
                 order_plan.detail = str(exc)
@@ -4758,6 +5514,31 @@ class BullpenAutoLiveEngine:
                     )
                 )
                 running_failed_orders += 1
+                if order_plan.action == "buy":
+                    _safe_trade_analysis_capture(
+                        "auto-live stage3 buy failure",
+                        capture_auto_live_buy_result_sync,
+                        user_id=user_id,
+                        entry_reference=trade_analysis_reference,
+                        raw_execution_response=None,
+                        failed=True,
+                        failure_reason=order_plan.detail,
+                    )
+                else:
+                    _safe_trade_analysis_capture(
+                        "auto-live stage3 exit failure",
+                        capture_auto_live_exit_result_sync,
+                        user_id=user_id,
+                        exit_reference=trade_analysis_reference,
+                        market_id=decision.market_id,
+                        outcome_name=order_plan.side,
+                        title=decision.market_title,
+                        raw_execution_response=None,
+                        exit_type=exit_type,
+                        failed=True,
+                        failure_reason=order_plan.detail,
+                        sell_reason=decision.reason,
+                    )
 
             _, step_processed, step_submitted = _stage3_step_counts(step_key)
             report_invest_stage_progress(

@@ -2,6 +2,12 @@
 # before any query runs. Required in Celery workers (which don't load main.py).
 from app.domains.cost_drivers.models import CostRecommendation, CostSnapshot, TrafficCostRollup  # noqa: F401
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
+from app.domains.bullpen_trade_analysis.models import (  # noqa: F401
+    BullpenTradeAnalysisEventLogRecord,
+    BullpenTradeAnalysisLlmRecord,
+    BullpenTradeAnalysisRecord,
+    BullpenTradeAnalysisSnapshotRecord,
+)
 from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
 from app.domains.jobs.models import Job  # noqa: F401

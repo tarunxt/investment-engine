@@ -1198,6 +1198,57 @@ export interface PolymarketLiveLimitUpdate {
   max_live_exposure_per_market: number;
 }
 
+export interface PolymarketManualInvestAnalysisLlmOutput {
+  provider: string;
+  model: string;
+  llm_yes_odds?: number | null;
+  llm_no_odds?: number | null;
+  confidence?: string | null;
+  evidence_status?: string | null;
+  event_state?: string | null;
+  key_evidence: string[];
+  red_flags: string[];
+  rationale?: string | null;
+  completed_at?: string | null;
+  raw_output?: string | null;
+  prompt_version?: string | null;
+}
+
+export interface PolymarketManualInvestAnalysisContext {
+  snapshot_id?: string | null;
+  snapshot_mode?: string | null;
+  scanned_at?: string | null;
+  source_label?: string | null;
+  source_url?: string | null;
+  category?: string | null;
+  topic?: string | null;
+  event_slug?: string | null;
+  event_description?: string | null;
+  yes_odds?: number | null;
+  no_odds?: number | null;
+  volume_usd?: number | null;
+  liquidity_usd?: number | null;
+  best_bid_cents?: number | null;
+  best_ask_cents?: number | null;
+  spread_cents?: number | null;
+  rules?: string | null;
+  market_context?: string | null;
+  resolution_source?: string | null;
+  llm_yes_odds?: number | null;
+  llm_no_odds?: number | null;
+  llm_disagreement_level?: string | null;
+  llm_disagreement_category?: string | null;
+  confidence?: string | null;
+  evidence_status?: string | null;
+  event_state?: string | null;
+  llm_notes?: string | null;
+  llm_provider?: string | null;
+  llm_model?: string | null;
+  llm_completed_at?: string | null;
+  preflight_evidence_block?: string | null;
+  llm_outputs: PolymarketManualInvestAnalysisLlmOutput[];
+}
+
 export interface PolymarketManualInvestOrderRequest {
   question_id: string;
   market_id: string;
@@ -1207,6 +1258,7 @@ export interface PolymarketManualInvestOrderRequest {
   price: number;
   event_end_at?: string | null;
   market_url?: string | null;
+  analysis_context?: PolymarketManualInvestAnalysisContext | null;
 }
 
 export interface PolymarketManualInvestOrderResult {
@@ -1636,6 +1688,11 @@ export interface BullpenAutoLiveConsoleCandidateInput {
   theme: string;
   current_yes_odds?: number | null;
   current_no_odds?: number | null;
+  volume_usd?: number | null;
+  liquidity_usd?: number | null;
+  best_bid_cents?: number | null;
+  best_ask_cents?: number | null;
+  spread_cents?: number | null;
   llm_yes_odds?: number | null;
   llm_no_odds?: number | null;
   returns_per_day?: number | null;
@@ -1647,6 +1704,10 @@ export interface BullpenAutoLiveConsoleCandidateInput {
   evidence_status?: BullpenAutoLiveEvidenceStatus | string | null;
   event_state?: string | null;
   rules?: string | null;
+  market_context?: string | null;
+  resolution_source?: string | null;
+  event_description?: string | null;
+  preflight_evidence_block?: string | null;
   selected: boolean;
   llm_outputs: BullpenAutoLiveLlmOutput[];
 }
@@ -1928,6 +1989,291 @@ export interface BullpenAutoLiveSummaryResponse {
   recent_runs: BullpenAutoLiveRun[];
   recent_decisions: BullpenAutoLiveDecision[];
   latest_guardrail_checks: BullpenAutoLiveGuardrailCheck[];
+}
+
+export interface BullpenTradeAnalysisSnapshot {
+  id: number;
+  snapshot_type: string;
+  captured_at: string;
+  bullpen_snapshot_json: Record<string, unknown>;
+  event_snapshot_json: Record<string, unknown>;
+  market_snapshot_json: Record<string, unknown>;
+  order_book_snapshot_json: Record<string, unknown>;
+  positions_snapshot_json: Record<string, unknown>;
+  raw_api_response_json: Record<string, unknown>;
+}
+
+export interface BullpenTradeAnalysisLlmEntry {
+  id: number;
+  phase: string;
+  provider?: string | null;
+  model?: string | null;
+  prompt_version?: string | null;
+  prompt_text?: string | null;
+  raw_output?: string | null;
+  parsed_output_json: Record<string, unknown>;
+  confidence?: number | null;
+  tags_json: unknown[];
+  computed_tags_json: unknown[];
+  decision_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BullpenTradeAnalysisEventLog {
+  id: number;
+  run_id?: string | null;
+  event_type: string;
+  message: string;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BullpenTradeAnalysisSummaryStats {
+  total_executed_trades: number;
+  open_positions: number;
+  closed_positions: number;
+  total_net_pnl: number;
+  win_rate: number;
+  average_pnl_percent?: number | null;
+  average_holding_period_seconds?: number | null;
+  total_fees: number;
+}
+
+export interface BullpenTradeAnalysisListItem {
+  id: string;
+  title: string;
+  status: string;
+  final_tag: string;
+  pnl_outcome_tag: string;
+  category?: string | null;
+  topic?: string | null;
+  run_id?: string | null;
+  strategy_name?: string | null;
+  strategy_version?: string | null;
+  bought_at?: string | null;
+  sold_at?: string | null;
+  redeemed_at?: string | null;
+  closed_at?: string | null;
+  buy_amount?: number | null;
+  buy_price?: number | null;
+  buy_odds?: number | null;
+  current_price?: number | null;
+  exit_price?: number | null;
+  exit_odds?: number | null;
+  net_pnl?: number | null;
+  pnl_percent?: number | null;
+  holding_period_seconds?: number | null;
+  buy_tags: string[];
+  short_reason?: string | null;
+  exit_reason?: string | null;
+  confidence?: number | null;
+  risk_score?: number | null;
+}
+
+export interface BullpenTradeAnalysisLearningInsights {
+  win_rate_by_tag: Array<Record<string, unknown>>;
+  average_pnl_by_tag: Array<Record<string, unknown>>;
+  total_pnl_by_strategy_version: Array<Record<string, unknown>>;
+  average_pnl_by_confidence_bucket: Array<Record<string, unknown>>;
+  average_pnl_by_spread_bucket: Array<Record<string, unknown>>;
+  average_pnl_by_liquidity_bucket: Array<Record<string, unknown>>;
+  losses_caused_by_low_liquidity: number;
+  high_confidence_losses: number;
+  profitable_tags: Array<Record<string, unknown>>;
+  unprofitable_tags: Array<Record<string, unknown>>;
+  average_holding_period_winners_seconds?: number | null;
+  average_holding_period_losers_seconds?: number | null;
+  exit_reasons_ranked_by_pnl: Array<Record<string, unknown>>;
+  buy_reasons_ranked_by_pnl: Array<Record<string, unknown>>;
+  recommendations: string[];
+}
+
+export interface BullpenTradeAnalysisComparison {
+  buy_price?: number | null;
+  exit_price?: number | null;
+  buy_odds?: number | null;
+  exit_odds?: number | null;
+  buy_liquidity_score?: number | null;
+  exit_liquidity_score?: number | null;
+  buy_volume_score?: number | null;
+  exit_volume_score?: number | null;
+  buy_spread_score?: number | null;
+  exit_spread_score?: number | null;
+  buy_confidence?: number | null;
+  exit_confidence?: number | null;
+  buy_probability_estimate?: number | null;
+  exit_probability_estimate?: number | null;
+  buy_market_implied_probability?: number | null;
+  exit_market_implied_probability?: number | null;
+  buy_probability_delta?: number | null;
+  exit_probability_delta?: number | null;
+}
+
+export interface BullpenTradeAnalysisActionableLearning {
+  analysis_summary?: string | null;
+  mistake_category?: string | null;
+  improvement_suggestion?: string | null;
+  reinforcement_signal?: string | null;
+  reinforcement_score?: number | null;
+  should_avoid_similar_trade: boolean;
+  should_increase_confidence_for_similar_trade: boolean;
+  human_review_required: boolean;
+  what_worked: string[];
+  what_went_wrong: string[];
+  exit_timing: string;
+  entry_too_expensive: boolean;
+  liquidity_or_spread_issue: boolean;
+  llm_confidence_aligned: boolean;
+  suggested_platform_rule_changes: string[];
+  suggested_prompt_changes: string[];
+  suggested_risk_management_changes: string[];
+  sell_reason?: string | null;
+}
+
+export interface BullpenTradeAnalysisRecordResponse {
+  id: string;
+  entry_reference: string;
+  exit_reference?: string | null;
+  source_variant: string;
+  bot_name: string;
+  strategy_name?: string | null;
+  strategy_version?: string | null;
+  status: string;
+  lifecycle_state: string;
+  final_tag: string;
+  pnl_outcome_tag: string;
+  position_key?: string | null;
+  event_id?: string | null;
+  event_slug?: string | null;
+  bullpen_event_id?: string | null;
+  bullpen_market_id?: string | null;
+  outcome_id?: string | null;
+  outcome_name?: string | null;
+  contract_id?: string | null;
+  run_id?: string | null;
+  title: string;
+  event_question: string;
+  event_description?: string | null;
+  category?: string | null;
+  topic?: string | null;
+  source_url?: string | null;
+  market_url?: string | null;
+  event_close_time?: string | null;
+  event_resolved_at?: string | null;
+  bought_at?: string | null;
+  sold_at?: string | null;
+  redeemed_at?: string | null;
+  closed_at?: string | null;
+  buy_order_id?: string | null;
+  buy_client_order_id?: string | null;
+  buy_submitted_at?: string | null;
+  buy_executed_at?: string | null;
+  buy_requested_amount?: number | null;
+  buy_requested_shares?: number | null;
+  buy_requested_price?: number | null;
+  buy_requested_odds?: number | null;
+  buy_filled_amount?: number | null;
+  buy_filled_shares?: number | null;
+  buy_average_fill_price?: number | null;
+  buy_average_fill_odds?: number | null;
+  buy_fees?: number | null;
+  buy_slippage?: number | null;
+  buy_status?: string | null;
+  buy_failure_reason?: string | null;
+  buy_decision_summary?: string | null;
+  buy_reason?: string | null;
+  buy_confidence?: number | null;
+  buy_risk_score?: number | null;
+  buy_expected_edge?: number | null;
+  buy_expected_value?: number | null;
+  buy_probability_estimate?: number | null;
+  buy_market_implied_probability?: number | null;
+  buy_probability_delta?: number | null;
+  buy_liquidity_score?: number | null;
+  buy_volume_score?: number | null;
+  buy_spread_score?: number | null;
+  buy_volatility_score?: number | null;
+  buy_news_recency_score?: number | null;
+  buy_selected_by_rule: boolean;
+  buy_selected_by_llm: boolean;
+  buy_selected_by_hybrid_decision: boolean;
+  buy_computed_tags_json: unknown[];
+  buy_rule_checks_json: unknown[];
+  exit_type?: string | null;
+  sell_order_id?: string | null;
+  sell_client_order_id?: string | null;
+  sell_submitted_at?: string | null;
+  sell_executed_at?: string | null;
+  sell_requested_amount?: number | null;
+  sell_requested_shares?: number | null;
+  sell_requested_price?: number | null;
+  sell_requested_odds?: number | null;
+  sell_filled_amount?: number | null;
+  sell_filled_shares?: number | null;
+  sell_average_fill_price?: number | null;
+  sell_average_fill_odds?: number | null;
+  sell_fees?: number | null;
+  sell_slippage?: number | null;
+  sell_status?: string | null;
+  sell_failure_reason?: string | null;
+  sell_decision_summary?: string | null;
+  sell_reason?: string | null;
+  sell_confidence?: number | null;
+  sell_risk_score?: number | null;
+  sell_expected_edge?: number | null;
+  sell_expected_value?: number | null;
+  sell_probability_estimate?: number | null;
+  sell_market_implied_probability?: number | null;
+  sell_probability_delta?: number | null;
+  sell_liquidity_score?: number | null;
+  sell_volume_score?: number | null;
+  sell_spread_score?: number | null;
+  sell_volatility_score?: number | null;
+  sell_computed_tags_json: unknown[];
+  sell_rule_checks_json: unknown[];
+  buy_notional?: number | null;
+  exit_notional?: number | null;
+  gross_pnl?: number | null;
+  net_pnl?: number | null;
+  pnl_percent?: number | null;
+  fees_total?: number | null;
+  holding_period_seconds?: number | null;
+  realized_return?: number | null;
+  max_favorable_price?: number | null;
+  max_adverse_price?: number | null;
+  best_possible_exit_price_after_buy?: number | null;
+  worst_price_after_buy?: number | null;
+  missed_profit_amount?: number | null;
+  drawdown_while_held?: number | null;
+  analysis_summary?: string | null;
+  mistake_category?: string | null;
+  improvement_suggestion?: string | null;
+  reinforcement_signal?: string | null;
+  reinforcement_score?: number | null;
+  should_avoid_similar_trade: boolean;
+  should_increase_confidence_for_similar_trade: boolean;
+  human_review_required: boolean;
+  reviewer_notes?: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BullpenTradeAnalysisListResponse {
+  items: BullpenTradeAnalysisListItem[];
+  summary: BullpenTradeAnalysisSummaryStats;
+  learning_insights: BullpenTradeAnalysisLearningInsights;
+}
+
+export interface BullpenTradeAnalysisDetailResponse {
+  trade: BullpenTradeAnalysisRecordResponse;
+  comparison: BullpenTradeAnalysisComparison;
+  actionable_learning: BullpenTradeAnalysisActionableLearning;
+  snapshots: BullpenTradeAnalysisSnapshot[];
+  llm_entries: BullpenTradeAnalysisLlmEntry[];
+  event_logs: BullpenTradeAnalysisEventLog[];
 }
 
 export type TradingBotSummaryId =

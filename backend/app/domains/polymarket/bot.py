@@ -19,6 +19,11 @@ from app.domains.polymarket.bullpen import (
     live_position_key,
     utc_now,
 )
+from app.domains.bullpen_trade_analysis.service import (
+    capture_manual_buy_pre_submit_async,
+    capture_manual_buy_result_async,
+    sync_redeemed_trades_async,
+)
 from app.domains.polymarket.logger import PolymarketFileLogger, redact_secrets
 from app.domains.polymarket.providers import (
     BullpenReadOnlyProvider,
@@ -75,6 +80,8 @@ NET_WORTH_DAILY_REFRESH_MINUTE_UTC = min(
 class PolymarketPaperCopyBot:
     def __init__(
         self,
+        *,
+        user_id: int | None = None,
         config: PolymarketBotConfig,
         provider: MarketDataProvider,
         fallback_provider: MockProvider,
@@ -87,6 +94,7 @@ class PolymarketPaperCopyBot:
         tracked_account_store: JsonModelStore[PolymarketTrackedAccount] | None = None,
         config_store: JsonObjectStore[PolymarketUserConfigOverride] | None = None,
     ) -> None:
+        self.user_id = user_id
         self.config = config
         self.provider = provider
         self.fallback_provider = fallback_provider
@@ -438,6 +446,18 @@ class PolymarketPaperCopyBot:
                     )
                     trade = self._manual_live_trade_decision(order)
                     await self._record_live_trade_unlocked(trade)
+                    if self.user_id is not None:
+                        try:
+                            await capture_manual_buy_pre_submit_async(
+                                user_id=self.user_id,
+                                entry_reference=f"manual-live-trade:{trade.id}",
+                                context=self._manual_trade_analysis_context(order, trade),
+                            )
+                        except Exception as capture_exc:
+                            await self.logger.error(
+                                "Manual Bullpen trade-analysis pre-submit capture failed",
+                                capture_exc,
+                            )
 
                     try:
                         await self._execute_live_trade_unlocked(
@@ -447,6 +467,18 @@ class PolymarketPaperCopyBot:
                             skip_dashboard_unlock=True,
                             skip_doctor_refresh=True,
                         )
+                        if self.user_id is not None:
+                            try:
+                                await capture_manual_buy_result_async(
+                                    user_id=self.user_id,
+                                    entry_reference=f"manual-live-trade:{trade.id}",
+                                    raw_execution_response=trade.execution_response,
+                                )
+                            except Exception as capture_exc:
+                                await self.logger.error(
+                                    "Manual Bullpen trade-analysis execution capture failed",
+                                    capture_exc,
+                                )
                         results.append(
                             PolymarketManualInvestOrderResult(
                                 question_id=order.question_id,
@@ -462,6 +494,22 @@ class PolymarketPaperCopyBot:
                             )
                         )
                     except Exception as exc:
+                        if self.user_id is not None:
+                            try:
+                                await capture_manual_buy_result_async(
+                                    user_id=self.user_id,
+                                    entry_reference=f"manual-live-trade:{trade.id}",
+                                    raw_execution_response=None,
+                                    failed=True,
+                                    failure_reason=redact_secrets(
+                                        trade.failure_reason or trade.reason or str(exc)
+                                    ),
+                                )
+                            except Exception as capture_exc:
+                                await self.logger.error(
+                                    "Manual Bullpen trade-analysis failure capture failed",
+                                    capture_exc,
+                                )
                         results.append(
                             PolymarketManualInvestOrderResult(
                                 question_id=order.question_id,
@@ -1406,7 +1454,7 @@ class PolymarketPaperCopyBot:
         await self._save_live_trades_unlocked()
 
         try:
-            await self.live_executor.execute(trade)
+            trade.execution_response = await self.live_executor.execute(trade)
             trade.status = "executed"
             trade.executed_at = utc_now()
             trade.updated_at = trade.executed_at
@@ -1557,6 +1605,23 @@ class PolymarketPaperCopyBot:
         self.balance_state = self._with_next_balance_refresh(
             await self.balance_reader.refresh()
         )
+        try:
+            redeemed_trades = await self.redeemed_trades_reader.refresh()
+        except Exception as exc:
+            await self.logger.error("Bullpen redeemed trade history refresh failed", exc)
+        else:
+            self.bullpen_redeemed_trades = redeemed_trades
+            if self.user_id is not None:
+                try:
+                    await sync_redeemed_trades_async(
+                        user_id=self.user_id,
+                        redeemed_trades=redeemed_trades,
+                    )
+                except Exception as capture_exc:
+                    await self.logger.error(
+                        "Bullpen trade-analysis redeem sync failed",
+                        capture_exc,
+                    )
 
     async def _auto_redeem_background(self) -> None:
         async with self._lock:
@@ -1619,6 +1684,17 @@ class PolymarketPaperCopyBot:
                 self.balance_state = balance_state
                 if redeemed_trades is not None:
                     self.bullpen_redeemed_trades = redeemed_trades
+            if redeemed_trades is not None and self.user_id is not None:
+                try:
+                    await sync_redeemed_trades_async(
+                        user_id=self.user_id,
+                        redeemed_trades=redeemed_trades,
+                    )
+                except Exception as capture_exc:
+                    await self.logger.error(
+                        "Bullpen trade-analysis redeem history sync failed",
+                        capture_exc,
+                    )
 
     async def _try_auto_unlock_live_unlocked(self, reason: str) -> None:
         if (
@@ -1784,6 +1860,144 @@ class PolymarketPaperCopyBot:
             order.amount / order.price,
             "Manual Bullpen x AI investment requested in dashboard.",
         )
+
+    @staticmethod
+    def _manual_market_probability(
+        order: PolymarketManualInvestOrderRequest,
+    ) -> float | None:
+        context = order.analysis_context
+        if context is None:
+            return None
+        if order.outcome.strip().lower() == "yes":
+            return context.yes_odds
+        return context.no_odds
+
+    def _manual_trade_analysis_context(
+        self,
+        order: PolymarketManualInvestOrderRequest,
+        trade: PolymarketLiveTradeDecision,
+    ) -> dict[str, object]:
+        context = order.analysis_context
+        market_probability = self._manual_market_probability(order)
+        probability_estimate = (
+            context.llm_yes_odds
+            if context and order.outcome.strip().lower() == "yes"
+            else context.llm_no_odds if context else None
+        )
+        return {
+            "source_variant": "manual-dashboard",
+            "bot_name": "Bullpen x AI",
+            "strategy_name": "Bullpen x AI Manual",
+            "strategy_version": context.snapshot_mode if context else "manual-dashboard",
+            "run_id": None,
+            "event_id": order.question_id,
+            "event_slug": context.event_slug if context else order.market_id,
+            "market_id": order.market_id,
+            "outcome_name": order.outcome,
+            "title": order.market_title,
+            "event_question": order.market_title,
+            "event_description": context.event_description if context else None,
+            "category": context.category if context else None,
+            "topic": context.topic if context else context.category if context else None,
+            "source_url": context.source_url if context else None,
+            "market_url": order.market_url,
+            "event_close_time": order.event_end_at,
+            "requested_amount": order.amount,
+            "requested_price": order.price,
+            "buy_probability_estimate": probability_estimate,
+            "market_probability": market_probability,
+            "confidence": context.confidence if context else None,
+            "risk_score": context.evidence_status if context else None,
+            "expected_edge": (
+                round(probability_estimate - market_probability, 4)
+                if probability_estimate is not None and market_probability is not None
+                else None
+            ),
+            "expected_value": (
+                round((probability_estimate - market_probability) * order.amount / 100, 6)
+                if probability_estimate is not None and market_probability is not None
+                else None
+            ),
+            "liquidity_score": (
+                1.0
+                if context and context.liquidity_usd is not None and context.liquidity_usd >= 20_000
+                else 0.7
+                if context and context.liquidity_usd is not None and context.liquidity_usd >= 5_000
+                else 0.45
+                if context and context.liquidity_usd is not None and context.liquidity_usd >= 1_000
+                else 0.2
+                if context and context.liquidity_usd is not None
+                else None
+            ),
+            "volume_score": (
+                1.0
+                if context and context.volume_usd is not None and context.volume_usd >= 100_000
+                else 0.7
+                if context and context.volume_usd is not None and context.volume_usd >= 10_000
+                else 0.35
+                if context and context.volume_usd is not None and context.volume_usd >= 1_000
+                else 0.15
+                if context and context.volume_usd is not None
+                else None
+            ),
+            "spread_score": (
+                max(0.0, min(1.0, 1 - (context.spread_cents / 15)))
+                if context and context.spread_cents is not None
+                else None
+            ),
+            "volatility_score": None,
+            "evidence_status": context.evidence_status if context else None,
+            "event_state": context.event_state if context else None,
+            "decision_summary": context.llm_notes if context else trade.reason,
+            "buy_reason": context.llm_notes if context else trade.reason,
+            "selected_by_rule": False,
+            "selected_by_llm": bool(context and context.llm_outputs),
+            "selected_by_hybrid": bool(context and context.llm_outputs),
+            "llm_payloads": [item.model_dump(mode="json") for item in (context.llm_outputs if context else [])],
+            "bullpen_snapshot_json": {
+                "source_label": context.source_label if context else None,
+                "source_url": context.source_url if context else None,
+                "snapshot_id": context.snapshot_id if context else None,
+                "snapshot_mode": context.snapshot_mode if context else None,
+                "scanned_at": context.scanned_at if context else None,
+                "trade_id": trade.id,
+            },
+            "event_snapshot_json": {
+                "question_id": order.question_id,
+                "market_title": order.market_title,
+                "event_slug": context.event_slug if context else None,
+                "event_description": context.event_description if context else None,
+                "category": context.category if context else None,
+                "topic": context.topic if context else None,
+                "resolution_source": context.resolution_source if context else None,
+            },
+            "market_snapshot_json": {
+                "market_id": order.market_id,
+                "market_url": order.market_url,
+                "outcome": order.outcome,
+                "price_decimal": order.price,
+                "yes_odds": context.yes_odds if context else None,
+                "no_odds": context.no_odds if context else None,
+                "volume_usd": context.volume_usd if context else None,
+                "liquidity_usd": context.liquidity_usd if context else None,
+                "rules": context.rules if context else None,
+                "market_context": context.market_context if context else None,
+                "preflight_evidence_block": context.preflight_evidence_block if context else None,
+            },
+            "order_book_snapshot_json": {
+                "best_bid_cents": context.best_bid_cents if context else None,
+                "best_ask_cents": context.best_ask_cents if context else None,
+                "spread_cents": context.spread_cents if context else None,
+            },
+            "positions_snapshot_json": {},
+            "raw_api_response_json": {},
+            "log_metadata": {
+                "trade_id": trade.id,
+                "question_id": order.question_id,
+                "market_id": order.market_id,
+                "outcome": order.outcome,
+            },
+        }
 
     def _live_state(self) -> PolymarketLiveControlState:
         block_reason = self.live_guard.startup_block_reason(

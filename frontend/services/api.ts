@@ -36,6 +36,8 @@ import {
   BullpenAutoLiveDecision,
   BullpenAutoLiveState,
   BullpenAutoLiveSummaryResponse,
+  BullpenTradeAnalysisDetailResponse,
+  BullpenTradeAnalysisListResponse,
   PolymarketBotState,
   PolymarketManualInvestOrderRequest,
   PolymarketManualInvestResponse,
@@ -976,6 +978,46 @@ class apiServiceClass implements IApiService {
     return this.get<BullpenAutoLiveDecision[]>(URLs.bullpenAutoLive.decisions());
   }
 
+  getBullpenTradeAnalysis(params?: {
+    status?: string;
+    finalTag?: string;
+    fromDate?: string;
+    toDate?: string;
+    strategyVersion?: string;
+    category?: string;
+    topic?: string;
+  }): Promise<BullpenTradeAnalysisListResponse> {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.finalTag) query.set("final_tag", params.finalTag);
+    if (params?.fromDate) query.set("from_date", params.fromDate);
+    if (params?.toDate) query.set("to_date", params.toDate);
+    if (params?.strategyVersion) {
+      query.set("strategy_version", params.strategyVersion);
+    }
+    if (params?.category) query.set("category", params.category);
+    if (params?.topic) query.set("topic", params.topic);
+    const baseUrl = URLs.bullpenTradeAnalysis.list();
+    const url = query.size > 0 ? `${baseUrl}?${query.toString()}` : baseUrl;
+    return this.get<BullpenTradeAnalysisListResponse>(url);
+  }
+
+  getBullpenTradeAnalysisDetail(
+    tradeId: string,
+  ): Promise<BullpenTradeAnalysisDetailResponse> {
+    return this.get<BullpenTradeAnalysisDetailResponse>(
+      URLs.bullpenTradeAnalysis.detail(tradeId),
+    );
+  }
+
+  recomputeBullpenTradeAnalysis(
+    tradeId: string,
+  ): Promise<BullpenTradeAnalysisDetailResponse> {
+    return this.post<BullpenTradeAnalysisDetailResponse>(
+      URLs.bullpenTradeAnalysis.recompute(tradeId),
+    );
+  }
+
   runBullpenAutoLiveOnce(
     data?: BullpenAutoLiveRunOnceRequest,
   ): Promise<BullpenAutoLiveRun> {
@@ -1034,6 +1076,30 @@ class apiServiceClass implements IApiService {
 
   bullpenAiAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]> {
     return this.getBullpenAutoLiveDecisions();
+  }
+
+  bullpenAiTradeAnalysis(params?: {
+    status?: string;
+    finalTag?: string;
+    fromDate?: string;
+    toDate?: string;
+    strategyVersion?: string;
+    category?: string;
+    topic?: string;
+  }): Promise<BullpenTradeAnalysisListResponse> {
+    return this.getBullpenTradeAnalysis(params);
+  }
+
+  bullpenAiTradeAnalysisDetail(
+    tradeId: string,
+  ): Promise<BullpenTradeAnalysisDetailResponse> {
+    return this.getBullpenTradeAnalysisDetail(tradeId);
+  }
+
+  bullpenAiTradeAnalysisRecompute(
+    tradeId: string,
+  ): Promise<BullpenTradeAnalysisDetailResponse> {
+    return this.recomputeBullpenTradeAnalysis(tradeId);
   }
 
   bullpenAiAutoLiveRunOnce(

@@ -70,6 +70,7 @@ class PolymarketBotManager:
                 else mock_provider
             )
             bot = PolymarketPaperCopyBot(
+                user_id=user_id,
                 config=user_config,
                 provider=read_provider,
                 fallback_provider=mock_provider,
