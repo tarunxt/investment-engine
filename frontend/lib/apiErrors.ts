@@ -17,6 +17,20 @@ function normalizeText(value: string | null | undefined): string | null {
   return trimmed;
 }
 
+function looksLikeHtmlDocument(value: string) {
+  return /<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>]/i.test(value);
+}
+
+function summarizeHtmlErrorPayload(value: string) {
+  if (!looksLikeHtmlDocument(value)) return null;
+
+  const titleMatch = value.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const headingMatch = value.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+  const summary = normalizeText(headingMatch?.[1] ?? titleMatch?.[1]);
+
+  return summary || "Upstream service returned an HTML error page";
+}
+
 function appendUniqueDetail(
   parts: string[],
   seen: Set<string>,
@@ -62,6 +76,8 @@ export function stringifyErrorDetail(detail: unknown): string | null {
   if (detail == null) return null;
   if (typeof detail === "string") {
     const trimmed = detail.trim();
+    const htmlSummary = summarizeHtmlErrorPayload(trimmed);
+    if (htmlSummary) return htmlSummary;
     return trimmed ? trimmed : null;
   }
   if (typeof detail === "number" || typeof detail === "boolean") {
@@ -104,7 +120,9 @@ export function deriveApiErrorMessage(
   return message;
 }
 
-export function splitApiErrorSummary(error: ApiErrorLike): ApiErrorSummaryParts {
+export function splitApiErrorSummary(
+  error: ApiErrorLike,
+): ApiErrorSummaryParts {
   const message =
     deriveApiErrorMessage(error.message, "API request failed") ||
     "API request failed";
