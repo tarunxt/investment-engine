@@ -2001,7 +2001,8 @@ class BullpenAutoLiveEngine:
             if quote.current_price_cents is None:
                 hard_block_reasons.append("Could not refresh the current market price.")
             if (
-                quote.spread_cents is not None
+                order_plan.action != "sell"
+                and quote.spread_cents is not None
                 and quote.spread_cents > settings.max_bid_ask_spread_cents
             ):
                 hard_block_reasons.append("Bid/ask spread exceeds the configured maximum.")
@@ -2040,28 +2041,12 @@ class BullpenAutoLiveEngine:
                     candidate.order_usd / max(0.01, cents_to_decimal(order_plan.limit_price_cents)),
                     6,
                 )
-            elif order_plan.action == "sell" and quote.current_price_cents is not None:
-                original_price_cents = initial_price_cents or quote.current_price_cents
-                if quote.current_price_cents < max(1, original_price_cents - settings.max_slippage_cents):
-                    hard_block_reasons.append("Refreshed sell price exceeds the slippage cap.")
-                refreshed_edge_pp = (
-                    round(fair_probability_for_order_side - quote.current_price_cents, 2)
-                    if fair_probability_for_order_side is not None
-                    else None
-                )
-                if (
-                    refreshed_edge_pp is not None
-                    and candidate.execution_edge_threshold_pp is not None
-                    and refreshed_edge_pp > candidate.execution_edge_threshold_pp
-                ):
-                    hard_block_reasons.append(
-                        "Price moved enough to restore the edge, so the exit was skipped."
-                    )
-                order_plan.limit_price_cents = sell_limit_price_cents(
-                    current_price_cents=quote.current_price_cents,
-                    original_price_cents=original_price_cents,
-                    max_slippage_cents=settings.max_slippage_cents,
-                )
+            elif order_plan.action == "sell":
+                # Exits are risk-reduction orders.  Do not let wide spreads,
+                # slippage caps, or recovered model edge strand an existing
+                # position; submit an aggressive sell limit at the exchange
+                # floor so it behaves like an immediate marketable exit.
+                order_plan.limit_price_cents = 1
                 if order_plan.shares <= 0 and candidate.current_position:
                     order_plan.shares = candidate.current_position.shares
 
@@ -4562,7 +4547,8 @@ class BullpenAutoLiveEngine:
                 quote = await refresh_execution_quote(slug=decision.slug, side=order_plan.side)
                 quote_price_cents = quote.current_price_cents or order_plan.limit_price_cents
                 if (
-                    quote.spread_cents is not None
+                    order_plan.action != "sell"
+                    and quote.spread_cents is not None
                     and quote.spread_cents > settings.max_bid_ask_spread_cents
                 ):
                     order_plan.status = "skipped"
@@ -4606,27 +4592,18 @@ class BullpenAutoLiveEngine:
                         6,
                     )
                 else:
-                    order_plan.limit_price_cents = sell_limit_price_cents(
-                        current_price_cents=quote_price_cents,
-                        original_price_cents=order_plan.limit_price_cents or quote_price_cents,
-                        max_slippage_cents=settings.max_slippage_cents,
-                    )
+                    # Console-profile exits should reduce risk immediately even
+                    # when the book is wide. Use the minimum allowed limit as a
+                    # marketable sell fallback instead of skipping the exit.
+                    order_plan.limit_price_cents = 1
                 order_plan.refreshed_market_price_cents = quote_price_cents
 
             if (
                 order_plan.action == "sell"
-                and (
-                    order_plan.shares <= 0
-                    or (
-                        cents_to_decimal(order_plan.limit_price_cents) * order_plan.shares
-                    )
-                    < DEFAULT_FORCED_EXIT_CONFIG.min_net_proceeds
-                )
+                and order_plan.shares <= 0
             ):
                 order_plan.status = "skipped"
-                order_plan.detail = (
-                    "Exit is tracked, but the refreshed executable value is below the minimum net proceeds threshold."
-                )
+                order_plan.detail = "Exit is tracked, but no shares are available to sell."
                 decision.stage_results.append(
                     build_stage_result(
                         stage_number=7,
