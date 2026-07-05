@@ -575,7 +575,7 @@ test("Stage 3 schedule card keeps the Invest button and reuse copy inside the ca
     "utf8",
   );
 
-  assert.match(source, />\s*Invest\s*</);
+  assert.match(source, />\s*Exit and Invest\s*</);
   assert.match(source, /getInvestStageImmediateSuccess/);
   assert.match(source, /buildBullpenStage3InvestPreviewSteps/);
   assert.match(source, />\s*Invested\s*</);

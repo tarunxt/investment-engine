@@ -30,7 +30,7 @@ function createInvestStage({
 } = {}) {
   return {
     key: "invest",
-    title: "Stage 3 · Rebalance and Invest",
+    title: "Stage 3 · Exit and Invest",
     subtitle:
       "Step 1 sells active positions outside the top 10, then Step 2 invests in the Stage 3 planned orders when the guardrails allow live execution.",
     tone: "yellow",

@@ -51,7 +51,7 @@ test("failed auto-run keeps Stage 3 highlighted but surfaces the failure summary
     started_at: "2026-07-01T08:00:00Z",
     completed_at: "2026-07-01T08:04:23Z",
     summary:
-      "Auto-Live run failed during Stage 3 · Rebalance and Invest: Future attached to a different loop",
+      "Auto-Live run failed during Stage 3 · Exit and Invest: Future attached to a different loop",
     live_execution_requested: true,
     live_execution_attempted: true,
     decisions_count: 7,
@@ -85,10 +85,10 @@ test("failed auto-run keeps Stage 3 highlighted but surfaces the failure summary
     ],
   });
 
-  assert.equal(view.currentStageLabel, "Stage 3 · Rebalance and Invest");
+  assert.equal(view.currentStageLabel, "Stage 3 · Exit and Invest");
   assert.equal(
     view.statusCopy,
-    "Auto-Live run failed during Stage 3 · Rebalance and Invest: Future attached to a different loop",
+    "Auto-Live run failed during Stage 3 · Exit and Invest: Future attached to a different loop",
   );
   assert.equal(view.stages[2].isCurrent, true);
   assert.match(view.stages[2].detail, /Worker error: Future attached to a different loop/);
@@ -104,7 +104,7 @@ test("failed auto-run uses persisted stage error output when available", async (
     dry_run: false,
     started_at: "2026-07-01T08:00:00Z",
     completed_at: "2026-07-01T08:04:23Z",
-    summary: "Auto-Live run failed during Stage 3 · Rebalance and Invest: worker error",
+    summary: "Auto-Live run failed during Stage 3 · Exit and Invest: worker error",
     live_execution_requested: true,
     live_execution_attempted: true,
     decisions_count: 7,
