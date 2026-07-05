@@ -2117,6 +2117,7 @@ class BullpenAutoLiveEngine:
                         outcome="Yes" if order_plan.side == "YES" else "No",
                         shares=order_plan.shares,
                         min_price=cents_to_decimal(order_plan.limit_price_cents),
+                        max_reprice_attempts=settings.max_reprice_attempts,
                     )
                 order_plan.status = "submitted"
                 order_plan.executed_at = utc_now_iso()
@@ -3465,6 +3466,9 @@ class BullpenAutoLiveEngine:
             if sell_planned == 0:
                 sell_status = "completed"
                 sell_detail = "No executable Step 1 Event Exits were needed."
+            elif is_sell_step_complete:
+                sell_status = "completed"
+                sell_detail = "Step 1 finished processing the Event Exits list."
             elif current_step_key == "sell":
                 if execution_gate_reason:
                     sell_status = "blocked"
@@ -3479,9 +3483,6 @@ class BullpenAutoLiveEngine:
                     sell_detail = current_step_detail or (
                         "Processing the Step 1 Event Exits before new investments."
                     )
-            elif is_sell_step_complete:
-                sell_status = "completed"
-                sell_detail = "Step 1 finished processing the Event Exits list."
             elif execution_gate_reason:
                 sell_status = "blocked"
                 sell_detail = execution_gate_reason
@@ -3509,6 +3510,9 @@ class BullpenAutoLiveEngine:
             if buy_planned == 0:
                 buy_status = "completed"
                 buy_detail = "No Step 2 Stage 3 planned orders were created."
+            elif buy_processed >= buy_planned:
+                buy_status = "completed"
+                buy_detail = "Step 2 finished processing the Stage 3 planned orders."
             elif current_step_key == "buy":
                 if execution_gate_reason:
                     buy_status = "blocked"
@@ -3528,9 +3532,6 @@ class BullpenAutoLiveEngine:
                 buy_detail = (
                     "Step 2 is waiting for Step 1 Event Exits to free capital before buying."
                 )
-            elif buy_processed >= buy_planned:
-                buy_status = "completed"
-                buy_detail = "Step 2 finished processing the Stage 3 planned orders."
             elif execution_gate_reason:
                 buy_status = "blocked"
                 buy_detail = execution_gate_reason
@@ -4726,6 +4727,7 @@ class BullpenAutoLiveEngine:
                             outcome="Yes" if order_plan.side == "YES" else "No",
                             shares=order_plan.shares,
                             min_price=cents_to_decimal(order_plan.limit_price_cents),
+                            max_reprice_attempts=settings.max_reprice_attempts,
                         ),
                         timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
                     )

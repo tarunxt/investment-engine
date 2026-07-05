@@ -7,6 +7,7 @@ import {
   useState,
   type ChangeEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   CalendarClock,
@@ -49,6 +50,16 @@ import {
   type BullpenStage3AlreadyInvestedRecord,
   selectBullpenStage3OnlyInvestSource,
 } from "./bullpenAutoRunStage3Invest";
+import {
+  deriveInvestExecutionStepStatus,
+  getInvestMetricDialogDefinition,
+  getInvestMetricRows,
+  getInvestStepMetricDialogKind,
+  getSellInvestMetricDialogKind,
+  isProcessedInvestOrderPlan,
+  type InvestExecutionStepStatus,
+  type InvestMetricDialogKind,
+} from "./bullpenAutoRunInvestMetrics";
 import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
 import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
@@ -82,8 +93,6 @@ type ErrorState = {
   message: string;
   details: string | null;
 };
-
-type InvestMetricDialogKind = "decisions" | "planned" | "submitted";
 
 type InvestMetricDialogState = {
   kind: InvestMetricDialogKind;
@@ -314,12 +323,6 @@ function getInvestStageMetric(
   return readStageOutputNumber(stage.outputs[key]) ?? fallback;
 }
 
-type InvestExecutionStepStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "blocked";
-
 type InvestExecutionStepView = {
   key: "sell" | "buy";
   stepNumber: number;
@@ -377,15 +380,22 @@ function getInvestStageExecutionSteps(
         return null;
       }
 
+      const plannedOrders = readStageOutputNumber(step.planned_orders) ?? 0;
+      const processedOrders = readStageOutputNumber(step.processed_orders) ?? 0;
+
       return {
         key,
         stepNumber,
         stepTotal,
         label,
-        status,
+        status: deriveInvestExecutionStepStatus({
+          status,
+          plannedOrders,
+          processedOrders,
+        }),
         detail: readStageOutputString(step.detail),
-        plannedOrders: readStageOutputNumber(step.planned_orders) ?? 0,
-        processedOrders: readStageOutputNumber(step.processed_orders) ?? 0,
+        plannedOrders,
+        processedOrders,
         submittedOrders: readStageOutputNumber(step.submitted_orders) ?? 0,
         eventExitRows: readStageOutputNumber(step.event_exit_rows),
         rankingLlmPlannedOrders: readStageOutputNumber(
@@ -709,15 +719,53 @@ function getInvestProgressLogEntries({
 function InvestExecutionStepsSummary({
   steps,
   compact = false,
+  onOpenMetricDetails,
   onOpenEventExitInfo,
 }: {
   steps: InvestExecutionStepView[];
   compact?: boolean;
+  onOpenMetricDetails?: (kind: InvestMetricDialogKind) => void;
   onOpenEventExitInfo?: () => void;
 }) {
   if (steps.length === 0) return null;
 
   const gridClasses = compact ? "grid gap-2" : "grid gap-2 md:grid-cols-2";
+
+  const renderMetricCard = ({
+    label,
+    value,
+    kind,
+    toneClasses,
+  }: {
+    label: string;
+    value: number | null | undefined;
+    kind?: InvestMetricDialogKind;
+    toneClasses: ReturnType<typeof getInvestExecutionStepClasses>;
+  }) => {
+    const body = (
+      <>
+        <p className="text-[10px] uppercase tracking-[0.1em]">{label}</p>
+        <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
+          {value ?? "—"}
+        </p>
+      </>
+    );
+
+    const className = `min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2 text-left`;
+    if (!kind || !onOpenMetricDetails) {
+      return <div className={className}>{body}</div>;
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenMetricDetails(kind)}
+        className={`${className} transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300`}
+      >
+        {body}
+      </button>
+    );
+  };
 
   return (
     <div className={gridClasses}>
@@ -760,46 +808,46 @@ function InvestExecutionStepsSummary({
               {step.detail ?? "Waiting for the worker to update this step."}
             </p>
             <div className={`mt-3 flex flex-wrap gap-2 text-xs ${toneClasses.muted}`}>
-              <div className="min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
-                <p className="text-[10px] uppercase tracking-[0.1em]">Planned</p>
-                <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                  {step.plannedOrders ?? "—"}
-                </p>
-              </div>
-              <div className="min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
-                <p className="text-[10px] uppercase tracking-[0.1em]">Processed</p>
-                <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                  {step.processedOrders ?? "—"}
-                </p>
-              </div>
-              <div className="min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
-                <p className="text-[10px] uppercase tracking-[0.1em]">Submitted</p>
-                <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                  {step.submittedOrders ?? "—"}
-                </p>
-              </div>
+              {renderMetricCard({
+                label: "Planned",
+                value: step.plannedOrders,
+                kind: getInvestStepMetricDialogKind(step.key, "planned"),
+                toneClasses,
+              })}
+              {renderMetricCard({
+                label: "Processed",
+                value: step.processedOrders,
+                kind: getInvestStepMetricDialogKind(step.key, "processed"),
+                toneClasses,
+              })}
+              {renderMetricCard({
+                label: "Submitted",
+                value: step.submittedOrders,
+                kind: getInvestStepMetricDialogKind(step.key, "submitted"),
+                toneClasses,
+              })}
             </div>
             {step.key === "sell" ? (
               <div className={`mt-3 grid gap-2 text-xs ${toneClasses.muted}`}>
-                <div className="rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.1em]">Exit rows</p>
-                  <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                    {step.eventExitRows ?? "—"}
-                  </p>
-                </div>
+                {renderMetricCard({
+                  label: "Exit rows",
+                  value: step.eventExitRows,
+                  kind: getSellInvestMetricDialogKind("event-exit-rows"),
+                  toneClasses,
+                })}
                 <div className="flex flex-wrap gap-2">
-                  <div className="min-w-[8rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
-                    <p className="text-[10px] uppercase tracking-[0.1em]">Ranking / LLM</p>
-                    <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                      {step.rankingLlmPlannedOrders ?? "—"}
-                    </p>
-                  </div>
-                  <div className="min-w-[8rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
-                    <p className="text-[10px] uppercase tracking-[0.1em]">Forced Exit</p>
-                    <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
-                      {step.forcedExitPlannedOrders ?? "—"}
-                    </p>
-                  </div>
+                  {renderMetricCard({
+                    label: "Ranking / LLM",
+                    value: step.rankingLlmPlannedOrders,
+                    kind: getSellInvestMetricDialogKind("ranking-llm"),
+                    toneClasses,
+                  })}
+                  {renderMetricCard({
+                    label: "Forced Exit",
+                    value: step.forcedExitPlannedOrders,
+                    kind: getSellInvestMetricDialogKind("forced-exit"),
+                    toneClasses,
+                  })}
                 </div>
               </div>
             ) : null}
@@ -1014,47 +1062,60 @@ function StageOneOutputDialog({
   );
 }
 
-function getInvestMetricDialogTitle(kind: InvestMetricDialogKind) {
-  if (kind === "planned") return "Stage 3 planned orders";
-  if (kind === "submitted") return "Stage 3 submitted orders";
-  return "Stage 3 decisions";
-}
-
-function getInvestMetricDialogDescription(kind: InvestMetricDialogKind) {
-  if (kind === "planned") {
-    return "Decision rows where Stage 3 created an order plan for the selected side.";
-  }
-  if (kind === "submitted") {
-    return "Decision rows where the planned order reached submitted status.";
-  }
-  return "All investment decisions recorded for this Stage 3 run.";
-}
-
-function getInvestMetricRows(state: InvestMetricDialogState) {
-  if (state.kind === "planned") {
-    return state.decisions.filter((decision) => decision.order_plan);
-  }
-  if (state.kind === "submitted") {
-    return state.decisions.filter((decision) => decision.order_plan?.status === "submitted");
-  }
-  return state.decisions;
-}
-
 function formatInvestMetricOrderStatus(decision: BullpenAutoLiveDecision) {
   if (!decision.order_plan) return "No order planned";
   return decision.order_plan.status.replaceAll("_", " ");
 }
 
+function InvestMetricSummaryCard({
+  label,
+  value,
+  onClick,
+}: {
+  label: string;
+  value: ReactNode;
+  onClick?: () => void;
+}) {
+  const classes =
+    "rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition";
+  if (!onClick) {
+    return (
+      <div className={classes}>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          {label}
+        </p>
+        <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`${classes} hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300`}
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
+    </button>
+  );
+}
+
 function InvestMetricDetailsDialog({
   state,
   onClose,
+  onSelectKind,
   onOpenEventExitInfo,
 }: {
   state: InvestMetricDialogState;
   onClose: () => void;
+  onSelectKind: (kind: InvestMetricDialogKind) => void;
   onOpenEventExitInfo?: () => void;
 }) {
-  const rows = getInvestMetricRows(state);
+  const metricDefinition = getInvestMetricDialogDefinition(state.kind);
+  const rows = getInvestMetricRows(state.kind, state.decisions);
   const decisionsCount = getInvestStageMetric(state.stage, "decisions_count", state.run.decisions_count);
   const plannedCount = getInvestStageMetric(state.stage, "orders_planned", state.run.orders_planned);
   const submittedCount = getInvestStageMetric(state.stage, "orders_submitted", state.run.orders_submitted);
@@ -1072,7 +1133,29 @@ function InvestMetricDetailsDialog({
     (typeof state.run.error_message === "string" && state.run.error_message.trim().length > 0
       ? state.run.error_message.trim()
       : null);
-  const hasPendingOrders = plannedCount > submittedCount;
+  const filteredPlannedCount = rows.filter((decision) => decision.order_plan).length;
+  const filteredProcessedCount = rows.filter((decision) =>
+    isProcessedInvestOrderPlan(decision.order_plan),
+  ).length;
+  const filteredSubmittedCount = rows.filter(
+    (decision) => decision.order_plan?.status === "submitted",
+  ).length;
+  const filteredUnsubmittedRows = rows.filter(
+    (decision) =>
+      decision.order_plan && decision.order_plan.status !== "submitted",
+  );
+  const filteredFailedRows = filteredUnsubmittedRows.filter(
+    (decision) =>
+      decision.order_plan?.status === "failed" ||
+      decision.order_plan?.status === "cancelled",
+  );
+  const filteredSkippedRows = filteredUnsubmittedRows.filter(
+    (decision) => decision.order_plan?.status === "skipped",
+  );
+  const filteredPendingRows = filteredUnsubmittedRows.filter(
+    (decision) => decision.order_plan?.status === "planned",
+  );
+  const hasPendingOrders = filteredPlannedCount > filteredSubmittedCount;
   const executionSteps = state.stage ? getInvestStageExecutionSteps(state.stage) : [];
   const progressLogEntries = getInvestProgressLogEntries({
     stage: state.stage,
@@ -1090,10 +1173,10 @@ function InvestMetricDetailsDialog({
               Stage 3 Details
             </p>
             <h2 className="text-xl font-semibold text-slate-950">
-              {getInvestMetricDialogTitle(state.kind)}
+              {metricDefinition.title}
             </h2>
             <p className="text-sm text-slate-600">
-              {getInvestMetricDialogDescription(state.kind)}
+              {metricDefinition.description}
             </p>
             <p className="text-xs text-slate-500">
               Run {state.run.id} · started {formatIstDateTime(state.run.started_at)}
@@ -1111,30 +1194,21 @@ function InvestMetricDetailsDialog({
 
         <div className="flex-1 overflow-auto px-6 py-5">
           <div className="grid gap-3 md:grid-cols-4">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Decisions
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-slate-950">
-                {decisionsCount}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Planned
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-slate-950">
-                {plannedCount}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Submitted
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-slate-950">
-                {submittedCount}
-              </p>
-            </div>
+            <InvestMetricSummaryCard
+              label="Decisions"
+              value={decisionsCount}
+              onClick={() => onSelectKind("decisions")}
+            />
+            <InvestMetricSummaryCard
+              label="Planned"
+              value={plannedCount}
+              onClick={() => onSelectKind("planned")}
+            />
+            <InvestMetricSummaryCard
+              label="Submitted"
+              value={submittedCount}
+              onClick={() => onSelectKind("submitted")}
+            />
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                 Review rows
@@ -1144,6 +1218,17 @@ function InvestMetricDetailsDialog({
                 {(candidateRows ?? 0).toLocaleString("en-IN")} candidate
               </p>
             </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Selected filter
+            </p>
+            <p className="mt-2 text-sm font-semibold text-slate-950">
+              {rows.length.toLocaleString("en-IN")} rows · {filteredPlannedCount.toLocaleString("en-IN")} planned ·{" "}
+              {filteredProcessedCount.toLocaleString("en-IN")} processed ·{" "}
+              {filteredSubmittedCount.toLocaleString("en-IN")} submitted
+            </p>
           </div>
 
           {runError ? (
@@ -1164,8 +1249,43 @@ function InvestMetricDetailsDialog({
             <div className="mt-5">
               <InvestExecutionStepsSummary
                 steps={executionSteps}
+                onOpenMetricDetails={onSelectKind}
                 onOpenEventExitInfo={onOpenEventExitInfo}
               />
+            </div>
+          ) : null}
+
+          {filteredUnsubmittedRows.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-950">
+              <p className="font-semibold">Orders still not submitted</p>
+              <p className="mt-1">
+                {filteredUnsubmittedRows.length.toLocaleString("en-IN")} of{" "}
+                {filteredPlannedCount.toLocaleString("en-IN")} filtered orders are still not
+                submitted. Failed {filteredFailedRows.length.toLocaleString("en-IN")} · Skipped{" "}
+                {filteredSkippedRows.length.toLocaleString("en-IN")} · Planned{" "}
+                {filteredPendingRows.length.toLocaleString("en-IN")}
+              </p>
+              <div className="mt-3 space-y-2">
+                {filteredUnsubmittedRows.map((decision) => (
+                  <div
+                    key={decision.id}
+                    className="rounded-xl border border-amber-300/70 bg-white/70 px-3 py-2.5"
+                  >
+                    <p className="font-semibold">
+                      {decision.market_title} ·{" "}
+                      <span className="capitalize">
+                        {decision.order_plan?.status.replaceAll("_", " ")}
+                      </span>
+                    </p>
+                    <div className="mt-1 leading-5 text-amber-950">
+                      <ErrorCodeWithDetails
+                        detail={decision.order_plan?.detail ?? "No execution detail was recorded."}
+                        detailClassName="text-amber-900"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -2409,6 +2529,7 @@ export function BullpenAutoRunScheduleCard({
                       <InvestExecutionStepsSummary
                         steps={displayedInvestSteps}
                         compact
+                        onOpenMetricDetails={workflowRun ? openInvestMetricDialog : undefined}
                         onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
                       />
                     </div>
@@ -2631,6 +2752,7 @@ export function BullpenAutoRunScheduleCard({
           <InvestMetricDetailsDialog
             state={investMetricDialog}
             onClose={() => setInvestMetricDialog(null)}
+            onSelectKind={openInvestMetricDialog}
             onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
           />
         ) : null}

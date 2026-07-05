@@ -1536,6 +1536,35 @@ async def test_bullpen_execute_retries_multiple_moving_buy_fill_prices(monkeypat
 
 
 @pytest.mark.anyio
+async def test_bullpen_sell_limit_retries_when_fill_price_falls_below_minimum(
+    monkeypatch,
+):
+    calls = []
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        calls.append(args)
+        if len(calls) == 1:
+            raise BullpenCommandError(
+                '{"error":"Fill price $0.2000 is below minimum acceptable price $0.2050. Use a limit order for precise price control, or decrease --min-price."}'
+            )
+        return "{}"
+
+    monkeypatch.delenv("BULLPEN_SELL_RETRY_PRICE_BUFFER", raising=False)
+    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
+
+    await BullpenLiveExecutor().sell_limit(
+        market_id="market-1",
+        outcome="No",
+        shares=7.5,
+        min_price=0.205,
+        max_reprice_attempts=2,
+    )
+
+    assert calls[0][calls[0].index("--min-price") + 1] == "0.2050"
+    assert calls[1][calls[1].index("--min-price") + 1] == "0.1999"
+
+
+@pytest.mark.anyio
 async def test_bullpen_execute_wraps_collateral_then_retries_buy(monkeypatch):
     calls = []
 

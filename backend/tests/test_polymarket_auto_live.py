@@ -1191,6 +1191,7 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
     }
     progress_runs: list[BullpenAutoLiveRun] = []
     executor_calls: list[str] = []
+    sell_limit_kwargs: list[dict[str, object]] = []
 
     async def fake_read_console_wallet_positions():
         return live_positions
@@ -1223,8 +1224,9 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
             executor_calls.append("buy_limit")
             return "buy-limit-submitted"
 
-        async def sell_limit(self, **_kwargs):
+        async def sell_limit(self, **kwargs):
             executor_calls.append("sell_limit")
+            sell_limit_kwargs.append(kwargs)
             return "sell-limit-submitted"
 
     monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
@@ -1310,6 +1312,12 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
     ]
     assert any(stage.outputs.get("execution_step_key") == "sell" for stage in running_invest_stages)
     assert any(stage.outputs.get("execution_step_key") == "buy" for stage in running_invest_stages)
+    latest_running_invest_stage = running_invest_stages[-1]
+    execution_steps = latest_running_invest_stage.outputs["execution_steps"]
+    assert isinstance(execution_steps, list)
+    assert execution_steps[0]["status"] == "completed"
+    assert execution_steps[1]["status"] == "completed"
+    assert sell_limit_kwargs[0]["max_reprice_attempts"] == 2
 
     invest_stage = next(
         stage

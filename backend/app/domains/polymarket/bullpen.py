@@ -56,10 +56,16 @@ DEFAULT_BULLPEN_BUY_MIN_PRICE_BUFFER = 0.02
 DEFAULT_BULLPEN_BUY_RETRY_PRICE_BUFFER = 0.02
 DEFAULT_BULLPEN_BUY_MAX_PRICE_RETRIES = 3
 DEFAULT_BULLPEN_SELL_MIN_PRICE_BUFFER = 0.05
+DEFAULT_BULLPEN_SELL_RETRY_PRICE_BUFFER = 0.0001
+DEFAULT_BULLPEN_SELL_MIN_PRICE_RETRIES = 3
 MIN_POLYMARKET_LIMIT_PRICE = 0.01
 MAX_POLYMARKET_LIMIT_PRICE = 0.99
 BULLPEN_MAX_PRICE_ERROR_PATTERN = re.compile(
     r"Fill price \$?(?P<fill_price>\d+(?:\.\d+)?) exceeds maximum acceptable price \$?(?P<max_price>\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+BULLPEN_MIN_PRICE_ERROR_PATTERN = re.compile(
+    r"Fill price \$?(?P<fill_price>\d+(?:\.\d+)?) is below minimum acceptable price \$?(?P<min_price>\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
 BULLPEN_INSUFFICIENT_COLLATERAL_PATTERN = re.compile(
@@ -208,6 +214,41 @@ def sell_min_price_for_execution(price: float) -> float:
         ),
     )
     return _clamp_limit_price(price - buffer)
+
+
+def sell_retry_min_price_for_execution(fill_price: float) -> float:
+    retry_buffer = max(
+        0.0,
+        _float_from_env(
+            "BULLPEN_SELL_RETRY_PRICE_BUFFER",
+            DEFAULT_BULLPEN_SELL_RETRY_PRICE_BUFFER,
+        ),
+    )
+    return _clamp_limit_price(fill_price - retry_buffer)
+
+
+def sell_min_price_retry_attempts(max_reprice_attempts: int | None = None) -> int:
+    if max_reprice_attempts is not None:
+        return max(1, int(max_reprice_attempts) + 1)
+    return max(
+        1,
+        int(
+            _float_from_env(
+                "BULLPEN_SELL_MIN_PRICE_RETRIES",
+                DEFAULT_BULLPEN_SELL_MIN_PRICE_RETRIES,
+            )
+        ),
+    )
+
+
+def extract_bullpen_sell_fill_price_error(message: str) -> float | None:
+    match = BULLPEN_MIN_PRICE_ERROR_PATTERN.search(message)
+    if not match:
+        return None
+    try:
+        return float(match.group("fill_price"))
+    except (TypeError, ValueError):
+        return None
 
 
 def bullpen_candidate_paths() -> list[str]:
@@ -506,6 +547,7 @@ class BullpenLiveExecutor:
         outcome: str,
         shares: float,
         min_price: float,
+        max_reprice_attempts: int | None = None,
     ) -> str:
         args = [
             "polymarket",
@@ -520,8 +562,28 @@ class BullpenLiveExecutor:
             "--output",
             "json",
         ]
-        stdout = await run_bullpen(args, timeout_seconds=45, read_only=False)
-        return redact_secrets(stdout)
+        attempts_remaining = sell_min_price_retry_attempts(max_reprice_attempts)
+        current_args = args
+        current_min_price = _clamp_limit_price(min_price)
+        while True:
+            try:
+                stdout = await run_bullpen(
+                    current_args, timeout_seconds=45, read_only=False
+                )
+                return redact_secrets(stdout)
+            except BullpenCommandError as exc:
+                fill_price = extract_bullpen_sell_fill_price_error(str(exc))
+                if fill_price is None or attempts_remaining <= 1:
+                    raise
+                retry_min_price = sell_retry_min_price_for_execution(fill_price)
+                if retry_min_price >= current_min_price:
+                    raise
+                attempts_remaining -= 1
+                current_min_price = retry_min_price
+                retry_args = [*current_args]
+                min_price_index = retry_args.index("--min-price") + 1
+                retry_args[min_price_index] = f"{retry_min_price:.4f}"
+                current_args = retry_args
 
     async def _execute_buy_with_limit(
         self,
