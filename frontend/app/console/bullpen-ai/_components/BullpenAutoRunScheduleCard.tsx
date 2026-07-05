@@ -28,6 +28,10 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  getBullpenAmountToBeInvestedBreakdown,
+  getBullpenReturnsPerDayBreakdown,
+} from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
 import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
@@ -46,6 +50,7 @@ import {
 } from "./bullpenAutoRunProgress";
 import {
   buildBullpenStage3InvestPreviewSteps,
+  NO_STAGE2_QUALIFIED_EVENTS_REASON,
   buildBullpenStage3OnlyInvestExecutionPlan,
   type BullpenStage3AlreadyInvestedRecord,
   selectBullpenStage3OnlyInvestSource,
@@ -106,10 +111,18 @@ type ScanCandidateDialogMode = "fresh-opportunities" | "active-positions";
 type ScanCandidateDialogState = {
   mode: ScanCandidateDialogMode;
   scanCompletedAt: string | null;
-  candidates: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["scanCandidates"];
+  candidates: ScanCandidateDialogCandidate[];
   activePositions: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["activePositionsFound"];
   activePositionCount: number;
 };
+
+type ScanCandidateDialogCandidate =
+  ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["scanCandidates"][number] & {
+    llmYesOdds: number | null;
+    llmNoOdds: number | null;
+    returnsPerDay: number | null;
+    amountToBeInvested: number | null;
+  };
 
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
 const DEFAULT_CONSOLE_ORDER_USD = 5;
@@ -151,9 +164,22 @@ function formatOddsPercent(value: number | null) {
   return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
 }
 
+function formatReturnsPerDay(value: number | null) {
+  if (value === null) return "—";
+  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+}
+
 function formatMoney(value: number | null) {
   if (value === null) return "—";
   return `$${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+function formatInvestAmount(value: number | null) {
+  if (value === null) return "—";
+  return value.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function formatEditableAmount(value: number) {
@@ -193,6 +219,133 @@ function readStageOutputString(value: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function normalizeMatchKey(value: string | null | undefined) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function findRunStage(
+  run: BullpenAutoLiveRun | null,
+  workflowStageKey: "scan" | "llm" | "invest",
+  fallbackStageNumber: number,
+) {
+  if (!run) return null;
+  return (
+    run.stage_results.find(
+      (stage) => readStageOutputString(stage.outputs?.workflow_stage_key) === workflowStageKey,
+    ) ??
+    run.stage_results.find((stage) => stage.stage_number === fallbackStageNumber) ??
+    null
+  );
+}
+
+function calculateDaysUntilClose(closeTime: string | null) {
+  if (!closeTime) return null;
+  const closeDate = new Date(closeTime);
+  if (Number.isNaN(closeDate.getTime())) return null;
+  return Number(
+    ((closeDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)).toFixed(1),
+  );
+}
+
+function buildScanCandidateDialogRows({
+  candidates,
+  run,
+}: {
+  candidates: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["scanCandidates"];
+  run: BullpenAutoLiveRun | null;
+}): ScanCandidateDialogCandidate[] {
+  const stage2 = findRunStage(run, "llm", 2);
+  const rawReviewedCandidates = stage2?.outputs?.llm_reviewed_candidates;
+  const reviewedCandidates = Array.isArray(rawReviewedCandidates)
+    ? rawReviewedCandidates.filter(isRecord)
+    : [];
+  const reviewedCandidateByLookupKey = new Map<
+    string,
+    {
+      llmYesOdds: number | null;
+      llmNoOdds: number | null;
+      returnsPerDay: number | null;
+      amountToBeInvested: number | null;
+    }
+  >();
+
+  for (const reviewedCandidate of reviewedCandidates) {
+    const llmYesOdds =
+      readStageOutputNumber(reviewedCandidate.fair_yes_probability_pct) ??
+      readStageOutputNumber(reviewedCandidate.llm_yes_odds);
+    const llmNoOdds =
+      readStageOutputNumber(reviewedCandidate.fair_no_probability_pct) ??
+      readStageOutputNumber(reviewedCandidate.llm_no_odds);
+    const returnsPerDay = readStageOutputNumber(reviewedCandidate.returns_per_day);
+    const amountToBeInvested =
+      readStageOutputNumber(reviewedCandidate.amount_to_be_invested) ??
+      getBullpenAmountToBeInvestedBreakdown({
+        llmYesOdds,
+        llmNoOdds,
+        returnsPerDay,
+      }).result;
+    const lookupValue = {
+      llmYesOdds,
+      llmNoOdds,
+      returnsPerDay,
+      amountToBeInvested,
+    };
+
+    [
+      normalizeMatchKey(readStageOutputString(reviewedCandidate.market_id)),
+      normalizeMatchKey(readStageOutputString(reviewedCandidate.slug)),
+      normalizeMatchKey(readStageOutputString(reviewedCandidate.market_url)),
+      normalizeMatchKey(readStageOutputString(reviewedCandidate.question)),
+    ]
+      .filter((key): key is string => Boolean(key))
+      .forEach((key) => {
+        if (!reviewedCandidateByLookupKey.has(key)) {
+          reviewedCandidateByLookupKey.set(key, lookupValue);
+        }
+      });
+  }
+
+  return candidates.map((candidate) => {
+    const matchedReviewedCandidate =
+      [
+        normalizeMatchKey(candidate.marketId),
+        normalizeMatchKey(candidate.slug),
+        normalizeMatchKey(candidate.marketUrl),
+        normalizeMatchKey(candidate.question),
+      ]
+        .map((key) => (key ? reviewedCandidateByLookupKey.get(key) ?? null : null))
+        .find((item) => item !== null) ?? null;
+    const llmYesOdds = matchedReviewedCandidate?.llmYesOdds ?? null;
+    const llmNoOdds = matchedReviewedCandidate?.llmNoOdds ?? null;
+    const derivedReturnsPerDay =
+      matchedReviewedCandidate?.returnsPerDay ??
+      getBullpenReturnsPerDayBreakdown({
+        yesOdds: candidate.currentYesOdds,
+        noOdds: candidate.currentNoOdds,
+        llmYesOdds,
+        llmNoOdds,
+        daysUntilClose: calculateDaysUntilClose(candidate.closeTime),
+      }).result;
+    const amountToBeInvested =
+      matchedReviewedCandidate?.amountToBeInvested ??
+      getBullpenAmountToBeInvestedBreakdown({
+        llmYesOdds,
+        llmNoOdds,
+        returnsPerDay: derivedReturnsPerDay,
+      }).result;
+
+    return {
+      ...candidate,
+      llmYesOdds,
+      llmNoOdds,
+      returnsPerDay: derivedReturnsPerDay,
+      amountToBeInvested,
+    };
+  });
 }
 
 function isInvestMetricDecisionRow(value: unknown): value is BullpenAutoLiveDecision {
@@ -332,6 +485,7 @@ type InvestExecutionStepView = {
   stepTotal: number;
   label: string;
   status: InvestExecutionStepStatus;
+  displayStatusLabel?: string;
   detail: string | null;
   plannedOrders: number | null;
   processedOrders: number | null;
@@ -396,6 +550,7 @@ function getInvestStageExecutionSteps(
           plannedOrders,
           processedOrders,
         }),
+        displayStatusLabel: undefined,
         detail: readStageOutputString(step.detail),
         plannedOrders,
         processedOrders,
@@ -793,11 +948,13 @@ function InvestExecutionStepsSummary({
   compact = false,
   onOpenMetricDetails,
   onOpenEventExitInfo,
+  onOpenInvestEligibilityInfo,
 }: {
   steps: InvestExecutionStepView[];
   compact?: boolean;
   onOpenMetricDetails?: (kind: InvestMetricDialogKind) => void;
   onOpenEventExitInfo?: () => void;
+  onOpenInvestEligibilityInfo?: () => void;
 }) {
   if (steps.length === 0) return null;
 
@@ -842,7 +999,10 @@ function InvestExecutionStepsSummary({
   return (
     <div className={gridClasses}>
       {steps.map((step) => {
-        const toneClasses = getInvestExecutionStepClasses(step.status);
+        const renderedStatus = step.status;
+        const renderedStatusLabel =
+          step.displayStatusLabel ?? getInvestExecutionStepStatusLabel(renderedStatus);
+        const toneClasses = getInvestExecutionStepClasses(renderedStatus);
         return (
           <div
             key={step.key}
@@ -868,12 +1028,23 @@ function InvestExecutionStepsSummary({
                       <Info className="h-3.5 w-3.5" />
                     </button>
                   ) : null}
+                  {step.key === "buy" && onOpenInvestEligibilityInfo ? (
+                    <button
+                      type="button"
+                      onClick={onOpenInvestEligibilityInfo}
+                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/80 bg-white/70 ${toneClasses.text}`}
+                      aria-label="Explain Stage 2 planned-order eligibility"
+                      title="Explain Stage 2 planned-order eligibility"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
                 </div>
               </div>
               <span
                 className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
               >
-                {getInvestExecutionStepStatusLabel(step.status)}
+                {renderedStatusLabel}
               </span>
             </div>
             <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
@@ -1119,10 +1290,18 @@ function StageOneOutputDialog({
                           <td className="px-4 py-3 align-top font-semibold text-rose-700">
                             {formatOddsPercent(candidate.currentNoOdds)}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-500">—</td>
-                          <td className="px-4 py-3 align-top text-slate-500">—</td>
-                          <td className="px-4 py-3 align-top text-slate-500">—</td>
-                          <td className="px-4 py-3 align-top text-slate-500">—</td>
+                          <td className="px-4 py-3 align-top font-semibold text-violet-700">
+                            {formatOddsPercent(candidate.llmYesOdds)}
+                          </td>
+                          <td className="px-4 py-3 align-top font-semibold text-fuchsia-700">
+                            {formatOddsPercent(candidate.llmNoOdds)}
+                          </td>
+                          <td className="px-4 py-3 align-top font-semibold text-slate-700">
+                            {formatReturnsPerDay(candidate.returnsPerDay)}
+                          </td>
+                          <td className="px-4 py-3 align-top font-semibold text-slate-700">
+                            {formatInvestAmount(candidate.amountToBeInvested)}
+                          </td>
                           <td className="px-4 py-3 align-top text-slate-700">
                             {formatMoney(candidate.volumeUsd)}
                           </td>
@@ -1193,11 +1372,13 @@ function InvestMetricDetailsDialog({
   onClose,
   onSelectKind,
   onOpenEventExitInfo,
+  onOpenInvestEligibilityInfo,
 }: {
   state: InvestMetricDialogState;
   onClose: () => void;
   onSelectKind: (kind: InvestMetricDialogKind) => void;
   onOpenEventExitInfo?: () => void;
+  onOpenInvestEligibilityInfo?: () => void;
 }) {
   const metricDefinition = getInvestMetricDialogDefinition(state.kind);
   const rows = getInvestMetricRows(state.kind, state.decisions);
@@ -1336,6 +1517,7 @@ function InvestMetricDetailsDialog({
                 steps={executionSteps}
                 onOpenMetricDetails={onSelectKind}
                 onOpenEventExitInfo={onOpenEventExitInfo}
+                onOpenInvestEligibilityInfo={onOpenInvestEligibilityInfo}
               />
             </div>
           ) : null}
@@ -1628,6 +1810,8 @@ export function BullpenAutoRunScheduleCard({
     useState<InvestMetricDialogState | null>(null);
   const [isScheduleInfoDialogOpen, setIsScheduleInfoDialogOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
+    useState(false);
+  const [isInvestEligibilityInfoDialogOpen, setIsInvestEligibilityInfoDialogOpen] =
     useState(false);
   const [consoleOrderInput, setConsoleOrderInput] = useState(() =>
     formatEditableAmount(DEFAULT_CONSOLE_ORDER_USD),
@@ -2020,7 +2204,10 @@ export function BullpenAutoRunScheduleCard({
     setScanCandidateDialog({
       mode,
       scanCompletedAt: stage.timerCompletedAt,
-      candidates: stage.scanCandidates,
+      candidates: buildScanCandidateDialogRows({
+        candidates: stage.scanCandidates,
+        run: workflowRun,
+      }),
       activePositions: stage.activePositionsFound,
       activePositionCount:
         readStageOutputNumber(stage.outputs.active_wallet_positions) ??
@@ -2529,9 +2716,6 @@ export function BullpenAutoRunScheduleCard({
           <div className="mt-3 grid gap-3 lg:grid-cols-3">
             {workflowView.stages.map((stage) => {
               const immediateSuccess = getInvestStageImmediateSuccess(stage);
-              const toneClasses = getWorkflowToneClasses(
-                immediateSuccess ? "green" : stage.tone,
-              );
               const canOpenInputs =
                 (stage.key === "llm" || stage.key === "invest") &&
                 Object.keys(stage.inputs).length > 0;
@@ -2548,16 +2732,42 @@ export function BullpenAutoRunScheduleCard({
                 investExecutionSteps.length > 0
                   ? investExecutionSteps
                   : investPreviewSteps;
+              const investPreviewFinished =
+                stage.key === "invest" &&
+                investExecutionSteps.length === 0 &&
+                displayedInvestSteps.length > 0 &&
+                displayedInvestSteps.every((step) => step.status === "completed");
+              const investPreviewNoQualifiedCandidates =
+                investPreviewFinished &&
+                investOnlyPlan.readyCandidateCount === 0 &&
+                investOnlyPlan.blockedReason === NO_STAGE2_QUALIFIED_EVENTS_REASON;
+              const toneClasses = getWorkflowToneClasses(
+                immediateSuccess || investPreviewFinished ? "green" : stage.tone,
+              );
               const investExecutionStatus = getInvestStageExecutionStatus(stage);
               const stageStatusLabel = immediateSuccess
                 ? "Finished"
+                : investPreviewFinished
+                  ? "Finished"
                 : stage.state === "current"
                   ? "Working"
                   : stage.state === "finished"
                     ? "Finished"
                     : "In Queue";
-              const stageProgressPercent = immediateSuccess ? 100 : stage.progressPercent;
-              const showStageSpinner = stage.isCurrent && !immediateSuccess;
+              const stageProgressPercent =
+                immediateSuccess || investPreviewFinished ? 100 : stage.progressPercent;
+              const stageProgressLabel =
+                investPreviewFinished && stage.key === "invest"
+                  ? "Finished"
+                  : stage.progressLabel;
+              const stageDetail =
+                investPreviewFinished && stage.key === "invest"
+                  ? investPreviewNoQualifiedCandidates
+                    ? "Stage 3 had nothing to process: no Event Exits were pending and no Stage 2-qualified events were available for the planned queue."
+                    : "Stage 3 had nothing new to process: no Event Exits were pending and the Stage 2-qualified events were already invested."
+                  : stage.detail;
+              const showStageSpinner =
+                stage.isCurrent && !immediateSuccess && !investPreviewFinished;
 
               return (
                 <div
@@ -2692,6 +2902,9 @@ export function BullpenAutoRunScheduleCard({
                         compact
                         onOpenMetricDetails={workflowRun ? openInvestMetricDialog : undefined}
                         onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
+                        onOpenInvestEligibilityInfo={() =>
+                          setIsInvestEligibilityInfoDialogOpen(true)
+                        }
                       />
                     </div>
                   ) : null}
@@ -2809,11 +3022,11 @@ export function BullpenAutoRunScheduleCard({
                         }}
                         className={`text-left text-xs font-semibold underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300 ${toneClasses.text}`}
                       >
-                        {stage.progressLabel}
+                        {stageProgressLabel}
                       </button>
                     ) : (
                       <p className={`text-xs font-semibold ${toneClasses.text}`}>
-                        {stage.progressLabel}
+                        {stageProgressLabel}
                       </p>
                     )}
                     {showStageSpinner ? (
@@ -2823,7 +3036,7 @@ export function BullpenAutoRunScheduleCard({
 
                   <div className="mt-2 flex items-end justify-between gap-3">
                     <p className={`text-xs leading-5 ${toneClasses.muted}`}>
-                      {stage.detail}
+                      {stageDetail}
                     </p>
                     {stage.key === "scan" || Object.keys(stage.outputs).length > 0 ? (
                       <button
@@ -2907,6 +3120,75 @@ export function BullpenAutoRunScheduleCard({
           />
         ) : null}
 
+        {isInvestEligibilityInfoDialogOpen ? (
+          <div
+            className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setIsInvestEligibilityInfoDialogOpen(false);
+              }
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="bullpen-stage3-eligibility-title"
+              className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]"
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-600">
+                    Stage 3 Planned Queue
+                  </p>
+                  <h2
+                    id="bullpen-stage3-eligibility-title"
+                    className="mt-2 text-xl font-semibold text-slate-950"
+                  >
+                    How Stage 2 events become eligible to invest
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsInvestEligibilityInfoDialogOpen(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                  aria-label="Close planned queue eligibility details"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="space-y-4 px-6 py-5 text-sm leading-6 text-slate-700">
+                <p>
+                  Stage 3 only plans buy orders for Stage 2 candidate events that have
+                  already passed the qualification and ranking checks.
+                </p>
+                <ul className="list-disc space-y-2 pl-5">
+                  <li>
+                    Stage 2 must first keep the event <span className="font-semibold">qualified</span>:
+                    rules parsing cannot be blocked, a strong LLM side must exist, returns/day must
+                    be computable, LLM disagreement cannot be High, and adjudication cannot be required.
+                  </li>
+                  <li>
+                    Those qualified candidates are then ranked together with active Bullpen positions
+                    by <span className="font-semibold">returns/day</span>.
+                  </li>
+                  <li>
+                    Only candidates that land inside the fixed <span className="font-semibold">top-10
+                    investable table</span> are added to Stage 3&apos;s planned buy queue.
+                  </li>
+                  <li>
+                    Step 1 Event Exits run first to free capital, and any buy still depends on live
+                    execution guardrails before submission.
+                  </li>
+                  <li>
+                    In invest-only reuse mode, markets that are already in the Bullpen wallet or were
+                    already submitted from the saved run are skipped instead of being re-planned.
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {scanCandidateDialog ? (
           <StageOneOutputDialog
             state={scanCandidateDialog}
@@ -2920,6 +3202,7 @@ export function BullpenAutoRunScheduleCard({
             onClose={() => setInvestMetricDialog(null)}
             onSelectKind={openInvestMetricDialog}
             onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
+            onOpenInvestEligibilityInfo={() => setIsInvestEligibilityInfoDialogOpen(true)}
           />
         ) : null}
 

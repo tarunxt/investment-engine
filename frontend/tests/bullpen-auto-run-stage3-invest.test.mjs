@@ -262,6 +262,11 @@ test("Stage 3 invest plan reuses only Stage 2-qualified candidate rows", async (
     theme: "Politics",
     current_yes_odds: 43,
     current_no_odds: 57,
+    volume_usd: null,
+    liquidity_usd: null,
+    best_bid_cents: null,
+    best_ask_cents: null,
+    spread_cents: null,
     llm_yes_odds: 18,
     llm_no_odds: 82,
     returns_per_day: 1.7,
@@ -273,6 +278,10 @@ test("Stage 3 invest plan reuses only Stage 2-qualified candidate rows", async (
     evidence_status: "Strong",
     event_state: "Watching",
     rules: "Official source resolves the event. | Deadline ET: July 7, 2026 8:00 PM ET",
+    market_context: null,
+    resolution_source: null,
+    event_description: null,
+    preflight_evidence_block: null,
     selected: true,
     llm_outputs: [
       {
@@ -585,6 +594,12 @@ test("Stage 3 schedule card keeps the Invest button and reuse copy inside the ca
   assert.match(source, /skips the Bullpen rescan plus LLM rerun/);
   assert.match(source, /already invested and will be skipped/);
   assert.match(source, /CheckCircle2/);
+  assert.match(source, /How Stage 2 events become eligible to invest/);
+  assert.match(source, /Stage 3 only plans buy orders/);
+  assert.match(source, /formatOddsPercent\(candidate\.llmYesOdds\)/);
+  assert.match(source, /formatOddsPercent\(candidate\.llmNoOdds\)/);
+  assert.match(source, /formatReturnsPerDay\(candidate\.returnsPerDay\)/);
+  assert.match(source, /formatInvestAmount\(candidate\.amountToBeInvested\)/);
 });
 
 test("Stage 3 preview steps summarize the sell-first then invest flow before execution starts", async () => {
@@ -631,4 +646,37 @@ test("Stage 3 preview steps summarize the sell-first then invest flow before exe
   assert.equal(previewSteps[1].plannedOrders, 2);
   assert.match(previewSteps[0].detail, /capital-aware forced-exit/i);
   assert.match(previewSteps[1].detail, /Stage 2-qualified/);
+});
+
+test("Stage 3 preview steps mark the no-work case as finished instead of pending", async () => {
+  const {
+    buildBullpenStage3InvestPreviewSteps,
+    NO_STAGE2_QUALIFIED_EVENTS_REASON,
+  } = await loadStage3InvestModule();
+
+  const previewSteps = buildBullpenStage3InvestPreviewSteps({
+    request: null,
+    qualifiedCandidateCount: 0,
+    readyCandidateCount: 0,
+    alreadyInvestedCandidateCount: 0,
+    alreadyInvestedMarketIds: [],
+    alreadyInvestedRecords: [],
+    candidatePreviews: [],
+    blockedReason: NO_STAGE2_QUALIFIED_EVENTS_REASON,
+  });
+
+  assert.equal(previewSteps.length, 2);
+  assert.deepEqual(
+    previewSteps.map((step) => ({
+      key: step.key,
+      status: step.status,
+      displayStatusLabel: step.displayStatusLabel ?? null,
+    })),
+    [
+      { key: "sell", status: "completed", displayStatusLabel: "N/A" },
+      { key: "buy", status: "completed", displayStatusLabel: null },
+    ],
+  );
+  assert.match(previewSteps[0].detail, /No executable Step 1 Event Exits were needed/i);
+  assert.match(previewSteps[1].detail, /planned queue/i);
 });

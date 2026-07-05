@@ -13,6 +13,9 @@ export type BullpenStage3OnlyInvestPlan = {
   blockedReason: string | null;
 };
 
+export const NO_STAGE2_QUALIFIED_EVENTS_REASON =
+  "No Stage 2-qualified events are available to invest yet.";
+
 export type BullpenStage3OnlyInvestSource = {
   run: BullpenAutoLiveRun | null;
   plan: BullpenStage3OnlyInvestPlan;
@@ -49,7 +52,10 @@ export type BullpenStage3OnlyInvestExecutionPlan = {
   blockedReason: string | null;
 };
 
-export type BullpenStage3InvestPreviewStepStatus = "pending" | "blocked";
+export type BullpenStage3InvestPreviewStepStatus =
+  | "pending"
+  | "blocked"
+  | "completed";
 
 export type BullpenStage3InvestPreviewStep = {
   key: "sell" | "buy";
@@ -57,6 +63,7 @@ export type BullpenStage3InvestPreviewStep = {
   stepTotal: number;
   label: string;
   status: BullpenStage3InvestPreviewStepStatus;
+  displayStatusLabel?: string;
   detail: string;
   plannedOrders: number | null;
   processedOrders: number | null;
@@ -284,7 +291,7 @@ export function buildBullpenStage3OnlyInvestPlan(
     return {
       request: null,
       qualifiedCandidateCount: 0,
-      blockedReason: "No Stage 2-qualified events are available to invest yet.",
+      blockedReason: NO_STAGE2_QUALIFIED_EVENTS_REASON,
     };
   }
 
@@ -530,15 +537,33 @@ export function buildBullpenStage3InvestPreviewSteps(
 ): BullpenStage3InvestPreviewStep[] {
   const readyLabel =
     plan.readyCandidateCount === 1 ? "event is" : "events are";
+  const noQualifiedCandidates =
+    plan.readyCandidateCount === 0 &&
+    plan.blockedReason === NO_STAGE2_QUALIFIED_EVENTS_REASON;
+  const onlyAlreadyInvestedCandidates =
+    plan.readyCandidateCount === 0 &&
+    plan.alreadyInvestedCandidateCount > 0 &&
+    plan.blockedReason === null;
   const sellDetail =
-    "Stage 3 first evaluates Event Exits, combining the existing ranking / LLM exit logic with the new capital-aware forced-exit safety checks.";
+    noQualifiedCandidates || onlyAlreadyInvestedCandidates
+      ? "No executable Step 1 Event Exits were needed."
+      : "Stage 3 first evaluates Event Exits, combining the existing ranking / LLM exit logic with the new capital-aware forced-exit safety checks.";
+  const sellStatus: BullpenStage3InvestPreviewStepStatus =
+    noQualifiedCandidates || onlyAlreadyInvestedCandidates ? "completed" : "pending";
   const buyStatus: BullpenStage3InvestPreviewStepStatus =
-    plan.blockedReason && plan.readyCandidateCount === 0 ? "blocked" : "pending";
-  const buyDetail =
-    plan.blockedReason ??
-    (plan.readyCandidateCount > 0
-      ? `${plan.readyCandidateCount} Stage 2-qualified ${readyLabel} ready for the invest-only pass after Step 1 clears.`
-      : "Stage 3 will invest the planned orders after Step 1 clears.");
+    noQualifiedCandidates || onlyAlreadyInvestedCandidates
+      ? "completed"
+      : plan.blockedReason && plan.readyCandidateCount === 0
+        ? "blocked"
+        : "pending";
+  const buyDetail = noQualifiedCandidates
+    ? "No Stage 2-qualified events were available for the planned queue."
+    : onlyAlreadyInvestedCandidates
+      ? "All Stage 2-qualified events were already invested, so no new planned orders were needed."
+      : plan.blockedReason ??
+        (plan.readyCandidateCount > 0
+          ? `${plan.readyCandidateCount} Stage 2-qualified ${readyLabel} ready for the invest-only pass after Step 1 clears.`
+          : "Stage 3 will invest the planned orders after Step 1 clears.");
 
   return [
     {
@@ -546,11 +571,12 @@ export function buildBullpenStage3InvestPreviewSteps(
       stepNumber: 1,
       stepTotal: 2,
       label: "Event Exits",
-      status: "pending",
+      status: sellStatus,
+      displayStatusLabel: sellStatus === "completed" ? "N/A" : undefined,
       detail: sellDetail,
-      plannedOrders: null,
-      processedOrders: null,
-      submittedOrders: null,
+      plannedOrders: sellStatus === "completed" ? 0 : null,
+      processedOrders: sellStatus === "completed" ? 0 : null,
+      submittedOrders: sellStatus === "completed" ? 0 : null,
     },
     {
       key: "buy",
