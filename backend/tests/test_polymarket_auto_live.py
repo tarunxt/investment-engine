@@ -1330,6 +1330,169 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
 
 
 @pytest.mark.anyio
+async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is_not_submitted(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    active_market = _market(
+        question="Will the active position fail to exit first?",
+        slug="active-position-failed-exit",
+        current_yes_odds=21,
+        current_no_odds=79,
+    )
+    candidate_market = _market(
+        question="Will the replacement position still buy second?",
+        slug="candidate-market-after-failed-exit",
+        current_yes_odds=16,
+        current_no_odds=84,
+    )
+    live_positions = [
+        _console_wallet_position(
+            slug=active_market.slug,
+            market_title=active_market.question,
+            current_price_cents=79,
+            exposure_usd=6.0,
+            shares=7.5,
+            side="NO",
+        )
+    ]
+    market_lookup = {
+        active_market.slug: active_market,
+        candidate_market.slug: candidate_market,
+    }
+    executor_calls: list[str] = []
+
+    async def fake_read_console_wallet_positions():
+        return live_positions
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="Bullpen console",
+            source_url="https://example.com/bullpen",
+            accepted=[active_market, candidate_market],
+            rejected=[],
+            total_candidates=2,
+        )
+
+    async def fake_refresh_live_controls(*, user_id: int):
+        assert user_id == 7
+        return _fake_live_controls()
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    class RecordingExecutor:
+        async def buy_limit(self, **_kwargs):
+            executor_calls.append("buy_limit")
+            return "buy-limit-submitted"
+
+        async def sell_limit(self, **_kwargs):
+            executor_calls.append("sell_limit")
+            raise RuntimeError("Bullpen rejected the Event Exit sell order.")
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.CONSOLE_RANKED_EVENT_LIMIT",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.position_returns_per_day",
+        lambda position, now: 1.0 if position.slug == active_market.slug else 0.5,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda market, now: 9.0 if market.slug == candidate_market.slug else 0.5,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_live_controls",
+        fake_refresh_live_controls,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.bullpen_module.BullpenLiveExecutor",
+        lambda: RecordingExecutor(),
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=False,
+            allow_live_execution=True,
+            require_manual_confirmation=False,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(dry_run=False),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    assert executor_calls == ["sell_limit", "buy_limit"]
+    assert result.run.status == "failed"
+    assert result.run.orders_planned == 2
+    assert result.run.orders_submitted == 1
+    assert (
+        result.run.summary
+        == "Live execution submitted 1 of 2 planned orders. The Event Exit order for "
+        "Will the active position fail to exit first? was not submitted: Bullpen rejected the Event Exit sell order."
+    )
+    assert result.state.last_error == result.run.summary
+
+    invest_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+    assert invest_stage.status == "fail"
+    assert invest_stage.reason == result.run.summary
+    assert invest_stage.outputs["orders_unsubmitted"] == 1
+    assert invest_stage.outputs["sell_orders_unsubmitted"] == 1
+    assert invest_stage.outputs["buy_orders_unsubmitted"] == 0
+    assert (
+        invest_stage.outputs["execution_failure_message"] == result.run.summary
+    )
+
+
+@pytest.mark.anyio
 async def test_console_profile_reviews_all_stage1_events_before_building_ranked_invest_table(
     monkeypatch,
 ):

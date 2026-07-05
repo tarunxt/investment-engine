@@ -602,6 +602,87 @@ def _simulation_reason(settings: BullpenAutoLiveSettings) -> str:
     return "Live execution is not armed."
 
 
+def _decision_stage_result(
+    decision: BullpenAutoLiveDecision,
+    stage_number: int,
+) -> BullpenAutoLiveStageResult | None:
+    return next(
+        (stage for stage in reversed(decision.stage_results) if stage.stage_number == stage_number),
+        None,
+    )
+
+
+def _collect_live_order_issues(
+    decisions: list[BullpenAutoLiveDecision],
+) -> list[dict[str, object]]:
+    issues: list[dict[str, object]] = []
+    for decision in decisions:
+        order_plan = decision.order_plan
+        if order_plan is None or order_plan.dry_run or order_plan.status == "submitted":
+            continue
+        stage7 = _decision_stage_result(decision, 7)
+        detail = order_plan.detail.strip() or "No execution detail was recorded."
+        hard_failure = order_plan.status in {"failed", "cancelled"} or (
+            stage7 is not None and stage7.status == "fail"
+        )
+        issues.append(
+            {
+                "market_id": decision.market_id,
+                "market_title": decision.market_title,
+                "action": order_plan.action,
+                "status": order_plan.status,
+                "detail": detail,
+                "hard_failure": hard_failure,
+            }
+        )
+    return issues
+
+
+def _summarize_live_order_issues(
+    issue_rows: list[dict[str, object]],
+    *,
+    planned_orders: int,
+    submitted_orders: int,
+) -> str | None:
+    if not issue_rows:
+        return None
+
+    total_issues = len(issue_rows)
+    sell_issues = sum(1 for row in issue_rows if row.get("action") == "sell")
+    buy_issues = sum(1 for row in issue_rows if row.get("action") == "buy")
+
+    if total_issues == 1:
+        row = issue_rows[0]
+        action_label = (
+            "Event Exit order" if row.get("action") == "sell" else "planned buy order"
+        )
+        return (
+            f"Live execution submitted {submitted_orders} of {planned_orders} planned orders. "
+            f"The {action_label} for {row.get('market_title') or 'an unknown market'} "
+            f"was not submitted: {row.get('detail') or 'No execution detail was recorded.'}"
+        )
+
+    issue_label_parts: list[str] = []
+    if sell_issues:
+        issue_label_parts.append(f"{sell_issues} Event Exit")
+    if buy_issues:
+        issue_label_parts.append(f"{buy_issues} planned buy")
+    issue_label = " and ".join(issue_label_parts) if issue_label_parts else f"{total_issues} planned"
+    issue_label = issue_label[:1].upper() + issue_label[1:]
+    example_rows = issue_rows[:2]
+    examples = "; ".join(
+        f"{row.get('market_title') or 'Unknown market'}: "
+        f"{row.get('detail') or 'No execution detail was recorded.'}"
+        for row in example_rows
+    )
+    remaining_count = total_issues - len(example_rows)
+    more_suffix = f" ({remaining_count} more)" if remaining_count > 0 else ""
+    return (
+        f"Live execution submitted {submitted_orders} of {planned_orders} planned orders. "
+        f"{issue_label} orders were not submitted. {examples}{more_suffix}"
+    )
+
+
 def _llm_provider_error_rate_high(evaluated: list[CandidateEvaluation]) -> bool:
     return any(
         candidate.llm_consensus is not None
@@ -4709,6 +4790,33 @@ class BullpenAutoLiveEngine:
             execution_gate_reason=execution_pause_reason,
             execution_mode_reason=simulation_reason if state.dry_run else None,
         )
+        live_order_issues = _collect_live_order_issues(decisions)
+        live_order_issue_count = len(live_order_issues)
+        live_order_hard_failure_count = sum(
+            1 for issue in live_order_issues if bool(issue.get("hard_failure"))
+        )
+        sell_order_issue_count = sum(
+            1 for issue in live_order_issues if issue.get("action") == "sell"
+        )
+        buy_order_issue_count = sum(
+            1 for issue in live_order_issues if issue.get("action") == "buy"
+        )
+        sell_order_hard_failure_count = sum(
+            1
+            for issue in live_order_issues
+            if issue.get("action") == "sell" and bool(issue.get("hard_failure"))
+        )
+        buy_order_hard_failure_count = sum(
+            1
+            for issue in live_order_issues
+            if issue.get("action") == "buy" and bool(issue.get("hard_failure"))
+        )
+        execution_issue_summary = _summarize_live_order_issues(
+            live_order_issues,
+            planned_orders=final_order_counts["planned"],
+            submitted_orders=final_order_counts["submitted"],
+        )
+        degraded_live_run = bool(live_order_issues) and not state.dry_run
         run.decisions_count = len(decisions)
         run.decision_ids = [decision.id for decision in decisions]
         run.orders_planned = final_order_counts["planned"]
@@ -4718,7 +4826,8 @@ class BullpenAutoLiveEngine:
         )
         run.live_execution_attempted = bool(actionable_decisions and not state.dry_run)
         run.completed_at = utc_now_iso()
-        run.status = "failed" if state.paused else "completed"
+        run.status = "failed" if state.paused or degraded_live_run else "completed"
+        run.error_message = None
         run.diagnostics.rejected_candidates = list(rejected_candidate_map.values())
         run.request_context = None
         if state.dry_run:
@@ -4727,7 +4836,15 @@ class BullpenAutoLiveEngine:
                 f"{final_order_counts['planned']} planned orders. {simulation_reason}"
             )
         elif state.paused:
-            run.summary = execution_pause_reason or "Console schedule paused."
+            run.summary = (
+                execution_issue_summary
+                or execution_pause_reason
+                or "Console schedule paused."
+            )
+        elif degraded_live_run:
+            run.summary = execution_issue_summary or (
+                "Live execution did not submit every planned console-profile order."
+            )
         else:
             run.summary = (
                 f"Console schedule completed with {len(decisions)} decisions, "
@@ -4740,9 +4857,17 @@ class BullpenAutoLiveEngine:
                 stage_number=3,
                 workflow_stage_key="invest",
                 phase_status="completed",
-                status="pass" if len(decisions) > 0 else "warning",
+                status=(
+                    "fail"
+                    if degraded_live_run
+                    else "pass"
+                    if len(decisions) > 0
+                    else "warning"
+                ),
                 reason=(
-                    "Rebalance, Event Exit processing, and investment planning/execution finished for the ranked Bullpen table."
+                    execution_issue_summary
+                    if degraded_live_run
+                    else "Rebalance, Event Exit processing, and investment planning/execution finished for the ranked Bullpen table."
                     if len(decisions) > 0
                     else "Stage 3 finished without any decisions to process."
                 ),
@@ -4761,16 +4886,24 @@ class BullpenAutoLiveEngine:
                     "orders_planned": final_order_counts["planned"],
                     "orders_submitted": final_order_counts["submitted"],
                     "orders_processed": final_order_counts["processed"],
+                    "orders_failed": live_order_hard_failure_count,
+                    "orders_unsubmitted": live_order_issue_count,
                     "sell_orders_planned": final_order_counts["sell_planned"],
                     "sell_orders_processed": final_order_counts["sell_processed"],
                     "sell_orders_submitted": final_order_counts["sell_submitted"],
+                    "sell_orders_failed": sell_order_hard_failure_count,
+                    "sell_orders_unsubmitted": sell_order_issue_count,
                     "buy_orders_planned": final_order_counts["buy_planned"],
                     "buy_orders_processed": final_order_counts["buy_processed"],
                     "buy_orders_submitted": final_order_counts["buy_submitted"],
+                    "buy_orders_failed": buy_order_hard_failure_count,
+                    "buy_orders_unsubmitted": buy_order_issue_count,
                     "execution_steps": final_execution_steps,
                     "execution_step_key": (
                         "blocked"
                         if actionable_decisions and state.paused
+                        else "failed"
+                        if degraded_live_run
                         else "completed"
                         if actionable_decisions
                         else None
@@ -4778,6 +4911,8 @@ class BullpenAutoLiveEngine:
                     "execution_step_label": (
                         "Stage 3 blocked"
                         if actionable_decisions and state.paused
+                        else "Stage 3 failed"
+                        if degraded_live_run
                         else "Stage 3 complete"
                         if actionable_decisions
                         else None
@@ -4785,7 +4920,9 @@ class BullpenAutoLiveEngine:
                     "execution_step_number": None,
                     "execution_step_total": 2,
                     "execution_step_detail": (
-                        execution_pause_reason
+                        execution_issue_summary
+                        if degraded_live_run
+                        else execution_pause_reason
                         if actionable_decisions and state.paused
                         else "Step 1 Event Exits and Step 2 planned buys finished processing."
                         if actionable_decisions
@@ -4795,7 +4932,9 @@ class BullpenAutoLiveEngine:
                         _serialize_stage3_decision_row(decision) for decision in decisions
                     ],
                     "execution_gate_reason": execution_pause_reason,
+                    "execution_failure_message": execution_issue_summary,
                     "execution_mode_reason": simulation_reason if state.dry_run else None,
+                    "order_issues": live_order_issues,
                     "decision_summaries": [
                         {
                             "market_id": decision.market_id,

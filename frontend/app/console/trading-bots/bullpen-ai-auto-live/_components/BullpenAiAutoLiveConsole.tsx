@@ -546,6 +546,10 @@ export function BullpenAiAutoLiveConsole() {
   const state = summary.state;
   const latestGuardrails = summary.latest_guardrail_checks ?? [];
   const latestRun = summary.latest_run ?? summary.recent_runs?.[0] ?? null;
+  const latestRunFailureMessage =
+    latestRun?.status === "failed"
+      ? latestRun.summary || latestRun.error_message || state.last_error || null
+      : null;
   const botCard = summary.bot_card;
   const runControl = deriveBullpenAiAutoLiveRunControlState({
     settings: summary.settings,
@@ -808,6 +812,14 @@ export function BullpenAiAutoLiveConsole() {
                     <AlertTriangle className="size-4" />
                     <AlertTitle>Showing partial data</AlertTitle>
                     <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {latestRunFailureMessage ? (
+                  <Alert className="border-rose-300 bg-rose-50 text-rose-900">
+                    <AlertTriangle className="size-4" />
+                    <AlertTitle>Latest Auto-Live run failed</AlertTitle>
+                    <AlertDescription>{latestRunFailureMessage}</AlertDescription>
                   </Alert>
                 ) : null}
 
