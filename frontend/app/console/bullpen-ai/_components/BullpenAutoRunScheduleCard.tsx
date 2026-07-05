@@ -399,6 +399,75 @@ function getInvestStageExecutionSteps(
     .filter((step): step is InvestExecutionStepView => step !== null);
 }
 
+function getLastInvestExecutionStep(
+  run: BullpenAutoLiveRun | null,
+  key: "sell" | "buy",
+) {
+  const investStage = run?.stage_results.find(
+    (stage) => stage.stage_number === 3 || stage.stage_name === "invest",
+  );
+  const rawSteps = investStage?.outputs.execution_steps;
+  if (!Array.isArray(rawSteps)) return null;
+
+  for (const rawStep of rawSteps) {
+    if (!isRecord(rawStep) || readStageOutputString(rawStep.key) !== key) {
+      continue;
+    }
+
+    return {
+      plannedOrders: readStageOutputNumber(rawStep.planned_orders) ?? 0,
+      processedOrders: readStageOutputNumber(rawStep.processed_orders) ?? 0,
+      submittedOrders: readStageOutputNumber(rawStep.submitted_orders) ?? 0,
+      eventExitRows: readStageOutputNumber(rawStep.event_exit_rows),
+      rankingLlmPlannedOrders: readStageOutputNumber(
+        rawStep.ranking_llm_planned_orders,
+      ),
+      forcedExitPlannedOrders: readStageOutputNumber(
+        rawStep.forced_exit_planned_orders,
+      ),
+    };
+  }
+
+  if (key !== "sell" || !investStage) return null;
+  return {
+    plannedOrders: readStageOutputNumber(investStage.outputs.event_exit_planned) ?? 0,
+    processedOrders:
+      readStageOutputNumber(investStage.outputs.event_exit_processed) ?? 0,
+    submittedOrders:
+      readStageOutputNumber(investStage.outputs.event_exit_submitted) ?? 0,
+    eventExitRows: readStageOutputNumber(investStage.outputs.event_exit_rows),
+    rankingLlmPlannedOrders: readStageOutputNumber(
+      investStage.outputs.event_exit_ranking_llm_planned,
+    ),
+    forcedExitPlannedOrders: readStageOutputNumber(
+      investStage.outputs.event_exit_forced_planned,
+    ),
+  };
+}
+
+function buildQueuedInvestPreviewSteps(
+  plan: Parameters<typeof buildBullpenStage3InvestPreviewSteps>[0],
+  lastRun: BullpenAutoLiveRun | null,
+) {
+  const steps = buildBullpenStage3InvestPreviewSteps(plan);
+  const lastSellStep = getLastInvestExecutionStep(lastRun, "sell");
+  if (!lastSellStep) return steps;
+
+  return steps.map((step) =>
+    step.key === "sell"
+      ? {
+          ...step,
+          plannedOrders: lastSellStep.plannedOrders,
+          processedOrders: lastSellStep.processedOrders,
+          submittedOrders: lastSellStep.submittedOrders,
+          eventExitRows: lastSellStep.eventExitRows,
+          rankingLlmPlannedOrders: lastSellStep.rankingLlmPlannedOrders,
+          forcedExitPlannedOrders: lastSellStep.forcedExitPlannedOrders,
+        }
+      : step,
+  );
+}
+
 function getInvestExecutionStepClasses(status: InvestExecutionStepStatus) {
   if (status === "completed") {
     return {
@@ -1930,7 +1999,7 @@ export function BullpenAutoRunScheduleCard({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-xl font-semibold text-slate-950">
-                  Bullpen Scan + LLM + Rebalance and Invest runs every 6 hours in IST
+                  Bullpen Scan + LLM + Exit and Invest runs every 6 hours in IST
                 </h2>
                 <button
                   type="button"
@@ -2279,7 +2348,7 @@ export function BullpenAutoRunScheduleCard({
                 investExecutionSteps.length === 0 &&
                 stage.state === "queued" &&
                 Array.isArray(stage.inputs.llm_review_rows)
-                  ? buildBullpenStage3InvestPreviewSteps(investOnlyPlan)
+                  ? buildQueuedInvestPreviewSteps(investOnlyPlan, investOnlySourceRun)
                   : [];
               const displayedInvestSteps =
                 investExecutionSteps.length > 0
@@ -2459,7 +2528,7 @@ export function BullpenAutoRunScheduleCard({
                         ) : (
                           <>
                             <Zap className="mr-2 h-4 w-4" />
-                            Invest
+                            Exit and Invest
                           </>
                         )}
                       </button>

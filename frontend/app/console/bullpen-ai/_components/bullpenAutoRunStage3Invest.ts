@@ -61,6 +61,9 @@ export type BullpenStage3InvestPreviewStep = {
   plannedOrders: number | null;
   processedOrders: number | null;
   submittedOrders: number | null;
+  eventExitRows?: number | null;
+  rankingLlmPlannedOrders?: number | null;
+  forcedExitPlannedOrders?: number | null;
 };
 
 export type BullpenStage3OnlyInvestExecutionPlanOptions = {

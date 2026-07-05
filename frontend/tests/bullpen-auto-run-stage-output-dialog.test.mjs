@@ -102,8 +102,8 @@ test("Bullpen auto-run stage dialog keeps primitive overview fields in a key-val
 
   const markup = renderToStaticMarkup(
     React.createElement(BullpenAutoRunStageOutputDialog, {
-      stageTitle: "Stage 3 · Rebalance and Invest",
-      stageDetail: "Event inputs being fed into Stage 3 · Rebalance and Invest.",
+      stageTitle: "Stage 3 · Exit and Invest",
+      stageDetail: "Event inputs being fed into Stage 3 · Exit and Invest.",
       eyebrow: "Stage Input",
       outputLabel: "Inputs",
       onClose: () => {},
@@ -167,8 +167,8 @@ test("Bullpen auto-run stage dialog makes invest rationale fields clickable", ()
 
   const markup = renderToStaticMarkup(
     React.createElement(BullpenAutoRunStageOutputDialog, {
-      stageTitle: "Stage 3 · Rebalance and Invest",
-      stageDetail: "Event inputs being fed into Stage 3 · Rebalance and Invest.",
+      stageTitle: "Stage 3 · Exit and Invest",
+      stageDetail: "Event inputs being fed into Stage 3 · Exit and Invest.",
       eyebrow: "Stage Input",
       outputLabel: "Inputs",
       onClose: () => {},
@@ -206,8 +206,8 @@ test("Bullpen auto-run stage dialog highlights invested Stage 3 rows with timest
 
   const markup = renderToStaticMarkup(
     React.createElement(BullpenAutoRunStageOutputDialog, {
-      stageTitle: "Stage 3 · Rebalance and Invest",
-      stageDetail: "Event inputs being fed into Stage 3 · Rebalance and Invest.",
+      stageTitle: "Stage 3 · Exit and Invest",
+      stageDetail: "Event inputs being fed into Stage 3 · Exit and Invest.",
       eyebrow: "Stage Input",
       outputLabel: "Inputs",
       onClose: () => {},
