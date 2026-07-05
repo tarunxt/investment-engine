@@ -161,7 +161,7 @@ export function TradeAnalysisListClient() {
           </p>
         </div>
         <Button asChild className="shrink-0 bg-purple-700 text-white hover:bg-purple-800">
-          <Link href={URLs.console.bullpenAi()}>Bullpen x AI</Link>
+          <Link href={URLs.routes.console.bullpenAi()}>Bullpen x AI</Link>
         </Button>
       </div>
 
