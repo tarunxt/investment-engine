@@ -486,7 +486,16 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
 
   if (readyCandidateCount === 0) {
     return {
-      request: null,
+      request:
+        alreadyInvestedCandidateCount > 0
+          ? {
+              console_profile: {
+                ...plan.request.console_profile,
+                total_candidates: 0,
+                candidate_rows: [],
+              },
+            }
+          : null,
       qualifiedCandidateCount: plan.qualifiedCandidateCount,
       readyCandidateCount,
       alreadyInvestedCandidateCount,
@@ -494,9 +503,7 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
       alreadyInvestedRecords,
       candidatePreviews,
       blockedReason:
-        alreadyInvestedCandidateCount > 0
-          ? "All Stage 2-qualified events from the latest reusable run are already invested or already submitted."
-          : plan.blockedReason,
+        alreadyInvestedCandidateCount > 0 ? null : plan.blockedReason,
     };
   }
 
