@@ -432,6 +432,74 @@ function getInvestExecutionStepClasses(status: InvestExecutionStepStatus) {
   };
 }
 
+
+function extractErrorCodeFromDetail(detail: string | null | undefined) {
+  const trimmed = detail?.trim();
+  if (!trimmed) return null;
+
+  const jsonStart = trimmed.indexOf("{");
+  const jsonText = jsonStart >= 0 ? trimmed.slice(jsonStart) : trimmed;
+  try {
+    const parsed = JSON.parse(jsonText) as { error_code?: unknown; code?: unknown; status?: unknown };
+    const code =
+      typeof parsed.error_code === "string" && parsed.error_code.trim().length > 0
+        ? parsed.error_code.trim()
+        : typeof parsed.code === "string" && parsed.code.trim().length > 0
+          ? parsed.code.trim()
+          : null;
+    if (code) return code;
+  } catch {
+    // Fall through to regex extraction for non-JSON / prefixed messages.
+  }
+
+  const errorCodeMatch = trimmed.match(/["']?error_code["']?\s*[:=]\s*["']?([A-Z0-9_:-]+)["']?/i);
+  if (errorCodeMatch?.[1]) return errorCodeMatch[1];
+
+  if (/insufficient balance/i.test(trimmed) || /balance_insufficient/i.test(trimmed)) {
+    return "BALANCE_INSUFFICIENT";
+  }
+
+  return null;
+}
+
+function ErrorCodeWithDetails({
+  detail,
+  detailClassName = "text-slate-700",
+  summaryPrefix,
+}: {
+  detail: string;
+  detailClassName?: string;
+  summaryPrefix?: string | null;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const code = extractErrorCodeFromDetail(detail);
+  if (!code) return <>{detail}</>;
+
+  return (
+    <span className="block">
+      <span className="inline-flex items-center gap-1.5 align-middle">
+        {summaryPrefix ? <span>{summaryPrefix}</span> : null}
+        <span className="font-semibold">{code}</span>
+        <button
+          type="button"
+          onClick={() => setIsOpen((current) => !current)}
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current/30 bg-white/60 transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
+          aria-expanded={isOpen}
+          aria-label={isOpen ? "Hide error details" : "Show error details"}
+          title={isOpen ? "Hide error details" : "Show error details"}
+        >
+          <Info className="h-3 w-3" />
+        </button>
+      </span>
+      {isOpen ? (
+        <span className={`mt-2 block whitespace-pre-wrap break-words rounded-lg border border-current/15 bg-white/60 px-2.5 py-2 text-[11px] leading-5 ${detailClassName}`}>
+          {detail}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function getInvestExecutionStepStatusLabel(status: InvestExecutionStepStatus) {
   if (status === "completed") return "Finished";
   if (status === "blocked") return "Blocked";
@@ -976,7 +1044,8 @@ function InvestMetricDetailsDialog({
 
           {runError ? (
             <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950">
-              <span className="font-semibold">Latest worker error:</span> {runError}
+              <span className="font-semibold">Latest worker error:</span>{" "}
+              <ErrorCodeWithDetails detail={runError} detailClassName="text-rose-800" />
             </div>
           ) : null}
 
@@ -1061,7 +1130,10 @@ function InvestMetricDetailsDialog({
                             {formatMoney(decision.order_plan.order_size_usd)} at{" "}
                             {formatPriceCents(decision.order_plan.limit_price_cents)}
                             <br />
-                            {decision.order_plan.detail}
+                            <ErrorCodeWithDetails
+                              detail={decision.order_plan.detail}
+                              detailClassName="text-slate-700"
+                            />
                           </>
                         ) : (
                           <>
@@ -2205,7 +2277,10 @@ export function BullpenAutoRunScheduleCard({
                         {investExecutionStatus.label}
                       </p>
                       <p className={`mt-1 text-xs leading-5 ${investExecutionStatus.detailClassName}`}>
-                        {investExecutionStatus.message}
+                        <ErrorCodeWithDetails
+                          detail={investExecutionStatus.message}
+                          detailClassName={investExecutionStatus.detailClassName}
+                        />
                       </p>
                     </div>
                   ) : null}
