@@ -253,6 +253,14 @@ test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {
 
   assert.match(bullpenAiPageSource, /Manual Scan/);
   assert.match(bullpenAiPageSource, /Auto Scan/);
+  assert.ok(
+    bullpenAiPageSource.indexOf('source: "auto"') <
+      bullpenAiPageSource.indexOf('source: "manual"'),
+  );
+  assert.match(
+    bullpenAiPageSource,
+    /function createEmptySnapshotSourceMap\(\): Record<ScanMode, BullpenSnapshotSource> \{\s+return \{\s+"30-days": "auto",\s+"end-of-month": "auto",\s+\};\s+\}/,
+  );
   assert.match(
     bullpenAiPageSource,
     /Auto Scan is read-only here\.\s+Switch to Manual Scan to run\s+Bullpen scans, LLM analysis, or manual investing\./,
@@ -266,6 +274,21 @@ test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {
   );
   assert.match(investmentsSectionSource, /isReadOnly: boolean;/);
   assert.match(investmentsSectionSource, /readOnlyMessage: string \| null;/);
+});
+
+test("Bullpen x AI keeps pause and kill controls available during an active run", () => {
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(autoRunCardSource, /const runIsActive =/);
+  assert.match(autoRunCardSource, /setAction\(null\);\s*\n\s*\}/);
+  assert.match(autoRunCardSource, /disabled=\{\s*action !== null \|\| runIsActive\s*\}/);
+  assert.match(autoRunCardSource, /Status: \{statusLabel\(summary, runIsActive\)\}/);
 });
 
 test("Bullpen x AI auto-run errors render detail text alongside the main message", () => {

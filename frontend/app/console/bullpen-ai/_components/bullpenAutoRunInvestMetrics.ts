@@ -164,9 +164,9 @@ export function getInvestMetricDialogDefinition(
       };
     case "sell-ranking-llm":
       return {
-        title: "Stage 3 Step 1 ranking / LLM exits",
+        title: "Stage 3 Step 1 Event out of Top 10 exits",
         description:
-          "Event Exit rows triggered by the ranking / LLM exit logic.",
+          "Event Exit rows triggered by the Event out of Top 10 exit logic.",
         includes: (decision) => hasExitStrategy(decision, RANKING_LLM_EXIT_STRATEGIES),
       };
     case "sell-forced-exit":

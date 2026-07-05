@@ -564,6 +564,71 @@ test("Bullpen auto-run workflow settled helper hides active controls once every 
   assert.equal(isBullpenAutoRunWorkflowSettled(queuedView), false);
 });
 
+test("Bullpen auto-run workflow treats a fully submitted running Stage 3 as settled", async () => {
+  const {
+    buildBullpenAutoRunWorkflowView,
+    isBullpenAutoRunWorkflowSettled,
+  } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage-3-submitted",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: false,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 3 submitted the final orders.",
+    live_execution_requested: true,
+    live_execution_attempted: true,
+    decisions_count: 3,
+    orders_planned: 2,
+    orders_submitted: 2,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+      }),
+      createStage(2, "Stage 2 reviewed candidates.", {
+        workflow_stage_key: "llm",
+        phase_status: "completed",
+      }),
+      createStage(3, "Stage 3 submitted the final orders.", {
+        workflow_stage_key: "invest",
+        phase_status: "running",
+        completed_items: 3,
+        total_items: 3,
+        orders_planned: 2,
+        orders_submitted: 2,
+        decision_rows: [
+          {
+            id: "sell-1",
+            market_id: "market-1",
+            market_title: "Will market one resolve?",
+            order_plan: {
+              status: "submitted",
+            },
+          },
+          {
+            id: "buy-1",
+            market_id: "market-2",
+            market_title: "Will market two resolve?",
+            order_plan: {
+              status: "submitted",
+            },
+          },
+        ],
+      }),
+    ],
+  });
+
+  assert.equal(isBullpenAutoRunWorkflowSettled(view), true);
+  assert.equal(view.currentStageLabel, "All 3 stages finished");
+  assert.equal(view.stages[2].state, "finished");
+  assert.equal(view.stages[2].tone, "green");
+});
+
 test("Bullpen auto-run workflow view does not show a failed run as actively working", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 

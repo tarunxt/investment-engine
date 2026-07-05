@@ -207,6 +207,45 @@ function readOutputs(stage: BullpenAutoLiveStageResult | null) {
   return readStageRecord(stage?.outputs);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readInvestStageDecisionRows(stage: BullpenAutoLiveStageResult | null) {
+  const rawDecisionRows = stage?.outputs?.decision_rows;
+  if (!Array.isArray(rawDecisionRows)) return [];
+
+  return rawDecisionRows.filter((decision) => {
+    if (!isRecord(decision)) return false;
+    return (
+      typeof decision.id === "string" &&
+      typeof decision.market_id === "string" &&
+      typeof decision.market_title === "string"
+    );
+  });
+}
+
+function isInvestStageEffectivelyCompleted(
+  workflowDefinition: WorkflowDefinition,
+  stage: BullpenAutoLiveStageResult | null,
+) {
+  if (workflowDefinition.key !== "invest") return false;
+  if (getPhaseStatus(stage) !== "running") return false;
+  if (readString(stage?.outputs?.execution_gate_reason)) return false;
+
+  const plannedOrders = readNumber(stage?.outputs?.orders_planned) ?? 0;
+  const submittedOrders = readNumber(stage?.outputs?.orders_submitted) ?? 0;
+  if (plannedOrders < 1 || submittedOrders < plannedOrders) return false;
+
+  const plannedDecisionRows = readInvestStageDecisionRows(stage).filter((decision) => {
+    if (!isRecord(decision.order_plan)) return false;
+    return typeof decision.order_plan.status === "string";
+  });
+  if (plannedDecisionRows.length < plannedOrders) return false;
+
+  return plannedDecisionRows.every((decision) => decision.order_plan?.status === "submitted");
+}
+
 function buildDerivedInputs(
   workflowDefinition: WorkflowDefinition,
   previousStage: BullpenAutoLiveStageResult | null,
@@ -371,8 +410,16 @@ export function buildBullpenAutoRunWorkflowView(
     const stage = stageResults[index];
     const previousStage = index > 0 ? stageResults[index - 1] : null;
     const explicitPhase = getPhaseStatus(stage);
+    const investStageEffectivelyCompleted = isInvestStageEffectivelyCompleted(
+      definition,
+      stage,
+    );
     let state: WorkflowState;
-    if (explicitPhase === "completed" || runStatus === "completed") {
+    if (
+      explicitPhase === "completed" ||
+      runStatus === "completed" ||
+      investStageEffectivelyCompleted
+    ) {
       state = "finished";
     } else if (
       index === currentStageIndex &&
@@ -467,9 +514,12 @@ export function buildBullpenAutoRunWorkflowView(
   });
 
   const currentStage = stages.find((stage) => stage.isCurrent) ?? null;
+  const allStagesFinished = stages.every((stage) => stage.state === "finished");
   const currentStageLabel = currentStage
     ? currentStage.title
-    : runStatus === "completed"
+    : allStagesFinished
+      ? "All 3 stages finished"
+      : runStatus === "completed"
       ? "All 3 stages finished"
       : runStatus === "failed"
         ? "Last run failed"
@@ -483,7 +533,7 @@ export function buildBullpenAutoRunWorkflowView(
         "The latest Bullpen Scan + LLM + Exit and Invest run failed before finishing."
       : currentStage
         ? `Current stage: ${currentStage.title}`
-        : runStatus === "completed"
+        : allStagesFinished || runStatus === "completed"
           ? "The latest Bullpen Scan + LLM + Exit and Invest run finished all 3 stages."
           : runStatus === "skipped"
           ? normalizedRun?.summary ||

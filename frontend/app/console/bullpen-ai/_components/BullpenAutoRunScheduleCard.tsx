@@ -906,7 +906,7 @@ function InvestExecutionStepsSummary({
                 })}
                 <div className="flex flex-wrap gap-2">
                   {renderMetricCard({
-                    label: "Ranking / LLM",
+                    label: "Event out of Top 10",
                     value: step.rankingLlmPlannedOrders,
                     kind: getSellInvestMetricDialogKind("ranking-llm"),
                     toneClasses,
@@ -1516,12 +1516,15 @@ function isAutoRunActive(summary: BullpenAutoLiveSummaryResponse | null) {
   );
 }
 
-function statusLabel(summary: BullpenAutoLiveSummaryResponse | null) {
+function statusLabel(
+  summary: BullpenAutoLiveSummaryResponse | null,
+  runActive: boolean,
+) {
   if (!summary) return "Loading";
   if (!summary.settings.auto_live_enabled) return "Off";
   if (!isConsoleProfileSelected(summary)) return "Other profile active";
   if (summary.state.paused) return "Paused";
-  if (summary.state.running) return "On";
+  if (runActive) return "On";
   return "Ready";
 }
 
@@ -1861,6 +1864,7 @@ export function BullpenAutoRunScheduleCard({
       setPendingRunId(run.id);
       setRunNowStartedAt(run.started_at ?? new Date().toISOString());
       await loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
+      setAction(null);
     } catch (nextError) {
       setError(normalizeError(nextError));
       setAction(null);
@@ -1900,6 +1904,7 @@ export function BullpenAutoRunScheduleCard({
         }.`,
       );
       await loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
+      setAction(null);
     } catch (nextError) {
       setError(normalizeError(nextError));
       setAction(null);
@@ -1992,23 +1997,35 @@ export function BullpenAutoRunScheduleCard({
   );
   const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
   const hasActiveWorkflowStage = workflowView.stages.some((stage) => stage.isCurrent);
-  const showRunTimer =
-    action === "run-now" ||
-    action === "invest-now" ||
-    pendingRunId !== null ||
-    visibleRun?.status === "running";
-  const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;
-  const showActiveRunControls =
+  const runActionRequested = action === "run-now" || action === "invest-now";
+  const runIsActive =
     !workflowSettled &&
-    (action === "run-now" ||
-      action === "invest-now" ||
+    (runActionRequested ||
       pendingRunId !== null ||
-      visibleRun?.status === "running");
+      visibleRun?.status === "running" ||
+      Boolean(summary?.state.running) ||
+      Boolean(summary?.state.paused) ||
+      hasActiveWorkflowStage);
+  const showRunTimer = Boolean(runTimerStartedAt) && (runActionRequested || runIsActive);
+  const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;
+  const showActiveRunControls = runIsActive;
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
   const openStage = workflowView.stages.find((stage) => stage.key === openStageKey) ?? null;
   const openInputStage = workflowView.stages.find((stage) => stage.key === openInputStageKey) ?? null;
   const activeWorkflowStage =
     workflowView.stages.find((stage) => stage.isCurrent) ?? null;
+  const workflowCurrentStageLabel = workflowSettled
+    ? "All 3 stages finished"
+    : workflowView.currentStageLabel;
+  const workflowStatusCopy = workflowSettled
+    ? "The latest Bullpen Scan + LLM + Rebalance and Invest run finished all 3 stages."
+    : workflowView.statusCopy;
+  const monitorRunStatusLabel =
+    workflowRun && !workflowSettled
+      ? formatRunStatusLabel(workflowRun.status)
+      : workflowRun
+        ? "Completed"
+        : null;
   const investWorkflowStage =
     workflowView.stages.find((stage) => stage.key === "invest") ?? null;
   const investStageImmediateSuccess =
@@ -2044,8 +2061,8 @@ export function BullpenAutoRunScheduleCard({
   const displayNotice =
     investStageImmediateSuccess?.message ??
     notice ??
-    (workflowRun?.status === "running"
-      ? activeWorkflowStage?.detail ?? workflowView.statusCopy
+    (runIsActive
+      ? activeWorkflowStage?.detail ?? workflowStatusCopy
       : null);
   const backendExecutionGuardrail = findGuardrailCheck(summary, "live-execution-env");
   const backendExecutionBlocked = Boolean(
@@ -2071,10 +2088,9 @@ export function BullpenAutoRunScheduleCard({
       decisions: investRunDecisions,
     });
   };
-  const investOnlyDisabledReason =
-    pendingRunId !== null || visibleRun?.status === "running"
-      ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
-      : investOnlyPlan.blockedReason;
+  const investOnlyDisabledReason = runIsActive
+    ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
+    : investOnlyPlan.blockedReason;
   const consoleOrderSaveDisabled =
     action !== null ||
     consoleOrderSaveBusy ||
@@ -2100,6 +2116,19 @@ export function BullpenAutoRunScheduleCard({
     };
   }, [shouldTickTimers, runTimerStartedAt]);
 
+  useEffect(() => {
+    if (!workflowSettled) return;
+    if (pendingRunId !== null) {
+      setPendingRunId(null);
+    }
+    if (runNowStartedAt !== null) {
+      setRunNowStartedAt(null);
+    }
+    if (action === "run-now" || action === "invest-now") {
+      setAction(null);
+    }
+  }, [action, pendingRunId, runNowStartedAt, workflowSettled]);
+
   return (
     <Card className="border-fuchsia-200 bg-[linear-gradient(135deg,rgba(253,242,248,0.98),rgba(239,246,255,0.98))] shadow-sm dark:border-fuchsia-500/30 dark:bg-[linear-gradient(135deg,rgba(91,33,182,0.24),rgba(15,23,42,0.94),rgba(14,165,233,0.16))]">
       <CardContent className="space-y-4 p-5">
@@ -2110,7 +2139,7 @@ export function BullpenAutoRunScheduleCard({
                 Auto Run Schedule
               </span>
               <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                Status: {statusLabel(summary)}
+                Status: {statusLabel(summary, runIsActive)}
               </span>
               <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
                 Mode: {mode}
@@ -2171,10 +2200,10 @@ export function BullpenAutoRunScheduleCard({
               <Button
                 variant="outline"
                 onClick={handleRunNow}
-                disabled={action !== null || pendingRunId !== null}
+                disabled={action !== null || runIsActive}
                 className="border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
               >
-                {action === "run-now" || pendingRunId ? (
+                {runActionRequested || runIsActive ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Running...
@@ -2259,7 +2288,12 @@ export function BullpenAutoRunScheduleCard({
             <Button
               type="button"
               onClick={handlePauseRun}
-              disabled={action !== null}
+              disabled={
+                action === "pause-run" ||
+                action === "resume-run" ||
+                action === "kill-run" ||
+                action === "stop"
+              }
               className="rounded-full bg-orange-500 text-white hover:bg-orange-600"
             >
               {action === "pause-run" || action === "resume-run" ? (
@@ -2274,7 +2308,12 @@ export function BullpenAutoRunScheduleCard({
             <Button
               type="button"
               onClick={handleKillRun}
-              disabled={action !== null}
+              disabled={
+                action === "pause-run" ||
+                action === "resume-run" ||
+                action === "kill-run" ||
+                action === "stop"
+              }
               className="rounded-full bg-rose-600 text-white hover:bg-rose-700"
             >
               {action === "kill-run" ? (
@@ -2398,12 +2437,12 @@ export function BullpenAutoRunScheduleCard({
                 </p>
                 {workflowRun ? (
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                    {formatRunStatusLabel(workflowRun.status)}
+                    {monitorRunStatusLabel}
                   </span>
                 ) : null}
               </div>
               <p className="text-sm font-semibold text-slate-950">
-                {workflowView.statusCopy}
+                {workflowStatusCopy}
               </p>
               <p className="text-xs text-slate-600">
                 {workflowRun
@@ -2416,7 +2455,7 @@ export function BullpenAutoRunScheduleCard({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                {workflowView.currentStageLabel}
+                {workflowCurrentStageLabel}
               </span>
               {workflowRun ? (
                 <>

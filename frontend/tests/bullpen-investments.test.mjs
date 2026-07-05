@@ -269,3 +269,93 @@ test("Bullpen investment display excludes attention positions from green rows wi
     assert.equal(topRowKeys.includes(positionKey), false);
   }
 });
+
+test("Bullpen investment display marks red Event Exit rows with the latest successful exit timestamp", async () => {
+  const { buildBullpenInvestmentDisplay } =
+    await loadBullpenInvestmentsModule();
+
+  const exitingPosition = createActivePosition({
+    key: "active-exit-position",
+    marketTitle: "Will the exit position resolve?",
+    returnsPerDay: 4,
+  });
+  const activePositionQuestions = [
+    createQuestion({
+      id: exitingPosition.key,
+      question: exitingPosition.marketTitle,
+      returnsPerDay: exitingPosition.returnsPerDay,
+      llmYesOdds: 10,
+      llmNoOdds: 90,
+      amountToBeInvested: null,
+    }),
+  ];
+  const candidates = Array.from({ length: 10 }, (_, index) =>
+    createQuestion({
+      id: `candidate-fast-${index + 1}`,
+      question: `Candidate fast ${index + 1}`,
+      returnsPerDay: 100 - index,
+      llmYesOdds: 85,
+      llmNoOdds: 15,
+    }),
+  );
+
+  const display = buildBullpenInvestmentDisplay({
+    activePositions: [exitingPosition],
+    activePositionQuestions,
+    candidates,
+    recentDecisions: [
+      {
+        id: "decision-sell-1",
+        run_id: "run-1",
+        created_at: "2026-07-05T10:00:00Z",
+        updated_at: "2026-07-05T10:00:00Z",
+        market_id: exitingPosition.marketId,
+        market_title: exitingPosition.marketTitle,
+        side: "NO",
+        decision: "EXIT",
+        risk_status: "Ready",
+        price_cents: 20,
+        fair_probability_pct: 20,
+        edge_pp: 0,
+        score: 1,
+        confidence: "High",
+        evidence_status: "Strong",
+        adjudication_required: false,
+        current_exposure_usd: 1,
+        target_exposure_usd: 0,
+        key_evidence: [],
+        red_flags: [],
+        reason: "Exited successfully.",
+        summary: "Exited successfully.",
+        order_plan: {
+          id: "order-sell-1",
+          action: "sell",
+          side: "NO",
+          order_type: "limit",
+          status: "submitted",
+          market_id: exitingPosition.marketId,
+          market_title: exitingPosition.marketTitle,
+          order_size_usd: 1,
+          shares: 5,
+          limit_price_cents: 20,
+          max_slippage_cents: 2,
+          dry_run: false,
+          detail: "Limit order submitted successfully.",
+          created_at: "2026-07-05T10:00:00Z",
+          executed_at: "2026-07-05T10:00:05Z",
+        },
+        exit_signals: [],
+        exit_state: "SELL_SUBMITTED",
+        llm_outputs: [],
+        stage_results: [],
+        guardrail_checks: [],
+      },
+    ],
+  });
+
+  assert.equal(display.activePositionsNeedingAttention.length, 1);
+  assert.equal(
+    display.activePositionsNeedingAttention[0]?.successfulExitAt,
+    "2026-07-05T10:00:05Z",
+  );
+});

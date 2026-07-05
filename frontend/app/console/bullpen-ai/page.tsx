@@ -69,6 +69,7 @@ import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type {
+  BullpenAutoLiveDecision,
   BullpenAutoLiveRunOnceRequest,
   PolymarketEventRunContext,
   PolymarketManualInvestOrderRequest,
@@ -128,15 +129,15 @@ const SNAPSHOT_SOURCE_TABS: {
   description: string;
 }[] = [
   {
-    source: "manual",
-    label: "Manual Scan",
-    description: "Shows results from the Run Bullpen Scan button in this section.",
-  },
-  {
     source: "auto",
     label: "Auto Scan",
     description:
       "Shows results produced by the Run Scans and Invest Now flow above.",
+  },
+  {
+    source: "manual",
+    label: "Manual Scan",
+    description: "Shows results from the Run Bullpen Scan button in this section.",
   },
 ];
 
@@ -254,8 +255,8 @@ function createEmptySortMap(): Record<ScanMode, BullpenTableSortState> {
 
 function createEmptySnapshotSourceMap(): Record<ScanMode, BullpenSnapshotSource> {
   return {
-    "30-days": "manual",
-    "end-of-month": "manual",
+    "30-days": "auto",
+    "end-of-month": "auto",
   };
 }
 
@@ -1211,6 +1212,9 @@ function BullpenAiPageContent() {
     "30-days": null,
     "end-of-month": null,
   });
+  const [recentAutoRunDecisions, setRecentAutoRunDecisions] = useState<
+    BullpenAutoLiveDecision[]
+  >([]);
   const [activePositions, setActivePositions] = useState<
     BullpenActivePositionView[]
   >([]);
@@ -3085,6 +3089,7 @@ function BullpenAiPageContent() {
         activePositions={openActivePositions}
         hasActivePositionsSnapshot={Boolean(positionsLastUpdatedAt)}
         onSummaryUpdated={({ summary, run }) => {
+          setRecentAutoRunDecisions(summary.recent_decisions ?? []);
           setAutoSnapshotsByMode((current) =>
             syncBullpenAutoRunSummarySnapshots({
               snapshotsByMode: current,
@@ -3664,6 +3669,7 @@ function BullpenAiPageContent() {
               positionsLastUpdatedAt={positionsLastUpdatedAt}
               positionsSource={positionsSource}
               progressMessage={isManualScanView ? investmentProgress : null}
+              recentDecisions={recentAutoRunDecisions}
               resultMessage={isManualScanView ? investmentNotice : null}
               selectedQuestionIds={visibleSelectedInvestmentQuestionIdSet}
             />

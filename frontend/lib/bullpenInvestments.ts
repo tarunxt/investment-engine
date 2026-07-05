@@ -9,6 +9,7 @@ import {
   type BullpenExitState,
 } from "@/lib/bullpenEventExits";
 import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
+import type { BullpenAutoLiveDecision } from "@/types/api";
 
 export type BullpenInvestmentRow =
   | {
@@ -31,22 +32,78 @@ export type BullpenActivePositionAttentionEntry = {
   exitState: BullpenExitState;
   reasonBadges: string[];
   estimatedFreeableValue: number | null;
+  successfulExitAt: string | null;
 };
 
 const BULLPEN_INVESTMENT_ROW_LIMIT = 10;
+
+function readLatestSuccessfulExitTimestampByPositionKey(
+  recentDecisions: BullpenAutoLiveDecision[],
+) {
+  const latestByPositionKey = new Map<string, string>();
+
+  for (const decision of recentDecisions) {
+    const orderPlan = decision.order_plan;
+    const side = decision.side?.trim().toUpperCase();
+    if (
+      !decision.market_id ||
+      !side ||
+      (orderPlan?.action !== "sell" &&
+        decision.exit_state !== "SELL_SUBMITTED" &&
+        decision.exit_state !== "PARTIALLY_FILLED" &&
+        decision.exit_state !== "SOLD")
+    ) {
+      continue;
+    }
+    if (
+      orderPlan &&
+      orderPlan.action === "sell" &&
+      orderPlan.status !== "submitted" &&
+      decision.exit_state !== "PARTIALLY_FILLED" &&
+      decision.exit_state !== "SOLD"
+    ) {
+      continue;
+    }
+
+    const timestamp =
+      orderPlan?.executed_at?.trim() ||
+      decision.updated_at?.trim() ||
+      decision.created_at?.trim() ||
+      null;
+    if (!timestamp) continue;
+
+    const positionKey = `${decision.market_id}::${side}`;
+    const existingTimestamp = latestByPositionKey.get(positionKey);
+    const existingMs = existingTimestamp ? Date.parse(existingTimestamp) : Number.NaN;
+    const nextMs = Date.parse(timestamp);
+    if (
+      !existingTimestamp ||
+      (Number.isFinite(nextMs) &&
+        (!Number.isFinite(existingMs) || nextMs >= existingMs))
+    ) {
+      latestByPositionKey.set(positionKey, timestamp);
+    }
+  }
+
+  return latestByPositionKey;
+}
 
 export function buildBullpenInvestmentDisplay({
   activePositions,
   activePositionQuestions,
   candidates,
+  recentDecisions = [],
 }: {
   activePositions: BullpenActivePositionView[];
   activePositionQuestions: BullpenQuestionRow[];
   candidates: BullpenQuestionRow[];
+  recentDecisions?: BullpenAutoLiveDecision[];
 }) {
   const activePositionQuestionByKey = new Map(
     activePositionQuestions.map((question) => [question.id, question] as const),
   );
+  const latestSuccessfulExitTimestampByPositionKey =
+    readLatestSuccessfulExitTimestampByPositionKey(recentDecisions);
   const rankingEligibleActivePositions = activePositions.filter((position) =>
     hasBullpenStrongLlmOdds(activePositionQuestionByKey.get(position.key)),
   );
@@ -74,6 +131,9 @@ export function buildBullpenInvestmentDisplay({
   const evaluatedActivePositions = activePositions.map((position) => {
     const question = activePositionQuestionByKey.get(position.key) ?? null;
     const hasStrongLlmOdds = hasBullpenStrongLlmOdds(question);
+    const positionSide = position.heldSide ?? position.outcome?.trim().toUpperCase() ?? null;
+    const positionKeyForExitLookup =
+      position.marketId && positionSide ? `${position.marketId}::${positionSide}` : null;
     const evaluation = evaluateBullpenEventExits({
       position,
       question,
@@ -89,6 +149,12 @@ export function buildBullpenInvestmentDisplay({
       reasonBadges: evaluation.exitSignals.map((signal) =>
         getBullpenEventExitBadgeLabel(signal),
       ),
+      successfulExitAt:
+        latestSuccessfulExitTimestampByPositionKey.get(position.key) ??
+        (positionKeyForExitLookup
+          ? latestSuccessfulExitTimestampByPositionKey.get(positionKeyForExitLookup)
+          : null) ??
+        null,
     };
   });
   const investableActivePositions = evaluatedActivePositions.filter(

@@ -28,6 +28,7 @@ import type {
   BullpenPositionsSource,
 } from "@/lib/bullpenPositions";
 import { cn } from "@/lib/utils";
+import type { BullpenAutoLiveDecision } from "@/types/api";
 import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
 import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
@@ -61,6 +62,7 @@ type BullpenInvestmentsSectionProps = {
   positionsLastUpdatedAt: string | null;
   positionsSource: BullpenPositionsSource | null;
   progressMessage: string | null;
+  recentDecisions: BullpenAutoLiveDecision[];
   resultMessage: string | null;
   selectedQuestionIds: Set<string>;
 };
@@ -372,6 +374,7 @@ export function BullpenInvestmentsSection({
   positionsLastUpdatedAt,
   positionsSource,
   progressMessage,
+  recentDecisions,
   resultMessage,
   selectedQuestionIds,
 }: BullpenInvestmentsSectionProps) {
@@ -397,8 +400,9 @@ export function BullpenInvestmentsSection({
         activePositions: openActivePositions,
         activePositionQuestions,
         candidates,
+        recentDecisions,
       }),
-    [activePositionQuestions, candidates, openActivePositions],
+    [activePositionQuestions, candidates, openActivePositions, recentDecisions],
   );
   const selectedCount = candidates.filter((question) =>
     selectedQuestionIds.has(question.id),
@@ -749,7 +753,7 @@ export function BullpenInvestmentsSection({
                   <EventsSectionHeader
                     title="Event Exits"
                     tone="attention"
-                    description={`Includes the union of ranking / LLM exits and capital-aware forced exits. Planned: ${eventExitCounts.total} · Ranking/LLM: ${eventExitCounts.rankingOrLlm} · Forced Exit: ${eventExitCounts.forced}.`}
+                    description={`Includes the union of Event out of Top 10 exits and capital-aware forced exits. Planned: ${eventExitCounts.total} · Event out of Top 10: ${eventExitCounts.rankingOrLlm} · Forced Exit: ${eventExitCounts.forced}.`}
                     titleAccessory={
                       <button
                         type="button"
@@ -769,6 +773,7 @@ export function BullpenInvestmentsSection({
                       reasonBadges,
                       estimatedFreeableValue,
                       exitState,
+                      successfulExitAt,
                     }) => {
                     return (
                       <RowShell key={`active-position-outside-top-${position.key}`} attention>
@@ -790,6 +795,12 @@ export function BullpenInvestmentsSection({
                               ))}
                               {exitState === "DUST_LOST" ? (
                                 <AttentionBadge label="Dust" />
+                              ) : null}
+                              {successfulExitAt ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-red-900">
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                  Exited out of Event at {formatIstTimestamp(successfulExitAt)}
+                                </span>
                               ) : null}
                             </div>
                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
