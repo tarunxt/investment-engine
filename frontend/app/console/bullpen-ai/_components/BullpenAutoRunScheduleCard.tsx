@@ -101,7 +101,10 @@ type InvestMetricDialogState = {
   decisions: BullpenAutoLiveDecision[];
 };
 
+type ScanCandidateDialogMode = "fresh-opportunities" | "active-positions";
+
 type ScanCandidateDialogState = {
+  mode: ScanCandidateDialogMode;
   scanCompletedAt: string | null;
   candidates: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["scanCandidates"];
   activePositions: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["activePositionsFound"];
@@ -934,16 +937,19 @@ function StageOneOutputDialog({
   state: ScanCandidateDialogState;
   onClose: () => void;
 }) {
+  const showActivePositionsFirst = state.mode === "active-positions";
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Stage 1 Output
+              {showActivePositionsFirst ? "Active Bullpen Positions" : "Fresh Bullpen Opportunities"}
             </p>
             <h2 className="text-xl font-semibold text-slate-950">
-              New event opportunity candidates
+              {showActivePositionsFirst
+                ? `Positions (${state.activePositionCount})`
+                : `Fresh Bullpen Opportunities (${state.candidates.length})`}
             </h2>
             <p className="text-sm text-slate-600">
               Latest Bullpen Scan Stage 1 completed at {formatIstDateTime(state.scanCompletedAt)}.
@@ -963,7 +969,7 @@ function StageOneOutputDialog({
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                New event candidates
+                Fresh Bullpen Opportunities
               </p>
               <p className="mt-2 text-2xl font-semibold text-slate-950">
                 {state.candidates.length}
@@ -1062,7 +1068,7 @@ function StageOneOutputDialog({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    New event opportunity candidates
+                    Fresh Bullpen Opportunities
                   </p>
                   <p className="mt-1 text-sm text-slate-600">
                     Fresh Bullpen events that passed the Stage 1 scan filters.
@@ -1078,10 +1084,15 @@ function StageOneOutputDialog({
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
                     <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                       <tr>
-                        <th className="px-4 py-3">Candidate</th>
-                        <th className="px-4 py-3">Odds</th>
+                        <th className="px-4 py-3">Outcomes</th>
+                        <th className="px-4 py-3">Current Yes odds %</th>
+                        <th className="px-4 py-3">Current No odds %</th>
+                        <th className="px-4 py-3">LLM Yes Odds</th>
+                        <th className="px-4 py-3">LLM No Odds</th>
+                        <th className="px-4 py-3">Returns/day</th>
+                        <th className="px-4 py-3">Amount to be invested</th>
+                        <th className="px-4 py-3">Volume</th>
                         <th className="px-4 py-3">Liquidity</th>
-                        <th className="px-4 py-3">Close time</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
@@ -1102,16 +1113,21 @@ function StageOneOutputDialog({
                               {candidate.forceInclude ? <span>Force included</span> : null}
                             </div>
                           </td>
+                          <td className="px-4 py-3 align-top font-semibold text-emerald-700">
+                            {formatOddsPercent(candidate.currentYesOdds)}
+                          </td>
+                          <td className="px-4 py-3 align-top font-semibold text-rose-700">
+                            {formatOddsPercent(candidate.currentNoOdds)}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-500">—</td>
+                          <td className="px-4 py-3 align-top text-slate-500">—</td>
+                          <td className="px-4 py-3 align-top text-slate-500">—</td>
+                          <td className="px-4 py-3 align-top text-slate-500">—</td>
                           <td className="px-4 py-3 align-top text-slate-700">
-                            Yes {formatOddsPercent(candidate.currentYesOdds)}<br />
-                            No {formatOddsPercent(candidate.currentNoOdds)}
+                            {formatMoney(candidate.volumeUsd)}
                           </td>
                           <td className="px-4 py-3 align-top text-slate-700">
-                            Liquidity {formatMoney(candidate.liquidityUsd)}<br />
-                            Volume {formatMoney(candidate.volumeUsd)}
-                          </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
-                            {formatIstDateTime(candidate.closeTime)}
+                            {formatMoney(candidate.liquidityUsd)}
                           </td>
                         </tr>
                       ))}
@@ -1626,8 +1642,10 @@ export function BullpenAutoRunScheduleCard({
 
   useEffect(() => {
     if (consoleOrderDirty) return;
-    setConsoleOrderInput(formatEditableAmount(savedConsoleOrderUsd));
-    setConsoleOrderFieldError(null);
+    window.queueMicrotask(() => {
+      setConsoleOrderInput(formatEditableAmount(savedConsoleOrderUsd));
+      setConsoleOrderFieldError(null);
+    });
   }, [consoleOrderDirty, savedConsoleOrderUsd]);
 
   function resolveConsoleOrderAmount() {
@@ -1995,6 +2013,21 @@ export function BullpenAutoRunScheduleCard({
     pendingRunId,
     runTimerStartedAt,
   );
+  const openScanCandidateDialog = (
+    stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
+    mode: ScanCandidateDialogMode,
+  ) => {
+    setScanCandidateDialog({
+      mode,
+      scanCompletedAt: stage.timerCompletedAt,
+      candidates: stage.scanCandidates,
+      activePositions: stage.activePositionsFound,
+      activePositionCount:
+        readStageOutputNumber(stage.outputs.active_wallet_positions) ??
+        readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
+        stage.activePositionsFound.length,
+    });
+  };
   const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
   const hasActiveWorkflowStage = workflowView.stages.some((stage) => stage.isCurrent);
   const runActionRequested = action === "run-now" || action === "invest-now";
@@ -2118,15 +2151,17 @@ export function BullpenAutoRunScheduleCard({
 
   useEffect(() => {
     if (!workflowSettled) return;
-    if (pendingRunId !== null) {
-      setPendingRunId(null);
-    }
-    if (runNowStartedAt !== null) {
-      setRunNowStartedAt(null);
-    }
-    if (action === "run-now" || action === "invest-now") {
-      setAction(null);
-    }
+    window.queueMicrotask(() => {
+      if (pendingRunId !== null) {
+        setPendingRunId(null);
+      }
+      if (runNowStartedAt !== null) {
+        setRunNowStartedAt(null);
+      }
+      if (action === "run-now" || action === "invest-now") {
+        setAction(null);
+      }
+    });
   }, [action, pendingRunId, runNowStartedAt, workflowSettled]);
 
   return (
@@ -2590,11 +2625,29 @@ export function BullpenAutoRunScheduleCard({
                       </span>
                     </div>
                     {stage.key === "scan" ? (
-                      <div>
-                        New events found:{" "}
-                        <span className="font-semibold tabular-nums">
-                          {stage.scanCandidates.length}
-                        </span>
+                      <div className="space-y-0.5">
+                        <button
+                          type="button"
+                          onClick={() => openScanCandidateDialog(stage, "fresh-opportunities")}
+                          className="block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                        >
+                          New events found:{" "}
+                          <span className="font-semibold tabular-nums">
+                            {stage.scanCandidates.length}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openScanCandidateDialog(stage, "active-positions")}
+                          className="block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                        >
+                          Active Bullpen Positions Found:{" "}
+                          <span className="font-semibold tabular-nums">
+                            {readStageOutputNumber(stage.outputs.active_wallet_positions) ??
+                              readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
+                              stage.activePositionsFound.length}
+                          </span>
+                        </button>
                       </div>
                     ) : null}
                     {stage.key === "invest" && formatInvestStageRowMix(stage) ? (
@@ -2747,9 +2800,22 @@ export function BullpenAutoRunScheduleCard({
                   </div>
 
                   <div className="mt-3 flex items-center justify-between gap-3">
-                    <p className={`text-xs font-semibold ${toneClasses.text}`}>
-                      {stage.progressLabel}
-                    </p>
+                    {stage.key === "llm" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const scanStage = workflowView.stages.find((item) => item.key === "scan");
+                          if (scanStage) openScanCandidateDialog(scanStage, "fresh-opportunities");
+                        }}
+                        className={`text-left text-xs font-semibold underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300 ${toneClasses.text}`}
+                      >
+                        {stage.progressLabel}
+                      </button>
+                    ) : (
+                      <p className={`text-xs font-semibold ${toneClasses.text}`}>
+                        {stage.progressLabel}
+                      </p>
+                    )}
                     {showStageSpinner ? (
                       <Loader2 className={`h-4 w-4 animate-spin ${toneClasses.text}`} />
                     ) : null}
@@ -2764,15 +2830,7 @@ export function BullpenAutoRunScheduleCard({
                         type="button"
                         onClick={() => {
                           if (stage.key === "scan") {
-                            setScanCandidateDialog({
-                              scanCompletedAt: stage.timerCompletedAt,
-                              candidates: stage.scanCandidates,
-                              activePositions: stage.activePositionsFound,
-                              activePositionCount:
-                                readStageOutputNumber(stage.outputs.active_wallet_positions) ??
-                                readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
-                                stage.activePositionsFound.length,
-                            });
+                            openScanCandidateDialog(stage, "fresh-opportunities");
                             return;
                           }
                           setOpenStageKey(stage.key);

@@ -21,7 +21,6 @@ import {
   formatDuration,
   formatPercent,
   formatNumber,
-  humanizeTag,
   JsonPanel,
   StatCard,
   TradeAnalysisBadge,
@@ -148,17 +147,22 @@ export function TradeAnalysisListClient() {
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
-      <div className="space-y-2">
-        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
-          Bullpen x AI
-        </p>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-950">
-          Bullpen Trade Analysis
-        </h1>
-        <p className="max-w-3xl text-sm leading-6 text-slate-600">
-          Review executed Bullpen trades with entry and exit snapshots, order details,
-          LLM reasoning, computed tags, realized P&amp;L, and reinforcement signals.
-        </p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
+            Bullpen x AI
+          </p>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-950">
+            Bullpen Trade Analysis
+          </h1>
+          <p className="max-w-3xl text-sm leading-6 text-slate-600">
+            Review executed Bullpen trades with entry and exit snapshots, order details,
+            LLM reasoning, computed tags, realized P&amp;L, and reinforcement signals.
+          </p>
+        </div>
+        <Button asChild className="shrink-0 bg-purple-700 text-white hover:bg-purple-800">
+          <Link href={URLs.console.bullpenAi()}>Bullpen x AI</Link>
+        </Button>
       </div>
 
       <Card className="rounded-none border-slate-200 shadow-none">
