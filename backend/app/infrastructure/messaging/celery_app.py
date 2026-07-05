@@ -50,6 +50,7 @@ celery.conf.beat_schedule = {
 # Retry failed tasks with exponential backoff + jitter
 celery.conf.task_acks_late = True          # ack only after task completes
 celery.conf.task_reject_on_worker_lost = True  # requeue if worker crashes mid-task
+celery.conf.task_track_started = True
 
 celery.autodiscover_tasks([
     "app.domains.jobs",

@@ -60,6 +60,20 @@ async def _get_task_id_async(key: str) -> str | None:
             await redis_client.aclose()
 
 
+def _get_task_id_sync(key: str) -> str | None:
+    redis_client: sync_redis.Redis | None = None
+    try:
+        redis_client = sync_redis.from_url(settings.redis_url, decode_responses=True)
+        task_id = redis_client.get(key)
+        return task_id.strip() if isinstance(task_id, str) and task_id.strip() else None
+    except Exception:
+        logger.exception("Failed to load Celery task id for key %s", key)
+        return None
+    finally:
+        if redis_client is not None:
+            redis_client.close()
+
+
 def _revoke_task(task_id: str) -> None:
     try:
         celery.control.revoke(
@@ -92,6 +106,14 @@ async def register_auto_live_run_task(run_id: str, task_id: str) -> None:
 
 def register_auto_live_run_task_sync(run_id: str, task_id: str) -> None:
     _store_task_id_sync(_auto_live_run_task_key(run_id), task_id)
+
+
+async def get_registered_auto_live_run_task_id(run_id: str) -> str | None:
+    return await _get_task_id_async(_auto_live_run_task_key(run_id))
+
+
+def get_registered_auto_live_run_task_id_sync(run_id: str) -> str | None:
+    return _get_task_id_sync(_auto_live_run_task_key(run_id))
 
 
 async def revoke_registered_auto_live_run_task(run_id: str) -> str | None:

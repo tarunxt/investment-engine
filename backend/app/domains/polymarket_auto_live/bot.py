@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -11,6 +12,9 @@ from app.domains.polymarket_auto_live.console_profile import (
 from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
     auto_live_backend_execution_env_detail,
+)
+from app.domains.polymarket_auto_live.run_recovery import (
+    reconcile_running_auto_live_run,
 )
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
@@ -177,6 +181,41 @@ class BullpenAutoLiveBot:
     def __init__(self, user_id: int) -> None:
         self.user_id = user_id
 
+    async def _get_active_run_or_recover(
+        self,
+        repo: AsyncPolymarketAutoLiveRepository,
+        settings: BullpenAutoLiveSettings,
+        state: BullpenAutoLiveState,
+    ) -> tuple[BullpenAutoLiveRun | None, BullpenAutoLiveState]:
+        running_record = await repo.get_running_run_record(self.user_id)
+        if running_record is None:
+            return None, state
+
+        running_run = record_to_run(running_record)
+        recovered_run = await asyncio.to_thread(
+            reconcile_running_auto_live_run,
+            running_run,
+            started_at=running_record.started_at,
+            updated_at=running_record.updated_at,
+        )
+        if recovered_run is None:
+            return running_run, state
+
+        recovered_state = state.model_copy(
+            update={
+                "last_run_id": recovered_run.id,
+                "last_run_at": recovered_run.completed_at,
+                "last_action": recovered_run.summary,
+                "last_error": (
+                    None if recovered_run.status == "completed" else recovered_run.summary
+                ),
+            }
+        )
+        recovered_state = self._synchronize_state(settings, recovered_state)
+        await repo.save_run(self.user_id, recovered_run)
+        await repo.save_state(self.user_id, recovered_state)
+        return None, recovered_state
+
     async def _cancel_active_run_if_needed(
         self,
         repo: AsyncPolymarketAutoLiveRepository,
@@ -245,6 +284,7 @@ class BullpenAutoLiveBot:
             repo = AsyncPolymarketAutoLiveRepository(session)
             settings = await repo.ensure_settings(self.user_id)
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
+            _, state = await self._get_active_run_or_recover(repo, settings, state)
             await repo.save_state(self.user_id, state)
             await session.commit()
             return state
@@ -254,6 +294,7 @@ class BullpenAutoLiveBot:
             repo = AsyncPolymarketAutoLiveRepository(session)
             settings = await repo.ensure_settings(self.user_id)
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
+            _, state = await self._get_active_run_or_recover(repo, settings, state)
             runs = await repo.list_runs(self.user_id, limit=10)
             decisions = await repo.list_decisions(self.user_id, limit=25)
             await repo.save_state(self.user_id, state)
@@ -291,6 +332,11 @@ class BullpenAutoLiveBot:
             repo = AsyncPolymarketAutoLiveRepository(session)
             settings = await repo.ensure_settings(self.user_id)
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
+            running_run, state = await self._get_active_run_or_recover(
+                repo,
+                settings,
+                state,
+            )
             if settings.emergency_stop:
                 run = BullpenAutoLiveRun(
                     id=str(uuid4()),
@@ -310,9 +356,7 @@ class BullpenAutoLiveBot:
                 await session.commit()
                 return run
 
-            running_record = await repo.get_running_run_record(self.user_id)
-            if running_record is not None:
-                running_run = record_to_run(running_record)
+            if running_run is not None:
                 run = BullpenAutoLiveRun(
                     id=str(uuid4()),
                     triggered_by=triggered_by,  # type: ignore[arg-type]
