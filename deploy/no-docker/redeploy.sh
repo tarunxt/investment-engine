@@ -143,6 +143,50 @@ validate_backend_env_file() {
   "
 }
 
+validate_bullpen_env_alignment() {
+  run_as_app_user "
+    set -euo pipefail
+
+    set -a
+    source '$BACKEND_ENV_FILE'
+    backend_bullpen_bin=\${BULLPEN_BIN:-}
+    backend_bullpen_home=\${BULLPEN_HOME:-}
+    backend_bullpen_credentials_home=\${BULLPEN_CREDENTIALS_HOME:-}
+    set +a
+
+    set -a
+    source '$FRONTEND_ENV_FILE'
+    frontend_bullpen_bin=\${BULLPEN_BIN:-}
+    frontend_bullpen_home=\${BULLPEN_HOME:-}
+    frontend_bullpen_credentials_home=\${BULLPEN_CREDENTIALS_HOME:-}
+    set +a
+
+    compare_bullpen_setting() {
+      local name=\"\$1\"
+      local backend_value=\"\$2\"
+      local frontend_value=\"\$3\"
+
+      if [[ -z \"\$backend_value\" && -z \"\$frontend_value\" ]]; then
+        return 0
+      fi
+
+      if [[ -z \"\$backend_value\" || -z \"\$frontend_value\" ]]; then
+        echo \"\$name must be set in both $BACKEND_ENV_FILE and $FRONTEND_ENV_FILE once Bullpen is configured. Backend='\$backend_value' Frontend='\$frontend_value'\" >&2
+        exit 1
+      fi
+
+      if [[ \"\$backend_value\" != \"\$frontend_value\" ]]; then
+        echo \"\$name differs between $BACKEND_ENV_FILE (\$backend_value) and $FRONTEND_ENV_FILE (\$frontend_value). The Bullpen popup and Auto-Live worker will read different Bullpen sessions.\" >&2
+        exit 1
+      fi
+    }
+
+    compare_bullpen_setting BULLPEN_BIN \"\$backend_bullpen_bin\" \"\$frontend_bullpen_bin\"
+    compare_bullpen_setting BULLPEN_HOME \"\$backend_bullpen_home\" \"\$frontend_bullpen_home\"
+    compare_bullpen_setting BULLPEN_CREDENTIALS_HOME \"\$backend_bullpen_credentials_home\" \"\$frontend_bullpen_credentials_home\"
+  "
+}
+
 run_as_app_user() {
   sudo -u "$APP_USER" -H bash -lc "$1"
 }
@@ -279,6 +323,7 @@ validate_backend_env_file
 install_bullpen_cli_if_needed
 if [[ "$SCOPE" == "full" ]]; then
   validate_frontend_env_file
+  validate_bullpen_env_alignment
 fi
 
 if [[ "$SKIP_GIT_SYNC" != "true" ]]; then

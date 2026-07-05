@@ -270,6 +270,25 @@ def bullpen_process_env(*, read_only: bool) -> dict[str, str]:
     return env
 
 
+def bullpen_runtime_context(*, read_only: bool) -> dict[str, str | None]:
+    env = bullpen_process_env(read_only=read_only)
+    return {
+        "credential_home": env.get("HOME"),
+        "command_path": bullpen_executable(),
+    }
+
+
+def format_bullpen_runtime_context(context: dict[str, str | None]) -> str:
+    details: list[str] = []
+    credential_home = context.get("credential_home")
+    command_path = context.get("command_path")
+    if credential_home:
+        details.append(f"HOME={credential_home}")
+    if command_path:
+        details.append(f"CLI={command_path}")
+    return ", ".join(details) if details else "runtime unknown"
+
+
 def _bullpen_install_hint() -> str:
     attempted = ", ".join(bullpen_candidate_paths())
     return (
@@ -345,13 +364,15 @@ async def run_first_bullpen_json(
     command_variants: Iterable[list[str]], *, timeout_seconds: int = 20
 ) -> object:
     errors: list[str] = []
+    runtime_context = bullpen_runtime_context(read_only=True)
     for args in command_variants:
         try:
             return await run_bullpen_json(args, timeout_seconds=timeout_seconds)
         except Exception as exc:
             errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
     raise BullpenCommandError(
-        "All Bullpen command variants failed: " + " | ".join(errors)
+        "All Bullpen command variants failed "
+        f"({format_bullpen_runtime_context(runtime_context)}): " + " | ".join(errors)
     )
 
 
@@ -372,6 +393,8 @@ def _is_refresh_token_rejected_error(message: str) -> bool:
 class BullpenLiveExecutor:
     async def doctor(self) -> PolymarketDoctorStatus:
         checked_at = utc_now()
+        runtime_context = bullpen_runtime_context(read_only=True)
+        runtime_context_label = format_bullpen_runtime_context(runtime_context)
         checks = [
             (["status"], True, "status"),
             (["polymarket", "preflight"], False, "preflight"),
@@ -416,7 +439,11 @@ class BullpenLiveExecutor:
         return PolymarketDoctorStatus(
             checked_at=checked_at,
             ok=False,
-            message=f"Bullpen doctor failed after {', '.join(passed) or 'no'} passed checks: {failure_message}",
+            message=(
+                "Bullpen doctor failed "
+                f"using {runtime_context_label} after {', '.join(passed) or 'no'} "
+                f"passed checks: {failure_message}"
+            ),
             **session,
         )
 

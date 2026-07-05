@@ -217,6 +217,31 @@ def test_bullpen_process_env_allows_explicit_credentials_home(monkeypatch):
     assert "BULLPEN_NON_INTERACTIVE" not in env
 
 
+@pytest.mark.anyio
+async def test_run_first_bullpen_json_includes_runtime_context_in_failure(monkeypatch):
+    async def fake_run_bullpen_json(args, *, timeout_seconds=20):
+        raise bullpen.BullpenCommandError("not logged in. Run: bullpen login")
+
+    monkeypatch.setattr(bullpen, "run_bullpen_json", fake_run_bullpen_json)
+    monkeypatch.setattr(
+        bullpen,
+        "bullpen_runtime_context",
+        lambda *, read_only: {
+            "credential_home": "/home/investor",
+            "command_path": "/usr/local/bin/bullpen",
+        },
+    )
+
+    with pytest.raises(bullpen.BullpenCommandError) as exc_info:
+        await bullpen.run_first_bullpen_json(
+            [["polymarket", "positions", "--output", "json"]]
+        )
+
+    assert "HOME=/home/investor" in str(exc_info.value)
+    assert "CLI=/usr/local/bin/bullpen" in str(exc_info.value)
+    assert "not logged in. Run: bullpen login" in str(exc_info.value)
+
+
 def test_parse_bullpen_session_extracts_15_minute_jwt_window():
     from datetime import datetime, timezone
 
