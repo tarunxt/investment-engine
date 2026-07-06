@@ -2985,36 +2985,37 @@ export function BullpenAutoRunScheduleCard({
                           for this invest-only pass.
                         </p>
                       ) : null}
-                      {investOnlyPlan.alreadyInvestedCandidateCount > 0 ? (
-                        <div className="space-y-2">
-                          <p className="text-[11px] font-semibold leading-5 text-emerald-800">
-                            {investOnlyPlan.alreadyInvestedCandidateCount} qualified{" "}
-                            {investOnlyPlan.alreadyInvestedCandidateCount === 1 ? "event is" : "events are"} already invested and will be skipped.
-                          </p>
-                          <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
-                            {investOnlyPlan.candidatePreviews
-                              .filter((preview) => preview.status === "already-invested")
-                              .map((preview) => (
-                                <div
-                                  key={preview.candidate.market_id}
-                                  className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900"
-                                >
-                                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                                  <div className="min-w-0">
-                                    <p className="font-semibold">
-                                      {preview.candidate.market_title}
-                                    </p>
-                                    {preview.reason ? (
-                                      <p className="leading-5 text-emerald-800">
-                                        {preview.reason}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {stage.key === "llm" && investOnlyPlan.alreadyInvestedCandidateCount > 0 ? (
+                    <div className="mt-3 space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-3 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+                      <p className="text-[11px] font-semibold leading-5 text-emerald-800 dark:text-emerald-200">
+                        {investOnlyPlan.alreadyInvestedCandidateCount} qualified{" "}
+                        {investOnlyPlan.alreadyInvestedCandidateCount === 1 ? "event is" : "events are"} already invested and will be skipped.
+                      </p>
+                      <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                        {investOnlyPlan.candidatePreviews
+                          .filter((preview) => preview.status === "already-invested")
+                          .map((preview) => (
+                            <div
+                              key={preview.candidate.market_id}
+                              className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-100"
+                            >
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                              <div className="min-w-0">
+                                <p className="font-semibold">
+                                  {preview.candidate.market_title}
+                                </p>
+                                {preview.reason ? (
+                                  <p className="leading-5 text-emerald-800 dark:text-emerald-200">
+                                    {preview.reason}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
                     </div>
                   ) : null}
 
