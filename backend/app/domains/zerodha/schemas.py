@@ -220,6 +220,28 @@ class ZerodhaProtectedMarketResponse(BaseModel):
     failed_count: int
 
 
+class ZerodhaSequencedProtectedMarketRequest(BaseModel):
+    orders: list[ZerodhaProtectedMarketOrderRequest]
+    sell_first: bool = True
+    wait_for_sell_completion: bool = True
+    sell_wait_timeout_seconds: int = Field(default=60, ge=1, le=300)
+    poll_interval_seconds: float = Field(default=2.0, ge=0.5, le=10.0)
+    safety_buffer_amount: float | None = Field(default=None, ge=0)
+
+
+class ZerodhaSequencedProtectedMarketResponse(BaseModel):
+    sell_results: list[ZerodhaProtectedMarketOrderResult] = Field(default_factory=list)
+    buy_results: list[ZerodhaProtectedMarketOrderResult] = Field(default_factory=list)
+    skipped_buy_results: list[ZerodhaProtectedMarketOrderResult] = Field(default_factory=list)
+    placed_count: int
+    failed_count: int
+    skipped_count: int
+    sell_phase_complete: bool
+    buy_phase_attempted: bool
+    refreshed_available_margin: float | None = None
+    messages: list[str] = Field(default_factory=list)
+
+
 class ZerodhaPortfolioHolding(BaseModel):
     tradingsymbol: str
     exchange: str

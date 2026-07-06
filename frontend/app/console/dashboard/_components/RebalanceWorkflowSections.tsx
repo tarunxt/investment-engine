@@ -189,6 +189,9 @@ type ZerodhaBasketSubmission = {
   placedOrderIds?: string[];
   failedMessages?: string[];
   portfolioRefreshedAt?: string | null;
+  phase?: "sell_first" | "buy_after_sell" | "single_side";
+  skippedOrderIds?: string[];
+  messages?: string[];
 };
 type ZerodhaBasketPreviewOrder = {
   id: string;
@@ -933,10 +936,12 @@ function getZerodhaBasketSellUnitLimit(order: ZerodhaBasketPreviewOrder) {
 }
 
 function getZerodhaBasketBuyUnitLimit(order: ZerodhaBasketPreviewOrder) {
-  if (order.availableBalance === null || order.availableBalance <= 0 || order.price === null || order.price <= 0) {
-    return null;
-  }
-  return Math.floor(order.availableBalance / order.price);
+  if (order.price === null || order.price <= 0) return null;
+  const recommendedUnits = order.baseUnits !== null && order.baseUnits > 0 ? Math.floor(order.baseUnits) : null;
+  const balanceUnits = order.availableBalance !== null && order.availableBalance > 0 ? Math.floor(order.availableBalance / order.price) : null;
+  if (recommendedUnits === null) return balanceUnits;
+  if (balanceUnits === null) return recommendedUnits;
+  return Math.min(recommendedUnits, balanceUnits);
 }
 
 function getZerodhaBasketUnitLimit(order: ZerodhaBasketPreviewOrder) {
@@ -1246,6 +1251,16 @@ function buildZerodhaBasketPreviewOrders(
   const holdingExchangeBySymbol = buildZerodhaHoldingExchangeMap(snapshot);
   const snapshotPriceBySymbol = buildZerodhaSnapshotPriceMap(snapshot);
   const availableBalance = snapshot?.available_margin ?? null;
+  const eligibleSellAmount = rows
+    .filter((row) => row.formulaAction === "Sell All" || row.formulaAction === "Trim")
+    .reduce((sum, row) => sum + Math.abs(row.formulaEstimate.amount ?? 0), 0);
+  const requestedBuyAmount = rows
+    .filter((row) => row.formulaAction === "Buy New" || row.formulaAction === "Add more")
+    .reduce((sum, row) => sum + Math.abs(row.formulaEstimate.amount ?? 0), 0);
+  const safetyBuffer = requestedBuyAmount > 0 ? Math.max(50, requestedBuyAmount * 0.01) : 0;
+  const projectedBuyPower = availableBalance !== null && eligibleSellAmount > 0
+    ? Math.max(0, availableBalance + eligibleSellAmount - safetyBuffer)
+    : availableBalance;
 
   return rows
     .filter((row) => ZERODHA_BASKET_ACTIONS.has(row.formulaAction))
@@ -1263,7 +1278,7 @@ function buildZerodhaBasketPreviewOrders(
       const sellAvailableUnits = estimate.currentUnits ?? baseUnits;
       const maxUnits = side === "SELL"
         ? (sellAvailableUnits !== null && sellAvailableUnits > 0 ? Math.floor(sellAvailableUnits) : null)
-        : (availableBalance !== null && price !== null && price > 0 ? Math.floor(availableBalance / price) : null);
+        : (projectedBuyPower !== null && price !== null && price > 0 ? Math.min(Math.floor(baseUnits ?? 0), Math.floor(projectedBuyPower / price)) : null);
       const units = clampZerodhaBasketUnits(rawUnits, maxUnits);
       const amount = calculateZerodhaBasketAmount(units, price) ?? estimate.amount;
       const percent = calculateZerodhaBasketPercent(
@@ -1285,7 +1300,7 @@ function buildZerodhaBasketPreviewOrders(
         price,
         amount,
         lastPrice: snapshotPrice,
-        availableBalance,
+        availableBalance: side === "BUY" ? projectedBuyPower : availableBalance,
         percent,
         orderKind: "Market" as const,
         stock,
@@ -3021,11 +3036,14 @@ function ZerodhaBasketPreviewDialog({
     availableMargin,
     selectedBuyAmount,
   );
+  const safetyBufferAmount = selectedBuyAmount > 0 ? Math.max(50, selectedBuyAmount * 0.01) : 0;
+  const projectedBuyPower = availableMargin === null ? null : Math.max(0, availableMargin + selectedSellAmount - safetyBufferAmount);
   const allSelected = orders.length > 0 && orders.every((order) => selectedIds.has(order.id));
   const marketStatus = getIndiaMarketStatus();
   const canUseDirectMarket = directMarketAvailable && marketStatus.open;
   const submittedOrderIds = new Set(submission?.orders.map((order) => order.id) ?? []);
   const placedOrderIds = new Set(submission?.placedOrderIds ?? []);
+  const skippedOrderIds = new Set(submission?.skippedOrderIds ?? []);
   const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
@@ -3034,7 +3052,7 @@ function ZerodhaBasketPreviewDialog({
       .sort(compareZerodhaBasketOrdersByScore),
   })).filter((group) => group.orders.length > 0);
 
-  const buttonText = executionMode === "direct_market" ? "Place protected MARKET orders" : "Open Kite protected LIMIT basket";
+  const buttonText = executionMode === "direct_market" ? "Place protected MARKET: sell first, then buy" : (submission?.phase === "sell_first" ? "Refresh & Open Buy Basket" : "Open Kite protected LIMIT basket");
   const busyText = executionMode === "direct_market" ? "Placing…" : "Opening…";
   const renderPlaceOrderButton = (className?: string) => (
     <Button
@@ -3143,7 +3161,7 @@ function ZerodhaBasketPreviewDialog({
                           : "text-slate-600 hover:bg-slate-100",
                       )}
                     >
-                      Protected LIMIT basket
+                      Protected LIMIT basket: Sell tray first, then buy tray
                     </button>
                     <button
                       type="button"
@@ -3156,12 +3174,12 @@ function ZerodhaBasketPreviewDialog({
                           : "text-slate-600 hover:bg-slate-100",
                       )}
                     >
-                      Protected MARKET for selected stocks
+                      Protected MARKET: Sell first, then buy
                     </button>
                   </div>
                   <p className="mt-2 text-xs leading-5 text-slate-500">
                     {canUseDirectMarket
-                      ? "Protected MARKET submits all selected rows directly with market_protection=-1. Per-row order type selectors still control the LIMIT basket fallback."
+                      ? "Protected MARKET submits SELL rows first with market_protection=-1, waits for terminal sell status, refreshes margin, then submits only affordable BUY rows. Per-row order type selectors still control the LIMIT basket fallback."
                       : directMarketAvailable
                         ? "Protected MARKET becomes available only while NSE/BSE regular trading is open."
                         : "Protected MARKET requires backend direct-order access from a Kite-whitelisted server egress IP."}
@@ -3208,6 +3226,9 @@ function ZerodhaBasketPreviewDialog({
                   <div className={cn("mt-1 text-lg font-black", availableMarginToneClass)}>
                     {availableMargin === null ? "Not available" : formatBasketCurrency(availableMargin)}
                   </div>
+                  <div className="mt-2 text-xs font-bold uppercase tracking-wide text-emerald-700">Projected after selected sells</div>
+                  <div className="mt-1 text-sm font-black text-emerald-900">{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower)}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-emerald-700">Includes safety buffer {formatBasketCurrency(safetyBufferAmount)}; not guaranteed until sells fill and margins refresh.</div>
                 </div>
                 <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
@@ -3286,9 +3307,10 @@ function ZerodhaBasketPreviewDialog({
                             </tr>
                             {group.orders.map((order) => {
                               const isSubmitted = submittedOrderIds.has(order.id);
+                              const isSkipped = skippedOrderIds.has(order.id);
                               const isPlaced = placedOrderIds.has(order.id) || (submission?.executionMode === "publisher_limit" && isSubmitted);
                               return (
-                              <tr key={order.id} className={cn("transition", isPlaced ? "bg-emerald-50/80 ring-1 ring-inset ring-emerald-100" : isSubmitted ? "bg-amber-50/70" : "bg-white")}>
+                              <tr key={order.id} className={cn("transition", isSkipped ? "bg-orange-50/80 ring-1 ring-inset ring-orange-100" : isPlaced ? "bg-emerald-50/80 ring-1 ring-inset ring-emerald-100" : isSubmitted ? "bg-amber-50/70" : "bg-white")}>
                                 <td className="px-4 py-3">
                                   <input
                                     type="checkbox"
@@ -3390,8 +3412,10 @@ function ZerodhaBasketPreviewDialog({
                                   </select>
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
-                                  {isPlaced ? (
-                                    <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 font-bold text-emerald-800">{submission?.executionMode === "direct_market" ? "Completed in Kite" : "Sent to protected LIMIT tray"}</span>
+                                  {isSkipped ? (
+                                    <span className="inline-flex rounded-full bg-orange-100 px-3 py-1 font-bold text-orange-800">Buy skipped/reduced</span>
+                                  ) : isPlaced ? (
+                                    <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 font-bold text-emerald-800">{submission?.executionMode === "direct_market" ? (order.side === "SELL" ? "Sell phase placed" : "Buy phase placed") : "Sent to protected LIMIT tray"}</span>
                                   ) : isSubmitted ? (
                                     <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 font-bold text-amber-800">Failed / check Kite</span>
                                   ) : (
@@ -3425,8 +3449,8 @@ function ZerodhaBasketPreviewDialog({
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {executionMode === "direct_market"
-              ? "Protected MARKET mode submits every selected stock through the backend using Kite Connect with market_protection=-1 during regular NSE/BSE hours. Access tokens never reach the browser."
-              : "Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. Each limit price mirrors the latest available quoted LTP before basket submission, so stale recommendation prices are never used as execution prices. Kite can still show a newer live LTP after the basket page opens."}
+              ? "Protected MARKET mode submits selected SELL orders first through the backend with market_protection=-1, waits for execution status, refreshes margin, then submits only affordable BUY orders. Access tokens never reach the browser; execution is not atomic or guaranteed."
+              : "Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. With mixed sides it opens SELL trays first; after you place the sell basket in Kite, click Refresh & Open Buy Basket to reprice and clamp affordable BUY rows. Kite can still show a newer live LTP after the basket page opens."}
           </div>
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
@@ -5545,13 +5569,16 @@ export function RebalanceWorkflowSections({
       window.alert(scoreWarningMessage);
     }
     const marketStatus = getIndiaMarketStatus();
-    const orderChunks = chunkZerodhaBasketOrders(selectedOrders);
+    const isPublisherBuySecondStep = zerodhaExecutionMode === "publisher_limit" && zerodhaBasketSubmission?.phase === "sell_first";
+    const publisherOrdersForThisStep = isPublisherBuySecondStep ? selectedOrders.filter((order) => order.side === "BUY") : selectedOrders;
+    const mixedPublisherSides = zerodhaExecutionMode === "publisher_limit" && !isPublisherBuySecondStep && selectedOrders.some((order) => order.side === "SELL") && selectedOrders.some((order) => order.side === "BUY");
+    const orderChunks = chunkZerodhaBasketOrders(mixedPublisherSides ? selectedOrders.filter((order) => order.side === "SELL") : publisherOrdersForThisStep);
     const shouldContinue = window.confirm(
       `${marketStatus.label}
 
 ${zerodhaExecutionMode === "direct_market"
-  ? `This will place ${selectedOrders.length} selected Zerodha protected MARKET order${selectedOrders.length === 1 ? "" : "s"} directly through Kite Connect with market_protection=-1. Continue?`
-  : `This will open ${orderChunks.length} Kite protected LIMIT basket tray${orderChunks.length === 1 ? "" : "s"} for ${selectedOrders.length} selected Zerodha order${selectedOrders.length === 1 ? "" : "s"}. Orders are split into batches of ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} so Kite does not leave later rows unsubmitted. Review and place every tray inside Kite. Continue?`}`,
+  ? `This will place SELL protected MARKET orders first through Kite Connect with market_protection=-1, wait for sell status, refresh margins, then place only affordable BUY orders. Execution is not atomic or guaranteed. Continue?`
+  : `This will open protected LIMIT Kite basket tray(s). If both SELL and BUY rows are selected, only SELL trays open first; after you place sells in Kite, click Refresh & Open Buy Basket to reprice and open affordable BUY trays. Continue?`}`,
     );
     if (!shouldContinue) return;
 
@@ -5566,7 +5593,7 @@ ${zerodhaExecutionMode === "direct_market"
         return;
       }
       try {
-        const response = await apiService.zerodhaPlaceProtectedMarketOrders({
+        const response = await apiService.zerodhaPlaceProtectedMarketOrdersSequenced({
           orders: selectedOrders.map((order) => ({
             tradingsymbol: order.symbol.toUpperCase(),
             exchange: order.exchange.toUpperCase() as "NSE" | "BSE",
@@ -5576,17 +5603,21 @@ ${zerodhaExecutionMode === "direct_market"
             validity: "DAY",
             market_protection: ZERODHA_DEFAULT_MARKET_PROTECTION,
           })),
+          sell_first: true,
+          wait_for_sell_completion: true,
+          safety_buffer_amount: Math.max(50, selectedOrders.filter((order) => order.side === "BUY").reduce((sum, order) => sum + (order.amount ?? 0), 0) * 0.01),
         });
-        const failed = response.results.filter((result) => result.status === "failed");
+        const allResults = [...response.sell_results, ...response.buy_results];
+        const failed = allResults.filter((result) => result.status === "failed");
         const placedResultKeys = new Set(
-          response.results
+          allResults
             .filter((result) => result.status === "placed")
             .map((result) => `${result.exchange.toUpperCase()}:${result.tradingsymbol.toUpperCase()}:${result.transaction_type}`),
         );
         const placedOrders = selectedOrders.filter((order) =>
           placedResultKeys.has(`${order.exchange.toUpperCase()}:${order.symbol.toUpperCase()}:${order.side}`),
         );
-        const failedMessages = failed.map((result) => `${result.tradingsymbol}: ${result.error || "unknown error"}`);
+        const failedMessages = [...failed.map((result) => `${result.tradingsymbol}: ${result.error || "unknown error"}`), ...response.skipped_buy_results.map((result) => `${result.tradingsymbol}: ${result.error || "buy skipped"}`), ...response.messages];
         let portfolioRefreshedAt: string | null = null;
 
         if (response.placed_count > 0) {
@@ -5611,11 +5642,13 @@ ${zerodhaExecutionMode === "direct_market"
           clipboardCopied: false,
           orders: selectedOrders,
           placedOrderIds: placedOrders.map((order) => order.id),
+          skippedOrderIds: selectedOrders.filter((order) => response.skipped_buy_results.some((result) => result.tradingsymbol.toUpperCase() === order.symbol.toUpperCase() && result.exchange.toUpperCase() === order.exchange.toUpperCase())).map((order) => order.id),
           failedMessages,
+          messages: response.messages,
           portfolioRefreshedAt,
         });
-        if (failed.length) {
-          setZerodhaBasketError(`Placed ${response.placed_count} protected MARKET order${response.placed_count === 1 ? "" : "s"}; ${response.failed_count} failed: ${failedMessages.join("; ")}`);
+        if (failed.length || response.skipped_count) {
+          setZerodhaBasketError(`Placed ${response.placed_count} protected MARKET order${response.placed_count === 1 ? "" : "s"}; ${response.failed_count} failed; ${response.skipped_count} buy order${response.skipped_count === 1 ? "" : "s"} skipped/reduced: ${failedMessages.join("; ")}`);
         }
       } catch (error) {
         setZerodhaBasketError(`Could not place protected MARKET orders: ${normalizeError(error)}. Use the Publisher-safe protected LIMIT fallback if direct order placement is unavailable.`);
@@ -5625,6 +5658,12 @@ ${zerodhaExecutionMode === "direct_market"
       return;
     }
 
+    const publisherStepOrders = mixedPublisherSides ? selectedOrders.filter((order) => order.side === "SELL") : publisherOrdersForThisStep;
+    if (!publisherStepOrders.length) {
+      setZerodhaBasketPlacing(false);
+      setZerodhaBasketError(isPublisherBuySecondStep ? "No selected BUY rows remain for the second-step buy basket." : "No selected rows to open in Kite.");
+      return;
+    }
     const kiteTargetPrefix = `zerodha-basket-${Date.now()}`;
     const kiteWindows = orderChunks.map((_, index) => {
       const targetName = `${kiteTargetPrefix}-${index + 1}`;
@@ -5652,7 +5691,24 @@ ${zerodhaExecutionMode === "direct_market"
         return;
       }
 
-      const preparedOrders = await prepareZerodhaBasketOrdersForKite(selectedOrders);
+      let preparedOrders = await prepareZerodhaBasketOrdersForKite(publisherStepOrders);
+      if (isPublisherBuySecondStep) {
+        const overview = await apiService.zerodhaPortfolioOverview();
+        const refreshedMargin = overview.latest?.available_margin ?? null;
+        let remaining = refreshedMargin === null ? 0 : Math.max(0, refreshedMargin - Math.max(50, preparedOrders.reduce((sum, order) => sum + (order.amount ?? 0), 0) * 0.01));
+        preparedOrders = preparedOrders.map((order) => {
+          if (order.side !== "BUY" || !order.price || order.price <= 0) return order;
+          const affordableUnits = Math.min(order.units ?? 0, Math.floor(remaining / order.price));
+          remaining -= Math.max(0, affordableUnits) * order.price;
+          return { ...order, units: affordableUnits > 0 ? affordableUnits : null, amount: calculateZerodhaBasketAmount(affordableUnits > 0 ? affordableUnits : null, order.price) };
+        }).filter((order) => order.side !== "BUY" || ((order.units ?? 0) > 0));
+        setZerodhaBasketDetailsData((current) => ({ ...current, portfolioSnapshot: overview.latest }));
+      }
+      if (!preparedOrders.length) {
+        kiteWindows.forEach((entry) => entry.win?.close());
+        setZerodhaBasketError("No affordable BUY rows remain after refreshed margin and safety buffer.");
+        return;
+      }
       setZerodhaBasketOrders((current) => mergePreparedZerodhaBasketOrders(current, preparedOrders));
       setZerodhaBasketLtpRefreshedAt(new Date().toISOString());
       const preparedChunks = chunkZerodhaBasketOrders(preparedOrders);
@@ -5674,6 +5730,8 @@ ${zerodhaExecutionMode === "direct_market"
         basketCount: preparedChunks.length,
         clipboardCopied,
         orders: preparedOrders,
+        phase: mixedPublisherSides ? "sell_first" : isPublisherBuySecondStep ? "buy_after_sell" : "single_side",
+        messages: mixedPublisherSides ? ["Sell phase opened. After you place the sell basket in Kite, click Refresh & Open Buy Basket."] : isPublisherBuySecondStep ? ["Buy phase opened after refreshed margin sizing."] : [],
       });
     } catch (error) {
       kiteWindows.forEach((entry) => entry.win?.close());
@@ -5681,7 +5739,7 @@ ${zerodhaExecutionMode === "direct_market"
     } finally {
       setZerodhaBasketPlacing(false);
     }
-  }, [selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaExecutionMode]);
+  }, [selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaBasketSubmission?.phase, zerodhaExecutionMode]);
 
   const loadLatestIdleStageInfo = useCallback(async () => {
     const [

@@ -68,6 +68,8 @@ import {
     ZerodhaPlaceOrderResponse,
   ZerodhaProtectedMarketRequest,
   ZerodhaProtectedMarketResponse,
+  ZerodhaSequencedProtectedMarketRequest,
+  ZerodhaSequencedProtectedMarketResponse,
     ZerodhaThreatAnalysis,
     ZerodhaThreatHistoryResponse,
     ZerodhaThreatLatestResponse,
@@ -141,6 +143,7 @@ export interface IApiService {
     zerodhaPrepareBasketOrders(data: ZerodhaPrepareBasketRequest): Promise<ZerodhaPrepareBasketResponse>;
     zerodhaPlaceOrder(data: ZerodhaPlaceOrderRequest): Promise<ZerodhaPlaceOrderResponse>;
     zerodhaPlaceProtectedMarketOrders(data: ZerodhaProtectedMarketRequest): Promise<ZerodhaProtectedMarketResponse>;
+    zerodhaPlaceProtectedMarketOrdersSequenced(data: ZerodhaSequencedProtectedMarketRequest): Promise<ZerodhaSequencedProtectedMarketResponse>;
     zerodhaDisconnect(): Promise<{ message: string }>;
     zerodhaEventsLatest(): Promise<ZerodhaEventsLatestResponse>;
     zerodhaEventsHistory(params?: { limit?: number }): Promise<ZerodhaEventsHistoryResponse>;
