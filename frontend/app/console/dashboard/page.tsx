@@ -15,6 +15,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
+import type { BullpenPositionsResponse } from "@/lib/bullpenPositions";
 import { URLs } from "@/lib/urls";
 import { apiService } from "@/services/api";
 import type {
@@ -62,6 +63,7 @@ type DashboardState = {
   indmoneyOverview: IndMoneyUsPortfolioOverviewResponse | null;
   indmoneyThreat: IndMoneyUsThreatAnalysis | null;
   polymarketState: PolymarketBotState | null;
+  bullpenPositions: BullpenPositionsResponse | null;
 };
 
 const INITIAL_STATE: DashboardState = {
@@ -71,9 +73,11 @@ const INITIAL_STATE: DashboardState = {
   indmoneyOverview: null,
   indmoneyThreat: null,
   polymarketState: null,
+  bullpenPositions: null,
 };
 
-const DASHBOARD_OVERVIEW_CACHE_KEY = "investment-engine:dashboard-overview-cache:v1";
+const DASHBOARD_OVERVIEW_CACHE_KEY =
+  "investment-engine:dashboard-overview-cache:v1";
 const DASHBOARD_OVERVIEW_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const DASHBOARD_SECTION_KEYS = [
   "zerodhaStatus",
@@ -82,12 +86,14 @@ const DASHBOARD_SECTION_KEYS = [
   "indmoneyOverview",
   "indmoneyThreat",
   "polymarketState",
+  "bullpenPositions",
 ] as const;
 const DASHBOARD_CRITICAL_KEYS = [
   "zerodhaStatus",
   "zerodhaOverview",
   "indmoneyOverview",
   "polymarketState",
+  "bullpenPositions",
 ] as const;
 
 type DashboardSectionKey = (typeof DASHBOARD_SECTION_KEYS)[number];
@@ -99,6 +105,7 @@ type DashboardOverviewCachePayload = {
   zerodhaOverview: ZerodhaPortfolioOverviewResponse | null;
   indmoneyOverview: IndMoneyUsPortfolioOverviewResponse | null;
   polymarketState: PolymarketBotState | null;
+  bullpenPositions: BullpenPositionsResponse | null;
 };
 
 const DeferredRebalanceWorkflowSections = dynamic(
@@ -131,6 +138,7 @@ function createPendingSectionsState(isPending: boolean): DashboardPendingState {
     indmoneyOverview: isPending,
     indmoneyThreat: isPending,
     polymarketState: isPending,
+    bullpenPositions: isPending,
   };
 }
 
@@ -153,6 +161,7 @@ function readDashboardOverviewCache(): Partial<DashboardState> | null {
       zerodhaOverview: parsed.zerodhaOverview ?? null,
       indmoneyOverview: parsed.indmoneyOverview ?? null,
       polymarketState: parsed.polymarketState ?? null,
+      bullpenPositions: parsed.bullpenPositions ?? null,
     };
   } catch {
     return null;
@@ -169,6 +178,7 @@ function writeDashboardOverviewCache(state: DashboardState) {
       zerodhaOverview: state.zerodhaOverview,
       indmoneyOverview: state.indmoneyOverview,
       polymarketState: state.polymarketState,
+      bullpenPositions: state.bullpenPositions,
     };
     window.localStorage.setItem(
       DASHBOARD_OVERVIEW_CACHE_KEY,
@@ -451,9 +461,12 @@ function PortfolioCommandSummary({
             </div>
             <div className="mt-3 text-xs leading-5 text-slate-200">
               <div>
-                Account Value: {formatPrivateInvestmentValueWithRs(bullpenAccountValueInr)} +
+                Account Value:{" "}
+                {formatPrivateInvestmentValueWithRs(bullpenAccountValueInr)} +
               </div>
-              <div>Cash: {formatPrivateInvestmentValueWithRs(bullpenCashValueInr)}</div>
+              <div>
+                Cash: {formatPrivateInvestmentValueWithRs(bullpenCashValueInr)}
+              </div>
             </div>
           </div>
         </div>
@@ -862,6 +875,17 @@ function buildUsTopHoldings(
   }));
 }
 
+async function fetchBullpenPositions(): Promise<BullpenPositionsResponse> {
+  const response = await fetch("/api/bullpen-ai/positions", {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to load Bullpen wallet positions.");
+  }
+
+  return (await response.json()) as BullpenPositionsResponse;
+}
 
 function parseBullpenAccountValueUsd(message?: string | null) {
   if (!message) return 0;
@@ -873,7 +897,9 @@ function parseBullpenAccountValueUsd(message?: string | null) {
 export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<DashboardState>(() => {
     const cachedOverview = readDashboardOverviewCache();
-    return cachedOverview ? { ...INITIAL_STATE, ...cachedOverview } : INITIAL_STATE;
+    return cachedOverview
+      ? { ...INITIAL_STATE, ...cachedOverview }
+      : INITIAL_STATE;
   });
   const [pendingSections, setPendingSections] = useState<DashboardPendingState>(
     () => createPendingSectionsState(true),
@@ -957,40 +983,46 @@ export default function DashboardPage() {
 
     const requests = [
       runRequest(
-      "zerodhaStatus",
-      "India connection status",
-      () => apiService.zerodhaStatus(),
-      (value) => value,
+        "zerodhaStatus",
+        "India connection status",
+        () => apiService.zerodhaStatus(),
+        (value) => value,
       ),
       runRequest(
-      "zerodhaOverview",
-      "India portfolio",
-      () => apiService.zerodhaPortfolioOverview(),
-      (value) => value,
+        "zerodhaOverview",
+        "India portfolio",
+        () => apiService.zerodhaPortfolioOverview(),
+        (value) => value,
       ),
       runRequest(
-      "indmoneyOverview",
-      "US portfolio",
-      () => apiService.indmoneyUsPortfolioOverview(),
-      (value) => value,
+        "indmoneyOverview",
+        "US portfolio",
+        () => apiService.indmoneyUsPortfolioOverview(),
+        (value) => value,
       ),
       runRequest(
-      "polymarketState",
-      "Bullpen account",
-      () => apiService.polymarketState(),
-      (value) => value,
+        "polymarketState",
+        "Bullpen bot state",
+        () => apiService.polymarketState(),
+        (value) => value,
       ),
       runRequest(
-      "zerodhaThreat",
-      "India threats",
-      () => apiService.zerodhaThreatsLatest(),
-      (value) => value.analysis,
+        "bullpenPositions",
+        "Bullpen wallet",
+        () => fetchBullpenPositions(),
+        (value) => value,
       ),
       runRequest(
-      "indmoneyThreat",
-      "US threats",
-      () => apiService.indmoneyUsThreatsLatest(),
-      (value) => value.analysis,
+        "zerodhaThreat",
+        "India threats",
+        () => apiService.zerodhaThreatsLatest(),
+        (value) => value.analysis,
+      ),
+      runRequest(
+        "indmoneyThreat",
+        "US threats",
+        () => apiService.indmoneyUsThreatsLatest(),
+        (value) => value.analysis,
       ),
     ];
 
@@ -1046,11 +1078,18 @@ export default function DashboardPage() {
       : usSnapshot.wallet_balance * usdInrRate;
   const indmoneyCommandValue =
     (indmoneyPortfolioValueInr ?? 0) + (indmoneyAvailableFundsValueInr ?? 0);
+  const bullpenSummary = dashboard.bullpenPositions?.summary;
   const bullpenAccountValueUsd =
+    bullpenSummary?.walletValue ??
+    bullpenSummary?.totalValue ??
     dashboard.polymarketState?.live.balance.account_value_usd ??
-    parseBullpenAccountValueUsd(dashboard.polymarketState?.live.balance.message);
+    parseBullpenAccountValueUsd(
+      dashboard.polymarketState?.live.balance.message,
+    );
   const bullpenCashValueUsd =
-    dashboard.polymarketState?.live.balance.available_balance_usd ?? 0;
+    bullpenSummary?.cashBalance ??
+    dashboard.polymarketState?.live.balance.available_balance_usd ??
+    0;
   const bullpenTotalValueUsd = bullpenAccountValueUsd + bullpenCashValueUsd;
   const bullpenAccountValueInr = bullpenAccountValueUsd * usdInrRate;
   const bullpenCashValueInr = bullpenCashValueUsd * usdInrRate;
