@@ -4,8 +4,10 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  Clock,
   Eye,
   EyeOff,
+  Info,
   Loader2,
   RefreshCw,
   Sparkles,
@@ -41,7 +43,10 @@ import {
   type PortfolioCardTopHolding,
 } from "./_components/MarketPortfolioCard";
 import { ThreatMarketCard } from "./_components/ThreatMarketCard";
-import { ZERODHA_DASHBOARD_SYNC_NOW_EVENT } from "./_components/RebalanceWorkflowSections";
+import {
+  INDMONEY_DASHBOARD_SYNC_NOW_EVENT,
+  ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
+} from "./_components/RebalanceWorkflowSections";
 import {
   countThreatSeverities,
   extractUrgentActionRows,
@@ -358,6 +363,44 @@ function maskInvestmentValue(value: string) {
   return value.replace(/\p{N}/gu, "*");
 }
 
+function formatCommandTileUpdatedAt(value?: string | null) {
+  if (!value) return "Not synced yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not synced yet";
+
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+  const day = new Intl.DateTimeFormat("en-GB", { day: "2-digit" }).format(date);
+  const month = new Intl.DateTimeFormat("en-GB", { month: "long" }).format(date);
+  const year = new Intl.DateTimeFormat("en-GB", { year: "numeric" }).format(date);
+
+  return `${time} | ${day} ${month}, ${year}`;
+}
+
+type CommandTileInfoKey = "zerodha" | "indmoney" | "bullpen";
+
+const COMMAND_TILE_INFO: Record<
+  CommandTileInfoKey,
+  { title: string; body: string }
+> = {
+  zerodha: {
+    title: "Zerodha tile details",
+    body: "Broker-backed India total. Portfolio is latest holdings market value; Cash is latest available margin from the Kite portfolio sync.",
+  },
+  indmoney: {
+    title: "INDmoney tile details",
+    body: "US portfolio total converted to INR. Portfolio is current holdings value; Cash is wallet balance / available funds from the latest INDmoney snapshot.",
+  },
+  bullpen: {
+    title: "Bullpen tile details",
+    body: "Polymarket Bullpen wallet total converted to INR. Portfolio is wallet position value; Cash is available balance from the live positions refresh.",
+  },
+};
+
 function PortfolioCommandSummary({
   totalValue,
   zerodhaValue,
@@ -369,6 +412,15 @@ function PortfolioCommandSummary({
   bullpenTotalValueInr,
   bullpenAccountValueInr,
   bullpenCashValueInr,
+  zerodhaUpdatedAt,
+  indmoneyUpdatedAt,
+  bullpenUpdatedAt,
+  onRefreshZerodha,
+  onRefreshIndmoney,
+  onRefreshBullpen,
+  refreshingZerodha,
+  refreshingIndmoney,
+  refreshingBullpen,
 }: {
   totalValue: number;
   zerodhaValue: number;
@@ -380,6 +432,15 @@ function PortfolioCommandSummary({
   bullpenTotalValueInr: number | null | undefined;
   bullpenAccountValueInr: number | null | undefined;
   bullpenCashValueInr: number | null | undefined;
+  zerodhaUpdatedAt?: string | null;
+  indmoneyUpdatedAt?: string | null;
+  bullpenUpdatedAt?: string | null;
+  onRefreshZerodha: () => void;
+  onRefreshIndmoney: () => void;
+  onRefreshBullpen: () => void;
+  refreshingZerodha: boolean;
+  refreshingIndmoney: boolean;
+  refreshingBullpen: boolean;
 }) {
   const [showInvestmentNumbers, setShowInvestmentNumbers] = useState(false);
   const formatPrivateInvestmentValue = (value: number | null | undefined) => {
@@ -392,6 +453,77 @@ function PortfolioCommandSummary({
     value: number | null | undefined,
   ) => formatPrivateInvestmentValue(value).replace("₹", "Rs ");
   const VisibilityIcon = showInvestmentNumbers ? EyeOff : Eye;
+  const [infoDialog, setInfoDialog] = useState<CommandTileInfoKey | null>(null);
+
+  const renderTile = ({
+    keyName,
+    title,
+    value,
+    portfolioValue,
+    cashValue,
+    cashLabel = "Cash",
+    updatedAt,
+    onRefresh,
+    refreshingTile,
+    useRsPrefix = false,
+  }: {
+    keyName: CommandTileInfoKey;
+    title: string;
+    value: number | null | undefined;
+    portfolioValue: number | null | undefined;
+    cashValue: number | null | undefined;
+    cashLabel?: string;
+    updatedAt?: string | null;
+    onRefresh: () => void;
+    refreshingTile: boolean;
+    useRsPrefix?: boolean;
+  }) => {
+    const formatter = useRsPrefix
+      ? formatPrivateInvestmentValueWithRs
+      : formatPrivateInvestmentValue;
+
+    return (
+      <div className="relative rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+            {title}
+            <button
+              type="button"
+              onClick={() => setInfoDialog(keyName)}
+              className="rounded-full text-slate-300 transition hover:text-white"
+              aria-label={`${title} info`}
+            >
+              <Info className="size-3.5" />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshingTile}
+            className="rounded-full text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label={`Refresh ${title}`}
+          >
+            <RefreshCw
+              className={`size-3.5 ${refreshingTile ? "animate-spin" : ""}`}
+            />
+          </button>
+        </div>
+        <div className="mt-1 text-sm font-bold text-white">
+          {formatter(value)}
+        </div>
+        <div className="mt-3 space-y-1 text-xs leading-5 text-slate-200">
+          <div>Portfolio: {formatter(portfolioValue)}</div>
+          <div>{cashLabel}: {formatter(cashValue)}</div>
+        </div>
+        <div className="mt-3 flex items-center gap-1.5 text-[10px] leading-4 text-slate-300">
+          <Clock className="size-3" />
+          <span>{formatCommandTileUpdatedAt(updatedAt)}</span>
+        </div>
+      </div>
+    );
+  };
+
+  const info = infoDialog ? COMMAND_TILE_INFO[infoDialog] : null;
 
   return (
     <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 shadow-2xl shadow-slate-950/15 backdrop-blur">
@@ -431,45 +563,67 @@ function PortfolioCommandSummary({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
-            <div className="text-xs font-semibold text-white">Zerodha</div>
-            <div className="mt-1 text-sm font-bold text-white">
-              {formatPrivateInvestmentValue(zerodhaValue)}
-            </div>
-            <div className="mt-3 text-xs leading-5 text-slate-200">
-              {formatPrivateInvestmentValue(zerodhaPortfolioValue)} portfolio +{" "}
-              {formatPrivateInvestmentValue(zerodhaMargin)} margin
-            </div>
-          </div>
-
-          <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
-            <div className="text-xs font-semibold text-white">INDmoney</div>
-            <div className="mt-1 text-sm font-bold text-white">
-              {formatPrivateInvestmentValue(indmoneyValue)}
-            </div>
-            <div className="mt-3 text-xs leading-5 text-slate-200">
-              {formatPrivateInvestmentValue(indmoneyPortfolioValue)} total
-              portfolio + {formatPrivateInvestmentValue(indmoneyFundsValue)}{" "}
-              available funds
-            </div>
-          </div>
-
-          <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
-            <div className="text-xs font-semibold text-white">Bullpen</div>
-            <div className="mt-1 text-sm font-bold text-white">
-              {formatPrivateInvestmentValue(bullpenTotalValueInr)}
-            </div>
-            <div className="mt-3 text-xs leading-5 text-slate-200">
-              <div>
-                Account Value:{" "}
-                {formatPrivateInvestmentValueWithRs(bullpenAccountValueInr)} +
-              </div>
-              <div>
-                Cash: {formatPrivateInvestmentValueWithRs(bullpenCashValueInr)}
-              </div>
-            </div>
-          </div>
+          {renderTile({
+            keyName: "zerodha",
+            title: "Zerodha",
+            value: zerodhaValue,
+            portfolioValue: zerodhaPortfolioValue,
+            cashValue: zerodhaMargin,
+            updatedAt: zerodhaUpdatedAt,
+            onRefresh: onRefreshZerodha,
+            refreshingTile: refreshingZerodha,
+          })}
+          {renderTile({
+            keyName: "indmoney",
+            title: "INDmoney",
+            value: indmoneyValue,
+            portfolioValue: indmoneyPortfolioValue,
+            cashValue: indmoneyFundsValue,
+            updatedAt: indmoneyUpdatedAt,
+            onRefresh: onRefreshIndmoney,
+            refreshingTile: refreshingIndmoney,
+          })}
+          {renderTile({
+            keyName: "bullpen",
+            title: "Bullpen",
+            value: bullpenTotalValueInr,
+            portfolioValue: bullpenAccountValueInr,
+            cashValue: bullpenCashValueInr,
+            updatedAt: bullpenUpdatedAt,
+            onRefresh: onRefreshBullpen,
+            refreshingTile: refreshingBullpen,
+            useRsPrefix: true,
+          })}
         </div>
+
+        {info ? (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="command-tile-info-title"
+            onClick={() => setInfoDialog(null)}
+          >
+            <div
+              className="w-full max-w-sm rounded-[24px] border border-white/10 bg-slate-950 p-5 text-white shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h2 id="command-tile-info-title" className="text-lg font-bold">
+                {info.title}
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                {info.body}
+              </p>
+              <Button
+                type="button"
+                onClick={() => setInfoDialog(null)}
+                className="mt-5 rounded-full bg-white text-slate-950 hover:bg-slate-200"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -905,11 +1059,20 @@ export default function DashboardPage() {
     () => createPendingSectionsState(true),
   );
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshingBullpenTile, setRefreshingBullpenTile] = useState(false);
   const [errorsBySection, setErrorsBySection] = useState<DashboardErrorsState>(
     {},
   );
   const usdInrRate = useUsdInrRate();
   const requestIdRef = useRef(0);
+
+  const refreshZerodhaTile = useCallback(() => {
+    window.dispatchEvent(new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT));
+  }, []);
+
+  const refreshIndmoneyTile = useCallback(() => {
+    window.dispatchEvent(new Event(INDMONEY_DASHBOARD_SYNC_NOW_EVENT));
+  }, []);
 
   const errors = useMemo(
     () =>
@@ -1123,6 +1286,35 @@ export default function DashboardPage() {
     !dashboard.zerodhaThreat && pendingSections.zerodhaThreat;
   const showUsThreatSkeleton =
     !dashboard.indmoneyThreat && pendingSections.indmoneyThreat;
+  const bullpenUpdatedAt =
+    dashboard.bullpenPositions?.fetchedAt ??
+    dashboard.bullpenPositions?.lastSuccessfulLiveSnapshot?.fetchedAt ??
+    dashboard.bullpenPositions?.health?.timestamp ??
+    null;
+  const refreshBullpenTile = async () => {
+    setRefreshingBullpenTile(true);
+    try {
+      const positions = await fetchBullpenPositions();
+      setDashboard((current) => {
+        const nextState = { ...current, bullpenPositions: positions };
+        writeDashboardOverviewCache(nextState);
+        return nextState;
+      });
+      setErrorsBySection((current) => {
+        if (!current.bullpenPositions) return current;
+        const nextErrors = { ...current };
+        delete nextErrors.bullpenPositions;
+        return nextErrors;
+      });
+    } catch (error) {
+      setErrorsBySection((current) => ({
+        ...current,
+        bullpenPositions: `Bullpen wallet: ${normalizeError(error)}`,
+      }));
+    } finally {
+      setRefreshingBullpenTile(false);
+    }
+  };
 
   return (
     <div className="mx-auto flex flex-col gap-6">
@@ -1173,6 +1365,17 @@ export default function DashboardPage() {
               bullpenTotalValueInr={bullpenTotalValueInr}
               bullpenAccountValueInr={bullpenAccountValueInr}
               bullpenCashValueInr={bullpenCashValueInr}
+              zerodhaUpdatedAt={indiaSnapshot?.captured_at}
+              indmoneyUpdatedAt={usSnapshot?.captured_at}
+              bullpenUpdatedAt={bullpenUpdatedAt}
+              onRefreshZerodha={refreshZerodhaTile}
+              onRefreshIndmoney={refreshIndmoneyTile}
+              onRefreshBullpen={() => void refreshBullpenTile()}
+              refreshingZerodha={pendingSections.zerodhaOverview}
+              refreshingIndmoney={pendingSections.indmoneyOverview}
+              refreshingBullpen={
+                refreshingBullpenTile || pendingSections.bullpenPositions
+              }
             />
 
             <PortfolioCommandChart
