@@ -568,7 +568,7 @@ test("Stage 3 invest execution plan keeps reuse enabled while skipping already i
   );
 });
 
-test("Stage 3 schedule card keeps the Invest button and reuse copy inside the card", () => {
+test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investments in Stage 2", () => {
   const source = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
@@ -592,6 +592,7 @@ test("Stage 3 schedule card keeps the Invest button and reuse copy inside the ca
   assert.match(statusSource, /Rebalance and investment complete\./);
   assert.match(source, /latest Stage 2-qualified rows/);
   assert.match(source, /skips the Bullpen rescan plus LLM rerun/);
+  assert.match(source, /stage\.key === "llm" && investOnlyPlan\.alreadyInvestedCandidateCount > 0/);
   assert.match(source, /already invested and will be skipped/);
   assert.match(source, /CheckCircle2/);
   assert.match(source, /How Stage 2 events become eligible to invest/);
