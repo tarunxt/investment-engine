@@ -1072,6 +1072,19 @@ function InvestExecutionStepsSummary({
             </div>
             {step.key === "sell" ? (
               <div className={`mt-3 grid gap-2 text-xs ${toneClasses.muted}`}>
+                <div className={`rounded-lg border border-white/70 bg-white/60 px-2.5 py-2 ${toneClasses.text}`}>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">
+                    Active positions shortlisted for exits
+                  </p>
+                  <p className="mt-1 text-sm font-semibold">
+                    {(step.eventExitRows ?? step.plannedOrders ?? 0) > 0
+                      ? `Yes · ${step.eventExitRows ?? step.plannedOrders} shortlisted`
+                      : "No · 0 shortlisted"}
+                  </p>
+                  <p className={`mt-1 text-[11px] leading-4 ${toneClasses.muted}`}>
+                    Stage 3 Step 1 reviews active positions before any buy orders.
+                  </p>
+                </div>
                 {renderMetricCard({
                   label: "Exit rows",
                   value: step.eventExitRows,

@@ -32,6 +32,10 @@ type ValueRationaleDialogState = {
   fieldKey: string;
   record: Record<string, unknown>;
 };
+type CandidateDetailsDialogState = {
+  title: string;
+  records: Record<string, unknown>[];
+};
 type AlreadyInvestedRecord = {
   marketId: string;
   timestamp: string | null;
@@ -576,12 +580,14 @@ function KeyValueTable({
   record = null,
   onOpenBreakdown,
   onOpenRationale,
+  onOpenQualifiedCandidates,
 }: {
   entries: [string, unknown][];
   nested?: boolean;
   record?: Record<string, unknown> | null;
   onOpenBreakdown?: (record: Record<string, unknown>) => void;
   onOpenRationale?: (record: Record<string, unknown>, fieldKey: string) => void;
+  onOpenQualifiedCandidates?: () => void;
 }) {
   return (
     <div className={`overflow-hidden rounded-2xl border ${nested ? "border-slate-200" : "border-slate-200 bg-white"}`}>
@@ -606,6 +612,7 @@ function KeyValueTable({
                   depth: nested ? 2 : 1,
                   onOpenBreakdown,
                   onOpenRationale,
+                  onOpenQualifiedCandidates,
                 })}
               </td>
             </tr>
@@ -1126,6 +1133,64 @@ function ValueRationaleDialog({
   );
 }
 
+function CandidateDetailsDialog({
+  state,
+  onClose,
+  onOpenBreakdown,
+  onOpenRationale,
+}: {
+  state: CandidateDetailsDialogState;
+  onClose: () => void;
+  onOpenBreakdown: (record: Record<string, unknown>) => void;
+  onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/40 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_70px_-24px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Candidate Details
+            </p>
+            <h3 className="text-lg font-semibold text-slate-950">{state.title}</h3>
+            <p className="text-sm text-slate-600">
+              {state.records.length} qualified {state.records.length === 1 ? "candidate" : "candidates"} from this Stage 2 output.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close qualified candidate details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-6 py-5">
+          {state.records.length > 0 ? (
+            <div className="space-y-4">
+              {state.records.map((record, index) => (
+                <RecordDetailsCard
+                  key={`qualified-candidate-${index}-${getRecordMarketId(record) ?? getStageOutputRecordTitle(record)}`}
+                  record={record}
+                  index={index}
+                  onOpenBreakdown={onOpenBreakdown}
+                  onOpenRationale={onOpenRationale}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+              No qualified candidate details were found in this saved output.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function renderRecordValue({
   value,
   key,
@@ -1134,6 +1199,7 @@ function renderRecordValue({
   depth = 1,
   onOpenBreakdown,
   onOpenRationale,
+  onOpenQualifiedCandidates,
 }: {
   value: unknown;
   key: string;
@@ -1142,6 +1208,7 @@ function renderRecordValue({
   depth?: number;
   onOpenBreakdown?: (record: Record<string, unknown>) => void;
   onOpenRationale?: (record: Record<string, unknown>, fieldKey: string) => void;
+  onOpenQualifiedCandidates?: () => void;
 }) {
   const baseValue = compact ? (
     renderCompactValue(value, key)
@@ -1184,12 +1251,70 @@ function renderRecordValue({
     );
   }
 
+  if (onOpenQualifiedCandidates && isQualifiedCandidateCountKey(key)) {
+    return (
+      <button
+        type="button"
+        onClick={onOpenQualifiedCandidates}
+        className="inline-flex items-center rounded-md underline decoration-sky-300 underline-offset-4 transition hover:text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-300"
+        title="Open qualified candidate details"
+        aria-label="Open qualified candidate details"
+      >
+        {baseValue}
+      </button>
+    );
+  }
+
   return baseValue;
 }
 
 function buildStageOutputEyebrow(stageTitle: string) {
   const stageMatch = stageTitle.match(/(Stage\s+\d+)/i);
   return stageMatch ? `${stageMatch[1]} Output` : "Stage Output";
+}
+
+function isQualifiedCandidateCountKey(key: string) {
+  return key.toLowerCase() === "qualified_candidate_count";
+}
+
+function getRecordMarketId(record: Record<string, unknown>) {
+  return (
+    readSummaryString(record.market_id) ??
+    readSummaryString(record.question_id) ??
+    readSummaryString(record.slug)
+  );
+}
+
+function isQualifiedCandidateRecord(record: Record<string, unknown>, qualifiedIds: Set<string>) {
+  const marketId = getRecordMarketId(record);
+  if (marketId && qualifiedIds.has(marketId)) return true;
+  return readSummaryBoolean(record.selected) === true || readSummaryBoolean(record.qualified) === true;
+}
+
+function findQualifiedCandidateRecords(outputs: Record<string, unknown>) {
+  const qualifiedIds = new Set<string>();
+  const rawIds = outputs.qualified_candidate_market_ids;
+  if (Array.isArray(rawIds)) {
+    for (const rawId of rawIds) {
+      const id = readSummaryString(rawId);
+      if (id) qualifiedIds.add(id);
+    }
+  }
+
+  const records: Record<string, unknown>[] = [];
+  const seenKeys = new Set<string>();
+  for (const value of Object.values(outputs)) {
+    if (!Array.isArray(value) || !value.every((item) => isRecord(item))) continue;
+    for (const record of value as Record<string, unknown>[]) {
+      if (!isQualifiedCandidateRecord(record, qualifiedIds)) continue;
+      const key = getRecordMarketId(record) ?? getStageOutputRecordTitle(record);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      records.push(record);
+    }
+  }
+
+  return records;
 }
 
 function appendSummaryItem(
@@ -1755,6 +1880,8 @@ export function BullpenAutoRunStageOutputDialog({
     useState<Record<string, unknown> | null>(null);
   const [valueRationaleDialog, setValueRationaleDialog] =
     useState<ValueRationaleDialogState | null>(null);
+  const [candidateDetailsDialog, setCandidateDetailsDialog] =
+    useState<CandidateDetailsDialogState | null>(null);
   const alreadyInvestedLookup = buildAlreadyInvestedLookup({
     explicitRecords: alreadyInvestedRecords,
     outputs,
@@ -1805,6 +1932,12 @@ export function BullpenAutoRunStageOutputDialog({
     });
     setBreakdownQuestion(createBullpenQuestionRow(seed) as Record<string, unknown>);
   };
+  const handleOpenQualifiedCandidates = () => {
+    setCandidateDetailsDialog({
+      title: "Qualified candidates",
+      records: findQualifiedCandidateRecords(visibleOutputs),
+    });
+  };
   const BreakdownDialog = breakdownDialogState?.Component ?? null;
 
   return (
@@ -1846,7 +1979,10 @@ export function BullpenAutoRunStageOutputDialog({
                     </span>
                   </div>
                   <div className="mt-4">
-                    <KeyValueTable entries={overviewEntries} />
+                    <KeyValueTable
+                      entries={overviewEntries}
+                      onOpenQualifiedCandidates={handleOpenQualifiedCandidates}
+                    />
                   </div>
                 </section>
               ) : null}
@@ -1892,6 +2028,16 @@ export function BullpenAutoRunStageOutputDialog({
         <ValueRationaleDialog
           state={valueRationaleDialog}
           onClose={() => setValueRationaleDialog(null)}
+        />
+      ) : null}
+      {candidateDetailsDialog ? (
+        <CandidateDetailsDialog
+          state={candidateDetailsDialog}
+          onClose={() => setCandidateDetailsDialog(null)}
+          onOpenBreakdown={handleOpenBreakdown}
+          onOpenRationale={(record, fieldKey) =>
+            setValueRationaleDialog({ record, fieldKey })
+          }
         />
       ) : null}
     </>

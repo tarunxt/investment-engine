@@ -149,3 +149,17 @@ test("schedule card wires step metric tiles into the shared popup flow", () => {
   assert.match(source, /Selected filter/);
   assert.match(source, /Orders still not submitted/);
 });
+
+test("schedule card clearly states whether Stage 3 Step 1 shortlisted active exits", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /Active positions shortlisted for exits/);
+  assert.match(source, /Stage 3 Step 1 reviews active positions before any buy orders/);
+  assert.match(source, /No · 0 shortlisted/);
+});
