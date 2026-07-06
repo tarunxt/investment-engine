@@ -276,6 +276,7 @@ export const URLs = {
     orders: () => `${resolveApiBaseUrl()}/zerodha/orders`,
     prepareBasketOrders: () => `${resolveApiBaseUrl()}/zerodha/orders/prepare-basket`,
     placeProtectedMarketOrders: () => `${resolveApiBaseUrl()}/zerodha/orders/place-protected-market`,
+    placeProtectedMarketOrdersSequenced: () => `${resolveApiBaseUrl()}/zerodha/orders/place-protected-market-sequenced`,
     disconnect: () => `${resolveApiBaseUrl()}/zerodha/disconnect`,
     eventsLatest: () => `${resolveApiBaseUrl()}/zerodha/events/latest`,
     eventsHistory: () => `${resolveApiBaseUrl()}/zerodha/events/history`,

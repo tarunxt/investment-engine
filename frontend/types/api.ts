@@ -986,7 +986,7 @@ export interface ZerodhaProtectedMarketOrderResult {
   exchange: string;
   transaction_type: 'BUY' | 'SELL';
   quantity: number;
-  status: 'placed' | 'failed';
+  status: 'placed' | 'failed' | 'skipped';
   order_id?: string | null;
   error?: string | null;
 }
@@ -995,6 +995,27 @@ export interface ZerodhaProtectedMarketResponse {
   results: ZerodhaProtectedMarketOrderResult[];
   placed_count: number;
   failed_count: number;
+}
+
+export interface ZerodhaSequencedProtectedMarketRequest extends ZerodhaProtectedMarketRequest {
+  sell_first?: boolean;
+  wait_for_sell_completion?: boolean;
+  sell_wait_timeout_seconds?: number;
+  poll_interval_seconds?: number;
+  safety_buffer_amount?: number;
+}
+
+export interface ZerodhaSequencedProtectedMarketResponse {
+  sell_results: ZerodhaProtectedMarketOrderResult[];
+  buy_results: ZerodhaProtectedMarketOrderResult[];
+  skipped_buy_results: ZerodhaProtectedMarketOrderResult[];
+  placed_count: number;
+  failed_count: number;
+  skipped_count: number;
+  sell_phase_complete: boolean;
+  buy_phase_attempted: boolean;
+  refreshed_available_margin?: number | null;
+  messages: string[];
 }
 
 

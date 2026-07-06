@@ -9,15 +9,15 @@ const source = readFileSync(
 assert.match(source, /type ZerodhaExecutionMode = "direct_market" \| "publisher_limit";/);
 assert.match(source, /Open Kite protected LIMIT basket/);
 assert.match(source, /Place protected MARKET/);
-assert.match(source, /Protected MARKET for selected stocks/);
+assert.match(source, /Protected MARKET: Sell first, then buy/);
 assert.match(source, /Refresh LTP/);
 assert.match(source, /Quoted LTP refreshed/);
 assert.match(source, /Quoted LTP/);
 assert.match(source, /Buy Threshold/);
 assert.match(source, /Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold/);
 assert.match(source, /Publisher-safe fallback uses \/connect\/basket only for protected LIMIT orders/);
-assert.match(source, /Each limit price mirrors the latest available quoted LTP before basket submission/);
-assert.match(source, /Any Kite basket tabs already opened keep showing Zerodha/);
+assert.match(source, /SELL trays first/);
+assert.match(source, /Refresh & Open Buy Basket/);
 assert.doesNotMatch(source, /Sell All, Trim, Buy New, and Buy More actionables are pre-selected/);
 assert.doesNotMatch(source, /Market with Zerodha auto protection/);
 
@@ -69,3 +69,7 @@ assert.equal(payload[0].price, 431);
 assert.equal(payload[1].price, 4402.5);
 assert.equal(payload[2].price, 1011.9);
 assert.equal(payload.some((order) => order.order_type === "MARKET"), false);
+
+assert.match(source, /projectedBuyPower/);
+assert.match(source, /zerodhaPlaceProtectedMarketOrdersSequenced/);
+assert.match(source, /selectedRows.*SELL|side === "SELL"/s);
