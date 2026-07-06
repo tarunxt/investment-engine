@@ -1125,15 +1125,41 @@ function InvestExecutionStepsSummary({
     value,
     kind,
     toneClasses,
+    onOpenInfo,
   }: {
     label: string;
     value: number | null | undefined;
     kind?: InvestMetricDialogKind;
     toneClasses: ReturnType<typeof getInvestExecutionStepClasses>;
+    onOpenInfo?: () => void;
   }) => {
     const body = (
       <>
-        <p className="text-[10px] uppercase tracking-[0.1em]">{label}</p>
+        <p className="flex items-center gap-1 text-[10px] uppercase tracking-[0.1em]">
+          <span>{label}</span>
+          {onOpenInfo ? (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenInfo();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onOpenInfo();
+                }
+              }}
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-current/30 bg-white/70"
+              aria-label={`Explain ${label}`}
+              title={`Explain ${label}`}
+            >
+              <Info className="h-2.5 w-2.5" />
+            </span>
+          ) : null}
+        </p>
         <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
           {value ?? "—"}
         </p>
@@ -1267,12 +1293,14 @@ function InvestExecutionStepsSummary({
                     value: step.rankingLlmPlannedOrders,
                     kind: getSellInvestMetricDialogKind("ranking-llm"),
                     toneClasses,
+                    onOpenInfo: onOpenEventExitInfo,
                   })}
                   {renderMetricCard({
                     label: "Forced Exit",
                     value: step.forcedExitPlannedOrders,
                     kind: getSellInvestMetricDialogKind("forced-exit"),
                     toneClasses,
+                    onOpenInfo: onOpenEventExitInfo,
                   })}
                 </div>
               </div>
@@ -1537,6 +1565,131 @@ function StageOneOutputDialog({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+function getDecisionExitTypeDetails(decision: BullpenAutoLiveDecision) {
+  const matchingSignals = decision.exit_signals.filter((signal) =>
+    signal.strategy === "OUTSIDE_TOP_10_RETURNS_DAY" ||
+    signal.strategy === "LLM_OR_ODDS_FILTER_EXIT" ||
+    signal.strategy === "CAPITAL_AWARE_FORCED_EXIT",
+  );
+  if (matchingSignals.length === 0) return null;
+
+  const hasForcedExit = matchingSignals.some(
+    (signal) => signal.strategy === "CAPITAL_AWARE_FORCED_EXIT",
+  );
+  const hasEventOutOfTop10 = matchingSignals.some(
+    (signal) =>
+      signal.strategy === "OUTSIDE_TOP_10_RETURNS_DAY" ||
+      signal.strategy === "LLM_OR_ODDS_FILTER_EXIT",
+  );
+
+  const label = hasForcedExit
+    ? hasEventOutOfTop10
+      ? "Force Exit + Event Out of Top 10"
+      : "Force Exit"
+    : "Event Out of Top 10";
+
+  return {
+    label,
+    details: matchingSignals
+      .map((signal) => `${signal.label}: ${signal.description}`)
+      .join(" "),
+  };
+}
+
+function StageTwoExecutionShortlist({
+  steps,
+  decisions,
+  onOpenEventExitInfo,
+  onOpenInvestEligibilityInfo,
+}: {
+  steps: InvestExecutionStepView[];
+  decisions: BullpenAutoLiveDecision[];
+  onOpenEventExitInfo: () => void;
+  onOpenInvestEligibilityInfo: () => void;
+}) {
+  if (steps.length === 0) return null;
+
+  const sellDecisions = decisions.filter(
+    (decision) => decision.order_plan?.action === "sell",
+  );
+  const buyDecisions = decisions.filter(
+    (decision) => decision.order_plan?.action === "buy",
+  );
+
+  return (
+    <div className="mt-3 grid gap-2 text-xs">
+      {steps.map((step) => {
+        const stepDecisions = step.key === "sell" ? sellDecisions : buyDecisions;
+        const infoHandler =
+          step.key === "sell" ? onOpenEventExitInfo : onOpenInvestEligibilityInfo;
+        return (
+          <div
+            key={`stage-2-shortlist-${step.key}`}
+            className="rounded-xl border border-white/70 bg-white/60 px-3 py-3 text-emerald-950 dark:border-slate-700/80 dark:bg-slate-950/70 dark:text-emerald-50"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900/80 dark:text-emerald-100/75">
+                  Step {step.stepNumber} of {step.stepTotal}
+                </p>
+                <div className="mt-1 flex items-center gap-2">
+                  <p className="font-semibold">{step.label}</p>
+                  <button
+                    type="button"
+                    onClick={infoHandler}
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 bg-white/70 text-emerald-900"
+                    aria-label={`Explain ${step.label}`}
+                    title={`Explain ${step.label}`}
+                  >
+                    <Info className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-900">
+                {step.plannedOrders ?? 0} planned
+              </span>
+            </div>
+            <p className="mt-2 text-[11px] leading-4 text-emerald-900/80 dark:text-emerald-100/75">
+              {step.detail ??
+                (step.key === "sell"
+                  ? "Stage 3 Step 1 will process shortlisted Event Exits first."
+                  : "Stage 3 Step 2 will process shortlisted buy orders after exits.")}
+            </p>
+            {stepDecisions.length > 0 ? (
+              <div className="mt-2 space-y-1.5">
+                {stepDecisions.slice(0, 3).map((decision) => {
+                  const exitType = getDecisionExitTypeDetails(decision);
+                  return (
+                    <div
+                      key={`stage-2-shortlist-${step.key}-${decision.id}`}
+                      className="rounded-lg border border-emerald-100 bg-white/70 px-2.5 py-2"
+                    >
+                      <p className="font-semibold text-slate-950">
+                        {decision.market_title}
+                      </p>
+                      <p className="mt-0.5 text-[11px] leading-4 text-slate-600">
+                        {exitType
+                          ? `${exitType.label}: ${exitType.details}`
+                          : decision.reason}
+                      </p>
+                    </div>
+                  );
+                })}
+                {stepDecisions.length > 3 ? (
+                  <p className="text-[11px] text-emerald-900/80">
+                    +{stepDecisions.length - 3} more shortlisted events
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1850,6 +2003,7 @@ function InvestMetricDetailsDialog({
                     <th className="px-4 py-3">Decision</th>
                     <th className="px-4 py-3">Edge & score</th>
                     <th className="px-4 py-3">Exposure</th>
+                    <th className="px-4 py-3">Exit Type</th>
                     <th className="px-4 py-3">Order</th>
                   </tr>
                 </thead>
@@ -1903,6 +2057,24 @@ function InvestMetricDetailsDialog({
                         Current {formatMoney(decision.current_exposure_usd)}
                         <br />
                         Target {formatMoney(decision.target_exposure_usd)}
+                      </td>
+                      <td className="px-4 py-3 align-top text-slate-700">
+                        {(() => {
+                          const exitType = getDecisionExitTypeDetails(decision);
+                          return exitType ? (
+                            <>
+                              <span className="font-semibold text-slate-950">
+                                {exitType.label}
+                              </span>
+                              <br />
+                              <span className="text-xs leading-5">
+                                {exitType.details}
+                              </span>
+                            </>
+                          ) : (
+                            "—"
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 align-top text-slate-700">
                         <span className="font-semibold capitalize">
@@ -3267,6 +3439,13 @@ export function BullpenAutoRunScheduleCard({
                 (stage.key === "llm" || stage.key === "invest") &&
                 Object.keys(stage.inputs).length > 0;
               const investStageCounters = getInvestStageCounters(stage);
+              const investStageForShortlist = workflowView.stages.find(
+                (item) => item.key === "invest",
+              );
+              const stageTwoExecutionSteps =
+                stage.key === "llm" && investStageForShortlist
+                  ? getInvestStageExecutionSteps(investStageForShortlist)
+                  : [];
               const investExecutionSteps = getInvestStageExecutionSteps(stage);
               const investPreviewSteps =
                 stage.key === "invest" &&
@@ -3461,6 +3640,19 @@ export function BullpenAutoRunScheduleCard({
                       </div>
                     ) : null}
                   </div>
+
+                  {stage.key === "llm" && stageTwoExecutionSteps.length > 0 ? (
+                    <StageTwoExecutionShortlist
+                      steps={stageTwoExecutionSteps}
+                      decisions={summary?.recent_decisions ?? []}
+                      onOpenEventExitInfo={() =>
+                        setIsEventExitStrategiesDialogOpen(true)
+                      }
+                      onOpenInvestEligibilityInfo={() =>
+                        setIsInvestEligibilityInfoDialogOpen(true)
+                      }
+                    />
+                  ) : null}
 
                   {investStageCounters.length > 0 ? (
                     <div className="mt-3 grid grid-cols-3 gap-2">

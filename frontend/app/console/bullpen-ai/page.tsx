@@ -3231,7 +3231,7 @@ function BullpenAiPageContent() {
                       <Menu className="h-4 w-4" />
                     </Button>
                   </div>
-                  {isManualScanView && isScanFiltersOpen ? (
+                  {isScanFiltersOpen ? (
                     <div className="absolute right-0 top-full z-20 mt-2 w-[min(34rem,calc(100vw-3rem))] rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
