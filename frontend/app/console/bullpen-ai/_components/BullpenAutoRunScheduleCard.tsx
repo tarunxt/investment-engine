@@ -13,6 +13,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Clock3,
+  History,
   Info,
   Loader2,
   LogIn,
@@ -68,7 +69,10 @@ import {
 import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
 import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
-import { formatElapsedRunTime, formatStageElapsedTime } from "./bullpenAutoRunTimers";
+import {
+  formatElapsedRunTime,
+  formatStageElapsedTime,
+} from "./bullpenAutoRunTimers";
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
@@ -103,7 +107,9 @@ type ErrorState = {
 type InvestMetricDialogState = {
   kind: InvestMetricDialogKind;
   run: BullpenAutoLiveRun;
-  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null;
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null;
   decisions: BullpenAutoLiveDecision[];
 };
 
@@ -113,28 +119,104 @@ type ScanCandidateDialogState = {
   mode: ScanCandidateDialogMode;
   scanCompletedAt: string | null;
   candidates: ScanCandidateDialogCandidate[];
-  activePositions: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["activePositionsFound"];
+  activePositions: ReturnType<
+    typeof buildBullpenAutoRunWorkflowView
+  >["stages"][number]["activePositionsFound"];
   activePositionCount: number;
 };
 
-type ScanCandidateDialogCandidate =
-  ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["scanCandidates"][number] & {
-    llmYesOdds: number | null;
-    llmNoOdds: number | null;
-    returnsPerDay: number | null;
-    amountToBeInvested: number | null;
-  };
+type ScanCandidateDialogCandidate = ReturnType<
+  typeof buildBullpenAutoRunWorkflowView
+>["stages"][number]["scanCandidates"][number] & {
+  llmYesOdds: number | null;
+  llmNoOdds: number | null;
+  returnsPerDay: number | null;
+  amountToBeInvested: number | null;
+};
 
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
 const DEFAULT_CONSOLE_ORDER_USD = 5;
 const POLL_INTERVAL_MS = 4_000;
 const RUN_TIMER_INTERVAL_MS = 1_000;
-const AUTO_RUN_TIMINGS = [
-  "6:00 AM IST",
-  "12:00 PM IST",
-  "6:00 PM IST",
-  "12:00 AM IST",
-];
+
+function formatIstScheduleSummaryDate(value: string) {
+  const normalized = value.replace(",", "").trim();
+  const match = normalized.match(
+    /^(\d{2}:\d{2}:\d{2})\s+(\d{1,2})\s+([A-Za-z]+)(?:\s+\d{4})?$/,
+  );
+  if (match) {
+    return `${match[1]} ${match[2].padStart(2, "0")} ${match[3]}`;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    day: "2-digit",
+    month: "long",
+    hour12: false,
+  })
+    .format(parsed)
+    .replace(",", "");
+}
+
+function formatScheduleInputFromDate(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour12: false,
+  }).formatToParts(date);
+  const byType = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+  return `${byType.hour}:${byType.minute}:${byType.second} ${byType.day} ${byType.month}, ${byType.year}`;
+}
+
+function formatDateTimeLocalValue(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const byType = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+  return `${byType.year}-${byType.month}-${byType.day}T${byType.hour}:${byType.minute}`;
+}
+
+function formatScheduleInputFromDateTimeLocal(value: string) {
+  if (!value) return "";
+  const [datePart, timePart] = value.split("T");
+  if (!datePart || !timePart) return value;
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+  const date = new Date(
+    Date.UTC(year, month - 1, day, hour - 5, minute - 30, 0),
+  );
+  return formatScheduleInputFromDate(date);
+}
+
+function buildScheduleSummary(startInput: string, refreshInput: string) {
+  const refreshMinutes = Number.parseInt(refreshInput, 10);
+  if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) return null;
+  const startLabel =
+    startInput.trim().toLowerCase() === "now"
+      ? "Now"
+      : formatIstScheduleSummaryDate(startInput.trim());
+  if (!startInput.trim()) return null;
+  return `Auto Runs Start${startLabel === "Now" ? "" : " at"} ${startLabel} and refreshes every ${refreshMinutes} minutes`;
+}
 
 function normalizeError(error: unknown) {
   if (error instanceof APIError) {
@@ -215,7 +297,9 @@ function readStageOutputNumber(value: unknown) {
 }
 
 function readStageOutputString(value: unknown) {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -236,9 +320,13 @@ function findRunStage(
   if (!run) return null;
   return (
     run.stage_results.find(
-      (stage) => readStageOutputString(stage.outputs?.workflow_stage_key) === workflowStageKey,
+      (stage) =>
+        readStageOutputString(stage.outputs?.workflow_stage_key) ===
+        workflowStageKey,
     ) ??
-    run.stage_results.find((stage) => stage.stage_number === fallbackStageNumber) ??
+    run.stage_results.find(
+      (stage) => stage.stage_number === fallbackStageNumber,
+    ) ??
     null
   );
 }
@@ -256,7 +344,9 @@ function buildScanCandidateDialogRows({
   candidates,
   run,
 }: {
-  candidates: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]["scanCandidates"];
+  candidates: ReturnType<
+    typeof buildBullpenAutoRunWorkflowView
+  >["stages"][number]["scanCandidates"];
   run: BullpenAutoLiveRun | null;
 }): ScanCandidateDialogCandidate[] {
   const stage2 = findRunStage(run, "llm", 2);
@@ -281,7 +371,9 @@ function buildScanCandidateDialogRows({
     const llmNoOdds =
       readStageOutputNumber(reviewedCandidate.fair_no_probability_pct) ??
       readStageOutputNumber(reviewedCandidate.llm_no_odds);
-    const returnsPerDay = readStageOutputNumber(reviewedCandidate.returns_per_day);
+    const returnsPerDay = readStageOutputNumber(
+      reviewedCandidate.returns_per_day,
+    );
     const amountToBeInvested =
       readStageOutputNumber(reviewedCandidate.amount_to_be_invested) ??
       getBullpenAmountToBeInvestedBreakdown({
@@ -318,7 +410,9 @@ function buildScanCandidateDialogRows({
         normalizeMatchKey(candidate.marketUrl),
         normalizeMatchKey(candidate.question),
       ]
-        .map((key) => (key ? reviewedCandidateByLookupKey.get(key) ?? null : null))
+        .map((key) =>
+          key ? (reviewedCandidateByLookupKey.get(key) ?? null) : null,
+        )
         .find((item) => item !== null) ?? null;
     const llmYesOdds = matchedReviewedCandidate?.llmYesOdds ?? null;
     const llmNoOdds = matchedReviewedCandidate?.llmNoOdds ?? null;
@@ -349,7 +443,9 @@ function buildScanCandidateDialogRows({
   });
 }
 
-function isInvestMetricDecisionRow(value: unknown): value is BullpenAutoLiveDecision {
+function isInvestMetricDecisionRow(
+  value: unknown,
+): value is BullpenAutoLiveDecision {
   if (!isRecord(value)) return false;
   return (
     typeof value.id === "string" &&
@@ -363,7 +459,9 @@ function isInvestMetricDecisionRow(value: unknown): value is BullpenAutoLiveDeci
 }
 
 function readInvestStageDecisionRows(
-  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null,
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null,
 ) {
   if (!stage || stage.key !== "invest") return [];
   const rawDecisionRows = stage.outputs.decision_rows;
@@ -375,7 +473,9 @@ function mergeInvestStageDecisionRows({
   stage,
   persistedDecisions,
 }: {
-  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null;
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null;
   persistedDecisions: BullpenAutoLiveDecision[];
 }) {
   const merged = new Map<string, BullpenAutoLiveDecision>();
@@ -421,7 +521,11 @@ function buildLatestSubmittedBuyTimestampsByMarketId(
     const current = lookup.get(marketId);
     const currentMs = current ? Date.parse(current) : Number.NaN;
     const nextMs = Date.parse(timestamp);
-    if (!current || (Number.isFinite(nextMs) && (!Number.isFinite(currentMs) || nextMs >= currentMs))) {
+    if (
+      !current ||
+      (Number.isFinite(nextMs) &&
+        (!Number.isFinite(currentMs) || nextMs >= currentMs))
+    ) {
       lookup.set(marketId, timestamp);
     }
   }
@@ -465,14 +569,20 @@ function findGuardrailCheck(
   guardrailId: string,
 ) {
   return (
-    summary?.latest_guardrail_checks.find((check) => check.id === guardrailId) ??
-    summary?.state.latest_guardrail_checks.find((check) => check.id === guardrailId) ??
+    summary?.latest_guardrail_checks.find(
+      (check) => check.id === guardrailId,
+    ) ??
+    summary?.state.latest_guardrail_checks.find(
+      (check) => check.id === guardrailId,
+    ) ??
     null
   );
 }
 
 function getInvestStageMetric(
-  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null,
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null,
   key: string,
   fallback: number,
 ) {
@@ -599,7 +709,8 @@ function getLastInvestExecutionStep(
 
   if (key !== "sell" || !investStage) return null;
   return {
-    plannedOrders: readStageOutputNumber(investStage.outputs.event_exit_planned) ?? 0,
+    plannedOrders:
+      readStageOutputNumber(investStage.outputs.event_exit_planned) ?? 0,
     processedOrders:
       readStageOutputNumber(investStage.outputs.event_exit_processed) ?? 0,
     submittedOrders:
@@ -640,36 +751,43 @@ function buildQueuedInvestPreviewSteps(
 function getInvestExecutionStepClasses(status: InvestExecutionStepStatus) {
   if (status === "completed") {
     return {
-      container: "border-emerald-200 bg-emerald-50/80 dark:border-emerald-400/30 dark:bg-emerald-950/35",
-      badge: "border-emerald-200 bg-emerald-100 text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100",
+      container:
+        "border-emerald-200 bg-emerald-50/80 dark:border-emerald-400/30 dark:bg-emerald-950/35",
+      badge:
+        "border-emerald-200 bg-emerald-100 text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100",
       text: "text-emerald-950 dark:text-emerald-50",
       muted: "text-emerald-900/80 dark:text-emerald-100/75",
     };
   }
   if (status === "blocked") {
     return {
-      container: "border-rose-200 bg-rose-50/80 dark:border-rose-400/30 dark:bg-rose-950/35",
-      badge: "border-rose-200 bg-rose-100 text-rose-900 dark:border-rose-400/30 dark:bg-rose-500/10 dark:text-rose-100",
+      container:
+        "border-rose-200 bg-rose-50/80 dark:border-rose-400/30 dark:bg-rose-950/35",
+      badge:
+        "border-rose-200 bg-rose-100 text-rose-900 dark:border-rose-400/30 dark:bg-rose-500/10 dark:text-rose-100",
       text: "text-rose-950 dark:text-rose-50",
       muted: "text-rose-900/80 dark:text-rose-100/75",
     };
   }
   if (status === "running") {
     return {
-      container: "border-amber-200 bg-amber-50/80 dark:border-amber-400/30 dark:bg-amber-950/35",
-      badge: "border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100",
+      container:
+        "border-amber-200 bg-amber-50/80 dark:border-amber-400/30 dark:bg-amber-950/35",
+      badge:
+        "border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100",
       text: "text-amber-950 dark:text-amber-50",
       muted: "text-amber-900/80 dark:text-amber-100/75",
     };
   }
   return {
-    container: "border-slate-200 bg-slate-50/80 dark:border-slate-700/80 dark:bg-slate-950/60",
-    badge: "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-200",
+    container:
+      "border-slate-200 bg-slate-50/80 dark:border-slate-700/80 dark:bg-slate-950/60",
+    badge:
+      "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-200",
     text: "text-slate-950 dark:text-slate-50",
     muted: "text-slate-600 dark:text-slate-300",
   };
 }
-
 
 function extractErrorCodeFromDetail(detail: string | null | undefined) {
   const trimmed = detail?.trim();
@@ -678,9 +796,14 @@ function extractErrorCodeFromDetail(detail: string | null | undefined) {
   const jsonStart = trimmed.indexOf("{");
   const jsonText = jsonStart >= 0 ? trimmed.slice(jsonStart) : trimmed;
   try {
-    const parsed = JSON.parse(jsonText) as { error_code?: unknown; code?: unknown; status?: unknown };
+    const parsed = JSON.parse(jsonText) as {
+      error_code?: unknown;
+      code?: unknown;
+      status?: unknown;
+    };
     const code =
-      typeof parsed.error_code === "string" && parsed.error_code.trim().length > 0
+      typeof parsed.error_code === "string" &&
+      parsed.error_code.trim().length > 0
         ? parsed.error_code.trim()
         : typeof parsed.code === "string" && parsed.code.trim().length > 0
           ? parsed.code.trim()
@@ -690,10 +813,15 @@ function extractErrorCodeFromDetail(detail: string | null | undefined) {
     // Fall through to regex extraction for non-JSON / prefixed messages.
   }
 
-  const errorCodeMatch = trimmed.match(/["']?error_code["']?\s*[:=]\s*["']?([A-Z0-9_:-]+)["']?/i);
+  const errorCodeMatch = trimmed.match(
+    /["']?error_code["']?\s*[:=]\s*["']?([A-Z0-9_:-]+)["']?/i,
+  );
   if (errorCodeMatch?.[1]) return errorCodeMatch[1];
 
-  if (/insufficient balance/i.test(trimmed) || /balance_insufficient/i.test(trimmed)) {
+  if (
+    /insufficient balance/i.test(trimmed) ||
+    /balance_insufficient/i.test(trimmed)
+  ) {
     return "BALANCE_INSUFFICIENT";
   }
 
@@ -730,7 +858,9 @@ function ErrorCodeWithDetails({
         </button>
       </span>
       {isOpen ? (
-        <span className={`mt-2 block whitespace-pre-wrap break-words rounded-lg border border-current/15 bg-white/60 px-2.5 py-2 text-[11px] leading-5 ${detailClassName}`}>
+        <span
+          className={`mt-2 block whitespace-pre-wrap break-words rounded-lg border border-current/15 bg-white/60 px-2.5 py-2 text-[11px] leading-5 ${detailClassName}`}
+        >
           {detail}
         </span>
       ) : null}
@@ -770,7 +900,9 @@ function getInvestStageExecutionStatus(
     };
   }
 
-  const executionGateReason = readStageOutputString(stage.outputs.execution_gate_reason);
+  const executionGateReason = readStageOutputString(
+    stage.outputs.execution_gate_reason,
+  );
   if (executionGateReason) {
     return {
       label: "Execution gate",
@@ -780,7 +912,9 @@ function getInvestStageExecutionStatus(
     };
   }
 
-  const executionModeReason = readStageOutputString(stage.outputs.execution_mode_reason);
+  const executionModeReason = readStageOutputString(
+    stage.outputs.execution_mode_reason,
+  );
   if (executionModeReason) {
     return {
       label: "Execution mode",
@@ -794,14 +928,16 @@ function getInvestStageExecutionStatus(
     .reverse()
     .find((decision) => decision.order_plan);
   const latestOrderStatus = latestOrderDecision?.order_plan?.status ?? null;
-  const latestOrderDetail = latestOrderDecision?.order_plan?.detail?.trim() ?? null;
+  const latestOrderDetail =
+    latestOrderDecision?.order_plan?.detail?.trim() ?? null;
   if (
     latestOrderDecision &&
     latestOrderStatus &&
     latestOrderStatus !== "submitted" &&
     latestOrderDetail
   ) {
-    const isFailure = latestOrderStatus === "failed" || latestOrderStatus === "cancelled";
+    const isFailure =
+      latestOrderStatus === "failed" || latestOrderStatus === "cancelled";
     return {
       label: "Latest order",
       message: `${latestOrderDecision.market_title}: ${latestOrderDetail}`,
@@ -839,13 +975,16 @@ function formatInvestStageRowMix(
 ) {
   if (stage.key !== "invest") return null;
 
-  const activePositionRows = readStageOutputNumber(stage.outputs.active_position_rows);
-  const candidateRows = readStageOutputNumber(stage.outputs.candidate_decision_rows);
+  const activePositionRows = readStageOutputNumber(
+    stage.outputs.active_position_rows,
+  );
+  const candidateRows = readStageOutputNumber(
+    stage.outputs.candidate_decision_rows,
+  );
   if (activePositionRows === null && candidateRows === null) return null;
 
   return `${activePositionRows ?? 0} Bullpen position ${activePositionRows === 1 ? "row" : "rows"} + ${candidateRows ?? 0} candidate ${candidateRows === 1 ? "row" : "rows"}`;
 }
-
 
 type InvestProgressLogEntry = {
   tone: "info" | "warning" | "error" | "success";
@@ -859,7 +998,9 @@ function getInvestProgressLogEntries({
   decisions,
   steps,
 }: {
-  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number] | null;
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null;
   run: BullpenAutoLiveRun;
   decisions: BullpenAutoLiveDecision[];
   steps: InvestExecutionStepView[];
@@ -869,10 +1010,18 @@ function getInvestProgressLogEntries({
 
   const stageError = readStageOutputString(stage.outputs.error_message);
   const runError = readStageOutputString(run.error_message);
-  const executionGateReason = readStageOutputString(stage.outputs.execution_gate_reason);
-  const executionModeReason = readStageOutputString(stage.outputs.execution_mode_reason);
-  const executionStepLabel = readStageOutputString(stage.outputs.execution_step_label);
-  const executionStepDetail = readStageOutputString(stage.outputs.execution_step_detail);
+  const executionGateReason = readStageOutputString(
+    stage.outputs.execution_gate_reason,
+  );
+  const executionModeReason = readStageOutputString(
+    stage.outputs.execution_mode_reason,
+  );
+  const executionStepLabel = readStageOutputString(
+    stage.outputs.execution_step_label,
+  );
+  const executionStepDetail = readStageOutputString(
+    stage.outputs.execution_step_detail,
+  );
 
   if (stageError || runError) {
     entries.push({
@@ -919,9 +1068,19 @@ function getInvestProgressLogEntries({
     const status = orderPlan.status?.trim().toLowerCase();
     const detail = orderPlan.detail?.trim();
     if (!status || !detail) continue;
-    if (status === "planned" || status === "failed" || status === "skipped" || status === "cancelled") {
+    if (
+      status === "planned" ||
+      status === "failed" ||
+      status === "skipped" ||
+      status === "cancelled"
+    ) {
       entries.push({
-        tone: status === "failed" || status === "cancelled" ? "error" : status === "skipped" ? "warning" : "info",
+        tone:
+          status === "failed" || status === "cancelled"
+            ? "error"
+            : status === "skipped"
+              ? "warning"
+              : "info",
         label: `${status.replaceAll("_", " ")} · ${decision.market_title}`,
         detail,
       });
@@ -1002,7 +1161,8 @@ function InvestExecutionStepsSummary({
       {steps.map((step) => {
         const renderedStatus = step.status;
         const renderedStatusLabel =
-          step.displayStatusLabel ?? getInvestExecutionStepStatusLabel(renderedStatus);
+          step.displayStatusLabel ??
+          getInvestExecutionStepStatusLabel(renderedStatus);
         const toneClasses = getInvestExecutionStepClasses(renderedStatus);
         return (
           <div
@@ -1011,7 +1171,9 @@ function InvestExecutionStepsSummary({
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}>
+                <p
+                  className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
+                >
                   Step {step.stepNumber} of {step.stepTotal}
                 </p>
                 <div className="mt-1 flex items-center gap-2">
@@ -1051,7 +1213,9 @@ function InvestExecutionStepsSummary({
             <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
               {step.detail ?? "Waiting for the worker to update this step."}
             </p>
-            <div className={`mt-3 flex flex-wrap gap-2 text-xs ${toneClasses.muted}`}>
+            <div
+              className={`mt-3 flex flex-wrap gap-2 text-xs ${toneClasses.muted}`}
+            >
               {renderMetricCard({
                 label: "Planned",
                 value: step.plannedOrders,
@@ -1073,7 +1237,9 @@ function InvestExecutionStepsSummary({
             </div>
             {step.key === "sell" ? (
               <div className={`mt-3 grid gap-2 text-xs ${toneClasses.muted}`}>
-                <div className={`rounded-lg border border-white/70 bg-white/60 px-2.5 py-2 ${toneClasses.text}`}>
+                <div
+                  className={`rounded-lg border border-white/70 bg-white/60 px-2.5 py-2 ${toneClasses.text}`}
+                >
                   <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">
                     Active positions shortlisted for exits
                   </p>
@@ -1082,8 +1248,11 @@ function InvestExecutionStepsSummary({
                       ? `Yes · ${step.eventExitRows ?? step.plannedOrders} shortlisted`
                       : "No · 0 shortlisted"}
                   </p>
-                  <p className={`mt-1 text-[11px] leading-4 ${toneClasses.muted}`}>
-                    Stage 3 Step 1 reviews active positions before any buy orders.
+                  <p
+                    className={`mt-1 text-[11px] leading-4 ${toneClasses.muted}`}
+                  >
+                    Stage 3 Step 1 reviews active positions before any buy
+                    orders.
                   </p>
                 </div>
                 {renderMetricCard({
@@ -1129,7 +1298,9 @@ function StageOneOutputDialog({
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              {showActivePositionsFirst ? "Active Bullpen Positions" : "Fresh Bullpen Opportunities"}
+              {showActivePositionsFirst
+                ? "Active Bullpen Positions"
+                : "Fresh Bullpen Opportunities"}
             </p>
             <h2 className="text-xl font-semibold text-slate-950">
               {showActivePositionsFirst
@@ -1137,7 +1308,8 @@ function StageOneOutputDialog({
                 : `Fresh Bullpen Opportunities (${state.candidates.length})`}
             </h2>
             <p className="text-sm text-slate-600">
-              Latest Bullpen Scan Stage 1 completed at {formatIstDateTime(state.scanCompletedAt)}.
+              Latest Bullpen Scan Stage 1 completed at{" "}
+              {formatIstDateTime(state.scanCompletedAt)}.
             </p>
           </div>
           <button
@@ -1178,11 +1350,13 @@ function StageOneOutputDialog({
                     Active Bullpen positions found
                   </p>
                   <p className="mt-1 text-sm text-slate-600">
-                    These live wallet positions were synced into the run before Stage 2 review.
+                    These live wallet positions were synced into the run before
+                    Stage 2 review.
                   </p>
                 </div>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                  {state.activePositionCount} {state.activePositionCount === 1 ? "position" : "positions"}
+                  {state.activePositionCount}{" "}
+                  {state.activePositionCount === 1 ? "position" : "positions"}
                 </span>
               </div>
 
@@ -1216,18 +1390,26 @@ function StageOneOutputDialog({
                               )}
                             </div>
                             <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                              {position.theme ? <span>{position.theme}</span> : null}
-                              {position.conditionId ? <span>{position.conditionId}</span> : null}
+                              {position.theme ? (
+                                <span>{position.theme}</span>
+                              ) : null}
+                              {position.conditionId ? (
+                                <span>{position.conditionId}</span>
+                              ) : null}
                             </div>
                           </td>
                           <td className="px-4 py-3 align-top text-slate-700">
-                            {position.side ?? "—"}<br />
-                            Shares {formatShares(position.shares)}<br />
-                            Exposure {formatMoney(position.exposureUsd)}<br />
+                            {position.side ?? "—"}
+                            <br />
+                            Shares {formatShares(position.shares)}
+                            <br />
+                            Exposure {formatMoney(position.exposureUsd)}
+                            <br />
                             Avg {formatPriceCents(position.averagePriceCents)}
                           </td>
                           <td className="px-4 py-3 align-top text-slate-700">
-                            Yes {formatOddsPercent(position.currentYesOdds)}<br />
+                            Yes {formatOddsPercent(position.currentYesOdds)}
+                            <br />
                             No {formatOddsPercent(position.currentNoOdds)}
                           </td>
                           <td className="px-4 py-3 align-top text-slate-700">
@@ -1240,11 +1422,17 @@ function StageOneOutputDialog({
                 </div>
               ) : state.activePositionCount > 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                  {state.activePositionCount} active Bullpen {state.activePositionCount === 1 ? "position was" : "positions were"} synced for this run, but the detailed rows were not stored in this run record.
+                  {state.activePositionCount} active Bullpen{" "}
+                  {state.activePositionCount === 1
+                    ? "position was"
+                    : "positions were"}{" "}
+                  synced for this run, but the detailed rows were not stored in
+                  this run record.
                 </div>
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                  No active Bullpen positions were recorded for this Stage 1 scan.
+                  No active Bullpen positions were recorded for this Stage 1
+                  scan.
                 </div>
               )}
             </section>
@@ -1260,7 +1448,8 @@ function StageOneOutputDialog({
                   </p>
                 </div>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                  {state.candidates.length} {state.candidates.length === 1 ? "candidate" : "candidates"}
+                  {state.candidates.length}{" "}
+                  {state.candidates.length === 1 ? "candidate" : "candidates"}
                 </span>
               </div>
 
@@ -1282,11 +1471,18 @@ function StageOneOutputDialog({
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {state.candidates.map((candidate, index) => (
-                        <tr key={`${candidate.slug || candidate.question}-${index}`}>
+                        <tr
+                          key={`${candidate.slug || candidate.question}-${index}`}
+                        >
                           <td className="px-4 py-3 align-top">
                             <div className="font-semibold text-slate-950">
                               {candidate.marketUrl ? (
-                                <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">
+                                <a
+                                  className="hover:text-sky-700 hover:underline"
+                                  href={candidate.marketUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
                                   {candidate.question}
                                 </a>
                               ) : (
@@ -1294,8 +1490,12 @@ function StageOneOutputDialog({
                               )}
                             </div>
                             <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                              {candidate.theme ? <span>{candidate.theme}</span> : null}
-                              {candidate.forceInclude ? <span>Force included</span> : null}
+                              {candidate.theme ? (
+                                <span>{candidate.theme}</span>
+                              ) : null}
+                              {candidate.forceInclude ? (
+                                <span>Force included</span>
+                              ) : null}
                             </div>
                           </td>
                           <td className="px-4 py-3 align-top font-semibold text-emerald-700">
@@ -1329,7 +1529,8 @@ function StageOneOutputDialog({
                 </div>
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                  No new event opportunity candidates were recorded for this Stage 1 scan.
+                  No new event opportunity candidates were recorded for this
+                  Stage 1 scan.
                 </div>
               )}
             </section>
@@ -1396,9 +1597,21 @@ function InvestMetricDetailsDialog({
 }) {
   const metricDefinition = getInvestMetricDialogDefinition(state.kind);
   const rows = getInvestMetricRows(state.kind, state.decisions);
-  const decisionsCount = getInvestStageMetric(state.stage, "decisions_count", state.run.decisions_count);
-  const plannedCount = getInvestStageMetric(state.stage, "orders_planned", state.run.orders_planned);
-  const submittedCount = getInvestStageMetric(state.stage, "orders_submitted", state.run.orders_submitted);
+  const decisionsCount = getInvestStageMetric(
+    state.stage,
+    "decisions_count",
+    state.run.decisions_count,
+  );
+  const plannedCount = getInvestStageMetric(
+    state.stage,
+    "orders_planned",
+    state.run.orders_planned,
+  );
+  const submittedCount = getInvestStageMetric(
+    state.stage,
+    "orders_submitted",
+    state.run.orders_submitted,
+  );
   const activePositionRows = state.stage
     ? readStageOutputNumber(state.stage.outputs.active_position_rows)
     : null;
@@ -1410,10 +1623,13 @@ function InvestMetricDetailsDialog({
     : null;
   const runError =
     stageError ??
-    (typeof state.run.error_message === "string" && state.run.error_message.trim().length > 0
+    (typeof state.run.error_message === "string" &&
+    state.run.error_message.trim().length > 0
       ? state.run.error_message.trim()
       : null);
-  const filteredPlannedCount = rows.filter((decision) => decision.order_plan).length;
+  const filteredPlannedCount = rows.filter(
+    (decision) => decision.order_plan,
+  ).length;
   const filteredProcessedCount = rows.filter((decision) =>
     isProcessedInvestOrderPlan(decision.order_plan),
   ).length;
@@ -1436,7 +1652,9 @@ function InvestMetricDetailsDialog({
     (decision) => decision.order_plan?.status === "planned",
   );
   const hasPendingOrders = filteredPlannedCount > filteredSubmittedCount;
-  const executionSteps = state.stage ? getInvestStageExecutionSteps(state.stage) : [];
+  const executionSteps = state.stage
+    ? getInvestStageExecutionSteps(state.stage)
+    : [];
   const progressLogEntries = getInvestProgressLogEntries({
     stage: state.stage,
     run: state.run,
@@ -1459,7 +1677,8 @@ function InvestMetricDetailsDialog({
               {metricDefinition.description}
             </p>
             <p className="text-xs text-slate-500">
-              Run {state.run.id} · started {formatIstDateTime(state.run.started_at)}
+              Run {state.run.id} · started{" "}
+              {formatIstDateTime(state.run.started_at)}
             </p>
           </div>
           <button
@@ -1505,7 +1724,8 @@ function InvestMetricDetailsDialog({
               Selected filter
             </p>
             <p className="mt-2 text-sm font-semibold text-slate-950">
-              {rows.length.toLocaleString("en-IN")} rows · {filteredPlannedCount.toLocaleString("en-IN")} planned ·{" "}
+              {rows.length.toLocaleString("en-IN")} rows ·{" "}
+              {filteredPlannedCount.toLocaleString("en-IN")} planned ·{" "}
               {filteredProcessedCount.toLocaleString("en-IN")} processed ·{" "}
               {filteredSubmittedCount.toLocaleString("en-IN")} submitted
             </p>
@@ -1514,7 +1734,10 @@ function InvestMetricDetailsDialog({
           {runError ? (
             <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950">
               <span className="font-semibold">Latest worker error:</span>{" "}
-              <ErrorCodeWithDetails detail={runError} detailClassName="text-rose-800" />
+              <ErrorCodeWithDetails
+                detail={runError}
+                detailClassName="text-rose-800"
+              />
             </div>
           ) : null}
 
@@ -1541,8 +1764,9 @@ function InvestMetricDetailsDialog({
               <p className="font-semibold">Orders still not submitted</p>
               <p className="mt-1">
                 {filteredUnsubmittedRows.length.toLocaleString("en-IN")} of{" "}
-                {filteredPlannedCount.toLocaleString("en-IN")} filtered orders are still not
-                submitted. Failed {filteredFailedRows.length.toLocaleString("en-IN")} · Skipped{" "}
+                {filteredPlannedCount.toLocaleString("en-IN")} filtered orders
+                are still not submitted. Failed{" "}
+                {filteredFailedRows.length.toLocaleString("en-IN")} · Skipped{" "}
                 {filteredSkippedRows.length.toLocaleString("en-IN")} · Planned{" "}
                 {filteredPendingRows.length.toLocaleString("en-IN")}
               </p>
@@ -1560,7 +1784,10 @@ function InvestMetricDetailsDialog({
                     </p>
                     <div className="mt-1 leading-5 text-amber-950">
                       <ErrorCodeWithDetails
-                        detail={decision.order_plan?.detail ?? "No execution detail was recorded."}
+                        detail={
+                          decision.order_plan?.detail ??
+                          "No execution detail was recorded."
+                        }
                         detailClassName="text-amber-900"
                       />
                     </div>
@@ -1578,7 +1805,9 @@ function InvestMetricDetailsDialog({
                     Live progress / error log
                   </p>
                   <p className="mt-1 text-sm text-slate-600">
-                    When a step takes a while, this shows the latest worker checkpoint, gate, and order error details saved for this run.
+                    When a step takes a while, this shows the latest worker
+                    checkpoint, gate, and order error details saved for this
+                    run.
                   </p>
                 </div>
                 {state.stage?.state === "current" ? (
@@ -1599,7 +1828,10 @@ function InvestMetricDetailsDialog({
                           ? "border-emerald-200 bg-emerald-50 text-emerald-950"
                           : "border-sky-200 bg-sky-50 text-sky-950";
                   return (
-                    <div key={`${entry.label}-${index}`} className={`rounded-xl border px-3 py-2.5 text-sm ${toneClass}`}>
+                    <div
+                      key={`${entry.label}-${index}`}
+                      className={`rounded-xl border px-3 py-2.5 text-sm ${toneClass}`}
+                    >
                       <p className="font-semibold capitalize">{entry.label}</p>
                       <p className="mt-1 leading-5">{entry.detail}</p>
                     </div>
@@ -1640,7 +1872,8 @@ function InvestMetricDetailsDialog({
                           )}
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
-                          {decision.theme} · closes {formatIstDateTime(decision.close_time)}
+                          {decision.theme} · closes{" "}
+                          {formatIstDateTime(decision.close_time)}
                         </div>
                       </td>
                       <td className="px-4 py-3 align-top text-slate-700">
@@ -1653,9 +1886,16 @@ function InvestMetricDetailsDialog({
                         {decision.risk_status.replaceAll("_", " ")}
                       </td>
                       <td className="px-4 py-3 align-top text-slate-700">
-                        Edge {decision.edge_pp.toLocaleString("en-IN", { maximumFractionDigits: 2 })} pp
+                        Edge{" "}
+                        {decision.edge_pp.toLocaleString("en-IN", {
+                          maximumFractionDigits: 2,
+                        })}{" "}
+                        pp
                         <br />
-                        Score {decision.score.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                        Score{" "}
+                        {decision.score.toLocaleString("en-IN", {
+                          maximumFractionDigits: 2,
+                        })}
                         <br />
                         Fair {formatOddsPercent(decision.fair_probability_pct)}
                       </td>
@@ -1671,8 +1911,12 @@ function InvestMetricDetailsDialog({
                         {decision.order_plan ? (
                           <>
                             <br />
-                            {formatMoney(decision.order_plan.order_size_usd)} at{" "}
-                            {formatPriceCents(decision.order_plan.limit_price_cents)}
+                            {formatMoney(
+                              decision.order_plan.order_size_usd,
+                            )} at{" "}
+                            {formatPriceCents(
+                              decision.order_plan.limit_price_cents,
+                            )}
                             <br />
                             <ErrorCodeWithDetails
                               detail={decision.order_plan.detail}
@@ -1703,7 +1947,11 @@ function InvestMetricDetailsDialog({
   );
 }
 
-function buildConsoleSettingsUpdate(consoleOrderUsd: number, startAt?: string | null, refreshMinutes?: number | null) {
+function buildConsoleSettingsUpdate(
+  consoleOrderUsd: number,
+  startAt?: string | null,
+  refreshMinutes?: number | null,
+) {
   return {
     strategy_profile: "bullpen_console_top10" as const,
     console_order_usd: consoleOrderUsd,
@@ -1716,17 +1964,19 @@ function buildConsoleSettingsUpdate(consoleOrderUsd: number, startAt?: string | 
   };
 }
 
-function isConsoleProfileSelected(summary: BullpenAutoLiveSummaryResponse | null) {
+function isConsoleProfileSelected(
+  summary: BullpenAutoLiveSummaryResponse | null,
+) {
   return summary?.settings.strategy_profile === CONSOLE_PROFILE_ID;
 }
 
 function isAutoRunActive(summary: BullpenAutoLiveSummaryResponse | null) {
   return Boolean(
     summary &&
-      isConsoleProfileSelected(summary) &&
-      summary.settings.auto_live_enabled &&
-      summary.state.running &&
-      !summary.state.paused,
+    isConsoleProfileSelected(summary) &&
+    summary.settings.auto_live_enabled &&
+    summary.state.running &&
+    !summary.state.paused,
   );
 }
 
@@ -1760,7 +2010,10 @@ function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
   return "Skipped";
 }
 
-function getVisibleRun(summary: BullpenAutoLiveSummaryResponse | null, pendingRunId: string | null) {
+function getVisibleRun(
+  summary: BullpenAutoLiveSummaryResponse | null,
+  pendingRunId: string | null,
+) {
   if (!summary) return null;
   if (pendingRunId) {
     return (
@@ -1775,8 +2028,10 @@ function getVisibleRun(summary: BullpenAutoLiveSummaryResponse | null, pendingRu
 function getWorkflowToneClasses(tone: "yellow" | "green" | "blue") {
   if (tone === "yellow") {
     return {
-      container: "border-amber-300 bg-amber-50/90 dark:border-amber-400/35 dark:bg-amber-950/45",
-      badge: "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100",
+      container:
+        "border-amber-300 bg-amber-50/90 dark:border-amber-400/35 dark:bg-amber-950/45",
+      badge:
+        "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100",
       text: "text-amber-950 dark:text-amber-50",
       muted: "text-amber-900/80 dark:text-amber-100/75",
       progress: "bg-amber-500",
@@ -1785,8 +2040,10 @@ function getWorkflowToneClasses(tone: "yellow" | "green" | "blue") {
   }
   if (tone === "green") {
     return {
-      container: "border-emerald-300 bg-emerald-50/90 dark:border-emerald-400/35 dark:bg-emerald-950/45",
-      badge: "border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-100",
+      container:
+        "border-emerald-300 bg-emerald-50/90 dark:border-emerald-400/35 dark:bg-emerald-950/45",
+      badge:
+        "border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-100",
       text: "text-emerald-950 dark:text-emerald-50",
       muted: "text-emerald-900/80 dark:text-emerald-100/75",
       progress: "bg-emerald-500",
@@ -1794,8 +2051,10 @@ function getWorkflowToneClasses(tone: "yellow" | "green" | "blue") {
     };
   }
   return {
-    container: "border-sky-300 bg-sky-50/90 dark:border-sky-400/35 dark:bg-sky-950/45",
-    badge: "border-sky-300 bg-sky-100 text-sky-900 dark:border-sky-400/35 dark:bg-sky-500/10 dark:text-sky-100",
+    container:
+      "border-sky-300 bg-sky-50/90 dark:border-sky-400/35 dark:bg-sky-950/45",
+    badge:
+      "border-sky-300 bg-sky-100 text-sky-900 dark:border-sky-400/35 dark:bg-sky-500/10 dark:text-sky-100",
     text: "text-sky-950 dark:text-sky-50",
     muted: "text-sky-900/80 dark:text-sky-100/75",
     progress: "bg-sky-500",
@@ -1811,7 +2070,9 @@ export function BullpenAutoRunScheduleCard({
   onSummaryUpdated,
   onOpenScanFilters,
 }: BullpenAutoRunScheduleCardProps) {
-  const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(null);
+  const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<ActionState>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1821,24 +2082,37 @@ export function BullpenAutoRunScheduleCard({
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
   const [scanCandidateDialog, setScanCandidateDialog] =
     useState<ScanCandidateDialogState | null>(null);
-  const [openStageKey, setOpenStageKey] = useState<"scan" | "llm" | "invest" | null>(null);
-  const [openInputStageKey, setOpenInputStageKey] = useState<"llm" | "invest" | null>(null);
+  const [openStageKey, setOpenStageKey] = useState<
+    "scan" | "llm" | "invest" | null
+  >(null);
+  const [openInputStageKey, setOpenInputStageKey] = useState<
+    "llm" | "invest" | null
+  >(null);
   const [investMetricDialog, setInvestMetricDialog] =
     useState<InvestMetricDialogState | null>(null);
-  const [isScheduleInfoDialogOpen, setIsScheduleInfoDialogOpen] = useState(false);
+  const [isScheduleInfoDialogOpen, setIsScheduleInfoDialogOpen] =
+    useState(false);
+  const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
+  const [isSchedulePickerOpen, setIsSchedulePickerOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
-  const [isInvestEligibilityInfoDialogOpen, setIsInvestEligibilityInfoDialogOpen] =
-    useState(false);
+  const [
+    isInvestEligibilityInfoDialogOpen,
+    setIsInvestEligibilityInfoDialogOpen,
+  ] = useState(false);
   const [consoleOrderInput, setConsoleOrderInput] = useState(() =>
     formatEditableAmount(DEFAULT_CONSOLE_ORDER_USD),
   );
   const [consoleOrderDirty, setConsoleOrderDirty] = useState(false);
   const [consoleOrderSaveBusy, setConsoleOrderSaveBusy] = useState(false);
-  const [consoleOrderFieldError, setConsoleOrderFieldError] =
-    useState<string | null>(null);
+  const [consoleOrderFieldError, setConsoleOrderFieldError] = useState<
+    string | null
+  >(null);
   const [scheduleStartInput, setScheduleStartInput] = useState("");
   const [scheduleRefreshInput, setScheduleRefreshInput] = useState("60");
+  const [scheduleSavedSummary, setScheduleSavedSummary] = useState<
+    string | null
+  >(null);
 
   const savedConsoleOrderUsd =
     summary?.settings.console_order_usd ?? DEFAULT_CONSOLE_ORDER_USD;
@@ -1849,8 +2123,14 @@ export function BullpenAutoRunScheduleCard({
     window.queueMicrotask(() => {
       setScheduleStartInput(nextStart);
       setScheduleRefreshInput(String(nextRefresh));
+      setScheduleSavedSummary(
+        buildScheduleSummary(nextStart, String(nextRefresh)),
+      );
     });
-  }, [summary?.settings.console_auto_start_at, summary?.settings.console_auto_refresh_minutes]);
+  }, [
+    summary?.settings.console_auto_start_at,
+    summary?.settings.console_auto_refresh_minutes,
+  ]);
 
   useEffect(() => {
     if (consoleOrderDirty) return;
@@ -1913,7 +2193,9 @@ export function BullpenAutoRunScheduleCard({
     void saveConsoleOrderAmount({ silentSuccess: true });
   }
 
-  function handleConsoleOrderInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function handleConsoleOrderInputKeyDown(
+    event: KeyboardEvent<HTMLInputElement>,
+  ) {
     if (event.key !== "Enter") return;
     event.preventDefault();
     void saveConsoleOrderAmount();
@@ -2022,6 +2304,43 @@ export function BullpenAutoRunScheduleCard({
     };
   }, [summary?.settings.auto_live_enabled, trackedRunId]);
 
+  async function handleSaveScheduleSettings() {
+    const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
+    if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
+      setError({
+        message: "Enter a refresh duration of at least 1 minute.",
+        details: null,
+      });
+      return false;
+    }
+    setError(null);
+    const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
+    const normalizedStart = startWasNow
+      ? formatScheduleInputFromDate(new Date())
+      : scheduleStartInput.trim();
+    try {
+      await apiService.updateBullpenAutoLiveSettings(
+        buildConsoleSettingsUpdate(
+          savedConsoleOrderUsd,
+          normalizedStart || null,
+          refreshMinutes,
+        ),
+      );
+      setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
+      const nextSummaryText = buildScheduleSummary(
+        startWasNow ? "Now" : normalizedStart,
+        String(refreshMinutes),
+      );
+      setScheduleSavedSummary(nextSummaryText);
+      await loadSummary({ preserveLoading: true });
+      setNotice(nextSummaryText);
+      return true;
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+      return false;
+    }
+  }
+
   async function handleEnableAutoRuns() {
     const nextConsoleOrderUsd = resolveConsoleOrderAmount();
     if (nextConsoleOrderUsd === null) {
@@ -2035,16 +2354,40 @@ export function BullpenAutoRunScheduleCard({
     try {
       const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
       if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
-        setError({ message: "Enter a refresh duration of at least 1 minute.", details: null });
+        setError({
+          message: "Enter a refresh duration of at least 1 minute.",
+          details: null,
+        });
         return;
       }
+      const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
+      const normalizedStart = startWasNow
+        ? formatScheduleInputFromDate(new Date())
+        : scheduleStartInput.trim();
       await apiService.updateBullpenAutoLiveSettings(
-        buildConsoleSettingsUpdate(nextConsoleOrderUsd, scheduleStartInput.trim() || null, refreshMinutes),
+        buildConsoleSettingsUpdate(
+          nextConsoleOrderUsd,
+          normalizedStart || null,
+          refreshMinutes,
+        ),
       );
       setConsoleOrderDirty(false);
       setConsoleOrderFieldError(null);
       setConsoleOrderInput(formatEditableAmount(nextConsoleOrderUsd));
+      setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
+      setScheduleSavedSummary(
+        buildScheduleSummary(
+          startWasNow ? "Now" : normalizedStart,
+          String(refreshMinutes),
+        ),
+      );
       await apiService.startBullpenAutoLive();
+      if (startWasNow) {
+        const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
+        const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
+        setPendingRunId(run.id);
+        setRunNowStartedAt(run.started_at ?? new Date().toISOString());
+      }
       const nextSummary = await loadSummary({ preserveLoading: true });
       setNotice(
         nextSummary?.state.next_run_at
@@ -2066,7 +2409,9 @@ export function BullpenAutoRunScheduleCard({
     try {
       await apiService.stopBullpenAutoLive();
       await loadSummary({ preserveLoading: true });
-      setNotice("Auto runs stopped. Any active Auto-Live run was cancelled immediately.");
+      setNotice(
+        "Auto runs stopped. Any active Auto-Live run was cancelled immediately.",
+      );
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
@@ -2091,11 +2436,18 @@ export function BullpenAutoRunScheduleCard({
       const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
       const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
       if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
-        setError({ message: "Enter a refresh duration of at least 1 minute.", details: null });
+        setError({
+          message: "Enter a refresh duration of at least 1 minute.",
+          details: null,
+        });
         return;
       }
       await apiService.updateBullpenAutoLiveSettings(
-        buildConsoleSettingsUpdate(nextConsoleOrderUsd, scheduleStartInput.trim() || null, refreshMinutes),
+        buildConsoleSettingsUpdate(
+          nextConsoleOrderUsd,
+          scheduleStartInput.trim() || null,
+          refreshMinutes,
+        ),
       );
       setConsoleOrderDirty(false);
       setConsoleOrderFieldError(null);
@@ -2129,11 +2481,18 @@ export function BullpenAutoRunScheduleCard({
     try {
       const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
       if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
-        setError({ message: "Enter a refresh duration of at least 1 minute.", details: null });
+        setError({
+          message: "Enter a refresh duration of at least 1 minute.",
+          details: null,
+        });
         return;
       }
       await apiService.updateBullpenAutoLiveSettings(
-        buildConsoleSettingsUpdate(nextConsoleOrderUsd, scheduleStartInput.trim() || null, refreshMinutes),
+        buildConsoleSettingsUpdate(
+          nextConsoleOrderUsd,
+          scheduleStartInput.trim() || null,
+          refreshMinutes,
+        ),
       );
       setConsoleOrderDirty(false);
       setConsoleOrderFieldError(null);
@@ -2191,7 +2550,9 @@ export function BullpenAutoRunScheduleCard({
     try {
       await apiService.stopBullpenAutoLive();
       await loadSummary({ preserveLoading: true });
-      setNotice("Auto-Live stopped. Active backend work was cancelled immediately.");
+      setNotice(
+        "Auto-Live stopped. Active backend work was cancelled immediately.",
+      );
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
@@ -2259,7 +2620,9 @@ export function BullpenAutoRunScheduleCard({
     });
   };
   const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
-  const hasActiveWorkflowStage = workflowView.stages.some((stage) => stage.isCurrent);
+  const hasActiveWorkflowStage = workflowView.stages.some(
+    (stage) => stage.isCurrent,
+  );
   const runActionRequested = action === "run-now" || action === "invest-now";
   const runIsActive =
     !workflowSettled &&
@@ -2269,12 +2632,16 @@ export function BullpenAutoRunScheduleCard({
       Boolean(summary?.state.running) ||
       Boolean(summary?.state.paused) ||
       hasActiveWorkflowStage);
-  const showRunTimer = Boolean(runTimerStartedAt) && (runActionRequested || runIsActive);
+  const showRunTimer =
+    Boolean(runTimerStartedAt) && (runActionRequested || runIsActive);
   const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;
   const showActiveRunControls = runIsActive;
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
-  const openStage = workflowView.stages.find((stage) => stage.key === openStageKey) ?? null;
-  const openInputStage = workflowView.stages.find((stage) => stage.key === openInputStageKey) ?? null;
+  const openStage =
+    workflowView.stages.find((stage) => stage.key === openStageKey) ?? null;
+  const openInputStage =
+    workflowView.stages.find((stage) => stage.key === openInputStageKey) ??
+    null;
   const activeWorkflowStage =
     workflowView.stages.find((stage) => stage.isCurrent) ?? null;
   const workflowCurrentStageLabel = workflowSettled
@@ -2324,14 +2691,16 @@ export function BullpenAutoRunScheduleCard({
   const displayNotice =
     investStageImmediateSuccess?.message ??
     notice ??
-    (runIsActive
-      ? activeWorkflowStage?.detail ?? workflowStatusCopy
-      : null);
-  const backendExecutionGuardrail = findGuardrailCheck(summary, "live-execution-env");
+    (runIsActive ? (activeWorkflowStage?.detail ?? workflowStatusCopy) : null);
+  const backendExecutionGuardrail = findGuardrailCheck(
+    summary,
+    "live-execution-env",
+  );
   const backendExecutionBlocked = Boolean(
     backendExecutionGuardrail &&
-      (((backendExecutionGuardrail.value ?? "").toString().toLowerCase() === "blocked") ||
-        /blocks auto-live execution/i.test(backendExecutionGuardrail.detail)),
+    ((backendExecutionGuardrail.value ?? "").toString().toLowerCase() ===
+      "blocked" ||
+      /blocks auto-live execution/i.test(backendExecutionGuardrail.detail)),
   );
   const investRunDecisions =
     summary && workflowRun
@@ -2365,7 +2734,7 @@ export function BullpenAutoRunScheduleCard({
       ? "Saving trade amount..."
       : consoleOrderDirty
         ? "Press Enter, click Save, or start a run to apply this amount to future trades."
-        : `Saved amount: ${formatMoney(savedConsoleOrderUsd)} will be used for future Bullpen x AI trades and auto runs.`;
+        : "";
 
   useEffect(() => {
     if (!shouldTickTimers) return;
@@ -2428,6 +2797,16 @@ export function BullpenAutoRunScheduleCard({
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsRunHistoryDialogOpen(true)}
+              aria-label="Show Bullpen run history"
+              className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            >
+              <History className="mr-2 h-4 w-4" />
+              History
+            </Button>
             {autoRunActive ? (
               <Button
                 variant="outline"
@@ -2456,7 +2835,9 @@ export function BullpenAutoRunScheduleCard({
                 ) : (
                   <>
                     <PlayCircle className="mr-2 h-4 w-4" />
-                    Enable Auto Runs
+                    {scheduleStartInput.trim().toLowerCase() === "now"
+                      ? "Run and Enable Auto Runs"
+                      : "Enable Auto Runs"}
                   </>
                 )}
               </Button>
@@ -2481,7 +2862,10 @@ export function BullpenAutoRunScheduleCard({
                 )}
               </Button>
               {showRunTimer ? (
-                <div className="text-center text-xs font-semibold tabular-nums text-sky-800" aria-live="polite">
+                <div
+                  className="text-center text-xs font-semibold tabular-nums text-sky-800"
+                  aria-live="polite"
+                >
                   {elapsedRunTime}
                 </div>
               ) : null}
@@ -2499,8 +2883,10 @@ export function BullpenAutoRunScheduleCard({
                 Trade amount per new opportunity
               </label>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <div className="flex h-11 min-w-[13rem] flex-1 items-center rounded-xl border border-slate-200 bg-white px-3 shadow-sm">
-                  <span className="mr-2 text-sm font-semibold text-slate-500">$</span>
+                <div className="flex h-11 min-w-[13rem] flex-1 items-center rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <span className="ml-3 mr-2 text-sm font-semibold text-slate-500">
+                    $
+                  </span>
                   <input
                     id="bullpen-auto-run-trade-amount"
                     type="number"
@@ -2516,25 +2902,25 @@ export function BullpenAutoRunScheduleCard({
                     placeholder={String(DEFAULT_CONSOLE_ORDER_USD)}
                     aria-describedby="bullpen-auto-run-trade-amount-help"
                   />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      void saveConsoleOrderAmount();
+                    }}
+                    disabled={consoleOrderSaveDisabled}
+                    className="h-full min-w-[5.5rem] rounded-l-none rounded-r-xl border-y-0 border-r-0 shadow-none"
+                  >
+                    {consoleOrderSaveBusy ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      "Save"
+                    )}
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    void saveConsoleOrderAmount();
-                  }}
-                  disabled={consoleOrderSaveDisabled}
-                  className="min-w-[5.5rem]"
-                >
-                  {consoleOrderSaveBusy ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    "Save"
-                  )}
-                </Button>
               </div>
               <p
                 id="bullpen-auto-run-trade-amount-help"
@@ -2542,44 +2928,123 @@ export function BullpenAutoRunScheduleCard({
                   consoleOrderFieldError ? "text-rose-700" : "text-slate-600"
                 }`}
               >
-                Default is $5. {consoleOrderHelperMessage}
+                {consoleOrderHelperMessage}
               </p>
             </div>
             <div className="min-w-[16rem] flex-1">
-              <label htmlFor="bullpen-auto-run-start-time" className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Auto-run start time
+              <label
+                htmlFor="bullpen-auto-run-start-time"
+                className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
+              >
+                Auto-run start time IST
               </label>
-              <input
-                id="bullpen-auto-run-start-time"
-                type="text"
-                value={scheduleStartInput}
-                onChange={(event) => setScheduleStartInput(event.target.value)}
-                disabled={action !== null}
-                className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
-                placeholder="13:00:00 06 July, 2026"
-              />
-              <p className="mt-2 text-xs leading-5 text-slate-600">Leave blank to keep the legacy fixed IST schedule.</p>
+              <div className="relative mt-2 flex h-11 items-center rounded-xl border border-slate-200 bg-white px-3 shadow-sm">
+                <input
+                  id="bullpen-auto-run-start-time"
+                  type="text"
+                  value={scheduleStartInput}
+                  onChange={(event) =>
+                    setScheduleStartInput(event.target.value)
+                  }
+                  disabled={action !== null}
+                  className="h-full w-full border-0 bg-transparent p-0 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
+                  placeholder="13:00:00 06 July, 2026"
+                />
+                <button
+                  type="button"
+                  onClick={() => setIsSchedulePickerOpen((open) => !open)}
+                  disabled={action !== null}
+                  className="ml-2 inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                  aria-label="Open auto-run date and time picker"
+                >
+                  <Clock3 className="h-5 w-5" />
+                </button>
+                {isSchedulePickerOpen ? (
+                  <div className="absolute left-0 top-12 z-30 w-[22rem] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
+                    <input
+                      type="datetime-local"
+                      defaultValue={formatDateTimeLocalValue(new Date())}
+                      onChange={(event) =>
+                        setScheduleStartInput(
+                          formatScheduleInputFromDateTimeLocal(
+                            event.target.value,
+                          ),
+                        )
+                      }
+                      className="h-10 w-full rounded-lg border border-blue-500 px-3 text-sm outline-none"
+                    />
+                    <div className="mt-3 flex justify-between gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setScheduleStartInput("Now");
+                          setIsSchedulePickerOpen(false);
+                        }}
+                      >
+                        Now
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => setIsSchedulePickerOpen(false)}
+                      >
+                        Confirm
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2"
+                onClick={() => {
+                  setScheduleStartInput("Now");
+                }}
+              >
+                Now
+              </Button>
             </div>
             <div className="min-w-[12rem] flex-1">
-              <label htmlFor="bullpen-auto-run-refresh-minutes" className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <label
+                htmlFor="bullpen-auto-run-refresh-minutes"
+                className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
+              >
                 Refresh duration
               </label>
               <div className="mt-2 flex h-11 items-center rounded-xl border border-slate-200 bg-white px-3 shadow-sm">
-                <span className="mr-2 text-sm font-semibold text-slate-500">Every</span>
+                <span className="mr-2 text-sm font-semibold text-slate-500">
+                  Every
+                </span>
                 <input
                   id="bullpen-auto-run-refresh-minutes"
                   type="number"
                   min="1"
                   step="1"
                   value={scheduleRefreshInput}
-                  onChange={(event) => setScheduleRefreshInput(event.target.value)}
+                  onChange={(event) =>
+                    setScheduleRefreshInput(event.target.value)
+                  }
                   disabled={action !== null}
                   className="h-full w-full border-0 bg-transparent p-0 text-sm font-semibold text-slate-950 outline-none disabled:cursor-not-allowed disabled:text-slate-400"
                 />
-                <span className="ml-2 text-sm font-semibold text-slate-500">min</span>
+                <span className="ml-2 text-sm font-semibold text-slate-500">
+                  min
+                </span>
               </div>
-              <p className="mt-2 text-xs leading-5 text-slate-600">Use 60 for every 1 hour.</p>
             </div>
+          </div>
+          <div className="mt-3 flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                void handleSaveScheduleSettings();
+              }}
+              disabled={action !== null}
+            >
+              Save Auto-run Settings
+            </Button>
           </div>
         </div>
 
@@ -2626,16 +3091,11 @@ export function BullpenAutoRunScheduleCard({
           </div>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
-          {AUTO_RUN_TIMINGS.map((timing) => (
-            <span
-              key={timing}
-              className="rounded-full border border-fuchsia-200 bg-white px-3 py-1 text-sm font-medium text-slate-700"
-            >
-              {timing}
-            </span>
-          ))}
-        </div>
+        {scheduleSavedSummary ? (
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
+            {scheduleSavedSummary}
+          </div>
+        ) : null}
 
         <div className="grid gap-3 lg:grid-cols-3">
           <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
@@ -2668,11 +3128,13 @@ export function BullpenAutoRunScheduleCard({
               Execution guardrails
             </div>
             <p className="mt-2 text-sm font-semibold text-slate-950">
-              {consoleProfileSelected ? "Bullpen console top-10" : "Not active yet"}
+              {consoleProfileSelected
+                ? "Bullpen console top-10"
+                : "Not active yet"}
             </p>
             <p className="mt-1 text-xs text-slate-600">
-              Live orders still require Bullpen doctor, balance, and runtime safety
-              checks to pass.
+              Live orders still require Bullpen doctor, balance, and runtime
+              safety checks to pass.
             </p>
           </div>
         </div>
@@ -2682,8 +3144,8 @@ export function BullpenAutoRunScheduleCard({
             <ShieldAlert className="h-4 w-4" />
             <AlertTitle>Another profile is currently selected</AlertTitle>
             <AlertDescription>
-              Enabling this schedule will switch Auto-Live to the Bullpen console
-              top-10 flow for this page.
+              Enabling this schedule will switch Auto-Live to the Bullpen
+              console top-10 flow for this page.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -2697,15 +3159,17 @@ export function BullpenAutoRunScheduleCard({
                 <code className="rounded bg-rose-100 px-1 py-0.5 text-[11px] font-semibold">
                   BULLPEN_AUTO_LIVE_ALLOW_EXECUTION
                 </code>{" "}
-                is off in the backend environment, so Stage 3 can review rows and
-                simulate order plans but it cannot submit live Bullpen orders.
+                is off in the backend environment, so Stage 3 can review rows
+                and simulate order plans but it cannot submit live Bullpen
+                orders.
               </span>
               <span className="mt-2 block text-xs leading-5 text-rose-800">
                 Set it to{" "}
                 <code className="rounded bg-rose-100 px-1 py-0.5 font-semibold">
                   true
                 </code>{" "}
-                and restart the backend and Celery worker to unlock live execution.
+                and restart the backend and Celery worker to unlock live
+                execution.
               </span>
               {backendExecutionGuardrail?.detail ? (
                 <span className="mt-2 block text-xs leading-5 text-rose-800">
@@ -2719,11 +3183,11 @@ export function BullpenAutoRunScheduleCard({
             <ShieldAlert className="h-4 w-4" />
             <AlertTitle>Live execution is still gated</AlertTitle>
             <AlertDescription>
-              Scheduled runs can still queue and analyze markets, but live orders only
-              submit when the backend environment, Auto-Live arming, and runtime
-              health checks all allow trading. Manual locks and emergency stops still
-              block Stage 3. Review the full controls if you need to inspect the
-              current gate.
+              Scheduled runs can still queue and analyze markets, but live
+              orders only submit when the backend environment, Auto-Live arming,
+              and runtime health checks all allow trading. Manual locks and
+              emergency stops still block Stage 3. Review the full controls if
+              you need to inspect the current gate.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -2750,7 +3214,8 @@ export function BullpenAutoRunScheduleCard({
                   : "The 3-stage monitor turns yellow while working, green when finished, and blue while queued."}
               </p>
               <p className="text-xs text-slate-500">
-                Worker stages. This panel refreshes every 4 seconds while the run is active.
+                Worker stages. This panel refreshes every 4 seconds while the
+                run is active.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -2764,21 +3229,25 @@ export function BullpenAutoRunScheduleCard({
                     onClick={() => openInvestMetricDialog("decisions")}
                     className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
                   >
-                    {workflowDecisionCount ?? workflowRun.decisions_count} decisions
+                    {workflowDecisionCount ?? workflowRun.decisions_count}{" "}
+                    decisions
                   </button>
                   <button
                     type="button"
                     onClick={() => openInvestMetricDialog("planned")}
                     className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
                   >
-                    {workflowPlannedOrderCount ?? workflowRun.orders_planned} planned
+                    {workflowPlannedOrderCount ?? workflowRun.orders_planned}{" "}
+                    planned
                   </button>
                   <button
                     type="button"
                     onClick={() => openInvestMetricDialog("submitted")}
                     className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
                   >
-                    {workflowSubmittedOrderCount ?? workflowRun.orders_submitted} submitted
+                    {workflowSubmittedOrderCount ??
+                      workflowRun.orders_submitted}{" "}
+                    submitted
                   </button>
                 </>
               ) : null}
@@ -2804,7 +3273,10 @@ export function BullpenAutoRunScheduleCard({
                 investExecutionSteps.length === 0 &&
                 stage.state === "queued" &&
                 Array.isArray(stage.inputs.llm_review_rows)
-                  ? buildQueuedInvestPreviewSteps(investOnlyPlan, investOnlySourceRun)
+                  ? buildQueuedInvestPreviewSteps(
+                      investOnlyPlan,
+                      investOnlySourceRun,
+                    )
                   : [];
               const displayedInvestSteps =
                 investExecutionSteps.length > 0
@@ -2814,26 +3286,34 @@ export function BullpenAutoRunScheduleCard({
                 stage.key === "invest" &&
                 investExecutionSteps.length === 0 &&
                 displayedInvestSteps.length > 0 &&
-                displayedInvestSteps.every((step) => step.status === "completed");
+                displayedInvestSteps.every(
+                  (step) => step.status === "completed",
+                );
               const investPreviewNoQualifiedCandidates =
                 investPreviewFinished &&
                 investOnlyPlan.readyCandidateCount === 0 &&
-                investOnlyPlan.blockedReason === NO_STAGE2_QUALIFIED_EVENTS_REASON;
+                investOnlyPlan.blockedReason ===
+                  NO_STAGE2_QUALIFIED_EVENTS_REASON;
               const toneClasses = getWorkflowToneClasses(
-                immediateSuccess || investPreviewFinished ? "green" : stage.tone,
+                immediateSuccess || investPreviewFinished
+                  ? "green"
+                  : stage.tone,
               );
-              const investExecutionStatus = getInvestStageExecutionStatus(stage);
+              const investExecutionStatus =
+                getInvestStageExecutionStatus(stage);
               const stageStatusLabel = immediateSuccess
                 ? "Finished"
                 : investPreviewFinished
                   ? "Finished"
-                : stage.state === "current"
-                  ? "Working"
-                  : stage.state === "finished"
-                    ? "Finished"
-                    : "In Queue";
+                  : stage.state === "current"
+                    ? "Working"
+                    : stage.state === "finished"
+                      ? "Finished"
+                      : "In Queue";
               const stageProgressPercent =
-                immediateSuccess || investPreviewFinished ? 100 : stage.progressPercent;
+                immediateSuccess || investPreviewFinished
+                  ? 100
+                  : stage.progressPercent;
               const stageProgressLabel =
                 investPreviewFinished && stage.key === "invest"
                   ? "Finished"
@@ -2855,7 +3335,9 @@ export function BullpenAutoRunScheduleCard({
                   {canOpenInputs ? (
                     <button
                       type="button"
-                      onClick={() => setOpenInputStageKey(stage.key as "llm" | "invest")}
+                      onClick={() =>
+                        setOpenInputStageKey(stage.key as "llm" | "invest")
+                      }
                       className={`absolute left-4 top-4 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-white/75 transition hover:-translate-y-0.5 hover:bg-white dark:bg-slate-950/80 dark:hover:bg-slate-900 ${toneClasses.badge}`}
                       aria-label={`Open ${stage.title} inputs`}
                       title="Input"
@@ -2864,9 +3346,13 @@ export function BullpenAutoRunScheduleCard({
                     </button>
                   ) : null}
                   <div className="flex items-start justify-between gap-3">
-                    <div className={`space-y-1 ${canOpenInputs ? "pl-12" : ""}`}>
+                    <div
+                      className={`space-y-1 ${canOpenInputs ? "pl-12" : ""}`}
+                    >
                       <div className="flex items-center gap-2">
-                        <p className={`text-sm font-semibold ${toneClasses.text}`}>
+                        <p
+                          className={`text-sm font-semibold ${toneClasses.text}`}
+                        >
                           {stage.title}
                         </p>
                         {stage.key === "scan" && onOpenScanFilters ? (
@@ -2913,7 +3399,9 @@ export function BullpenAutoRunScheduleCard({
                     <div>
                       Last stage run:{" "}
                       <span className="font-semibold tabular-nums">
-                        {formatStageLastRunLabel(stage.timerCompletedAt ?? stage.timerStartedAt)}
+                        {formatStageLastRunLabel(
+                          stage.timerCompletedAt ?? stage.timerStartedAt,
+                        )}
                       </span>
                     </div>
                     <div>
@@ -2930,7 +3418,12 @@ export function BullpenAutoRunScheduleCard({
                       <div className="space-y-0.5">
                         <button
                           type="button"
-                          onClick={() => openScanCandidateDialog(stage, "fresh-opportunities")}
+                          onClick={() =>
+                            openScanCandidateDialog(
+                              stage,
+                              "fresh-opportunities",
+                            )
+                          }
                           className="block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
                         >
                           New events found:{" "}
@@ -2940,19 +3433,26 @@ export function BullpenAutoRunScheduleCard({
                         </button>
                         <button
                           type="button"
-                          onClick={() => openScanCandidateDialog(stage, "active-positions")}
+                          onClick={() =>
+                            openScanCandidateDialog(stage, "active-positions")
+                          }
                           className="block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
                         >
                           Active Bullpen Positions Found:{" "}
                           <span className="font-semibold tabular-nums">
-                            {readStageOutputNumber(stage.outputs.active_wallet_positions) ??
-                              readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
+                            {readStageOutputNumber(
+                              stage.outputs.active_wallet_positions,
+                            ) ??
+                              readStageOutputNumber(
+                                stage.outputs.active_position_rows_before_llm,
+                              ) ??
                               stage.activePositionsFound.length}
                           </span>
                         </button>
                       </div>
                     ) : null}
-                    {stage.key === "invest" && formatInvestStageRowMix(stage) ? (
+                    {stage.key === "invest" &&
+                    formatInvestStageRowMix(stage) ? (
                       <div>
                         Rows counted:{" "}
                         <span className="font-semibold">
@@ -2976,10 +3476,14 @@ export function BullpenAutoRunScheduleCard({
                           className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-950/70 text-left transition hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
                           aria-label={`Open Stage 3 ${counter.label.toLowerCase()} details`}
                         >
-                          <p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}>
+                          <p
+                            className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
+                          >
                             {counter.label}
                           </p>
-                          <p className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}>
+                          <p
+                            className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}
+                          >
                             {counter.value}
                           </p>
                         </button>
@@ -2992,8 +3496,12 @@ export function BullpenAutoRunScheduleCard({
                       <InvestExecutionStepsSummary
                         steps={displayedInvestSteps}
                         compact
-                        onOpenMetricDetails={workflowRun ? openInvestMetricDialog : undefined}
-                        onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
+                        onOpenMetricDetails={
+                          workflowRun ? openInvestMetricDialog : undefined
+                        }
+                        onOpenEventExitInfo={() =>
+                          setIsEventExitStrategiesDialogOpen(true)
+                        }
                         onOpenInvestEligibilityInfo={() =>
                           setIsInvestEligibilityInfoDialogOpen(true)
                         }
@@ -3002,14 +3510,20 @@ export function BullpenAutoRunScheduleCard({
                   ) : null}
 
                   {investExecutionStatus ? (
-                    <div className={`mt-3 rounded-xl border px-3 py-2 ${investExecutionStatus.className}`}>
+                    <div
+                      className={`mt-3 rounded-xl border px-3 py-2 ${investExecutionStatus.className}`}
+                    >
                       <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">
                         {investExecutionStatus.label}
                       </p>
-                      <p className={`mt-1 text-xs leading-5 ${investExecutionStatus.detailClassName}`}>
+                      <p
+                        className={`mt-1 text-xs leading-5 ${investExecutionStatus.detailClassName}`}
+                      >
                         <ErrorCodeWithDetails
                           detail={investExecutionStatus.message}
-                          detailClassName={investExecutionStatus.detailClassName}
+                          detailClassName={
+                            investExecutionStatus.detailClassName
+                          }
                         />
                       </p>
                     </div>
@@ -3024,13 +3538,15 @@ export function BullpenAutoRunScheduleCard({
                             void handleInvestOnly(investOnlyPlan.request);
                           }
                         }}
-                        disabled={Boolean(investOnlyDisabledReason) || action !== null}
+                        disabled={
+                          Boolean(investOnlyDisabledReason) || action !== null
+                        }
                         className={`inline-flex w-full items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold transition ${
                           investOnlyActionCompleted
                             ? "cursor-default border-emerald-200 bg-emerald-50 text-emerald-900"
                             : investOnlyDisabledReason || action !== null
-                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
-                            : "border-blue-950 bg-blue-950 text-white hover:bg-blue-900"
+                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                              : "border-blue-950 bg-blue-950 text-white hover:bg-blue-900"
                         }`}
                       >
                         {investOnlyActionCompleted ? (
@@ -3050,25 +3566,35 @@ export function BullpenAutoRunScheduleCard({
                           </>
                         )}
                       </button>
-                      <p className={`text-[11px] leading-5 ${toneClasses.muted}`}>
-                        Reuses the latest Stage 2-qualified rows and skips the Bullpen rescan plus LLM rerun.
+                      <p
+                        className={`text-[11px] leading-5 ${toneClasses.muted}`}
+                      >
+                        Reuses the latest Stage 2-qualified rows and skips the
+                        Bullpen rescan plus LLM rerun.
                       </p>
                       {investOnlyDisabledReason ? (
-                        <p className={`text-[11px] leading-5 ${toneClasses.muted}`}>
+                        <p
+                          className={`text-[11px] leading-5 ${toneClasses.muted}`}
+                        >
                           {investOnlyDisabledReason}
                         </p>
                       ) : investOnlyPlan.readyCandidateCount > 0 ? (
-                        <p className={`text-[11px] leading-5 ${toneClasses.muted}`}>
+                        <p
+                          className={`text-[11px] leading-5 ${toneClasses.muted}`}
+                        >
                           {investOnlyPlan.readyCandidateCount} qualified{" "}
-                          {investOnlyPlan.readyCandidateCount === 1 ? "event is" : "events are"} ready
-                          for this invest-only pass.
+                          {investOnlyPlan.readyCandidateCount === 1
+                            ? "event is"
+                            : "events are"}{" "}
+                          ready for this invest-only pass.
                         </p>
                       ) : null}
                     </div>
                   ) : null}
 
-
-                  <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
+                  <div
+                    className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}
+                  >
                     <div
                       className={`h-full rounded-full ${toneClasses.progress}`}
                       style={{ width: `${stageProgressPercent}%` }}
@@ -3080,20 +3606,30 @@ export function BullpenAutoRunScheduleCard({
                       <button
                         type="button"
                         onClick={() => {
-                          const scanStage = workflowView.stages.find((item) => item.key === "scan");
-                          if (scanStage) openScanCandidateDialog(scanStage, "fresh-opportunities");
+                          const scanStage = workflowView.stages.find(
+                            (item) => item.key === "scan",
+                          );
+                          if (scanStage)
+                            openScanCandidateDialog(
+                              scanStage,
+                              "fresh-opportunities",
+                            );
                         }}
                         className={`text-left text-xs font-semibold underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300 ${toneClasses.text}`}
                       >
                         {stageProgressLabel}
                       </button>
                     ) : (
-                      <p className={`text-xs font-semibold ${toneClasses.text}`}>
+                      <p
+                        className={`text-xs font-semibold ${toneClasses.text}`}
+                      >
                         {stageProgressLabel}
                       </p>
                     )}
                     {showStageSpinner ? (
-                      <Loader2 className={`h-4 w-4 animate-spin ${toneClasses.text}`} />
+                      <Loader2
+                        className={`h-4 w-4 animate-spin ${toneClasses.text}`}
+                      />
                     ) : null}
                   </div>
 
@@ -3101,12 +3637,16 @@ export function BullpenAutoRunScheduleCard({
                     <p className={`text-xs leading-5 ${toneClasses.muted}`}>
                       {stageDetail}
                     </p>
-                    {stage.key === "scan" || Object.keys(stage.outputs).length > 0 ? (
+                    {stage.key === "scan" ||
+                    Object.keys(stage.outputs).length > 0 ? (
                       <button
                         type="button"
                         onClick={() => {
                           if (stage.key === "scan") {
-                            openScanCandidateDialog(stage, "fresh-opportunities");
+                            openScanCandidateDialog(
+                              stage,
+                              "fresh-opportunities",
+                            );
                             return;
                           }
                           setOpenStageKey(stage.key);
@@ -3129,11 +3669,121 @@ export function BullpenAutoRunScheduleCard({
           </div>
         </div>
 
+        {isRunHistoryDialogOpen ? (
+          <div
+            className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget)
+                setIsRunHistoryDialogOpen(false);
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="bullpen-run-history-title"
+              className="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]"
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                    Run History
+                  </p>
+                  <h2
+                    id="bullpen-run-history-title"
+                    className="mt-2 text-xl font-semibold text-slate-950"
+                  >
+                    Bullpen Auto and Manual Runs
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsRunHistoryDialogOpen(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                  aria-label="Close Bullpen run history"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="max-h-[65vh] overflow-y-auto px-6 py-5">
+                {summary?.recent_runs.length ? (
+                  <div className="space-y-3">
+                    {summary.recent_runs.map((run) => {
+                      const runKind =
+                        run.triggered_by === "scheduler"
+                          ? "Auto Run"
+                          : "Manual Run";
+                      return (
+                        <div
+                          key={run.id}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800">
+                                  {runKind}
+                                </span>
+                                <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
+                                  {run.status}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                                {run.summary || "Run summary unavailable."}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-600">
+                                Run {run.id} • started{" "}
+                                {formatIstDateTime(run.started_at)}
+                                {run.completed_at
+                                  ? ` • completed ${formatIstDateTime(run.completed_at)}`
+                                  : ""}
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                              <div className="rounded-xl bg-white px-3 py-2">
+                                <div className="font-semibold text-slate-950">
+                                  {run.decisions_count}
+                                </div>
+                                <div className="text-slate-500">decisions</div>
+                              </div>
+                              <div className="rounded-xl bg-white px-3 py-2">
+                                <div className="font-semibold text-slate-950">
+                                  {run.orders_planned}
+                                </div>
+                                <div className="text-slate-500">planned</div>
+                              </div>
+                              <div className="rounded-xl bg-white px-3 py-2">
+                                <div className="font-semibold text-slate-950">
+                                  {run.orders_submitted}
+                                </div>
+                                <div className="text-slate-500">submitted</div>
+                              </div>
+                            </div>
+                          </div>
+                          {run.error_message ? (
+                            <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                              {run.error_message}
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-600">
+                    No Bullpen run history is available yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {isScheduleInfoDialogOpen ? (
           <div
             className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4"
             onMouseDown={(event) => {
-              if (event.target === event.currentTarget) setIsScheduleInfoDialogOpen(false);
+              if (event.target === event.currentTarget)
+                setIsScheduleInfoDialogOpen(false);
             }}
           >
             <div
@@ -3147,7 +3797,10 @@ export function BullpenAutoRunScheduleCard({
                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-600">
                     Auto Run Architecture
                   </p>
-                  <h2 id="bullpen-auto-run-schedule-info-title" className="mt-2 text-xl font-semibold text-slate-950">
+                  <h2
+                    id="bullpen-auto-run-schedule-info-title"
+                    className="mt-2 text-xl font-semibold text-slate-950"
+                  >
                     Scheduled Bullpen x AI execution
                   </h2>
                 </div>
@@ -3162,10 +3815,11 @@ export function BullpenAutoRunScheduleCard({
               </div>
               <div className="px-6 py-5 text-sm leading-6 text-slate-700">
                 <p>
-                  Scheduled runs use the Bullpen console top-10 profile: scan upcoming
-                  markets, run LLM consensus on every Stage 1 event, process Event
-                  Exits from both the ranking / LLM strategy and the capital-aware
-                  forced-exit strategy so capital is freed first, and then buy{" "}
+                  Scheduled runs use the Bullpen console top-10 profile: scan
+                  upcoming markets, run LLM consensus on every Stage 1 event,
+                  process Event Exits from both the ranking / LLM strategy and
+                  the capital-aware forced-exit strategy so capital is freed
+                  first, and then buy{" "}
                   <span className="font-semibold">
                     {formatMoney(savedConsoleOrderUsd)}
                   </span>{" "}
@@ -3221,30 +3875,38 @@ export function BullpenAutoRunScheduleCard({
               </div>
               <div className="space-y-4 px-6 py-5 text-sm leading-6 text-slate-700">
                 <p>
-                  Stage 3 only plans buy orders for Stage 2 candidate events that have
-                  already passed the qualification and ranking checks.
+                  Stage 3 only plans buy orders for Stage 2 candidate events
+                  that have already passed the qualification and ranking checks.
                 </p>
                 <ul className="list-disc space-y-2 pl-5">
                   <li>
-                    Stage 2 must first keep the event <span className="font-semibold">qualified</span>:
-                    rules parsing cannot be blocked, a strong LLM side must exist, returns/day must
-                    be computable, LLM disagreement cannot be High, and adjudication cannot be required.
+                    Stage 2 must first keep the event{" "}
+                    <span className="font-semibold">qualified</span>: rules
+                    parsing cannot be blocked, a strong LLM side must exist,
+                    returns/day must be computable, LLM disagreement cannot be
+                    High, and adjudication cannot be required.
                   </li>
                   <li>
-                    Those qualified candidates are then ranked together with active Bullpen positions
-                    by <span className="font-semibold">returns/day</span>.
+                    Those qualified candidates are then ranked together with
+                    active Bullpen positions by{" "}
+                    <span className="font-semibold">returns/day</span>.
                   </li>
                   <li>
-                    Only candidates that land inside the fixed <span className="font-semibold">top-10
-                    investable table</span> are added to Stage 3&apos;s planned buy queue.
+                    Only candidates that land inside the fixed{" "}
+                    <span className="font-semibold">
+                      top-10 investable table
+                    </span>{" "}
+                    are added to Stage 3&apos;s planned buy queue.
                   </li>
                   <li>
-                    Step 1 Event Exits run first to free capital, and any buy still depends on live
-                    execution guardrails before submission.
+                    Step 1 Event Exits run first to free capital, and any buy
+                    still depends on live execution guardrails before
+                    submission.
                   </li>
                   <li>
-                    In invest-only reuse mode, markets that are already in the Bullpen wallet or were
-                    already submitted from the saved run are skipped instead of being re-planned.
+                    In invest-only reuse mode, markets that are already in the
+                    Bullpen wallet or were already submitted from the saved run
+                    are skipped instead of being re-planned.
                   </li>
                 </ul>
               </div>
@@ -3265,7 +3927,9 @@ export function BullpenAutoRunScheduleCard({
             onClose={() => setInvestMetricDialog(null)}
             onSelectKind={openInvestMetricDialog}
             onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
-            onOpenInvestEligibilityInfo={() => setIsInvestEligibilityInfoDialogOpen(true)}
+            onOpenInvestEligibilityInfo={() =>
+              setIsInvestEligibilityInfoDialogOpen(true)
+            }
           />
         ) : null}
 
@@ -3279,15 +3943,17 @@ export function BullpenAutoRunScheduleCard({
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
             <p className="font-medium">{error.message}</p>
             {error.details ? (
-              <p className="mt-1 text-xs leading-5 text-rose-800">{error.details}</p>
+              <p className="mt-1 text-xs leading-5 text-rose-800">
+                {error.details}
+              </p>
             ) : null}
           </div>
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
           <span>
-            Need deeper guardrail control? Open the dedicated Auto-Live dashboard for
-            the same execution pipeline.
+            Need deeper guardrail control? Open the dedicated Auto-Live
+            dashboard for the same execution pipeline.
           </span>
           <Link
             href={URLs.routes.console.bullpenAiAutoLive()}
@@ -3311,7 +3977,9 @@ export function BullpenAutoRunScheduleCard({
             stageDetail={`Event inputs being fed into ${openInputStage.title}.`}
             outputs={openInputStage.inputs}
             alreadyInvestedRecords={
-              openInputStage.key === "invest" ? stageInputAlreadyInvestedRecords : []
+              openInputStage.key === "invest"
+                ? stageInputAlreadyInvestedRecords
+                : []
             }
             outputLabel="Inputs"
             onClose={() => setOpenInputStageKey(null)}
