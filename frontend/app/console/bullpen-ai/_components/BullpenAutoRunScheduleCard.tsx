@@ -115,6 +115,11 @@ type InvestMetricDialogState = {
 
 type ScanCandidateDialogMode = "fresh-opportunities" | "active-positions";
 
+type RunDetailDialogState = {
+  run: BullpenAutoLiveRun;
+  decisions: BullpenAutoLiveDecision[];
+};
+
 type ScanCandidateDialogState = {
   mode: ScanCandidateDialogMode;
   scanCompletedAt: string | null;
@@ -145,7 +150,7 @@ function formatIstScheduleSummaryDate(value: string) {
     /^(\d{2}:\d{2}:\d{2})\s+(\d{1,2})\s+([A-Za-z]+)(?:\s+\d{4})?$/,
   );
   if (match) {
-    return `${match[1]} ${match[2].padStart(2, "0")} ${match[3]}`;
+    return `${match[1]}, ${match[2].padStart(2, "0")} ${match[3]}`;
   }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
@@ -215,7 +220,7 @@ function buildScheduleSummary(startInput: string, refreshInput: string) {
       ? "Now"
       : formatIstScheduleSummaryDate(startInput.trim());
   if (!startInput.trim()) return null;
-  return `Auto Runs Start${startLabel === "Now" ? "" : " at"} ${startLabel} and refreshes every ${refreshMinutes} minutes`;
+  return `Auto Runs Started${startLabel === "Now" ? "" : " at"} ${startLabel} and refreshes every ${refreshMinutes} minutes`;
 }
 
 function normalizeError(error: unknown) {
@@ -238,7 +243,7 @@ function formatIstDateTime(value: string | null | undefined) {
     emptyValue: "—",
     timeZone: "Asia/Kolkata",
     timeZoneName: "short",
-    second: undefined,
+    second: "2-digit",
   });
 }
 
@@ -1589,15 +1594,24 @@ function getDecisionExitTypeDetails(decision: BullpenAutoLiveDecision) {
 
   const label = hasForcedExit
     ? hasEventOutOfTop10
-      ? "Force Exit + Event Out of Top 10"
-      : "Force Exit"
-    : "Event Out of Top 10";
+      ? "Exit: Event out of Top 10 + Forced Exit"
+      : "Exit: Forced Exit"
+    : "Exit: Event out of Top 10";
+
+  const details = [
+    hasEventOutOfTop10
+      ? "Exit: Event out of Top 10. Case 1: Position is outside top 10 by Returns/day. Case 2: Odds filter no longer qualifies the event."
+      : null,
+    hasForcedExit
+      ? "Exit: Forced Exit. Case 1: Market is 99.5% or more against the held outcome. Case 2: Held-side best bid falls below 0.5c."
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return {
     label,
-    details: matchingSignals
-      .map((signal) => `${signal.label}: ${signal.description}`)
-      .join(" "),
+    details,
   };
 }
 
@@ -1732,6 +1746,98 @@ function InvestMetricSummaryCard({
       </p>
       <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
     </button>
+  );
+}
+
+
+function RunDetailDialog({
+  state,
+  onClose,
+}: {
+  state: RunDetailDialogState;
+  onClose: () => void;
+}) {
+  const { run, decisions } = state;
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Run Details
+            </p>
+            <h2 className="text-xl font-semibold text-slate-950">
+              {run.summary || "Run summary unavailable."}
+            </h2>
+            <p className="text-xs text-slate-500">
+              Run {run.id} · started {formatIstDateTime(run.started_at)}
+              {run.completed_at ? ` · completed ${formatIstDateTime(run.completed_at)}` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close run details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <div className="grid gap-3 md:grid-cols-3">
+            <InvestMetricSummaryCard label="Decisions" value={run.decisions_count} />
+            <InvestMetricSummaryCard label="Planned" value={run.orders_planned} />
+            <InvestMetricSummaryCard label="Submitted" value={run.orders_submitted} />
+          </div>
+          {run.error_message ? (
+            <p className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              {run.error_message}
+            </p>
+          ) : null}
+          <div className="mt-5 space-y-4">
+            {run.stage_results.map((stage) => (
+              <section key={`${stage.stage_number}-${stage.stage_name}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Stage {stage.stage_number}
+                    </p>
+                    <h3 className="mt-1 text-base font-semibold text-slate-950">
+                      {stage.stage_name}
+                    </h3>
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold capitalize text-slate-700">
+                    {stage.status}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Started {formatIstDateTime(stage.started_at)}
+                  {stage.completed_at ? ` · completed ${formatIstDateTime(stage.completed_at)}` : ""}
+                </p>
+                <pre className="mt-3 max-h-64 overflow-auto rounded-xl bg-white p-3 text-xs leading-5 text-slate-700">
+                  {JSON.stringify(stage.outputs ?? {}, null, 2)}
+                </pre>
+              </section>
+            ))}
+          </div>
+          <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+            <h3 className="text-sm font-semibold text-slate-950">Event decisions</h3>
+            {decisions.length ? (
+              <div className="mt-3 space-y-2">
+                {decisions.map((decision) => (
+                  <div key={decision.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                    <div className="font-semibold text-slate-950">{decision.market_title}</div>
+                    <div className="mt-1">Outcome: {decision.side || "—"} · action: {decision.decision || "—"}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-slate-600">No persisted event decisions were returned for this run.</p>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2265,6 +2371,7 @@ export function BullpenAutoRunScheduleCard({
   const [isScheduleInfoDialogOpen, setIsScheduleInfoDialogOpen] =
     useState(false);
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
+  const [runDetailDialog, setRunDetailDialog] = useState<RunDetailDialogState | null>(null);
   const [isSchedulePickerOpen, setIsSchedulePickerOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
@@ -2892,6 +2999,28 @@ export function BullpenAutoRunScheduleCard({
       decisions: investRunDecisions,
     });
   };
+  const openRunInvestMetricDialog = (
+    run: BullpenAutoLiveRun,
+    kind: InvestMetricDialogKind = "planned",
+  ) => {
+    const stage = buildBullpenAutoRunWorkflowView(run).stages.find((workflowStage) => workflowStage.key === "invest") ?? null;
+    setInvestMetricDialog({
+      kind,
+      run,
+      stage,
+      decisions: summary?.recent_decisions.filter((decision) => decision.run_id === run.id) ?? [],
+    });
+  };
+  const openRunDetailDialog = (run: BullpenAutoLiveRun) => {
+    setRunDetailDialog({
+      run,
+      decisions: summary?.recent_decisions.filter((decision) => decision.run_id === run.id) ?? [],
+    });
+  };
+  const latestCompletedRun =
+    summary?.recent_runs.find((run) => run.status === "completed") ??
+    summary?.latest_run ??
+    null;
   const investOnlyDisabledReason = runIsActive
     ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
     : investOnlyPlan.blockedReason;
@@ -3108,7 +3237,7 @@ export function BullpenAutoRunScheduleCard({
                 htmlFor="bullpen-auto-run-start-time"
                 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
               >
-                Auto-run start time IST
+                Auto-run start time (IST)
               </label>
               <div className="relative mt-2 flex h-11 items-center rounded-xl border border-slate-200 bg-white px-3 shadow-sm">
                 <input
@@ -3122,6 +3251,15 @@ export function BullpenAutoRunScheduleCard({
                   className="h-full w-full border-0 bg-transparent p-0 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
                   placeholder="13:00:00 06 July, 2026"
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setScheduleStartInput(formatScheduleInputFromDate(new Date()))}
+                  disabled={action !== null}
+                  className="ml-2 h-8 rounded-lg px-3 text-xs shadow-none"
+                >
+                  Now
+                </Button>
                 <button
                   type="button"
                   onClick={() => setIsSchedulePickerOpen((open) => !open)}
@@ -3166,16 +3304,6 @@ export function BullpenAutoRunScheduleCard({
                   </div>
                 ) : null}
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-2"
-                onClick={() => {
-                  setScheduleStartInput("Now");
-                }}
-              >
-                Now
-              </Button>
             </div>
             <div className="min-w-[12rem] flex-1">
               <label
@@ -3287,11 +3415,16 @@ export function BullpenAutoRunScheduleCard({
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               Last completed run
             </div>
-            <p className="mt-2 text-sm font-semibold text-slate-950">
-              {formatIstDateTime(summary?.state.last_run_at)}
-            </p>
+            <button
+              type="button"
+              onClick={() => latestCompletedRun ? openRunDetailDialog(latestCompletedRun) : undefined}
+              disabled={!latestCompletedRun}
+              className="mt-2 block text-left text-sm font-semibold text-slate-950 underline-offset-4 transition hover:text-blue-700 hover:underline disabled:cursor-not-allowed disabled:no-underline"
+            >
+              {formatIstDateTime(latestCompletedRun?.started_at ?? summary?.state.last_run_at)}
+            </button>
             <p className="mt-1 text-xs text-slate-600">
-              {summary?.latest_run?.summary || "No auto-run result yet."}
+              {latestCompletedRun?.summary || "No auto-run result yet."}
             </p>
           </div>
 
@@ -3907,12 +4040,18 @@ export function BullpenAutoRunScheduleCard({
                       return (
                         <div
                           key={run.id}
-                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openRunDetailDialog(run)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") openRunDetailDialog(run);
+                          }}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
-                                <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800">
+                                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
                                   {runKind}
                                 </span>
                                 <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
@@ -3931,24 +4070,18 @@ export function BullpenAutoRunScheduleCard({
                               </p>
                             </div>
                             <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                              <div className="rounded-xl bg-white px-3 py-2">
-                                <div className="font-semibold text-slate-950">
-                                  {run.decisions_count}
-                                </div>
+                              <button type="button" onClick={(event) => { event.stopPropagation(); openRunInvestMetricDialog(run, "planned"); }} className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50">
+                                <div className="font-semibold text-slate-950">{run.decisions_count}</div>
                                 <div className="text-slate-500">decisions</div>
-                              </div>
-                              <div className="rounded-xl bg-white px-3 py-2">
-                                <div className="font-semibold text-slate-950">
-                                  {run.orders_planned}
-                                </div>
+                              </button>
+                              <button type="button" onClick={(event) => { event.stopPropagation(); openRunInvestMetricDialog(run, "planned"); }} className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50">
+                                <div className="font-semibold text-slate-950">{run.orders_planned}</div>
                                 <div className="text-slate-500">planned</div>
-                              </div>
-                              <div className="rounded-xl bg-white px-3 py-2">
-                                <div className="font-semibold text-slate-950">
-                                  {run.orders_submitted}
-                                </div>
+                              </button>
+                              <button type="button" onClick={(event) => { event.stopPropagation(); openRunInvestMetricDialog(run, "planned"); }} className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50">
+                                <div className="font-semibold text-slate-950">{run.orders_submitted}</div>
                                 <div className="text-slate-500">submitted</div>
-                              </div>
+                              </button>
                             </div>
                           </div>
                           {run.error_message ? (
@@ -4110,6 +4243,13 @@ export function BullpenAutoRunScheduleCard({
           <StageOneOutputDialog
             state={scanCandidateDialog}
             onClose={() => setScanCandidateDialog(null)}
+          />
+        ) : null}
+
+        {runDetailDialog ? (
+          <RunDetailDialog
+            state={runDetailDialog}
+            onClose={() => setRunDetailDialog(null)}
           />
         ) : null}
 
