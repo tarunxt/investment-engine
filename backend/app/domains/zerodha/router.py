@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 
@@ -72,6 +73,47 @@ def _is_regular_market_open(exchange: str, now: datetime | None = None) -> bool:
         return False
     current_time = current.time()
     return INDIA_MARKET_OPEN <= current_time <= INDIA_MARKET_CLOSE
+
+
+def _order_average_price(order: dict) -> float | None:
+    value = order.get("average_price") or order.get("average_price_decimal")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+async def _get_order_average_prices(
+    access_token: str, order_ids: set[str]
+) -> dict[str, float]:
+    if not order_ids:
+        return {}
+
+    average_prices: dict[str, float] = {}
+    # Kite MARKET orders usually complete quickly, but the order book can lag
+    # the placement response. Retry briefly so the UI can show the final Avg.
+    # Price without making the route a long-running operation.
+    for attempt in range(3):
+        if attempt > 0:
+            await asyncio.sleep(0.6)
+        try:
+            orders = await _svc.get_orders(access_token)
+        except Exception:
+            logger.exception(
+                "Failed to read Zerodha order book for average execution prices"
+            )
+            return average_prices
+        for order in orders:
+            order_id = str(order.get("order_id") or "").strip()
+            if order_id not in order_ids or order_id in average_prices:
+                continue
+            average_price = _order_average_price(order)
+            if average_price is not None:
+                average_prices[order_id] = average_price
+        if len(average_prices) == len(order_ids):
+            break
+    return average_prices
 
 
 def _instrument_key(exchange: str, tradingsymbol: str) -> str:
@@ -581,6 +623,16 @@ async def place_protected_market_orders(
                 status="failed",
                 error="Failed to place order on Zerodha",
             ))
+
+    placed_order_ids = {
+        str(result.order_id).strip()
+        for result in results
+        if result.status == "placed" and result.order_id
+    }
+    average_prices = await _get_order_average_prices(token, placed_order_ids)
+    for result in results:
+        if result.order_id:
+            result.average_price = average_prices.get(str(result.order_id).strip())
 
     placed_count = sum(1 for result in results if result.status == "placed")
     failed_count = len(results) - placed_count

@@ -988,6 +988,7 @@ export interface ZerodhaProtectedMarketOrderResult {
   quantity: number;
   status: 'placed' | 'failed';
   order_id?: string | null;
+  average_price?: number | null;
   error?: string | null;
 }
 

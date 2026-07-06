@@ -187,6 +187,7 @@ type ZerodhaBasketSubmission = {
   clipboardCopied: boolean;
   orders: ZerodhaBasketPreviewOrder[];
   placedOrderIds?: string[];
+  executionPricesByOrderId?: Record<string, number>;
   failedMessages?: string[];
   portfolioRefreshedAt?: string | null;
 };
@@ -3027,6 +3028,7 @@ function ZerodhaBasketPreviewDialog({
   const canUseDirectMarket = directMarketAvailable && marketStatus.open;
   const submittedOrderIds = new Set(submission?.orders.map((order) => order.id) ?? []);
   const placedOrderIds = new Set(submission?.placedOrderIds ?? []);
+  const executionPricesByOrderId = submission?.executionPricesByOrderId ?? {};
   const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
@@ -3301,6 +3303,7 @@ function ZerodhaBasketPreviewDialog({
                             {group.orders.map((order) => {
                               const isSubmitted = submittedOrderIds.has(order.id);
                               const isPlaced = placedOrderIds.has(order.id) || (submission?.executionMode === "publisher_limit" && isSubmitted);
+                              const executionPrice = executionPricesByOrderId[order.id] ?? null;
                               return (
                               <tr key={order.id} className={cn("transition", isPlaced ? "bg-emerald-50/80 ring-1 ring-inset ring-emerald-100" : isSubmitted ? "bg-amber-50/70" : "bg-white")}>
                                 <td className="px-4 py-3">
@@ -3405,7 +3408,12 @@ function ZerodhaBasketPreviewDialog({
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
                                   {isPlaced ? (
-                                    <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 font-bold text-emerald-800">{submission?.executionMode === "direct_market" ? "Completed in Kite" : "Sent to protected LIMIT tray"}</span>
+                                    <span className="inline-flex flex-col rounded-xl bg-emerald-100 px-3 py-1 font-bold text-emerald-800">
+                                      <span>{submission?.executionMode === "direct_market" ? "Completed in Kite" : "Sent to protected LIMIT tray"}</span>
+                                      {executionPrice !== null ? (
+                                        <span className="text-[11px] font-black text-emerald-950">Avg. Price {formatBasketCurrency(executionPrice)}</span>
+                                      ) : null}
+                                    </span>
                                   ) : isSubmitted ? (
                                     <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 font-bold text-amber-800">Failed / check Kite</span>
                                   ) : (
@@ -5601,6 +5609,22 @@ ${zerodhaExecutionMode === "direct_market"
           placedResultKeys.has(`${order.exchange.toUpperCase()}:${order.symbol.toUpperCase()}:${order.side}`),
         );
         const failedMessages = failed.map((result) => `${result.tradingsymbol}: ${result.error || "unknown error"}`);
+        const executionPricesByResultKey = new Map(
+          response.results
+            .filter((result) => result.status === "placed" && typeof result.average_price === "number" && result.average_price > 0)
+            .map((result) => [
+              `${result.exchange.toUpperCase()}:${result.tradingsymbol.toUpperCase()}:${result.transaction_type}`,
+              result.average_price as number,
+            ] as const),
+        );
+        const executionPricesByOrderId = Object.fromEntries(
+          placedOrders
+            .map((order) => [
+              order.id,
+              executionPricesByResultKey.get(`${order.exchange.toUpperCase()}:${order.symbol.toUpperCase()}:${order.side}`) ?? null,
+            ] as const)
+            .filter((entry): entry is [string, number] => entry[1] !== null),
+        );
         let portfolioRefreshedAt: string | null = null;
 
         if (response.placed_count > 0) {
@@ -5625,6 +5649,7 @@ ${zerodhaExecutionMode === "direct_market"
           clipboardCopied: false,
           orders: selectedOrders,
           placedOrderIds: placedOrders.map((order) => order.id),
+          executionPricesByOrderId,
           failedMessages,
           portfolioRefreshedAt,
         });

@@ -211,6 +211,7 @@ class ZerodhaProtectedMarketOrderResult(BaseModel):
     quantity: int
     status: str
     order_id: str | None = None
+    average_price: float | None = None
     error: str | None = None
 
 
