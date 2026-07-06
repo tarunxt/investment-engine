@@ -1181,6 +1181,16 @@ function formatBasketCurrency(value: number | null) {
   }).format(value);
 }
 
+function getZerodhaAvailableMarginToneClass(
+  availableMargin: number | null,
+  buyBasketAmount: number,
+) {
+  if (availableMargin === null) return "text-slate-500";
+  if (availableMargin <= buyBasketAmount) return "text-red-700";
+  if (availableMargin > buyBasketAmount * 1.1) return "text-emerald-700";
+  return "text-amber-600";
+}
+
 function normalizeZerodhaBasketSymbol(value?: string | null) {
   return (value || "")
     .trim()
@@ -3005,6 +3015,12 @@ function ZerodhaBasketPreviewDialog({
   const selectedSellAmount = selectedOrders
     .filter((order) => order.side === "SELL")
     .reduce((sum, order) => sum + (order.amount ?? 0), 0);
+  const availableMargin =
+    (detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null)?.available_margin ?? null;
+  const availableMarginToneClass = getZerodhaAvailableMarginToneClass(
+    availableMargin,
+    selectedBuyAmount,
+  );
   const allSelected = orders.length > 0 && orders.every((order) => selectedIds.has(order.id));
   const marketStatus = getIndiaMarketStatus();
   const canUseDirectMarket = directMarketAvailable && marketStatus.open;
@@ -3186,6 +3202,12 @@ function ZerodhaBasketPreviewDialog({
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Buy Basket</div>
                   <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedBuyAmount)}</div>
+                  <div className={cn("mt-3 text-xs font-bold uppercase tracking-wide", availableMarginToneClass)}>
+                    Available Margin
+                  </div>
+                  <div className={cn("mt-1 text-lg font-black", availableMarginToneClass)}>
+                    {availableMargin === null ? "Not available" : formatBasketCurrency(availableMargin)}
+                  </div>
                 </div>
                 <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
