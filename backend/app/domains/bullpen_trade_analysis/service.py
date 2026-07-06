@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -46,8 +47,12 @@ from app.domains.bullpen_trade_analysis.schemas import (
     BullpenTradeAnalysisSnapshot,
     BullpenTradeAnalysisSummaryStats,
 )
+from app.domains.polymarket.bullpen import BullpenTradeHistoryReader
+from app.domains.polymarket.schemas import PolymarketBullpenTradeHistoryItem
 from app.infrastructure.database.session import AsyncSessionLocal
 from app.infrastructure.database.sync_session import SyncSessionLocal
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_datetime(value: datetime | None) -> datetime | None:
@@ -91,7 +96,9 @@ def _pnl_outcome_tag(net_pnl: float | None, *, closed: bool) -> str:
     return "BREAKEVEN"
 
 
-def _final_exit_tag(*, exit_type: str | None, sell_reason: str | None, net_pnl: float | None) -> str:
+def _final_exit_tag(
+    *, exit_type: str | None, sell_reason: str | None, net_pnl: float | None
+) -> str:
     normalized_reason = (sell_reason or "").strip().lower()
     normalized_type = (exit_type or "").strip().upper()
     if normalized_type == "REDEEM":
@@ -115,7 +122,9 @@ def _final_exit_tag(*, exit_type: str | None, sell_reason: str | None, net_pnl: 
     return "UNKNOWN"
 
 
-def _notional(amount: float | None, shares: float | None, price: float | None) -> float | None:
+def _notional(
+    amount: float | None, shares: float | None, price: float | None
+) -> float | None:
     if amount is not None:
         return round(amount, 6)
     if shares is not None and price is not None:
@@ -142,7 +151,9 @@ def _requested_shares(amount: float | None, price: float | None) -> float | None
     return round(amount / price, 6)
 
 
-def _slippage(requested_price: float | None, average_fill_price: float | None) -> float | None:
+def _slippage(
+    requested_price: float | None, average_fill_price: float | None
+) -> float | None:
     if requested_price is None or average_fill_price is None:
         return None
     return round(average_fill_price - requested_price, 6)
@@ -178,7 +189,9 @@ def _llm_entries_for_phase(
                 model=_safe_text(payload.get("model")),
                 prompt_version=_safe_text(payload.get("prompt_version")),
                 prompt_text=_safe_text(payload.get("prompt_text")),
-                raw_output=_safe_text(payload.get("raw_output") or payload.get("rationale")),
+                raw_output=_safe_text(
+                    payload.get("raw_output") or payload.get("rationale")
+                ),
                 parsed_output_json=sanitize_json_value(dict(payload)),
                 confidence=confidence_score_from_value(payload.get("confidence")),
                 tags_json=sanitize_json_value(list(payload.get("tags") or [])),
@@ -196,7 +209,9 @@ def _llm_entries_for_phase(
     return records
 
 
-def _build_record_response(record: BullpenTradeAnalysisRecord) -> BullpenTradeAnalysisRecordResponse:
+def _build_record_response(
+    record: BullpenTradeAnalysisRecord,
+) -> BullpenTradeAnalysisRecordResponse:
     return BullpenTradeAnalysisRecordResponse(
         id=record.id,
         entry_reference=record.entry_reference,
@@ -327,7 +342,9 @@ def _build_record_response(record: BullpenTradeAnalysisRecord) -> BullpenTradeAn
     )
 
 
-def _build_list_item(record: BullpenTradeAnalysisRecord) -> BullpenTradeAnalysisListItem:
+def _build_list_item(
+    record: BullpenTradeAnalysisRecord,
+) -> BullpenTradeAnalysisListItem:
     latest_monitor = record.metadata_json.get("latest_monitor", {})
     current_price = parse_float(latest_monitor.get("current_price_cents"))
     return BullpenTradeAnalysisListItem(
@@ -362,11 +379,19 @@ def _build_list_item(record: BullpenTradeAnalysisRecord) -> BullpenTradeAnalysis
     )
 
 
-def _build_summary(records: Sequence[BullpenTradeAnalysisRecord]) -> BullpenTradeAnalysisSummaryStats:
+def _build_summary(
+    records: Sequence[BullpenTradeAnalysisRecord],
+) -> BullpenTradeAnalysisSummaryStats:
     closed = [record for record in records if record.closed_at is not None]
     wins = [record for record in closed if (record.net_pnl or 0) > 0]
-    holding_values = [record.holding_period_seconds for record in closed if record.holding_period_seconds is not None]
-    pnl_values = [record.pnl_percent for record in closed if record.pnl_percent is not None]
+    holding_values = [
+        record.holding_period_seconds
+        for record in closed
+        if record.holding_period_seconds is not None
+    ]
+    pnl_values = [
+        record.pnl_percent for record in closed if record.pnl_percent is not None
+    ]
     fees_total = sum(record.fees_total or 0 for record in records)
     return BullpenTradeAnalysisSummaryStats(
         total_executed_trades=len(
@@ -376,15 +401,21 @@ def _build_summary(records: Sequence[BullpenTradeAnalysisRecord]) -> BullpenTrad
         closed_positions=len(closed),
         total_net_pnl=round(sum(record.net_pnl or 0 for record in records), 4),
         win_rate=round(len(wins) / len(closed), 4) if closed else 0,
-        average_pnl_percent=round(sum(pnl_values) / len(pnl_values), 4) if pnl_values else None,
+        average_pnl_percent=(
+            round(sum(pnl_values) / len(pnl_values), 4) if pnl_values else None
+        ),
         average_holding_period_seconds=(
-            round(sum(holding_values) / len(holding_values), 2) if holding_values else None
+            round(sum(holding_values) / len(holding_values), 2)
+            if holding_values
+            else None
         ),
         total_fees=round(fees_total, 4),
     )
 
 
-def _build_comparison(record: BullpenTradeAnalysisRecord) -> BullpenTradeAnalysisComparison:
+def _build_comparison(
+    record: BullpenTradeAnalysisRecord,
+) -> BullpenTradeAnalysisComparison:
     return BullpenTradeAnalysisComparison(
         buy_price=record.buy_average_fill_price or record.buy_requested_price,
         exit_price=record.sell_average_fill_price or record.sell_requested_price,
@@ -407,7 +438,9 @@ def _build_comparison(record: BullpenTradeAnalysisRecord) -> BullpenTradeAnalysi
     )
 
 
-def _apply_learning_fields(record: BullpenTradeAnalysisRecord) -> BullpenTradeAnalysisActionableLearning:
+def _apply_learning_fields(
+    record: BullpenTradeAnalysisRecord,
+) -> BullpenTradeAnalysisActionableLearning:
     learning = generate_bullpen_post_trade_analysis(record)
     record.analysis_summary = _safe_text(learning.get("analysis_summary"))
     record.mistake_category = _safe_text(learning.get("mistake_category"))
@@ -468,7 +501,9 @@ def _replace_llm_entries(
         if existing.phase != phase:
             continue
         session.delete(existing)
-    for entry in _llm_entries_for_phase(payloads, phase=phase, computed_tags=computed_tags):
+    for entry in _llm_entries_for_phase(
+        payloads, phase=phase, computed_tags=computed_tags
+    ):
         entry.trade_analysis_id = trade.id
         session.add(entry)
 
@@ -506,8 +541,12 @@ def _upsert_singleton_snapshot(
                 bullpen_snapshot_json=sanitize_json_value(bullpen_snapshot_json or {}),
                 event_snapshot_json=sanitize_json_value(event_snapshot_json or {}),
                 market_snapshot_json=sanitize_json_value(market_snapshot_json or {}),
-                order_book_snapshot_json=sanitize_json_value(order_book_snapshot_json or {}),
-                positions_snapshot_json=sanitize_json_value(positions_snapshot_json or {}),
+                order_book_snapshot_json=sanitize_json_value(
+                    order_book_snapshot_json or {}
+                ),
+                positions_snapshot_json=sanitize_json_value(
+                    positions_snapshot_json or {}
+                ),
                 raw_api_response_json=sanitize_json_value(raw_api_response_json or {}),
             )
         )
@@ -516,8 +555,12 @@ def _upsert_singleton_snapshot(
     existing.bullpen_snapshot_json = sanitize_json_value(bullpen_snapshot_json or {})
     existing.event_snapshot_json = sanitize_json_value(event_snapshot_json or {})
     existing.market_snapshot_json = sanitize_json_value(market_snapshot_json or {})
-    existing.order_book_snapshot_json = sanitize_json_value(order_book_snapshot_json or {})
-    existing.positions_snapshot_json = sanitize_json_value(positions_snapshot_json or {})
+    existing.order_book_snapshot_json = sanitize_json_value(
+        order_book_snapshot_json or {}
+    )
+    existing.positions_snapshot_json = sanitize_json_value(
+        positions_snapshot_json or {}
+    )
     existing.raw_api_response_json = sanitize_json_value(raw_api_response_json or {})
 
 
@@ -538,15 +581,21 @@ def _find_open_trade(
             or_(
                 BullpenTradeAnalysisRecord.bullpen_market_id == market_id,
                 BullpenTradeAnalysisRecord.event_slug == market_id,
-                BullpenTradeAnalysisRecord.position_key == f"{market_id}::{_normalize_outcome(outcome_name) or ''}",
+                BullpenTradeAnalysisRecord.position_key
+                == f"{market_id}::{_normalize_outcome(outcome_name) or ''}",
             )
         )
     if outcome_name:
-        conditions.append(BullpenTradeAnalysisRecord.outcome_name == _normalize_outcome(outcome_name))
+        conditions.append(
+            BullpenTradeAnalysisRecord.outcome_name == _normalize_outcome(outcome_name)
+        )
     query = (
         select(BullpenTradeAnalysisRecord)
         .where(and_(*conditions))
-        .order_by(desc(BullpenTradeAnalysisRecord.buy_executed_at), desc(BullpenTradeAnalysisRecord.created_at))
+        .order_by(
+            desc(BullpenTradeAnalysisRecord.buy_executed_at),
+            desc(BullpenTradeAnalysisRecord.created_at),
+        )
         .limit(1)
     )
     record = session.execute(query).scalars().first()
@@ -569,7 +618,11 @@ def _find_open_trade(
     )
     normalized_title = normalize_title(title)
     return next(
-        (item for item in open_records if normalize_title(item.title) == normalized_title),
+        (
+            item
+            for item in open_records
+            if normalize_title(item.title) == normalized_title
+        ),
         None,
     )
 
@@ -653,7 +706,9 @@ def _apply_buy_pre_submit(
     trade.event_slug = event_slug
     trade.bullpen_market_id = market_id
     trade.outcome_name = _normalize_outcome(outcome_name)
-    trade.position_key = f"{market_id or event_slug or event_id or title}::{trade.outcome_name or ''}"
+    trade.position_key = (
+        f"{market_id or event_slug or event_id or title}::{trade.outcome_name or ''}"
+    )
     trade.title = title
     trade.event_question = event_question
     trade.event_description = event_description
@@ -665,7 +720,9 @@ def _apply_buy_pre_submit(
     trade.buy_submitted_at = trade.buy_submitted_at or utc_now()
     trade.buy_requested_amount = requested_amount
     trade.buy_requested_price = requested_price
-    trade.buy_requested_odds = round(requested_price * 100, 4) if requested_price is not None else None
+    trade.buy_requested_odds = (
+        round(requested_price * 100, 4) if requested_price is not None else None
+    )
     trade.buy_requested_shares = _requested_shares(requested_amount, requested_price)
     trade.buy_probability_estimate = buy_probability_estimate
     trade.buy_market_implied_probability = market_probability
@@ -725,12 +782,22 @@ def _apply_buy_execution(
     trade.buy_order_id = _safe_text(summary.get("order_id"))
     trade.buy_client_order_id = _safe_text(summary.get("client_order_id"))
     trade.buy_status = _safe_text(summary.get("status")) or "executed"
-    trade.buy_filled_amount = parse_float(summary.get("filled_amount")) or trade.buy_requested_amount
-    trade.buy_filled_shares = parse_float(summary.get("filled_shares")) or trade.buy_requested_shares
-    trade.buy_average_fill_price = parse_float(summary.get("average_fill_price")) or trade.buy_requested_price
-    trade.buy_average_fill_odds = parse_float(summary.get("average_fill_odds")) or trade.buy_requested_odds
+    trade.buy_filled_amount = (
+        parse_float(summary.get("filled_amount")) or trade.buy_requested_amount
+    )
+    trade.buy_filled_shares = (
+        parse_float(summary.get("filled_shares")) or trade.buy_requested_shares
+    )
+    trade.buy_average_fill_price = (
+        parse_float(summary.get("average_fill_price")) or trade.buy_requested_price
+    )
+    trade.buy_average_fill_odds = (
+        parse_float(summary.get("average_fill_odds")) or trade.buy_requested_odds
+    )
     trade.buy_fees = parse_float(summary.get("fees"))
-    trade.buy_slippage = _slippage(trade.buy_requested_price, trade.buy_average_fill_price)
+    trade.buy_slippage = _slippage(
+        trade.buy_requested_price, trade.buy_average_fill_price
+    )
     trade.buy_executed_at = executed_at
     trade.bought_at = executed_at
     trade.buy_status = trade.buy_status or "executed"
@@ -776,7 +843,9 @@ def _apply_exit_pre_submit(
     trade.sell_requested_amount = requested_amount
     trade.sell_requested_shares = requested_shares
     trade.sell_requested_price = requested_price
-    trade.sell_requested_odds = round(requested_price * 100, 4) if requested_price is not None else None
+    trade.sell_requested_odds = (
+        round(requested_price * 100, 4) if requested_price is not None else None
+    )
     trade.sell_probability_estimate = probability_estimate
     trade.sell_market_implied_probability = market_probability
     trade.sell_probability_delta = (
@@ -831,12 +900,22 @@ def _apply_exit_execution(
     trade.sell_order_id = _safe_text(summary.get("order_id"))
     trade.sell_client_order_id = _safe_text(summary.get("client_order_id"))
     trade.sell_status = _safe_text(summary.get("status")) or exit_type.lower()
-    trade.sell_filled_amount = parse_float(summary.get("filled_amount")) or trade.sell_requested_amount
-    trade.sell_filled_shares = parse_float(summary.get("filled_shares")) or trade.sell_requested_shares
-    trade.sell_average_fill_price = parse_float(summary.get("average_fill_price")) or trade.sell_requested_price
-    trade.sell_average_fill_odds = parse_float(summary.get("average_fill_odds")) or trade.sell_requested_odds
+    trade.sell_filled_amount = (
+        parse_float(summary.get("filled_amount")) or trade.sell_requested_amount
+    )
+    trade.sell_filled_shares = (
+        parse_float(summary.get("filled_shares")) or trade.sell_requested_shares
+    )
+    trade.sell_average_fill_price = (
+        parse_float(summary.get("average_fill_price")) or trade.sell_requested_price
+    )
+    trade.sell_average_fill_odds = (
+        parse_float(summary.get("average_fill_odds")) or trade.sell_requested_odds
+    )
     trade.sell_fees = parse_float(summary.get("fees"))
-    trade.sell_slippage = _slippage(trade.sell_requested_price, trade.sell_average_fill_price)
+    trade.sell_slippage = _slippage(
+        trade.sell_requested_price, trade.sell_average_fill_price
+    )
     trade.sell_executed_at = executed_at
     trade.sell_reason = sell_reason or trade.sell_reason
     trade.exit_notional = _notional(
@@ -873,9 +952,13 @@ def _apply_exit_execution(
         else None
     )
     trade.realized_return = (
-        round((trade.net_pnl or 0) / trade.buy_notional, 6) if trade.buy_notional else None
+        round((trade.net_pnl or 0) / trade.buy_notional, 6)
+        if trade.buy_notional
+        else None
     )
-    trade.holding_period_seconds = _holding_period_seconds(trade.buy_executed_at, trade.closed_at)
+    trade.holding_period_seconds = _holding_period_seconds(
+        trade.buy_executed_at, trade.closed_at
+    )
     trade.pnl_outcome_tag = _pnl_outcome_tag(trade.net_pnl, closed=True)
     trade.final_tag = _final_exit_tag(
         exit_type=exit_type,
@@ -885,7 +968,9 @@ def _apply_exit_execution(
     return _apply_learning_fields(trade)
 
 
-def _apply_failed_exit(trade: BullpenTradeAnalysisRecord, *, failure_reason: str) -> None:
+def _apply_failed_exit(
+    trade: BullpenTradeAnalysisRecord, *, failure_reason: str
+) -> None:
     trade.sell_failure_reason = failure_reason
     trade.sell_status = "failed"
     trade.status = "FAILED"
@@ -931,7 +1016,9 @@ def _apply_filters(
             )
         )
     if pnl_outcome:
-        query = query.where(BullpenTradeAnalysisRecord.pnl_outcome_tag == pnl_outcome.strip().upper())
+        query = query.where(
+            BullpenTradeAnalysisRecord.pnl_outcome_tag == pnl_outcome.strip().upper()
+        )
     if final_tag:
         normalized_final_tag = final_tag.strip().upper()
         if normalized_final_tag in {"PROFIT", "LOSS", "BREAKEVEN", "OPEN"}:
@@ -939,7 +1026,9 @@ def _apply_filters(
                 BullpenTradeAnalysisRecord.pnl_outcome_tag == normalized_final_tag
             )
         else:
-            query = query.where(BullpenTradeAnalysisRecord.final_tag == normalized_final_tag)
+            query = query.where(
+                BullpenTradeAnalysisRecord.final_tag == normalized_final_tag
+            )
     if from_date:
         query = query.where(
             or_(
@@ -955,7 +1044,9 @@ def _apply_filters(
             )
         )
     if strategy_version:
-        query = query.where(BullpenTradeAnalysisRecord.strategy_version == strategy_version)
+        query = query.where(
+            BullpenTradeAnalysisRecord.strategy_version == strategy_version
+        )
     if category:
         query = query.where(BullpenTradeAnalysisRecord.category == category)
     if topic:
@@ -963,9 +1054,165 @@ def _apply_filters(
     return query
 
 
+async def sync_bullpen_trade_history_for_user(user_id: int) -> None:
+    try:
+        trades = await BullpenTradeHistoryReader().refresh()
+    except Exception:
+        logger.exception("Bullpen trade-analysis history sync failed")
+        return
+    if not trades:
+        return
+    async with AsyncSessionLocal() as session:
+        service = BullpenTradeAnalysisService(session)
+        await service.sync_external_trade_history(user_id=user_id, trades=trades)
+
+
 class BullpenTradeAnalysisService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def sync_external_trade_history(
+        self, *, user_id: int, trades: Sequence[PolymarketBullpenTradeHistoryItem]
+    ) -> None:
+        for trade in sorted(trades, key=lambda item: item.timestamp):
+            executed_at = parse_datetime(trade.timestamp) or utc_now()
+            outcome = _normalize_outcome(trade.outcome) or trade.outcome
+            market_id = _safe_text(trade.market_id)
+            title = _safe_text(trade.market_title) or "Bullpen prediction trade"
+            side = str(trade.side).upper()
+            if side == "BUY":
+                entry_reference = f"bullpen-history:{trade.id}:BUY"
+                existing = (
+                    (
+                        await self.session.execute(
+                            select(BullpenTradeAnalysisRecord).where(
+                                BullpenTradeAnalysisRecord.entry_reference
+                                == entry_reference
+                            )
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+                if existing is None:
+                    existing = BullpenTradeAnalysisRecord(
+                        id=str(uuid4()),
+                        user_id=user_id,
+                        entry_reference=entry_reference,
+                        source_variant="bullpen-history",
+                        bot_name="Bullpen",
+                        strategy_name="Bullpen Executed History",
+                        strategy_version="bullpen_history",
+                        status="BOUGHT",
+                        lifecycle_state="BUY_EXECUTED_ONLY",
+                        final_tag="OPEN",
+                        pnl_outcome_tag="OPEN",
+                        position_key=f"{market_id or normalize_title(title)}::{outcome}",
+                        bullpen_market_id=market_id,
+                        outcome_name=outcome,
+                        title=title,
+                        event_question=title,
+                    )
+                    self.session.add(existing)
+                existing.bought_at = existing.bought_at or executed_at
+                existing.buy_executed_at = existing.buy_executed_at or executed_at
+                existing.buy_status = "executed"
+                existing.buy_filled_amount = existing.buy_filled_amount or trade.amount
+                existing.buy_filled_shares = existing.buy_filled_shares or trade.shares
+                existing.buy_average_fill_price = (
+                    existing.buy_average_fill_price or trade.price
+                )
+                existing.buy_average_fill_odds = existing.buy_average_fill_odds or (
+                    trade.price * 100 if trade.price else None
+                )
+                existing.buy_notional = existing.buy_notional or _notional(
+                    trade.amount, trade.shares, trade.price
+                )
+                existing.metadata_json = {
+                    **(existing.metadata_json or {}),
+                    "bullpen_history_buy": sanitize_json_value(trade.raw),
+                }
+                continue
+            if side != "SELL":
+                continue
+            open_trade = (
+                (
+                    await self.session.execute(
+                        select(BullpenTradeAnalysisRecord)
+                        .where(BullpenTradeAnalysisRecord.user_id == user_id)
+                        .where(BullpenTradeAnalysisRecord.closed_at.is_(None))
+                        .where(BullpenTradeAnalysisRecord.outcome_name == outcome)
+                        .where(
+                            or_(
+                                BullpenTradeAnalysisRecord.bullpen_market_id
+                                == market_id,
+                                BullpenTradeAnalysisRecord.title == title,
+                            )
+                        )
+                        .order_by(
+                            desc(BullpenTradeAnalysisRecord.buy_executed_at),
+                            desc(BullpenTradeAnalysisRecord.created_at),
+                        )
+                        .limit(1)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if open_trade is None:
+                open_trade = BullpenTradeAnalysisRecord(
+                    id=str(uuid4()),
+                    user_id=user_id,
+                    entry_reference=f"bullpen-history:{trade.id}:SELL:unknown-entry",
+                    source_variant="bullpen-history",
+                    bot_name="Bullpen",
+                    strategy_name="Bullpen Executed History",
+                    strategy_version="bullpen_history",
+                    position_key=f"{market_id or normalize_title(title)}::{outcome}",
+                    bullpen_market_id=market_id,
+                    outcome_name=outcome,
+                    title=title,
+                    event_question=title,
+                )
+                self.session.add(open_trade)
+            open_trade.exit_reference = (
+                open_trade.exit_reference or f"bullpen-history:{trade.id}:SELL"
+            )
+            open_trade.status = "SOLD"
+            open_trade.lifecycle_state = "EXIT_EXECUTED"
+            open_trade.final_tag = _final_exit_tag(
+                exit_type="SELL", sell_reason="Bullpen wallet history", net_pnl=None
+            )
+            open_trade.pnl_outcome_tag = _pnl_outcome_tag(
+                open_trade.net_pnl, closed=True
+            )
+            open_trade.sold_at = open_trade.sold_at or executed_at
+            open_trade.closed_at = open_trade.closed_at or executed_at
+            open_trade.sell_executed_at = open_trade.sell_executed_at or executed_at
+            open_trade.sell_status = "executed"
+            open_trade.sell_filled_amount = (
+                open_trade.sell_filled_amount or trade.amount
+            )
+            open_trade.sell_filled_shares = (
+                open_trade.sell_filled_shares or trade.shares
+            )
+            open_trade.sell_average_fill_price = (
+                open_trade.sell_average_fill_price or trade.price
+            )
+            open_trade.sell_average_fill_odds = open_trade.sell_average_fill_odds or (
+                trade.price * 100 if trade.price else None
+            )
+            open_trade.exit_notional = open_trade.exit_notional or _notional(
+                trade.amount, trade.shares, trade.price
+            )
+            open_trade.holding_period_seconds = _holding_period_seconds(
+                open_trade.buy_executed_at, open_trade.closed_at
+            )
+            open_trade.metadata_json = {
+                **(open_trade.metadata_json or {}),
+                "bullpen_history_sell": sanitize_json_value(trade.raw),
+            }
+        await self.session.commit()
 
     async def list_trades(
         self,
@@ -1007,17 +1254,21 @@ class BullpenTradeAnalysisService:
         trade_id: str,
     ) -> BullpenTradeAnalysisDetailResponse | None:
         record = (
-            await self.session.execute(
-                select(BullpenTradeAnalysisRecord)
-                .where(BullpenTradeAnalysisRecord.user_id == user_id)
-                .where(BullpenTradeAnalysisRecord.id == trade_id)
-                .options(
-                    selectinload(BullpenTradeAnalysisRecord.snapshots),
-                    selectinload(BullpenTradeAnalysisRecord.llm_entries),
-                    selectinload(BullpenTradeAnalysisRecord.event_logs),
+            (
+                await self.session.execute(
+                    select(BullpenTradeAnalysisRecord)
+                    .where(BullpenTradeAnalysisRecord.user_id == user_id)
+                    .where(BullpenTradeAnalysisRecord.id == trade_id)
+                    .options(
+                        selectinload(BullpenTradeAnalysisRecord.snapshots),
+                        selectinload(BullpenTradeAnalysisRecord.llm_entries),
+                        selectinload(BullpenTradeAnalysisRecord.event_logs),
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if record is None:
             return None
         actionable_learning = _apply_learning_fields(record)
@@ -1027,7 +1278,9 @@ class BullpenTradeAnalysisService:
             comparison=_build_comparison(record),
             actionable_learning=actionable_learning,
             snapshots=[
-                BullpenTradeAnalysisSnapshot.model_validate(snapshot, from_attributes=True)
+                BullpenTradeAnalysisSnapshot.model_validate(
+                    snapshot, from_attributes=True
+                )
                 for snapshot in record.snapshots
             ],
             llm_entries=[
@@ -1047,12 +1300,16 @@ class BullpenTradeAnalysisService:
         trade_id: str,
     ) -> BullpenTradeAnalysisDetailResponse | None:
         record = (
-            await self.session.execute(
-                select(BullpenTradeAnalysisRecord)
-                .where(BullpenTradeAnalysisRecord.user_id == user_id)
-                .where(BullpenTradeAnalysisRecord.id == trade_id)
+            (
+                await self.session.execute(
+                    select(BullpenTradeAnalysisRecord)
+                    .where(BullpenTradeAnalysisRecord.user_id == user_id)
+                    .where(BullpenTradeAnalysisRecord.id == trade_id)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if record is None:
             return None
         _apply_learning_fields(record)
@@ -1095,7 +1352,9 @@ async def capture_manual_buy_pre_submit_async(
             event_close_time=parse_datetime(context.get("event_close_time")),
             requested_amount=parse_float(context.get("requested_amount")),
             requested_price=parse_float(context.get("requested_price")),
-            buy_probability_estimate=parse_float(context.get("buy_probability_estimate")),
+            buy_probability_estimate=parse_float(
+                context.get("buy_probability_estimate")
+            ),
             market_probability=parse_float(context.get("market_probability")),
             confidence=confidence_score_from_value(context.get("confidence")),
             risk_score=risk_score_from_status(context.get("risk_score")),
@@ -1128,7 +1387,9 @@ async def capture_manual_buy_pre_submit_async(
             bullpen_snapshot_json=dict(context.get("bullpen_snapshot_json") or {}),
             event_snapshot_json=dict(context.get("event_snapshot_json") or {}),
             market_snapshot_json=dict(context.get("market_snapshot_json") or {}),
-            order_book_snapshot_json=dict(context.get("order_book_snapshot_json") or {}),
+            order_book_snapshot_json=dict(
+                context.get("order_book_snapshot_json") or {}
+            ),
             positions_snapshot_json=dict(context.get("positions_snapshot_json") or {}),
             raw_api_response_json=dict(context.get("raw_api_response_json") or {}),
         )
@@ -1137,7 +1398,8 @@ async def capture_manual_buy_pre_submit_async(
             trade,
             run_id=_safe_text(context.get("run_id")),
             event_type="BUY_SUBMITTED",
-            message=_safe_text(context.get("decision_summary")) or "Buy prepared for submission.",
+            message=_safe_text(context.get("decision_summary"))
+            or "Buy prepared for submission.",
             metadata_json=dict(context.get("log_metadata") or {}),
         )
         session.commit()
@@ -1234,7 +1496,9 @@ def capture_auto_live_buy_pre_submit_sync(
             event_close_time=parse_datetime(context.get("event_close_time")),
             requested_amount=parse_float(context.get("requested_amount")),
             requested_price=parse_float(context.get("requested_price")),
-            buy_probability_estimate=parse_float(context.get("buy_probability_estimate")),
+            buy_probability_estimate=parse_float(
+                context.get("buy_probability_estimate")
+            ),
             market_probability=parse_float(context.get("market_probability")),
             confidence=confidence_score_from_value(context.get("confidence")),
             risk_score=risk_score_from_status(context.get("risk_score")),
@@ -1267,7 +1531,9 @@ def capture_auto_live_buy_pre_submit_sync(
             bullpen_snapshot_json=dict(context.get("bullpen_snapshot_json") or {}),
             event_snapshot_json=dict(context.get("event_snapshot_json") or {}),
             market_snapshot_json=dict(context.get("market_snapshot_json") or {}),
-            order_book_snapshot_json=dict(context.get("order_book_snapshot_json") or {}),
+            order_book_snapshot_json=dict(
+                context.get("order_book_snapshot_json") or {}
+            ),
             positions_snapshot_json=dict(context.get("positions_snapshot_json") or {}),
             raw_api_response_json=dict(context.get("raw_api_response_json") or {}),
         )
@@ -1276,7 +1542,8 @@ def capture_auto_live_buy_pre_submit_sync(
             trade,
             run_id=_safe_text(context.get("run_id")),
             event_type="BUY_SUBMITTED",
-            message=_safe_text(context.get("decision_summary")) or "Auto-Live buy prepared for submission.",
+            message=_safe_text(context.get("decision_summary"))
+            or "Auto-Live buy prepared for submission.",
             metadata_json=dict(context.get("log_metadata") or {}),
         )
         session.commit()
@@ -1362,9 +1629,7 @@ def capture_auto_live_exit_pre_submit_sync(
             )
             trade.status = "BOUGHT"
             trade.lifecycle_state = "BUY_EXECUTED_ONLY"
-            trade.analysis_summary = (
-                "Backfilled from historical order data; detailed buy/sell snapshots unavailable."
-            )
+            trade.analysis_summary = "Backfilled from historical order data; detailed buy/sell snapshots unavailable."
         computed_tags = _apply_exit_pre_submit(
             trade,
             exit_reference=exit_reference,
@@ -1403,7 +1668,9 @@ def capture_auto_live_exit_pre_submit_sync(
             bullpen_snapshot_json=dict(context.get("bullpen_snapshot_json") or {}),
             event_snapshot_json=dict(context.get("event_snapshot_json") or {}),
             market_snapshot_json=dict(context.get("market_snapshot_json") or {}),
-            order_book_snapshot_json=dict(context.get("order_book_snapshot_json") or {}),
+            order_book_snapshot_json=dict(
+                context.get("order_book_snapshot_json") or {}
+            ),
             positions_snapshot_json=dict(context.get("positions_snapshot_json") or {}),
             raw_api_response_json=dict(context.get("raw_api_response_json") or {}),
         )
@@ -1412,7 +1679,8 @@ def capture_auto_live_exit_pre_submit_sync(
             trade,
             run_id=_safe_text(context.get("run_id") or trade.run_id),
             event_type="SELL_SUBMITTED",
-            message=_safe_text(context.get("decision_summary")) or "Exit prepared for submission.",
+            message=_safe_text(context.get("decision_summary"))
+            or "Exit prepared for submission.",
             metadata_json=dict(context.get("log_metadata") or {}),
         )
         session.commit()
@@ -1480,7 +1748,11 @@ def capture_auto_live_exit_result_sync(
         _upsert_singleton_snapshot(
             session,
             trade,
-            snapshot_type="REDEEM_POST_EXECUTION" if exit_type == "REDEEM" else "SELL_POST_EXECUTION",
+            snapshot_type=(
+                "REDEEM_POST_EXECUTION"
+                if exit_type == "REDEEM"
+                else "SELL_POST_EXECUTION"
+            ),
             captured_at=executed_at,
             raw_api_response_json=parsed,
         )
@@ -1489,7 +1761,11 @@ def capture_auto_live_exit_result_sync(
             trade,
             run_id=trade.run_id,
             event_type="REDEEMED" if exit_type == "REDEEM" else "SELL_EXECUTED",
-            message="Redeem executed in Bullpen." if exit_type == "REDEEM" else "Sell executed in Bullpen.",
+            message=(
+                "Redeem executed in Bullpen."
+                if exit_type == "REDEEM"
+                else "Sell executed in Bullpen."
+            ),
             metadata_json={**summary, "learning": learning.model_dump(mode="json")},
         )
         _record_event_log(
@@ -1548,13 +1824,16 @@ async def sync_redeemed_trades_async(
                 or trade.sell_requested_shares,
                 requested_price=price or trade.sell_requested_price or 1,
             )
-            executed_at = parse_datetime(getattr(redeemed, "timestamp", None)) or utc_now()
+            executed_at = (
+                parse_datetime(getattr(redeemed, "timestamp", None)) or utc_now()
+            )
             _apply_exit_execution(
                 trade,
                 summary=summary,
                 exit_type="REDEEM",
                 executed_at=executed_at,
-                sell_reason=_safe_text(getattr(redeemed, "detail", None)) or "Redeemed in Bullpen.",
+                sell_reason=_safe_text(getattr(redeemed, "detail", None))
+                or "Redeemed in Bullpen.",
             )
             _upsert_singleton_snapshot(
                 session,
@@ -1595,19 +1874,33 @@ def sync_auto_live_position_snapshots_sync(
                 continue
             price_history = list(getattr(position, "price_history", []) or [])
             latest_price = price_history[-1] if price_history else None
-            latest_timestamp = parse_datetime(getattr(latest_price, "timestamp", None)) or utc_now()
-            current_price_cents = parse_float(getattr(position, "current_price_cents", None))
-            held_probability = parse_float(getattr(latest_price, "heldProbability", None))
+            latest_timestamp = (
+                parse_datetime(getattr(latest_price, "timestamp", None)) or utc_now()
+            )
+            current_price_cents = parse_float(
+                getattr(position, "current_price_cents", None)
+            )
+            held_probability = parse_float(
+                getattr(latest_price, "heldProbability", None)
+            )
             latest_monitor = {
                 "captured_at": latest_timestamp.isoformat(),
-                "current_price_cents": current_price_cents
-                if current_price_cents is not None
-                else round((held_probability or 0) * 100, 4)
-                if held_probability is not None
-                else None,
+                "current_price_cents": (
+                    current_price_cents
+                    if current_price_cents is not None
+                    else (
+                        round((held_probability or 0) * 100, 4)
+                        if held_probability is not None
+                        else None
+                    )
+                ),
                 "held_probability": held_probability,
-                "adverse_probability": parse_float(getattr(latest_price, "adverseProbability", None)),
-                "held_best_bid": parse_float(getattr(latest_price, "heldBestBid", None)),
+                "adverse_probability": parse_float(
+                    getattr(latest_price, "adverseProbability", None)
+                ),
+                "held_best_bid": parse_float(
+                    getattr(latest_price, "heldBestBid", None)
+                ),
             }
             history_prices = [
                 parse_float(getattr(item, "heldProbability", None))
@@ -1625,7 +1918,9 @@ def sync_auto_live_position_snapshots_sync(
                         (trade.max_adverse_price - buy_price) / max(buy_price, 1),
                         6,
                     )
-                    latest_exit = trade.sell_average_fill_odds or trade.sell_requested_odds
+                    latest_exit = (
+                        trade.sell_average_fill_odds or trade.sell_requested_odds
+                    )
                     if latest_exit is not None:
                         trade.missed_profit_amount = round(
                             max(trade.max_favorable_price - latest_exit, 0),
@@ -1640,7 +1935,9 @@ def sync_auto_live_position_snapshots_sync(
                         "side": side,
                         "shares": getattr(position, "shares", None),
                         "exposure_usd": getattr(position, "exposure_usd", None),
-                        "average_price_cents": getattr(position, "average_price_cents", None),
+                        "average_price_cents": getattr(
+                            position, "average_price_cents", None
+                        ),
                         "close_time": getattr(position, "close_time", None),
                         "exit_state": getattr(position, "exit_state", None),
                     },
@@ -1652,7 +1949,9 @@ def sync_auto_live_position_snapshots_sync(
                 snapshot_type="PERIODIC_MONITOR",
                 captured_at=latest_timestamp,
                 market_snapshot_json=sanitize_json_value(latest_monitor),
-                positions_snapshot_json=sanitize_json_value(trade.metadata_json.get("position_snapshot", {})),
+                positions_snapshot_json=sanitize_json_value(
+                    trade.metadata_json.get("position_snapshot", {})
+                ),
                 raw_api_response_json=sanitize_json_value(
                     {
                         "price_history": [
