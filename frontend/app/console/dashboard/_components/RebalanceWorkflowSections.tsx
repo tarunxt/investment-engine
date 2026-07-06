@@ -187,6 +187,7 @@ type ZerodhaBasketSubmission = {
   clipboardCopied: boolean;
   orders: ZerodhaBasketPreviewOrder[];
   placedOrderIds?: string[];
+  executionPricesByOrderId?: Record<string, number>;
   failedMessages?: string[];
   portfolioRefreshedAt?: string | null;
   phase?: "sell_first" | "buy_after_sell" | "single_side";
@@ -3323,6 +3324,7 @@ function ZerodhaBasketPreviewDialog({
                               const isSubmitted = submittedOrderIds.has(order.id);
                               const isSkipped = skippedOrderIds.has(order.id);
                               const isPlaced = placedOrderIds.has(order.id) || (submission?.executionMode === "publisher_limit" && isSubmitted);
+                              const executionPrice = executionPricesByOrderId[order.id] ?? null;
                               return (
                               <tr key={order.id} className={cn("transition", isSkipped ? "bg-orange-50/80 ring-1 ring-inset ring-orange-100" : isPlaced ? "bg-emerald-50/80 ring-1 ring-inset ring-emerald-100" : isSubmitted ? "bg-amber-50/70" : "bg-white")}>
                                 <td className="px-4 py-3">
