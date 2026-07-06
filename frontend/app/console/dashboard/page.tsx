@@ -378,6 +378,9 @@ function PortfolioCommandSummary({
       ? formattedValue
       : maskInvestmentValue(formattedValue);
   };
+  const formatPrivateInvestmentValueWithRs = (
+    value: number | null | undefined,
+  ) => formatPrivateInvestmentValue(value).replace("₹", "Rs ");
   const VisibilityIcon = showInvestmentNumbers ? EyeOff : Eye;
 
   return (
@@ -447,8 +450,10 @@ function PortfolioCommandSummary({
               {formatPrivateInvestmentValue(bullpenTotalValueInr)}
             </div>
             <div className="mt-3 text-xs leading-5 text-slate-200">
-              {formatPrivateInvestmentValue(bullpenAccountValueInr)} account value +{" "}
-              {formatPrivateInvestmentValue(bullpenCashValueInr)} cash
+              <div>
+                Account Value: {formatPrivateInvestmentValueWithRs(bullpenAccountValueInr)} +
+              </div>
+              <div>Cash: {formatPrivateInvestmentValueWithRs(bullpenCashValueInr)}</div>
             </div>
           </div>
         </div>
