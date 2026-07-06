@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, History, Loader2, Pause, Play, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, History, Info, Loader2, Pause, Play, X } from "lucide-react";
 
 import {
   buildConsensusRows,
@@ -3005,6 +3005,7 @@ function ZerodhaBasketPreviewDialog({
   onBuyThresholdDraftChange: (value: string) => void;
 }) {
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
+  const [basketInfoOpen, setBasketInfoOpen] = useState(false);
 
   if (!open) return null;
 
@@ -3062,6 +3063,22 @@ function ZerodhaBasketPreviewDialog({
               <h3 className="text-xl font-bold text-slate-950">
                 Zerodha India Place Order Basket
               </h3>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setBasketInfoOpen((current) => !current)}
+                  className="inline-flex size-8 items-center justify-center rounded-full border border-blue-100 bg-blue-50 text-blue-600 transition hover:border-blue-200 hover:bg-blue-100 hover:text-blue-700"
+                  aria-label="Show Zerodha basket selection guidance"
+                  aria-expanded={basketInfoOpen}
+                >
+                  <Info className="size-4" />
+                </button>
+                {basketInfoOpen ? (
+                  <div className="absolute left-0 top-10 z-20 w-96 max-w-[calc(100vw-3rem)] rounded-2xl border border-blue-100 bg-white p-4 text-sm leading-6 text-slate-600 shadow-xl shadow-slate-900/10">
+                    Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.
+                  </div>
+                ) : null}
+              </div>
               <TradingViewUrlListButton
                 items={orders.map((order) => ({
                   symbol: order.symbol,
@@ -3072,9 +3089,6 @@ function ZerodhaBasketPreviewDialog({
                 ariaLabel="Open Zerodha India basket TradingView URL list"
               />
             </div>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.
-            </p>
           </div>
           <div className="flex items-center gap-3">
             {renderPlaceOrderButton()}
