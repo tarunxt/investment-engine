@@ -356,7 +356,9 @@ function PortfolioCommandSummary({
   indmoneyValue,
   indmoneyPortfolioValue,
   indmoneyFundsValue,
-  bullpenValueInr,
+  bullpenTotalValueInr,
+  bullpenAccountValueInr,
+  bullpenCashValueInr,
 }: {
   totalValue: number;
   zerodhaValue: number;
@@ -365,7 +367,9 @@ function PortfolioCommandSummary({
   indmoneyValue: number;
   indmoneyPortfolioValue: number | null | undefined;
   indmoneyFundsValue: number | null | undefined;
-  bullpenValueInr: number | null | undefined;
+  bullpenTotalValueInr: number | null | undefined;
+  bullpenAccountValueInr: number | null | undefined;
+  bullpenCashValueInr: number | null | undefined;
 }) {
   const [showInvestmentNumbers, setShowInvestmentNumbers] = useState(false);
   const formatPrivateInvestmentValue = (value: number | null | undefined) => {
@@ -440,10 +444,11 @@ function PortfolioCommandSummary({
           <div className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
             <div className="text-xs font-semibold text-white">Bullpen</div>
             <div className="mt-1 text-sm font-bold text-white">
-              {formatPrivateInvestmentValue(bullpenValueInr)}
+              {formatPrivateInvestmentValue(bullpenTotalValueInr)}
             </div>
             <div className="mt-3 text-xs leading-5 text-slate-200">
-              {formatPrivateInvestmentValue(bullpenValueInr)} included in total investments
+              {formatPrivateInvestmentValue(bullpenAccountValueInr)} account value +{" "}
+              {formatPrivateInvestmentValue(bullpenCashValueInr)} cash
             </div>
           </div>
         </div>
@@ -1039,9 +1044,14 @@ export default function DashboardPage() {
   const bullpenAccountValueUsd =
     dashboard.polymarketState?.live.balance.account_value_usd ??
     parseBullpenAccountValueUsd(dashboard.polymarketState?.live.balance.message);
+  const bullpenCashValueUsd =
+    dashboard.polymarketState?.live.balance.available_balance_usd ?? 0;
+  const bullpenTotalValueUsd = bullpenAccountValueUsd + bullpenCashValueUsd;
   const bullpenAccountValueInr = bullpenAccountValueUsd * usdInrRate;
+  const bullpenCashValueInr = bullpenCashValueUsd * usdInrRate;
+  const bullpenTotalValueInr = bullpenTotalValueUsd * usdInrRate;
   const totalCommandValue =
-    zerodhaCommandValue + indmoneyCommandValue + bullpenAccountValueInr;
+    zerodhaCommandValue + indmoneyCommandValue + bullpenTotalValueInr;
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
   const totalProfitLossValue =
     (indiaSnapshot?.holdings_pnl ?? 0) +
@@ -1116,7 +1126,9 @@ export default function DashboardPage() {
               indmoneyValue={indmoneyCommandValue}
               indmoneyPortfolioValue={indmoneyPortfolioValueInr}
               indmoneyFundsValue={indmoneyAvailableFundsValueInr}
-              bullpenValueInr={bullpenAccountValueInr}
+              bullpenTotalValueInr={bullpenTotalValueInr}
+              bullpenAccountValueInr={bullpenAccountValueInr}
+              bullpenCashValueInr={bullpenCashValueInr}
             />
 
             <PortfolioCommandChart
