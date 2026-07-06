@@ -3296,7 +3296,7 @@ function ZerodhaBasketPreviewDialog({
                                   </div>
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                                  <ScoreMatrixButton detail={order.detail} onOpenDetail={setSelectedMatrixDetail} />
+                                  <ScoreMatrixButton detail={order.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
