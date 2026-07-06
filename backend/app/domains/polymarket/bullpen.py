@@ -13,6 +13,7 @@ from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.schemas import (
     PolymarketBalanceState,
     PolymarketBullpenRedeemedTrade,
+    PolymarketBullpenTradeHistoryItem,
     PolymarketBotConfig,
     PolymarketDoctorStatus,
     PolymarketLiveTradeDecision,
@@ -804,6 +805,125 @@ def _normalized_redeemed_trade(
             row, ("detail", "description", "reason"), "Bullpen wallet redeem history"
         ),
     )
+
+
+def _is_trade_history_row(row: dict[str, object]) -> bool:
+    side = _string_from_row(row, ("side", "action", "type", "category")).upper()
+    if side in {"BUY", "SELL"}:
+        return True
+    text = " ".join(str(value) for value in row.values() if value is not None).lower()
+    return ("buy" in text or "sell" in text) and not _is_redeem_row(row)
+
+
+def _normalized_trade_history_item(
+    row: dict[str, object], index: int
+) -> PolymarketBullpenTradeHistoryItem | None:
+    if not _is_trade_history_row(row):
+        return None
+    timestamp = _string_from_row(
+        row,
+        (
+            "timestamp",
+            "createdAt",
+            "created_at",
+            "time",
+            "date",
+            "executedAt",
+            "executed_at",
+        ),
+    )
+    title = _string_from_row(
+        row, ("marketTitle", "market_title", "title", "market", "event", "question")
+    )
+    side_text = _string_from_row(
+        row, ("side", "action", "type", "category"), ""
+    ).upper()
+    if "SELL" in side_text:
+        side = "SELL"
+    elif "BUY" in side_text:
+        side = "BUY"
+    else:
+        text = " ".join(
+            str(value) for value in row.values() if value is not None
+        ).lower()
+        side = "SELL" if "sell" in text else "BUY"
+    if not timestamp or not title:
+        return None
+    amount = _float_from_row(row, ("amount", "value", "usd", "total", "notional"))
+    shares = abs(_float_from_row(row, ("shares", "size", "quantity", "qty")))
+    price = _float_from_row(row, ("price", "avgPrice", "average_price", "average"))
+    return PolymarketBullpenTradeHistoryItem(
+        id=_string_from_row(
+            row,
+            ("id", "orderId", "order_id", "transactionHash", "txHash", "hash"),
+            f"bullpen-history-{index}-{timestamp}-{title}-{side}",
+        ),
+        timestamp=timestamp,
+        market_id=_string_from_row(
+            row, ("marketId", "market_id", "conditionId", "condition_id", "slug")
+        ),
+        market_title=title,
+        outcome=_string_from_row(
+            row, ("outcome", "outcomeName", "asset", "selection"), "—"
+        ),
+        side=side,
+        amount=amount,
+        shares=shares,
+        price=price,
+        status=_string_from_row(row, ("status",), "executed"),
+        raw=row,
+    )
+
+
+BULLPEN_TRADE_HISTORY_COMMAND_VARIANTS = [
+    [
+        "wallet",
+        "predictions",
+        "--history",
+        "--read-only",
+        "--non-interactive",
+        "--output",
+        "json",
+    ],
+    ["portfolio", "history", "--read-only", "--non-interactive", "--output", "json"],
+    [
+        "activity",
+        "--limit",
+        "100",
+        "--read-only",
+        "--non-interactive",
+        "--output",
+        "json",
+    ],
+]
+
+
+class BullpenTradeHistoryReader:
+    async def refresh(self) -> list[PolymarketBullpenTradeHistoryItem]:
+        parsed = await run_first_bullpen_json(
+            BULLPEN_TRADE_HISTORY_COMMAND_VARIANTS, timeout_seconds=10
+        )
+        rows = _collect_bullpen_rows(parsed)
+        trades = [
+            trade
+            for index, row in enumerate(rows)
+            if (trade := _normalized_trade_history_item(row, index)) is not None
+        ]
+        deduped: dict[str, PolymarketBullpenTradeHistoryItem] = {}
+        for trade in trades:
+            key = "::".join(
+                [
+                    trade.timestamp,
+                    trade.market_id,
+                    trade.market_title,
+                    trade.outcome,
+                    trade.side,
+                    str(trade.amount),
+                    str(trade.shares),
+                ]
+            )
+            deduped.setdefault(key, trade)
+        return list(deduped.values())
 
 
 BULLPEN_REDEEMED_HISTORY_COMMAND_VARIANTS = [

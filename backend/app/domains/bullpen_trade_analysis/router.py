@@ -11,7 +11,10 @@ from app.domains.bullpen_trade_analysis.schemas import (
     BullpenTradeAnalysisDetailResponse,
     BullpenTradeAnalysisListResponse,
 )
-from app.domains.bullpen_trade_analysis.service import BullpenTradeAnalysisService
+from app.domains.bullpen_trade_analysis.service import (
+    BullpenTradeAnalysisService,
+    sync_bullpen_trade_history_for_user,
+)
 from app.infrastructure.database.session import get_async_db
 
 router = APIRouter(prefix="/bullpen-ai/trade-analysis", tags=["bullpen-ai"])
@@ -43,6 +46,7 @@ async def list_bullpen_trade_analysis(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    await sync_bullpen_trade_history_for_user(current_user.id)
     service = BullpenTradeAnalysisService(db)
     return await service.list_trades(
         user_id=current_user.id,
@@ -70,7 +74,9 @@ async def get_bullpen_trade_analysis_detail(
     return detail
 
 
-@router.post("/{trade_id}/post-trade-analysis", response_model=BullpenTradeAnalysisDetailResponse)
+@router.post(
+    "/{trade_id}/post-trade-analysis", response_model=BullpenTradeAnalysisDetailResponse
+)
 async def recompute_bullpen_trade_analysis(
     trade_id: str,
     current_user: User = Depends(get_current_user),

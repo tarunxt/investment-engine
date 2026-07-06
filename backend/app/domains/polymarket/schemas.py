@@ -173,7 +173,9 @@ class PolymarketManualInvestAnalysisContext(BaseModel):
     llm_model: str | None = None
     llm_completed_at: str | None = None
     preflight_evidence_block: str | None = None
-    llm_outputs: list[PolymarketManualInvestAnalysisLlmOutput] = Field(default_factory=list)
+    llm_outputs: list[PolymarketManualInvestAnalysisLlmOutput] = Field(
+        default_factory=list
+    )
 
 
 class PolymarketManualInvestResponse(BaseModel):
@@ -340,6 +342,20 @@ class PolymarketLiveTradeDecision(BaseModel):
     execution_response: str | None = None
     executed_at: str | None = None
     source: TradeSource
+
+
+class PolymarketBullpenTradeHistoryItem(BaseModel):
+    id: str
+    timestamp: str
+    market_id: str = ""
+    market_title: str
+    outcome: str = "—"
+    side: TradeSide | str
+    amount: float = 0
+    shares: float = 0
+    price: float = 0
+    status: str = "executed"
+    raw: dict[str, object] = Field(default_factory=dict)
 
 
 class PolymarketBullpenRedeemedTrade(BaseModel):
