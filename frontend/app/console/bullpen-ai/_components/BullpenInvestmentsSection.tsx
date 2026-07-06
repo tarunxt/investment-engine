@@ -130,11 +130,13 @@ function EventsSectionHeader({
   tone,
   description,
   titleAccessory,
+  lastRefreshedAt,
 }: {
   title: string;
   tone: "active" | "candidate" | "attention";
   description?: string;
   titleAccessory?: ReactNode;
+  lastRefreshedAt?: string | null;
 }) {
   return (
     <div
@@ -149,7 +151,7 @@ function EventsSectionHeader({
     >
       <div
         className={cn(
-          "flex items-center gap-2 text-sm font-semibold",
+          "flex flex-wrap items-center justify-between gap-2 text-sm font-semibold",
           tone === "active"
             ? "text-emerald-900"
             : tone === "candidate"
@@ -157,8 +159,15 @@ function EventsSectionHeader({
               : "text-red-900",
         )}
       >
-        <span>{title}</span>
-        {titleAccessory ? <span>{titleAccessory}</span> : null}
+        <span className="inline-flex items-center gap-2">
+          <span>{title}</span>
+          {titleAccessory ? <span>{titleAccessory}</span> : null}
+        </span>
+        {lastRefreshedAt ? (
+          <span className="text-[11px] font-medium normal-case tracking-normal opacity-80">
+            Last refreshed: {formatIstTimestamp(lastRefreshedAt)}
+          </span>
+        ) : null}
       </div>
       {description ? (
         <p
@@ -576,7 +585,7 @@ export function BullpenInvestmentsSection({
             <div className="mt-4 space-y-6">
               {activeInvestmentRows.length > 0 ? (
                 <div className="space-y-3">
-                  <EventsSectionHeader title="Active Bullpen Positions" tone="active" />
+                  <EventsSectionHeader title="Active Bullpen Positions" tone="active" lastRefreshedAt={positionsLastUpdatedAt} />
                   {activeInvestmentRows.map((row) => {
                     const position = row.position;
                     const question = activePositionQuestionByKey.get(position.key);
@@ -663,6 +672,7 @@ export function BullpenInvestmentsSection({
                   <EventsSectionHeader
                     title="New Scanned Opportunities"
                     tone="candidate"
+                    lastRefreshedAt={positionsLastUpdatedAt}
                   />
                   {candidateInvestmentRows.map((row) => {
                     const question = row.question;
@@ -756,6 +766,7 @@ export function BullpenInvestmentsSection({
                   <EventsSectionHeader
                     title="Event Exits"
                     tone="attention"
+                    lastRefreshedAt={positionsLastUpdatedAt}
                     description={`Includes the union of Event out of Top 10 exits and capital-aware forced exits. Planned: ${eventExitCounts.total} · Event out of Top 10: ${eventExitCounts.rankingOrLlm} · Forced Exit: ${eventExitCounts.forced}.`}
                     titleAccessory={
                       <button
