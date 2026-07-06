@@ -32,6 +32,8 @@ from app.domains.zerodha.schemas import (
     ZerodhaProtectedMarketRequest,
     ZerodhaProtectedMarketResponse,
     ZerodhaProtectedMarketOrderResult,
+    ZerodhaSequencedProtectedMarketRequest,
+    ZerodhaSequencedProtectedMarketResponse,
     ZerodhaPreparedBasketOrder,
     ZerodhaPortfolioOverviewResponse,
     ZerodhaPortfolioSnapshotDetailResponse,
@@ -152,6 +154,71 @@ def _prepared_basket_order_from_quote(order, quote: dict) -> ZerodhaPreparedBask
         reasons=list(guard.reasons),
     )
 
+
+
+
+def _build_protected_market_order_data(order) -> dict[str, str]:
+    return {
+        "variety": "regular",
+        "tradingsymbol": order.tradingsymbol.upper(),
+        "exchange": order.exchange.upper(),
+        "transaction_type": order.transaction_type.upper(),
+        "quantity": str(order.quantity),
+        "product": "CNC",
+        "validity": "DAY",
+        "order_type": "MARKET",
+        "market_protection": order.market_protection,
+    }
+
+
+def _order_result_from_request(order, status: str, order_id: str | None = None, error: str | None = None, quantity: int | None = None):
+    return ZerodhaProtectedMarketOrderResult(
+        tradingsymbol=order.tradingsymbol.upper(),
+        exchange=order.exchange.upper(),
+        transaction_type=order.transaction_type.upper(),
+        quantity=quantity if quantity is not None else order.quantity,
+        status=status,
+        order_id=order_id,
+        error=error,
+    )
+
+
+def _kite_order_terminal(order: dict) -> bool:
+    return str(order.get("status") or "").upper() in {"COMPLETE", "REJECTED", "CANCELLED"}
+
+def _kite_order_filled_quantity(order: dict) -> int:
+    value = order.get("filled_quantity") or order.get("filled_quantity_pending") or 0
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return 0
+
+def _kite_order_average_price(order: dict) -> float:
+    try:
+        return max(0.0, float(order.get("average_price") or order.get("price") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+def _available_margin_from_kite_margins(margins: dict) -> float | None:
+    equity = margins.get("equity") if isinstance(margins, dict) else None
+    available = equity.get("available") if isinstance(equity, dict) else None
+    for key in ("live_balance", "cash", "opening_balance"):
+        value = available.get(key) if isinstance(available, dict) else None
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+async def _wait_for_terminal_orders(token: str, order_ids: set[str], timeout_seconds: int, poll_interval_seconds: float) -> tuple[list[dict], bool]:
+    deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=timeout_seconds)
+    latest: list[dict] = []
+    while True:
+        orders = await _svc.get_orders(token)
+        latest = [order for order in orders if str(order.get("order_id") or "") in order_ids]
+        if len(latest) >= len(order_ids) and all(_kite_order_terminal(order) for order in latest):
+            return latest, True
+        if datetime.now(tz=timezone.utc) >= deadline:
+            return latest, False
+        await asyncio.sleep(poll_interval_seconds)
 
 def _client_ip(request: Request) -> str | None:
     forwarded = request.headers.get("X-Forwarded-For")
@@ -644,6 +711,136 @@ async def place_protected_market_orders(
     )
     await db.commit()
     return ZerodhaProtectedMarketResponse(results=results, placed_count=placed_count, failed_count=failed_count)
+
+
+@router.post("/orders/place-protected-market-sequenced", response_model=ZerodhaSequencedProtectedMarketResponse)
+async def place_protected_market_orders_sequenced(
+    request: Request,
+    body: ZerodhaSequencedProtectedMarketRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    ip = _client_ip(request)
+    repo = ZerodhaCredentialRepository(db)
+    audit = ZerodhaAuditRepository(db)
+
+    if not _svc.direct_market_orders_enabled:
+        raise HTTPException(
+            503,
+            detail=(
+                "Zerodha direct MARKET order placement is disabled on this server. "
+                "Use the protected LIMIT Kite basket fallback unless the backend egress IP is allowed in Kite."
+            ),
+        )
+
+    token = await repo.get_plaintext_token(current_user.id)
+    if not token:
+        raise HTTPException(401, detail="Not connected to Zerodha. Please login first.")
+
+    sell_orders = [order for order in body.orders if order.transaction_type.upper() == "SELL"]
+    buy_orders = [order for order in body.orders if order.transaction_type.upper() == "BUY"]
+    if not body.orders:
+        return ZerodhaSequencedProtectedMarketResponse(
+            placed_count=0, failed_count=0, skipped_count=0, sell_phase_complete=True, buy_phase_attempted=False
+        )
+
+    await audit.log(current_user.id, "token_used", ip, {"operation": "place_protected_market_sequenced", "count": len(body.orders)})
+
+    messages: list[str] = []
+    sell_results: list[ZerodhaProtectedMarketOrderResult] = []
+    buy_results: list[ZerodhaProtectedMarketOrderResult] = []
+    skipped_buy_results: list[ZerodhaProtectedMarketOrderResult] = []
+    sell_order_ids: set[str] = set()
+
+    for order in sell_orders:
+        try:
+            result = await _svc.place_order(token, _build_protected_market_order_data(order), variety="regular")
+            order_id = result.get("order_id", "")
+            if order_id:
+                sell_order_ids.add(str(order_id))
+            sell_results.append(_order_result_from_request(order, "placed", order_id=str(order_id)))
+        except KiteError as exc:
+            sell_results.append(_order_result_from_request(order, "failed", error=exc.message))
+        except Exception:
+            logger.exception("Failed to place sequenced Zerodha SELL order for user %s", current_user.id)
+            sell_results.append(_order_result_from_request(order, "failed", error="Failed to place sell order on Zerodha"))
+
+    await audit.log(current_user.id, "place_protected_market_sell_phase", ip, {"placed_count": len(sell_order_ids), "failed_count": sum(1 for r in sell_results if r.status == "failed")})
+
+    terminal_sell_orders: list[dict] = []
+    sell_phase_complete = True
+    if sell_order_ids and buy_orders and body.wait_for_sell_completion:
+        messages.append("Waiting for sell completion before attempting buys.")
+        terminal_sell_orders, sell_phase_complete = await _wait_for_terminal_orders(token, sell_order_ids, body.sell_wait_timeout_seconds, body.poll_interval_seconds)
+        if not sell_phase_complete:
+            messages.append("Sell wait timed out; only refreshed available margin will be used for buys.")
+
+    usable_sell_proceeds = sum(
+        _kite_order_filled_quantity(order) * _kite_order_average_price(order)
+        for order in terminal_sell_orders
+        if str(order.get("status") or "").upper() == "COMPLETE" or _kite_order_filled_quantity(order) > 0
+    )
+    if usable_sell_proceeds > 0:
+        messages.append(f"Detected filled sell proceeds of approximately ₹{usable_sell_proceeds:.2f} before buy sizing.")
+
+    refreshed_available_margin: float | None = None
+    if buy_orders:
+        try:
+            refreshed_available_margin = _available_margin_from_kite_margins(await _svc.get_margins(token))
+        except Exception:
+            logger.exception("Failed to refresh Zerodha margins before sequenced BUY phase for user %s", current_user.id)
+            messages.append("Could not refresh live margin; buy phase skipped for safety.")
+
+    buy_phase_attempted = False
+    buy_capital = refreshed_available_margin
+    if buy_orders and buy_capital is not None:
+        safety_buffer = body.safety_buffer_amount if body.safety_buffer_amount is not None else 50.0
+        remaining = max(0.0, buy_capital - safety_buffer)
+        for order in buy_orders:
+            unit_price = 0.0
+            try:
+                quotes = await _svc.get_quotes(token, [_instrument_key(order.exchange, order.tradingsymbol)])
+                quote = quotes.get(_instrument_key(order.exchange, order.tradingsymbol), {})
+                unit_price = _quote_number(quote, "last_price") or 0.0
+            except Exception:
+                unit_price = 0.0
+            if unit_price <= 0:
+                skipped_buy_results.append(_order_result_from_request(order, "skipped", error="Could not refresh buy LTP for affordability check"))
+                continue
+            affordable_qty = min(order.quantity, int(remaining // unit_price))
+            if affordable_qty <= 0:
+                skipped_buy_results.append(_order_result_from_request(order, "skipped", error="Insufficient refreshed available margin"))
+                continue
+            buy_phase_attempted = True
+            buy_order = order.model_copy(update={"quantity": affordable_qty})
+            try:
+                result = await _svc.place_order(token, _build_protected_market_order_data(buy_order), variety="regular")
+                buy_results.append(_order_result_from_request(buy_order, "placed", order_id=str(result.get("order_id", ""))))
+                remaining -= affordable_qty * unit_price
+                if affordable_qty < order.quantity:
+                    skipped_buy_results.append(_order_result_from_request(order, "skipped", quantity=order.quantity - affordable_qty, error="Reduced to refreshed affordable quantity"))
+            except KiteError as exc:
+                buy_results.append(_order_result_from_request(buy_order, "failed", error=exc.message))
+            except Exception:
+                logger.exception("Failed to place sequenced Zerodha BUY order for user %s", current_user.id)
+                buy_results.append(_order_result_from_request(buy_order, "failed", error="Failed to place buy order on Zerodha"))
+    elif buy_orders:
+        skipped_buy_results = [_order_result_from_request(order, "skipped", error="No refreshed available margin for buy phase") for order in buy_orders]
+
+    await audit.log(current_user.id, "place_protected_market_buy_phase", ip, {"placed_count": sum(1 for r in buy_results if r.status == "placed"), "failed_count": sum(1 for r in buy_results if r.status == "failed"), "skipped_count": len(skipped_buy_results)})
+    if skipped_buy_results:
+        await audit.log(current_user.id, "place_protected_market_buy_skipped", ip, {"skipped_count": len(skipped_buy_results)})
+    placed_count = sum(1 for r in sell_results + buy_results if r.status == "placed")
+    failed_count = sum(1 for r in sell_results + buy_results if r.status == "failed")
+    skipped_count = len(skipped_buy_results)
+    await audit.log(current_user.id, "place_protected_market_sequenced", ip, {"placed_count": placed_count, "failed_count": failed_count, "skipped_count": skipped_count, "sell_phase_complete": sell_phase_complete, "buy_phase_attempted": buy_phase_attempted})
+    await db.commit()
+    return ZerodhaSequencedProtectedMarketResponse(
+        sell_results=sell_results, buy_results=buy_results, skipped_buy_results=skipped_buy_results,
+        placed_count=placed_count, failed_count=failed_count, skipped_count=skipped_count,
+        sell_phase_complete=sell_phase_complete, buy_phase_attempted=buy_phase_attempted,
+        refreshed_available_margin=refreshed_available_margin, messages=messages,
+    )
 
 
 @router.post("/orders", response_model=ZerodhaPlaceOrderResponse)

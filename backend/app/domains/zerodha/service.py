@@ -130,6 +130,10 @@ class ZerodhaService:
         data = await self._request_async("GET", "/orders", access_token=access_token)
         return data or []
 
+    async def get_margins(self, access_token: str) -> dict[str, Any]:
+        data = await self._request_async("GET", "/user/margins", access_token=access_token)
+        return data or {}
+
     async def get_quotes(
         self, access_token: str, instruments: list[str]
     ) -> dict[str, Any]:
