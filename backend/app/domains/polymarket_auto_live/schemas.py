@@ -115,6 +115,8 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     candidate_price_refresh_minutes: int = Field(default=5, ge=1)
     new_scan_interval_minutes: int = Field(default=60, ge=1)
     llm_rerun_interval_minutes: int = Field(default=240, ge=1)
+    console_auto_start_at: str | None = None
+    console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 
     auto_live_enabled: bool = False
     dry_run: bool = True
@@ -218,6 +220,8 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     candidate_price_refresh_minutes: int | None = Field(default=None, ge=1)
     new_scan_interval_minutes: int | None = Field(default=None, ge=1)
     llm_rerun_interval_minutes: int | None = Field(default=None, ge=1)
+    console_auto_start_at: str | None = None
+    console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 
     auto_live_enabled: bool | None = None
     dry_run: bool | None = None

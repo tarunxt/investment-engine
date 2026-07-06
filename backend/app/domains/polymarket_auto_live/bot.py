@@ -8,6 +8,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     DEFAULT_CONSOLE_ORDER_USD,
     next_console_schedule_time,
+    next_custom_console_schedule_time,
 )
 from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
@@ -647,7 +648,7 @@ class BullpenAutoLiveBot:
         reference_time: datetime,
     ) -> None:
         if settings.strategy_profile == CONSOLE_PROFILE_ID:
-            next_run_at = next_console_schedule_time(reference_time).isoformat()
+            next_run_at = next_custom_console_schedule_time(reference_time, start_at=settings.console_auto_start_at, refresh_minutes=settings.console_auto_refresh_minutes).isoformat()
             state.next_run_at = next_run_at
             state.next_scan_at = next_run_at
             state.next_llm_run_at = next_run_at

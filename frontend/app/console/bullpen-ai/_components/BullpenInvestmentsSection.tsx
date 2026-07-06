@@ -385,6 +385,7 @@ export function BullpenInvestmentsSection({
     position?: BullpenActivePositionView;
   } | null>(null);
   const [isPositionsDialogOpen, setIsPositionsDialogOpen] = useState(false);
+  const [isGroupingInfoOpen, setIsGroupingInfoOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
   const openActivePositions = activePositions.filter((position) => !position.isClaimable);
@@ -445,20 +446,20 @@ export function BullpenInvestmentsSection({
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-fuchsia-700">
                 Events to invest in
               </p>
-              <h3 className="mt-1 text-lg font-semibold text-slate-950">
-                Grouped Bullpen events by action
-              </h3>
+              <div className="mt-1 flex items-center gap-2">
+                <h3 className="text-lg font-semibold text-slate-950">
+                  Grouped Bullpen events by action
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsGroupingInfoOpen(true)}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-fuchsia-200 hover:bg-fuchsia-50 hover:text-fuchsia-800"
+                  aria-label="Show grouped Bullpen event legend"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
-            <p className="max-w-3xl text-sm text-slate-600">
-              Green rows show active Bullpen positions, pink rows show new
-              scanned opportunities, and red rows show active positions that
-              are now in the Event Exits pipeline. The green and pink sections
-              reflect the current top 10 rows ranked by{" "}
-              <span className="font-semibold">returns/day</span> after Event Exit
-              evaluation. The Invest action buys the stronger LLM side in
-              Bullpen with a fixed <span className="font-semibold">$5</span>{" "}
-              order per new opportunity.
-            </p>
           </div>
           {!isReadOnly && hasRows ? (
             <div className="flex w-full flex-col items-start gap-2">
@@ -537,11 +538,13 @@ export function BullpenInvestmentsSection({
           ) : null}
         </div>
 
-        {isReadOnly ? (
+        {isReadOnly && readOnlyMessage ? (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            {readOnlyMessage || "This snapshot is read-only."}
+            {readOnlyMessage}
           </div>
-        ) : !hasRows ? (
+        ) : null}
+
+        {!hasRows ? (
           <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
             {emptyMessage}
           </div>
@@ -849,6 +852,20 @@ export function BullpenInvestmentsSection({
           </>
         )}
       </div>
+
+      {isGroupingInfoOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <h2 className="text-lg font-semibold text-slate-950">Grouped Bullpen events by action</h2>
+              <button type="button" onClick={() => setIsGroupingInfoOpen(false)} className="text-sm font-semibold text-slate-500 hover:text-slate-900">Close</button>
+            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-600">
+              Green rows show active Bullpen positions, pink rows show new scanned opportunities, and red rows show active positions that are now in the Event Exits pipeline. The green and pink sections reflect the current top 10 rows ranked by <span className="font-semibold">returns/day</span> after Event Exit evaluation. The Invest action buys the stronger LLM side in Bullpen with a fixed <span className="font-semibold">$5</span> order per new opportunity.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {breakdownQuestion ? (
         <BullpenLlmBreakdownDialog

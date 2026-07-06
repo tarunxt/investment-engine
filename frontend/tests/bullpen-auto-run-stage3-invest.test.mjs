@@ -592,8 +592,8 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.match(statusSource, /Rebalance and investment complete\./);
   assert.match(source, /latest Stage 2-qualified rows/);
   assert.match(source, /skips the Bullpen rescan plus LLM rerun/);
-  assert.match(source, /stage\.key === "llm" && investOnlyPlan\.alreadyInvestedCandidateCount > 0/);
-  assert.match(source, /already invested and will be skipped/);
+  assert.doesNotMatch(source, /stage\.key === "llm" && investOnlyPlan\.alreadyInvestedCandidateCount > 0/);
+  assert.doesNotMatch(source, /already invested and will be skipped/);
   assert.match(source, /CheckCircle2/);
   assert.match(source, /How Stage 2 events become eligible to invest/);
   assert.match(source, /Stage 3 only plans buy orders/);
