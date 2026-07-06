@@ -63,6 +63,7 @@ import {
   RunCreate,
   RunListItem,
   AutoRebalanceRunReservationResponse,
+  AutoRebalanceCompletionEmailRequest,
   AutoRebalancePortfolioKey,
   RunResponse,
   UpdatePasswordRequest,
@@ -560,6 +561,10 @@ class apiServiceClass implements IApiService {
 
   reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey): Promise<AutoRebalanceRunReservationResponse> {
     return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio });
+  }
+
+  queueAutoRebalanceCompletionEmail(data: AutoRebalanceCompletionEmailRequest): Promise<{ status: string }> {
+    return this.post<{ status: string }>(URLs.runs.autoRebalanceCompletionEmail(), data);
   }
 
   getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>> {

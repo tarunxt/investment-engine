@@ -7133,6 +7133,19 @@ ${zerodhaExecutionMode === "direct_market"
               completedAt: actionablesCompletedAt,
             },
           }));
+          try {
+            await apiService.queueAutoRebalanceCompletionEmail({
+              portfolio: runMetadata.auto_rebalance_portfolio,
+              sequence: runMetadata.auto_rebalance_sequence,
+              label: runMetadata.auto_rebalance_label,
+              completed_at: actionablesCompletedAt,
+              stages_completed: STAGE_ORDER.filter(shouldRunCurrentStage).map(
+                getStageTileLabel,
+              ),
+            });
+          } catch (emailError) {
+            console.error("Failed to queue auto-rebalance success email", emailError);
+          }
         } else {
           completeSkippedStage(
             portfolio,

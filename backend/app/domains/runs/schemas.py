@@ -71,6 +71,39 @@ class AutoRebalanceRunReservationResponse(BaseModel):
     label: str
 
 
+class AutoRebalanceCompletionEmailRequest(BaseModel):
+    portfolio: str
+    sequence: int
+    label: str
+    completed_at: datetime
+    total_cost_inr: float | None = None
+    total_llm_time: str | None = None
+    stages_completed: list[str] = Field(default_factory=list)
+
+    @field_validator("portfolio")
+    @classmethod
+    def normalize_portfolio(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in {"india", "indmoney_us"}:
+            raise ValueError("portfolio must be india or indmoney_us")
+        return normalized
+
+    @field_validator("sequence")
+    @classmethod
+    def sequence_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("sequence must be positive")
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def label_not_empty(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("label is required")
+        return normalized[:128]
+
+
 class RunCreate(BaseModel):
     prompt: str
     targets: list[RunModelTarget]

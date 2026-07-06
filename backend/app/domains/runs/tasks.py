@@ -136,6 +136,125 @@ def _build_run_completion_email(run: Run) -> tuple[str, str, str]:
     return subject, html_content, text_content
 
 
+def _format_optional_cost_inr(value: float | int | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"₹{float(value):.2f}"
+
+
+def _build_auto_rebalance_success_email(
+    *,
+    label: str,
+    portfolio: str,
+    completed_at: datetime,
+    total_cost_inr: float | None = None,
+    total_llm_time: str | None = None,
+    stages_completed: list[str] | None = None,
+) -> tuple[str, str, str]:
+    portfolio_label = (
+        "Zerodha Auto-Rebalance"
+        if portfolio == "india"
+        else "IndMoney US Auto-Rebalance"
+    )
+    subject = f"{settings.app_name}: {label} completed successfully"
+    dashboard_url = f"{settings.frontend_url.rstrip('/')}/console/dashboard"
+    stages = stages_completed or []
+    stage_line = ", ".join(stages) if stages else "All selected stages"
+    text_content = "\n".join([
+        f"{portfolio_label} completed successfully.",
+        "",
+        f"Run label: {label}",
+        f"Completed at: {completed_at.isoformat()}",
+        f"Stages completed: {stage_line}",
+        f"Cumulative LLM time: {total_llm_time or 'n/a'}",
+        f"Total cost: {_format_optional_cost_inr(total_cost_inr)}",
+        f"Dashboard: {dashboard_url}",
+    ])
+    html_stages = (
+        "".join(f"<li>{escape(stage)}</li>" for stage in stages)
+        or "<li>All selected stages</li>"
+    )
+    html_content = f"""
+    <html>
+        <body>
+            <p>Hello,</p>
+            <p><strong>{escape(portfolio_label)}</strong> completed successfully after the last stage.</p>
+            <ul>
+                <li>Run label: {escape(label)}</li>
+                <li>Completed at: {escape(completed_at.isoformat())}</li>
+                <li>Cumulative LLM time: {escape(total_llm_time or 'n/a')}</li>
+                <li>Total cost: {escape(_format_optional_cost_inr(total_cost_inr))}</li>
+            </ul>
+            <p>Completed stages:</p>
+            <ul>{html_stages}</ul>
+            <p><a href="{escape(dashboard_url)}">Open dashboard</a></p>
+            <p>Best regards,<br>{escape(settings.app_name)} Team</p>
+        </body>
+    </html>
+    """
+    return subject, html_content, text_content
+
+
+@celery.task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    name="app.domains.runs.tasks.send_auto_rebalance_success_email_task",
+    queue="email",
+)
+def send_auto_rebalance_success_email_task(
+    self,
+    user_id: int,
+    portfolio: str,
+    label: str,
+    completed_at: str,
+    total_cost_inr: float | None = None,
+    total_llm_time: str | None = None,
+    stages_completed: list[str] | None = None,
+) -> None:
+    try:
+        parsed_completed_at = datetime.fromisoformat(completed_at)
+    except ValueError:
+        parsed_completed_at = datetime.utcnow()
+    with SyncSessionLocal() as db:
+        try:
+            user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
+            if not user or not user.email:
+                logger.info(
+                    "Auto-rebalance success email skipped: user %s has no email",
+                    user_id,
+                )
+                return
+            subject, html_content, text_content = _build_auto_rebalance_success_email(
+                label=label,
+                portfolio=portfolio,
+                completed_at=parsed_completed_at,
+                total_cost_inr=total_cost_inr,
+                total_llm_time=total_llm_time,
+                stages_completed=stages_completed,
+            )
+            success = EmailService.send_email(
+                email_to=user.email,
+                subject=subject,
+                html_content=html_content,
+                text_content=text_content,
+            )
+            if not success:
+                raise RuntimeError("Auto-rebalance success email send returned failure")
+            logger.info(
+                "Auto-rebalance success email sent to user %s for %s",
+                user_id,
+                label,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Auto-rebalance success email failed for user %s label %s",
+                user_id,
+                label,
+            )
+            raise self.retry(exc=exc)
+
+
 @celery.task(
     bind=True,
     max_retries=3,

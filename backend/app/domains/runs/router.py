@@ -12,6 +12,7 @@ from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob
 from app.domains.runs.repository import PostgresRunRepository
 from app.domains.runs.schemas import (
+    AutoRebalanceCompletionEmailRequest,
     AutoRebalanceRunReservationRequest,
     AutoRebalanceRunReservationResponse,
     RunCreate,
@@ -146,6 +147,34 @@ async def reserve_auto_rebalance_label(
         sequence=sequence,
         label=_format_auto_rebalance_label(body.portfolio, sequence),
     )
+
+
+@router.post("/auto-rebalance-completion-email")
+async def queue_auto_rebalance_completion_email(
+    body: AutoRebalanceCompletionEmailRequest,
+    current_user: User = Depends(get_current_user),
+):
+    dedupe_key = f"auto_rebalance_success_email_sent:{current_user.id}:{body.portfolio}:{body.sequence}"
+    redis = _get_redis()
+    try:
+        queued = await redis.set(dedupe_key, "1", nx=True, ex=60 * 60 * 24 * 30)
+    finally:
+        await redis.aclose()
+    if not queued:
+        return {"status": "already_queued"}
+
+    from app.domains.runs.tasks import send_auto_rebalance_success_email_task
+
+    send_auto_rebalance_success_email_task.delay(  # type: ignore
+        current_user.id,
+        body.portfolio,
+        body.label,
+        body.completed_at.isoformat(),
+        body.total_cost_inr,
+        body.total_llm_time,
+        body.stages_completed,
+    )
+    return {"status": "queued"}
 
 
 @router.post("", response_model=RunResponse)
