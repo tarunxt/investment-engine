@@ -412,6 +412,16 @@ export interface AutoRebalanceRunMetadata {
   auto_rebalance_label: string;
 }
 
+export interface AutoRebalanceCompletionEmailRequest {
+  portfolio: AutoRebalancePortfolioKey;
+  sequence: number;
+  label: string;
+  completed_at: string;
+  total_cost_inr?: number | null;
+  total_llm_time?: string | null;
+  stages_completed?: string[];
+}
+
 export interface RunCreate {
   prompt: string;
   targets: RunModelTarget[];
