@@ -239,6 +239,8 @@ const STAGE_LLM_SELECTION_STORAGE_KEY = "investment-engine:dashboard-stage-llms:
 const WORKFLOW_COMPLETION_RESET_DELAY_MS = 10000;
 export const ZERODHA_DASHBOARD_SYNC_NOW_EVENT =
   "investment-engine:dashboard:zerodha-sync-now";
+export const INDMONEY_DASHBOARD_SYNC_NOW_EVENT =
+  "investment-engine:dashboard:indmoney-sync-now";
 
 const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",
@@ -7445,19 +7447,34 @@ ${zerodhaExecutionMode === "direct_market"
   );
 
   useEffect(() => {
-    const handleDashboardSync = () => {
+    const handleZerodhaDashboardSync = () => {
       if (runningPortfolio) return;
       void syncPortfolioNow("zerodha");
     };
+    const handleIndmoneyDashboardSync = () => {
+      if (runningPortfolio) return;
+      setIndMoneySyncOnly(true);
+      setDialogError(null);
+      setDialogOpen(true);
+    };
     window.addEventListener(
       ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
-      handleDashboardSync,
+      handleZerodhaDashboardSync,
     );
-    return () =>
+    window.addEventListener(
+      INDMONEY_DASHBOARD_SYNC_NOW_EVENT,
+      handleIndmoneyDashboardSync,
+    );
+    return () => {
       window.removeEventListener(
         ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
-        handleDashboardSync,
+        handleZerodhaDashboardSync,
       );
+      window.removeEventListener(
+        INDMONEY_DASHBOARD_SYNC_NOW_EVENT,
+        handleIndmoneyDashboardSync,
+      );
+    };
   }, [runningPortfolio, syncPortfolioNow]);
 
   const handleIndMoneyContinue = useCallback(
