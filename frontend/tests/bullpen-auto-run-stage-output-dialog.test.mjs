@@ -245,6 +245,21 @@ test("Bullpen auto-run stage dialog highlights invested Stage 3 rows with timest
   assert.match(markup, /Will rates fall\?/);
 });
 
+test("Bullpen auto-run stage dialog makes qualified candidate count open detail popup", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunStageOutputDialog.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /isQualifiedCandidateCountKey/);
+  assert.match(source, /Open qualified candidate details/);
+  assert.match(source, /CandidateDetailsDialog/);
+  assert.match(source, /findQualifiedCandidateRecords/);
+});
+
 test("Bullpen LLM breakdown dialog layers above the stage output dialog", () => {
   const source = readFileSync(
     new URL(
