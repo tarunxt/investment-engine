@@ -3046,6 +3046,7 @@ function ZerodhaBasketPreviewDialog({
   const submittedOrderIds = new Set(submission?.orders.map((order) => order.id) ?? []);
   const placedOrderIds = new Set(submission?.placedOrderIds ?? []);
   const skippedOrderIds = new Set(submission?.skippedOrderIds ?? []);
+  const executionPricesByOrderId = submission?.executionPricesByOrderId ?? {};
   const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
@@ -3431,7 +3432,12 @@ function ZerodhaBasketPreviewDialog({
                                   {isSkipped ? (
                                     <span className="inline-flex rounded-full bg-orange-100 px-3 py-1 font-bold text-orange-800">Buy skipped/reduced</span>
                                   ) : isPlaced ? (
-                                    <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 font-bold text-emerald-800">{submission?.executionMode === "direct_market" ? (order.side === "SELL" ? "Sell phase placed" : "Buy phase placed") : "Sent to protected LIMIT tray"}</span>
+                                    <span className="inline-flex flex-col rounded-xl bg-emerald-100 px-3 py-1 font-bold text-emerald-800">
+                                      <span>{submission?.executionMode === "direct_market" ? (order.side === "SELL" ? "Sell phase placed" : "Buy phase placed") : "Sent to protected LIMIT tray"}</span>
+                                      {executionPrice !== null ? (
+                                        <span className="text-[11px] font-black text-emerald-950">Avg. Price {formatBasketCurrency(executionPrice)}</span>
+                                      ) : null}
+                                    </span>
                                   ) : isSubmitted ? (
                                     <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 font-bold text-amber-800">Failed / check Kite</span>
                                   ) : (
