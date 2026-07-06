@@ -719,6 +719,8 @@ test("Bullpen auto-run workflow view exposes Stage 1 output candidates", async (
 
   assert.equal(view.stages[0].scanCandidates.length, 1);
   assert.deepEqual(view.stages[0].scanCandidates[0], {
+    questionId: null,
+    marketId: null,
     question: "Will the event resolve No?",
     marketUrl: "https://polymarket.com/event/no",
     slug: "event-no",

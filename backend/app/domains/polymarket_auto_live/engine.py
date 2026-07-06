@@ -32,6 +32,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     candidate_returns_per_day,
     console_market_filter_reasons,
     next_console_schedule_time,
+    next_custom_console_schedule_time,
     position_returns_per_day,
     read_console_wallet_positions,
     scan_console_profile_markets,
@@ -5768,7 +5769,7 @@ class BullpenAutoLiveEngine:
         state.latest_guardrail_checks = global_guardrails
         state.live_execution_allowed = not execution_block_reasons and not state.paused and not state.dry_run
         if state.running:
-            next_run_at = next_console_schedule_time(now).isoformat()
+            next_run_at = next_custom_console_schedule_time(now, start_at=settings.console_auto_start_at, refresh_minutes=settings.console_auto_refresh_minutes).isoformat()
             state.next_run_at = next_run_at
             state.next_scan_at = next_run_at
             state.next_llm_run_at = next_run_at

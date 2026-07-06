@@ -120,6 +120,47 @@ class ConsoleScanResult:
     details: str | None = None
 
 
+def _parse_console_start_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    for candidate in (normalized, normalized.replace(" ", "T", 1)):
+        try:
+            parsed = datetime.fromisoformat(candidate)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=CONSOLE_SCHEDULE_TIMEZONE)
+            return parsed
+        except ValueError:
+            continue
+    for fmt in ("%H:%M:%S %d %B, %Y", "%H:%M:%S %d %b, %Y", "%H:%M:%S %d %B %Y", "%H:%M:%S %d %b %Y"):
+        try:
+            return datetime.strptime(normalized, fmt).replace(tzinfo=CONSOLE_SCHEDULE_TIMEZONE)
+        except ValueError:
+            continue
+    return None
+
+
+def next_custom_console_schedule_time(
+    reference_time: datetime,
+    *,
+    start_at: str | None = None,
+    refresh_minutes: int | None = None,
+) -> datetime:
+    if not start_at or not refresh_minutes or refresh_minutes < 1:
+        return next_console_schedule_time(reference_time)
+    start = _parse_console_start_at(start_at)
+    if start is None:
+        return next_console_schedule_time(reference_time)
+    start_utc = start.astimezone(UTC)
+    reference_utc = reference_time.astimezone(UTC)
+    if start_utc > reference_utc:
+        return start_utc
+    interval = timedelta(minutes=refresh_minutes)
+    elapsed = reference_utc - start_utc
+    intervals_elapsed = int(elapsed.total_seconds() // interval.total_seconds()) + 1
+    return start_utc + (interval * intervals_elapsed)
+
+
 def next_console_schedule_time(reference_time: datetime) -> datetime:
     localized = reference_time.astimezone(CONSOLE_SCHEDULE_TIMEZONE)
     schedule_dates = [localized.date(), localized.date() + timedelta(days=1)]

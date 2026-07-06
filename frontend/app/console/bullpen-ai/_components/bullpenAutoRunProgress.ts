@@ -80,22 +80,21 @@ const WORKFLOW_DEFINITIONS: WorkflowDefinition[] = [
   {
     key: "scan",
     title: "Stage 1 · Bullpen Scan",
-    subtitle: "Scans Bullpen while honoring the current exclusions, filters, and active-position rules.",
+    subtitle: "",
     defaultDetail: "Waiting for the worker to begin the Bullpen scan.",
     defaultItemLabel: "events",
   },
   {
     key: "llm",
     title: "Stage 2 · Run LLM",
-    subtitle: "Runs LLM review on every new event that survives Stage 1.",
+    subtitle: "",
     defaultDetail: "Waiting for Stage 1 to finish so LLM review can begin.",
     defaultItemLabel: "events",
   },
   {
     key: "invest",
     title: "Stage 3 · Exit and Invest",
-    subtitle:
-      "Step 1 processes Event Exits from both the ranking / LLM strategy and the capital-aware forced-exit strategy, then Step 2 invests in the Stage 3 planned orders when the guardrails allow live execution.",
+    subtitle: "",
     defaultDetail: "Waiting for Stage 2 to finish before exit and investment planning starts.",
     defaultItemLabel: "rows",
   },
@@ -469,13 +468,15 @@ export function buildBullpenAutoRunWorkflowView(
         : stage?.started_at ??
       (index === 0 && runStatus === "running"
         ? pendingRunStartedAt ?? normalizedRun?.started_at ?? null
-        : null);
+        : state === "finished"
+          ? normalizedRun?.started_at ?? null
+          : null);
     const stageTimerCompletedAt =
       !shouldShowStageData
         ? null
         : explicitPhase === "running" && runStatus === "running"
         ? null
-        : stage?.completed_at ?? null;
+        : stage?.completed_at ?? (state === "finished" ? normalizedRun?.completed_at ?? null : null);
     let detail =
       (shouldShowStageData ? stage?.reason : null) ||
       (state === "current" && index === 0 && runStatus === "running"

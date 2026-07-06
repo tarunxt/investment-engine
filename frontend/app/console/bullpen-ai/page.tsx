@@ -3160,6 +3160,7 @@ function BullpenAiPageContent() {
             }),
           );
         }}
+        onOpenScanFilters={() => setIsScanFiltersOpen(true)}
         onRunCompleted={() => {
           void refreshBullpenPositions({ suppressAutoClaim: true });
         }}
@@ -3511,12 +3512,6 @@ function BullpenAiPageContent() {
                     </p>
                   </div>
                 ) : null}
-                {!isManualScanView ? (
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">
-                    Auto Scan is read-only here. Switch to Manual Scan to run
-                    Bullpen scans, LLM analysis, or manual investing.
-                  </div>
-                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
@@ -3701,7 +3696,7 @@ function BullpenAiPageContent() {
               readOnlyMessage={
                 isViewingHistory
                   ? "Switch back to the current snapshot to select events and place Bullpen orders."
-                  : "Auto Scan is read-only here. Switch to Manual Scan to run LLM analysis or place manual Bullpen orders."
+                  : null
               }
               isInvesting={isInvesting}
               isLoadingPositions={isLoadingPositions}
@@ -3735,9 +3730,7 @@ function BullpenAiPageContent() {
               <span>
                 {selectionEnabled
                   ? `${formatCountLabel(openActivePositions.length, "active position")} auto-included and ${formatCountLabel(selectedQuestionCount, "scan question")} selected for LLM analysis.`
-                  : isManualScanView
-                    ? "Run Bullpen Scan first to select questions for LLM analysis."
-                    : "Auto Scan is read-only here; switch to Manual Scan to select questions or run LLM analysis."}
+                  : "Run Bullpen Scan first to select questions for LLM analysis."}
               </span>
               {isManualScanView && lastLlmTargets.length > 0 ? (
                 <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">

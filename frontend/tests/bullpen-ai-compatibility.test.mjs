@@ -182,9 +182,9 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
 
   assert.match(bullpenAiPageSource, /BullpenAutoRunScheduleCard/);
   assert.match(autoRunCardSource, /Run Scans and Invest Now/);
-  assert.match(autoRunCardSource, /Bullpen Scan \+ LLM \+ Exit and Invest runs every 6 hours in IST/);
-  assert.match(autoRunProgressSource, /Step 1 processes Event Exits/);
-  assert.match(autoRunProgressSource, /Step 2 invests in the Stage 3 planned orders/);
+  assert.match(autoRunCardSource, /Bullpen Scan \+ LLM \+ Exit and Invest auto-run schedule/);
+  assert.doesNotMatch(autoRunProgressSource, /Step 1 processes Event Exits/);
+  assert.doesNotMatch(autoRunProgressSource, /Step 2 invests in the Stage 3 planned orders/);
   assert.match(autoRunCardSource, /InvestExecutionStepsSummary/);
   assert.match(autoRunCardSource, /execution_steps/);
   assert.match(autoRunCardSource, /6:00 AM IST/);
@@ -261,7 +261,7 @@ test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {
     bullpenAiPageSource,
     /function createEmptySnapshotSourceMap\(\): Record<ScanMode, BullpenSnapshotSource> \{\s+return \{\s+"30-days": "auto",\s+"end-of-month": "auto",\s+\};\s+\}/,
   );
-  assert.match(
+  assert.doesNotMatch(
     bullpenAiPageSource,
     /Auto Scan is read-only here\.\s+Switch to Manual Scan to run\s+Bullpen scans, LLM analysis, or manual investing\./,
   );

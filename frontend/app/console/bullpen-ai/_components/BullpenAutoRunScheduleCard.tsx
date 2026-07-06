@@ -78,6 +78,7 @@ type BullpenAutoRunScheduleCardProps = {
     | null;
   activePositions?: BullpenActivePositionView[];
   hasActivePositionsSnapshot?: boolean;
+  onOpenScanFilters?: () => void;
   onSummaryUpdated?: (payload: {
     summary: BullpenAutoLiveSummaryResponse;
     run: BullpenAutoLiveRun | null;
@@ -1702,10 +1703,12 @@ function InvestMetricDetailsDialog({
   );
 }
 
-function buildConsoleSettingsUpdate(consoleOrderUsd: number) {
+function buildConsoleSettingsUpdate(consoleOrderUsd: number, startAt?: string | null, refreshMinutes?: number | null) {
   return {
     strategy_profile: "bullpen_console_top10" as const,
     console_order_usd: consoleOrderUsd,
+    console_auto_start_at: startAt ?? null,
+    console_auto_refresh_minutes: refreshMinutes ?? null,
     auto_live_enabled: true,
     dry_run: false,
     allow_live_execution: true,
@@ -1806,6 +1809,7 @@ export function BullpenAutoRunScheduleCard({
   activePositions = [],
   hasActivePositionsSnapshot = false,
   onSummaryUpdated,
+  onOpenScanFilters,
 }: BullpenAutoRunScheduleCardProps) {
   const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1833,9 +1837,20 @@ export function BullpenAutoRunScheduleCard({
   const [consoleOrderSaveBusy, setConsoleOrderSaveBusy] = useState(false);
   const [consoleOrderFieldError, setConsoleOrderFieldError] =
     useState<string | null>(null);
+  const [scheduleStartInput, setScheduleStartInput] = useState("");
+  const [scheduleRefreshInput, setScheduleRefreshInput] = useState("60");
 
   const savedConsoleOrderUsd =
     summary?.settings.console_order_usd ?? DEFAULT_CONSOLE_ORDER_USD;
+
+  useEffect(() => {
+    const nextStart = summary?.settings.console_auto_start_at ?? "";
+    const nextRefresh = summary?.settings.console_auto_refresh_minutes ?? 60;
+    window.queueMicrotask(() => {
+      setScheduleStartInput(nextStart);
+      setScheduleRefreshInput(String(nextRefresh));
+    });
+  }, [summary?.settings.console_auto_start_at, summary?.settings.console_auto_refresh_minutes]);
 
   useEffect(() => {
     if (consoleOrderDirty) return;
@@ -2018,8 +2033,13 @@ export function BullpenAutoRunScheduleCard({
     setError(null);
 
     try {
+      const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
+      if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
+        setError({ message: "Enter a refresh duration of at least 1 minute.", details: null });
+        return;
+      }
       await apiService.updateBullpenAutoLiveSettings(
-        buildConsoleSettingsUpdate(nextConsoleOrderUsd),
+        buildConsoleSettingsUpdate(nextConsoleOrderUsd, scheduleStartInput.trim() || null, refreshMinutes),
       );
       setConsoleOrderDirty(false);
       setConsoleOrderFieldError(null);
@@ -2069,8 +2089,13 @@ export function BullpenAutoRunScheduleCard({
 
     try {
       const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
+      const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
+      if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
+        setError({ message: "Enter a refresh duration of at least 1 minute.", details: null });
+        return;
+      }
       await apiService.updateBullpenAutoLiveSettings(
-        buildConsoleSettingsUpdate(nextConsoleOrderUsd),
+        buildConsoleSettingsUpdate(nextConsoleOrderUsd, scheduleStartInput.trim() || null, refreshMinutes),
       );
       setConsoleOrderDirty(false);
       setConsoleOrderFieldError(null);
@@ -2102,8 +2127,13 @@ export function BullpenAutoRunScheduleCard({
     setError(null);
 
     try {
+      const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
+      if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
+        setError({ message: "Enter a refresh duration of at least 1 minute.", details: null });
+        return;
+      }
       await apiService.updateBullpenAutoLiveSettings(
-        buildConsoleSettingsUpdate(nextConsoleOrderUsd),
+        buildConsoleSettingsUpdate(nextConsoleOrderUsd, scheduleStartInput.trim() || null, refreshMinutes),
       );
       setConsoleOrderDirty(false);
       setConsoleOrderFieldError(null);
@@ -2383,7 +2413,7 @@ export function BullpenAutoRunScheduleCard({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-xl font-semibold text-slate-950">
-                  Bullpen Scan + LLM + Exit and Invest runs every 6 hours in IST
+                  Bullpen Scan + LLM + Exit and Invest auto-run schedule
                 </h2>
                 <button
                   type="button"
@@ -2514,6 +2544,41 @@ export function BullpenAutoRunScheduleCard({
               >
                 Default is $5. {consoleOrderHelperMessage}
               </p>
+            </div>
+            <div className="min-w-[16rem] flex-1">
+              <label htmlFor="bullpen-auto-run-start-time" className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Auto-run start time
+              </label>
+              <input
+                id="bullpen-auto-run-start-time"
+                type="text"
+                value={scheduleStartInput}
+                onChange={(event) => setScheduleStartInput(event.target.value)}
+                disabled={action !== null}
+                className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
+                placeholder="13:00:00 06 July, 2026"
+              />
+              <p className="mt-2 text-xs leading-5 text-slate-600">Leave blank to keep the legacy fixed IST schedule.</p>
+            </div>
+            <div className="min-w-[12rem] flex-1">
+              <label htmlFor="bullpen-auto-run-refresh-minutes" className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Refresh duration
+              </label>
+              <div className="mt-2 flex h-11 items-center rounded-xl border border-slate-200 bg-white px-3 shadow-sm">
+                <span className="mr-2 text-sm font-semibold text-slate-500">Every</span>
+                <input
+                  id="bullpen-auto-run-refresh-minutes"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={scheduleRefreshInput}
+                  onChange={(event) => setScheduleRefreshInput(event.target.value)}
+                  disabled={action !== null}
+                  className="h-full w-full border-0 bg-transparent p-0 text-sm font-semibold text-slate-950 outline-none disabled:cursor-not-allowed disabled:text-slate-400"
+                />
+                <span className="ml-2 text-sm font-semibold text-slate-500">min</span>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-slate-600">Use 60 for every 1 hour.</p>
             </div>
           </div>
         </div>
@@ -2800,12 +2865,26 @@ export function BullpenAutoRunScheduleCard({
                   ) : null}
                   <div className="flex items-start justify-between gap-3">
                     <div className={`space-y-1 ${canOpenInputs ? "pl-12" : ""}`}>
-                      <p className={`text-sm font-semibold ${toneClasses.text}`}>
-                        {stage.title}
-                      </p>
-                      <p className={`text-xs leading-5 ${toneClasses.muted}`}>
-                        {stage.subtitle}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className={`text-sm font-semibold ${toneClasses.text}`}>
+                          {stage.title}
+                        </p>
+                        {stage.key === "scan" && onOpenScanFilters ? (
+                          <button
+                            type="button"
+                            onClick={onOpenScanFilters}
+                            className={`inline-flex h-5 w-5 items-center justify-center rounded-full border bg-white/70 ${toneClasses.badge}`}
+                            aria-label="Open scan filters"
+                          >
+                            <Info className="h-3 w-3" />
+                          </button>
+                        ) : null}
+                      </div>
+                      {stage.subtitle ? (
+                        <p className={`text-xs leading-5 ${toneClasses.muted}`}>
+                          {stage.subtitle}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       <span
@@ -2988,36 +3067,6 @@ export function BullpenAutoRunScheduleCard({
                     </div>
                   ) : null}
 
-                  {stage.key === "llm" && investOnlyPlan.alreadyInvestedCandidateCount > 0 ? (
-                    <div className="mt-3 space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-3 dark:border-emerald-900/60 dark:bg-emerald-950/30">
-                      <p className="text-[11px] font-semibold leading-5 text-emerald-800 dark:text-emerald-200">
-                        {investOnlyPlan.alreadyInvestedCandidateCount} qualified{" "}
-                        {investOnlyPlan.alreadyInvestedCandidateCount === 1 ? "event is" : "events are"} already invested and will be skipped.
-                      </p>
-                      <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
-                        {investOnlyPlan.candidatePreviews
-                          .filter((preview) => preview.status === "already-invested")
-                          .map((preview) => (
-                            <div
-                              key={preview.candidate.market_id}
-                              className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900 dark:border-emerald-800/70 dark:bg-emerald-950/50 dark:text-emerald-100"
-                            >
-                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="font-semibold">
-                                  {preview.candidate.market_title}
-                                </p>
-                                {preview.reason ? (
-                                  <p className="leading-5 text-emerald-800 dark:text-emerald-200">
-                                    {preview.reason}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  ) : null}
 
                   <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
                     <div
