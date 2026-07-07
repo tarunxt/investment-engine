@@ -138,18 +138,21 @@ export const MARKET_QUESTION_KEYWORDS = MARKET_QUESTION_KEYWORD_GROUPS.flat();
 export const SOCIAL_POST_COUNT_KEYWORDS =
   SOCIAL_POST_COUNT_KEYWORD_GROUPS.flat();
 
-export const SPORTS_PATTERNS = [
-  /\b(?:both teams to score|exact score|leading at halftime|draw at halftime|penalty shootout|extra time)\b/i,
-  /\bhalftime\b/i,
-  /\b[A-Za-z][A-Za-z .'\-]{2,40}\s+vs\.?\s+[A-Za-z][A-Za-z .'\-]{2,40}\b/i,
-] as const;
-
 export const SOCIAL_POST_COUNT_PATTERNS = [
   /\bhow many (?:tweets?|posts?|truths?)\b/i,
   /\bnumber of (?:tweets?|posts?|truths?)\b/i,
   /\b(?:at least|at most|more than|less than|over|under|between)\s+\d+[\w\s-]*(?:tweets?|posts?|truths?)\b/i,
   /\b\d+\s*(?:-|to)\s*\d+\s+(?:tweets?|posts?|truths?)\b/i,
   /\b\d+\+?\s+(?:tweets?|posts?|truths?)\b/i,
+] as const;
+
+export const SPORTS_PATTERNS = [
+  /\b(?:both teams to score|exact score|leading at halftime|draw at halftime|penalty shootout|extra time)\b/i,
+  /\b(?:first|second) half\b/i,
+  /\bhalftime\b/i,
+  /\bmap\s+\d+\b/i,
+  /\bbest of\s+\d+\b/i,
+  /\b[A-Za-z][A-Za-z .'\-]{2,40}\s+vs\.?\s+[A-Za-z][A-Za-z .'\-]{2,40}\b/i,
 ] as const;
 
 export const MARKET_PREDICTION_PATTERNS = [
@@ -165,26 +168,30 @@ export const BULLPEN_SCAN_FILTER_DETAILS: Record<
     id: "excludeSports",
     label: "Exclude sports",
     description:
-      "Remove sports leagues, teams, games, tournaments, and match-result markets, including tennis tours and Wimbledon-style questions.",
+      "Remove sports leagues, teams, games, tournaments, halftime/score props, and esports match markets, including tennis tours and Wimbledon-style questions.",
     dialogEyebrow: "Sports exclusion",
     title: "How the sports filter excludes markets",
     matcherScope:
       "Search text = question + category/tags/event category + slug + outcome labels, normalized to lowercase and matched on whole words plus sports phrase patterns.",
     algorithmSteps: [
-      "Build a normalized search string from the market question, category, slug, and outcome labels.",
+      "Build a normalized search string from the market question, category, slug, outcome labels, and supported nested event/category metadata.",
       "Run whole-word keyword checks across that search string.",
-      "Run sports phrase checks for scoreboard-style markets such as halftime, exact score, both-teams-to-score, penalty shootout, extra time, and Team A vs Team B titles.",
-      "Exclude the market as soon as any sports keyword or sports phrase pattern matches.",
+      "Run sports-market phrase checks for scoreboard-style props, match-up titles, and esports map/best-of patterns.",
+      "Exclude the market as soon as any sports keyword or sports phrase matches.",
     ],
     keywordGroups: SPORTS_KEYWORD_GROUPS.map((group) => group.join(", ")),
     patternRules: [
       "both teams to score, exact score, leading/draw at halftime, penalty shootout, extra time",
       "Team A vs Team B / Team A vs. Team B question titles",
+      "first half / second half",
+      "map <number>",
+      "best of <number>",
     ],
     excludedEventExamples: [
       "League, team, match, tournament, and winner markets.",
+      "Halftime, both-teams-to-score, and exact-score markets such as Argentina vs. Egypt match props.",
       "Tennis questions such as Wimbledon, ATP, WTA, and Grand Slam events.",
-      "Esports and global competition markets such as Dota, CS2, World Cup, or Champions League.",
+      "Esports and global competition markets such as Dota, CS2, map markets, World Cup, or Champions League.",
     ],
   },
   excludeWeather: {

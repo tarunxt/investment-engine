@@ -39,6 +39,11 @@ type WalkContext = {
   category: string | null;
 };
 
+type FilterableBullpenQuestion = BullpenQuestion & {
+  _categorySearchText: string;
+  _searchText: string;
+};
+
 const execFileAsync = promisify(execFile);
 
 const CLI_SOURCE_LABEL = "Bullpen CLI";
@@ -88,6 +93,27 @@ const MARKET_SLUG_KEYS = [
 const EVENT_SLUG_KEYS = [
   "eventSlug",
   "urlSlug",
+];
+const FILTER_TEXT_KEYS = [
+  ...CATEGORY_KEYS,
+  ...QUESTION_KEYS,
+  ...MARKET_SLUG_KEYS,
+  ...EVENT_SLUG_KEYS,
+  "tags",
+  "categories",
+  "description",
+  "groupTitle",
+  "groupItemTitle",
+  "league",
+  "tournament",
+  "sport",
+  "homeTeam",
+  "awayTeam",
+  "team",
+  "team1",
+  "team2",
+  "competitor",
+  "competitors",
 ];
 const OUTCOME_LABEL_KEYS = ["name", "label", "outcome", "title", "side"];
 const INSULT_MARKET_PATTERNS = [
@@ -245,6 +271,55 @@ function readDeepString(
   }
 
   return null;
+}
+
+function collectDeepStrings(
+  value: unknown,
+  keys: string[],
+  { maxNodes = 10_000, maxValues = 128 } = {},
+) {
+  const values: string[] = [];
+  const seenNodes = new Set<unknown>();
+  const stack: unknown[] = [value];
+  let inspected = 0;
+
+  while (stack.length > 0 && inspected < maxNodes && values.length < maxValues) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object" || seenNodes.has(current)) continue;
+    seenNodes.add(current);
+    inspected += 1;
+
+    if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        stack.push(current[index]);
+      }
+      continue;
+    }
+
+    const record = current as Record<string, unknown>;
+    for (const key of keys) {
+      const candidate = record[key];
+      if (typeof candidate === "string" && candidate.trim()) {
+        values.push(candidate.trim());
+      } else if (typeof candidate === "number" && Number.isFinite(candidate)) {
+        values.push(String(candidate));
+      } else if (Array.isArray(candidate)) {
+        for (const item of candidate) {
+          if (typeof item === "string" && item.trim()) {
+            values.push(item.trim());
+            if (values.length >= maxValues) break;
+          }
+        }
+      }
+      if (values.length >= maxValues) break;
+    }
+
+    for (const child of Object.values(record)) {
+      stack.push(child);
+    }
+  }
+
+  return values;
 }
 
 function readOutcomeNumber(
@@ -477,19 +552,25 @@ function includesAnyKeyword(text: string, keywords: readonly string[]) {
   return keywords.some((keyword) => matchesKeyword(text, keyword));
 }
 
-function getQuestionSearchText(question: BullpenQuestion) {
-  return [
-    question.question,
-    question.category,
-    question.slug,
-    question.outcomeLabels.join(" "),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+function normalizeSearchTextParts(parts: Array<string | null | undefined>) {
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+
+  for (const part of parts) {
+    const normalized = (part || "").trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    deduped.push(normalized);
+  }
+
+  return deduped.join(" ");
 }
 
-function isSportsQuestion(question: BullpenQuestion) {
+function getQuestionSearchText(question: FilterableBullpenQuestion) {
+  return question._searchText;
+}
+
+function isSportsQuestion(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
     includesAnyKeyword(searchText, SPORTS_KEYWORDS) ||
@@ -497,20 +578,20 @@ function isSportsQuestion(question: BullpenQuestion) {
   );
 }
 
-function isWeatherQuestion(question: BullpenQuestion) {
+function isWeatherQuestion(question: FilterableBullpenQuestion) {
   return includesAnyKeyword(getQuestionSearchText(question), WEATHER_KEYWORDS);
 }
 
-function isMarketPredictionQuestion(question: BullpenQuestion) {
+function isMarketPredictionQuestion(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
-    includesAnyKeyword(question.category.toLowerCase(), MARKET_CATEGORY_KEYWORDS) ||
+    includesAnyKeyword(question._categorySearchText, MARKET_CATEGORY_KEYWORDS) ||
     includesAnyKeyword(searchText, MARKET_QUESTION_KEYWORDS) ||
     MARKET_PREDICTION_PATTERNS.some((pattern) => pattern.test(searchText))
   );
 }
 
-function isTweetCountQuestion(question: BullpenQuestion) {
+function isTweetCountQuestion(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
     includesAnyKeyword(searchText, SOCIAL_POST_COUNT_KEYWORDS) &&
@@ -518,12 +599,12 @@ function isTweetCountQuestion(question: BullpenQuestion) {
   );
 }
 
-function isInsultMarket(question: BullpenQuestion) {
+function isInsultMarket(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return INSULT_MARKET_PATTERNS.some((pattern) => pattern.test(searchText));
 }
 
-function sortQuestions(questions: BullpenQuestion[]) {
+function sortQuestions<T extends BullpenQuestion>(questions: T[]) {
   return [...questions].sort((left, right) => {
     const leftTime = left.closeTime ? new Date(left.closeTime).getTime() : Number.POSITIVE_INFINITY;
     const rightTime = right.closeTime ? new Date(right.closeTime).getTime() : Number.POSITIVE_INFINITY;
@@ -533,10 +614,35 @@ function sortQuestions(questions: BullpenQuestion[]) {
   });
 }
 
+function buildQuestionFilterSearchText({
+  question,
+  category,
+  slug,
+  outcomeLabels,
+  record,
+  contextCategory,
+}: {
+  question: string;
+  category: string;
+  slug: string | null;
+  outcomeLabels: string[];
+  record: Record<string, unknown>;
+  contextCategory?: string | null;
+}) {
+  return normalizeSearchTextParts([
+    question,
+    category,
+    slug,
+    outcomeLabels.join(" "),
+    contextCategory || null,
+    ...collectDeepStrings(record, FILTER_TEXT_KEYS),
+  ]);
+}
+
 function normalizeGammaMarket(
   record: Record<string, unknown>,
   sourceUrl: string,
-): BullpenQuestion | null {
+): FilterableBullpenQuestion | null {
   const question = readString(record, QUESTION_KEYS);
   if (!question || question.length < 8) return null;
 
@@ -557,6 +663,18 @@ function normalizeGammaMarket(
     inferSemanticCloseTime(record, question),
   );
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
+  const category = readCategory(record);
+  const categorySearchText = normalizeSearchTextParts([
+    category,
+    ...collectCategoryLabels(record),
+  ]);
+  const searchText = buildQuestionFilterSearchText({
+    question,
+    category,
+    slug,
+    outcomeLabels,
+    record,
+  });
 
   return {
     id:
@@ -564,7 +682,7 @@ function normalizeGammaMarket(
       question,
     question,
     closeTime,
-    category: readCategory(record),
+    category,
     yesOdds,
     noOdds,
     volume: readDisplayValue(record, [
@@ -597,6 +715,8 @@ function normalizeGammaMarket(
     rules: null,
     marketContext: null,
     resolutionSource: null,
+    _categorySearchText: categorySearchText,
+    _searchText: searchText,
   };
 }
 
@@ -604,7 +724,7 @@ function normalizeQuestion(
   record: Record<string, unknown>,
   sourceUrl: string,
   context: WalkContext,
-): BullpenQuestion | null {
+): FilterableBullpenQuestion | null {
   const question = readString(record, QUESTION_KEYS);
   if (!question || question.length < 8) return null;
 
@@ -659,6 +779,19 @@ function normalizeQuestion(
       ],
     ) ||
     `${question}-${closeTime || "unknown"}`;
+  const categorySearchText = normalizeSearchTextParts([
+    category,
+    context.category,
+    ...collectCategoryLabels(record, context),
+  ]);
+  const searchText = buildQuestionFilterSearchText({
+    question,
+    category,
+    slug,
+    outcomeLabels,
+    record,
+    contextCategory: context.category,
+  });
 
   return {
     id,
@@ -698,6 +831,8 @@ function normalizeQuestion(
     rules: null,
     marketContext: null,
     resolutionSource: null,
+    _categorySearchText: categorySearchText,
+    _searchText: searchText,
   };
 }
 
@@ -714,7 +849,11 @@ function passesTimeFilter(question: BullpenQuestion, mode: ScanMode, filters: Bu
   return difference > 0 && difference <= filters.maxClosingDays * MILLISECONDS_PER_DAY;
 }
 
-function passesFilters(question: BullpenQuestion, mode: ScanMode, filters: BullpenScanFilters) {
+function passesFilters(
+  question: FilterableBullpenQuestion,
+  mode: ScanMode,
+  filters: BullpenScanFilters,
+) {
   if (!passesTimeFilter(question, mode, filters)) return false;
   if (filters.excludeSports && isSportsQuestion(question)) return false;
   if (filters.excludeWeather && isWeatherQuestion(question)) return false;
@@ -732,7 +871,7 @@ function passesFilters(question: BullpenQuestion, mode: ScanMode, filters: Bullp
 }
 
 function collectQuestions(payloads: unknown[], sourceUrl: string) {
-  const candidates = new Map<string, BullpenQuestion>();
+  const candidates = new Map<string, FilterableBullpenQuestion>();
   for (const payload of payloads) {
     walk(payload, (record, context) => {
       const normalized = normalizeQuestion(record, sourceUrl, context);
@@ -742,13 +881,24 @@ function collectQuestions(payloads: unknown[], sourceUrl: string) {
   return sortQuestions(Array.from(candidates.values()));
 }
 
+function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuestion {
+  const {
+    _categorySearchText: _ignoredCategorySearchText,
+    _searchText: _ignoredSearchText,
+    ...publicQuestion
+  } = question;
+  return publicQuestion;
+}
+
 function applyFilters(
-  candidates: BullpenQuestion[],
+  candidates: FilterableBullpenQuestion[],
   mode: ScanMode,
   filters: BullpenScanFilters,
 ) {
   return sortQuestions(
-    candidates.filter((question) => passesFilters(question, mode, filters)),
+    candidates
+      .filter((question) => passesFilters(question, mode, filters))
+      .map((question) => stripFilterMetadata(question)),
   );
 }
 

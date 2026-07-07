@@ -68,11 +68,49 @@ SPORTS_PATTERNS = (
         r"\b(?:both teams to score|exact score|leading at halftime|draw at halftime|penalty shootout|extra time)\b",
         re.IGNORECASE,
     ),
+    re.compile(r"\b(?:first|second) half\b", re.IGNORECASE),
     re.compile(r"\bhalftime\b", re.IGNORECASE),
+    re.compile(r"\bmap\s+\d+\b", re.IGNORECASE),
+    re.compile(r"\bbest of\s+\d+\b", re.IGNORECASE),
     re.compile(
         r"\b[A-Za-z][A-Za-z .\'-]{2,40}\s+vs\.?\s+[A-Za-z][A-Za-z .\'-]{2,40}\b",
         re.IGNORECASE,
     ),
+)
+FILTER_TEXT_KEYS = (
+    "category",
+    "categoryName",
+    "categorySlug",
+    "primaryCategory",
+    "group",
+    "tag",
+    "topic",
+    "type",
+    "tags",
+    "categories",
+    "question",
+    "title",
+    "name",
+    "eventTitle",
+    "marketQuestion",
+    "description",
+    "groupTitle",
+    "groupItemTitle",
+    "league",
+    "tournament",
+    "sport",
+    "homeTeam",
+    "awayTeam",
+    "team",
+    "team1",
+    "team2",
+    "competitor",
+    "competitors",
+    "slug",
+    "marketSlug",
+    "questionSlug",
+    "eventSlug",
+    "urlSlug",
 )
 WEATHER_KEYWORDS = (
     "weather",
@@ -266,6 +304,12 @@ def is_insult_market_text(text: str) -> bool:
     return any(pattern.search(text) for pattern in INSULT_MARKET_PATTERNS)
 
 
+def is_sports_market_text(text: str) -> bool:
+    return _includes_any(text, SPORTS_KEYWORDS) or any(
+        pattern.search(text) for pattern in SPORTS_PATTERNS
+    )
+
+
 def _build_market_url(event_slug: str | None) -> str | None:
     if not event_slug:
         return None
@@ -377,18 +421,77 @@ def _is_binary_yes_no(
     return len(normalized) == 2 and normalized == {"yes", "no"}
 
 
-def _search_text(market: ScannedMarket) -> str:
-    return " ".join(
-        filter(
-            None,
-            [
-                market.question,
-                market.theme,
-                market.slug,
-                " ".join(market.outcome_labels),
-            ],
-        )
-    ).lower()
+def _collect_nested_strings(
+    value: object,
+    *,
+    keys: tuple[str, ...],
+    max_nodes: int = 10_000,
+    max_values: int = 128,
+) -> list[str]:
+    if not value:
+        return []
+
+    results: list[str] = []
+    seen_nodes: set[int] = set()
+    stack: list[object] = [value]
+    inspected = 0
+
+    while stack and inspected < max_nodes and len(results) < max_values:
+        current = stack.pop()
+        if not isinstance(current, (dict, list)):
+            continue
+
+        current_id = id(current)
+        if current_id in seen_nodes:
+            continue
+        seen_nodes.add(current_id)
+        inspected += 1
+
+        if isinstance(current, list):
+            stack.extend(reversed(current))
+            continue
+
+        for key in keys:
+            candidate = current.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                results.append(candidate.strip())
+            elif isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+                results.append(str(candidate))
+            elif isinstance(candidate, list):
+                for item in candidate:
+                    if isinstance(item, str) and item.strip():
+                        results.append(item.strip())
+                        if len(results) >= max_values:
+                            break
+                if len(results) >= max_values:
+                    break
+
+        if len(results) >= max_values:
+            break
+
+        stack.extend(reversed(list(current.values())))
+
+    return results
+
+
+def build_market_filter_search_text(market: ScannedMarket) -> str:
+    parts = [
+        market.question,
+        market.theme,
+        market.slug,
+        market.description,
+        " ".join(market.outcome_labels),
+        *_collect_nested_strings(market.raw, keys=FILTER_TEXT_KEYS),
+    ]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        normalized = _normalize_text(part)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return " ".join(deduped)
 
 
 def _evaluate_filter_reasons(
@@ -397,10 +500,8 @@ def _evaluate_filter_reasons(
     min_liquidity_usd: float,
 ) -> list[str]:
     reasons: list[str] = []
-    search_text = _search_text(market)
-    if _includes_any(search_text, SPORTS_KEYWORDS) or any(
-        pattern.search(search_text) for pattern in SPORTS_PATTERNS
-    ):
+    search_text = build_market_filter_search_text(market)
+    if is_sports_market_text(search_text):
         reasons.append("Excluded sports market.")
     if _includes_any(search_text, WEATHER_KEYWORDS):
         reasons.append("Excluded weather market.")

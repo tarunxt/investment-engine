@@ -21,6 +21,24 @@ async function loadBullpenAiModule() {
   );
 }
 
+async function loadBullpenScanExclusionsModule() {
+  const source = readFileSync(
+    new URL("../lib/bullpenScanExclusions.ts", import.meta.url),
+    "utf8",
+  );
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: "bullpenScanExclusions.ts",
+  });
+
+  return import(
+    `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
+  );
+}
+
 function createQuestionRow() {
   return {
     id: "Q1",
@@ -379,6 +397,28 @@ test("Bullpen x AI sports filter catches Games category markets", () => {
   assert.match(exclusionsSource, /SPORTS_PATTERNS[\s\S]*halftime/);
   assert.match(routeSource, /collectCategoryLabels/);
   assert.match(routeSource, /SPORTS_PATTERNS\.some/);
+});
+
+test("Bullpen x AI sports filter catches halftime, exact-score, and esports map phrasing", async () => {
+  const { SPORTS_PATTERNS } = await loadBullpenScanExclusionsModule();
+  const routeSource = readFileSync(
+    new URL("../app/api/bullpen-ai/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(routeSource, /SPORTS_PATTERNS/);
+  for (const prompt of [
+    "Argentina leading at halftime?",
+    "Argentina vs. Egypt: Both Teams to Score",
+    "Exact Score: Argentina 1 - 0 Egypt?",
+    "Will Team Liquid win map 1?",
+  ]) {
+    assert.equal(
+      SPORTS_PATTERNS.some((pattern) => pattern.test(prompt)),
+      true,
+      prompt,
+    );
+  }
 });
 
 test("Bullpen x AI market prediction filter excludes largest-company-by-market-cap questions", () => {

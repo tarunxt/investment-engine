@@ -10,13 +10,14 @@ from app.domains.polymarket.bullpen import _collect_bullpen_rows, run_first_bull
 from app.domains.polymarket_auto_live.scanner import (
     MARKET_PREDICTION_KEYWORDS,
     MARKET_PREDICTION_PATTERNS,
-    SPORTS_KEYWORDS,
     TWEET_COUNT_KEYWORDS,
     TWEET_COUNT_PATTERNS,
     WEATHER_KEYWORDS,
     ScanRejectedMarket,
     ScannedMarket,
+    build_market_filter_search_text,
     is_insult_market_text,
+    is_sports_market_text,
     scan_candidate_markets,
 )
 
@@ -510,28 +511,14 @@ def _is_binary_yes_no(
     return len(normalized) == 2 and normalized == {"yes", "no"}
 
 
-def _console_search_text(market: ScannedMarket) -> str:
-    return " ".join(
-        filter(
-            None,
-            [
-                market.question,
-                market.theme,
-                market.slug,
-                " ".join(market.outcome_labels),
-            ],
-        )
-    ).lower()
-
-
 def console_market_filter_reasons(
     market: ScannedMarket,
     *,
     now: datetime,
 ) -> list[str]:
     reasons: list[str] = []
-    search_text = _console_search_text(market)
-    if _includes_any(search_text, SPORTS_KEYWORDS):
+    search_text = build_market_filter_search_text(market)
+    if is_sports_market_text(search_text):
         reasons.append("Excluded sports market.")
     if _includes_any(search_text, WEATHER_KEYWORDS):
         reasons.append("Excluded weather market.")

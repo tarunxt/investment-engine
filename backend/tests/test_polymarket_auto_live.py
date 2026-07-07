@@ -24,6 +24,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     ConsoleWalletPosition,
     candidate_returns_per_day,
+    console_market_filter_reasons,
     next_console_schedule_time,
     position_returns_per_day,
     read_console_wallet_positions,
@@ -2054,6 +2055,33 @@ def test_candidate_filter_reasons_block_wimbledon_tennis_markets():
     )
 
     reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+    assert "Excluded sports market." in reasons
+
+
+def test_candidate_filter_reasons_block_halftime_markets_without_category_keywords():
+    market = _market(
+        question="Argentina leading at halftime?",
+        theme="Uncategorized",
+        slug="argentina-leading-at-halftime",
+    )
+
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+    assert "Excluded sports market." in reasons
+
+
+def test_console_market_filter_reasons_block_exact_score_markets_when_uncategorized():
+    market = _market(
+        question="Exact Score: Argentina 1 - 0 Egypt?",
+        theme="Uncategorized",
+        slug="argentina-egypt-exact-score",
+    )
+
+    reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+    )
 
     assert "Excluded sports market." in reasons
 
