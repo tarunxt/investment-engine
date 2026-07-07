@@ -16,6 +16,9 @@ SCAN_LIMIT = 1_500
 SPORTS_KEYWORDS = (
     "sports",
     "esports",
+    "games",
+    "match",
+    "tournament",
     "nba",
     "nfl",
     "mlb",
@@ -59,6 +62,17 @@ SPORTS_KEYWORDS = (
     "rocket league",
     "fifa",
     "uefa",
+)
+SPORTS_PATTERNS = (
+    re.compile(
+        r"\b(?:both teams to score|exact score|leading at halftime|draw at halftime|penalty shootout|extra time)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bhalftime\b", re.IGNORECASE),
+    re.compile(
+        r"\b[A-Za-z][A-Za-z .\'-]{2,40}\s+vs\.?\s+[A-Za-z][A-Za-z .\'-]{2,40}\b",
+        re.IGNORECASE,
+    ),
 )
 WEATHER_KEYWORDS = (
     "weather",
@@ -384,7 +398,9 @@ def _evaluate_filter_reasons(
 ) -> list[str]:
     reasons: list[str] = []
     search_text = _search_text(market)
-    if _includes_any(search_text, SPORTS_KEYWORDS):
+    if _includes_any(search_text, SPORTS_KEYWORDS) or any(
+        pattern.search(search_text) for pattern in SPORTS_PATTERNS
+    ):
         reasons.append("Excluded sports market.")
     if _includes_any(search_text, WEATHER_KEYWORDS):
         reasons.append("Excluded weather market.")
