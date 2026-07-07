@@ -49,6 +49,16 @@ SPORTS_KEYWORDS = (
     "premier league",
     "champions league",
     "la liga",
+    "dota",
+    "dota 2",
+    "cs2",
+    "counter-strike",
+    "counter strike",
+    "league of legends",
+    "valorant",
+    "rocket league",
+    "fifa",
+    "uefa",
 )
 WEATHER_KEYWORDS = (
     "weather",
@@ -228,7 +238,10 @@ def _normalize_text(value: str | None) -> str:
 
 
 def _contains_keyword(text: str, keyword: str) -> bool:
-    return re.search(rf"(^|\W){re.escape(keyword)}(?=$|\W)", text, re.IGNORECASE) is not None
+    return (
+        re.search(rf"(^|\W){re.escape(keyword)}(?=$|\W)", text, re.IGNORECASE)
+        is not None
+    )
 
 
 def _includes_any(text: str, keywords: tuple[str, ...]) -> bool:
@@ -245,19 +258,66 @@ def _build_market_url(event_slug: str | None) -> str | None:
     return f"https://polymarket.com/event/{event_slug}"
 
 
-def _read_theme(row: dict[str, Any]) -> str:
+def _read_label(value: object) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        for key in ("label", "name", "title", "slug"):
+            child = value.get(key)
+            if isinstance(child, str) and child.strip():
+                return child.strip()
+    return None
+
+
+def _collect_category_labels(row: dict[str, Any]) -> list[str]:
+    labels: list[str] = []
+
+    def add(value: object) -> None:
+        label = _read_label(value)
+        if label and label.lower() not in {item.lower() for item in labels}:
+            labels.append(label)
+
+    for key in (
+        "category",
+        "categoryName",
+        "primaryCategory",
+        "group",
+        "tag",
+        "topic",
+        "type",
+    ):
+        add(row.get(key))
+    for key in ("tags", "categories"):
+        value = row.get(key)
+        if isinstance(value, list):
+            for item in value:
+                add(item)
     events = row.get("events")
     if isinstance(events, list):
         for event in events:
-            if isinstance(event, dict):
-                title = event.get("title")
-                if isinstance(title, str) and title.strip():
-                    return title.strip()
-    for key in ("category", "categoryName", "group", "tag", "topic", "type"):
-        value = row.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return "Uncategorized"
+            if not isinstance(event, dict):
+                continue
+            for key in (
+                "category",
+                "categoryName",
+                "primaryCategory",
+                "group",
+                "tag",
+                "topic",
+                "type",
+            ):
+                add(event.get(key))
+            for key in ("tags", "categories"):
+                value = event.get(key)
+                if isinstance(value, list):
+                    for item in value:
+                        add(item)
+    return labels
+
+
+def _read_theme(row: dict[str, Any]) -> str:
+    labels = _collect_category_labels(row)
+    return " · ".join(labels) if labels else "Uncategorized"
 
 
 def _read_outcome_labels(row: dict[str, Any]) -> list[str]:
@@ -294,7 +354,9 @@ def _read_yes_no_prices(
     return _normalize_odds(yes_price), _normalize_odds(no_price)
 
 
-def _is_binary_yes_no(outcome_labels: list[str], yes_odds: float | None, no_odds: float | None) -> bool:
+def _is_binary_yes_no(
+    outcome_labels: list[str], yes_odds: float | None, no_odds: float | None
+) -> bool:
     if not outcome_labels:
         return yes_odds is not None and no_odds is not None
     normalized = {_normalize_text(label) for label in outcome_labels}
@@ -336,7 +398,9 @@ def _evaluate_filter_reasons(
         reasons.append("Excluded tweet-count or social-post-count market.")
     if is_insult_market_text(search_text):
         reasons.append("Excluded insult or name-calling market.")
-    if not _is_binary_yes_no(market.outcome_labels, market.current_yes_odds, market.current_no_odds):
+    if not _is_binary_yes_no(
+        market.outcome_labels, market.current_yes_odds, market.current_no_odds
+    ):
         reasons.append("Excluded unclear non-binary market.")
     if (
         market.liquidity_usd is not None
@@ -349,7 +413,9 @@ def _evaluate_filter_reasons(
     return reasons
 
 
-def _normalize_market(row: dict[str, Any], *, force_include: bool = False) -> ScannedMarket | None:
+def _normalize_market(
+    row: dict[str, Any], *, force_include: bool = False
+) -> ScannedMarket | None:
     question = row.get("question")
     market_id = row.get("id") or row.get("slug") or row.get("conditionId")
     if not isinstance(question, str) or not question.strip():
@@ -373,14 +439,23 @@ def _normalize_market(row: dict[str, Any], *, force_include: bool = False) -> Sc
         market_id=str(market_id).strip(),
         question=question.strip(),
         market_url=_build_market_url(event_slug),
-        slug=row.get("slug").strip() if isinstance(row.get("slug"), str) and row.get("slug").strip() else None,
+        slug=(
+            row.get("slug").strip()
+            if isinstance(row.get("slug"), str) and row.get("slug").strip()
+            else None
+        ),
         close_time=_normalize_close_time(row.get("endDate")),
         theme=_read_theme(row),
         current_yes_odds=yes_odds,
         current_no_odds=no_odds,
         volume_usd=_parse_float(row.get("volumeNum") or row.get("volume")),
         liquidity_usd=_parse_float(row.get("liquidityNum") or row.get("liquidity")),
-        description=row.get("description").strip() if isinstance(row.get("description"), str) and row.get("description").strip() else None,
+        description=(
+            row.get("description").strip()
+            if isinstance(row.get("description"), str)
+            and row.get("description").strip()
+            else None
+        ),
         outcome_labels=outcome_labels,
         event_slug=event_slug,
         best_bid_cents=_normalize_odds(_parse_float(row.get("bestBid"))),

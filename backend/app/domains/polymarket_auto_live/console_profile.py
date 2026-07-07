@@ -73,6 +73,8 @@ _CATEGORY_KEYS = (
     "categoryName",
     "group",
     "tag",
+    "categories",
+    "tags",
 )
 _MARKET_SLUG_KEYS = ("slug", "marketSlug", "questionSlug")
 _CLOSE_TIME_KEYS = (
@@ -298,6 +300,54 @@ def _build_market_url(event_slug: str | None) -> str | None:
     if not event_slug:
         return None
     return f"https://polymarket.com/event/{event_slug}"
+
+
+def _read_label(value: object) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        return _read_string(value, ("label", "name", "title", "slug"))
+    return None
+
+
+def _collect_category_labels(row: dict[str, object]) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: object) -> None:
+        label = _read_label(value)
+        if not label:
+            return
+        normalized = _normalize_text(label)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            labels.append(label)
+
+    for key in _CATEGORY_KEYS:
+        value = row.get(key)
+        if isinstance(value, list):
+            for item in value:
+                add(item)
+        else:
+            add(value)
+    events = row.get("events")
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            for key in _CATEGORY_KEYS:
+                value = event.get(key)
+                if isinstance(value, list):
+                    for item in value:
+                        add(item)
+                else:
+                    add(value)
+    return labels
+
+
+def _read_theme(row: dict[str, object]) -> str:
+    labels = _collect_category_labels(row)
+    return " · ".join(labels) if labels else "Uncategorized"
 
 
 def _parse_json_list(value: object) -> list[object]:
@@ -558,7 +608,7 @@ def _normalize_console_market(row: dict[str, object]) -> ScannedMarket | None:
         market_url=_build_market_url(event_slug),
         slug=_read_string(row, _MARKET_SLUG_KEYS),
         close_time=_extract_close_time(close_time),
-        theme=_read_string(row, _CATEGORY_KEYS) or "Uncategorized",
+        theme=_read_theme(row),
         current_yes_odds=current_yes_odds,
         current_no_odds=current_no_odds,
         volume_usd=_read_nested_number(
