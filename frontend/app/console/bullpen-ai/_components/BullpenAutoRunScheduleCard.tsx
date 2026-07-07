@@ -1750,6 +1750,103 @@ function InvestMetricSummaryCard({
 }
 
 
+function RunDetailWorkerStages({
+  run,
+  decisions,
+}: {
+  run: BullpenAutoLiveRun;
+  decisions: BullpenAutoLiveDecision[];
+}) {
+  const workflowView = buildBullpenAutoRunWorkflowView(run);
+  const investStage = workflowView.stages.find((stage) => stage.key === "invest") ?? null;
+  const timerNowMs = Date.parse(run.completed_at ?? run.started_at ?? "");
+  const stableTimerNowMs = Number.isFinite(timerNowMs) ? timerNowMs : 0;
+
+  return (
+    <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+            Background execution monitor
+          </p>
+          <h3 className="mt-2 text-base font-semibold text-slate-950">
+            {isBullpenAutoRunWorkflowSettled(workflowView)
+              ? "The latest Bullpen Scan + LLM + Rebalance and Invest run finished all 3 stages."
+              : workflowView.statusCopy}
+          </h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Run {run.id} · started {formatIstDateTime(run.started_at)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold text-slate-700">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+            {isBullpenAutoRunWorkflowSettled(workflowView)
+              ? "All 3 stages finished"
+              : workflowView.currentStageLabel}
+          </span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">{run.decisions_count} decisions</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">{run.orders_planned} planned</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">{run.orders_submitted} submitted</span>
+        </div>
+      </div>
+
+      <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        Worker stages
+      </p>
+      <div className="mt-3 grid gap-3 xl:grid-cols-3">
+        {workflowView.stages.map((stage) => {
+          const immediateSuccess = getInvestStageImmediateSuccess(stage);
+          const investStageCounters = getInvestStageCounters(stage);
+          const stageTwoExecutionSteps = stage.key === "llm" && investStage ? getInvestStageExecutionSteps(investStage) : [];
+          const investExecutionSteps = getInvestStageExecutionSteps(stage);
+          const toneClasses = getWorkflowToneClasses(immediateSuccess ? "green" : stage.tone);
+          const stageStatusLabel = immediateSuccess ? "Finished" : stage.state === "current" ? "Working" : stage.state === "finished" ? "Finished" : "In Queue";
+          const progressPercent = immediateSuccess ? 100 : stage.progressPercent;
+
+          return (
+            <div key={stage.key} className={`flex min-h-[28rem] flex-col rounded-2xl border p-4 shadow-sm ${toneClasses.container}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className={`text-sm font-semibold ${toneClasses.text}`}>{stage.title}</p>
+                  {stage.subtitle ? <p className={`text-xs leading-5 ${toneClasses.muted}`}>{stage.subtitle}</p> : null}
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}>{stageStatusLabel}</span>
+                  <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}>
+                    <Clock3 className="h-3 w-3" />
+                    {formatStageElapsedTime(stage.timerStartedAt, stage.timerCompletedAt, stableTimerNowMs)}
+                  </span>
+                </div>
+              </div>
+
+              <div className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-[11px] leading-5 ${toneClasses.muted}`}>
+                <div>Last stage run: <span className="font-semibold tabular-nums">{formatStageLastRunLabel(stage.timerCompletedAt ?? stage.timerStartedAt)}</span></div>
+                <div>Time taken: <span className="font-semibold tabular-nums">{formatStageElapsedTime(stage.timerStartedAt, stage.timerCompletedAt, stableTimerNowMs)}</span></div>
+                {stage.key === "scan" ? <>
+                  <div>New events found: <span className="font-semibold tabular-nums">{readStageOutputNumber(stage.outputs.accepted_candidates_count) ?? readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ?? stage.scanCandidates.length}</span></div>
+                  <div>Active Bullpen Positions Found: <span className="font-semibold tabular-nums">{readStageOutputNumber(stage.outputs.active_wallet_positions) ?? readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ?? stage.activePositionsFound.length}</span></div>
+                </> : null}
+                {stage.key === "invest" && formatInvestStageRowMix(stage) ? <div>Rows counted: <span className="font-semibold">{formatInvestStageRowMix(stage)}</span></div> : null}
+              </div>
+
+              {stage.key === "llm" && stageTwoExecutionSteps.length > 0 ? <StageTwoExecutionShortlist steps={stageTwoExecutionSteps} decisions={decisions} onOpenEventExitInfo={() => undefined} onOpenInvestEligibilityInfo={() => undefined} /> : null}
+
+              {investStageCounters.length > 0 ? <div className="mt-3 grid grid-cols-3 gap-2">{investStageCounters.map((counter) => <div key={counter.label} className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left"><p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}>{counter.label}</p><p className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}>{counter.value}</p></div>)}</div> : null}
+
+              {investExecutionSteps.length > 0 ? <div className="mt-3"><InvestExecutionStepsSummary steps={investExecutionSteps} compact /></div> : null}
+
+              <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}><div className={`h-full rounded-full ${toneClasses.progress}`} style={{ width: `${progressPercent}%` }} /></div>
+              <p className={`mt-3 text-xs font-semibold ${toneClasses.text}`}>{immediateSuccess ? "Finished" : stage.progressLabel}</p>
+              <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>{stage.detail}</p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+
 function RunDetailDialog({
   state,
   onClose,
@@ -1760,7 +1857,7 @@ function RunDetailDialog({
   const { run, decisions } = state;
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+      <div className="flex max-h-[90vh] w-full max-w-[92rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
@@ -1794,6 +1891,7 @@ function RunDetailDialog({
               {run.error_message}
             </p>
           ) : null}
+          <RunDetailWorkerStages run={run} decisions={decisions} />
           <div className="mt-5 space-y-4">
             {run.stage_results.map((stage) => (
               <section key={`${stage.stage_number}-${stage.stage_name}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
