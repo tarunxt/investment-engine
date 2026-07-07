@@ -104,6 +104,22 @@ async def test_sequenced_sell_complete_places_affordable_buys(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_sequenced_uses_completed_sell_proceeds_when_margin_is_stale(monkeypatch):
+    svc = FakeSvc(margin=0, quote=100)
+    monkeypatch.setattr(zerodha_router, "_svc", svc)
+
+    response = await zerodha_router.place_protected_market_orders_sequenced(
+        FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5), safety_buffer_amount=50), FakeDb(), SimpleNamespace(id=1)
+    )
+
+    assert response.sell_phase_complete is True
+    assert response.placed_count == 2
+    assert response.skipped_count == 0
+    assert [placed["transaction_type"] for placed in svc.placed] == ["SELL", "BUY"]
+    assert "Using detected completed sell proceeds" in "; ".join(response.messages)
+
+
+@pytest.mark.anyio
 async def test_sequenced_sell_rejected_skips_unaffordable_buys(monkeypatch):
     svc = FakeSvc(sell_status="REJECTED", margin=0, quote=100)
     monkeypatch.setattr(zerodha_router, "_svc", svc)
@@ -122,7 +138,7 @@ async def test_sequenced_partial_margin_clamps_buy_quantity(monkeypatch):
     monkeypatch.setattr(zerodha_router, "_svc", svc)
 
     response = await zerodha_router.place_protected_market_orders_sequenced(
-        FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5), safety_buffer_amount=50), FakeDb(), SimpleNamespace(id=1)
+        FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5), safety_buffer_amount=50, wait_for_sell_completion=False), FakeDb(), SimpleNamespace(id=1)
     )
 
     assert response.buy_results[0].quantity == 3

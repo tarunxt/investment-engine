@@ -793,6 +793,12 @@ async def place_protected_market_orders_sequenced(
 
     buy_phase_attempted = False
     buy_capital = refreshed_available_margin
+    if usable_sell_proceeds > 0:
+        buy_capital = max(refreshed_available_margin or 0.0, usable_sell_proceeds)
+        if refreshed_available_margin is not None and buy_capital > refreshed_available_margin:
+            messages.append(
+                "Using detected completed sell proceeds for buy sizing because refreshed margin has not yet reflected them."
+            )
     if buy_orders and buy_capital is not None:
         safety_buffer = body.safety_buffer_amount if body.safety_buffer_amount is not None else 50.0
         remaining = max(0.0, buy_capital - safety_buffer)

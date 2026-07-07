@@ -941,11 +941,9 @@ function getZerodhaBasketSellUnitLimit(order: ZerodhaBasketPreviewOrder) {
 
 function getZerodhaBasketBuyUnitLimit(order: ZerodhaBasketPreviewOrder) {
   if (order.price === null || order.price <= 0) return null;
-  const recommendedUnits = order.baseUnits !== null && order.baseUnits > 0 ? Math.floor(order.baseUnits) : null;
-  const balanceUnits = order.availableBalance !== null && order.availableBalance > 0 ? Math.floor(order.availableBalance / order.price) : null;
-  if (recommendedUnits === null) return balanceUnits;
-  if (balanceUnits === null) return recommendedUnits;
-  return Math.min(recommendedUnits, balanceUnits);
+  return order.availableBalance !== null && order.availableBalance > 0
+    ? Math.floor(order.availableBalance / order.price)
+    : null;
 }
 
 function getZerodhaBasketUnitLimit(order: ZerodhaBasketPreviewOrder) {
@@ -1282,7 +1280,7 @@ function buildZerodhaBasketPreviewOrders(
       const sellAvailableUnits = estimate.currentUnits ?? baseUnits;
       const maxUnits = side === "SELL"
         ? (sellAvailableUnits !== null && sellAvailableUnits > 0 ? Math.floor(sellAvailableUnits) : null)
-        : (projectedBuyPower !== null && price !== null && price > 0 ? Math.min(Math.floor(baseUnits ?? 0), Math.floor(projectedBuyPower / price)) : null);
+        : (projectedBuyPower !== null && price !== null && price > 0 ? Math.floor(projectedBuyPower / price) : null);
       const units = clampZerodhaBasketUnits(rawUnits, maxUnits);
       const amount = calculateZerodhaBasketAmount(units, price) ?? estimate.amount;
       const percent = calculateZerodhaBasketPercent(
