@@ -902,7 +902,7 @@ function applyFilters(
   );
 }
 
-function sourceHasFutureCandidates(candidates: BullpenQuestion[]) {
+function sourceHasFutureCandidates<T extends BullpenQuestion>(candidates: T[]) {
   return candidates.some((candidate) => {
     const closeDate = toValidDate(candidate.closeTime);
     return closeDate !== null && closeDate.getTime() >= Date.now();
@@ -963,7 +963,7 @@ async function fetchGammaMarkets(
   mode: ScanMode,
   filters: BullpenScanFilters,
 ) {
-  const candidates = new Map<string, BullpenQuestion>();
+  const candidates = new Map<string, FilterableBullpenQuestion>();
   let offset = 0;
 
   while (offset < DISCOVER_FALLBACK_LIMIT) {
@@ -1071,7 +1071,7 @@ async function buildResponse({
   sourceLabel: string;
   scannedAt: string;
   filters: BullpenScanFilters;
-  candidates: BullpenQuestion[];
+  candidates: FilterableBullpenQuestion[];
   warning?: string;
   details?: string;
 }) {
