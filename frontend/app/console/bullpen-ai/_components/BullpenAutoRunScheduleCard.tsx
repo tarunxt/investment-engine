@@ -301,7 +301,6 @@ function readStageOutputNumber(value: unknown) {
   return null;
 }
 
-
 type WorkflowStageView = ReturnType<
   typeof buildBullpenAutoRunWorkflowView
 >["stages"][number];
@@ -345,6 +344,7 @@ function StageOneRunStats({
   stage,
   renderInteractiveRows = false,
   onOpenScanCandidateDialog,
+  onOpenScanFilters,
 }: {
   stage: WorkflowStageView;
   renderInteractiveRows?: boolean;
@@ -352,6 +352,7 @@ function StageOneRunStats({
     stage: WorkflowStageView,
     mode: ScanCandidateDialogMode,
   ) => void;
+  onOpenScanFilters?: () => void;
 }) {
   const stats = getStageOneStats(stage);
   const rowClassName = renderInteractiveRows
@@ -381,30 +382,52 @@ function StageOneRunStats({
       )}
       <div className="pt-2">
         Total Events Scanned:{" "}
-        <span className="font-semibold tabular-nums">
-          {stats.totalScanned}
-        </span>{" "}
+        <span className="font-semibold tabular-nums">{stats.totalScanned}</span>{" "}
         (total questions)
       </div>
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
-        <button
-          type="button"
-          onClick={() =>
-            onOpenScanCandidateDialog(stage, "fresh-opportunities")
-          }
-          className={rowClassName}
-        >
-          Events that passed Filters:{" "}
-          <span className="font-semibold tabular-nums">
-            {stats.passedFilters}
-          </span>
-        </button>
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              onOpenScanCandidateDialog(stage, "fresh-opportunities")
+            }
+            className={rowClassName}
+          >
+            Events that passed Filters:{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.passedFilters}
+            </span>
+          </button>
+          {onOpenScanFilters ? (
+            <button
+              type="button"
+              onClick={onOpenScanFilters}
+              className="ml-auto inline-flex items-center rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              aria-label="Open scan filters"
+            >
+              Filters
+            </button>
+          ) : null}
+        </div>
       ) : (
-        <div>
-          Events that passed Filters:{" "}
-          <span className="font-semibold tabular-nums">
-            {stats.passedFilters}
+        <div className="flex items-center justify-between gap-2">
+          <span>
+            Events that passed Filters:{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.passedFilters}
+            </span>
           </span>
+          {onOpenScanFilters ? (
+            <button
+              type="button"
+              onClick={onOpenScanFilters}
+              className="ml-auto inline-flex items-center rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              aria-label="Open scan filters"
+            >
+              Filters
+            </button>
+          ) : null}
         </div>
       )}
     </div>
@@ -1717,12 +1740,12 @@ function StageOneOutputDialog({
   );
 }
 
-
 function getDecisionExitTypeDetails(decision: BullpenAutoLiveDecision) {
-  const matchingSignals = decision.exit_signals.filter((signal) =>
-    signal.strategy === "OUTSIDE_TOP_10_RETURNS_DAY" ||
-    signal.strategy === "LLM_OR_ODDS_FILTER_EXIT" ||
-    signal.strategy === "CAPITAL_AWARE_FORCED_EXIT",
+  const matchingSignals = decision.exit_signals.filter(
+    (signal) =>
+      signal.strategy === "OUTSIDE_TOP_10_RETURNS_DAY" ||
+      signal.strategy === "LLM_OR_ODDS_FILTER_EXIT" ||
+      signal.strategy === "CAPITAL_AWARE_FORCED_EXIT",
   );
   if (matchingSignals.length === 0) return null;
 
@@ -1781,9 +1804,12 @@ function StageTwoExecutionShortlist({
   return (
     <div className="mt-3 grid gap-2 text-xs">
       {steps.map((step) => {
-        const stepDecisions = step.key === "sell" ? sellDecisions : buyDecisions;
+        const stepDecisions =
+          step.key === "sell" ? sellDecisions : buyDecisions;
         const infoHandler =
-          step.key === "sell" ? onOpenEventExitInfo : onOpenInvestEligibilityInfo;
+          step.key === "sell"
+            ? onOpenEventExitInfo
+            : onOpenInvestEligibilityInfo;
         return (
           <div
             key={`stage-2-shortlist-${step.key}`}
@@ -1892,7 +1918,6 @@ function InvestMetricSummaryCard({
   );
 }
 
-
 function RunDetailWorkerStages({
   run,
   decisions,
@@ -1901,7 +1926,8 @@ function RunDetailWorkerStages({
   decisions: BullpenAutoLiveDecision[];
 }) {
   const workflowView = buildBullpenAutoRunWorkflowView(run);
-  const investStage = workflowView.stages.find((stage) => stage.key === "invest") ?? null;
+  const investStage =
+    workflowView.stages.find((stage) => stage.key === "invest") ?? null;
   const timerNowMs = Date.parse(run.completed_at ?? run.started_at ?? "");
   const stableTimerNowMs = Number.isFinite(timerNowMs) ? timerNowMs : 0;
 
@@ -1927,9 +1953,15 @@ function RunDetailWorkerStages({
               ? "All 3 stages finished"
               : workflowView.currentStageLabel}
           </span>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">{run.decisions_count} decisions</span>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">{run.orders_planned} planned</span>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">{run.orders_submitted} submitted</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+            {run.decisions_count} decisions
+          </span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+            {run.orders_planned} planned
+          </span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+            {run.orders_submitted} submitted
+          </span>
         </div>
       </div>
 
@@ -1940,45 +1972,154 @@ function RunDetailWorkerStages({
         {workflowView.stages.map((stage) => {
           const immediateSuccess = getInvestStageImmediateSuccess(stage);
           const investStageCounters = getInvestStageCounters(stage);
-          const stageTwoExecutionSteps = stage.key === "llm" && investStage ? getInvestStageExecutionSteps(investStage) : [];
+          const stageTwoExecutionSteps =
+            stage.key === "llm" && investStage
+              ? getInvestStageExecutionSteps(investStage)
+              : [];
           const investExecutionSteps = getInvestStageExecutionSteps(stage);
-          const toneClasses = getWorkflowToneClasses(immediateSuccess ? "green" : stage.tone);
-          const stageStatusLabel = immediateSuccess ? "Finished" : stage.state === "current" ? "Working" : stage.state === "finished" ? "Finished" : "In Queue";
-          const progressPercent = immediateSuccess ? 100 : stage.progressPercent;
+          const toneClasses = getWorkflowToneClasses(
+            immediateSuccess ? "green" : stage.tone,
+          );
+          const stageStatusLabel = immediateSuccess
+            ? "Finished"
+            : stage.state === "current"
+              ? "Working"
+              : stage.state === "finished"
+                ? "Finished"
+                : "In Queue";
+          const progressPercent = immediateSuccess
+            ? 100
+            : stage.progressPercent;
 
           return (
-            <div key={stage.key} className={`flex min-h-[28rem] flex-col rounded-2xl border p-4 shadow-sm ${toneClasses.container}`}>
+            <div
+              key={stage.key}
+              className={`flex min-h-[28rem] flex-col rounded-2xl border p-4 shadow-sm ${toneClasses.container}`}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
-                  <p className={`text-sm font-semibold ${toneClasses.text}`}>{stage.title}</p>
-                  {stage.subtitle ? <p className={`text-xs leading-5 ${toneClasses.muted}`}>{stage.subtitle}</p> : null}
+                  <p className={`text-sm font-semibold ${toneClasses.text}`}>
+                    {stage.title}
+                  </p>
+                  {stage.subtitle ? (
+                    <p className={`text-xs leading-5 ${toneClasses.muted}`}>
+                      {stage.subtitle}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}>{stageStatusLabel}</span>
-                  <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}>
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
+                  >
+                    {stageStatusLabel}
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}
+                  >
                     <Clock3 className="h-3 w-3" />
-                    {formatStageElapsedTime(stage.timerStartedAt, stage.timerCompletedAt, stableTimerNowMs)}
+                    {formatStageElapsedTime(
+                      stage.timerStartedAt,
+                      stage.timerCompletedAt,
+                      stableTimerNowMs,
+                    )}
                   </span>
                 </div>
               </div>
 
-              <div className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-[11px] leading-5 ${toneClasses.muted}`}>
-                <div>Last stage run: <span className="font-semibold tabular-nums">{formatStageLastRunLabel(stage.timerCompletedAt ?? stage.timerStartedAt)}</span></div>
-                <div>Time taken: <span className="font-semibold tabular-nums">{formatStageElapsedTime(stage.timerStartedAt, stage.timerCompletedAt, stableTimerNowMs)}</span></div>
-                {stage.key === "scan" ? <StageOneRunStats stage={stage} /> : null}
-                {stage.key === "llm" ? <StageTwoRunStats stage={stage} /> : null}
-                {stage.key === "invest" && formatInvestStageRowMix(stage) ? <div>Rows counted: <span className="font-semibold">{formatInvestStageRowMix(stage)}</span></div> : null}
+              <div
+                className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-[11px] leading-5 ${toneClasses.muted}`}
+              >
+                <div>
+                  Last stage run:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {formatStageLastRunLabel(
+                      stage.timerCompletedAt ?? stage.timerStartedAt,
+                    )}
+                  </span>
+                </div>
+                <div>
+                  Time taken:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {formatStageElapsedTime(
+                      stage.timerStartedAt,
+                      stage.timerCompletedAt,
+                      stableTimerNowMs,
+                    )}
+                  </span>
+                </div>
+                {stage.key === "scan" ? (
+                  <StageOneRunStats
+                    stage={stage}
+                    onOpenScanFilters={onOpenScanFilters}
+                  />
+                ) : null}
+                {stage.key === "llm" ? (
+                  <StageTwoRunStats stage={stage} />
+                ) : null}
+                {stage.key === "invest" && formatInvestStageRowMix(stage) ? (
+                  <div>
+                    Rows counted:{" "}
+                    <span className="font-semibold">
+                      {formatInvestStageRowMix(stage)}
+                    </span>
+                  </div>
+                ) : null}
               </div>
 
-              {stage.key === "llm" && stageTwoExecutionSteps.length > 0 ? <StageTwoExecutionShortlist steps={stageTwoExecutionSteps} decisions={decisions} onOpenEventExitInfo={() => undefined} onOpenInvestEligibilityInfo={() => undefined} /> : null}
+              {stage.key === "llm" && stageTwoExecutionSteps.length > 0 ? (
+                <StageTwoExecutionShortlist
+                  steps={stageTwoExecutionSteps}
+                  decisions={decisions}
+                  onOpenEventExitInfo={() => undefined}
+                  onOpenInvestEligibilityInfo={() => undefined}
+                />
+              ) : null}
 
-              {investStageCounters.length > 0 ? <div className="mt-3 grid grid-cols-3 gap-2">{investStageCounters.map((counter) => <div key={counter.label} className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left"><p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}>{counter.label}</p><p className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}>{counter.value}</p></div>)}</div> : null}
+              {investStageCounters.length > 0 ? (
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {investStageCounters.map((counter) => (
+                    <div
+                      key={counter.label}
+                      className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left"
+                    >
+                      <p
+                        className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
+                      >
+                        {counter.label}
+                      </p>
+                      <p
+                        className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}
+                      >
+                        {counter.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
 
-              {investExecutionSteps.length > 0 ? <div className="mt-3"><InvestExecutionStepsSummary steps={investExecutionSteps} compact /></div> : null}
+              {investExecutionSteps.length > 0 ? (
+                <div className="mt-3">
+                  <InvestExecutionStepsSummary
+                    steps={investExecutionSteps}
+                    compact
+                  />
+                </div>
+              ) : null}
 
-              <div className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}><div className={`h-full rounded-full ${toneClasses.progress}`} style={{ width: `${progressPercent}%` }} /></div>
-              <p className={`mt-3 text-xs font-semibold ${toneClasses.text}`}>{immediateSuccess ? "Finished" : stage.progressLabel}</p>
-              <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>{stage.detail}</p>
+              <div
+                className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}
+              >
+                <div
+                  className={`h-full rounded-full ${toneClasses.progress}`}
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <p className={`mt-3 text-xs font-semibold ${toneClasses.text}`}>
+                {immediateSuccess ? "Finished" : stage.progressLabel}
+              </p>
+              <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
+                {stage.detail}
+              </p>
             </div>
           );
         })}
@@ -1986,7 +2127,6 @@ function RunDetailWorkerStages({
     </section>
   );
 }
-
 
 function RunDetailDialog({
   state,
@@ -2009,7 +2149,9 @@ function RunDetailDialog({
             </h2>
             <p className="text-xs text-slate-500">
               Run {run.id} · started {formatIstDateTime(run.started_at)}
-              {run.completed_at ? ` · completed ${formatIstDateTime(run.completed_at)}` : ""}
+              {run.completed_at
+                ? ` · completed ${formatIstDateTime(run.completed_at)}`
+                : ""}
             </p>
           </div>
           <button
@@ -2023,9 +2165,18 @@ function RunDetailDialog({
         </div>
         <div className="flex-1 overflow-auto px-6 py-5">
           <div className="grid gap-3 md:grid-cols-3">
-            <InvestMetricSummaryCard label="Decisions" value={run.decisions_count} />
-            <InvestMetricSummaryCard label="Planned" value={run.orders_planned} />
-            <InvestMetricSummaryCard label="Submitted" value={run.orders_submitted} />
+            <InvestMetricSummaryCard
+              label="Decisions"
+              value={run.decisions_count}
+            />
+            <InvestMetricSummaryCard
+              label="Planned"
+              value={run.orders_planned}
+            />
+            <InvestMetricSummaryCard
+              label="Submitted"
+              value={run.orders_submitted}
+            />
           </div>
           {run.error_message ? (
             <p className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">
@@ -2035,7 +2186,10 @@ function RunDetailDialog({
           <RunDetailWorkerStages run={run} decisions={decisions} />
           <div className="mt-5 space-y-4">
             {run.stage_results.map((stage) => (
-              <section key={`${stage.stage_number}-${stage.stage_name}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <section
+                key={`${stage.stage_number}-${stage.stage_name}`}
+                className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -2051,7 +2205,9 @@ function RunDetailDialog({
                 </div>
                 <p className="mt-2 text-xs text-slate-500">
                   Started {formatIstDateTime(stage.started_at)}
-                  {stage.completed_at ? ` · completed ${formatIstDateTime(stage.completed_at)}` : ""}
+                  {stage.completed_at
+                    ? ` · completed ${formatIstDateTime(stage.completed_at)}`
+                    : ""}
                 </p>
                 <pre className="mt-3 max-h-64 overflow-auto rounded-xl bg-white p-3 text-xs leading-5 text-slate-700">
                   {JSON.stringify(stage.outputs ?? {}, null, 2)}
@@ -2060,18 +2216,30 @@ function RunDetailDialog({
             ))}
           </div>
           <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-950">Event decisions</h3>
+            <h3 className="text-sm font-semibold text-slate-950">
+              Event decisions
+            </h3>
             {decisions.length ? (
               <div className="mt-3 space-y-2">
                 {decisions.map((decision) => (
-                  <div key={decision.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-                    <div className="font-semibold text-slate-950">{decision.market_title}</div>
-                    <div className="mt-1">Outcome: {decision.side || "—"} · action: {decision.decision || "—"}</div>
+                  <div
+                    key={decision.id}
+                    className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-700"
+                  >
+                    <div className="font-semibold text-slate-950">
+                      {decision.market_title}
+                    </div>
+                    <div className="mt-1">
+                      Outcome: {decision.side || "—"} · action:{" "}
+                      {decision.decision || "—"}
+                    </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="mt-2 text-sm text-slate-600">No persisted event decisions were returned for this run.</p>
+              <p className="mt-2 text-sm text-slate-600">
+                No persisted event decisions were returned for this run.
+              </p>
             )}
           </section>
         </div>
@@ -2610,7 +2778,8 @@ export function BullpenAutoRunScheduleCard({
   const [isScheduleInfoDialogOpen, setIsScheduleInfoDialogOpen] =
     useState(false);
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
-  const [runDetailDialog, setRunDetailDialog] = useState<RunDetailDialogState | null>(null);
+  const [runDetailDialog, setRunDetailDialog] =
+    useState<RunDetailDialogState | null>(null);
   const [isSchedulePickerOpen, setIsSchedulePickerOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
@@ -3242,18 +3411,27 @@ export function BullpenAutoRunScheduleCard({
     run: BullpenAutoLiveRun,
     kind: InvestMetricDialogKind = "planned",
   ) => {
-    const stage = buildBullpenAutoRunWorkflowView(run).stages.find((workflowStage) => workflowStage.key === "invest") ?? null;
+    const stage =
+      buildBullpenAutoRunWorkflowView(run).stages.find(
+        (workflowStage) => workflowStage.key === "invest",
+      ) ?? null;
     setInvestMetricDialog({
       kind,
       run,
       stage,
-      decisions: summary?.recent_decisions.filter((decision) => decision.run_id === run.id) ?? [],
+      decisions:
+        summary?.recent_decisions.filter(
+          (decision) => decision.run_id === run.id,
+        ) ?? [],
     });
   };
   const openRunDetailDialog = (run: BullpenAutoLiveRun) => {
     setRunDetailDialog({
       run,
-      decisions: summary?.recent_decisions.filter((decision) => decision.run_id === run.id) ?? [],
+      decisions:
+        summary?.recent_decisions.filter(
+          (decision) => decision.run_id === run.id,
+        ) ?? [],
     });
   };
   const latestCompletedRun =
@@ -3493,7 +3671,11 @@ export function BullpenAutoRunScheduleCard({
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setScheduleStartInput(formatScheduleInputFromDate(new Date()))}
+                  onClick={() =>
+                    setScheduleStartInput(
+                      formatScheduleInputFromDate(new Date()),
+                    )
+                  }
                   disabled={action !== null}
                   className="ml-2 h-8 rounded-lg px-3 text-xs shadow-none"
                 >
@@ -3656,11 +3838,17 @@ export function BullpenAutoRunScheduleCard({
             </div>
             <button
               type="button"
-              onClick={() => latestCompletedRun ? openRunDetailDialog(latestCompletedRun) : undefined}
+              onClick={() =>
+                latestCompletedRun
+                  ? openRunDetailDialog(latestCompletedRun)
+                  : undefined
+              }
               disabled={!latestCompletedRun}
               className="mt-2 block text-left text-sm font-semibold text-slate-950 underline-offset-4 transition hover:text-blue-700 hover:underline disabled:cursor-not-allowed disabled:no-underline"
             >
-              {formatIstDateTime(latestCompletedRun?.started_at ?? summary?.state.last_run_at)}
+              {formatIstDateTime(
+                latestCompletedRun?.started_at ?? summary?.state.last_run_at,
+              )}
             </button>
             <p className="mt-1 text-xs text-slate-600">
               {latestCompletedRun?.summary || "No auto-run result yet."}
@@ -3970,9 +4158,12 @@ export function BullpenAutoRunScheduleCard({
                         stage={stage}
                         renderInteractiveRows
                         onOpenScanCandidateDialog={openScanCandidateDialog}
+                        onOpenScanFilters={onOpenScanFilters}
                       />
                     ) : null}
-                    {stage.key === "llm" ? <StageTwoRunStats stage={stage} /> : null}
+                    {stage.key === "llm" ? (
+                      <StageTwoRunStats stage={stage} />
+                    ) : null}
                     {stage.key === "invest" &&
                     formatInvestStageRowMix(stage) ? (
                       <div>
@@ -4254,7 +4445,8 @@ export function BullpenAutoRunScheduleCard({
                           tabIndex={0}
                           onClick={() => openRunDetailDialog(run)}
                           onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") openRunDetailDialog(run);
+                            if (event.key === "Enter" || event.key === " ")
+                              openRunDetailDialog(run);
                           }}
                           className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
                         >
@@ -4280,16 +4472,43 @@ export function BullpenAutoRunScheduleCard({
                               </p>
                             </div>
                             <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                              <button type="button" onClick={(event) => { event.stopPropagation(); openRunInvestMetricDialog(run, "planned"); }} className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50">
-                                <div className="font-semibold text-slate-950">{run.decisions_count}</div>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openRunInvestMetricDialog(run, "planned");
+                                }}
+                                className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50"
+                              >
+                                <div className="font-semibold text-slate-950">
+                                  {run.decisions_count}
+                                </div>
                                 <div className="text-slate-500">decisions</div>
                               </button>
-                              <button type="button" onClick={(event) => { event.stopPropagation(); openRunInvestMetricDialog(run, "planned"); }} className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50">
-                                <div className="font-semibold text-slate-950">{run.orders_planned}</div>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openRunInvestMetricDialog(run, "planned");
+                                }}
+                                className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50"
+                              >
+                                <div className="font-semibold text-slate-950">
+                                  {run.orders_planned}
+                                </div>
                                 <div className="text-slate-500">planned</div>
                               </button>
-                              <button type="button" onClick={(event) => { event.stopPropagation(); openRunInvestMetricDialog(run, "planned"); }} className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50">
-                                <div className="font-semibold text-slate-950">{run.orders_submitted}</div>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openRunInvestMetricDialog(run, "planned");
+                                }}
+                                className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50"
+                              >
+                                <div className="font-semibold text-slate-950">
+                                  {run.orders_submitted}
+                                </div>
                                 <div className="text-slate-500">submitted</div>
                               </button>
                             </div>
