@@ -62,6 +62,10 @@ SPORTS_KEYWORDS = (
     "rocket league",
     "fifa",
     "uefa",
+    "roshan",
+    "rampage",
+    "ultra kill",
+    "first blood",
 )
 SPORTS_PATTERNS = (
     re.compile(
@@ -71,6 +75,7 @@ SPORTS_PATTERNS = (
     re.compile(r"\b(?:first|second) half\b", re.IGNORECASE),
     re.compile(r"\bhalftime\b", re.IGNORECASE),
     re.compile(r"\bmap\s+\d+\b", re.IGNORECASE),
+    re.compile(r"\bgame\s+\d+\s*:", re.IGNORECASE),
     re.compile(r"\bbest of\s+\d+\b", re.IGNORECASE),
     re.compile(
         r"\b[A-Za-z][A-Za-z .\'-]{2,40}\s+vs\.?\s+[A-Za-z][A-Za-z .\'-]{2,40}\b",
