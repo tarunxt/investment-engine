@@ -9,6 +9,11 @@ import {
   getCanonicalPolymarketEventSlug,
 } from "./_lib/polymarketMarketUrls";
 import {
+  collectPolymarketCategoryLabels,
+  formatPolymarketCategory,
+  POLYMARKET_DEFAULT_CATEGORY,
+} from "./_lib/polymarketCategory";
+import {
   BULLPEN_BIN_CANDIDATES,
   buildBullpenProcessEnv,
   parseBullpenJsonOutput,
@@ -39,7 +44,8 @@ type WalkContext = {
   category: string | null;
 };
 
-type FilterableBullpenQuestion = BullpenQuestion & {
+type FilterableBullpenQuestion = Omit<BullpenQuestion, "category"> & {
+  category: string | null;
   _categorySearchText: string;
   _searchText: string;
 };
@@ -351,39 +357,26 @@ function collectDeepCategoryTrailLabels(value: unknown) {
 
 function collectCategoryLabels(
   record: Record<string, unknown>,
-  context?: WalkContext,
+  contextCategory: string | null = null,
 ) {
-  const labels: string[] = [];
-  const seen = new Set<string>();
+  const labels = [
+    ...collectPolymarketCategoryLabels(contextCategory),
+    ...collectPolymarketCategoryLabels(record),
+  ];
+  const seen = new Set(labels.map((label) => label.toLowerCase()));
   const add = (value: unknown) => addCategoryTrailLabel(labels, seen, value);
 
-  CATEGORY_KEYS.forEach((key) => add(record[key]));
-  if (context?.category) add(context.category);
-
-  for (const key of ["tags", "categories"]) {
-    const value = record[key];
-    if (Array.isArray(value)) value.forEach(add);
-  }
-
-  for (const event of toArray(record.events)) {
-    if (!event || typeof event !== "object") continue;
-    const eventRecord = event as Record<string, unknown>;
-    CATEGORY_KEYS.forEach((key) => add(eventRecord[key]));
-    for (const key of ["tags", "categories"]) {
-      const value = eventRecord[key];
-      if (Array.isArray(value)) value.forEach(add);
-    }
-    collectDeepCategoryTrailLabels(eventRecord).forEach(add);
-  }
-
   collectDeepCategoryTrailLabels(record).forEach(add);
-
   return labels;
 }
 
-function readCategory(record: Record<string, unknown>, context?: WalkContext) {
-  const labels = collectCategoryLabels(record, context);
-  return labels.length > 0 ? labels.join(" · ") : "Uncategorized";
+function readCategory(
+  record: Record<string, unknown>,
+  contextCategory: string | null = null,
+) {
+  return formatPolymarketCategory(
+    collectCategoryLabels(record, contextCategory),
+  );
 }
 
 function readDeepString(value: unknown, keys: string[]): string | null {
@@ -533,7 +526,7 @@ function walk(
   const record = value as Record<string, unknown>;
   const nextContext = {
     closeTime: readString(record, CLOSE_TIME_KEYS) || context.closeTime,
-    category: readCategory(record, context),
+    category: readCategory(record, context.category),
   };
   visit(record, nextContext);
   Object.values(record).forEach((child) => walk(child, visit, nextContext));
@@ -777,7 +770,9 @@ function isInsultMarket(question: FilterableBullpenQuestion) {
   return INSULT_MARKET_PATTERNS.some((pattern) => pattern.test(searchText));
 }
 
-function sortQuestions<T extends BullpenQuestion>(questions: T[]) {
+function sortQuestions<
+  T extends Pick<BullpenQuestion, "question" | "closeTime">,
+>(questions: T[]) {
   return [...questions].sort((left, right) => {
     const leftTime = left.closeTime
       ? new Date(left.closeTime).getTime()
@@ -800,7 +795,7 @@ function buildQuestionFilterSearchText({
   contextCategory,
 }: {
   question: string;
-  category: string;
+  category: string | null;
   slug: string | null;
   outcomeLabels: string[];
   record: Record<string, unknown>;
@@ -845,9 +840,10 @@ function normalizeGammaMarket(
   );
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
   const category = readCategory(record);
+  const categoryLabels = collectCategoryLabels(record);
   const categorySearchText = normalizeSearchTextParts([
     category,
-    ...collectCategoryLabels(record),
+    ...categoryLabels,
   ]);
   const searchText = buildQuestionFilterSearchText({
     question,
@@ -913,7 +909,8 @@ function normalizeQuestion(
   const question = readString(record, QUESTION_KEYS);
   if (!question || question.length < 8) return null;
 
-  const category = readCategory(record, context);
+  const category = readCategory(record, context.category);
+  const categoryLabels = collectCategoryLabels(record, context.category);
   const yesOdds = normalizeOdds(
     readOutcomeNumber(record, "yes", [
       "yesOdds",
@@ -963,7 +960,7 @@ function normalizeQuestion(
   const categorySearchText = normalizeSearchTextParts([
     category,
     context.category,
-    ...collectCategoryLabels(record, context),
+    ...categoryLabels,
   ]);
   const searchText = buildQuestionFilterSearchText({
     question,
@@ -1018,7 +1015,7 @@ function normalizeQuestion(
 }
 
 function passesTimeFilter(
-  question: BullpenQuestion,
+  question: Pick<BullpenQuestion, "closeTime">,
   mode: ScanMode,
   filters: BullpenScanFilters,
 ) {
@@ -1075,15 +1072,14 @@ function collectQuestions(payloads: unknown[], sourceUrl: string) {
   return sortQuestions(Array.from(candidates.values()));
 }
 
-function stripFilterMetadata(
-  question: FilterableBullpenQuestion,
-): BullpenQuestion {
-  const {
-    _categorySearchText: _ignoredCategorySearchText,
-    _searchText: _ignoredSearchText,
-    ...publicQuestion
-  } = question;
-  return publicQuestion;
+function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuestion {
+  const publicQuestion = { ...question };
+  delete publicQuestion._categorySearchText;
+  delete publicQuestion._searchText;
+  return {
+    ...publicQuestion,
+    category: publicQuestion.category ?? POLYMARKET_DEFAULT_CATEGORY,
+  };
 }
 
 function applyFilters(
@@ -1098,7 +1094,9 @@ function applyFilters(
   );
 }
 
-function sourceHasFutureCandidates<T extends BullpenQuestion>(candidates: T[]) {
+function sourceHasFutureCandidates<
+  T extends Pick<BullpenQuestion, "closeTime">,
+>(candidates: T[]) {
   return candidates.some((candidate) => {
     const closeDate = toValidDate(candidate.closeTime);
     return closeDate !== null && closeDate.getTime() >= Date.now();

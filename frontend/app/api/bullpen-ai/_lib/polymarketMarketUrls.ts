@@ -4,6 +4,11 @@ import { promisify } from "node:util";
 import type { BullpenQuestion } from "@/lib/bullpen-ai";
 
 import {
+  collectPolymarketCategoryLabels,
+  formatPolymarketCategory,
+  shouldReplaceCategory,
+} from "./polymarketCategory";
+import {
   BULLPEN_BIN_CANDIDATES,
   buildBullpenProcessEnv,
   parseBullpenJsonOutput,
@@ -28,6 +33,7 @@ export type ResolvedPolymarketMarket = {
   id: string;
   slug: string | null;
   marketUrl: string | null;
+  category: string | null;
   yesOdds: number | null;
   noOdds: number | null;
   bestBidPrice: number | null;
@@ -38,6 +44,7 @@ export type ResolvedPolymarketMarket = {
 };
 
 type PolymarketEventSupplement = {
+  category: string | null;
   marketContext: string | null;
 };
 
@@ -270,6 +277,78 @@ function htmlToText(value: string | null) {
   return normalized || null;
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractMetaContent(
+  html: string,
+  attribute: "property" | "name",
+  attributeValue: string,
+) {
+  const escapedAttributeValue = escapeRegExp(attributeValue);
+  const pattern = new RegExp(
+    `<meta[^>]+${attribute}=["']${escapedAttributeValue}["'][^>]+content=["']([^"']+)["']|<meta[^>]+content=["']([^"']+)["'][^>]+${attribute}=["']${escapedAttributeValue}["']`,
+    "i",
+  );
+  const match = html.match(pattern);
+  return normalizeText(decodeHtmlEntities(match?.[1] || match?.[2] || ""));
+}
+
+function extractEmbeddedJson(html: string) {
+  const scripts = [
+    ...html.matchAll(
+      /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/gi,
+    ),
+    ...html.matchAll(
+      /<script[^>]+type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi,
+    ),
+  ];
+
+  return scripts.flatMap((match) => {
+    try {
+      return [JSON.parse(match[1])];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function preferMoreSpecificCategory(
+  currentCategory: string | null,
+  candidateCategory: string | null,
+) {
+  if (shouldReplaceCategory(currentCategory, candidateCategory)) {
+    return candidateCategory;
+  }
+
+  return currentCategory ?? candidateCategory;
+}
+
+function extractEventCategoryText(html: string) {
+  const metaCategory = formatPolymarketCategory([
+    extractMetaContent(html, "property", "og:temporal:event_category"),
+    extractMetaContent(html, "property", "og:temporal:event_subcategory"),
+  ]);
+  const breadcrumbCategory = formatPolymarketCategory([
+    html.match(
+      /"categoryBreadcrumb":\{[^}]*"categoryLabel":"([^"]+)"[^}]*"subcategoryLabel":"([^"]+)"/i,
+    )?.[1] || null,
+    html.match(
+      /"categoryBreadcrumb":\{[^}]*"categoryLabel":"([^"]+)"[^}]*"subcategoryLabel":"([^"]+)"/i,
+    )?.[2] || null,
+  ]);
+  const embeddedCategory = formatPolymarketCategory(
+    collectPolymarketCategoryLabels(extractEmbeddedJson(html)),
+  );
+
+  return [metaCategory, breadcrumbCategory, embeddedCategory].reduce(
+    (bestCategory, candidateCategory) =>
+      preferMoreSpecificCategory(bestCategory, candidateCategory),
+    null as string | null,
+  );
+}
+
 function extractContextPanelSlice(html: string) {
   const panelMatch = html.match(
     /<(?:div|section)[^>]*\brole=["']tabpanel["'][^>]*\bid=["'][^"']*-panel-context["'][^>]*>/i,
@@ -370,6 +449,7 @@ async function fetchPolymarketEventSupplement(
   const html = await response.text();
 
   return {
+    category: extractEventCategoryText(html),
     marketContext: extractMarketContextText(html),
   };
 }
@@ -417,6 +497,9 @@ function normalizeResolvedMarket(
   const rules = extractRulesText(record);
   const bestBidPrice = normalizePrice(parseNumber(record.bestBid));
   const bestAskPrice = normalizePrice(parseNumber(record.bestAsk));
+  const category = formatPolymarketCategory(
+    collectPolymarketCategoryLabels(record),
+  );
 
   if (!id) return null;
 
@@ -424,6 +507,7 @@ function normalizeResolvedMarket(
     id,
     slug,
     marketUrl: buildPolymarketEventUrl(eventSlug),
+    category,
     yesOdds,
     noOdds,
     bestBidPrice,
@@ -536,6 +620,10 @@ export async function resolvePolymarketMarkets<
 
     resolvedByQuestionId[questionId] = {
       ...resolved,
+      category: preferMoreSpecificCategory(
+        resolved.category,
+        supplement.category,
+      ),
       marketContext: supplement.marketContext,
     };
   }
@@ -617,6 +705,7 @@ async function searchBullpenMarketByQuestion(question: string) {
         id: fallbackMarket.id,
         slug: fallbackMarket.slug,
         marketUrl: fallbackMarket.marketUrl,
+        category: null,
         yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
         noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
         bestBidPrice: null,
@@ -674,21 +763,45 @@ export async function resolvePolymarketMarketsWithQuestionFallback<
 
 export async function applyCanonicalPolymarketMarketUrls(
   questions: BullpenQuestion[],
+  resolveMarkets: (
+    questions: BullpenQuestion[],
+  ) => Promise<Record<string, ResolvedPolymarketMarket>> =
+    resolvePolymarketMarketsWithQuestionFallback,
 ) {
   if (questions.length === 0) return questions;
 
   try {
-    const resolvedByQuestionId =
-      await resolvePolymarketMarketsWithQuestionFallback(questions);
+    const resolvedByQuestionId = await resolveMarkets(questions);
 
     let changed = false;
     const nextQuestions = questions.map((question) => {
       const resolved = resolvedByQuestionId[question.id];
       if (!resolved) return question;
+      const nextCategory = shouldReplaceCategory(
+        question.category,
+        resolved.category,
+      )
+        ? resolved.category
+        : question.category;
+
+      if (
+        process.env.BULLPEN_AI_DEBUG_CATEGORIES === "1" &&
+        nextCategory !== question.category
+      ) {
+        console.info("[bullpen-ai:category-debug]", {
+          questionId: question.id,
+          title: question.question,
+          originalCategory: question.category,
+          resolvedCategory: nextCategory,
+          slug: resolved.slug ?? question.slug,
+          marketUrl: resolved.marketUrl ?? question.marketUrl,
+        });
+      }
 
       if (
         resolved.marketUrl === question.marketUrl &&
         resolved.slug === question.slug &&
+        nextCategory === question.category &&
         resolved.yesOdds === question.yesOdds &&
         resolved.noOdds === question.noOdds &&
         resolved.rules === question.rules &&
@@ -703,6 +816,7 @@ export async function applyCanonicalPolymarketMarketUrls(
         ...question,
         slug: resolved.slug,
         marketUrl: resolved.marketUrl,
+        category: nextCategory,
         yesOdds: resolved.yesOdds,
         noOdds: resolved.noOdds,
         rules: resolved.rules,

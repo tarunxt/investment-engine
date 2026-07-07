@@ -79,6 +79,7 @@ import type {
   RunResponse,
 } from "@/types/api";
 
+import { shouldReplaceCategory } from "@/app/api/bullpen-ai/_lib/polymarketCategory";
 import {
   BullpenQuestionsTable,
   type BullpenTableSortKey,
@@ -169,6 +170,7 @@ type PolymarketMarketRefresh = {
   id: string;
   slug: string | null;
   marketUrl: string | null;
+  category?: string | null;
   yesOdds: number | null;
   noOdds: number | null;
   bestBidPrice: number | null;
@@ -768,12 +770,19 @@ function applySnapshotMarketUpdates(
       marketUpdate.resolutionSource === undefined
         ? question.resolutionSource
         : marketUpdate.resolutionSource;
+    const nextCategory = shouldReplaceCategory(
+      question.category,
+      marketUpdate.category,
+    )
+      ? marketUpdate.category ?? question.category
+      : question.category;
 
     const oddsChanged = nextYesOdds !== question.yesOdds || nextNoOdds !== question.noOdds;
 
     if (
       nextSlug === question.slug &&
       nextMarketUrl === question.marketUrl &&
+      nextCategory === question.category &&
       nextYesOdds === question.yesOdds &&
       nextNoOdds === question.noOdds &&
       nextRules === question.rules &&
@@ -788,6 +797,7 @@ function applySnapshotMarketUpdates(
       ...question,
       slug: nextSlug,
       marketUrl: nextMarketUrl,
+      category: nextCategory,
       yesOdds: nextYesOdds,
       noOdds: nextNoOdds,
       currentOddsUpdatedAt:
@@ -1718,8 +1728,10 @@ function BullpenAiPageContent() {
       .filter((question) => question.id.trim())
       .map((question) => ({
         id: question.id,
+        question: question.question,
         slug: question.slug,
         marketUrl: question.marketUrl,
+        category: question.category,
       }));
     if (questions.length === 0) return;
 
@@ -1740,8 +1752,16 @@ function BullpenAiPageContent() {
         const payload = (await response.json()) as {
           marketUrls?: Record<string, string | null>;
           marketSlugs?: Record<string, string | null>;
+          marketCategories?: Record<string, string | null>;
         };
-        if (cancelled || (!payload.marketUrls && !payload.marketSlugs)) return;
+        if (
+          cancelled ||
+          (!payload.marketUrls &&
+            !payload.marketSlugs &&
+            !payload.marketCategories)
+        ) {
+          return;
+        }
 
         const marketUpdates = Object.fromEntries(
           questions.map((question) => [
@@ -1749,6 +1769,7 @@ function BullpenAiPageContent() {
             {
               marketUrl: payload.marketUrls?.[question.id],
               slug: payload.marketSlugs?.[question.id],
+              category: payload.marketCategories?.[question.id],
             },
           ]),
         );
@@ -1787,6 +1808,8 @@ function BullpenAiPageContent() {
           };
         };
 
+        // Older localStorage snapshots may have stale "Uncategorized" values.
+        // Reapplying market metadata lets canonical Polymarket categories heal them.
         if (activeSnapshotSource === "manual") {
           setSnapshotsByMode(updateSnapshotStore);
         } else {
@@ -2756,6 +2779,7 @@ function BullpenAiPageContent() {
             question: question.question,
             slug: question.slug,
             marketUrl: question.marketUrl,
+            category: question.category,
           })),
         }),
       });
@@ -2769,22 +2793,13 @@ function BullpenAiPageContent() {
       const marketUpdates = payload.markets || {};
       const currentOddsUpdatedAt = new Date().toISOString();
       const currentSnapshotId = activeCurrentSnapshot.snapshotId;
-      const nextQuestions = activeCurrentSnapshot.questions.map((question) => {
-        const update = marketUpdates[question.id];
-        if (!update) return question;
-        return createBullpenQuestionRow({
-          ...question,
-          slug: update.slug ?? question.slug,
-          marketUrl: update.marketUrl ?? question.marketUrl,
-          yesOdds: update.yesOdds ?? question.yesOdds,
-          noOdds: update.noOdds ?? question.noOdds,
+      const nextSnapshot =
+        applySnapshotMarketUpdates(
+          activeCurrentSnapshot,
+          currentSnapshotId,
+          marketUpdates,
           currentOddsUpdatedAt,
-          rules: update.rules ?? question.rules,
-          marketContext: update.marketContext ?? question.marketContext,
-          resolutionSource:
-            update.resolutionSource ?? question.resolutionSource,
-        });
-      });
+        ) ?? activeCurrentSnapshot;
       const refreshedQuestionIds = new Set(Object.keys(marketUpdates));
       const unresolvedCount = payload.unresolvedQuestionIds?.length || 0;
 
@@ -2824,7 +2839,7 @@ function BullpenAiPageContent() {
       }
 
       return {
-        refreshedQuestions: nextQuestions.filter((question) =>
+        refreshedQuestions: nextSnapshot.questions.filter((question) =>
           selectedQuestionIdSet.has(question.id),
         ),
         refreshedCount: refreshedQuestionIds.size,
