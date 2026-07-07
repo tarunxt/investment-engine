@@ -3076,7 +3076,26 @@ export function BullpenAutoRunScheduleCard({
           String(refreshMinutes),
         ),
       );
-      await apiService.startBullpenAutoLive();
+      const startedState = await apiService.startBullpenAutoLive();
+      setSummary((currentSummary) =>
+        currentSummary
+          ? {
+              ...currentSummary,
+              state: startedState,
+              settings: {
+                ...currentSummary.settings,
+                auto_live_enabled: true,
+                dry_run: false,
+                allow_live_execution: true,
+                require_manual_confirmation: false,
+                strategy_profile: CONSOLE_PROFILE_ID,
+                console_order_usd: nextConsoleOrderUsd,
+                console_auto_start_at: normalizedStart || null,
+                console_auto_refresh_minutes: refreshMinutes,
+              },
+            }
+          : currentSummary,
+      );
       if (startWasNow) {
         const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
         const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
