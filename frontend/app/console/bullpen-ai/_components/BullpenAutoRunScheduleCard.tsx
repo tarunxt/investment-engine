@@ -301,6 +301,149 @@ function readStageOutputNumber(value: unknown) {
   return null;
 }
 
+
+type WorkflowStageView = ReturnType<
+  typeof buildBullpenAutoRunWorkflowView
+>["stages"][number];
+
+function getStageOneStats(stage: WorkflowStageView) {
+  const activePositions =
+    readStageOutputNumber(stage.outputs.active_wallet_positions) ??
+    readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
+    stage.activePositionsFound.length;
+  const totalScanned =
+    readStageOutputNumber(stage.outputs.scanned_candidates) ??
+    readStageOutputNumber(stage.outputs.total_items) ??
+    stage.scanCandidates.length;
+  const passedFilters =
+    readStageOutputNumber(stage.outputs.accepted_candidates_count) ??
+    readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ??
+    stage.scanCandidates.length;
+
+  return { activePositions, totalScanned, passedFilters };
+}
+
+function getStageTwoStats(stage: WorkflowStageView) {
+  const activePositions =
+    readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
+    readStageOutputNumber(stage.inputs.active_position_rows_before_llm) ??
+    stage.activePositionsFound.length;
+  const newOpportunities =
+    readStageOutputNumber(stage.outputs.stage1_accepted_candidate_count) ??
+    readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ??
+    readStageOutputNumber(stage.inputs.candidate_rows_before_llm) ??
+    stage.scanCandidates.length;
+  const llmRanOn =
+    readStageOutputNumber(stage.outputs.llm_candidate_count) ??
+    readStageOutputNumber(stage.outputs.total_items) ??
+    activePositions + newOpportunities;
+
+  return { activePositions, newOpportunities, llmRanOn };
+}
+
+function StageOneRunStats({
+  stage,
+  renderInteractiveRows = false,
+  onOpenScanCandidateDialog,
+}: {
+  stage: WorkflowStageView;
+  renderInteractiveRows?: boolean;
+  onOpenScanCandidateDialog?: (
+    stage: WorkflowStageView,
+    mode: ScanCandidateDialogMode,
+  ) => void;
+}) {
+  const stats = getStageOneStats(stage);
+  const rowClassName = renderInteractiveRows
+    ? "block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
+    : undefined;
+
+  return (
+    <div className="space-y-0.5">
+      {renderInteractiveRows && onOpenScanCandidateDialog ? (
+        <button
+          type="button"
+          onClick={() => onOpenScanCandidateDialog(stage, "active-positions")}
+          className={`${rowClassName} pt-2`}
+        >
+          Active Positions Found:{" "}
+          <span className="font-semibold tabular-nums">
+            {stats.activePositions}
+          </span>
+        </button>
+      ) : (
+        <div className="pt-2">
+          Active Positions Found:{" "}
+          <span className="font-semibold tabular-nums">
+            {stats.activePositions}
+          </span>
+        </div>
+      )}
+      <div className="pt-2">
+        Total Events Scanned:{" "}
+        <span className="font-semibold tabular-nums">
+          {stats.totalScanned}
+        </span>{" "}
+        (total questions)
+      </div>
+      {renderInteractiveRows && onOpenScanCandidateDialog ? (
+        <button
+          type="button"
+          onClick={() =>
+            onOpenScanCandidateDialog(stage, "fresh-opportunities")
+          }
+          className={rowClassName}
+        >
+          Events that passed Filters:{" "}
+          <span className="font-semibold tabular-nums">
+            {stats.passedFilters}
+          </span>
+        </button>
+      ) : (
+        <div>
+          Events that passed Filters:{" "}
+          <span className="font-semibold tabular-nums">
+            {stats.passedFilters}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StageTwoRunStats({ stage }: { stage: WorkflowStageView }) {
+  const stats = getStageTwoStats(stage);
+
+  return (
+    <div className="space-y-0.5 pt-2">
+      <div>
+        Active Positions:{" "}
+        <span className="font-semibold tabular-nums">
+          {stats.activePositions}
+        </span>
+      </div>
+      <div>
+        New Opportunities:{" "}
+        <span className="font-semibold tabular-nums">
+          {stats.newOpportunities}
+        </span>
+      </div>
+      <div>
+        LLM ran on:{" "}
+        <span className="font-semibold tabular-nums">
+          {stats.activePositions}
+        </span>{" "}
+        Active +{" "}
+        <span className="font-semibold tabular-nums">
+          {stats.newOpportunities}
+        </span>{" "}
+        New Opportunities ={" "}
+        <span className="font-semibold tabular-nums">{stats.llmRanOn}</span>
+      </div>
+    </div>
+  );
+}
+
 function readStageOutputString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
@@ -1822,10 +1965,8 @@ function RunDetailWorkerStages({
               <div className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-[11px] leading-5 ${toneClasses.muted}`}>
                 <div>Last stage run: <span className="font-semibold tabular-nums">{formatStageLastRunLabel(stage.timerCompletedAt ?? stage.timerStartedAt)}</span></div>
                 <div>Time taken: <span className="font-semibold tabular-nums">{formatStageElapsedTime(stage.timerStartedAt, stage.timerCompletedAt, stableTimerNowMs)}</span></div>
-                {stage.key === "scan" ? <>
-                  <div>New events found: <span className="font-semibold tabular-nums">{readStageOutputNumber(stage.outputs.accepted_candidates_count) ?? readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ?? stage.scanCandidates.length}</span></div>
-                  <div>Active Bullpen Positions Found: <span className="font-semibold tabular-nums">{readStageOutputNumber(stage.outputs.active_wallet_positions) ?? readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ?? stage.activePositionsFound.length}</span></div>
-                </> : null}
+                {stage.key === "scan" ? <StageOneRunStats stage={stage} /> : null}
+                {stage.key === "llm" ? <StageTwoRunStats stage={stage} /> : null}
                 {stage.key === "invest" && formatInvestStageRowMix(stage) ? <div>Rows counted: <span className="font-semibold">{formatInvestStageRowMix(stage)}</span></div> : null}
               </div>
 
@@ -3825,48 +3966,13 @@ export function BullpenAutoRunScheduleCard({
                       </span>
                     </div>
                     {stage.key === "scan" ? (
-                      <div className="space-y-0.5">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openScanCandidateDialog(
-                              stage,
-                              "fresh-opportunities",
-                            )
-                          }
-                          className="block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                        >
-                          New events found:{" "}
-                          <span className="font-semibold tabular-nums">
-                            {readStageOutputNumber(
-                              stage.outputs.accepted_candidates_count,
-                            ) ??
-                              readStageOutputNumber(
-                                stage.outputs.candidate_rows_before_llm,
-                              ) ??
-                              stage.scanCandidates.length}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openScanCandidateDialog(stage, "active-positions")
-                          }
-                          className="block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                        >
-                          Active Bullpen Positions Found:{" "}
-                          <span className="font-semibold tabular-nums">
-                            {readStageOutputNumber(
-                              stage.outputs.active_wallet_positions,
-                            ) ??
-                              readStageOutputNumber(
-                                stage.outputs.active_position_rows_before_llm,
-                              ) ??
-                              stage.activePositionsFound.length}
-                          </span>
-                        </button>
-                      </div>
+                      <StageOneRunStats
+                        stage={stage}
+                        renderInteractiveRows
+                        onOpenScanCandidateDialog={openScanCandidateDialog}
+                      />
                     ) : null}
+                    {stage.key === "llm" ? <StageTwoRunStats stage={stage} /> : null}
                     {stage.key === "invest" &&
                     formatInvestStageRowMix(stage) ? (
                       <div>
