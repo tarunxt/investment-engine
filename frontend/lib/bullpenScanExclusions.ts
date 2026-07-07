@@ -138,6 +138,12 @@ export const MARKET_QUESTION_KEYWORDS = MARKET_QUESTION_KEYWORD_GROUPS.flat();
 export const SOCIAL_POST_COUNT_KEYWORDS =
   SOCIAL_POST_COUNT_KEYWORD_GROUPS.flat();
 
+export const SPORTS_PATTERNS = [
+  /\b(?:both teams to score|exact score|leading at halftime|draw at halftime|penalty shootout|extra time)\b/i,
+  /\bhalftime\b/i,
+  /\b[A-Za-z][A-Za-z .'\-]{2,40}\s+vs\.?\s+[A-Za-z][A-Za-z .'\-]{2,40}\b/i,
+] as const;
+
 export const SOCIAL_POST_COUNT_PATTERNS = [
   /\bhow many (?:tweets?|posts?|truths?)\b/i,
   /\bnumber of (?:tweets?|posts?|truths?)\b/i,
@@ -163,13 +169,18 @@ export const BULLPEN_SCAN_FILTER_DETAILS: Record<
     dialogEyebrow: "Sports exclusion",
     title: "How the sports filter excludes markets",
     matcherScope:
-      "Search text = question + category + slug + outcome labels, normalized to lowercase and matched on whole words.",
+      "Search text = question + category/tags/event category + slug + outcome labels, normalized to lowercase and matched on whole words plus sports phrase patterns.",
     algorithmSteps: [
       "Build a normalized search string from the market question, category, slug, and outcome labels.",
       "Run whole-word keyword checks across that search string.",
-      "Exclude the market as soon as any sports keyword matches.",
+      "Run sports phrase checks for scoreboard-style markets such as halftime, exact score, both-teams-to-score, penalty shootout, extra time, and Team A vs Team B titles.",
+      "Exclude the market as soon as any sports keyword or sports phrase pattern matches.",
     ],
     keywordGroups: SPORTS_KEYWORD_GROUPS.map((group) => group.join(", ")),
+    patternRules: [
+      "both teams to score, exact score, leading/draw at halftime, penalty shootout, extra time",
+      "Team A vs Team B / Team A vs. Team B question titles",
+    ],
     excludedEventExamples: [
       "League, team, match, tournament, and winner markets.",
       "Tennis questions such as Wimbledon, ATP, WTA, and Grand Slam events.",

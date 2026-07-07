@@ -27,6 +27,7 @@ import {
   SOCIAL_POST_COUNT_KEYWORDS,
   SOCIAL_POST_COUNT_PATTERNS,
   SPORTS_KEYWORDS,
+  SPORTS_PATTERNS,
   WEATHER_KEYWORDS,
 } from "@/lib/bullpenScanExclusions";
 
@@ -164,6 +165,52 @@ function readDisplayValue(record: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
+function readLabelValue(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (value && typeof value === "object") {
+    return readString(value as Record<string, unknown>, ["label", "name", "title", "slug"]);
+  }
+  return null;
+}
+
+function collectCategoryLabels(record: Record<string, unknown>, context?: WalkContext) {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: unknown) => {
+    const label = readLabelValue(value);
+    const normalized = label?.trim().toLowerCase();
+    if (!label || !normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    labels.push(label);
+  };
+
+  CATEGORY_KEYS.forEach((key) => add(record[key]));
+  if (context?.category) add(context.category);
+
+  for (const key of ["tags", "categories"]) {
+    const value = record[key];
+    if (Array.isArray(value)) value.forEach(add);
+  }
+
+  for (const event of toArray(record.events)) {
+    if (!event || typeof event !== "object") continue;
+    const eventRecord = event as Record<string, unknown>;
+    CATEGORY_KEYS.forEach((key) => add(eventRecord[key]));
+    for (const key of ["tags", "categories"]) {
+      const value = eventRecord[key];
+      if (Array.isArray(value)) value.forEach(add);
+    }
+  }
+
+  return labels;
+}
+
+function readCategory(record: Record<string, unknown>, context?: WalkContext) {
+  const labels = collectCategoryLabels(record, context);
+  return labels.length > 0 ? labels.join(" · ") : "Uncategorized";
+}
+
 function readDeepString(
   value: unknown,
   keys: string[],
@@ -257,7 +304,7 @@ function walk(
   const record = value as Record<string, unknown>;
   const nextContext = {
     closeTime: readString(record, CLOSE_TIME_KEYS) || context.closeTime,
-    category: readString(record, CATEGORY_KEYS) || context.category,
+    category: readCategory(record, context),
   };
   visit(record, nextContext);
   Object.values(record).forEach((child) => walk(child, visit, nextContext));
@@ -443,7 +490,11 @@ function getQuestionSearchText(question: BullpenQuestion) {
 }
 
 function isSportsQuestion(question: BullpenQuestion) {
-  return includesAnyKeyword(getQuestionSearchText(question), SPORTS_KEYWORDS);
+  const searchText = getQuestionSearchText(question);
+  return (
+    includesAnyKeyword(searchText, SPORTS_KEYWORDS) ||
+    SPORTS_PATTERNS.some((pattern) => pattern.test(searchText))
+  );
 }
 
 function isWeatherQuestion(question: BullpenQuestion) {
@@ -513,7 +564,7 @@ function normalizeGammaMarket(
       question,
     question,
     closeTime,
-    category: readString(record, CATEGORY_KEYS) || "Uncategorized",
+    category: readCategory(record),
     yesOdds,
     noOdds,
     volume: readDisplayValue(record, [
@@ -557,8 +608,7 @@ function normalizeQuestion(
   const question = readString(record, QUESTION_KEYS);
   if (!question || question.length < 8) return null;
 
-  const category =
-    readString(record, CATEGORY_KEYS) || context.category || "Uncategorized";
+  const category = readCategory(record, context);
   const yesOdds = normalizeOdds(
     readOutcomeNumber(record, "yes", [
       "yesOdds",

@@ -376,7 +376,9 @@ test("Bullpen x AI sports filter catches Games category markets", () => {
   );
 
   assert.match(exclusionsSource, /SPORTS_KEYWORD_GROUPS[\s\S]*"games"/);
-  assert.match(routeSource, /question\.category/);
+  assert.match(exclusionsSource, /SPORTS_PATTERNS[\s\S]*halftime/);
+  assert.match(routeSource, /collectCategoryLabels/);
+  assert.match(routeSource, /SPORTS_PATTERNS\.some/);
 });
 
 test("Bullpen x AI market prediction filter excludes largest-company-by-market-cap questions", () => {
