@@ -57,7 +57,9 @@ _DISCOVER_COMMAND_VARIANTS = [
     ],
 ]
 CONSOLE_CLI_SOURCE_LABEL = "Bullpen CLI"
-CONSOLE_CLI_SOURCE_URL = "https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3"
+CONSOLE_CLI_SOURCE_URL = (
+    "https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3"
+)
 CONSOLE_GAMMA_SOURCE_LABEL = "Polymarket Gamma API"
 _EASTERN_TIMEZONE = ZoneInfo("America/New_York")
 _OUTCOME_LABEL_KEYS = ("name", "label", "outcome", "title", "side")
@@ -132,9 +134,16 @@ def _parse_console_start_at(value: str | None) -> datetime | None:
             return parsed
         except ValueError:
             continue
-    for fmt in ("%H:%M:%S %d %B, %Y", "%H:%M:%S %d %b, %Y", "%H:%M:%S %d %B %Y", "%H:%M:%S %d %b %Y"):
+    for fmt in (
+        "%H:%M:%S %d %B, %Y",
+        "%H:%M:%S %d %b, %Y",
+        "%H:%M:%S %d %B %Y",
+        "%H:%M:%S %d %b %Y",
+    ):
         try:
-            return datetime.strptime(normalized, fmt).replace(tzinfo=CONSOLE_SCHEDULE_TIMEZONE)
+            return datetime.strptime(normalized, fmt).replace(
+                tzinfo=CONSOLE_SCHEDULE_TIMEZONE
+            )
         except ValueError:
             continue
     return None
@@ -178,7 +187,17 @@ def next_console_schedule_time(reference_time: datetime) -> datetime:
     return fallback.astimezone(UTC)
 
 
-def _read_string(value: object) -> str | None:
+def _read_string(
+    value: object, keys: tuple[str, ...] | list[str] | None = None
+) -> str | None:
+    if keys is not None:
+        if not isinstance(value, dict):
+            return None
+        for key in keys:
+            parsed = _read_string(value.get(key))
+            if parsed:
+                return parsed
+        return None
     if isinstance(value, str):
         normalized = value.strip()
         return normalized or None
@@ -269,7 +288,10 @@ def _extract_claimable(row: dict[str, object]) -> bool:
         for key in ("action", "status")
         if isinstance((value := row.get(key)), str) and value.strip()
     ).lower()
-    return any(token in claim_text for token in ("claim", "redeem", "claimable", "redeemable", "won"))
+    return any(
+        token in claim_text
+        for token in ("claim", "redeem", "claimable", "redeemable", "won")
+    )
 
 
 def _build_market_url(event_slug: str | None) -> str | None:
@@ -296,7 +318,9 @@ def _iter_list_like(value: object) -> list[object]:
     return _parse_json_list(value)
 
 
-def _read_nested_number(record: dict[str, object], keys: tuple[str, ...]) -> float | None:
+def _read_nested_number(
+    record: dict[str, object], keys: tuple[str, ...]
+) -> float | None:
     for key in keys:
         parsed = _read_number(record.get(key))
         if parsed is not None:
@@ -317,7 +341,10 @@ def _normalize_text(value: str | None) -> str:
 
 
 def _contains_keyword(text: str, keyword: str) -> bool:
-    return re.search(rf"(^|\W){re.escape(keyword)}(?=$|\W)", text, re.IGNORECASE) is not None
+    return (
+        re.search(rf"(^|\W){re.escape(keyword)}(?=$|\W)", text, re.IGNORECASE)
+        is not None
+    )
 
 
 def _includes_any(text: str, keywords: tuple[str, ...]) -> bool:
@@ -562,6 +589,38 @@ def _normalize_console_market(row: dict[str, object]) -> ScannedMarket | None:
     )
 
 
+def _collect_console_discover_rows(value: object) -> list[dict[str, object]]:
+    """Walk the full Bullpen discover payload, matching the manual scan parser.
+
+    Bullpen CLI discover can return nested sections where only a small top-level
+    collection is exposed as rows. Manual Scan walks every embedded object and
+    normalizes records with question/title fields, so Auto Scan must do the same
+    before applying filters.
+    """
+    rows: list[dict[str, object]] = []
+    seen_object_ids: set[int] = set()
+
+    def walk(current: object) -> None:
+        if isinstance(current, list):
+            for item in current:
+                walk(item)
+            return
+        if not isinstance(current, dict):
+            return
+        object_id = id(current)
+        if object_id in seen_object_ids:
+            return
+        seen_object_ids.add(object_id)
+        if _read_string(current, _QUESTION_KEYS):
+            rows.append(current)
+        for child in current.values():
+            if isinstance(child, (dict, list)):
+                walk(child)
+
+    walk(value)
+    return rows
+
+
 def _build_cli_console_scan_result(
     rows: list[dict[str, object]],
     *,
@@ -612,7 +671,7 @@ async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
             timeout_seconds=25,
         )
         return _build_cli_console_scan_result(
-            _collect_bullpen_rows(parsed),
+            _collect_console_discover_rows(parsed),
             now=now,
             scanned_at=scanned_at,
         )
@@ -652,7 +711,9 @@ async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
         )
 
 
-def _position_yes_no_odds(side: str, current_price_cents: float | None) -> tuple[float | None, float | None]:
+def _position_yes_no_odds(
+    side: str, current_price_cents: float | None
+) -> tuple[float | None, float | None]:
     if current_price_cents is None:
         return None, None
     held_side_price = round(current_price_cents, 2)
@@ -669,7 +730,11 @@ def position_returns_per_day(
     *,
     now: datetime,
 ) -> float | None:
-    if position.is_claimable or position.current_price_cents is None or not position.close_time:
+    if (
+        position.is_claimable
+        or position.current_price_cents is None
+        or not position.close_time
+    ):
         return None
     close_time = _parse_close_time_utc(position.close_time)
     if close_time is None:
@@ -762,7 +827,9 @@ def _merge_console_wallet_position(
         average_price_cents=average_price_cents,
         exposure_usd=total_exposure_usd,
         current_price_cents=current_price_cents,
-        current_yes_odds=yes_odds if yes_odds is not None else existing.current_yes_odds,
+        current_yes_odds=(
+            yes_odds if yes_odds is not None else existing.current_yes_odds
+        ),
         current_no_odds=no_odds if no_odds is not None else existing.current_no_odds,
         close_time=existing.close_time or incoming.close_time,
         theme=existing.theme or incoming.theme,
@@ -796,13 +863,17 @@ def _aggregate_console_wallet_positions(
             )
 
         for alias in aliases or [group_key]:
-            alias_to_group_key[(alias, position.side, position.is_claimable)] = group_key
+            alias_to_group_key[(alias, position.side, position.is_claimable)] = (
+                group_key
+            )
 
     return list(grouped_positions.values())
 
 
 async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
-    parsed = await run_first_bullpen_json(_POSITIONS_COMMAND_VARIANTS, timeout_seconds=30)
+    parsed = await run_first_bullpen_json(
+        _POSITIONS_COMMAND_VARIANTS, timeout_seconds=30
+    )
     rows = _collect_bullpen_rows(parsed)
     positions: list[ConsoleWalletPosition] = []
 
@@ -819,9 +890,10 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
             row.get("current_price") or row.get("currentPrice")
         )
         yes_odds, no_odds = _position_yes_no_odds(side, current_price_cents)
-        average_price_cents = _normalize_price_to_cents(
-            row.get("avg_price") or row.get("avgPrice")
-        ) or 0.0
+        average_price_cents = (
+            _normalize_price_to_cents(row.get("avg_price") or row.get("avgPrice"))
+            or 0.0
+        )
         shares = round(_read_number(row.get("shares")) or 0.0, 6)
         exposure_usd = round(
             (
@@ -837,8 +909,11 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
             ConsoleWalletPosition(
                 market_id=market_id,
                 slug=_read_string(row.get("slug")),
-                condition_id=_read_string(row.get("condition_id") or row.get("conditionId")),
-                market_title=_read_string(row.get("market") or row.get("title")) or market_id,
+                condition_id=_read_string(
+                    row.get("condition_id") or row.get("conditionId")
+                ),
+                market_title=_read_string(row.get("market") or row.get("title"))
+                or market_id,
                 market_url=_build_market_url(event_slug),
                 side=side,
                 shares=shares,
@@ -847,13 +922,17 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
                 current_price_cents=current_price_cents,
                 current_yes_odds=yes_odds,
                 current_no_odds=no_odds,
-                close_time=_extract_close_time(row.get("end_date") or row.get("endDate")),
+                close_time=_extract_close_time(
+                    row.get("end_date") or row.get("endDate")
+                ),
                 theme="Bullpen Wallet",
                 is_claimable=_extract_claimable(row),
             )
         )
 
-    positive_share_positions = [position for position in positions if position.shares > 0]
+    positive_share_positions = [
+        position for position in positions if position.shares > 0
+    ]
     return _aggregate_console_wallet_positions(positive_share_positions)
 
 
