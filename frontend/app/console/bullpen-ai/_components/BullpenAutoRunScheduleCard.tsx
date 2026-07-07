@@ -1600,10 +1600,10 @@ function getDecisionExitTypeDetails(decision: BullpenAutoLiveDecision) {
 
   const details = [
     hasEventOutOfTop10
-      ? "Exit: Event out of Top 10. Case 1: Position is outside top 10 by Returns/day. Case 2: Odds filter no longer qualifies the event."
+      ? "Exit: Event out of Top 10.\nCase 1: Position is outside top 10 by Returns/day.\nCase 2: Odds filter no longer qualifies the event."
       : null,
     hasForcedExit
-      ? "Exit: Forced Exit. Case 1: Market is 99.5% or more against the held outcome. Case 2: Held-side best bid falls below 0.5c."
+      ? "Exit: Forced Exit.\nCase 1: Market is 99.5% or more against the held outcome.\nCase 2: Held-side best bid falls below 0.5c."
       : null,
   ]
     .filter(Boolean)
@@ -1687,9 +1687,9 @@ function StageTwoExecutionShortlist({
                         {decision.market_title}
                       </p>
                       <p className="mt-0.5 text-[11px] leading-4 text-slate-600">
-                        {exitType
-                          ? `${exitType.label}: ${exitType.details}`
-                          : decision.reason}
+                        <span className="whitespace-pre-line">
+                          {exitType ? exitType.details : decision.reason}
+                        </span>
                       </p>
                     </div>
                   );
@@ -2173,7 +2173,7 @@ function InvestMetricDetailsDialog({
                                 {exitType.label}
                               </span>
                               <br />
-                              <span className="text-xs leading-5">
+                              <span className="whitespace-pre-line text-xs leading-5">
                                 {exitType.details}
                               </span>
                             </>
@@ -3148,7 +3148,7 @@ export function BullpenAutoRunScheduleCard({
                 variant="outline"
                 onClick={handleRunNow}
                 disabled={action !== null || runIsActive}
-                className="border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
+                className="border-blue-900 bg-blue-900 text-white hover:bg-blue-800 hover:text-white"
               >
                 {runActionRequested || runIsActive ? (
                   <>
@@ -3642,7 +3642,7 @@ export function BullpenAutoRunScheduleCard({
               return (
                 <div
                   key={stage.key}
-                  className={`relative rounded-2xl border p-4 shadow-sm transition ${toneClasses.container}`}
+                  className={`relative flex min-h-[34rem] flex-col rounded-2xl border p-4 shadow-sm transition ${toneClasses.container}`}
                 >
                   {canOpenInputs ? (
                     <button
@@ -3740,7 +3740,13 @@ export function BullpenAutoRunScheduleCard({
                         >
                           New events found:{" "}
                           <span className="font-semibold tabular-nums">
-                            {stage.scanCandidates.length}
+                            {readStageOutputNumber(
+                              stage.outputs.accepted_candidates_count,
+                            ) ??
+                              readStageOutputNumber(
+                                stage.outputs.candidate_rows_before_llm,
+                              ) ??
+                              stage.scanCandidates.length}
                           </span>
                         </button>
                         <button
@@ -3958,7 +3964,7 @@ export function BullpenAutoRunScheduleCard({
                     ) : null}
                   </div>
 
-                  <div className="mt-2 flex items-end justify-between gap-3">
+                  <div className="mt-auto flex items-end justify-between gap-3 pt-3">
                     <p className={`text-xs leading-5 ${toneClasses.muted}`}>
                       {stageDetail}
                     </p>
