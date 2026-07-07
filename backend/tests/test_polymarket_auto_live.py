@@ -2071,6 +2071,33 @@ def test_candidate_filter_reasons_block_halftime_markets_without_category_keywor
     assert "Excluded sports market." in reasons
 
 
+def test_candidate_filter_reasons_block_uncategorized_esports_prop_markets():
+    market = _market(
+        question="Game 1: Any Player Rampage?",
+        theme="Uncategorized",
+        slug="game-1-any-player-rampage",
+    )
+
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+    assert "Excluded sports market." in reasons
+
+
+def test_console_market_filter_reasons_block_uncategorized_esports_objective_markets():
+    market = _market(
+        question="Game 1: Both Teams Beat Roshan?",
+        theme="Uncategorized",
+        slug="game-1-both-teams-beat-roshan",
+    )
+
+    reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+    )
+
+    assert "Excluded sports market." in reasons
+
+
 def test_console_market_filter_reasons_block_exact_score_markets_when_uncategorized():
     market = _market(
         question="Exact Score: Argentina 1 - 0 Egypt?",
