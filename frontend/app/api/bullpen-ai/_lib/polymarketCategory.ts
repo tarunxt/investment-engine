@@ -51,12 +51,13 @@ function splitCategoryTrail(value: unknown) {
   return normalized
     .split(/\s*·\s*/g)
     .map((part) => normalizeCategoryLabel(part))
-    .filter(
-      (part): part is string =>
-        Boolean(part) &&
+    .filter((part): part is string => {
+      if (typeof part !== "string") return false;
+      return (
         !isMissingCategory(part) &&
-        !GENERIC_NON_CATEGORY_LABELS.has(part.toLowerCase()),
-    );
+        !GENERIC_NON_CATEGORY_LABELS.has(part.toLowerCase())
+      );
+    });
 }
 
 function readCategoryObjectLabel(value: Record<string, unknown>) {

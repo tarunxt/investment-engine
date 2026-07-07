@@ -770,7 +770,7 @@ function applySnapshotMarketUpdates(
       marketUpdate.resolutionSource === undefined
         ? question.resolutionSource
         : marketUpdate.resolutionSource;
-    const nextCategory = shouldReplaceCategory(
+    const nextCategory: string = shouldReplaceCategory(
       question.category,
       marketUpdate.category,
     )

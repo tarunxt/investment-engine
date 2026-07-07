@@ -777,11 +777,11 @@ export async function applyCanonicalPolymarketMarketUrls(
     const nextQuestions = questions.map((question) => {
       const resolved = resolvedByQuestionId[question.id];
       if (!resolved) return question;
-      const nextCategory = shouldReplaceCategory(
+      const nextCategory: string = shouldReplaceCategory(
         question.category,
         resolved.category,
       )
-        ? resolved.category
+        ? resolved.category ?? question.category
         : question.category;
 
       if (

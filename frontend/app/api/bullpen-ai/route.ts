@@ -1073,9 +1073,13 @@ function collectQuestions(payloads: unknown[], sourceUrl: string) {
 }
 
 function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuestion {
-  const publicQuestion = { ...question };
-  delete publicQuestion._categorySearchText;
-  delete publicQuestion._searchText;
+  const {
+    _categorySearchText,
+    _searchText,
+    ...publicQuestion
+  } = question;
+  void _categorySearchText;
+  void _searchText;
   return {
     ...publicQuestion,
     category: publicQuestion.category ?? POLYMARKET_DEFAULT_CATEGORY,
