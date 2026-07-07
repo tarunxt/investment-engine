@@ -85,15 +85,27 @@ const QUESTION_KEYS = [
   "eventTitle",
   "marketQuestion",
 ];
-const MARKET_SLUG_KEYS = [
-  "slug",
-  "marketSlug",
-  "questionSlug",
-];
-const EVENT_SLUG_KEYS = [
-  "eventSlug",
-  "urlSlug",
-];
+const MARKET_SLUG_KEYS = ["slug", "marketSlug", "questionSlug"];
+const EVENT_SLUG_KEYS = ["eventSlug", "urlSlug"];
+const CATEGORY_TRAIL_KEYS = [
+  "category",
+  "categories",
+  "tags",
+  "breadcrumbs",
+  "breadcrumb",
+  "path",
+  "pathname",
+  "url",
+  "href",
+  "link",
+  "marketUrl",
+  "eventUrl",
+  "groupTitle",
+  "groupItemTitle",
+  "league",
+  "tournament",
+  "sport",
+] as const;
 const FILTER_TEXT_KEYS = [
   ...CATEGORY_KEYS,
   ...QUESTION_KEYS,
@@ -114,6 +126,14 @@ const FILTER_TEXT_KEYS = [
   "team2",
   "competitor",
   "competitors",
+  "url",
+  "href",
+  "link",
+  "marketUrl",
+  "eventUrl",
+  "pathname",
+  "breadcrumbs",
+  "breadcrumb",
 ];
 const OUTCOME_LABEL_KEYS = ["name", "label", "outcome", "title", "side"];
 const INSULT_MARKET_PATTERNS = [
@@ -195,21 +215,147 @@ function readLabelValue(value: unknown) {
   if (typeof value === "string" && value.trim()) return value.trim();
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (value && typeof value === "object") {
-    return readString(value as Record<string, unknown>, ["label", "name", "title", "slug"]);
+    return readString(value as Record<string, unknown>, [
+      "label",
+      "name",
+      "title",
+      "slug",
+    ]);
   }
   return null;
 }
 
-function collectCategoryLabels(record: Record<string, unknown>, context?: WalkContext) {
+function titleCaseCategorySegment(value: string) {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => {
+      const lower = part.toLowerCase();
+      const upperLabels = new Set([
+        "cs2",
+        "lol",
+        "nba",
+        "nfl",
+        "mlb",
+        "nhl",
+        "ufc",
+        "f1",
+      ]);
+      if (upperLabels.has(lower)) return lower.toUpperCase();
+      if (/^dota\s*2$/i.test(part)) return "Dota 2";
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(" ");
+}
+
+function addCategoryTrailLabel(
+  labels: string[],
+  seen: Set<string>,
+  value: unknown,
+) {
+  const label = readLabelValue(value);
+  const normalized = label?.trim().toLowerCase();
+  if (!label || !normalized || seen.has(normalized)) return;
+  seen.add(normalized);
+  labels.push(label);
+}
+
+function addCategoryTrailFromPath(
+  labels: string[],
+  seen: Set<string>,
+  value: unknown,
+) {
+  if (typeof value !== "string" || !value.trim()) return;
+  let pathname = value.trim();
+  try {
+    pathname = new URL(pathname).pathname;
+  } catch {
+    // Plain path/slugs are accepted below.
+  }
+
+  const segments = pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const esportsIndex = segments.findIndex((segment) =>
+    /^e-?sports$/i.test(segment),
+  );
+  if (esportsIndex < 0) return;
+
+  segments
+    .slice(esportsIndex, esportsIndex + 3)
+    .map((segment) => decodeURIComponent(segment))
+    .map((segment) => titleCaseCategorySegment(segment))
+    .forEach((label) => addCategoryTrailLabel(labels, seen, label));
+}
+
+function isCategoryPathKey(key: (typeof CATEGORY_TRAIL_KEYS)[number]) {
+  return [
+    "path",
+    "pathname",
+    "url",
+    "href",
+    "link",
+    "marketUrl",
+    "eventUrl",
+  ].includes(key);
+}
+
+function collectDeepCategoryTrailLabels(value: unknown) {
+  const labels: string[] = [];
+  const seenLabels = new Set<string>();
+  const seenNodes = new Set<unknown>();
+  const stack: unknown[] = [value];
+  let inspected = 0;
+
+  while (stack.length > 0 && inspected < 10_000) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object" || seenNodes.has(current))
+      continue;
+    seenNodes.add(current);
+    inspected += 1;
+
+    if (Array.isArray(current)) {
+      current.forEach((item) => {
+        addCategoryTrailLabel(labels, seenLabels, item);
+        addCategoryTrailFromPath(labels, seenLabels, item);
+        stack.push(item);
+      });
+      continue;
+    }
+
+    const record = current as Record<string, unknown>;
+    for (const key of CATEGORY_TRAIL_KEYS) {
+      const candidate = record[key];
+      const shouldReadRawLabel = !isCategoryPathKey(key);
+      if (Array.isArray(candidate)) {
+        candidate.forEach((item) => {
+          if (shouldReadRawLabel)
+            addCategoryTrailLabel(labels, seenLabels, item);
+          addCategoryTrailFromPath(labels, seenLabels, item);
+        });
+      } else {
+        if (shouldReadRawLabel)
+          addCategoryTrailLabel(labels, seenLabels, candidate);
+        addCategoryTrailFromPath(labels, seenLabels, candidate);
+      }
+    }
+
+    for (const child of Object.values(record)) {
+      stack.push(child);
+    }
+  }
+
+  return labels;
+}
+
+function collectCategoryLabels(
+  record: Record<string, unknown>,
+  context?: WalkContext,
+) {
   const labels: string[] = [];
   const seen = new Set<string>();
-  const add = (value: unknown) => {
-    const label = readLabelValue(value);
-    const normalized = label?.trim().toLowerCase();
-    if (!label || !normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    labels.push(label);
-  };
+  const add = (value: unknown) => addCategoryTrailLabel(labels, seen, value);
 
   CATEGORY_KEYS.forEach((key) => add(record[key]));
   if (context?.category) add(context.category);
@@ -227,7 +373,10 @@ function collectCategoryLabels(record: Record<string, unknown>, context?: WalkCo
       const value = eventRecord[key];
       if (Array.isArray(value)) value.forEach(add);
     }
+    collectDeepCategoryTrailLabels(eventRecord).forEach(add);
   }
+
+  collectDeepCategoryTrailLabels(record).forEach(add);
 
   return labels;
 }
@@ -237,10 +386,7 @@ function readCategory(record: Record<string, unknown>, context?: WalkContext) {
   return labels.length > 0 ? labels.join(" · ") : "Uncategorized";
 }
 
-function readDeepString(
-  value: unknown,
-  keys: string[],
-): string | null {
+function readDeepString(value: unknown, keys: string[]): string | null {
   const seen = new Set<unknown>();
   const stack: unknown[] = [value];
   let inspected = 0;
@@ -283,9 +429,14 @@ function collectDeepStrings(
   const stack: unknown[] = [value];
   let inspected = 0;
 
-  while (stack.length > 0 && inspected < maxNodes && values.length < maxValues) {
+  while (
+    stack.length > 0 &&
+    inspected < maxNodes &&
+    values.length < maxValues
+  ) {
     const current = stack.pop();
-    if (!current || typeof current !== "object" || seenNodes.has(current)) continue;
+    if (!current || typeof current !== "object" || seenNodes.has(current))
+      continue;
     seenNodes.add(current);
     inspected += 1;
 
@@ -336,7 +487,10 @@ function readOutcomeNumber(
     record.tokens,
     record.markets,
   ]) {
-    for (const item of [...toArray(collection), ...parseJsonArray(collection)]) {
+    for (const item of [
+      ...toArray(collection),
+      ...parseJsonArray(collection),
+    ]) {
       if (!item || typeof item !== "object") continue;
       const outcome = item as Record<string, unknown>;
       const label = readString(outcome, OUTCOME_LABEL_KEYS);
@@ -431,13 +585,19 @@ function readOutcomeLabels(record: Record<string, unknown>) {
     record.tokens,
     record.markets,
   ]) {
-    for (const item of [...toArray(collection), ...parseJsonArray(collection)]) {
+    for (const item of [
+      ...toArray(collection),
+      ...parseJsonArray(collection),
+    ]) {
       if (typeof item === "string" && item.trim()) {
         labels.push(item.trim());
         continue;
       }
       if (!item || typeof item !== "object") continue;
-      const label = readString(item as Record<string, unknown>, OUTCOME_LABEL_KEYS);
+      const label = readString(
+        item as Record<string, unknown>,
+        OUTCOME_LABEL_KEYS,
+      );
       if (label) labels.push(label);
     }
   }
@@ -445,7 +605,11 @@ function readOutcomeLabels(record: Record<string, unknown>) {
   return dedupeOutcomeLabels(labels);
 }
 
-function isBinaryYesNoQuestion(outcomeLabels: string[], yesOdds: number | null, noOdds: number | null) {
+function isBinaryYesNoQuestion(
+  outcomeLabels: string[],
+  yesOdds: number | null,
+  noOdds: number | null,
+) {
   if (outcomeLabels.length === 0) return yesOdds !== null && noOdds !== null;
   if (outcomeLabels.length !== 2) return false;
   const normalized = outcomeLabels.map(normalizeLabel);
@@ -502,7 +666,10 @@ function extractMentionedDate(
   return new Date(Date.UTC(year, monthIndex, day, 23, 59, 0)).toISOString();
 }
 
-function inferSemanticCloseTime(record: Record<string, unknown>, question: string) {
+function inferSemanticCloseTime(
+  record: Record<string, unknown>,
+  question: string,
+) {
   const candidates = [
     readString(record, ["description"]),
     readString(record, ["groupItemTitle", "groupTitle"]),
@@ -518,7 +685,10 @@ function inferSemanticCloseTime(record: Record<string, unknown>, question: strin
   return null;
 }
 
-function chooseCloseTime(rawCloseTime: string | null, semanticCloseTime: string | null) {
+function chooseCloseTime(
+  rawCloseTime: string | null,
+  semanticCloseTime: string | null,
+) {
   const rawDate = toValidDate(rawCloseTime);
   const semanticDate = toValidDate(semanticCloseTime);
 
@@ -585,7 +755,10 @@ function isWeatherQuestion(question: FilterableBullpenQuestion) {
 function isMarketPredictionQuestion(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
-    includesAnyKeyword(question._categorySearchText, MARKET_CATEGORY_KEYWORDS) ||
+    includesAnyKeyword(
+      question._categorySearchText,
+      MARKET_CATEGORY_KEYWORDS,
+    ) ||
     includesAnyKeyword(searchText, MARKET_QUESTION_KEYWORDS) ||
     MARKET_PREDICTION_PATTERNS.some((pattern) => pattern.test(searchText))
   );
@@ -606,8 +779,12 @@ function isInsultMarket(question: FilterableBullpenQuestion) {
 
 function sortQuestions<T extends BullpenQuestion>(questions: T[]) {
   return [...questions].sort((left, right) => {
-    const leftTime = left.closeTime ? new Date(left.closeTime).getTime() : Number.POSITIVE_INFINITY;
-    const rightTime = right.closeTime ? new Date(right.closeTime).getTime() : Number.POSITIVE_INFINITY;
+    const leftTime = left.closeTime
+      ? new Date(left.closeTime).getTime()
+      : Number.POSITIVE_INFINITY;
+    const rightTime = right.closeTime
+      ? new Date(right.closeTime).getTime()
+      : Number.POSITIVE_INFINITY;
 
     if (leftTime !== rightTime) return leftTime - rightTime;
     return left.question.localeCompare(right.question);
@@ -651,8 +828,12 @@ function normalizeGammaMarket(
     .map((value) => parseNumber(value))
     .filter((value): value is number => value !== null);
   const normalizedOutcomeLabels = outcomeLabels.map(normalizeLabel);
-  const yesIndex = normalizedOutcomeLabels.findIndex((outcome) => outcome === "yes");
-  const noIndex = normalizedOutcomeLabels.findIndex((outcome) => outcome === "no");
+  const yesIndex = normalizedOutcomeLabels.findIndex(
+    (outcome) => outcome === "yes",
+  );
+  const noIndex = normalizedOutcomeLabels.findIndex(
+    (outcome) => outcome === "no",
+  );
   const yesPrice = yesIndex >= 0 ? outcomePrices[yesIndex] : null;
   const noPrice = noIndex >= 0 ? outcomePrices[noIndex] : null;
   const yesOdds = normalizeOdds(yesPrice);
@@ -678,8 +859,12 @@ function normalizeGammaMarket(
 
   return {
     id:
-      readString(record, ["id", ...MARKET_SLUG_KEYS, "marketId", "conditionId"]) ||
-      question,
+      readString(record, [
+        "id",
+        ...MARKET_SLUG_KEYS,
+        "marketId",
+        "conditionId",
+      ]) || question,
     question,
     closeTime,
     category,
@@ -767,18 +952,14 @@ function normalizeQuestion(
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
   const outcomeLabels = readOutcomeLabels(record);
   const id =
-    readString(
-      record,
-      [
-        "id",
-        ...MARKET_SLUG_KEYS,
-        "marketId",
-        "conditionId",
-        ...EVENT_SLUG_KEYS,
-        "eventId",
-      ],
-    ) ||
-    `${question}-${closeTime || "unknown"}`;
+    readString(record, [
+      "id",
+      ...MARKET_SLUG_KEYS,
+      "marketId",
+      "conditionId",
+      ...EVENT_SLUG_KEYS,
+      "eventId",
+    ]) || `${question}-${closeTime || "unknown"}`;
   const categorySearchText = normalizeSearchTextParts([
     category,
     context.category,
@@ -836,7 +1017,11 @@ function normalizeQuestion(
   };
 }
 
-function passesTimeFilter(question: BullpenQuestion, mode: ScanMode, filters: BullpenScanFilters) {
+function passesTimeFilter(
+  question: BullpenQuestion,
+  mode: ScanMode,
+  filters: BullpenScanFilters,
+) {
   if (!question.closeTime) return false;
   const closeDate = new Date(question.closeTime);
   if (Number.isNaN(closeDate.getTime())) return false;
@@ -846,7 +1031,10 @@ function passesTimeFilter(question: BullpenQuestion, mode: ScanMode, filters: Bu
   }
 
   const difference = closeDate.getTime() - Date.now();
-  return difference > 0 && difference <= filters.maxClosingDays * MILLISECONDS_PER_DAY;
+  return (
+    difference > 0 &&
+    difference <= filters.maxClosingDays * MILLISECONDS_PER_DAY
+  );
 }
 
 function passesFilters(
@@ -863,9 +1051,15 @@ function passesFilters(
     return false;
   if (isInsultMarket(question)) return false;
   if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) return false;
-  if (filters.minYesOdds > 0 && (question.yesOdds === null || question.yesOdds < filters.minYesOdds))
+  if (
+    filters.minYesOdds > 0 &&
+    (question.yesOdds === null || question.yesOdds < filters.minYesOdds)
+  )
     return false;
-  if (filters.minNoOdds > 0 && (question.noOdds === null || question.noOdds < filters.minNoOdds))
+  if (
+    filters.minNoOdds > 0 &&
+    (question.noOdds === null || question.noOdds < filters.minNoOdds)
+  )
     return false;
   return true;
 }
@@ -881,7 +1075,9 @@ function collectQuestions(payloads: unknown[], sourceUrl: string) {
   return sortQuestions(Array.from(candidates.values()));
 }
 
-function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuestion {
+function stripFilterMetadata(
+  question: FilterableBullpenQuestion,
+): BullpenQuestion {
   const {
     _categorySearchText: _ignoredCategorySearchText,
     _searchText: _ignoredSearchText,
@@ -959,10 +1155,7 @@ async function runBullpenDiscover() {
   throw new Error(`Bullpen CLI scan failed (${errors.join("; ")})`);
 }
 
-async function fetchGammaMarkets(
-  mode: ScanMode,
-  filters: BullpenScanFilters,
-) {
+async function fetchGammaMarkets(mode: ScanMode, filters: BullpenScanFilters) {
   const candidates = new Map<string, FilterableBullpenQuestion>();
   let offset = 0;
 
@@ -1104,7 +1297,9 @@ export async function GET(request: NextRequest) {
     const cliPayload = await runBullpenDiscover();
     const candidates = collectQuestions([cliPayload], sourceUrl);
     if (!sourceHasFutureCandidates(candidates)) {
-      throw new Error("Bullpen CLI returned stale markets with past close dates");
+      throw new Error(
+        "Bullpen CLI returned stale markets with past close dates",
+      );
     }
     if (candidates.length > 0) {
       return NextResponse.json(
@@ -1124,7 +1319,9 @@ export async function GET(request: NextRequest) {
       const html = await fetchBullpenPage(sourceUrl);
       const candidates = collectQuestions(extractEmbeddedJson(html), sourceUrl);
       if (!sourceHasFutureCandidates(candidates)) {
-        throw new Error("Bullpen web returned stale markets with past close dates");
+        throw new Error(
+          "Bullpen web returned stale markets with past close dates",
+        );
       }
       if (candidates.length > 0) {
         return NextResponse.json(

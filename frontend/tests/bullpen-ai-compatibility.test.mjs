@@ -399,6 +399,20 @@ test("Bullpen x AI sports filter catches Games category markets", () => {
   assert.match(routeSource, /SPORTS_PATTERNS\.some/);
 });
 
+test("Bullpen x AI category trail displays and filters nested esports paths", () => {
+  const routeSource = readFileSync(
+    new URL("../app/api/bullpen-ai/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(routeSource, /CATEGORY_TRAIL_KEYS/);
+  assert.match(routeSource, /collectDeepCategoryTrailLabels/);
+  assert.match(routeSource, /addCategoryTrailFromPath/);
+  assert.match(routeSource, /titleCaseCategorySegment/);
+  assert.match(routeSource, /slice\(esportsIndex, esportsIndex \+ 3\)/);
+  assert.match(routeSource, /Dota 2/);
+});
+
 test("Bullpen x AI sports filter catches halftime, exact-score, and esports map phrasing", async () => {
   const { SPORTS_PATTERNS } = await loadBullpenScanExclusionsModule();
   const routeSource = readFileSync(
