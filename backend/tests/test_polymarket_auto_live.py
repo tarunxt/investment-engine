@@ -4872,3 +4872,39 @@ def test_auto_live_domain_never_uses_bypass_trade_risk_flag():
         for path in Path("backend/app/domains/polymarket_auto_live").glob("*.py")
     )
     assert "bypass_trade_risk=True" not in source
+
+
+def test_console_profile_discover_walks_nested_bullpen_payload_like_manual_scan():
+    from app.domains.polymarket_auto_live.console_profile import (
+        _build_cli_console_scan_result,
+        _collect_console_discover_rows,
+    )
+
+    now = datetime(2026, 7, 7, tzinfo=UTC)
+    payload = {
+        "rows": [{"summary": "top-level placeholder"} for _ in range(100)],
+        "payload": {
+            "markets": [
+                {
+                    "id": f"market-{index}",
+                    "question": f"Nested valid question {index}?",
+                    "slug": f"nested-valid-question-{index}",
+                    "endDate": "2026-07-08T00:00:00Z",
+                    "outcomes": json.dumps(["Yes", "No"]),
+                    "outcomePrices": json.dumps([0.55, 0.45]),
+                }
+                for index in range(125)
+            ]
+        },
+    }
+
+    rows = _collect_console_discover_rows(payload)
+    result = _build_cli_console_scan_result(
+        rows,
+        now=now,
+        scanned_at="2026-07-07T00:00:00+00:00",
+    )
+
+    assert len(rows) == 125
+    assert result.total_candidates == 125
+    assert len(result.accepted) == 125
