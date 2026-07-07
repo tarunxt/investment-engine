@@ -3160,7 +3160,15 @@ function BullpenAiPageContent() {
             }),
           );
         }}
-        onOpenScanFilters={() => setIsScanFiltersOpen(true)}
+        onOpenScanFilters={() => {
+          setIsScanFiltersOpen(true);
+          window.requestAnimationFrame(() => {
+            scanFiltersMenuRef.current?.scrollIntoView({
+              block: "center",
+              behavior: "smooth",
+            });
+          });
+        }}
         onRunCompleted={() => {
           void refreshBullpenPositions({ suppressAutoClaim: true });
         }}
@@ -3756,7 +3764,15 @@ function BullpenAiPageContent() {
                           [activeMode]: tab.source,
                         }))
                       }
-                      className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${activeSnapshotSource === tab.source ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-950"}`}
+                      className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                        activeSnapshotSource === tab.source
+                          ? tab.source === "manual"
+                            ? "border-blue-700 bg-blue-700 text-white shadow-sm shadow-blue-700/20"
+                            : "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-600/20"
+                          : tab.source === "manual"
+                            ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                            : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                      }`}
                     >
                       {tab.label}
                     </button>
