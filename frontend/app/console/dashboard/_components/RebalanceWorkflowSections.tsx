@@ -77,6 +77,7 @@ import type {
   ZerodhaPortfolioSnapshotDetail,
   ZerodhaPortfolioOverviewResponse,
   IndMoneyUsThreatAnalysis,
+  IndMoneyUsPortfolioSnapshotDetail,
   ProviderInfo,
   ProviderModelTarget,
   RunCreate,
@@ -2718,6 +2719,7 @@ function WorkflowStageTile({
   onOutputClick,
   onSyncNowClick,
   onPlaceOrderClick,
+  placeOrderLabel = "Place Order",
   onCalculationsClick,
 }: {
   stage: WorkflowStageKey;
@@ -2732,6 +2734,7 @@ function WorkflowStageTile({
   onOutputClick?: () => void;
   onSyncNowClick?: () => void;
   onPlaceOrderClick?: () => void;
+  placeOrderLabel?: string;
   onCalculationsClick?: () => void;
 }) {
   const isRunning = info.state === "running";
@@ -2909,7 +2912,7 @@ function WorkflowStageTile({
               : "bg-blue-600 shadow-blue-600/25 hover:bg-blue-700",
           )}
         >
-          Place Order
+          {placeOrderLabel}
         </span>
       ) : null}
 
@@ -2993,6 +2996,15 @@ function ZerodhaBasketPreviewDialog({
   buyThreshold,
   buyThresholdDraft,
   onBuyThresholdDraftChange,
+  previewLabel = "Zerodha Basket Preview",
+  basketTitle = "Zerodha India Place Order Basket",
+  basketBrokerLabel = "Zerodha",
+  tradingViewMarket = "india",
+  tradingViewTitle = "Zerodha India Basket TradingView URLs",
+  tradingViewAriaLabel = "Open Zerodha India basket TradingView URL list",
+  loadingLabel = "Preparing Zerodha basket…",
+  primaryButtonLabel,
+  basketInfoText = "Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.",
 }: {
   open: boolean;
   loading: boolean;
@@ -3021,6 +3033,15 @@ function ZerodhaBasketPreviewDialog({
   buyThreshold: number;
   buyThresholdDraft: string;
   onBuyThresholdDraftChange: (value: string) => void;
+  previewLabel?: string;
+  basketTitle?: string;
+  basketBrokerLabel?: string;
+  tradingViewMarket?: SwingTradeMarket;
+  tradingViewTitle?: string;
+  tradingViewAriaLabel?: string;
+  loadingLabel?: string;
+  primaryButtonLabel?: string;
+  basketInfoText?: ReactNode;
 }) {
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [basketInfoOpen, setBasketInfoOpen] = useState(false);
@@ -3057,7 +3078,7 @@ function ZerodhaBasketPreviewDialog({
       .sort(compareZerodhaBasketOrdersByScore),
   })).filter((group) => group.orders.length > 0);
 
-  const buttonText = executionMode === "direct_market" ? "Place protected MARKET: sell first, then buy" : (submission?.phase === "sell_first" ? "Refresh & Open Buy Basket" : "Open Kite protected LIMIT basket");
+  const buttonText = primaryButtonLabel ?? (executionMode === "direct_market" ? "Place protected MARKET: sell first, then buy" : (submission?.phase === "sell_first" ? "Refresh & Open Buy Basket" : "Open Kite protected LIMIT basket"));
   const busyText = executionMode === "direct_market" ? "Placing…" : "Opening…";
   const renderPlaceOrderButton = (className?: string) => (
     <Button
@@ -3079,36 +3100,36 @@ function ZerodhaBasketPreviewDialog({
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-400">
-              Zerodha Basket Preview
+              {previewLabel}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <h3 className="text-xl font-bold text-slate-950">
-                Zerodha India Place Order Basket
+                {basketTitle}
               </h3>
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setBasketInfoOpen((current) => !current)}
                   className="inline-flex size-8 items-center justify-center rounded-full border border-blue-100 bg-blue-50 text-blue-600 transition hover:border-blue-200 hover:bg-blue-100 hover:text-blue-700"
-                  aria-label="Show Zerodha basket selection guidance"
+                  aria-label={`Show ${basketBrokerLabel} basket selection guidance`}
                   aria-expanded={basketInfoOpen}
                 >
                   <Info className="size-4" />
                 </button>
                 {basketInfoOpen ? (
                   <div className="absolute left-0 top-10 z-20 w-96 max-w-[calc(100vw-3rem)] rounded-2xl border border-blue-100 bg-white p-4 text-sm leading-6 text-slate-600 shadow-xl shadow-slate-900/10">
-                    Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.
+                    {basketInfoText}
                   </div>
                 ) : null}
               </div>
               <TradingViewUrlListButton
                 items={orders.map((order) => ({
                   symbol: order.symbol,
-                  market: "india",
+                  market: tradingViewMarket,
                   exchange: order.exchange,
                 }))}
-                title="Zerodha India Basket TradingView URLs"
-                ariaLabel="Open Zerodha India basket TradingView URL list"
+                title={tradingViewTitle}
+                ariaLabel={tradingViewAriaLabel}
               />
             </div>
           </div>
@@ -3128,7 +3149,7 @@ function ZerodhaBasketPreviewDialog({
         <div className="min-h-0 flex-1 overflow-auto p-5">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-              <Loader2 className="size-4 animate-spin" /> Preparing Zerodha basket…
+              <Loader2 className="size-4 animate-spin" /> {loadingLabel}
             </div>
           ) : orders.length ? (
             <>
@@ -5274,6 +5295,19 @@ export function RebalanceWorkflowSections({
     DEFAULT_ZERODHA_BUY_THRESHOLD.toFixed(2),
   );
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
+  const [indmoneyBasketOpen, setIndmoneyBasketOpen] = useState(false);
+  const [indmoneyBasketLoading, setIndmoneyBasketLoading] = useState(false);
+  const [indmoneyBasketError, setIndmoneyBasketError] = useState<string | null>(null);
+  const [indmoneyBasketOrders, setIndmoneyBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
+  const [indmoneyBasketDetailsData, setIndmoneyBasketDetailsData] = useState<StockDetailsData>({
+    portfolioSnapshot: null,
+    eventsAnalysis: null,
+    threatsAnalysis: null,
+    error: null,
+  });
+  const [indmoneyBasketBuyThreshold, setIndmoneyBasketBuyThreshold] = useState(2.5);
+  const [indmoneyBasketBuyThresholdDraft, setIndmoneyBasketBuyThresholdDraft] = useState("2.50");
+  const [selectedIndmoneyBasketIds, setSelectedIndmoneyBasketIds] = useState<Set<string>>(new Set());
   const activeExecutionRefsRef = useRef<Array<{ kind: "run" | "job"; id: number }>>([]);
   const cancelRequestedRef = useRef(false);
   const pauseRequestedRef = useRef(false);
@@ -5474,6 +5508,60 @@ export function RebalanceWorkflowSections({
     }
   }, [scoreMatrixFormulaConfig, zerodhaBasketBuyThreshold]);
 
+
+  const openIndmoneyBasketPreview = useCallback(async () => {
+    setIndmoneyBasketOpen(true);
+    setIndmoneyBasketLoading(true);
+    setIndmoneyBasketError(null);
+    try {
+      const [runs, overview, eventsResult, threatsResult] = await Promise.all([
+        fetchAllFullRuns(),
+        apiService.indmoneyUsPortfolioOverview(),
+        apiService.indmoneyUsEventsLatest().then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
+        apiService.indmoneyUsThreatsLatest().then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
+      ]);
+      const stocks = buildConsensusRows(
+        getLatestMatchingRebalanceRuns(runs, "us"),
+        "us",
+        overview.latest,
+      );
+      const technicalScans = buildTechnicalScanMap(runs);
+      const actionRows = buildDashboardActionRows(stocks, "us", technicalScans, scoreMatrixFormulaConfig);
+      const orders = buildZerodhaBasketPreviewOrders(actionRows, technicalScans, null)
+        .map((order) => ({
+          ...order,
+          id: order.id.replace(/^zerodha:/, "indmoney:"),
+          exchange: order.exchange || "NASDAQ",
+        }));
+      const capturedDetailsErrors = [eventsResult, threatsResult]
+        .filter((result) => result.status === "rejected")
+        .map((result) => normalizeError(result.reason));
+      setIndmoneyBasketDetailsData({
+        portfolioSnapshot: overview.latest as IndMoneyUsPortfolioSnapshotDetail | null,
+        eventsAnalysis: eventsResult.status === "fulfilled" ? eventsResult.value.analysis : null,
+        threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
+        error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
+      });
+      setIndmoneyBasketOrders(orders);
+      setSelectedIndmoneyBasketIds(
+        buildDefaultZerodhaBasketSelection(
+          getZerodhaBasketSelectableOrders(orders),
+          indmoneyBasketBuyThreshold,
+        ),
+      );
+    } catch (error) {
+      setIndmoneyBasketOrders([]);
+      setIndmoneyBasketDetailsData((current) => ({
+        ...current,
+        error: normalizeError(error),
+      }));
+      setSelectedIndmoneyBasketIds(new Set());
+      setIndmoneyBasketError(`Could not prepare IndMoney basket: ${normalizeError(error)}`);
+    } finally {
+      setIndmoneyBasketLoading(false);
+    }
+  }, [indmoneyBasketBuyThreshold, scoreMatrixFormulaConfig]);
+
   const updateZerodhaBasketBuyThresholdDraft = useCallback((value: string) => {
     setZerodhaBasketBuyThresholdDraft(value);
     const trimmedValue = value.trim();
@@ -5557,6 +5645,87 @@ export function RebalanceWorkflowSections({
     },
     [],
   );
+
+
+  const updateIndmoneyBasketBuyThresholdDraft = useCallback((value: string) => {
+    setIndmoneyBasketBuyThresholdDraft(value);
+    const trimmedValue = value.trim();
+    if (!trimmedValue) return;
+
+    const parsed = Number(trimmedValue);
+    if (!Number.isFinite(parsed)) return;
+
+    setIndmoneyBasketBuyThreshold(parsed);
+    setSelectedIndmoneyBasketIds((current) =>
+      syncZerodhaBasketBuySelection(
+        current,
+        getZerodhaBasketSelectableOrders(indmoneyBasketOrders),
+        parsed,
+      ),
+    );
+  }, [indmoneyBasketOrders]);
+
+  const toggleIndmoneyBasketOrder = useCallback((id: string) => {
+    setSelectedIndmoneyBasketIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAllIndmoneyBasketOrders = useCallback(() => {
+    setSelectedIndmoneyBasketIds((current) => {
+      const allOrdersSelected = indmoneyBasketOrders.every((order) => current.has(order.id));
+      if (allOrdersSelected) return new Set();
+      return new Set(indmoneyBasketOrders.map((order) => order.id));
+    });
+  }, [indmoneyBasketOrders]);
+
+  const toggleIndmoneyBasketSection = useCallback(
+    (action: ActionCategory) => {
+      const sectionOrderIds = indmoneyBasketOrders
+        .filter((order) => getZerodhaBasketActionForPercent(order) === action)
+        .map((order) => order.id);
+      setSelectedIndmoneyBasketIds((current) => {
+        const next = new Set(current);
+        const sectionAllSelected = sectionOrderIds.every((id) => next.has(id));
+        sectionOrderIds.forEach((id) => {
+          if (sectionAllSelected) next.delete(id);
+          else next.add(id);
+        });
+        return next;
+      });
+    },
+    [indmoneyBasketOrders],
+  );
+
+  const updateIndmoneyBasketOrderKind = useCallback((id: string, orderKind: ZerodhaBasketOrderKind) => {
+    setIndmoneyBasketOrders((current) =>
+      current.map((order) => (order.id === id ? { ...order, orderKind } : order)),
+    );
+  }, []);
+
+  const updateIndmoneyBasketPercent = useCallback((id: string, percent: ZerodhaBasketOrderPercent) => {
+    setIndmoneyBasketOrders((current) =>
+      current.map((order) => (order.id === id ? applyZerodhaBasketPercent(order, percent) : order)),
+    );
+  }, []);
+
+  const updateIndmoneyBasketUnits = useCallback((id: string, delta: number) => {
+    setIndmoneyBasketOrders((current) =>
+      current.map((order) => (order.id === id ? applyZerodhaBasketUnitDelta(order, delta) : order)),
+    );
+  }, []);
+
+  const confirmIndmoneyFinalOrder = useCallback(() => {
+    const selectedOrders = indmoneyBasketOrders.filter((order) => selectedIndmoneyBasketIds.has(order.id));
+    if (!selectedOrders.length) {
+      window.alert("Select at least one IndMoney basket row before final order review.");
+      return;
+    }
+    window.alert("IndMoney final order basket is ready for manual execution review.");
+  }, [indmoneyBasketOrders, selectedIndmoneyBasketIds]);
 
   const refreshZerodhaBasketLtp = useCallback(async () => {
     if (!zerodhaBasketOrders.length) return;
@@ -7702,10 +7871,13 @@ ${zerodhaExecutionMode === "direct_market"
                   : undefined
               }
               onPlaceOrderClick={
-                stage === "actionables" && section.portfolio === "zerodha"
-                  ? () => void openZerodhaBasketPreview()
+                stage === "actionables"
+                  ? section.portfolio === "zerodha"
+                    ? () => void openZerodhaBasketPreview()
+                    : () => void openIndmoneyBasketPreview()
                   : undefined
               }
+              placeOrderLabel={section.portfolio === "indmoneyUs" ? "Final Order" : "Place Order"}
               onCalculationsClick={
                 stage === "actionables"
                   ? () => {
@@ -7842,6 +8014,45 @@ ${zerodhaExecutionMode === "direct_market"
         buyThreshold={zerodhaBasketBuyThreshold}
         buyThresholdDraft={zerodhaBasketBuyThresholdDraft}
         onBuyThresholdDraftChange={updateZerodhaBasketBuyThresholdDraft}
+      />
+
+      <ZerodhaBasketPreviewDialog
+        open={indmoneyBasketOpen}
+        loading={indmoneyBasketLoading}
+        error={indmoneyBasketError}
+        orders={indmoneyBasketOrders}
+        selectedIds={selectedIndmoneyBasketIds}
+        onClose={() => setIndmoneyBasketOpen(false)}
+        onToggle={toggleIndmoneyBasketOrder}
+        onToggleAll={toggleAllIndmoneyBasketOrders}
+        onToggleSection={toggleIndmoneyBasketSection}
+        onOrderKindChange={updateIndmoneyBasketOrderKind}
+        onPercentChange={updateIndmoneyBasketPercent}
+        onUnitsChange={updateIndmoneyBasketUnits}
+        onPlaceOrder={confirmIndmoneyFinalOrder}
+        placing={false}
+        directMarketAvailable={false}
+        executionMode="publisher_limit"
+        onExecutionModeChange={() => undefined}
+        onRefreshLtp={() => undefined}
+        ltpRefreshing={false}
+        ltpRefreshedAt={null}
+        submission={null}
+        detailsData={indmoneyBasketDetailsData}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={setScoreMatrixFormulaConfig}
+        buyThreshold={indmoneyBasketBuyThreshold}
+        buyThresholdDraft={indmoneyBasketBuyThresholdDraft}
+        onBuyThresholdDraftChange={updateIndmoneyBasketBuyThresholdDraft}
+        previewLabel="IndMoney Basket Preview"
+        basketTitle="IndMoney Final Order Basket"
+        basketBrokerLabel="IndMoney"
+        tradingViewMarket="us"
+        tradingViewTitle="IndMoney Basket TradingView URLs"
+        tradingViewAriaLabel="Open IndMoney basket TradingView URL list"
+        loadingLabel="Preparing IndMoney basket…"
+        primaryButtonLabel="Final Order"
+        basketInfoText="Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the IndMoney basket here before final order execution."
       />
 
       {promptDialog ? (
