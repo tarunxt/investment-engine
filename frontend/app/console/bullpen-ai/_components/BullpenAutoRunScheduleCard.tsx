@@ -1921,9 +1921,11 @@ function InvestMetricSummaryCard({
 function RunDetailWorkerStages({
   run,
   decisions,
+  onOpenScanFilters,
 }: {
   run: BullpenAutoLiveRun;
   decisions: BullpenAutoLiveDecision[];
+  onOpenScanFilters?: () => void;
 }) {
   const workflowView = buildBullpenAutoRunWorkflowView(run);
   const investStage =
@@ -2131,9 +2133,11 @@ function RunDetailWorkerStages({
 function RunDetailDialog({
   state,
   onClose,
+  onOpenScanFilters,
 }: {
   state: RunDetailDialogState;
   onClose: () => void;
+  onOpenScanFilters?: () => void;
 }) {
   const { run, decisions } = state;
   return (
@@ -2183,7 +2187,11 @@ function RunDetailDialog({
               {run.error_message}
             </p>
           ) : null}
-          <RunDetailWorkerStages run={run} decisions={decisions} />
+          <RunDetailWorkerStages
+            run={run}
+            decisions={decisions}
+            onOpenScanFilters={onOpenScanFilters}
+          />
           <div className="mt-5 space-y-4">
             {run.stage_results.map((stage) => (
               <section
@@ -4679,6 +4687,7 @@ export function BullpenAutoRunScheduleCard({
           <RunDetailDialog
             state={runDetailDialog}
             onClose={() => setRunDetailDialog(null)}
+            onOpenScanFilters={onOpenScanFilters}
           />
         ) : null}
 
