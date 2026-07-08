@@ -73,3 +73,6 @@ assert.equal(payload.some((order) => order.order_type === "MARKET"), false);
 assert.match(source, /projectedBuyPower/);
 assert.match(source, /zerodhaPlaceProtectedMarketOrdersSequenced/);
 assert.match(source, /selectedRows.*SELL|side === "SELL"/s);
+assert.match(source, /allowFractionalSellUnits\?: boolean/);
+assert.match(source, /allowFractionalUnits \? availableUnits : Math\.floor\(availableUnits\)/);
+assert.match(source, /buildZerodhaBasketPreviewOrders\(actionRows, technicalScans, null, \{ allowFractionalSellUnits: true \}\)/);
