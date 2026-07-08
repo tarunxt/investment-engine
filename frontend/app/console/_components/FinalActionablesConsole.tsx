@@ -3090,6 +3090,24 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
 }
 
 
+function getAutoRebalanceRunMarket(run: RunResponse): SwingTradeMarket | null {
+  if (run.auto_rebalance_portfolio === "india") return "india";
+  if (run.auto_rebalance_portfolio === "indmoney_us") return "us";
+  return null;
+}
+
+function isSwingScanRunForMarket(run: RunResponse, market: SwingTradeMarket) {
+  const metadataMarket = getAutoRebalanceRunMarket(run);
+  const isSwingScan =
+    /\(swing scan\)/i.test(run.auto_rebalance_label || "") ||
+    getRunScanTypeLabelFromPrompt(run.prompt) === "Swing Scan";
+  const isSameMarket = metadataMarket
+    ? metadataMarket === market
+    : isRunInSwingTradeMarket(run.prompt, market);
+
+  return isSwingScan && isSameMarket;
+}
+
 function getSwingScanBreakupEntriesForStock(
   runs: RunResponse[],
   market: SwingTradeMarket,
@@ -3103,11 +3121,7 @@ function getSwingScanBreakupEntriesForStock(
   if (!stockSymbols.size) return [];
 
   return runs
-    .filter(
-      (run) =>
-        getRunScanTypeLabelFromPrompt(run.prompt) === "Swing Scan" &&
-        isRunInSwingTradeMarket(run.prompt, market),
-    )
+    .filter((run) => isSwingScanRunForMarket(run, market))
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
