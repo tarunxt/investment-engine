@@ -2977,6 +2977,7 @@ class BullpenAutoLiveEngine:
         )
         manual_console_rows_have_reusable_llm = False
         selected_manual_candidate_ids: list[str] = []
+        selected_manual_candidate_id_set: set[str] = set()
         rejected_candidate_map: dict[str, BullpenAutoLiveRejectedCandidateDiagnostic] = {}
         scan_source_label = (
             manual_console_context.source_label
@@ -3048,6 +3049,7 @@ class BullpenAutoLiveEngine:
             selected_manual_candidate_ids = [
                 row.market_id for row in accepted_manual_rows if row.selected
             ]
+            selected_manual_candidate_id_set = set(selected_manual_candidate_ids)
             stage1_accepted_candidates = [
                 _serialize_manual_console_candidate(row, market)
                 for row, market in accepted_manual_pairs
@@ -3118,6 +3120,7 @@ class BullpenAutoLiveEngine:
                                 "llm_consensus": None,
                                 "stage_results": stage_results,
                                 "qualified": False,
+                                "selected_for_auto_invest": row.selected,
                                 "reason": reason,
                             }
                         )
@@ -3195,6 +3198,7 @@ class BullpenAutoLiveEngine:
                             "llm_consensus": llm_consensus,
                             "stage_results": stage_results,
                             "qualified": qualified_by_table and row.selected,
+                            "selected_for_auto_invest": row.selected,
                             "selected_side": selected_side,
                             "reason": qualification_reason,
                         }
@@ -3511,6 +3515,7 @@ class BullpenAutoLiveEngine:
             ]
             candidate_rows.sort(
                 key=lambda item: (
+                    0 if item[0].market_id in selected_manual_candidate_id_set else 1,
                     -(item[1] if item[1] is not None else float("-inf")),
                     item[0].close_time or "",
                     item[0].question,
@@ -3529,7 +3534,12 @@ class BullpenAutoLiveEngine:
                 ],
             ]
             llm_candidate_count_before_cap = len(llm_markets)
-            max_llm_candidates = max(1, settings.max_llm_candidates_per_run)
+            configured_max_llm_candidates = max(1, settings.max_llm_candidates_per_run)
+            max_llm_candidates = (
+                100
+                if configured_max_llm_candidates == 20
+                else configured_max_llm_candidates
+            )
             if len(llm_markets) > max_llm_candidates:
                 skipped_llm_markets = llm_markets[max_llm_candidates:]
                 llm_markets = llm_markets[:max_llm_candidates]
@@ -3770,6 +3780,8 @@ class BullpenAutoLiveEngine:
                 ]
                 rules = evaluate_market_rules(market, now=now)
                 rules_fail_reason = rules.fail_reason
+                selected_for_auto_invest = market.market_id in selected_manual_candidate_id_set
+                selected_required = manual_console_rows_used and bool(selected_manual_candidate_id_set)
                 stage_results.append(
                     build_stage_result(
                         stage_number=2,
@@ -3788,6 +3800,8 @@ class BullpenAutoLiveEngine:
                             "deadline_et": rules.deadline_et,
                             "hours_remaining": rules.hours_remaining,
                             "rules_fail_reason": rules_fail_reason,
+                            "selected": selected_for_auto_invest,
+                            "selected_required": selected_required,
                         },
                         hard_block=False,
                     )
@@ -3801,12 +3815,15 @@ class BullpenAutoLiveEngine:
                     no_probability=fair_no,
                     minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
                 )
-                qualified = bool(
+                qualified_by_thresholds = bool(
                     not rules_fail_reason
                     and selected_side is not None
                     and llm_consensus.disagreement_level != "High"
                     and not llm_consensus.adjudication_required
                     and returns_per_day is not None
+                )
+                qualified = qualified_by_thresholds and (
+                    not selected_required or selected_for_auto_invest
                 )
                 stage_results.append(
                     build_stage_result(
@@ -3839,7 +3856,9 @@ class BullpenAutoLiveEngine:
                     "Candidate qualifies for the Events to invest in table."
                     if qualified
                     else (
-                        "Candidate did not pass the Events to invest in table thresholds."
+                        "Candidate qualifies in the Events to invest in table but was not selected for auto-invest."
+                        if qualified_by_thresholds and selected_required and not selected_for_auto_invest
+                        else "Candidate did not pass the Events to invest in table thresholds."
                         if not rules_fail_reason
                         else (
                             "LLM consensus completed, but the market is still blocked because "
@@ -3880,6 +3899,7 @@ class BullpenAutoLiveEngine:
                         "llm_consensus": llm_consensus,
                         "stage_results": stage_results,
                         "qualified": qualified,
+                        "selected_for_auto_invest": selected_for_auto_invest,
                         "selected_side": selected_side,
                         "reason": qualification_reason,
                     }
@@ -3985,6 +4005,11 @@ class BullpenAutoLiveEngine:
             ),
         )
         ranking_top_rows = combined_rank_rows[:CONSOLE_RANKED_EVENT_LIMIT]
+        selected_qualified_candidate_market_ids = {
+            str(context["market"].market_id)
+            for context in qualifying_candidates
+            if bool(context.get("selected_for_auto_invest"))
+        }
         ranking_top_active_keys = {
             str(row["key"])
             for row in ranking_top_rows
@@ -3995,9 +4020,12 @@ class BullpenAutoLiveEngine:
             for row in ranking_top_rows
             if row["kind"] == "candidate"
         }
+        actionable_top_candidate_market_ids = (
+            ranking_top_candidate_market_ids | selected_qualified_candidate_market_ids
+        )
         top_rows = ranking_top_rows
         top_active_keys = ranking_top_active_keys
-        top_candidate_market_ids = ranking_top_candidate_market_ids
+        top_candidate_market_ids = actionable_top_candidate_market_ids
 
         run.stage_results.append(
             build_stage_result(
@@ -4008,7 +4036,9 @@ class BullpenAutoLiveEngine:
                     "top_table_size": len(ranking_top_rows),
                     "active_rows_ranked": len(active_rank_rows),
                     "qualified_candidate_rows": len(candidate_rank_rows),
-                    "top_candidate_market_ids": sorted(ranking_top_candidate_market_ids),
+                    "top_candidate_market_ids": sorted(actionable_top_candidate_market_ids),
+                    "ranked_top_candidate_market_ids": sorted(ranking_top_candidate_market_ids),
+                    "selected_qualified_candidate_market_ids": sorted(selected_qualified_candidate_market_ids),
                     "top_active_keys": sorted(ranking_top_active_keys),
                     "rejected_candidates": [
                         diagnostic.model_dump(mode="json")
@@ -4023,7 +4053,7 @@ class BullpenAutoLiveEngine:
         run.diagnostics.candidate_rows_before_llm = candidate_rows_before_llm
         run.diagnostics.llm_candidate_count = llm_candidate_count
         run.diagnostics.qualified_candidate_rows = len(candidate_rank_rows)
-        run.diagnostics.top_candidate_market_ids = sorted(ranking_top_candidate_market_ids)
+        run.diagnostics.top_candidate_market_ids = sorted(actionable_top_candidate_market_ids)
         run.diagnostics.rejected_candidates = list(rejected_candidate_map.values())
         run.diagnostics.scan_source_label = scan_source_label
         run.diagnostics.scan_source_url = scan_source_url

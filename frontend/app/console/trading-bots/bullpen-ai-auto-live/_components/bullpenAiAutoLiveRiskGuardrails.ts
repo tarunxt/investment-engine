@@ -109,7 +109,7 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   candidate_price_refresh_minutes: 5,
   new_scan_interval_minutes: 60,
   llm_rerun_interval_minutes: 240,
-  max_llm_candidates_per_run: 20,
+  max_llm_candidates_per_run: 100,
   auto_live_enabled: false,
   dry_run: true,
   require_manual_confirmation: true,
