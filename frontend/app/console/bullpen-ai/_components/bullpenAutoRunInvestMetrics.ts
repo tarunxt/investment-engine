@@ -17,7 +17,8 @@ export type InvestMetricDialogKind =
   | `${InvestStepKey}-${InvestStepMetricKind}`
   | "sell-exit-rows"
   | "sell-ranking-llm"
-  | "sell-forced-exit";
+  | "sell-forced-exit"
+  | "sell-redeem";
 
 type InvestMetricDialogDefinition = {
   title: string;
@@ -31,6 +32,7 @@ const RANKING_LLM_EXIT_STRATEGIES = new Set([
   "LLM_OR_ODDS_FILTER_EXIT",
 ]);
 const FORCED_EXIT_STRATEGIES = new Set(["CAPITAL_AWARE_FORCED_EXIT"]);
+const REDEEM_EXIT_STRATEGIES = new Set(["REDEEM_CLAIM"]);
 
 function hasOrderAction(
   decision: BullpenAutoLiveDecision,
@@ -80,10 +82,11 @@ export function getInvestStepMetricDialogKind(
 }
 
 export function getSellInvestMetricDialogKind(
-  metric: "event-exit-rows" | "ranking-llm" | "forced-exit",
+  metric: "event-exit-rows" | "ranking-llm" | "forced-exit" | "redeem",
 ): InvestMetricDialogKind {
   if (metric === "event-exit-rows") return "sell-exit-rows";
   if (metric === "ranking-llm") return "sell-ranking-llm";
+  if (metric === "redeem") return "sell-redeem";
   return "sell-forced-exit";
 }
 
@@ -175,6 +178,15 @@ export function getInvestMetricDialogDefinition(
         description:
           "Event Exit rows triggered by the capital-aware forced-exit guardrail.",
         includes: (decision) => hasExitStrategy(decision, FORCED_EXIT_STRATEGIES),
+      };
+    case "sell-redeem":
+      return {
+        title: "Stage 3 Step 1 redeem/claim",
+        description:
+          "Resolved winning Bullpen positions that skip Stage 2 LLM review and are redeemed/claimed in Stage 3 Step 1.",
+        includes: (decision) =>
+          decision.order_plan?.action === "redeem" ||
+          hasExitStrategy(decision, REDEEM_EXIT_STRATEGIES),
       };
     case "decisions":
     default:

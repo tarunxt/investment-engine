@@ -1704,6 +1704,116 @@ async def test_console_profile_reviews_all_stage1_events_before_building_ranked_
 
 
 @pytest.mark.anyio
+async def test_console_profile_redeems_claimable_positions_without_llm(monkeypatch):
+    fixed_now = datetime(2026, 7, 8, 12, 0, tzinfo=UTC)
+    claimable_position = _console_wallet_position(
+        slug="gpt-56-released-by-july-7-2026",
+        market_title="GPT-5.6 released by July 7, 2026?",
+        current_price_cents=100,
+        shares=2.353,
+        average_price_cents=85,
+        exposure_usd=2.35,
+        close_time="2026-07-07T00:00:00+00:00",
+        side="NO",
+        is_claimable=True,
+    )
+    calls: list[str] = []
+
+    async def fake_read_console_wallet_positions():
+        return [claimable_position]
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[],
+            rejected=[],
+            total_candidates=0,
+        )
+
+    async def fake_refresh_live_controls(**_kwargs):
+        return _fake_live_controls()
+
+    class RecordingExecutor:
+        async def redeem(self, **_kwargs):
+            calls.append("redeem")
+            return "redeem submitted"
+
+        async def claim(self, **_kwargs):
+            calls.append("claim")
+            return "claim submitted"
+
+    async def fail_llm(*_args, **_kwargs):
+        raise AssertionError("claimable positions must not run Stage 2 LLM review")
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now", lambda: fixed_now
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_live_controls",
+        fake_refresh_live_controls,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus", fail_llm
+    )
+    async def fake_fetch_market_by_slug(_slug):
+        return None
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.fetch_market_by_slug",
+        fake_fetch_market_by_slug,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.bullpen_module.BullpenLiveExecutor",
+        lambda: RecordingExecutor(),
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=False,
+            allow_live_execution=True,
+            require_manual_confirmation=False,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(dry_run=False),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    redeem_decision = next(
+        decision
+        for decision in result.decisions
+        if decision.order_plan is not None and decision.order_plan.action == "redeem"
+    )
+
+    assert calls == ["redeem", "claim"]
+    assert result.run.stage_results[0].outputs["active_position_rows_before_llm"] == 1
+    assert result.run.stage_results[1].outputs["llm_candidate_count"] == 0
+    invest_stage = next(
+        stage for stage in result.run.stage_results if "redeem_planned" in stage.outputs
+    )
+    assert invest_stage.outputs["redeem_planned"] == 1
+    assert invest_stage.outputs["redeem_submitted"] == 1
+    assert redeem_decision.order_plan.status == "submitted"
+
+
+@pytest.mark.anyio
 async def test_console_profile_stage_2_reviews_active_positions_and_persists_llm_outputs(
     monkeypatch,
 ):
@@ -2396,6 +2506,7 @@ def _console_wallet_position(
     exposure_usd: float = 4.5,
     close_time: str | None = None,
     side: str = "NO",
+    is_claimable: bool = False,
 ) -> ConsoleWalletPosition:
     if close_time is None:
         close_time = (datetime.now(UTC) + timedelta(days=7)).isoformat()
@@ -2414,7 +2525,7 @@ def _console_wallet_position(
         current_no_odds=round(current_price_cents, 2),
         close_time=close_time,
         theme="Politics",
-        is_claimable=False,
+        is_claimable=is_claimable,
     )
 
 

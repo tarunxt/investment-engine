@@ -3352,7 +3352,12 @@ class BullpenAutoLiveEngine:
                     ),
                 )
             )
-        active_position_rows_before_llm = len(position_snapshots)
+        claimable_wallet_positions = [
+            position for position in enriched_wallet_positions if position.is_claimable
+        ]
+        active_position_rows_before_llm = len(position_snapshots) + len(
+            claimable_wallet_positions
+        )
 
         set_run_stage_result(
             run,
@@ -3367,12 +3372,12 @@ class BullpenAutoLiveEngine:
                 item_label="events",
                 outputs={
                     "live_wallet_positions": len(enriched_wallet_positions),
-                    "active_wallet_positions": len(position_snapshots),
+                    "active_wallet_positions": active_position_rows_before_llm,
                     "active_positions_found": [
                         _serialize_active_wallet_position(position)
                         for position in enriched_wallet_positions
-                        if not position.is_claimable
                     ],
+                    "claimable_wallet_positions": len(claimable_wallet_positions),
                     "scanned_candidates": scanned_total_candidates,
                     "active_position_rows_before_llm": active_position_rows_before_llm,
                     "candidate_rows_before_llm": candidate_rows_before_llm,
@@ -3559,12 +3564,12 @@ class BullpenAutoLiveEngine:
                     item_label="events",
                     outputs={
                         "live_wallet_positions": len(enriched_wallet_positions),
-                        "active_wallet_positions": len(position_snapshots),
+                        "active_wallet_positions": active_position_rows_before_llm,
                         "active_positions_found": [
                             _serialize_active_wallet_position(position)
                             for position in enriched_wallet_positions
-                            if not position.is_claimable
                         ],
+                        "claimable_wallet_positions": len(claimable_wallet_positions),
                         "scanned_candidates": scanned_total_candidates,
                         "active_position_rows_before_llm": active_position_rows_before_llm,
                         "candidate_rows_before_llm": candidate_rows_before_llm,
@@ -3974,6 +3979,15 @@ class BullpenAutoLiveEngine:
         active_rank_rows = []
         for position in enriched_wallet_positions:
             if position.is_claimable:
+                active_rank_rows.append(
+                    {
+                        "kind": "redeem",
+                        "key": f"{position.market_id}::{position.side}",
+                        "market_id": position.market_id,
+                        "returns_per_day": float("inf"),
+                        "position": position,
+                    }
+                )
                 continue
             returns_per_day = position_returns_per_day(position, now=now)
             if returns_per_day is None:
@@ -4048,7 +4062,7 @@ class BullpenAutoLiveEngine:
             )
         )
         run.diagnostics.live_wallet_positions = len(enriched_wallet_positions)
-        run.diagnostics.active_wallet_positions = len(position_snapshots)
+        run.diagnostics.active_wallet_positions = active_position_rows_before_llm
         run.diagnostics.scanned_candidates = scanned_total_candidates
         run.diagnostics.candidate_rows_before_llm = candidate_rows_before_llm
         run.diagnostics.llm_candidate_count = llm_candidate_count
@@ -4061,7 +4075,11 @@ class BullpenAutoLiveEngine:
         run.diagnostics.selected_manual_candidate_ids = selected_manual_candidate_ids
 
         invest_stage_started_at = utc_now_iso()
-        total_decision_rows = len(position_snapshots) + len(candidate_contexts)
+        total_decision_rows = (
+            len(position_snapshots)
+            + len(claimable_wallet_positions)
+            + len(candidate_contexts)
+        )
         decisions: list[BullpenAutoLiveDecision] = []
         processed_decision_rows = 0
         execution_pause_reason: str | None = None
@@ -4077,6 +4095,9 @@ class BullpenAutoLiveEngine:
             event_exit_rows = 0
             ranking_llm_sell_planned = 0
             forced_exit_sell_planned = 0
+            redeem_planned = 0
+            redeem_processed = 0
+            redeem_submitted = 0
 
             for current in decisions:
                 if current.exit_state in {"EVENT_EXIT_PLANNED", "DUST_LOST"}:
@@ -4084,9 +4105,12 @@ class BullpenAutoLiveEngine:
                 order_plan = current.order_plan
                 if order_plan is None:
                     continue
-                is_sell = order_plan.action == "sell"
+                is_redeem = order_plan.action == "redeem"
+                is_sell = order_plan.action == "sell" or is_redeem
                 if is_sell:
                     sell_planned += 1
+                    if is_redeem:
+                        redeem_planned += 1
                     strategies = {signal.strategy for signal in current.exit_signals}
                     if strategies & {
                         "OUTSIDE_TOP_10_RETURNS_DAY",
@@ -4100,11 +4124,15 @@ class BullpenAutoLiveEngine:
                 if order_plan.status != "planned":
                     if is_sell:
                         sell_processed += 1
+                        if is_redeem:
+                            redeem_processed += 1
                     else:
                         buy_processed += 1
                 if order_plan.status == "submitted":
                     if is_sell:
                         sell_submitted += 1
+                        if is_redeem:
+                            redeem_submitted += 1
                     else:
                         buy_submitted += 1
 
@@ -4115,6 +4143,9 @@ class BullpenAutoLiveEngine:
                 "event_exit_rows": event_exit_rows,
                 "ranking_llm_sell_planned": ranking_llm_sell_planned,
                 "forced_exit_sell_planned": forced_exit_sell_planned,
+                "redeem_planned": redeem_planned,
+                "redeem_processed": redeem_processed,
+                "redeem_submitted": redeem_submitted,
                 "buy_planned": buy_planned,
                 "buy_processed": buy_processed,
                 "buy_submitted": buy_submitted,
@@ -4182,6 +4213,9 @@ class BullpenAutoLiveEngine:
                     "event_exit_rows": counts["event_exit_rows"],
                     "ranking_llm_planned_orders": counts["ranking_llm_sell_planned"],
                     "forced_exit_planned_orders": counts["forced_exit_sell_planned"],
+                    "redeem_planned_orders": counts["redeem_planned"],
+                    "redeem_processed_orders": counts["redeem_processed"],
+                    "redeem_submitted_orders": counts["redeem_submitted"],
                 }
             )
 
@@ -4271,6 +4305,9 @@ class BullpenAutoLiveEngine:
                 "event_exit_submitted": counts["sell_submitted"],
                 "event_exit_ranking_llm_planned": counts["ranking_llm_sell_planned"],
                 "event_exit_forced_planned": counts["forced_exit_sell_planned"],
+                "redeem_planned": counts["redeem_planned"],
+                "redeem_processed": counts["redeem_processed"],
+                "redeem_submitted": counts["redeem_submitted"],
                 "sell_orders_planned": counts["sell_planned"],
                 "sell_orders_processed": counts["sell_processed"],
                 "sell_orders_submitted": counts["sell_submitted"],
@@ -4715,6 +4752,92 @@ class BullpenAutoLiveEngine:
             completed_at=None,
         )
 
+        for position in claimable_wallet_positions:
+            market = _active_position_market(
+                position,
+                market_by_slug=market_by_slug,
+                market_by_id=market_by_id,
+            )
+            current_position = PositionSnapshot(
+                market_id=position.market_id,
+                slug=position.slug,
+                market_title=position.market_title,
+                market_url=position.market_url,
+                theme=position.theme,
+                side=position.side,
+                exposure_usd=position.exposure_usd,
+                shares=position.shares,
+                average_price_cents=position.average_price_cents,
+                opened_at=now,
+                updated_at=now,
+                close_time=position.close_time,
+                current_price_cents=position.current_price_cents,
+                condition_id=position.condition_id,
+                current_yes_odds=position.current_yes_odds,
+                current_no_odds=position.current_no_odds,
+                exit_state="REDEEM_CLAIM",
+            )
+            reason = (
+                "Resolved winning Bullpen position is redeemable/claimable; "
+                "Stage 2 LLM review is intentionally skipped and Stage 3 Step 1 will redeem/claim it."
+            )
+            stage_results = [
+                build_stage_result(
+                    stage_number=1,
+                    status="pass",
+                    reason="Live wallet position is active because it is redeemable/claimable.",
+                    outputs={
+                        "source_kind": "claimable_position",
+                        "position_key": f"{position.market_id}::{position.side}",
+                        "position_side": position.side,
+                        "shares": position.shares,
+                        "claimable": True,
+                    },
+                ),
+                build_stage_result(
+                    stage_number=2,
+                    status="skipped",
+                    reason="Redeemable/claimable positions skip Stage 2 LLM review.",
+                    outputs={"claimable": True},
+                ),
+                build_stage_result(
+                    stage_number=6,
+                    status="pass",
+                    reason=reason,
+                    outputs={
+                        "exit_state": "REDEEM_CLAIM",
+                        "claimable": True,
+                        "condition_id": position.condition_id,
+                    },
+                ),
+            ]
+            signal = ExitSignal(
+                strategy="REDEEM_CLAIM",
+                severity="IMMEDIATE_EXIT",
+                reasonCode="RESOLVED_POSITION_CLAIMABLE",
+                label="Redeem/claim resolved position",
+                description=reason,
+                score=100,
+                createdAt=utc_now_iso(),
+            )
+            decision = _build_decision(
+                market=market,
+                decision_action="EXIT",
+                reason=reason,
+                stage_results=stage_results,
+                current_position=current_position,
+                current_exposure_usd=position.exposure_usd,
+                target_exposure_usd=0,
+                order_usd=position.exposure_usd,
+                order_shares=position.shares,
+                exit_signals=[signal],
+                exit_state="REDEEM_CLAIM",
+            )
+            if decision.order_plan is not None:
+                decision.order_plan.action = "redeem"  # type: ignore[assignment]
+                decision.order_plan.detail = "Redeem/claim planned for resolved Bullpen position."
+            record_invest_decision(decision, market=market)
+
         for entry in evaluated_active_positions:
             position = entry["position"]
             market = entry["market"]
@@ -5067,7 +5190,10 @@ class BullpenAutoLiveEngine:
         sell_execution_decisions = [
             decision
             for decision in decisions
-            if decision.order_plan is not None and decision.order_plan.action == "sell"
+            if (
+                decision.order_plan is not None
+                and decision.order_plan.action in {"sell", "redeem"}
+            )
         ]
         buy_execution_decisions = [
             decision
@@ -5186,9 +5312,15 @@ class BullpenAutoLiveEngine:
             global_counts = _current_stage3_order_counts()
             pending_order_number = global_counts["processed"] + 1
             pending_step_order_number = step_processed_orders + 1
+            action_label = (
+                "redeem/claim"
+                if order_plan.action == "redeem"
+                else "sell"
+                if step_key == "sell"
+                else "buy"
+            )
             in_flight_detail = (
-                f"Step {step_number} of 2 is submitting "
-                f"{'sell' if step_key == 'sell' else 'buy'} order "
+                f"Step {step_number} of 2 is submitting {action_label} order "
                 f"{pending_step_order_number} of {step_total_orders}."
             )
             order_plan.detail = in_flight_detail
@@ -5231,6 +5363,73 @@ class BullpenAutoLiveEngine:
                     execution_gate_reason=execution_pause_reason,
                     current_step_key=step_key,
                     current_step_detail=execution_pause_reason,
+                    completed_at=None,
+                )
+                return
+
+            if order_plan.action == "redeem":
+                if state.dry_run:
+                    order_plan.status = "skipped"
+                    order_plan.detail = f"Simulation only: {simulation_reason}"
+                else:
+                    try:
+                        condition_ids = [decision.market_id]
+                        if decision.order_plan.market_id:
+                            condition_ids = [decision.order_plan.market_id]
+                        order_plan.execution_response = await asyncio.wait_for(
+                            executor.redeem(dry_run=False, condition_ids=condition_ids),
+                            timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                        )
+                        claim = getattr(executor, "claim", None)
+                        if claim is not None:
+                            claim_response = await asyncio.wait_for(
+                                claim(dry_run=False),
+                                timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                            )
+                            if claim_response:
+                                order_plan.execution_response = (
+                                    f"{order_plan.execution_response}\n{claim_response}"
+                                    if order_plan.execution_response
+                                    else claim_response
+                                )
+                        order_plan.status = "submitted"
+                        order_plan.executed_at = utc_now_iso()
+                        order_plan.detail = "Bullpen redeem/claim submitted successfully."
+                        running_failed_orders = 0
+                    except Exception as exc:
+                        order_plan.status = "failed"
+                        order_plan.detail = str(exc)
+                        running_failed_orders += 1
+                decision.stage_results.append(
+                    build_stage_result(
+                        stage_number=7,
+                        status=(
+                            "pass"
+                            if order_plan.status == "submitted"
+                            else "skipped"
+                            if state.dry_run
+                            else "fail"
+                        ),
+                        reason=order_plan.detail,
+                        outputs=order_plan.model_dump(mode="json"),
+                        hard_block=order_plan.status == "failed",
+                    )
+                )
+                _, step_processed, step_submitted = _stage3_step_counts(step_key)
+                report_invest_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        f"Stage 3 Step {step_number} of 2 submitted {step_submitted} of "
+                        f"{step_total_orders} redeem/claim orders. Latest: {decision.market_title}"
+                        if order_plan.status == "submitted"
+                        else f"Stage 3 Step {step_number} of 2 processed {step_processed} of "
+                        f"{step_total_orders} redeem/claim orders. Latest: {decision.market_title}"
+                    ),
+                    completed_items=processed_decision_rows,
+                    execution_gate_reason=execution_pause_reason,
+                    execution_mode_reason=simulation_reason if state.dry_run else None,
+                    current_step_key=step_key,
+                    current_step_detail=order_plan.detail,
                     completed_at=None,
                 )
                 return
@@ -5730,7 +5929,8 @@ class BullpenAutoLiveEngine:
                     "qualified_candidate_rows": len(candidate_rank_rows),
                     "top_candidate_market_ids": sorted(top_candidate_market_ids),
                     "top_active_keys": sorted(top_active_keys),
-                    "active_position_rows": len(position_snapshots),
+                    "active_position_rows": active_position_rows_before_llm,
+                    "claimable_position_rows": len(claimable_wallet_positions),
                     "candidate_decision_rows": len(candidate_contexts),
                     "decisions_count": len(decisions),
                     "orders_planned": final_order_counts["planned"],
@@ -5741,6 +5941,9 @@ class BullpenAutoLiveEngine:
                     "sell_orders_planned": final_order_counts["sell_planned"],
                     "sell_orders_processed": final_order_counts["sell_processed"],
                     "sell_orders_submitted": final_order_counts["sell_submitted"],
+                    "redeem_planned": final_order_counts["redeem_planned"],
+                    "redeem_processed": final_order_counts["redeem_processed"],
+                    "redeem_submitted": final_order_counts["redeem_submitted"],
                     "sell_orders_failed": sell_order_hard_failure_count,
                     "sell_orders_unsubmitted": sell_order_issue_count,
                     "buy_orders_planned": final_order_counts["buy_planned"],

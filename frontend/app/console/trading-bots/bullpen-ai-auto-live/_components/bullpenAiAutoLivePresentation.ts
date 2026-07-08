@@ -224,7 +224,7 @@ function buildProposedOrderLabel(
 ) {
   const orderPlan = decision.order_plan;
   if (orderPlan) {
-    const action = orderPlan.action === "buy" ? "Buy" : orderPlan.action === "sell" ? "Sell" : "Hold";
+    const action = orderPlan.action === "buy" ? "Buy" : orderPlan.action === "sell" ? "Sell" : orderPlan.action === "redeem" ? "Redeem" : "Hold";
     return `${action} ${orderPlan.side} ${orderPlan.order_size_usd.toFixed(2)} @ ${orderPlan.limit_price_cents.toFixed(1)}c`;
   }
 
