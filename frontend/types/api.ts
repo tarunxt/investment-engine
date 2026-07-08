@@ -1677,6 +1677,7 @@ export interface BullpenAutoLiveSettings {
   candidate_price_refresh_minutes: number;
   new_scan_interval_minutes: number;
   llm_rerun_interval_minutes: number;
+  max_llm_candidates_per_run: number;
   console_auto_start_at?: string | null;
   console_auto_refresh_minutes?: number | null;
   auto_live_enabled: boolean;

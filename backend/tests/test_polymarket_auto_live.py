@@ -827,6 +827,108 @@ async def test_console_profile_reports_incremental_stage_2_progress(monkeypatch)
 
 
 @pytest.mark.anyio
+async def test_console_profile_caps_stage_2_llm_reviews_to_keep_runs_bounded(monkeypatch):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    markets = [
+        _market(
+            question=f"Will capped Stage 2 market {index} finish review?",
+            slug=f"stage-2-cap-{index}",
+            current_yes_odds=10 + index,
+            current_no_odds=90 - index,
+        )
+        for index in range(5)
+    ]
+    reviewed_slugs: list[str | None] = []
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=markets,
+            rejected=[],
+            total_candidates=len(markets),
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = next(item for item in markets if item.slug == slug)
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=market.current_no_odds,
+            spread_cents=2,
+        )
+
+    def fake_run_llm_consensus(market, *_args, **_kwargs):
+        reviewed_slugs.append(market.slug)
+        return _fake_llm_consensus(fair_yes=8, fair_no=92)
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda *_args, **_kwargs: 9.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        fake_run_llm_consensus,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            max_llm_candidates_per_run=2,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    llm_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+
+    assert reviewed_slugs == ["stage-2-cap-0", "stage-2-cap-1"]
+    assert llm_stage.outputs["llm_candidate_count"] == 2
+    assert llm_stage.outputs["llm_candidate_count_before_cap"] == 5
+    assert llm_stage.outputs["max_llm_candidates_per_run"] == 2
+    assert llm_stage.outputs["llm_candidates_skipped_by_cap"] == 3
+
+
+@pytest.mark.anyio
 async def test_console_profile_reports_incremental_stage_3_counters_and_mode_reason(
     monkeypatch,
 ):
