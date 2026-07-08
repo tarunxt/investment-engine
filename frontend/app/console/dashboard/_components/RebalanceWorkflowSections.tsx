@@ -5793,6 +5793,8 @@ ${zerodhaExecutionMode === "direct_market"
             product: "CNC",
             validity: "DAY",
             market_protection: ZERODHA_DEFAULT_MARKET_PROTECTION,
+            estimated_price: order.price || order.lastPrice || undefined,
+            last_price: order.lastPrice || order.price || undefined,
           })),
           sell_first: true,
           wait_for_sell_completion: true,

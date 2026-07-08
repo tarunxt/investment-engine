@@ -975,6 +975,8 @@ export interface ZerodhaProtectedMarketOrderRequest {
   product?: 'CNC';
   validity?: 'DAY';
   market_protection?: string;
+  estimated_price?: number;
+  last_price?: number;
 }
 
 export interface ZerodhaProtectedMarketRequest {

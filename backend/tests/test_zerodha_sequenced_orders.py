@@ -146,6 +146,26 @@ async def test_sequenced_partial_margin_clamps_buy_quantity(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_sequenced_uses_client_price_when_buy_quote_refresh_fails(monkeypatch):
+    class QuoteFailSvc(FakeSvc):
+        async def get_quotes(self, token, instruments):
+            raise RuntimeError("quote permission denied")
+
+    svc = QuoteFailSvc(margin=1_000, quote=100)
+    monkeypatch.setattr(zerodha_router, "_svc", svc)
+
+    buy_order = order("BUYME", "BUY", 5).model_copy(update={"estimated_price": 100, "last_price": 100})
+    response = await zerodha_router.place_protected_market_orders_sequenced(
+        FakeRequest(), req(order("SELLME", "SELL"), buy_order, safety_buffer_amount=50), FakeDb(), SimpleNamespace(id=1)
+    )
+
+    assert response.placed_count == 2
+    assert response.skipped_count == 0
+    assert [placed["transaction_type"] for placed in svc.placed] == ["SELL", "BUY"]
+    assert "using client basket price" in "; ".join(response.messages)
+
+
+@pytest.mark.anyio
 async def test_sequenced_direct_market_disabled_returns_503(monkeypatch):
     svc = FakeSvc()
     svc.direct_market_orders_enabled = False
