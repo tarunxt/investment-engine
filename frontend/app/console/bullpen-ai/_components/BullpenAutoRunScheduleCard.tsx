@@ -4685,9 +4685,9 @@ export function BullpenAutoRunScheduleCard({
                   <li>
                     Stage 2 must first keep the event{" "}
                     <span className="font-semibold">qualified</span>: rules
-                    parsing cannot be blocked, a strong LLM side must exist,
-                    returns/day must be computable, LLM disagreement cannot be
-                    High, and adjudication cannot be required.
+                    parsing, disagreement, adjudication, and manual selection are
+                    shown for review, but only a strong LLM side and computable
+                    returns/day are required before Stage 3 ranking.
                   </li>
                   <li>
                     Those qualified candidates are then ranked together with
@@ -4707,9 +4707,11 @@ export function BullpenAutoRunScheduleCard({
                     submission.
                   </li>
                   <li>
-                    In invest-only reuse mode, markets that are already in the
-                    Bullpen wallet or were already submitted from the saved run
-                    are skipped instead of being re-planned.
+                    In invest-only reuse mode, Stage 3 uses the latest qualified
+                    rows and skips the Bullpen rescan plus LLM rerun; markets
+                    that are already in the Bullpen wallet or were already
+                    submitted from the saved run are skipped instead of being
+                    re-planned.
                   </li>
                 </ul>
               </div>

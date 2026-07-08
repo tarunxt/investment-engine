@@ -3134,8 +3134,6 @@ class BullpenAutoLiveEngine:
                     qualified_by_table = bool(
                         returns_per_day is not None
                         and selected_side is not None
-                        and llm_consensus.disagreement_level != "High"
-                        and not llm_consensus.adjudication_required
                     )
                     stage_results.append(
                         build_stage_result(
@@ -3160,15 +3158,11 @@ class BullpenAutoLiveEngine:
                         if qualified_by_table
                         else "Candidate did not pass the Events to invest in table thresholds."
                     )
-                    if qualified_by_table and not row.selected:
-                        qualification_reason = (
-                            "Candidate qualifies in the Events to invest in table but was not selected for auto-invest."
-                        )
                     stage_results.append(
                         build_stage_result(
                             stage_number=4,
                             status="pass"
-                            if qualified_by_table and row.selected
+                            if qualified_by_table
                             else "warning",
                             reason=qualification_reason,
                             outputs={
@@ -3180,10 +3174,10 @@ class BullpenAutoLiveEngine:
                                 "min_strongest_llm_odds": CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
                                 "selected": row.selected,
                             },
-                            hard_block=not (qualified_by_table and row.selected),
+                            hard_block=not qualified_by_table,
                         )
                     )
-                    if not qualified_by_table or not row.selected:
+                    if not qualified_by_table:
                         _record_rejected_candidate(
                             rejected_candidate_map,
                             market=market,
@@ -3821,15 +3815,10 @@ class BullpenAutoLiveEngine:
                     minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
                 )
                 qualified_by_thresholds = bool(
-                    not rules_fail_reason
-                    and selected_side is not None
-                    and llm_consensus.disagreement_level != "High"
-                    and not llm_consensus.adjudication_required
+                    selected_side is not None
                     and returns_per_day is not None
                 )
-                qualified = qualified_by_thresholds and (
-                    not selected_required or selected_for_auto_invest
-                )
+                qualified = qualified_by_thresholds
                 stage_results.append(
                     build_stage_result(
                         stage_number=3,
@@ -3841,8 +3830,8 @@ class BullpenAutoLiveEngine:
                             "LLM consensus completed for the candidate market."
                             if not rules_fail_reason
                             else (
-                                f"LLM consensus completed, but Stage 2 kept the candidate "
-                                f"blocked because {rules_fail_reason.rstrip('.')}."
+                                f"LLM consensus completed; rules parsing noted "
+                                f"{rules_fail_reason.rstrip('.')} for review."
                             )
                         ),
                         outputs={
@@ -3861,9 +3850,7 @@ class BullpenAutoLiveEngine:
                     "Candidate qualifies for the Events to invest in table."
                     if qualified
                     else (
-                        "Candidate qualifies in the Events to invest in table but was not selected for auto-invest."
-                        if qualified_by_thresholds and selected_required and not selected_for_auto_invest
-                        else "Candidate did not pass the Events to invest in table thresholds."
+                        "Candidate did not pass the Events to invest in table thresholds."
                         if not rules_fail_reason
                         else (
                             "LLM consensus completed, but the market is still blocked because "
