@@ -37,7 +37,7 @@ import {
   isScoreMatrixRowOutOfBounds,
   type ScoreMatrixWeightedRow,
 } from "@/lib/scoreMatrixMath";
-import { getAutoRebalanceRunDisplayLabel, isRunInSwingTradeMarket } from "@/lib/runPresentation";
+import { getAutoRebalanceRunDisplayLabel, getRunScanTypeLabelFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -3103,7 +3103,11 @@ function getSwingScanBreakupEntriesForStock(
   if (!stockSymbols.size) return [];
 
   return runs
-    .filter((run) => isRunInSwingTradeMarket(run.prompt, market))
+    .filter(
+      (run) =>
+        getRunScanTypeLabelFromPrompt(run.prompt) === "Swing Scan" &&
+        isRunInSwingTradeMarket(run.prompt, market),
+    )
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
@@ -3516,53 +3520,7 @@ export function ConsensusBreakupButton({
               </button>
             </div>
             <div className="max-h-[75vh] overflow-y-auto px-5 py-4">
-              <div className="space-y-3">
-                {stock.breakupEntries.map((entry, index) => {
-                  const rowAction = getConsensusBreakupAction(entry);
-                  const recommendationLabel = rowAction ? formatRecommendationLabel(rowAction) : "Not mentioned";
-                  return (
-                    <div
-                      key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`}
-                      className={cn(
-                        "rounded-xl border px-4 py-3",
-                        rowAction ? CONSENSUS_BREAKUP_ROW_CLASS[rowAction] : "border-slate-200 bg-slate-50",
-                      )}
-                    >
-                      <div className="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-                        <div className="min-w-0">
-                          <Link
-                            href={`/console/runs/${entry.meta.runId}#llm-output-job-${entry.meta.jobId}`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setOpen(false);
-                            }}
-                            className="block cursor-pointer truncate text-base font-bold text-slate-900 underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            title={`Open ${entry.meta.provider || "Unknown provider"} ${entry.meta.model || "Unknown model"} output`}
-                          >
-                            {index + 1}. {entry.meta.provider || "Unknown provider"} {entry.meta.model || "Unknown model"}
-                          </Link>
-                          <div className="mt-0.5 text-sm text-slate-500">
-                            {entry.meta.runLabel} · Job #{entry.meta.jobId}
-                          </div>
-                        </div>
-                        <div className="whitespace-nowrap text-sm text-slate-500">
-                          {formatDateTime(entry.meta.createdAt)}
-                        </div>
-                        <span
-                          className={cn(
-                            "justify-self-start rounded-full border px-3 py-1 text-sm font-bold sm:justify-self-end",
-                            rowAction ? CATEGORY_BADGE_CLASS[rowAction] : "border-slate-200 bg-slate-100 text-slate-600",
-                          )}
-                        >
-                          {recommendationLabel}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <section className="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <section className="mb-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="border-b border-slate-200 px-4 py-3">
                   <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-700">Swing Scan captures</h3>
                   <p className="mt-1 text-sm text-slate-500">
@@ -3612,6 +3570,52 @@ export function ConsensusBreakupButton({
                   </div>
                 )}
               </section>
+
+              <div className="space-y-3">
+                {stock.breakupEntries.map((entry, index) => {
+                  const rowAction = getConsensusBreakupAction(entry);
+                  const recommendationLabel = rowAction ? formatRecommendationLabel(rowAction) : "Not mentioned";
+                  return (
+                    <div
+                      key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`}
+                      className={cn(
+                        "rounded-xl border px-4 py-3",
+                        rowAction ? CONSENSUS_BREAKUP_ROW_CLASS[rowAction] : "border-slate-200 bg-slate-50",
+                      )}
+                    >
+                      <div className="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                        <div className="min-w-0">
+                          <Link
+                            href={`/console/runs/${entry.meta.runId}#llm-output-job-${entry.meta.jobId}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpen(false);
+                            }}
+                            className="block cursor-pointer truncate text-base font-bold text-slate-900 underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            title={`Open ${entry.meta.provider || "Unknown provider"} ${entry.meta.model || "Unknown model"} output`}
+                          >
+                            {index + 1}. {entry.meta.provider || "Unknown provider"} {entry.meta.model || "Unknown model"}
+                          </Link>
+                          <div className="mt-0.5 text-sm text-slate-500">
+                            {entry.meta.runLabel} · Job #{entry.meta.jobId}
+                          </div>
+                        </div>
+                        <div className="whitespace-nowrap text-sm text-slate-500">
+                          {formatDateTime(entry.meta.createdAt)}
+                        </div>
+                        <span
+                          className={cn(
+                            "justify-self-start rounded-full border px-3 py-1 text-sm font-bold sm:justify-self-end",
+                            rowAction ? CATEGORY_BADGE_CLASS[rowAction] : "border-slate-200 bg-slate-100 text-slate-600",
+                          )}
+                        >
+                          {recommendationLabel}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
@@ -6195,9 +6199,9 @@ function ActionablesCalculationsModal({
   const hasSelectableTechnicalInputs = inputCandidates.some((candidate) => candidate.kind === "technical");
   const displayedStocks = useMemo(
     () => hasSelectableRebalanceInputs
-      ? buildConsensusRows(selectedRebalanceRuns, market, detailsData?.portfolioSnapshot)
+      ? buildConsensusRows(selectedRebalanceRuns, market, detailsData?.portfolioSnapshot, allRuns)
       : stocks,
-    [detailsData?.portfolioSnapshot, hasSelectableRebalanceInputs, market, selectedRebalanceRuns, stocks],
+    [allRuns, detailsData?.portfolioSnapshot, hasSelectableRebalanceInputs, market, selectedRebalanceRuns, stocks],
   );
   const displayedTechnicalScans = useMemo(
     () => hasSelectableTechnicalInputs ? buildTechnicalScanMap(selectedTechnicalRuns) : technicalScans,
