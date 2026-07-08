@@ -6188,7 +6188,43 @@ ${zerodhaExecutionMode === "direct_market"
         ? [{ stage, runId: info.activeRunId }]
         : [];
     });
-    if (runningEntries.length === 0) return;
+    if (runningEntries.length === 0) {
+      const hasQueuedStages = STAGE_ORDER.some(
+        (stage) => states[runningPortfolio][stage].state === "queued",
+      );
+      const hasVisibleFinishedStages = STAGE_ORDER.some((stage) =>
+        ["completed", "failed"].includes(states[runningPortfolio][stage].state),
+      );
+      if (hasQueuedStages || hasVisibleFinishedStages) {
+        const timestamp = new Date().toISOString();
+        setStates((current) => ({
+          ...current,
+          [runningPortfolio]: STAGE_ORDER.reduce((acc, stage) => {
+            const info = current[runningPortfolio][stage];
+            acc[stage] =
+              info.state === "queued"
+                ? {
+                    ...info,
+                    state: "idle",
+                    endedAt: timestamp,
+                    runStatus:
+                      "Not started before this browser session ended",
+                  }
+                : info;
+            return acc;
+          }, {} as WorkflowState),
+        }));
+        setRunningPortfolio(null);
+        setWorkflowPaused(false);
+        pauseRequestedRef.current = false;
+      }
+      return;
+    }
+
+    activeExecutionRefsRef.current = runningEntries.map(({ stage, runId }) => ({
+      kind: stage === "threats" ? "job" : "run",
+      id: runId,
+    }));
 
     let cancelled = false;
     const poll = async () => {
