@@ -1179,11 +1179,11 @@ function formatBasketQuantity(value: number | null) {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 3 }).format(value);
 }
 
-function formatBasketCurrency(value: number | null) {
+function formatBasketCurrency(value: number | null, currency: "INR" | "USD" = "INR") {
   if (value === null) return "—";
-  return new Intl.NumberFormat("en-IN", {
+  return new Intl.NumberFormat(currency === "USD" ? "en-US" : "en-IN", {
     style: "currency",
-    currency: "INR",
+    currency,
     maximumFractionDigits: 2,
   }).format(value);
 }
@@ -3003,6 +3003,7 @@ function ZerodhaBasketPreviewDialog({
   loadingLabel = "Preparing Zerodha basket…",
   primaryButtonLabel,
   basketInfoText = "Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.",
+  basketCurrency = "INR",
 }: {
   open: boolean;
   loading: boolean;
@@ -3040,6 +3041,7 @@ function ZerodhaBasketPreviewDialog({
   loadingLabel?: string;
   primaryButtonLabel?: string;
   basketInfoText?: ReactNode;
+  basketCurrency?: "INR" | "USD";
 }) {
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [basketInfoOpen, setBasketInfoOpen] = useState(false);
@@ -3256,20 +3258,20 @@ function ZerodhaBasketPreviewDialog({
                 </div>
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Buy Basket</div>
-                  <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedBuyAmount)}</div>
+                  <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedBuyAmount, basketCurrency)}</div>
                   <div className={cn("mt-3 text-xs font-bold uppercase tracking-wide", availableMarginToneClass)}>
                     Available Margin
                   </div>
                   <div className={cn("mt-1 text-lg font-black", availableMarginToneClass)}>
-                    {availableMargin === null ? "Not available" : formatBasketCurrency(availableMargin)}
+                    {availableMargin === null ? "Not available" : formatBasketCurrency(availableMargin, basketCurrency)}
                   </div>
                   <div className="mt-2 text-xs font-bold uppercase tracking-wide text-emerald-700">Projected after selected sells</div>
-                  <div className="mt-1 text-sm font-black text-emerald-900">{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower)}</div>
-                  <div className="mt-1 text-[11px] font-semibold text-emerald-700">Includes safety buffer {formatBasketCurrency(safetyBufferAmount)}; not guaranteed until sells fill and margins refresh.</div>
+                  <div className="mt-1 text-sm font-black text-emerald-900">{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower, basketCurrency)}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-emerald-700">Includes safety buffer {formatBasketCurrency(safetyBufferAmount, basketCurrency)}; not guaranteed until sells fill and margins refresh.</div>
                 </div>
                 <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
-                  <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedSellAmount)}</div>
+                  <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedSellAmount, basketCurrency)}</div>
                 </div>
                 <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
                   <label className="block text-xs font-bold uppercase tracking-wide text-blue-700" htmlFor="zerodha-buy-threshold">
@@ -3433,9 +3435,9 @@ function ZerodhaBasketPreviewDialog({
                                     </span>
                                   )}
                                 </td>
-                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.lastPrice)}</td>
-                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price)}</td>
-                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount)}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.lastPrice, basketCurrency)}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price, basketCurrency)}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount, basketCurrency)}</td>
                                 <td className="px-4 py-3">
                                   <select
                                     value={order.orderKind}
@@ -3456,7 +3458,7 @@ function ZerodhaBasketPreviewDialog({
                                     <span className="inline-flex flex-col rounded-xl bg-emerald-100 px-3 py-1 font-bold text-emerald-800">
                                       <span>{submission?.executionMode === "direct_market" ? (order.side === "SELL" ? "Sell phase placed" : "Buy phase placed") : "Sent to protected LIMIT tray"}</span>
                                       {executionPrice !== null ? (
-                                        <span className="text-[11px] font-black text-emerald-950">Avg. Price {formatBasketCurrency(executionPrice)}</span>
+                                        <span className="text-[11px] font-black text-emerald-950">Avg. Price {formatBasketCurrency(executionPrice, basketCurrency)}</span>
                                       ) : null}
                                     </span>
                                   ) : isSubmitted ? (
@@ -8088,6 +8090,7 @@ ${zerodhaExecutionMode === "direct_market"
         tradingViewAriaLabel="Open IndMoney basket TradingView URL list"
         loadingLabel="Preparing IndMoney basket…"
         primaryButtonLabel="Final Order"
+        basketCurrency="USD"
         basketInfoText="Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the IndMoney basket here before final order execution."
       />
 
