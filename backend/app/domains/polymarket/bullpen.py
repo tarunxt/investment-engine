@@ -432,6 +432,29 @@ def _is_refresh_token_rejected_error(message: str) -> bool:
     )
 
 
+def _is_transient_bullpen_preflight_error(message: str) -> bool:
+    lowered = message.lower()
+    has_transient_transport_error = any(
+        marker in lowered
+        for marker in (
+            "bad gateway",
+            "502",
+            "protocol error",
+            "invalid compression flag",
+            "failed to parse message",
+            "status 101",
+            "socket hang up",
+            "connection reset",
+            "timeout",
+            "timed out",
+            "temporarily unavailable",
+        )
+    )
+    if not has_transient_transport_error:
+        return False
+    return "preflight" in lowered or "validate active wallet" in lowered
+
+
 class BullpenLiveExecutor:
     async def doctor(self) -> PolymarketDoctorStatus:
         checked_at = utc_now()
@@ -462,22 +485,31 @@ class BullpenLiveExecutor:
                 **session,
             )
         failure_message = "; ".join(failures)
-        if (
-            "status" in passed
-            and _has_active_bullpen_session(session)
-            and _is_refresh_token_rejected_error(failure_message)
-        ):
-            return PolymarketDoctorStatus(
-                checked_at=checked_at,
-                ok=True,
-                message=(
-                    "Bullpen status passed with an active JWT; preflight reported a "
-                    "stale refresh-token error after login, so status is being "
-                    "used as the auth source of truth. Preflight detail: "
-                    f"{failure_message}"
-                ),
-                **session,
-            )
+        if "status" in passed and _has_active_bullpen_session(session):
+            if _is_refresh_token_rejected_error(failure_message):
+                return PolymarketDoctorStatus(
+                    checked_at=checked_at,
+                    ok=True,
+                    message=(
+                        "Bullpen status passed with an active JWT; preflight reported a "
+                        "stale refresh-token error after login, so status is being "
+                        "used as the auth source of truth. Preflight detail: "
+                        f"{failure_message}"
+                    ),
+                    **session,
+                )
+            if _is_transient_bullpen_preflight_error(failure_message):
+                return PolymarketDoctorStatus(
+                    checked_at=checked_at,
+                    ok=True,
+                    message=(
+                        "Bullpen status passed with an active JWT; preflight reported a "
+                        "transient transport error, so status is being used as the "
+                        "auth source of truth for this run. Preflight detail: "
+                        f"{failure_message}"
+                    ),
+                    **session,
+                )
         return PolymarketDoctorStatus(
             checked_at=checked_at,
             ok=False,
