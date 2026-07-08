@@ -120,6 +120,10 @@ type RunDetailDialogState = {
   decisions: BullpenAutoLiveDecision[];
 };
 
+type StageTwoInvestEventsDialogState = {
+  decisions: BullpenAutoLiveDecision[];
+};
+
 type ScanCandidateDialogState = {
   mode: ScanCandidateDialogMode;
   scanCompletedAt: string | null;
@@ -322,7 +326,10 @@ function getStageOneStats(stage: WorkflowStageView) {
   return { activePositions, totalScanned, passedFilters };
 }
 
-function getStageTwoStats(stage: WorkflowStageView) {
+function getStageTwoStats(
+  stage: WorkflowStageView,
+  decisions: BullpenAutoLiveDecision[] = [],
+) {
   const activePositions =
     readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
     readStageOutputNumber(stage.inputs.active_position_rows_before_llm) ??
@@ -337,7 +344,25 @@ function getStageTwoStats(stage: WorkflowStageView) {
     readStageOutputNumber(stage.outputs.total_items) ??
     activePositions + newOpportunities;
 
-  return { activePositions, newOpportunities, llmRanOn };
+  const newEventsToInvestIn = getStageTwoInvestableDecisions(decisions).length;
+
+  return { activePositions, newOpportunities, llmRanOn, newEventsToInvestIn };
+}
+
+function getStageTwoInvestableDecisions(
+  decisions: BullpenAutoLiveDecision[],
+) {
+  return decisions.filter((decision) => {
+    const orderPlan = decision.order_plan;
+    if (orderPlan) {
+      return orderPlan.action === "buy" && orderPlan.status !== "cancelled";
+    }
+    return (
+      (decision.decision === "BUY_NEW" || decision.decision === "ADD_MORE") &&
+      decision.risk_status !== "Blocked" &&
+      decision.target_exposure_usd > decision.current_exposure_usd
+    );
+  });
 }
 
 function StageOneRunStats({
@@ -434,8 +459,17 @@ function StageOneRunStats({
   );
 }
 
-function StageTwoRunStats({ stage }: { stage: WorkflowStageView }) {
-  const stats = getStageTwoStats(stage);
+function StageTwoRunStats({
+  stage,
+  decisions = [],
+  onOpenInvestEvents,
+}: {
+  stage: WorkflowStageView;
+  decisions?: BullpenAutoLiveDecision[];
+  onOpenInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
+}) {
+  const investableDecisions = getStageTwoInvestableDecisions(decisions);
+  const stats = getStageTwoStats(stage, decisions);
 
   return (
     <div className="space-y-0.5 pt-2">
@@ -462,6 +496,28 @@ function StageTwoRunStats({ stage }: { stage: WorkflowStageView }) {
         </span>{" "}
         New Opportunities ={" "}
         <span className="font-semibold tabular-nums">{stats.llmRanOn}</span>
+      </div>
+      <div>
+        {onOpenInvestEvents && stats.newEventsToInvestIn > 0 ? (
+          <button
+            type="button"
+            onClick={() => onOpenInvestEvents(investableDecisions)}
+            className="text-left font-medium text-emerald-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
+            aria-label={`Open details for ${stats.newEventsToInvestIn} new events to invest in`}
+          >
+            New Events to Invest in: {" "}
+            <span className="font-semibold tabular-nums">
+              {stats.newEventsToInvestIn}
+            </span>
+          </button>
+        ) : (
+          <>
+            New Events to Invest in: {" "}
+            <span className="font-semibold tabular-nums">
+              {stats.newEventsToInvestIn}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1944,10 +2000,12 @@ function RunDetailWorkerStages({
   run,
   decisions,
   onOpenScanFilters,
+  onOpenStageTwoInvestEvents,
 }: {
   run: BullpenAutoLiveRun;
   decisions: BullpenAutoLiveDecision[];
   onOpenScanFilters?: () => void;
+  onOpenStageTwoInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
 }) {
   const workflowView = buildBullpenAutoRunWorkflowView(run);
   const investStage =
@@ -2078,7 +2136,11 @@ function RunDetailWorkerStages({
                   />
                 ) : null}
                 {stage.key === "llm" ? (
-                  <StageTwoRunStats stage={stage} />
+                  <StageTwoRunStats
+                    stage={stage}
+                    decisions={decisions}
+                    onOpenInvestEvents={onOpenStageTwoInvestEvents}
+                  />
                 ) : null}
                 {stage.key === "invest" && formatInvestStageRowMix(stage) ? (
                   <div>
@@ -2156,10 +2218,12 @@ function RunDetailDialog({
   state,
   onClose,
   onOpenScanFilters,
+  onOpenStageTwoInvestEvents,
 }: {
   state: RunDetailDialogState;
   onClose: () => void;
   onOpenScanFilters?: () => void;
+  onOpenStageTwoInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
 }) {
   const { run, decisions } = state;
   return (
@@ -2213,6 +2277,7 @@ function RunDetailDialog({
             run={run}
             decisions={decisions}
             onOpenScanFilters={onOpenScanFilters}
+            onOpenStageTwoInvestEvents={onOpenStageTwoInvestEvents}
           />
           <div className="mt-5 space-y-4">
             {run.stage_results.map((stage) => (
@@ -2272,6 +2337,117 @@ function RunDetailDialog({
               </p>
             )}
           </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function StageTwoInvestEventsDialog({
+  state,
+  onClose,
+}: {
+  state: StageTwoInvestEventsDialogState;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 2 Output
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">
+              New Events to Invest in: {state.decisions.length}
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Stage 2-qualified events that have a buy plan ready for the Stage 3 invest pass.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close new events to invest details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5">
+          {state.decisions.length ? (
+            <div className="space-y-4">
+              {state.decisions.map((decision, index) => (
+                <article
+                  key={decision.id}
+                  className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 text-sm text-slate-700"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                        Event {index + 1}
+                      </p>
+                      <h3 className="mt-1 text-base font-semibold text-slate-950">
+                        {decision.market_title}
+                      </h3>
+                    </div>
+                    <span className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-800">
+                      {decision.side} · {decision.order_plan?.status ?? decision.decision}
+                    </span>
+                  </div>
+                  <div className="mt-3 rounded-xl bg-white/80 px-3 py-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Summary
+                    </p>
+                    <p className="mt-1 leading-6">{decision.summary || decision.reason}</p>
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-xl bg-white/80 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Price / fair</p>
+                      <p className="mt-1 font-semibold text-slate-950">
+                        {decision.price_cents.toFixed(1)}¢ / {decision.fair_probability_pct.toFixed(1)}%
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-white/80 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Edge / score</p>
+                      <p className="mt-1 font-semibold text-slate-950">
+                        {decision.edge_pp.toFixed(1)} pp / {decision.score.toFixed(1)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-white/80 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Planned amount</p>
+                      <p className="mt-1 font-semibold text-slate-950">
+                        ${decision.order_plan?.order_size_usd.toFixed(2) ?? decision.target_exposure_usd.toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-xl bg-white/80 px-3 py-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Indepth details
+                    </p>
+                    <p className="mt-1 leading-6">{decision.rationale || decision.reason}</p>
+                    {decision.key_evidence.length ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-5">
+                        {decision.key_evidence.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {decision.red_flags.length ? (
+                      <p className="mt-2 text-rose-700">
+                        Red flags: {decision.red_flags.join("; ")}
+                      </p>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              No Stage 2-qualified invest events were returned for this run.
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -2810,6 +2986,8 @@ export function BullpenAutoRunScheduleCard({
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
   const [runDetailDialog, setRunDetailDialog] =
     useState<RunDetailDialogState | null>(null);
+  const [stageTwoInvestEventsDialog, setStageTwoInvestEventsDialog] =
+    useState<StageTwoInvestEventsDialogState | null>(null);
   const [isSchedulePickerOpen, setIsSchedulePickerOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
@@ -4211,7 +4389,15 @@ export function BullpenAutoRunScheduleCard({
                       />
                     ) : null}
                     {stage.key === "llm" ? (
-                      <StageTwoRunStats stage={stage} />
+                      <StageTwoRunStats
+                        stage={stage}
+                        decisions={investRunDecisions}
+                        onOpenInvestEvents={(investDecisions) =>
+                          setStageTwoInvestEventsDialog({
+                            decisions: investDecisions,
+                          })
+                        }
+                      />
                     ) : null}
                     {stage.key === "invest" &&
                     formatInvestStageRowMix(stage) ? (
@@ -4731,6 +4917,16 @@ export function BullpenAutoRunScheduleCard({
             state={runDetailDialog}
             onClose={() => setRunDetailDialog(null)}
             onOpenScanFilters={onOpenScanFilters}
+            onOpenStageTwoInvestEvents={(investDecisions) =>
+              setStageTwoInvestEventsDialog({ decisions: investDecisions })
+            }
+          />
+        ) : null}
+
+        {stageTwoInvestEventsDialog ? (
+          <StageTwoInvestEventsDialog
+            state={stageTwoInvestEventsDialog}
+            onClose={() => setStageTwoInvestEventsDialog(null)}
           />
         ) : null}
 
