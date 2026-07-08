@@ -3431,6 +3431,10 @@ class BullpenAutoLiveEngine:
                 "llm_candidate_count": llm_candidate_count,
                 "stage1_accepted_candidate_count": stage1_accepted_candidate_count,
             }
+            if "llm_candidate_count_before_cap" in locals():
+                stage_outputs["llm_candidate_count_before_cap"] = llm_candidate_count_before_cap
+                stage_outputs["max_llm_candidates_per_run"] = max_llm_candidates
+                stage_outputs["llm_candidates_skipped_by_cap"] = len(skipped_llm_markets)
             if reused_existing_llm_outputs:
                 stage_outputs["reused_existing_llm_outputs"] = True
             if current_candidate_index is not None:
@@ -3524,6 +3528,13 @@ class BullpenAutoLiveEngine:
                     for market, returns_per_day in candidate_rows
                 ],
             ]
+            llm_candidate_count_before_cap = len(llm_markets)
+            max_llm_candidates = max(1, settings.max_llm_candidates_per_run)
+            if len(llm_markets) > max_llm_candidates:
+                skipped_llm_markets = llm_markets[max_llm_candidates:]
+                llm_markets = llm_markets[:max_llm_candidates]
+            else:
+                skipped_llm_markets = []
             llm_candidate_count = len(llm_markets)
             set_run_stage_result(
                 run,
@@ -3548,6 +3559,9 @@ class BullpenAutoLiveEngine:
                         "active_position_rows_before_llm": active_position_rows_before_llm,
                         "candidate_rows_before_llm": candidate_rows_before_llm,
                         "llm_candidate_count": llm_candidate_count,
+                        "llm_candidate_count_before_cap": llm_candidate_count_before_cap,
+                        "max_llm_candidates_per_run": max_llm_candidates,
+                        "llm_candidates_skipped_by_cap": len(skipped_llm_markets),
                         "unsupported_wallet_positions_skipped": len(unsupported_live_wallet_positions),
                         "unsupported_wallet_positions": [
                             {
@@ -3922,6 +3936,9 @@ class BullpenAutoLiveEngine:
                     "active_position_rows_reviewed": len(active_position_contexts),
                     "candidate_rows_before_llm": candidate_rows_before_llm,
                     "llm_candidate_count": llm_candidate_count,
+                    "llm_candidate_count_before_cap": llm_candidate_count_before_cap if "llm_candidate_count_before_cap" in locals() else llm_candidate_count,
+                    "max_llm_candidates_per_run": max_llm_candidates if "max_llm_candidates" in locals() else settings.max_llm_candidates_per_run,
+                    "llm_candidates_skipped_by_cap": len(skipped_llm_markets) if "skipped_llm_markets" in locals() else 0,
                     "qualified_candidate_count": len(qualifying_candidates),
                     "qualified_candidate_market_ids": [
                         context["market"].market_id for context in qualifying_candidates
