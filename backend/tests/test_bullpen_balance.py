@@ -306,6 +306,50 @@ Account
 
 
 @pytest.mark.anyio
+async def test_bullpen_doctor_accepts_active_status_when_preflight_has_transient_transport_error(monkeypatch):
+    status_output = """
+Account
+  Status:           Logged in
+  JWT expires:      2026-06-14 17:39:06 UTC (in 13m 48s)
+  JWT observed:     2026-06-14 17:24:08 UTC; client expires in 14m 58s
+"""
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        if args == ["status"]:
+            return status_output
+        if args == ["polymarket", "preflight"]:
+            raise bullpen.BullpenCommandError(
+                "failed to validate active wallet role before money-path routing for owner "
+                "0xabc caused by: failed to fetch wallets: protocol error: received "
+                "message with invalid compression flag; 101 (valid flags are 0 and 1) "
+                "failed: 502 Bad Gateway"
+            )
+        raise AssertionError(f"unexpected args: {args}")
+
+    monkeypatch.setattr(bullpen, "run_bullpen", fake_run_bullpen)
+    monkeypatch.setattr(
+        bullpen,
+        "datetime",
+        type(
+            "FrozenDateTime",
+            (),
+            {
+                "now": staticmethod(
+                    lambda tz=None: datetime(2026, 6, 14, 17, 25, 0, tzinfo=timezone.utc)
+                ),
+                "strptime": staticmethod(datetime.strptime),
+            },
+        ),
+    )
+
+    doctor = await bullpen.BullpenLiveExecutor().doctor()
+
+    assert doctor.ok is True
+    assert "transient transport error" in doctor.message
+    assert doctor.bullpen_jwt_seconds_remaining == 846
+
+
+@pytest.mark.anyio
 async def test_bullpen_doctor_still_fails_stale_refresh_token_without_active_jwt(monkeypatch):
     status_output = """
 Account
