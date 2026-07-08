@@ -4136,9 +4136,17 @@ class BullpenAutoLiveEngine:
                 "buy_planned": buy_planned,
                 "buy_processed": buy_processed,
                 "buy_submitted": buy_submitted,
-                "planned": sell_planned + buy_planned,
-                "processed": sell_processed + buy_processed,
-                "submitted": sell_submitted + buy_submitted,
+                # Aggregate order metrics are used by the Stage 3 tile to show
+                # invest/sell order execution progress. Redeem/claim rows are
+                # surfaced in the Step 1-specific metrics below, but they should
+                # not inflate the headline planned/processed/submitted counts for
+                # the Stage 3 investment pass. A resolved claimable position can
+                # exist alongside seven new buys; the tile should still report the
+                # seven investment orders as 7 processed / 7 submitted while Step
+                # 1 shows the redeem/claim row separately.
+                "planned": (sell_planned - redeem_planned) + buy_planned,
+                "processed": (sell_processed - redeem_processed) + buy_processed,
+                "submitted": (sell_submitted - redeem_submitted) + buy_submitted,
             }
 
         def _build_stage3_execution_steps(
@@ -5360,19 +5368,36 @@ class BullpenAutoLiveEngine:
                     order_plan.detail = f"Simulation only: {simulation_reason}"
                 else:
                     try:
-                        condition_ids = [decision.market_id]
-                        if decision.order_plan.market_id:
-                            condition_ids = [decision.order_plan.market_id]
+                        stage_condition_ids = [
+                            str(stage.outputs.get("condition_id"))
+                            for stage in decision.stage_results
+                            if stage.outputs.get("condition_id")
+                        ]
+                        condition_ids = [
+                            condition_id
+                            for condition_id in (
+                                *stage_condition_ids,
+                                order_plan.market_id,
+                                decision.market_id,
+                            )
+                            if condition_id
+                        ][:1]
                         order_plan.execution_response = await asyncio.wait_for(
                             executor.redeem(dry_run=False, condition_ids=condition_ids),
                             timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
                         )
                         claim = getattr(executor, "claim", None)
                         if claim is not None:
-                            claim_response = await asyncio.wait_for(
-                                claim(dry_run=False),
-                                timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
-                            )
+                            try:
+                                claim_response = await asyncio.wait_for(
+                                    claim(dry_run=False),
+                                    timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                                )
+                            except Exception as claim_exc:
+                                claim_response = (
+                                    "Bullpen claim follow-up did not complete after redeem "
+                                    f"was submitted: {claim_exc}"
+                                )
                             if claim_response:
                                 order_plan.execution_response = (
                                     f"{order_plan.execution_response}\n{claim_response}"
