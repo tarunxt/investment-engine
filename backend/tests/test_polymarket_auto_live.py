@@ -1716,8 +1716,9 @@ async def test_console_profile_redeems_claimable_positions_without_llm(monkeypat
         close_time="2026-07-07T00:00:00+00:00",
         side="NO",
         is_claimable=True,
+        condition_id="condition-123",
     )
-    calls: list[str] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
     async def fake_read_console_wallet_positions():
         return [claimable_position]
@@ -1735,12 +1736,12 @@ async def test_console_profile_redeems_claimable_positions_without_llm(monkeypat
         return _fake_live_controls()
 
     class RecordingExecutor:
-        async def redeem(self, **_kwargs):
-            calls.append("redeem")
+        async def redeem(self, **kwargs):
+            calls.append(("redeem", kwargs))
             return "redeem submitted"
 
-        async def claim(self, **_kwargs):
-            calls.append("claim")
+        async def claim(self, **kwargs):
+            calls.append(("claim", kwargs))
             return "claim submitted"
 
     async def fail_llm(*_args, **_kwargs):
@@ -1802,7 +1803,8 @@ async def test_console_profile_redeems_claimable_positions_without_llm(monkeypat
         if decision.order_plan is not None and decision.order_plan.action == "redeem"
     )
 
-    assert calls == ["redeem", "claim"]
+    assert [name for name, _kwargs in calls] == ["redeem", "claim"]
+    assert calls[0][1]["condition_ids"] == ["condition-123"]
     assert result.run.stage_results[0].outputs["active_position_rows_before_llm"] == 1
     assert result.run.stage_results[1].outputs["llm_candidate_count"] == 0
     invest_stage = next(
@@ -2507,13 +2509,14 @@ def _console_wallet_position(
     close_time: str | None = None,
     side: str = "NO",
     is_claimable: bool = False,
+    condition_id: str | None = None,
 ) -> ConsoleWalletPosition:
     if close_time is None:
         close_time = (datetime.now(UTC) + timedelta(days=7)).isoformat()
     return ConsoleWalletPosition(
         market_id=slug,
         slug=slug,
-        condition_id=None,
+        condition_id=condition_id,
         market_title=market_title,
         market_url=f"https://polymarket.com/event/{slug}",
         side=side,
