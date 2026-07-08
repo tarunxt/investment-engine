@@ -161,6 +161,8 @@ class ZerodhaProtectedMarketOrderRequest(BaseModel):
     product: str = "CNC"
     validity: str = "DAY"
     market_protection: str = "-1"
+    estimated_price: float | None = Field(default=None, gt=0)
+    last_price: float | None = Field(default=None, gt=0)
 
     @field_validator("quantity")
     @classmethod

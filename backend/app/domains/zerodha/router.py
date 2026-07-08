@@ -805,13 +805,24 @@ async def place_protected_market_orders_sequenced(
         for order in buy_orders:
             unit_price = 0.0
             try:
-                quotes = await _svc.get_quotes(token, [_instrument_key(order.exchange, order.tradingsymbol)])
-                quote = quotes.get(_instrument_key(order.exchange, order.tradingsymbol), {})
+                instrument = _instrument_key(order.exchange, order.tradingsymbol)
+                quotes = await _svc.get_quotes(token, [instrument])
+                quote = quotes.get(instrument, {})
                 unit_price = _quote_number(quote, "last_price") or 0.0
             except Exception:
-                unit_price = 0.0
+                logger.exception(
+                    "Failed to refresh Zerodha BUY LTP for %s:%s before sequenced BUY phase for user %s",
+                    order.exchange,
+                    order.tradingsymbol,
+                    current_user.id,
+                )
+                messages.append(
+                    f"Could not refresh live BUY price for {order.exchange.upper()}:{order.tradingsymbol.upper()}; using client basket price for affordability sizing."
+                )
             if unit_price <= 0:
-                skipped_buy_results.append(_order_result_from_request(order, "skipped", error="Could not refresh buy LTP for affordability check"))
+                unit_price = float(order.last_price or order.estimated_price or 0.0)
+            if unit_price <= 0:
+                skipped_buy_results.append(_order_result_from_request(order, "skipped", error="Could not refresh buy LTP or use a client basket price for affordability check"))
                 continue
             affordable_qty = min(order.quantity, int(remaining // unit_price))
             if affordable_qty <= 0:
