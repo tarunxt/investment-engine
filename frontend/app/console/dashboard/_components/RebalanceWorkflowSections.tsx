@@ -213,6 +213,7 @@ type ZerodhaBasketPreviewOrder = {
   stock: StockConsensus;
   detail: ScoreMatrixDetail;
   technicalScan: TechnicalScanResult | null;
+  allowFractionalUnits?: boolean;
 };
 type WorkflowState = Record<WorkflowStageKey, StageInfo>;
 type IndMoneySyncMode = "reuse" | "paste";
@@ -928,15 +929,21 @@ function getBasketPrice(stock: StockConsensus, amount: number | null, units: num
   return fallbackPrice !== null && fallbackPrice > 0 ? fallbackPrice : null;
 }
 
-function calculatePercentBasketUnits(baseUnits: number | null, percent: ZerodhaBasketOrderPercent) {
+function calculatePercentBasketUnits(
+  baseUnits: number | null,
+  percent: ZerodhaBasketOrderPercent,
+  allowFractionalUnits = false,
+) {
   if (baseUnits === null || baseUnits <= 0) return null;
   const rawUnits = Math.abs(baseUnits) * (percent / 100);
+  if (allowFractionalUnits) return rawUnits > 0 ? rawUnits : null;
   return Math.max(1, Math.floor(rawUnits));
 }
 
 function getZerodhaBasketSellUnitLimit(order: ZerodhaBasketPreviewOrder) {
   const availableUnits = order.currentUnits ?? order.baseUnits;
-  return availableUnits !== null && availableUnits > 0 ? Math.floor(availableUnits) : null;
+  if (availableUnits === null || availableUnits <= 0) return null;
+  return order.allowFractionalUnits ? availableUnits : Math.floor(availableUnits);
 }
 
 function getZerodhaBasketBuyUnitLimit(order: ZerodhaBasketPreviewOrder) {
@@ -950,12 +957,16 @@ function getZerodhaBasketUnitLimit(order: ZerodhaBasketPreviewOrder) {
   return order.side === "SELL" ? getZerodhaBasketSellUnitLimit(order) : getZerodhaBasketBuyUnitLimit(order);
 }
 
-function clampZerodhaBasketUnits(units: number | null, maxUnits: number | null) {
+function clampZerodhaBasketUnits(
+  units: number | null,
+  maxUnits: number | null,
+  allowFractionalUnits = false,
+) {
   if (units === null || !Number.isFinite(units)) return null;
-  const wholeUnits = Math.floor(Math.abs(units));
-  if (wholeUnits < 1) return null;
-  if (maxUnits !== null && maxUnits < 1) return null;
-  return Math.min(wholeUnits, maxUnits ?? wholeUnits);
+  const normalizedUnits = allowFractionalUnits ? Math.abs(units) : Math.floor(Math.abs(units));
+  if (normalizedUnits <= 0 || (!allowFractionalUnits && normalizedUnits < 1)) return null;
+  if (maxUnits !== null && maxUnits <= 0) return null;
+  return Math.min(normalizedUnits, maxUnits ?? normalizedUnits);
 }
 
 function calculateZerodhaBasketAmount(units: number | null, price: number | null) {
@@ -1018,8 +1029,9 @@ function applyZerodhaBasketPercent(
 ): ZerodhaBasketPreviewOrder {
   const baseUnits = order.side === "SELL" ? (order.currentUnits ?? order.baseUnits) : order.baseUnits;
   const units = clampZerodhaBasketUnits(
-    calculatePercentBasketUnits(baseUnits, percent),
+    calculatePercentBasketUnits(baseUnits, percent, order.allowFractionalUnits),
     getZerodhaBasketUnitLimit(order),
+    order.allowFractionalUnits,
   );
   const amount = calculateZerodhaBasketAmount(units, order.price);
   const normalizedPercent = calculateZerodhaBasketPercent(
@@ -1043,7 +1055,7 @@ function applyZerodhaBasketUnitDelta(
   order: ZerodhaBasketPreviewOrder,
   delta: number,
 ): ZerodhaBasketPreviewOrder {
-  const units = clampZerodhaBasketUnits((order.units ?? 0) + delta, getZerodhaBasketUnitLimit(order));
+  const units = clampZerodhaBasketUnits((order.units ?? 0) + delta, getZerodhaBasketUnitLimit(order), order.allowFractionalUnits);
   const amount = calculateZerodhaBasketAmount(units, order.price);
   const percent = calculateZerodhaBasketPercent(
     order.side,
@@ -1072,7 +1084,7 @@ function applyZerodhaBasketLivePricing(
     price,
     lastPrice,
   };
-  const units = clampZerodhaBasketUnits(order.units, getZerodhaBasketUnitLimit(pricedOrder));
+  const units = clampZerodhaBasketUnits(order.units, getZerodhaBasketUnitLimit(pricedOrder), order.allowFractionalUnits);
   const amount = calculateZerodhaBasketAmount(units, price);
   const percent = calculateZerodhaBasketPercent(
     order.side,
@@ -1249,6 +1261,7 @@ function buildZerodhaBasketPreviewOrders(
   rows: DashboardActionRow[],
   technicalScans: Record<string, TechnicalScanResult>,
   snapshot?: ZerodhaPortfolioSnapshotDetail | null,
+  options: { allowFractionalSellUnits?: boolean } = {},
 ): ZerodhaBasketPreviewOrder[] {
   const holdingExchangeBySymbol = buildZerodhaHoldingExchangeMap(snapshot);
   const snapshotPriceBySymbol = buildZerodhaSnapshotPriceMap(snapshot);
@@ -1276,12 +1289,13 @@ function buildZerodhaBasketPreviewOrders(
       const normalizedSymbol = normalizeZerodhaBasketSymbol(stock.symbol) || stock.symbol;
       const snapshotPrice = snapshotPriceBySymbol.get(normalizedSymbol) ?? null;
       const price = getBasketPrice(stock, estimate.amount, estimate.units, snapshotPrice);
-      const rawUnits = calculatePercentBasketUnits(baseUnits, requestedPercent);
+      const allowFractionalUnits = side === "SELL" && Boolean(options.allowFractionalSellUnits);
+      const rawUnits = calculatePercentBasketUnits(baseUnits, requestedPercent, allowFractionalUnits);
       const sellAvailableUnits = estimate.currentUnits ?? baseUnits;
       const maxUnits = side === "SELL"
-        ? (sellAvailableUnits !== null && sellAvailableUnits > 0 ? Math.floor(sellAvailableUnits) : null)
+        ? (sellAvailableUnits !== null && sellAvailableUnits > 0 ? (allowFractionalUnits ? sellAvailableUnits : Math.floor(sellAvailableUnits)) : null)
         : (projectedBuyPower !== null && price !== null && price > 0 ? Math.floor(projectedBuyPower / price) : null);
-      const units = clampZerodhaBasketUnits(rawUnits, maxUnits);
+      const units = clampZerodhaBasketUnits(rawUnits, maxUnits, allowFractionalUnits);
       const amount = calculateZerodhaBasketAmount(units, price) ?? estimate.amount;
       const percent = calculateZerodhaBasketPercent(
         side,
@@ -1308,6 +1322,7 @@ function buildZerodhaBasketPreviewOrders(
         stock,
         detail: row.detail,
         technicalScan: getTechnicalScanForStock(technicalScans, stock),
+        allowFractionalUnits,
       };
     })
     .filter((order) => order.units !== null && order.units > 0)
@@ -5527,7 +5542,7 @@ export function RebalanceWorkflowSections({
       );
       const technicalScans = buildTechnicalScanMap(runs);
       const actionRows = buildDashboardActionRows(stocks, "us", technicalScans, scoreMatrixFormulaConfig);
-      const orders = buildZerodhaBasketPreviewOrders(actionRows, technicalScans, null)
+      const orders = buildZerodhaBasketPreviewOrders(actionRows, technicalScans, null, { allowFractionalSellUnits: true })
         .map((order) => ({
           ...order,
           id: order.id.replace(/^zerodha:/, "indmoney:"),
