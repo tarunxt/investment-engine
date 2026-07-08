@@ -1619,7 +1619,7 @@ export type BullpenAutoLiveOrderPlanStatus =
   | "skipped"
   | "cancelled"
   | "failed";
-export type BullpenAutoLiveOrderAction = "buy" | "sell" | "hold";
+export type BullpenAutoLiveOrderAction = "buy" | "sell" | "hold" | "redeem";
 export type BullpenAutoLiveOutcomeSide = "YES" | "NO";
 export type BullpenAutoLiveTriggeredBy =
   | "manual"

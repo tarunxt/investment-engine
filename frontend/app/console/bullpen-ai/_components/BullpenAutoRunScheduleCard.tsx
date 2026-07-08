@@ -775,6 +775,9 @@ type InvestExecutionStepView = {
   eventExitRows?: number | null;
   rankingLlmPlannedOrders?: number | null;
   forcedExitPlannedOrders?: number | null;
+  redeemPlannedOrders?: number | null;
+  redeemProcessedOrders?: number | null;
+  redeemSubmittedOrders?: number | null;
 };
 
 function normalizeInvestExecutionStepStatus(
@@ -844,6 +847,9 @@ function getInvestStageExecutionSteps(
         forcedExitPlannedOrders: readStageOutputNumber(
           step.forced_exit_planned_orders,
         ),
+        redeemPlannedOrders: readStageOutputNumber(step.redeem_planned_orders),
+        redeemProcessedOrders: readStageOutputNumber(step.redeem_processed_orders),
+        redeemSubmittedOrders: readStageOutputNumber(step.redeem_submitted_orders),
       };
     })
     .filter((step): step is InvestExecutionStepView => step !== null);
@@ -875,6 +881,9 @@ function getLastInvestExecutionStep(
       forcedExitPlannedOrders: readStageOutputNumber(
         rawStep.forced_exit_planned_orders,
       ),
+      redeemPlannedOrders: readStageOutputNumber(rawStep.redeem_planned_orders),
+      redeemProcessedOrders: readStageOutputNumber(rawStep.redeem_processed_orders),
+      redeemSubmittedOrders: readStageOutputNumber(rawStep.redeem_submitted_orders),
     };
   }
 
@@ -893,6 +902,9 @@ function getLastInvestExecutionStep(
     forcedExitPlannedOrders: readStageOutputNumber(
       investStage.outputs.event_exit_forced_planned,
     ),
+    redeemPlannedOrders: readStageOutputNumber(investStage.outputs.redeem_planned),
+    redeemProcessedOrders: readStageOutputNumber(investStage.outputs.redeem_processed),
+    redeemSubmittedOrders: readStageOutputNumber(investStage.outputs.redeem_submitted),
   };
 }
 
@@ -914,6 +926,9 @@ function buildQueuedInvestPreviewSteps(
           eventExitRows: lastSellStep.eventExitRows,
           rankingLlmPlannedOrders: lastSellStep.rankingLlmPlannedOrders,
           forcedExitPlannedOrders: lastSellStep.forcedExitPlannedOrders,
+          redeemPlannedOrders: lastSellStep.redeemPlannedOrders,
+          redeemProcessedOrders: lastSellStep.redeemProcessedOrders,
+          redeemSubmittedOrders: lastSellStep.redeemSubmittedOrders,
         }
       : step,
   );
@@ -1473,6 +1488,13 @@ function InvestExecutionStepsSummary({
                     toneClasses,
                     onOpenInfo: onOpenEventExitInfo,
                   })}
+                  {renderMetricCard({
+                    label: "Redeem",
+                    value: step.redeemPlannedOrders,
+                    kind: getSellInvestMetricDialogKind("redeem"),
+                    toneClasses,
+                    onOpenInfo: onOpenEventExitInfo,
+                  })}
                 </div>
               </div>
             ) : null}
@@ -1795,7 +1817,7 @@ function StageTwoExecutionShortlist({
   if (steps.length === 0) return null;
 
   const sellDecisions = decisions.filter(
-    (decision) => decision.order_plan?.action === "sell",
+    (decision) => decision.order_plan?.action === "sell" || decision.order_plan?.action === "redeem",
   );
   const buyDecisions = decisions.filter(
     (decision) => decision.order_plan?.action === "buy",

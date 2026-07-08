@@ -10,6 +10,7 @@ ExitStrategy = Literal[
     "OUTSIDE_TOP_10_RETURNS_DAY",
     "LLM_OR_ODDS_FILTER_EXIT",
     "CAPITAL_AWARE_FORCED_EXIT",
+    "REDEEM_CLAIM",
 ]
 ExitSeverity = Literal[
     "INFO",
@@ -17,6 +18,7 @@ ExitSeverity = Literal[
     "PLANNED_EXIT",
     "IMMEDIATE_EXIT",
     "DUST_LOST",
+    "REDEEM_CLAIM",
 ]
 ExitReasonCode = Literal[
     "OUTSIDE_TOP_10_BY_RETURNS_DAY",
@@ -31,6 +33,7 @@ ExitReasonCode = Literal[
     "EVENT_CLOSE_PASSED",
     "LOW_EXECUTABLE_VALUE",
     "NO_BID_AVAILABLE",
+    "RESOLVED_POSITION_CLAIMABLE",
 ]
 ExitState = Literal[
     "ACTIVE",
@@ -41,6 +44,7 @@ ExitState = Literal[
     "SOLD",
     "DUST_LOST",
     "FAILED",
+    "REDEEM_CLAIM",
 ]
 
 

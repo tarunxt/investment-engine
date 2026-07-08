@@ -14,7 +14,7 @@ AutoLiveStageStatus = Literal["pass", "fail", "warning", "skipped"]
 AutoLiveRuntimeStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 AutoLiveRuntimeMode = Literal["dry-run", "analysis-only", "live-trading"]
 AutoLiveOrderPlanStatus = Literal["planned", "submitted", "skipped", "cancelled", "failed"]
-AutoLiveOrderAction = Literal["buy", "sell", "hold"]
+AutoLiveOrderAction = Literal["buy", "sell", "hold", "redeem"]
 AutoLiveOutcomeSide = Literal["YES", "NO"]
 AutoLiveTriggeredBy = Literal["manual", "scheduler", "start", "resume"]
 AutoLiveStrategyProfile = Literal["guardrail_kelly", "bullpen_console_top10"]
@@ -22,6 +22,7 @@ AutoLiveExitStrategy = Literal[
     "OUTSIDE_TOP_10_RETURNS_DAY",
     "LLM_OR_ODDS_FILTER_EXIT",
     "CAPITAL_AWARE_FORCED_EXIT",
+    "REDEEM_CLAIM",
 ]
 AutoLiveExitSeverity = Literal[
     "INFO",
@@ -43,6 +44,7 @@ AutoLiveExitReasonCode = Literal[
     "EVENT_CLOSE_PASSED",
     "LOW_EXECUTABLE_VALUE",
     "NO_BID_AVAILABLE",
+    "RESOLVED_POSITION_CLAIMABLE",
 ]
 AutoLiveExitState = Literal[
     "ACTIVE",
@@ -53,6 +55,7 @@ AutoLiveExitState = Literal[
     "SOLD",
     "DUST_LOST",
     "FAILED",
+    "REDEEM_CLAIM",
 ]
 TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 TradingBotMode = Literal["paper", "live-read", "live-trading", "dry-run", "analysis-only"]
