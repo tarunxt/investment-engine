@@ -7,6 +7,7 @@ import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight
 import {
   parseInvestmentRecommendationContent,
   REBALANCE_HEADER_ORDER,
+  type CanonicalHeader,
   type CanonicalRow,
   type RebalanceHeader,
 } from "@/components/InvestmentRecommendationTable";
@@ -36,7 +37,7 @@ import {
   isScoreMatrixRowOutOfBounds,
   type ScoreMatrixWeightedRow,
 } from "@/lib/scoreMatrixMath";
-import { getAutoRebalanceRunDisplayLabel } from "@/lib/runPresentation";
+import { getAutoRebalanceRunDisplayLabel, isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -92,6 +93,11 @@ type ActionablesInputCandidate = {
 type ConsensusBreakupEntry = {
   meta: LlmMeta;
   row: LlmBreakupRow | null;
+};
+
+type SwingScanBreakupEntry = {
+  meta: LlmMeta;
+  row: CanonicalRow;
 };
 
 function getInputMarketLabel(market?: SwingTradeMarket) {
@@ -303,6 +309,7 @@ export type StockConsensus = {
   representative: CanonicalRow;
   rows: LlmBreakupRow[];
   breakupEntries: ConsensusBreakupEntry[];
+  swingScanEntries: SwingScanBreakupEntry[];
 };
 
 export type TechnicalScanResult = {
@@ -673,6 +680,40 @@ const REBALANCE_DISPLAY_HEADERS = [
   CURRENT_INVESTMENT_AMOUNT_HEADER,
   ...REBALANCE_HEADER_ORDER.slice(3),
 ] as const;
+
+const SWING_SCAN_BREAKUP_HEADERS: CanonicalHeader[] = [
+  "LLM Name + Model",
+  "Exchange Symbol",
+  "Stock Symbol",
+  "Stock Name",
+  "Technical Setup",
+  "Entry Range",
+  "Stop Loss",
+  "Target",
+  "Analyst Source",
+  "Units to Buy",
+  "Price per Unit",
+  "Total Buy Amount",
+  "Upside Horizon (%)",
+  "Weeks",
+  "Confidence Score (0-100)",
+  "Rationale Cruxx",
+  "Score Rationale Cruxx",
+  "Rationale Technical Setup Short Term 1–3 Months",
+  "Score Rationale Technical Setup Short Term 1–3 Months",
+  "Rationale - Technical Setup (Medium Term)",
+  "Score Rationale - Technical Setup (Medium Term)",
+  "Rationale - Technical Setup (Long Term)",
+  "Score Rationale - Technical Setup (Long Term)",
+  "Rationale - Fundamentals Short Term",
+  "Score Rationale - Fundamentals Short Term",
+  "Rationale - Fundamentals Medium/Long Term",
+  "Score Rationale - Fundamentals Medium/Long Term",
+  "Run #",
+  "Run Date",
+  "Run Time",
+  "LLM",
+];
 
 const CONSOLIDATED_DISPLAY_HEADERS = [
   "Current Units",
@@ -3048,10 +3089,60 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
   });
 }
 
+
+function getSwingScanBreakupEntriesForStock(
+  runs: RunResponse[],
+  market: SwingTradeMarket,
+  stockRow: CanonicalRow,
+): SwingScanBreakupEntry[] {
+  const stockSymbols = new Set(
+    [stockRow["Stock Symbol"], stockRow["Stock Name"]]
+      .map((value) => normalizeStockSymbol(value))
+      .filter((value) => value !== "UNKNOWN"),
+  );
+  if (!stockSymbols.size) return [];
+
+  return runs
+    .filter((run) => isRunInSwingTradeMarket(run.prompt, market))
+    .flatMap((run) =>
+      (run.run_jobs ?? []).flatMap((link) => {
+        const job = link.job;
+        if (!job || !isUsableModelOutputStatus(job.status) || !job.response) return [];
+        const parsed = parseInvestmentRecommendationContent(job.response, {
+          provider: job.provider,
+          model: job.model,
+          runNumber: run.id,
+          runCreatedAt: run.created_at,
+        });
+        if (!parsed) return [];
+
+        const meta: LlmMeta = {
+          runId: run.id,
+          jobId: link.job_id,
+          runLabel: getRunDisplayLabelForBreakup(run),
+          provider: job.provider,
+          model: job.model,
+          createdAt: job.created_at,
+          status: job.status || "completed",
+          error: job.error_message ?? null,
+        };
+
+        return parsed.rows
+          .filter((row) => {
+            const rowCandidates = [row["Stock Symbol"], row["Stock Name"]].map((value) => normalizeStockSymbol(value));
+            return rowCandidates.some((candidate) => stockSymbols.has(candidate));
+          })
+          .map((row) => ({ meta, row }));
+      }),
+    )
+    .sort((a, b) => parseTimestampMs(b.meta.createdAt) - parseTimestampMs(a.meta.createdAt));
+}
+
 export function buildConsensusRows(
   runs: RunResponse[],
   market: SwingTradeMarket,
   portfolioSnapshot?: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+  allRuns: RunResponse[] = runs,
 ): StockConsensus[] {
   const grouped = new Map<string, LlmBreakupRow[]>();
   const currentValueSnapshots = buildCurrentValueSnapshotMap(portfolioSnapshot, market);
@@ -3102,6 +3193,7 @@ export function buildConsensusRows(
       const totalSuggestions = llmMetas.length || rows.length;
 
       const first = getRepresentativeConsensusRow(rows);
+      const swingScanEntries = getSwingScanBreakupEntriesForStock(allRuns, market, first);
       const representative = { ...first };
       representative[ACTION_HEADER] =
         ACTION_CATEGORIES.filter((action) => actionCounts[action] > 0)
@@ -3140,6 +3232,7 @@ export function buildConsensusRows(
         representative,
         rows,
         breakupEntries,
+        swingScanEntries,
       };
     })
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
@@ -3382,7 +3475,7 @@ export function ConsensusBreakupButton({
           aria-label={`${stock.symbol} consensus breakup`}
           onClick={() => setOpen(false)}
         >
-          <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl" style={draggableStyle} onClick={(event) => event.stopPropagation()}>
+          <div className="w-full max-w-7xl rounded-2xl bg-white shadow-2xl" style={draggableStyle} onClick={(event) => event.stopPropagation()}>
             <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4" {...dragHandleProps}>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-600">Consensus breakup</p>
@@ -3447,6 +3540,57 @@ export function ConsensusBreakupButton({
                   );
                 })}
               </div>
+
+              <section className="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 px-4 py-3">
+                  <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-700">Swing Scan captures</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Matching rows captured for this stock in Swing Scan stage LLM outputs, with timestamp and the same columns shown in the Swing Opportunities Output popup.
+                  </p>
+                </div>
+                {stock.swingScanEntries.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                      <thead className="bg-slate-950 text-white">
+                        <tr>
+                          <th className="whitespace-nowrap px-3 py-3 font-bold uppercase tracking-wider">Timestamp</th>
+                          <th className="whitespace-nowrap px-3 py-3 font-bold uppercase tracking-wider">Job / Run</th>
+                          {SWING_SCAN_BREAKUP_HEADERS.map((header) => (
+                            <th key={header} className="whitespace-nowrap px-3 py-3 font-bold uppercase tracking-wider">
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                        {stock.swingScanEntries.map((entry, index) => (
+                          <tr key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`} className={index % 2 ? "bg-slate-50/70" : "bg-white"}>
+                            <td className="whitespace-nowrap px-3 py-3 font-medium text-slate-700">{formatDateTime(entry.meta.createdAt)}</td>
+                            <td className="whitespace-nowrap px-3 py-3">
+                              <Link
+                                href={`/console/runs/${entry.meta.runId}#llm-output-job-${entry.meta.jobId}`}
+                                onClick={() => setOpen(false)}
+                                className="font-semibold text-blue-700 underline-offset-4 hover:underline"
+                              >
+                                {entry.meta.runLabel} · Job #{entry.meta.jobId}
+                              </Link>
+                            </td>
+                            {SWING_SCAN_BREAKUP_HEADERS.map((header) => (
+                              <td key={header} className="min-w-[10rem] px-3 py-3 align-top">
+                                {entry.row[header] || "—"}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="px-4 py-5 text-sm text-slate-500">
+                    No matching Swing Scan stage LLM rows were found for this stock.
+                  </div>
+                )}
+              </section>
             </div>
           </div>
         </div>
@@ -7399,8 +7543,8 @@ export function FinalActionablesConsole({
   }, [market, runs]);
 
   const consensus = useMemo(
-    () => buildConsensusRows(groupedRuns.runs, market, detailsData.portfolioSnapshot),
-    [detailsData.portfolioSnapshot, groupedRuns.runs, market],
+    () => buildConsensusRows(groupedRuns.runs, market, detailsData.portfolioSnapshot, runs),
+    [detailsData.portfolioSnapshot, groupedRuns.runs, market, runs],
   );
   const totalStocksConsolidated = consensus.length;
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
