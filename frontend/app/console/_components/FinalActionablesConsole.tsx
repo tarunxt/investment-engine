@@ -3171,6 +3171,27 @@ function stockSymbolMatches(value: string | null | undefined, stock: StockConsen
   return normalized !== "UNKNOWN" && normalized === normalizeStockSymbol(stock.symbol);
 }
 
+function getStockMatchAliases(stock: StockConsensus) {
+  const aliases = [
+    stock.key,
+    stock.symbol,
+    stock.representative["Stock Symbol"],
+    stock.representative["Stock Name"],
+  ]
+    .map((value) => normalizeStockSymbol(value || ""))
+    .filter((value) => value !== "UNKNOWN");
+
+  return new Set(aliases);
+}
+
+function stockConsensusMatches(left: StockConsensus, right: StockConsensus) {
+  const leftAliases = getStockMatchAliases(left);
+  const rightAliases = getStockMatchAliases(right);
+  if (!leftAliases.size || !rightAliases.size) return false;
+
+  return Array.from(leftAliases).some((alias) => rightAliases.has(alias));
+}
+
 function getAnalysisTableRowsForStock(
   tables: Array<{ title: string; columns: string[]; rows: Record<string, string>[] }> | undefined,
   stock: StockConsensus,
@@ -3489,8 +3510,8 @@ export function StockDetailsButton({
   );
   const threatRows = getAnalysisTableRowsForStock(detailsData.threatsAnalysis?.report?.tables, stock);
   const matchingHistoricalRows = useMemo(
-    () => historicalRows.filter((row) => row.stock.key === stock.key),
-    [historicalRows, stock.key],
+    () => historicalRows.filter((row) => stockConsensusMatches(row.stock, stock)),
+    [historicalRows, stock],
   );
 
   useEffect(() => {
