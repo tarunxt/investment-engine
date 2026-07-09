@@ -3890,30 +3890,46 @@ function BullpenAiPageContent() {
             emptyMessage={currentTableEmptyMessage}
             headerContent={
               <>
-                <div className="flex flex-wrap gap-2">
-                  {SNAPSHOT_SOURCE_TABS.map((tab) => (
-                    <button
-                      key={tab.source}
-                      type="button"
-                      onClick={() =>
-                        setSnapshotSourceByMode((current) => ({
-                          ...current,
-                          [activeMode]: tab.source,
-                        }))
-                      }
-                      className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
-                        activeSnapshotSource === tab.source
-                          ? tab.source === "manual"
-                            ? "border-blue-700 bg-blue-700 text-white shadow-sm shadow-blue-700/20"
-                            : "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-600/20"
-                          : tab.source === "manual"
-                            ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                            : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                      }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap gap-4">
+                  {SNAPSHOT_SOURCE_TABS.map((tab) => {
+                    const tabSnapshot =
+                      tab.source === "manual"
+                        ? activeCurrentSnapshot
+                        : activeAutoCurrentSnapshot;
+
+                    return (
+                      <div key={tab.source} className="space-y-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSnapshotSourceByMode((current) => ({
+                              ...current,
+                              [activeMode]: tab.source,
+                            }))
+                          }
+                          className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                            activeSnapshotSource === tab.source
+                              ? tab.source === "manual"
+                                ? "border-blue-700 bg-blue-700 text-white shadow-sm shadow-blue-700/20"
+                                : "border-emerald-600 bg-emerald-600 text-white shadow-sm shadow-emerald-600/20"
+                              : tab.source === "manual"
+                                ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                        <div className="space-y-0.5 text-xs font-medium leading-5 text-slate-600">
+                          <p>
+                            Total Events Scanned: {tabSnapshot?.totalCandidates ?? 0}
+                          </p>
+                          <p>
+                            Events that passed Filters: {tabSnapshot?.questions.length ?? 0}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
                 <p className="mt-2 text-xs text-slate-500">
                   {
