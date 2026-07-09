@@ -124,6 +124,11 @@ type StageTwoInvestEventsDialogState = {
   decisions: BullpenAutoLiveDecision[];
 };
 
+type StageTwoLlmRunDialogState = {
+  stage: WorkflowStageView;
+  decisions: BullpenAutoLiveDecision[];
+};
+
 type ScanCandidateDialogState = {
   mode: ScanCandidateDialogMode;
   scanCompletedAt: string | null;
@@ -463,13 +468,19 @@ function StageTwoRunStats({
   stage,
   decisions = [],
   onOpenInvestEvents,
+  onOpenLlmRunDetails,
 }: {
   stage: WorkflowStageView;
   decisions?: BullpenAutoLiveDecision[];
   onOpenInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
+  onOpenLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
 }) {
   const investableDecisions = getStageTwoInvestableDecisions(decisions);
   const stats = getStageTwoStats(stage, decisions);
+  const deDuplicatedCount = Math.max(
+    0,
+    stats.activePositions + stats.newOpportunities - stats.llmRanOn,
+  );
 
   return (
     <div className="space-y-0.5 pt-2">
@@ -486,16 +497,41 @@ function StageTwoRunStats({
         </span>
       </div>
       <div>
-        LLM ran on:{" "}
-        <span className="font-semibold tabular-nums">
-          {stats.activePositions}
-        </span>{" "}
-        Active +{" "}
-        <span className="font-semibold tabular-nums">
-          {stats.newOpportunities}
-        </span>{" "}
-        New Opportunities ={" "}
-        <span className="font-semibold tabular-nums">{stats.llmRanOn}</span>
+        {onOpenLlmRunDetails ? (
+          <button
+            type="button"
+            onClick={() => onOpenLlmRunDetails({ stage, decisions })}
+            className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+            aria-label={`Open details for ${stats.llmRanOn} LLM-reviewed rows`}
+          >
+            LLM ran on:{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.llmRanOn}
+            </span>{" "}
+            unique rows ({" "}
+            <span className="font-semibold tabular-nums">
+              {stats.activePositions}
+            </span>{" "}
+            Active +{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.newOpportunities}
+            </span>{" "}
+            New Opportunities
+            {deDuplicatedCount > 0 ? (
+              <>
+                , <span className="font-semibold tabular-nums">{deDuplicatedCount}</span>{" "}
+                overlap/de-duped
+              </>
+            ) : null}
+            )
+          </button>
+        ) : (
+          <>
+            LLM ran on: <span className="font-semibold tabular-nums">{stats.llmRanOn}</span>{" "}
+            unique rows ({stats.activePositions} Active + {stats.newOpportunities} New Opportunities
+            {deDuplicatedCount > 0 ? `, ${deDuplicatedCount} overlap/de-duped` : ""})
+          </>
+        )}
       </div>
       <div>
         {onOpenInvestEvents && stats.newEventsToInvestIn > 0 ? (
@@ -2001,11 +2037,13 @@ function RunDetailWorkerStages({
   decisions,
   onOpenScanFilters,
   onOpenStageTwoInvestEvents,
+  onOpenStageTwoLlmRunDetails,
 }: {
   run: BullpenAutoLiveRun;
   decisions: BullpenAutoLiveDecision[];
   onOpenScanFilters?: () => void;
   onOpenStageTwoInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
+  onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
 }) {
   const workflowView = buildBullpenAutoRunWorkflowView(run);
   const investStage =
@@ -2140,6 +2178,7 @@ function RunDetailWorkerStages({
                     stage={stage}
                     decisions={decisions}
                     onOpenInvestEvents={onOpenStageTwoInvestEvents}
+                    onOpenLlmRunDetails={onOpenStageTwoLlmRunDetails}
                   />
                 ) : null}
                 {stage.key === "invest" && formatInvestStageRowMix(stage) ? (
@@ -2219,11 +2258,13 @@ function RunDetailDialog({
   onClose,
   onOpenScanFilters,
   onOpenStageTwoInvestEvents,
+  onOpenStageTwoLlmRunDetails,
 }: {
   state: RunDetailDialogState;
   onClose: () => void;
   onOpenScanFilters?: () => void;
   onOpenStageTwoInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
+  onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
 }) {
   const { run, decisions } = state;
   return (
@@ -2278,6 +2319,7 @@ function RunDetailDialog({
             decisions={decisions}
             onOpenScanFilters={onOpenScanFilters}
             onOpenStageTwoInvestEvents={onOpenStageTwoInvestEvents}
+            onOpenStageTwoLlmRunDetails={onOpenStageTwoLlmRunDetails}
           />
           <div className="mt-5 space-y-4">
             {run.stage_results.map((stage) => (
@@ -2343,6 +2385,91 @@ function RunDetailDialog({
   );
 }
 
+
+
+function StageTwoLlmRunDetailsDialog({
+  state,
+  onClose,
+}: {
+  state: StageTwoLlmRunDialogState;
+  onClose: () => void;
+}) {
+  const stats = getStageTwoStats(state.stage, state.decisions);
+  const overlapCount = Math.max(
+    0,
+    stats.activePositions + stats.newOpportunities - stats.llmRanOn,
+  );
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 2 LLM Run
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">
+              LLM ran on {stats.llmRanOn} unique rows
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              The previous “{stats.activePositions} Active + {stats.newOpportunities} New Opportunities = {stats.llmRanOn}” label was wrong because the two source lists can overlap. Stage 2 de-duplicates rows before sending them to the LLM.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close LLM run details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            {[
+              ["Active positions", stats.activePositions],
+              ["New opportunities", stats.newOpportunities],
+              ["Overlap / de-duped", overlapCount],
+              ["Unique LLM rows", stats.llmRanOn],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">{value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-950">
+            <p className="font-semibold">Summary</p>
+            <p className="mt-1 leading-6">
+              Stage 2 reviews the unique union of active-position rows and fresh opportunity rows. It does not add the two displayed source counts when a market appears in both groups.
+            </p>
+          </div>
+          <div className="mt-5 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Indepth details ({state.decisions.length} decisions currently returned)
+            </p>
+            {state.decisions.length ? state.decisions.map((decision) => (
+              <article key={decision.id} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <h3 className="font-semibold text-slate-950">{decision.market_title}</h3>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                    {decision.decision} · {decision.risk_status}
+                  </span>
+                </div>
+                <p className="mt-2 leading-6"><span className="font-semibold">Summary:</span> {decision.summary || decision.reason}</p>
+                <p className="mt-2 leading-6"><span className="font-semibold">Indepth details:</span> {decision.rationale || decision.reason}</p>
+              </article>
+            )) : (
+              <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                Decision rows are still loading or have not been returned yet for this run.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function StageTwoInvestEventsDialog({
   state,
@@ -2988,6 +3115,8 @@ export function BullpenAutoRunScheduleCard({
     useState<RunDetailDialogState | null>(null);
   const [stageTwoInvestEventsDialog, setStageTwoInvestEventsDialog] =
     useState<StageTwoInvestEventsDialogState | null>(null);
+  const [stageTwoLlmRunDialog, setStageTwoLlmRunDialog] =
+    useState<StageTwoLlmRunDialogState | null>(null);
   const [isSchedulePickerOpen, setIsSchedulePickerOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
@@ -4400,6 +4529,7 @@ export function BullpenAutoRunScheduleCard({
                             decisions: investDecisions,
                           })
                         }
+                        onOpenLlmRunDetails={setStageTwoLlmRunDialog}
                       />
                     ) : null}
                     {stage.key === "invest" &&
@@ -4923,6 +5053,14 @@ export function BullpenAutoRunScheduleCard({
             onOpenStageTwoInvestEvents={(investDecisions) =>
               setStageTwoInvestEventsDialog({ decisions: investDecisions })
             }
+            onOpenStageTwoLlmRunDetails={setStageTwoLlmRunDialog}
+          />
+        ) : null}
+
+        {stageTwoLlmRunDialog ? (
+          <StageTwoLlmRunDetailsDialog
+            state={stageTwoLlmRunDialog}
+            onClose={() => setStageTwoLlmRunDialog(null)}
           />
         ) : null}
 
