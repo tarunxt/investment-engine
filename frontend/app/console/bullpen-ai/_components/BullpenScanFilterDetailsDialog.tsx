@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
-import { X } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Plus, Trash2, X } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import {
   BULLPEN_SCAN_FILTER_DETAILS,
   type BullpenScanFilterDetailId,
@@ -10,8 +11,14 @@ import {
 
 type BullpenScanFilterDetailsDialogProps = {
   detailId: BullpenScanFilterDetailId;
+  customKeywords: string[];
+  onSaveCustomKeywords: (keywords: string[]) => void;
   onClose: () => void;
 };
+
+function normalizeKeyword(value: string) {
+  return value.trim().toLowerCase();
+}
 
 function DetailList({
   title,
@@ -43,6 +50,8 @@ function DetailList({
 
 export function BullpenScanFilterDetailsDialog({
   detailId,
+  customKeywords,
+  onSaveCustomKeywords,
   onClose,
 }: BullpenScanFilterDetailsDialogProps) {
   const detail = BULLPEN_SCAN_FILTER_DETAILS[detailId];
@@ -50,6 +59,10 @@ export function BullpenScanFilterDetailsDialog({
     detailId === "onlyBinaryYesNo"
       ? "Exact keep algorithm"
       : "Exact exclusion algorithm";
+  const supportsCustomKeywords = detailId !== "onlyBinaryYesNo";
+  const [draftKeywords, setDraftKeywords] = useState<string[]>(customKeywords);
+  const [newKeyword, setNewKeyword] = useState("");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -59,6 +72,32 @@ export function BullpenScanFilterDetailsDialog({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  const hasUnsavedChanges = useMemo(
+    () => draftKeywords.join(",") !== customKeywords.join(","),
+    [customKeywords, draftKeywords],
+  );
+
+  function addKeyword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const keyword = normalizeKeyword(newKeyword);
+    if (!keyword) return;
+    setDraftKeywords((current) =>
+      current.includes(keyword) ? current : [...current, keyword],
+    );
+    setNewKeyword("");
+    setSaveMessage(null);
+  }
+
+  function deleteKeyword(keyword: string) {
+    setDraftKeywords((current) => current.filter((item) => item !== keyword));
+    setSaveMessage(null);
+  }
+
+  function saveKeywords() {
+    onSaveCustomKeywords(draftKeywords);
+    setSaveMessage("Saved custom exclusion keywords.");
+  }
 
   return (
     <div
@@ -115,6 +154,62 @@ export function BullpenScanFilterDetailsDialog({
               ))}
             </ol>
           </section>
+
+          {supportsCustomKeywords ? (
+            <section className="space-y-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold text-slate-950">
+                  Custom exclusion keywords
+                </h3>
+                <p className="text-xs leading-5 text-slate-600">
+                  Add extra whole-word keywords for this exclusion. Click Save to persist them and include them in the next scan.
+                </p>
+              </div>
+              <form onSubmit={addKeyword} className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="text"
+                  value={newKeyword}
+                  onChange={(event) => setNewKeyword(event.target.value)}
+                  placeholder="Add keyword or phrase"
+                  className="min-h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-indigo-300"
+                />
+                <Button type="submit" variant="outline" className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Add
+                </Button>
+              </form>
+              <div className="flex flex-wrap gap-2">
+                {draftKeywords.length ? (
+                  draftKeywords.map((keyword) => (
+                    <span
+                      key={keyword}
+                      className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-white px-3 py-1.5 font-mono text-xs text-slate-700"
+                    >
+                      {keyword}
+                      <button
+                        type="button"
+                        onClick={() => deleteKeyword(keyword)}
+                        className="rounded-full text-slate-400 transition hover:text-red-600"
+                        aria-label={`Delete custom keyword ${keyword}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-500">No custom keywords saved.</p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button type="button" onClick={saveKeywords} disabled={!hasUnsavedChanges}>
+                  Save keywords
+                </Button>
+                {saveMessage ? (
+                  <p className="text-xs font-medium text-emerald-700">{saveMessage}</p>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
 
           <DetailList
             title="Whole-word keyword sets"

@@ -103,6 +103,10 @@ export type BullpenScanFilters = {
   excludeWeather: boolean;
   excludeMarketPredictions: boolean;
   excludeTweetCountQuestions: boolean;
+  customExcludeSportsKeywords: string[];
+  customExcludeWeatherKeywords: string[];
+  customExcludeMarketPredictionsKeywords: string[];
+  customExcludeTweetCountQuestionsKeywords: string[];
   onlyBinaryYesNo: boolean;
   minYesOdds: number;
   minNoOdds: number;
@@ -430,6 +434,10 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     excludeWeather: true,
     excludeMarketPredictions: true,
     excludeTweetCountQuestions: true,
+    customExcludeSportsKeywords: [],
+    customExcludeWeatherKeywords: [],
+    customExcludeMarketPredictionsKeywords: [],
+    customExcludeTweetCountQuestionsKeywords: [],
     onlyBinaryYesNo: true,
     minYesOdds: 5,
     minNoOdds: 5,
@@ -441,6 +449,10 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     excludeWeather: true,
     excludeMarketPredictions: true,
     excludeTweetCountQuestions: true,
+    customExcludeSportsKeywords: [],
+    customExcludeWeatherKeywords: [],
+    customExcludeMarketPredictionsKeywords: [],
+    customExcludeTweetCountQuestionsKeywords: [],
     onlyBinaryYesNo: true,
     minYesOdds: 5,
     minNoOdds: 5,
@@ -466,6 +478,19 @@ const BULLPEN_MONTH_INDEX_BY_NAME: Record<string, number> = {
 type SearchParamReader = {
   get(name: string): string | null;
 };
+
+function parseKeywordListSearchParam(value: string | null) {
+  if (!value) return [];
+  const seen = new Set<string>();
+  return value
+    .split(",")
+    .map((keyword) => keyword.trim().toLowerCase())
+    .filter((keyword) => {
+      if (!keyword || seen.has(keyword)) return false;
+      seen.add(keyword);
+      return true;
+    });
+}
 
 function parseBooleanSearchParam(value: string | null, fallback: boolean) {
   if (value === null) return fallback;
@@ -521,6 +546,18 @@ export function normalizeBullpenScanFilters(
       searchParams.get("excludeTweetCountQuestions"),
       defaults.excludeTweetCountQuestions,
     ),
+    customExcludeSportsKeywords: parseKeywordListSearchParam(
+      searchParams.get("customExcludeSportsKeywords"),
+    ),
+    customExcludeWeatherKeywords: parseKeywordListSearchParam(
+      searchParams.get("customExcludeWeatherKeywords"),
+    ),
+    customExcludeMarketPredictionsKeywords: parseKeywordListSearchParam(
+      searchParams.get("customExcludeMarketPredictionsKeywords"),
+    ),
+    customExcludeTweetCountQuestionsKeywords: parseKeywordListSearchParam(
+      searchParams.get("customExcludeTweetCountQuestionsKeywords"),
+    ),
     onlyBinaryYesNo: parseBooleanSearchParam(
       searchParams.get("onlyBinaryYesNo"),
       defaults.onlyBinaryYesNo,
@@ -553,6 +590,22 @@ export function buildBullpenScanQueryParams(
   params.set(
     "excludeTweetCountQuestions",
     String(filters.excludeTweetCountQuestions),
+  );
+  params.set(
+    "customExcludeSportsKeywords",
+    filters.customExcludeSportsKeywords.join(","),
+  );
+  params.set(
+    "customExcludeWeatherKeywords",
+    filters.customExcludeWeatherKeywords.join(","),
+  );
+  params.set(
+    "customExcludeMarketPredictionsKeywords",
+    filters.customExcludeMarketPredictionsKeywords.join(","),
+  );
+  params.set(
+    "customExcludeTweetCountQuestionsKeywords",
+    filters.customExcludeTweetCountQuestionsKeywords.join(","),
   );
   params.set("onlyBinaryYesNo", String(filters.onlyBinaryYesNo));
   params.set("minYesOdds", String(filters.minYesOdds));
