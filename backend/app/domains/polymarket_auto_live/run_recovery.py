@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from app.core.logging import get_logger
+from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveRun,
     BullpenAutoLiveStageResult,
@@ -34,6 +35,8 @@ _WORKFLOW_STAGE_LABELS = {
 class AutoLiveTaskRuntimeSnapshot:
     task_id: str | None
     state: str | None = None
+    result_error: str | None = None
+    result_traceback: str | None = None
     is_active: bool = False
     is_reserved: bool = False
     is_scheduled: bool = False
@@ -325,9 +328,19 @@ def inspect_auto_live_run_task_sync(run_id: str) -> AutoLiveTaskRuntimeSnapshot:
         )
 
     state: str | None = None
+    result_error: str | None = None
+    result_traceback: str | None = None
     try:
-        state_value = celery.AsyncResult(task_id).state
+        async_result = celery.AsyncResult(task_id)
+        state_value = async_result.state
         state = str(state_value).strip().upper() or None
+        if state in _TERMINAL_CELERY_STATES:
+            raw_result = getattr(async_result, "result", None)
+            if raw_result is not None:
+                result_error = redact_secrets(str(raw_result))[:1000]
+            raw_traceback = getattr(async_result, "traceback", None)
+            if raw_traceback:
+                result_traceback = redact_secrets(str(raw_traceback))[-2000:]
     except Exception:
         logger.exception("Failed to read Celery result state for Auto-Live task %s", task_id)
 
@@ -357,6 +370,8 @@ def inspect_auto_live_run_task_sync(run_id: str) -> AutoLiveTaskRuntimeSnapshot:
     return AutoLiveTaskRuntimeSnapshot(
         task_id=task_id,
         state=state,
+        result_error=result_error,
+        result_traceback=result_traceback,
         is_active=is_active,
         is_reserved=is_reserved,
         is_scheduled=is_scheduled,
@@ -374,6 +389,18 @@ def _payload_contains_task_id(payload: object, task_id: str) -> bool:
     if isinstance(payload, list):
         return any(_payload_contains_task_id(value, task_id) for value in payload)
     return False
+
+
+def _format_terminal_task_result_detail(task_snapshot: AutoLiveTaskRuntimeSnapshot) -> str:
+    """Return the best persisted Celery failure detail for a dead run task."""
+    details: list[str] = []
+    if task_snapshot.result_error:
+        details.append(f"Failure detail: {task_snapshot.result_error}")
+    if task_snapshot.result_traceback:
+        traceback_head = task_snapshot.result_traceback.strip().splitlines()[-1]
+        if traceback_head and traceback_head not in (task_snapshot.result_error or ""):
+            details.append(f"Traceback tail: {traceback_head}")
+    return " ".join(details) if details else "No persisted Celery exception detail was available."
 
 
 def _should_finalize_settled_running_run(run: BullpenAutoLiveRun) -> bool:
@@ -431,9 +458,12 @@ def _build_stalled_run_failure_message(
         return None
 
     if normalized_state in _TERMINAL_CELERY_STATES and task_snapshot.task_id:
+        result_detail = _format_terminal_task_result_detail(task_snapshot)
         return (
             f"Worker task {task_snapshot.task_id} ended with {normalized_state.lower()} "
-            "before the run status was finalized. Please rerun."
+            "before the run status was finalized."
+            f" {result_detail}"
+            " Please rerun."
         )
 
     if not task_snapshot.inspect_succeeded:
