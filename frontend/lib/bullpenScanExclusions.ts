@@ -138,6 +138,26 @@ export const MARKET_QUESTION_KEYWORDS = MARKET_QUESTION_KEYWORD_GROUPS.flat();
 export const SOCIAL_POST_COUNT_KEYWORDS =
   SOCIAL_POST_COUNT_KEYWORD_GROUPS.flat();
 
+export function normalizeCustomExclusionKeywordVariants(keyword: string) {
+  const normalized = keyword.trim().toLowerCase();
+  if (!normalized) return [];
+
+  const variants = [normalized];
+  const withoutLeadingOperator = normalized
+    .replace(/^(?:\d+\s*)?\+\s+/, "")
+    .replace(
+      /^(?:at least|at most|over|under|more than|less than)\s+\d+\s+/,
+      "",
+    )
+    .trim();
+
+  if (withoutLeadingOperator && withoutLeadingOperator !== normalized) {
+    variants.push(withoutLeadingOperator);
+  }
+
+  return variants;
+}
+
 export const SOCIAL_POST_COUNT_PATTERNS = [
   /\bhow many (?:tweets?|posts?|truths?)\b/i,
   /\bnumber of (?:tweets?|posts?|truths?)\b/i,
