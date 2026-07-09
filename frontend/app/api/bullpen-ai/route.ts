@@ -11,6 +11,7 @@ import {
 import {
   collectPolymarketCategoryLabels,
   formatPolymarketCategory,
+  inferPolymarketCategoryFromText,
   POLYMARKET_DEFAULT_CATEGORY,
 } from "./_lib/polymarketCategory";
 import {
@@ -839,7 +840,14 @@ function normalizeGammaMarket(
     inferSemanticCloseTime(record, question),
   );
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
-  const category = readCategory(record);
+  const category =
+    readCategory(record) ??
+    inferPolymarketCategoryFromText(
+      question,
+      slug,
+      outcomeLabels.join(" "),
+      collectDeepStrings(record, FILTER_TEXT_KEYS).join(" "),
+    );
   const categoryLabels = collectCategoryLabels(record);
   const categorySearchText = normalizeSearchTextParts([
     category,
@@ -909,7 +917,14 @@ function normalizeQuestion(
   const question = readString(record, QUESTION_KEYS);
   if (!question || question.length < 8) return null;
 
-  const category = readCategory(record, context.category);
+  const category =
+    readCategory(record, context.category) ??
+    inferPolymarketCategoryFromText(
+      question,
+      context.category,
+      readString(record, MARKET_SLUG_KEYS),
+      collectDeepStrings(record, FILTER_TEXT_KEYS).join(" "),
+    );
   const categoryLabels = collectCategoryLabels(record, context.category);
   const yesOdds = normalizeOdds(
     readOutcomeNumber(record, "yes", [
@@ -1082,7 +1097,14 @@ function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuesti
   void _searchText;
   return {
     ...publicQuestion,
-    category: publicQuestion.category ?? POLYMARKET_DEFAULT_CATEGORY,
+    category:
+      publicQuestion.category ??
+      inferPolymarketCategoryFromText(
+        publicQuestion.question,
+        publicQuestion.slug,
+        publicQuestion.outcomeLabels.join(" "),
+      ) ??
+      POLYMARKET_DEFAULT_CATEGORY,
   };
 }
 

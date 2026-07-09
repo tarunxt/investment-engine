@@ -100,6 +100,44 @@ function normalizeCategoryTrail(value: unknown) {
 
 export const POLYMARKET_DEFAULT_CATEGORY = "Uncategorized";
 
+const INFERRED_CATEGORY_RULES: Array<{
+  category: string;
+  patterns: readonly RegExp[];
+}> = [
+  {
+    category: "Sports",
+    patterns: [
+      /\b(?:assists?|goals?|shots?|shots on target|saves?|tackles?|cards?|player props?)\b/i,
+      /\b(?:nba|nfl|mlb|nhl|ncaa|soccer|football|baseball|basketball|cricket|tennis|wimbledon|atp|wta|ufc|mma|boxing|golf|formula 1|f1|world cup|premier league|champions league|la liga)\b/i,
+      /\b[A-Za-z][A-Za-z .'\-]{2,40}\s+vs\.?\s+[A-Za-z][A-Za-z .'\-]{2,40}\b/i,
+    ],
+  },
+  {
+    category: "Weather",
+    patterns: [
+      /\b(?:weather|temperature|rain|snow|hurricane|storm|tornado|heatwave|forecast|climate|wind|precipitation|monsoon|floods?)\b/i,
+    ],
+  },
+  {
+    category: "Finance",
+    patterns: [
+      /\b(?:bitcoin|ethereum|solana|dogecoin|crypto|stock|stocks|share price|nasdaq|s&p|dow|oil|gold|silver|yield|bonds?|commodit(?:y|ies)|forex|inflation|interest rate|fed|etf)\b/i,
+    ],
+  },
+  {
+    category: "Politics",
+    patterns: [
+      /\b(?:election|president|senate|congress|parliament|minister|government|mou|treaty|ceasefire|sanctions?|iran|trump|biden|putin|zelenskyy|netanyahu)\b/i,
+    ],
+  },
+  {
+    category: "Social Media",
+    patterns: [
+      /\b(?:tweets?|x posts?|posts on x|truth social posts?|truths?)\b/i,
+    ],
+  },
+];
+
 export function normalizeCategoryLabel(value: unknown): string | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return String(value);
@@ -113,6 +151,22 @@ export function normalizeCategoryLabel(value: unknown): string | null {
 export function isMissingCategory(value: unknown) {
   const normalized = normalizeCategoryLabel(value);
   return !normalized || normalized.toLowerCase() === "uncategorized";
+}
+
+export function inferPolymarketCategoryFromText(
+  ...values: Array<string | null | undefined>
+) {
+  const searchText = values
+    .map((value) => normalizeCategoryLabel(value)?.toLowerCase())
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+
+  if (!searchText) return null;
+
+  const matchedRule = INFERRED_CATEGORY_RULES.find((rule) =>
+    rule.patterns.some((pattern) => pattern.test(searchText)),
+  );
+  return matchedRule?.category ?? null;
 }
 
 export function collectPolymarketCategoryLabels(recordOrPayload: unknown) {

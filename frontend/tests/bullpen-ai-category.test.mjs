@@ -166,6 +166,23 @@ test("shouldReplaceCategory only upgrades to richer Polymarket category trails",
   );
 });
 
+test("inferPolymarketCategoryFromText assigns proper fallback labels for sportsbook-style props", () => {
+  const { inferPolymarketCategoryFromText } = loadCategoryModule();
+
+  assert.equal(
+    inferPolymarketCategoryFromText("Achraf Hakimi: 1+ assists"),
+    "Sports",
+  );
+  assert.equal(
+    inferPolymarketCategoryFromText("Western Maharashtra floods by July 10?"),
+    "Weather",
+  );
+  assert.equal(
+    inferPolymarketCategoryFromText("Will Iran announce withdrawal from MOU negotiations?"),
+    "Politics",
+  );
+});
+
 test("applyCanonicalPolymarketMarketUrls upgrades Uncategorized categories from resolver metadata", async () => {
   const { applyCanonicalPolymarketMarketUrls } =
     loadPolymarketMarketUrlsModule();
@@ -191,6 +208,38 @@ test("applyCanonicalPolymarketMarketUrls upgrades Uncategorized categories from 
   );
 
   assert.equal(nextQuestions[0].category, "Politics · Iran");
+});
+
+test("applyCanonicalPolymarketMarketUrls replaces Uncategorized with inferred category when resolver lacks metadata", async () => {
+  const { applyCanonicalPolymarketMarketUrls } =
+    loadPolymarketMarketUrlsModule();
+
+  const questions = [
+    createQuestion({
+      question: "Achraf Hakimi: 1+ assists",
+      slug: "achraf-hakimi-1-assists",
+    }),
+  ];
+  const nextQuestions = await applyCanonicalPolymarketMarketUrls(
+    questions,
+    async () => ({
+      Q1: {
+        id: "Q1",
+        slug: questions[0].slug,
+        marketUrl: questions[0].marketUrl,
+        category: null,
+        yesOdds: questions[0].yesOdds,
+        noOdds: questions[0].noOdds,
+        bestBidPrice: null,
+        bestAskPrice: null,
+        rules: null,
+        marketContext: null,
+        resolutionSource: null,
+      },
+    }),
+  );
+
+  assert.equal(nextQuestions[0].category, "Sports");
 });
 
 test("applyCanonicalPolymarketMarketUrls does not overwrite valid categories with missing resolver categories", async () => {
