@@ -192,6 +192,47 @@ def test_reconcile_running_auto_live_run_keeps_healthy_worker_running():
     assert run.status == "running"
 
 
+def test_reconcile_running_auto_live_run_surfaces_terminal_celery_failure_detail():
+    run = BullpenAutoLiveRun(
+        id="run-terminal-failure",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 3 is submitting planned orders.",
+        stage_results=[
+            _stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="running",
+                reason="Stage 3 submitted 2 of 5 orders.",
+                completed_at=None,
+            )
+        ],
+    )
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 5, tzinfo=UTC),
+        now=datetime(2026, 7, 5, 12, 6, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="celery-task-failed",
+            state="FAILURE",
+            result_error="Future attached to a different loop",
+            result_traceback="Traceback (most recent call last):\nRuntimeError: Future attached to a different loop",
+            inspect_succeeded=True,
+        ),
+    )
+
+    assert recovered is run
+    assert recovered.status == "failed"
+    assert recovered.error_message is not None
+    assert "Failure detail: Future attached to a different loop" in recovered.error_message
+    assert "No persisted Celery exception detail" not in recovered.error_message
+    assert recovered.stage_results[-1].outputs["failure_message"] == recovered.error_message
+
+
 @pytest.mark.anyio
 async def test_run_once_queues_new_run_after_recovering_stale_running_record(monkeypatch):
     settings = BullpenAutoLiveSettings(auto_live_enabled=True, dry_run=True)
