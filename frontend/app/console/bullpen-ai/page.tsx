@@ -2315,7 +2315,10 @@ function BullpenAiPageContent() {
     setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     const positionsRefreshTask = refreshBullpenPositions({
       suppressAutoClaim: true,
-    });
+    }).catch((error) => ({
+      positions: activePositions,
+      error: `Failed to refresh Bullpen wallet positions during scan: ${normalizeError(error)}.`,
+    }));
 
     try {
       const response = await fetch(`/api/bullpen-ai?${params.toString()}`, {
@@ -2324,7 +2327,7 @@ function BullpenAiPageContent() {
       const payload = (await response.json()) as ScanResult;
       const isSuccessfulScan = response.ok && !payload.error;
 
-      await positionsRefreshTask;
+      void positionsRefreshTask;
 
       const nextSnapshot = isSuccessfulScan
         ? createBullpenScanSnapshot(payload)
@@ -2355,7 +2358,7 @@ function BullpenAiPageContent() {
           : null,
       };
     } catch (scanError) {
-      await positionsRefreshTask;
+      void positionsRefreshTask;
       const message =
         scanError instanceof Error
           ? scanError.message
@@ -3339,7 +3342,7 @@ function BullpenAiPageContent() {
                 </p>
                 <p className="mt-2 text-sm text-slate-700">
                   {isManualScanView
-                    ? "Scan Bullpen&apos;s trending source for this tab, then fall back to alternate market feeds only if Bullpen access fails."
+                    ? "Scan Bullpen's trending source for this tab, then fall back to alternate market feeds only if Bullpen access fails."
                     : "Auto Scan snapshots are populated by the Run Scans and Invest Now flow above and kept separate from the manual scan table."}
                 </p>
               </div>
