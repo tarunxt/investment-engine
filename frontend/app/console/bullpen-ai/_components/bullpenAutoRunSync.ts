@@ -47,6 +47,21 @@ function readNumber(value: unknown) {
   return null;
 }
 
+function readCandidateCategory(
+  record: Record<string, unknown>,
+  fallback: string | null = null,
+) {
+  return (
+    readString(record.category) ??
+    readString(record.theme) ??
+    readString(record.categoryName) ??
+    readString(record.primaryCategory) ??
+    readString(record.topic) ??
+    fallback ??
+    "Uncategorized"
+  );
+}
+
 function readBoolean(value: unknown) {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -205,7 +220,7 @@ function buildQuestionFromAcceptedCandidate({
       questionId,
       question: questionLabel,
       closeTime: readString(record.close_time),
-      category: readString(record.theme) ?? "Uncategorized",
+      category: readCandidateCategory(record),
       yesOdds: readNumber(record.current_yes_odds),
       noOdds: readNumber(record.current_no_odds),
       volume: stringifyNumericValue(record.volume_usd),
@@ -221,7 +236,7 @@ function buildQuestionFromAcceptedCandidate({
     id: questionId,
     question: questionLabel,
     closeTime: readString(record.close_time) ?? baseQuestion.closeTime,
-    category: readString(record.theme) ?? baseQuestion.category,
+    category: readCandidateCategory(record, baseQuestion.category),
     yesOdds: readNumber(record.current_yes_odds) ?? baseQuestion.yesOdds,
     noOdds: readNumber(record.current_no_odds) ?? baseQuestion.noOdds,
     volume: stringifyNumericValue(record.volume_usd) ?? baseQuestion.volume,
@@ -484,7 +499,10 @@ function applyDecisionOutputsToSnapshot({
       marketUrl: decision.market_url ?? question.marketUrl,
       slug: decision.slug ?? question.slug,
       closeTime: nextCloseTime,
-      category: decision.theme || question.category,
+      category: readCandidateCategory(
+        decision as unknown as Record<string, unknown>,
+        question.category,
+      ),
       llmYesOdds: decision.fair_yes_probability_pct ?? question.llmYesOdds,
       llmNoOdds: decision.fair_no_probability_pct ?? question.llmNoOdds,
       evidenceStatus: decision.evidence_status ?? question.evidenceStatus,
@@ -559,6 +577,7 @@ function applyStage2OutputsToSnapshot({
     const nextQuestion = createBullpenQuestionRow({
       ...question,
       marketUrl: readString(reviewedCandidate.market_url) ?? question.marketUrl,
+      category: readCandidateCategory(reviewedCandidate, question.category),
       closeTime: nextCloseTime,
       llmYesOdds:
         readNumber(reviewedCandidate.fair_yes_probability_pct) ??
