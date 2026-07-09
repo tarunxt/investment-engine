@@ -6,6 +6,7 @@ import type { BullpenQuestion } from "@/lib/bullpen-ai";
 import {
   collectPolymarketCategoryLabels,
   formatPolymarketCategory,
+  inferPolymarketCategoryFromText,
   shouldReplaceCategory,
 } from "./polymarketCategory";
 import {
@@ -777,11 +778,17 @@ export async function applyCanonicalPolymarketMarketUrls(
     const nextQuestions = questions.map((question) => {
       const resolved = resolvedByQuestionId[question.id];
       if (!resolved) return question;
+      const inferredCategory = inferPolymarketCategoryFromText(
+        question.question,
+        resolved.slug ?? question.slug,
+      );
+      const resolvedOrInferredCategory =
+        resolved.category ?? inferredCategory;
       const nextCategory: string = shouldReplaceCategory(
         question.category,
-        resolved.category,
+        resolvedOrInferredCategory,
       )
-        ? resolved.category ?? question.category
+        ? resolvedOrInferredCategory ?? question.category
         : question.category;
 
       if (
