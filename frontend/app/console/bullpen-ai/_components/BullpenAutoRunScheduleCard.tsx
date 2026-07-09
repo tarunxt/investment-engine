@@ -3646,10 +3646,13 @@ export function BullpenAutoRunScheduleCard({
       kind,
       run,
       stage,
-      decisions:
-        summary?.recent_decisions.filter(
-          (decision) => decision.run_id === run.id,
-        ) ?? [],
+      decisions: mergeInvestStageDecisionRows({
+        stage,
+        persistedDecisions:
+          summary?.recent_decisions.filter(
+            (decision) => decision.run_id === run.id,
+          ) ?? [],
+      }),
     });
   };
   const openRunDetailDialog = (run: BullpenAutoLiveRun) => {
