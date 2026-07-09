@@ -4,7 +4,6 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from celery.exceptions import MaxRetriesExceededError
 from sqlalchemy import and_, select
 
 from app.core.logging import get_logger
@@ -174,6 +173,26 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
         except Exception as exc:
             logger.exception("Auto-Live run %s failed before completion", run_id)
             sanitized_error = redact_secrets(str(exc))
+            current_retries = int(getattr(self.request, "retries", 0) or 0)
+            max_retries = int(getattr(self, "max_retries", 0) or 0)
+            if current_retries < max_retries:
+                retry_number = current_retries + 1
+                run.status = "running"
+                run.completed_at = None
+                run.error_message = None
+                run.summary = (
+                    f"Auto-Live worker hit a retryable error and is automatically "
+                    f"retrying attempt {retry_number} of {max_retries}: {sanitized_error}"
+                )
+                state.last_error = None
+                state.last_action = run.summary
+                state.last_run_id = run.id
+                state.last_run_at = datetime.now(UTC).isoformat()
+                repo.save_run(user_id, run)
+                repo.save_state(user_id, state)
+                session.commit()
+                raise self.retry(exc=exc)
+
             completed_at = datetime.now(UTC).isoformat()
             run.status = "failed"
             run.completed_at = completed_at
@@ -190,10 +209,7 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
             repo.save_run(user_id, run)
             repo.save_state(user_id, state)
             session.commit()
-            try:
-                raise self.retry(exc=exc)
-            except MaxRetriesExceededError:
-                logger.exception("Auto-Live run %s exhausted retries", run_id)
+            logger.exception("Auto-Live run %s exhausted retries", run_id)
             return
 
         repo.save_run(user_id, engine_result.run)
