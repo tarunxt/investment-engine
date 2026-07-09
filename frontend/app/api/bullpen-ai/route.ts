@@ -49,6 +49,10 @@ type FilterableBullpenQuestion = Omit<BullpenQuestion, "category"> & {
   category: string | null;
   _categorySearchText: string;
   _searchText: string;
+  _customExcludeSportsKeywords: string[];
+  _customExcludeWeatherKeywords: string[];
+  _customExcludeMarketPredictionsKeywords: string[];
+  _customExcludeTweetCountQuestionsKeywords: string[];
 };
 
 const execFileAsync = promisify(execFile);
@@ -737,13 +741,19 @@ function getQuestionSearchText(question: FilterableBullpenQuestion) {
 function isSportsQuestion(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
-    includesAnyKeyword(searchText, SPORTS_KEYWORDS) ||
+    includesAnyKeyword(searchText, [
+      ...SPORTS_KEYWORDS,
+      ...question._customExcludeSportsKeywords,
+    ]) ||
     SPORTS_PATTERNS.some((pattern) => pattern.test(searchText))
   );
 }
 
 function isWeatherQuestion(question: FilterableBullpenQuestion) {
-  return includesAnyKeyword(getQuestionSearchText(question), WEATHER_KEYWORDS);
+  return includesAnyKeyword(getQuestionSearchText(question), [
+    ...WEATHER_KEYWORDS,
+    ...question._customExcludeWeatherKeywords,
+  ]);
 }
 
 function isMarketPredictionQuestion(question: FilterableBullpenQuestion) {
@@ -751,9 +761,15 @@ function isMarketPredictionQuestion(question: FilterableBullpenQuestion) {
   return (
     includesAnyKeyword(
       question._categorySearchText,
-      MARKET_CATEGORY_KEYWORDS,
+      [
+        ...MARKET_CATEGORY_KEYWORDS,
+        ...question._customExcludeMarketPredictionsKeywords,
+      ],
     ) ||
-    includesAnyKeyword(searchText, MARKET_QUESTION_KEYWORDS) ||
+    includesAnyKeyword(searchText, [
+      ...MARKET_QUESTION_KEYWORDS,
+      ...question._customExcludeMarketPredictionsKeywords,
+    ]) ||
     MARKET_PREDICTION_PATTERNS.some((pattern) => pattern.test(searchText))
   );
 }
@@ -761,7 +777,10 @@ function isMarketPredictionQuestion(question: FilterableBullpenQuestion) {
 function isTweetCountQuestion(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
-    includesAnyKeyword(searchText, SOCIAL_POST_COUNT_KEYWORDS) &&
+    includesAnyKeyword(searchText, [
+      ...SOCIAL_POST_COUNT_KEYWORDS,
+      ...question._customExcludeTweetCountQuestionsKeywords,
+    ]) &&
     SOCIAL_POST_COUNT_PATTERNS.some((pattern) => pattern.test(searchText))
   );
 }
@@ -906,6 +925,10 @@ function normalizeGammaMarket(
     resolutionSource: null,
     _categorySearchText: categorySearchText,
     _searchText: searchText,
+    _customExcludeSportsKeywords: [],
+    _customExcludeWeatherKeywords: [],
+    _customExcludeMarketPredictionsKeywords: [],
+    _customExcludeTweetCountQuestionsKeywords: [],
   };
 }
 
@@ -1026,6 +1049,10 @@ function normalizeQuestion(
     resolutionSource: null,
     _categorySearchText: categorySearchText,
     _searchText: searchText,
+    _customExcludeSportsKeywords: [],
+    _customExcludeWeatherKeywords: [],
+    _customExcludeMarketPredictionsKeywords: [],
+    _customExcludeTweetCountQuestionsKeywords: [],
   };
 }
 
@@ -1091,10 +1118,18 @@ function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuesti
   const {
     _categorySearchText,
     _searchText,
+    _customExcludeSportsKeywords,
+    _customExcludeWeatherKeywords,
+    _customExcludeMarketPredictionsKeywords,
+    _customExcludeTweetCountQuestionsKeywords,
     ...publicQuestion
   } = question;
   void _categorySearchText;
   void _searchText;
+  void _customExcludeSportsKeywords;
+  void _customExcludeWeatherKeywords;
+  void _customExcludeMarketPredictionsKeywords;
+  void _customExcludeTweetCountQuestionsKeywords;
   return {
     ...publicQuestion,
     category:
@@ -1115,6 +1150,15 @@ function applyFilters(
 ) {
   return sortQuestions(
     candidates
+      .map((question) => ({
+        ...question,
+        _customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
+        _customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
+        _customExcludeMarketPredictionsKeywords:
+          filters.customExcludeMarketPredictionsKeywords,
+        _customExcludeTweetCountQuestionsKeywords:
+          filters.customExcludeTweetCountQuestionsKeywords,
+      }))
       .filter((question) => passesFilters(question, mode, filters))
       .map((question) => stripFilterMetadata(question)),
   );

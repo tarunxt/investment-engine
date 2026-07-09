@@ -153,6 +153,8 @@ const BULLPEN_LLM_PROMPT_STORAGE_KEY =
   "investment-engine:bullpen-ai:llm-prompt-template:v1";
 const BULLPEN_REQUIRE_FRESH_EVIDENCE_STORAGE_KEY =
   "investment-engine:bullpen-ai:require-fresh-evidence:v1";
+const BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY =
+  "investment-engine:bullpen-ai:custom-exclusion-keywords:v1";
 const BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY =
   "investment-engine:bullpen-ai:allow-non-web-evidence:v1";
 const MAX_BULLPEN_SNAPSHOT_HISTORY = 10;
@@ -483,6 +485,79 @@ function getModeDescription(mode: ScanMode, filters: BullpenScanFilters) {
   return `Bullpen questions closing within ${filters.maxClosingDays} days.`;
 }
 
+function getFilterCustomKeywordKey(detailId: BullpenScanFilterDetailId) {
+  if (detailId === "excludeSports") return "customExcludeSportsKeywords";
+  if (detailId === "excludeWeather") return "customExcludeWeatherKeywords";
+  if (detailId === "excludeMarketPredictions") {
+    return "customExcludeMarketPredictionsKeywords";
+  }
+  if (detailId === "excludeTweetCountQuestions") {
+    return "customExcludeTweetCountQuestionsKeywords";
+  }
+  return null;
+}
+
+function normalizeCustomExclusionKeywords(keywords: unknown) {
+  if (!Array.isArray(keywords)) return [];
+  const seen = new Set<string>();
+  return keywords
+    .map((keyword) => (typeof keyword === "string" ? keyword.trim().toLowerCase() : ""))
+    .filter((keyword) => {
+      if (!keyword || seen.has(keyword)) return false;
+      seen.add(keyword);
+      return true;
+    });
+}
+
+function readStoredCustomExclusionKeywords() {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(
+      BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY,
+    );
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      customExcludeSportsKeywords: normalizeCustomExclusionKeywords(
+        parsed.customExcludeSportsKeywords,
+      ),
+      customExcludeWeatherKeywords: normalizeCustomExclusionKeywords(
+        parsed.customExcludeWeatherKeywords,
+      ),
+      customExcludeMarketPredictionsKeywords: normalizeCustomExclusionKeywords(
+        parsed.customExcludeMarketPredictionsKeywords,
+      ),
+      customExcludeTweetCountQuestionsKeywords: normalizeCustomExclusionKeywords(
+        parsed.customExcludeTweetCountQuestionsKeywords,
+      ),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function getCustomExclusionKeywordsForDetail(
+  filters: BullpenScanFilters,
+  detailId: BullpenScanFilterDetailId,
+) {
+  const filterKey = getFilterCustomKeywordKey(detailId);
+  return filterKey ? filters[filterKey] : [];
+}
+
+function writeStoredCustomExclusionKeywords(filters: BullpenScanFilters) {
+  window.localStorage.setItem(
+    BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY,
+    JSON.stringify({
+      customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
+      customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
+      customExcludeMarketPredictionsKeywords:
+        filters.customExcludeMarketPredictionsKeywords,
+      customExcludeTweetCountQuestionsKeywords:
+        filters.customExcludeTweetCountQuestionsKeywords,
+    }),
+  );
+}
+
 function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
   return (
     left.maxClosingDays === right.maxClosingDays &&
@@ -492,6 +567,14 @@ function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
     left.excludeMarketPredictions === right.excludeMarketPredictions &&
     Boolean(left.excludeTweetCountQuestions) ===
       Boolean(right.excludeTweetCountQuestions) &&
+    left.customExcludeSportsKeywords.join(",") ===
+      right.customExcludeSportsKeywords.join(",") &&
+    left.customExcludeWeatherKeywords.join(",") ===
+      right.customExcludeWeatherKeywords.join(",") &&
+    left.customExcludeMarketPredictionsKeywords.join(",") ===
+      right.customExcludeMarketPredictionsKeywords.join(",") &&
+    left.customExcludeTweetCountQuestionsKeywords.join(",") ===
+      right.customExcludeTweetCountQuestionsKeywords.join(",") &&
     left.onlyBinaryYesNo === right.onlyBinaryYesNo &&
     left.minYesOdds === right.minYesOdds &&
     left.minNoOdds === right.minNoOdds
@@ -1223,10 +1306,19 @@ function BullpenAiPageContent() {
   const activeTab = TABS.find((tab) => tab.mode === activeMode) || TABS[0];
   const [filtersByMode, setFiltersByMode] = useState<
     Record<ScanMode, BullpenScanFilters>
-  >(() => ({
-    "30-days": normalizeBullpenScanFilters("30-days", searchParams),
-    "end-of-month": normalizeBullpenScanFilters("end-of-month", searchParams),
-  }));
+  >(() => {
+    const storedCustomKeywords = readStoredCustomExclusionKeywords();
+    return {
+      "30-days": {
+        ...normalizeBullpenScanFilters("30-days", searchParams),
+        ...storedCustomKeywords,
+      },
+      "end-of-month": {
+        ...normalizeBullpenScanFilters("end-of-month", searchParams),
+        ...storedCustomKeywords,
+      },
+    };
+  });
   const [snapshotsByMode, setSnapshotsByMode] = useState<
     Record<ScanMode, BullpenSnapshotHistory>
   >(createEmptySnapshotHistory);
@@ -1828,19 +1920,49 @@ function BullpenAiPageContent() {
   }, [activeMode, activeSnapshotSource, activeVisibleSnapshot, hasLoadedStorage]);
 
   function updateActiveFilters(patch: Partial<BullpenScanFilters>) {
-    setFiltersByMode((current) => ({
-      ...current,
-      [activeMode]: {
+    setFiltersByMode((current) => {
+      const nextActiveFilters = {
         ...current[activeMode],
         ...patch,
-      },
-    }));
+      };
+      return {
+        ...current,
+        [activeMode]: nextActiveFilters,
+      };
+    });
+  }
+
+  function saveCustomExclusionKeywords(
+    detailId: BullpenScanFilterDetailId,
+    keywords: string[],
+  ) {
+    const filterKey = getFilterCustomKeywordKey(detailId);
+    if (!filterKey) return;
+    setFiltersByMode((current) => {
+      const nextActiveFilters = {
+        ...current[activeMode],
+        [filterKey]: keywords,
+      };
+      const nextFiltersByMode = {
+        ...current,
+        [activeMode]: nextActiveFilters,
+      };
+      try {
+        writeStoredCustomExclusionKeywords(nextActiveFilters);
+      } catch {
+        // Keep the in-memory edits usable when localStorage is unavailable.
+      }
+      return nextFiltersByMode;
+    });
   }
 
   function resetActiveFilters() {
     setFiltersByMode((current) => ({
       ...current,
-      [activeMode]: createBullpenScanFilters(activeMode),
+      [activeMode]: {
+        ...createBullpenScanFilters(activeMode),
+        ...readStoredCustomExclusionKeywords(),
+      },
     }));
   }
 
@@ -3823,7 +3945,15 @@ function BullpenAiPageContent() {
 
       {openFilterDetailsId ? (
         <BullpenScanFilterDetailsDialog
+          key={openFilterDetailsId}
           detailId={openFilterDetailsId}
+          customKeywords={getCustomExclusionKeywordsForDetail(
+            activeFilters,
+            openFilterDetailsId,
+          )}
+          onSaveCustomKeywords={(keywords) =>
+            saveCustomExclusionKeywords(openFilterDetailsId, keywords)
+          }
           onClose={() => setOpenFilterDetailsId(null)}
         />
       ) : null}
