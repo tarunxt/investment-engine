@@ -32,6 +32,7 @@ import {
   MARKET_QUESTION_KEYWORDS,
   SOCIAL_POST_COUNT_KEYWORDS,
   SOCIAL_POST_COUNT_PATTERNS,
+  normalizeCustomExclusionKeywordVariants,
   SPORTS_KEYWORDS,
   SPORTS_PATTERNS,
   WEATHER_KEYWORDS,
@@ -720,6 +721,14 @@ function includesAnyKeyword(text: string, keywords: readonly string[]) {
   return keywords.some((keyword) => matchesKeyword(text, keyword));
 }
 
+function includesAnyCustomKeyword(text: string, keywords: readonly string[]) {
+  return keywords.some((keyword) =>
+    normalizeCustomExclusionKeywordVariants(keyword).some((variant) =>
+      matchesKeyword(text, variant),
+    ),
+  );
+}
+
 function normalizeSearchTextParts(parts: Array<string | null | undefined>) {
   const deduped: string[] = [];
   const seen = new Set<string>();
@@ -741,35 +750,33 @@ function getQuestionSearchText(question: FilterableBullpenQuestion) {
 function isSportsQuestion(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
-    includesAnyKeyword(searchText, [
-      ...SPORTS_KEYWORDS,
-      ...question._customExcludeSportsKeywords,
-    ]) ||
+    includesAnyKeyword(searchText, SPORTS_KEYWORDS) ||
+    includesAnyCustomKeyword(searchText, question._customExcludeSportsKeywords) ||
     SPORTS_PATTERNS.some((pattern) => pattern.test(searchText))
   );
 }
 
 function isWeatherQuestion(question: FilterableBullpenQuestion) {
-  return includesAnyKeyword(getQuestionSearchText(question), [
-    ...WEATHER_KEYWORDS,
-    ...question._customExcludeWeatherKeywords,
-  ]);
+  const searchText = getQuestionSearchText(question);
+  return (
+    includesAnyKeyword(searchText, WEATHER_KEYWORDS) ||
+    includesAnyCustomKeyword(searchText, question._customExcludeWeatherKeywords)
+  );
 }
 
 function isMarketPredictionQuestion(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
-    includesAnyKeyword(
+    includesAnyKeyword(question._categorySearchText, MARKET_CATEGORY_KEYWORDS) ||
+    includesAnyCustomKeyword(
       question._categorySearchText,
-      [
-        ...MARKET_CATEGORY_KEYWORDS,
-        ...question._customExcludeMarketPredictionsKeywords,
-      ],
+      question._customExcludeMarketPredictionsKeywords,
     ) ||
-    includesAnyKeyword(searchText, [
-      ...MARKET_QUESTION_KEYWORDS,
-      ...question._customExcludeMarketPredictionsKeywords,
-    ]) ||
+    includesAnyKeyword(searchText, MARKET_QUESTION_KEYWORDS) ||
+    includesAnyCustomKeyword(
+      searchText,
+      question._customExcludeMarketPredictionsKeywords,
+    ) ||
     MARKET_PREDICTION_PATTERNS.some((pattern) => pattern.test(searchText))
   );
 }
@@ -777,10 +784,11 @@ function isMarketPredictionQuestion(question: FilterableBullpenQuestion) {
 function isTweetCountQuestion(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return (
-    includesAnyKeyword(searchText, [
-      ...SOCIAL_POST_COUNT_KEYWORDS,
-      ...question._customExcludeTweetCountQuestionsKeywords,
-    ]) &&
+    (includesAnyKeyword(searchText, SOCIAL_POST_COUNT_KEYWORDS) ||
+      includesAnyCustomKeyword(
+        searchText,
+        question._customExcludeTweetCountQuestionsKeywords,
+      )) &&
     SOCIAL_POST_COUNT_PATTERNS.some((pattern) => pattern.test(searchText))
   );
 }

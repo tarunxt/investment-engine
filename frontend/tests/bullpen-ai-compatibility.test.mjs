@@ -413,6 +413,24 @@ test("Bullpen x AI category trail displays and filters nested esports paths", ()
   assert.match(routeSource, /Dota 2/);
 });
 
+test("Bullpen x AI custom exclusion keywords normalize leading plus prop phrases", async () => {
+  const { normalizeCustomExclusionKeywordVariants } =
+    await loadBullpenScanExclusionsModule();
+
+  assert.deepEqual(normalizeCustomExclusionKeywordVariants("+ shots"), [
+    "+ shots",
+    "shots",
+  ]);
+  assert.deepEqual(normalizeCustomExclusionKeywordVariants("+ assists"), [
+    "+ assists",
+    "assists",
+  ]);
+  assert.deepEqual(normalizeCustomExclusionKeywordVariants("1+ goals"), [
+    "1+ goals",
+    "goals",
+  ]);
+});
+
 test("Bullpen x AI sports filter catches halftime, exact-score, and esports map phrasing", async () => {
   const { SPORTS_PATTERNS } = await loadBullpenScanExclusionsModule();
   const routeSource = readFileSync(
