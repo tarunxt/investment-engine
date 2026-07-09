@@ -453,6 +453,38 @@ test("Bullpen x AI sports filter catches halftime, exact-score, and esports map 
   }
 });
 
+test("Bullpen x AI sports filter catches player-prop threshold phrasing", async () => {
+  const { SPORTS_PATTERNS } = await loadBullpenScanExclusionsModule();
+
+  for (const prompt of [
+    "Achraf Hakimi: 1+ assists",
+    "Achraf Hakimi: 1+ goals + assists",
+    "Achraf Hakimi: 2+ shots on target",
+    "Achraf Hakimi: 5+ shots",
+  ]) {
+    assert.equal(
+      SPORTS_PATTERNS.some((pattern) => pattern.test(prompt)),
+      true,
+      prompt,
+    );
+  }
+});
+
+test("Bullpen x AI sports filter catches win-on-date phrasing without misclassifying elections", async () => {
+  const { isLikelySportsWinOnText } = await loadBullpenScanExclusionsModule();
+
+  assert.equal(
+    isLikelySportsWinOnText("Will Norway win on 2026-06-26?"),
+    true,
+  );
+  assert.equal(
+    isLikelySportsWinOnText(
+      "Will Donald Trump win the presidential election on 2028-11-07?",
+    ),
+    false,
+  );
+});
+
 test("Bullpen x AI market prediction filter excludes largest-company-by-market-cap questions", () => {
   const exclusionsSource = readFileSync(
     new URL("../lib/bullpenScanExclusions.ts", import.meta.url),

@@ -2297,6 +2297,52 @@ def test_candidate_filter_reasons_block_uncategorized_esports_prop_markets():
     assert "Excluded sports market." in reasons
 
 
+def test_candidate_filter_reasons_block_uncategorized_player_prop_threshold_markets():
+    for question, slug in (
+        ("Achraf Hakimi: 1+ assists", "achraf-hakimi-1-assists"),
+        ("Achraf Hakimi: 1+ goals + assists", "achraf-hakimi-1-goals-assists"),
+        (
+            "Achraf Hakimi: 2+ shots on target",
+            "achraf-hakimi-2-shots-on-target",
+        ),
+        ("Achraf Hakimi: 5+ shots", "achraf-hakimi-5-shots"),
+    ):
+        market = _market(
+            question=question,
+            theme="Uncategorized",
+            slug=slug,
+        )
+
+        reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+        assert "Excluded sports market." in reasons, question
+
+
+def test_candidate_filter_reasons_block_uncategorized_win_on_date_markets():
+    market = _market(
+        question="Will Norway win on 2026-06-26?",
+        description=None,
+        theme="Uncategorized",
+        slug="norway-win-2026-06-26",
+    )
+
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+    assert "Excluded sports market." in reasons
+
+
+def test_candidate_filter_reasons_do_not_treat_political_win_on_date_markets_as_sports():
+    market = _market(
+        question="Will Donald Trump win the presidential election on 2028-11-07?",
+        theme="Politics",
+        slug="donald-trump-win-presidential-election-2028-11-07",
+    )
+
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+    assert "Excluded sports market." not in reasons
+
+
 def test_console_market_filter_reasons_block_uncategorized_esports_objective_markets():
     market = _market(
         question="Game 1: Both Teams Beat Roshan?",

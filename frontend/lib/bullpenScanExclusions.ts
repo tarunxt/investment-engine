@@ -168,12 +168,58 @@ export const SOCIAL_POST_COUNT_PATTERNS = [
 
 export const SPORTS_PATTERNS = [
   /\b(?:both teams to score|exact score|leading at halftime|draw at halftime|penalty shootout|extra time)\b/i,
+  /(?:^|\W)(?:\d+\s*)?\+\s+(?:shots?\s+on\s+target|shots?|assists?|goals?|saves?|tackles?|cards?)(?=$|\W)/i,
   /\b(?:first|second) half\b/i,
   /\bhalftime\b/i,
   /\bmap\s+\d+\b/i,
   /\bbest of\s+\d+\b/i,
   /\b[A-Za-z][A-Za-z .'\-]{2,40}\s+vs\.?\s+[A-Za-z][A-Za-z .'\-]{2,40}\b/i,
 ] as const;
+
+export const SPORTS_WIN_ON_DATE_PATTERN =
+  /\b(?:will\s+)?[A-Za-z][A-Za-z .'\-]{2,40}\s+win(?:s)?\s+on\s+(?:\d{4}-\d{2}-\d{2}|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:,\s*\d{4})?)\b/i;
+
+export const SPORTS_WIN_ON_GUARD_KEYWORDS = [
+  "award",
+  "awards",
+  "candidate",
+  "coalition",
+  "congress",
+  "election",
+  "emmy",
+  "governor",
+  "grammy",
+  "mayor",
+  "minister",
+  "oscar",
+  "parliament",
+  "party",
+  "president",
+  "presidential",
+  "primary",
+  "referendum",
+  "seat",
+  "senate",
+  "vote",
+  "voter",
+] as const;
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchesWholeWordKeyword(text: string, keyword: string) {
+  return new RegExp(`(^|\\W)${escapeRegExp(keyword)}(?=$|\\W)`, "i").test(text);
+}
+
+export function isLikelySportsWinOnText(text: string) {
+  return (
+    SPORTS_WIN_ON_DATE_PATTERN.test(text) &&
+    !SPORTS_WIN_ON_GUARD_KEYWORDS.some((keyword) =>
+      matchesWholeWordKeyword(text, keyword),
+    )
+  );
+}
 
 export const MARKET_PREDICTION_PATTERNS = [
   /\blargest company in the world by market cap\b/i,
@@ -202,6 +248,8 @@ export const BULLPEN_SCAN_FILTER_DETAILS: Record<
     keywordGroups: SPORTS_KEYWORD_GROUPS.map((group) => group.join(", ")),
     patternRules: [
       "both teams to score, exact score, leading/draw at halftime, penalty shootout, extra time",
+      "player-prop thresholds such as 1+ assists, 2+ shots, 1+ goals, and shots on target",
+      "team/country win on <date> phrasing when no election-style keywords are present",
       "Team A vs Team B / Team A vs. Team B question titles",
       "first half / second half",
       "map <number>",
@@ -209,6 +257,8 @@ export const BULLPEN_SCAN_FILTER_DETAILS: Record<
     ],
     excludedEventExamples: [
       "League, team, match, tournament, and winner markets.",
+      "Player-prop thresholds such as 1+ assists, 2+ shots, 1+ goals, and shots on target markets.",
+      'Winner phrasing such as "Will Norway win on 2026-06-26?" when the market text does not look like politics or awards.',
       "Halftime, both-teams-to-score, and exact-score markets such as Argentina vs. Egypt match props.",
       "Tennis questions such as Wimbledon, ATP, WTA, and Grand Slam events.",
       "Esports and global competition markets such as Dota, CS2, map markets, World Cup, or Champions League.",

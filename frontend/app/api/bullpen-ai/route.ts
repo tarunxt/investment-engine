@@ -32,6 +32,7 @@ import {
   MARKET_QUESTION_KEYWORDS,
   SOCIAL_POST_COUNT_KEYWORDS,
   SOCIAL_POST_COUNT_PATTERNS,
+  isLikelySportsWinOnText,
   normalizeCustomExclusionKeywordVariants,
   SPORTS_KEYWORDS,
   SPORTS_PATTERNS,
@@ -752,7 +753,8 @@ function isSportsQuestion(question: FilterableBullpenQuestion) {
   return (
     includesAnyKeyword(searchText, SPORTS_KEYWORDS) ||
     includesAnyCustomKeyword(searchText, question._customExcludeSportsKeywords) ||
-    SPORTS_PATTERNS.some((pattern) => pattern.test(searchText))
+    SPORTS_PATTERNS.some((pattern) => pattern.test(searchText)) ||
+    isLikelySportsWinOnText(searchText)
   );
 }
 

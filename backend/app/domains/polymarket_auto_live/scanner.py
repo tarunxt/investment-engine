@@ -72,6 +72,10 @@ SPORTS_PATTERNS = (
         r"\b(?:both teams to score|exact score|leading at halftime|draw at halftime|penalty shootout|extra time)\b",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"(?:^|\W)(?:\d+\s*)?\+\s+(?:shots?\s+on\s+target|shots?|assists?|goals?|saves?|tackles?|cards?)(?=$|\W)",
+        re.IGNORECASE,
+    ),
     re.compile(r"\b(?:first|second) half\b", re.IGNORECASE),
     re.compile(r"\bhalftime\b", re.IGNORECASE),
     re.compile(r"\bmap\s+\d+\b", re.IGNORECASE),
@@ -81,6 +85,34 @@ SPORTS_PATTERNS = (
         r"\b[A-Za-z][A-Za-z .\'-]{2,40}\s+vs\.?\s+[A-Za-z][A-Za-z .\'-]{2,40}\b",
         re.IGNORECASE,
     ),
+)
+SPORTS_WIN_ON_DATE_PATTERN = re.compile(
+    r"\b(?:will\s+)?[A-Za-z][A-Za-z .\'-]{2,40}\s+win(?:s)?\s+on\s+(?:\d{4}-\d{2}-\d{2}|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:,\s*\d{4})?)\b",
+    re.IGNORECASE,
+)
+SPORTS_WIN_ON_GUARD_KEYWORDS = (
+    "award",
+    "awards",
+    "candidate",
+    "coalition",
+    "congress",
+    "election",
+    "emmy",
+    "governor",
+    "grammy",
+    "mayor",
+    "minister",
+    "oscar",
+    "parliament",
+    "party",
+    "president",
+    "presidential",
+    "primary",
+    "referendum",
+    "seat",
+    "senate",
+    "vote",
+    "voter",
 )
 FILTER_TEXT_KEYS = (
     "category",
@@ -310,8 +342,13 @@ def is_insult_market_text(text: str) -> bool:
 
 
 def is_sports_market_text(text: str) -> bool:
-    return _includes_any(text, SPORTS_KEYWORDS) or any(
-        pattern.search(text) for pattern in SPORTS_PATTERNS
+    return (
+        _includes_any(text, SPORTS_KEYWORDS)
+        or any(pattern.search(text) for pattern in SPORTS_PATTERNS)
+        or (
+            SPORTS_WIN_ON_DATE_PATTERN.search(text) is not None
+            and not _includes_any(text, SPORTS_WIN_ON_GUARD_KEYWORDS)
+        )
     )
 
 
