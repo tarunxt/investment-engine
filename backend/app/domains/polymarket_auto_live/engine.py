@@ -3421,6 +3421,7 @@ class BullpenAutoLiveEngine:
             current_candidate_index: int | None = None,
             current_market: ScannedMarket | None = None,
             last_completed_market: ScannedMarket | None = None,
+            reviewed_contexts: list[dict[str, object]] | None = None,
             qualified_candidate_count: int | None = None,
             reused_existing_llm_outputs: bool = False,
             completed_at: str | None | object = _DEFAULT_COMPLETED_AT,
@@ -3456,7 +3457,32 @@ class BullpenAutoLiveEngine:
                 stage_outputs["last_completed_candidate_market_url"] = (
                     last_completed_market.market_url
                 )
-            if qualified_candidate_count is not None:
+            if reviewed_contexts is not None:
+                reviewed_candidates = [
+                    _serialize_llm_review_context(context) for context in reviewed_contexts
+                ]
+                qualifying_reviewed_candidates = [
+                    candidate
+                    for candidate in reviewed_candidates
+                    if candidate.get("source_kind") == "candidate"
+                    and bool(candidate.get("qualified"))
+                ]
+                stage_outputs["llm_reviewed_candidates"] = reviewed_candidates
+                stage_outputs["llm_reviewed_candidate_count_so_far"] = len(
+                    reviewed_candidates
+                )
+                stage_outputs["qualified_candidate_count_so_far"] = len(
+                    qualifying_reviewed_candidates
+                )
+                stage_outputs["qualified_candidate_count"] = len(
+                    qualifying_reviewed_candidates
+                )
+                stage_outputs["qualified_candidate_market_ids"] = [
+                    candidate["market_id"]
+                    for candidate in qualifying_reviewed_candidates
+                    if candidate.get("market_id")
+                ]
+            elif qualified_candidate_count is not None:
                 stage_outputs["qualified_candidate_count_so_far"] = qualified_candidate_count
             set_run_stage_result(
                 run,
@@ -3635,9 +3661,7 @@ class BullpenAutoLiveEngine:
                     completed_items=index - 1,
                     current_candidate_index=index,
                     current_market=market,
-                    qualified_candidate_count=len(
-                        [context for context in candidate_contexts if bool(context["qualified"])]
-                    ),
+                    reviewed_contexts=[*active_position_contexts, *candidate_contexts],
                     completed_at=None,
                 )
                 if llm_row["kind"] == "active_position":
@@ -3752,13 +3776,7 @@ class BullpenAutoLiveEngine:
                         ),
                         completed_items=index,
                         last_completed_market=market,
-                        qualified_candidate_count=len(
-                            [
-                                context
-                                for context in candidate_contexts
-                                if bool(context["qualified"])
-                            ]
-                        ),
+                        reviewed_contexts=[*active_position_contexts, *candidate_contexts],
                         completed_at=None,
                     )
                     continue
@@ -3903,9 +3921,7 @@ class BullpenAutoLiveEngine:
                     ),
                     completed_items=index,
                     last_completed_market=market,
-                    qualified_candidate_count=len(
-                        [context for context in candidate_contexts if bool(context["qualified"])]
-                    ),
+                    reviewed_contexts=[*active_position_contexts, *candidate_contexts],
                     completed_at=None,
                 )
 
