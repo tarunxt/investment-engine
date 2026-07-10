@@ -3282,17 +3282,45 @@ function stockSymbolMatches(value: string | null | undefined, stock: StockConsen
   return normalized !== "UNKNOWN" && normalized === normalizeStockSymbol(stock.symbol);
 }
 
+function addNormalizedStockAlias(aliases: Set<string>, value?: string | null) {
+  const rawValue = value?.trim();
+  if (!rawValue) return;
+
+  const candidates = [rawValue];
+  const parentheticalMatches = rawValue.matchAll(/\(([A-Z][A-Z0-9._-]{0,9})\)/gi);
+  for (const match of parentheticalMatches) {
+    candidates.push(match[1]);
+  }
+
+  const delimitedTickerMatch = rawValue.match(/[-–—:]\s*([A-Z][A-Z0-9._-]{0,9})\s*$/i);
+  if (delimitedTickerMatch) {
+    candidates.push(delimitedTickerMatch[1]);
+  }
+
+  candidates
+    .map((candidate) => normalizeStockSymbol(candidate))
+    .filter((candidate) => candidate !== "UNKNOWN")
+    .forEach((candidate) => aliases.add(candidate));
+}
+
 function getStockMatchAliases(stock: StockConsensus) {
-  const aliases = [
+  const aliases = new Set<string>();
+  [
     stock.key,
     stock.symbol,
+    stock.exchange,
+    stock.representative["Exchange Symbol"],
     stock.representative["Stock Symbol"],
     stock.representative["Stock Name"],
-  ]
-    .map((value) => normalizeStockSymbol(value || ""))
-    .filter((value) => value !== "UNKNOWN");
+  ].forEach((value) => addNormalizedStockAlias(aliases, value));
 
-  return new Set(aliases);
+  stock.rows.forEach((row) => {
+    addNormalizedStockAlias(aliases, row.cells["Exchange Symbol"]);
+    addNormalizedStockAlias(aliases, row.cells["Stock Symbol"]);
+    addNormalizedStockAlias(aliases, row.cells["Stock Name"]);
+  });
+
+  return aliases;
 }
 
 function stockConsensusMatches(left: StockConsensus, right: StockConsensus) {
