@@ -2326,15 +2326,10 @@ function RunDetailDialog({
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               Run Details
             </p>
-            <h2 className="text-xl font-semibold text-slate-950">
+            <h2 className="max-w-5xl text-base font-semibold leading-6 text-slate-950 line-clamp-3">
               {run.summary || "Run summary unavailable."}
             </h2>
-            <p className="text-xs text-slate-500">
-              Run {run.id} · started {formatIstDateTime(run.started_at)}
-              {run.completed_at
-                ? ` · completed ${formatIstDateTime(run.completed_at)}`
-                : ""}
-            </p>
+            <p className="text-xs text-slate-500">Run {run.id}</p>
           </div>
           <button
             type="button"
@@ -2365,6 +2360,7 @@ function RunDetailDialog({
               {run.error_message}
             </p>
           ) : null}
+          <SubmittedExecutionEventsTable decisions={decisions} />
           <RunDetailWorkerStages
             run={run}
             decisions={decisions}
@@ -2403,36 +2399,162 @@ function RunDetailDialog({
               </section>
             ))}
           </div>
-          <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-950">
-              Event decisions
-            </h3>
-            {decisions.length ? (
-              <div className="mt-3 space-y-2">
-                {decisions.map((decision) => (
-                  <div
-                    key={decision.id}
-                    className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-700"
-                  >
-                    <div className="font-semibold text-slate-950">
-                      {decision.market_title}
-                    </div>
-                    <div className="mt-1">
-                      Outcome: {decision.side || "—"} · action:{" "}
-                      {decision.decision || "—"}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-slate-600">
-                No persisted event decisions were returned for this run.
-              </p>
-            )}
-          </section>
+
         </div>
       </div>
     </div>
+  );
+}
+
+function SubmittedExecutionEventsTable({
+  decisions,
+}: {
+  decisions: BullpenAutoLiveDecision[];
+}) {
+  const submittedDecisions = decisions.filter(
+    (decision) => decision.order_plan?.status === "submitted",
+  );
+  const submittedSellCount = submittedDecisions.filter(
+    (decision) =>
+      decision.order_plan?.action === "sell" ||
+      decision.order_plan?.action === "redeem",
+  ).length;
+  const submittedBuyCount = submittedDecisions.filter(
+    (decision) => decision.order_plan?.action === "buy",
+  ).length;
+
+  return (
+    <section className="mt-5 overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-sky-50 to-violet-50">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/80 px-4 py-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+            Executed Stage 3 Events
+          </p>
+          <h3 className="mt-1 text-sm font-semibold text-slate-950">
+            Step 1 exits + Step 2 buys submitted to Bullpen
+          </h3>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <span className="rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-emerald-800">
+            {submittedDecisions.length.toLocaleString("en-IN")} total
+          </span>
+          <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-800">
+            {submittedSellCount.toLocaleString("en-IN")} exits
+          </span>
+          <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-800">
+            {submittedBuyCount.toLocaleString("en-IN")} buys
+          </span>
+        </div>
+      </div>
+      {submittedDecisions.length ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-white/80 text-left text-xs">
+            <thead className="bg-white/60 font-semibold uppercase tracking-[0.12em] text-slate-600">
+              <tr>
+                <th className="px-4 py-3">Event</th>
+                <th className="px-4 py-3">Step</th>
+                <th className="px-4 py-3">Side</th>
+                <th className="px-4 py-3">Size</th>
+                <th className="px-4 py-3">Limit</th>
+                <th className="px-4 py-3">Executed</th>
+                <th className="px-4 py-3">Edge / Score</th>
+                <th className="px-4 py-3">Detail</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/80 bg-white/50">
+              {submittedDecisions.map((decision) => {
+                const action = decision.order_plan?.action;
+                const isExit = action === "sell" || action === "redeem";
+                const stepLabel = isExit ? "Step 1 exit" : "Step 2 buy";
+                const stepClass = isExit
+                  ? "border-rose-200 bg-rose-50 text-rose-800"
+                  : "border-blue-200 bg-blue-50 text-blue-800";
+                return (
+                  <tr key={decision.id} className="align-top">
+                    <td className="max-w-sm px-4 py-3">
+                      <div className="font-semibold text-slate-950 line-clamp-2">
+                        {decision.market_url ? (
+                          <a
+                            className="hover:text-sky-700 hover:underline"
+                            href={decision.market_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {decision.market_title}
+                          </a>
+                        ) : (
+                          decision.market_title
+                        )}
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        {decision.theme} · closes{" "}
+                        {formatIstDateTime(decision.close_time)}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full border px-2.5 py-1 font-semibold ${stepClass}`}
+                      >
+                        {stepLabel}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-semibold uppercase text-slate-800">
+                      {decision.order_plan?.side ?? decision.side}
+                    </td>
+                    <td className="px-4 py-3 font-semibold tabular-nums text-slate-950">
+                      {formatMoney(decision.order_plan?.order_size_usd ?? null)}
+                      <div className="mt-1 text-[11px] font-normal text-slate-500">
+                        {decision.order_plan?.shares.toLocaleString("en-IN", {
+                          maximumFractionDigits: 4,
+                        }) ?? "—"}{" "}
+                        shares
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {formatPriceCents(
+                        decision.order_plan?.limit_price_cents ?? null,
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {formatIstDateTime(
+                        decision.order_plan?.executed_at ??
+                          decision.order_plan?.created_at,
+                      )}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {decision.edge_pp.toLocaleString("en-IN", {
+                        maximumFractionDigits: 2,
+                      })}{" "}
+                      pp
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        Score{" "}
+                        {decision.score.toLocaleString("en-IN", {
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    </td>
+                    <td className="min-w-64 px-4 py-3 text-slate-700">
+                      <ErrorCodeWithDetails
+                        detail={
+                          decision.order_plan?.detail ??
+                          "Submitted without extra execution detail."
+                        }
+                        detailClassName="text-slate-700"
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-4 py-5 text-sm text-slate-600">
+          No Stage 3 Step 1 or Step 2 submitted events were returned for this
+          run.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -4881,23 +5003,14 @@ export function BullpenAutoRunScheduleCard({
                                 <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
                                   {run.status}
                                 </span>
-                                <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-bold text-blue-900 shadow-sm">
-                                  started {formatIstDateTime(run.started_at)}
-                                  {run.completed_at
-                                    ? ` · completed ${formatIstDateTime(run.completed_at)}`
-                                    : ""}
+                                <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-900 shadow-sm">
+                                  {formatIstDateTime(run.started_at)}
                                 </span>
                               </div>
-                              <p className="mt-2 text-sm font-semibold text-slate-950">
+                              <p className="mt-2 text-sm font-semibold leading-5 text-slate-950 line-clamp-2">
                                 {run.summary || "Run summary unavailable."}
                               </p>
-                              <p className="mt-1 text-xs text-slate-600">
-                                Run {run.id} • started{" "}
-                                {formatIstDateTime(run.started_at)}
-                                {run.completed_at
-                                  ? ` • completed ${formatIstDateTime(run.completed_at)}`
-                                  : ""}
-                              </p>
+                              <p className="mt-1 text-xs text-slate-600">Run {run.id}</p>
                             </div>
                             <div className="grid grid-cols-3 gap-2 text-center text-xs">
                               <button
