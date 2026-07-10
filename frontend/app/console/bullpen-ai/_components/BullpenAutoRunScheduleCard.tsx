@@ -4827,6 +4827,12 @@ export function BullpenAutoRunScheduleCard({
                                 <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
                                   {run.status}
                                 </span>
+                                <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-bold text-blue-900 shadow-sm">
+                                  started {formatIstDateTime(run.started_at)}
+                                  {run.completed_at
+                                    ? ` · completed ${formatIstDateTime(run.completed_at)}`
+                                    : ""}
+                                </span>
                               </div>
                               <p className="mt-2 text-sm font-semibold text-slate-950">
                                 {run.summary || "Run summary unavailable."}

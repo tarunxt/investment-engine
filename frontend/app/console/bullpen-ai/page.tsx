@@ -5,12 +5,16 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
+  Copy,
+  Edit3,
   ExternalLink,
   FileText,
   Info,
   Loader2,
   Menu,
+  Plus,
   RefreshCw,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -167,6 +171,42 @@ const DEFAULT_SORT_STATE: BullpenTableSortState = {
 };
 const INVESTMENT_PROGRESS_POLL_MS = 1_500;
 const EMPTY_SELECTED_IDS = new Set<string>();
+
+const AWS_EC2_TERMINAL_URL =
+  "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
+const DEFAULT_SYSTEMD_BULLPEN_LOGIN_COMMAND =
+  "sudo -u investor env HOME=/var/lib/credx/bullpen bullpen login";
+const DEFAULT_SYSTEMD_BULLPEN_VERIFY_COMMAND =
+  "sudo -u investor env HOME=/var/lib/credx/bullpen bullpen polymarket positions --output json";
+const DEFAULT_EC2_COMMANDS = [
+  DEFAULT_SYSTEMD_BULLPEN_LOGIN_COMMAND,
+  DEFAULT_SYSTEMD_BULLPEN_VERIFY_COMMAND,
+  "sudo systemctl status investor-celery-worker --no-pager",
+];
+const EC2_COMMANDS_STORAGE_KEY = "bullpenAi.ec2Commands";
+
+function normalizeEc2Commands(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((command): command is string => typeof command === "string")
+    .map((command) => command.trim())
+    .filter(Boolean);
+}
+
+function getInitialEc2Commands() {
+  if (typeof window === "undefined") return DEFAULT_EC2_COMMANDS;
+
+  try {
+    const savedCommands = window.localStorage.getItem(EC2_COMMANDS_STORAGE_KEY);
+    if (!savedCommands) return DEFAULT_EC2_COMMANDS;
+
+    const parsedCommands = JSON.parse(savedCommands);
+    return normalizeEc2Commands(parsedCommands) ?? DEFAULT_EC2_COMMANDS;
+  } catch (error) {
+    console.warn("Unable to load saved EC2 commands", error);
+    return DEFAULT_EC2_COMMANDS;
+  }
+}
 
 type PolymarketMarketRefresh = {
   id: string;
@@ -3193,6 +3233,32 @@ function BullpenAiPageContent() {
         ? "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions."
         : "No auto scan results yet. Run Scans and Invest Now above to populate this tab.";
   const [isBullpenIntroDialogOpen, setIsBullpenIntroDialogOpen] = useState(false);
+  const [ec2CommandMenuOpen, setEc2CommandMenuOpen] = useState(false);
+  const [ec2Commands, setEc2Commands] = useState(getInitialEc2Commands);
+  const [newEc2Command, setNewEc2Command] = useState("");
+  const [editingEc2CommandIndex, setEditingEc2CommandIndex] = useState<
+    number | null
+  >(null);
+  const [editingEc2Command, setEditingEc2Command] = useState("");
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        EC2_COMMANDS_STORAGE_KEY,
+        JSON.stringify(ec2Commands),
+      );
+    } catch (error) {
+      console.warn("Unable to save EC2 commands", error);
+    }
+  }, [ec2Commands]);
+
+  function handleDeleteEc2Command(index: number) {
+    setEc2Commands((commands) => commands.filter((_, itemIndex) => itemIndex !== index));
+    if (editingEc2CommandIndex === index) {
+      setEditingEc2CommandIndex(null);
+      setEditingEc2Command("");
+    }
+  }
 
   const investmentEmptyMessage = !activeVisibleSnapshot
     ? isManualScanView
@@ -3230,11 +3296,156 @@ function BullpenAiPageContent() {
             </button>
           </div>
         </div>
-        <Button asChild className="mt-1">
-          <Link href={URLs.routes.console.bullpenAiAnalyseEvents()}>
-            Analyse Events
-          </Link>
-        </Button>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <div className="relative inline-flex rounded-full border border-amber-300 bg-amber-50 text-amber-900 shadow-sm transition hover:border-amber-400 hover:bg-amber-100">
+            <a
+              href={AWS_EC2_TERMINAL_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center rounded-l-full px-5 py-2 text-sm font-semibold"
+            >
+              Open AWS EC2
+              <ExternalLink className="ml-2 size-3.5" aria-hidden="true" />
+            </a>
+            <button
+              type="button"
+              className="inline-flex items-center rounded-r-full border-l border-amber-300 px-3 py-2 transition hover:bg-amber-200/60"
+              aria-label="Show AWS EC2 commands"
+              aria-expanded={ec2CommandMenuOpen}
+              onClick={() => setEc2CommandMenuOpen((open) => !open)}
+            >
+              <Menu className="size-4" aria-hidden="true" />
+            </button>
+            {ec2CommandMenuOpen ? (
+              <div className="absolute right-0 top-full z-30 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-4 text-left text-slate-950 shadow-xl">
+                <div className="mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    EC2 commands
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Most-used commands to run after opening the EC2 shell.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  {ec2Commands.map((command, index) => {
+                    const isEditing = editingEc2CommandIndex === index;
+
+                    return (
+                      <div
+                        key={`${command}-${index}`}
+                        className="rounded-xl border border-slate-200 bg-slate-50 p-2"
+                      >
+                        {isEditing ? (
+                          <form
+                            className="flex gap-2"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              const updatedCommand = editingEc2Command.trim();
+                              if (!updatedCommand) return;
+                              setEc2Commands((commands) =>
+                                commands.map((item, itemIndex) =>
+                                  itemIndex === index ? updatedCommand : item,
+                                ),
+                              );
+                              setEditingEc2CommandIndex(null);
+                              setEditingEc2Command("");
+                            }}
+                          >
+                            <input
+                              type="text"
+                              value={editingEc2Command}
+                              onChange={(event) =>
+                                setEditingEc2Command(event.target.value)
+                              }
+                              aria-label="Edit EC2 command"
+                              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-900 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                            />
+                            <button
+                              type="submit"
+                              className="rounded-lg bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                            >
+                              Save
+                            </button>
+                          </form>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <code className="min-w-0 flex-1 break-words text-xs font-semibold text-slate-800">
+                              {command}
+                            </code>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <button
+                                type="button"
+                                className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-950"
+                                aria-label={`Copy command: ${command}`}
+                                title="Copy command"
+                                onClick={() =>
+                                  void navigator.clipboard.writeText(command)
+                                }
+                              >
+                                <Copy className="size-3.5" aria-hidden="true" />
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-950"
+                                aria-label={`Edit command: ${command}`}
+                                title="Edit command"
+                                onClick={() => {
+                                  setEditingEc2CommandIndex(index);
+                                  setEditingEc2Command(command);
+                                }}
+                              >
+                                <Edit3 className="size-3.5" aria-hidden="true" />
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-lg p-1.5 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600"
+                                aria-label={`Delete command: ${command}`}
+                                title="Delete command"
+                                onClick={() => handleDeleteEc2Command(index)}
+                              >
+                                <Trash2 className="size-3.5" aria-hidden="true" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <form
+                  className="mt-3 flex gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const command = newEc2Command.trim();
+                    if (!command) return;
+                    setEc2Commands((commands) => [...commands, command]);
+                    setNewEc2Command("");
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={newEc2Command}
+                    onChange={(event) => setNewEc2Command(event.target.value)}
+                    placeholder="Add another command"
+                    className="min-w-0 flex-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-slate-900 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                  />
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                  >
+                    <Plus className="size-3.5" aria-hidden="true" />
+                    Add
+                  </button>
+                </form>
+              </div>
+            ) : null}
+          </div>
+          <Button asChild>
+            <Link href={URLs.routes.console.bullpenAiAnalyseEvents()}>
+              Analyse Events
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {isBullpenIntroDialogOpen ? (
