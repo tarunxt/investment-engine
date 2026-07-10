@@ -497,6 +497,16 @@ function getStageTileLabel(stage: WorkflowStageKey) {
   return labels[stage];
 }
 
+function hasExceededCurrentQuotaError(error: string | null | undefined) {
+  return /exceeded\s+your\s+current\s+quota/i.test(error ?? "");
+}
+
+function shouldShowQuotaLlmSwitchWarning(
+  stages: Record<WorkflowStageKey, StageInfo>,
+) {
+  return hasExceededCurrentQuotaError(stages.threats.error);
+}
+
 function getLlmSelectorScanLabel(
   stage: WorkflowStageKey,
   portfolio: WorkflowPortfolio | null,
@@ -7760,6 +7770,9 @@ ${zerodhaExecutionMode === "direct_market"
       specificMode,
       selectedStages,
     );
+    const showQuotaLlmSwitchWarning = shouldShowQuotaLlmSwitchWarning(
+      states[section.portfolio],
+    );
 
     return (
       <div
@@ -7861,6 +7874,45 @@ ${zerodhaExecutionMode === "direct_market"
             </button>
           </div>
         </div>
+
+        {showQuotaLlmSwitchWarning ? (
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-950 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 gap-3">
+                <AlertCircle className="mt-0.5 size-5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="font-extrabold">Threat Scan quota exceeded.</p>
+                  <p className="mt-1">
+                    Switch LLMs for both the Threats Scan and Technical Scan
+                    stages before rerunning auto-rebalance.
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-full border-amber-300 bg-white px-4 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
+                  onClick={() =>
+                    void showStageLlmInfo(section.portfolio, "threats")
+                  }
+                >
+                  Switch Threats LLMs
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-full border-amber-300 bg-white px-4 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
+                  onClick={() =>
+                    void showStageLlmInfo(section.portfolio, "technical")
+                  }
+                >
+                  Switch Technical LLMs
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {STAGE_ORDER.map((stage) => (
