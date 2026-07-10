@@ -41,7 +41,11 @@ test("Trade analysis list and detail pages stay wired to their client screens", 
   assert.match(detailPageSource, /TradeAnalysisDetailClient/);
   assert.match(listClientSource, /Bullpen Trade Analysis/);
   assert.match(listClientSource, /Learning Insights/);
+  assert.match(listClientSource, /SQUARED_OFF/);
+  assert.match(listClientSource, /P&amp;L outcome:/);
+  assert.match(listClientSource, /Exit submitted:/);
   assert.match(detailClientSource, /Lifecycle Summary/);
+  assert.match(detailClientSource, /SQUARED_OFF/);
   assert.match(detailClientSource, /Actionable Learning/);
   assert.match(detailClientSource, /Raw Data/);
 });

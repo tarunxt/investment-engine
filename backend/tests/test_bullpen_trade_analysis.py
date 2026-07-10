@@ -1,8 +1,11 @@
 import httpx
 import pytest
+from datetime import UTC, datetime
 from fastapi import FastAPI
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 from types import SimpleNamespace
 
 from app.domains.auth.dependencies import get_current_user
@@ -28,6 +31,7 @@ from app.domains.bullpen_trade_analysis.service import (
     capture_auto_live_exit_pre_submit_sync,
     capture_auto_live_exit_result_sync,
 )
+from app.domains.polymarket.schemas import PolymarketBullpenTradeHistoryItem
 from app.infrastructure.database.base import Base
 import app.infrastructure.database.all_models  # noqa: F401
 
@@ -66,6 +70,39 @@ def _build_session_factory():
             )
         )
         session.commit()
+    return SessionLocal
+
+
+async def _build_async_session_factory():
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        future=True,
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            lambda sync_conn: Base.metadata.create_all(
+                sync_conn,
+                tables=[
+                    User.__table__,
+                    BullpenTradeAnalysisRecord.__table__,
+                    BullpenTradeAnalysisSnapshotRecord.__table__,
+                    BullpenTradeAnalysisLlmRecord.__table__,
+                    BullpenTradeAnalysisEventLogRecord.__table__,
+                ],
+            )
+        )
+    SessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        session.add(
+            User(
+                id=7,
+                email="trade-analysis@example.com",
+                username="trade-analysis",
+                password_hash="hashed",
+            )
+        )
+        await session.commit()
     return SessionLocal
 
 
@@ -229,6 +266,116 @@ def test_generate_post_trade_analysis_penalizes_high_confidence_loss():
         "WEAK_EDGE",
         "LOW_LIQUIDITY",
     }
+
+
+@pytest.mark.anyio
+async def test_history_sync_backfills_manual_trade_and_marks_it_squared_off():
+    session_factory = await _build_async_session_factory()
+
+    async with session_factory() as session:
+        session.add(
+            BullpenTradeAnalysisRecord(
+                id="manual-trade-1",
+                user_id=7,
+                entry_reference="manual-entry-1",
+                source_variant="manual-dashboard",
+                bot_name="Bullpen x AI",
+                strategy_name="Bullpen x AI Manual",
+                strategy_version="bullpen_console_top10",
+                status="OPEN",
+                lifecycle_state="BUY_EXECUTED_ONLY",
+                final_tag="OPEN",
+                pnl_outcome_tag="OPEN",
+                position_key="market-1::NO",
+                bullpen_market_id="market-1",
+                outcome_name="NO",
+                title="US x Iran diplomatic meeting by July 17, 2026?",
+                event_question="US x Iran diplomatic meeting by July 17, 2026?",
+                buy_submitted_at=datetime(2026, 7, 9, 10, 0, tzinfo=UTC),
+                buy_requested_amount=2.0,
+                buy_requested_shares=2.5,
+                buy_requested_price=0.8,
+                buy_requested_odds=80.0,
+                buy_decision_summary="Manual buy queued.",
+            )
+        )
+        await session.commit()
+
+        service = BullpenTradeAnalysisService(session)
+        await service.sync_external_trade_history(
+            user_id=7,
+            trades=[
+                PolymarketBullpenTradeHistoryItem(
+                    id="wallet-buy-1",
+                    timestamp="2026-07-09T10:05:00+00:00",
+                    market_id="market-1",
+                    market_title="US x Iran diplomatic meeting by July 17, 2026?",
+                    outcome="NO",
+                    side="BUY",
+                    amount=2.0,
+                    shares=2.5,
+                    price=0.8,
+                    status="filled",
+                    raw={
+                        "id": "wallet-buy-1",
+                        "status": "filled",
+                        "amount": 2.0,
+                        "shares": 2.5,
+                        "price": 0.8,
+                    },
+                ),
+                PolymarketBullpenTradeHistoryItem(
+                    id="wallet-sell-1",
+                    timestamp="2026-07-09T15:05:00+00:00",
+                    market_id="market-1",
+                    market_title="US x Iran diplomatic meeting by July 17, 2026?",
+                    outcome="NO",
+                    side="SELL",
+                    amount=2.25,
+                    shares=2.5,
+                    price=0.9,
+                    status="filled",
+                    raw={
+                        "id": "wallet-sell-1",
+                        "status": "filled",
+                        "amount": 2.25,
+                        "shares": 2.5,
+                        "price": 0.9,
+                    },
+                ),
+            ],
+        )
+
+        records = (
+            (
+                await session.execute(
+                    select(BullpenTradeAnalysisRecord).where(
+                        BullpenTradeAnalysisRecord.user_id == 7
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(records) == 1
+        record = records[0]
+        assert record.entry_reference == "manual-entry-1"
+        assert record.buy_executed_at is not None
+        assert record.sell_executed_at is not None
+        assert record.status == "SOLD"
+        assert record.lifecycle_state == "BUY_AND_SELL_EXECUTED"
+        assert record.final_tag == "PROFIT"
+        assert record.pnl_outcome_tag == "PROFIT"
+        assert record.gross_pnl == pytest.approx(0.25)
+        assert record.net_pnl == pytest.approx(0.25)
+        assert record.pnl_percent == pytest.approx(12.5)
+
+        response = await service.list_trades(user_id=7)
+        assert response.summary.total_executed_trades == 1
+        assert response.summary.closed_positions == 1
+        assert response.items[0].is_squared_off is True
+        assert response.items[0].sell_status == "filled"
+        assert response.items[0].buy_status == "filled"
 
 
 @pytest.mark.anyio

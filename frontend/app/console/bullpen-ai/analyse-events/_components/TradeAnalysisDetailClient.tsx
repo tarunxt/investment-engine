@@ -254,6 +254,12 @@ export function TradeAnalysisDetailClient() {
             <div className="flex flex-wrap gap-2">
               <TradeAnalysisBadge value={trade.final_tag} />
               <TradeAnalysisBadge value={trade.status} />
+              {trade.pnl_outcome_tag !== trade.final_tag ? (
+                <TradeAnalysisBadge value={trade.pnl_outcome_tag} />
+              ) : null}
+              {trade.is_squared_off ? (
+                <TradeAnalysisBadge value="SQUARED_OFF" className="border-slate-200 bg-white text-slate-700" />
+              ) : null}
               <TradeAnalysisBadge value={trade.lifecycle_state} className="border-slate-200 bg-white text-slate-700" />
             </div>
           </div>
@@ -286,6 +292,7 @@ export function TradeAnalysisDetailClient() {
         <CardContent>
           <DetailGrid
             items={[
+              { label: "P&L Outcome", value: humanizeTag(trade.pnl_outcome_tag) },
               { label: "Buy Notional", value: formatCurrency(trade.buy_notional) },
               { label: "Exit Notional", value: formatCurrency(trade.exit_notional) },
               { label: "Gross P&L", value: formatCurrency(trade.gross_pnl) },

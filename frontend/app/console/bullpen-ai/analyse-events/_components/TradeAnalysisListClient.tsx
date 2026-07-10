@@ -21,6 +21,7 @@ import {
   formatDuration,
   formatPercent,
   formatNumber,
+  humanizeTag,
   JsonPanel,
   StatCard,
   TradeAnalysisBadge,
@@ -70,6 +71,42 @@ function listEntries(items: Array<Record<string, unknown>>, labelKey: string) {
       .join(" · ");
     return `${label}: ${details || "No aggregate detail yet."}`;
   });
+}
+
+function formatExecutionSummary({
+  amount,
+  shares,
+  price,
+  odds,
+}: {
+  amount?: number | null;
+  shares?: number | null;
+  price?: number | null;
+  odds?: number | null;
+}) {
+  const parts = [
+    amount !== null && amount !== undefined ? formatCurrency(amount) : null,
+    shares !== null && shares !== undefined ? `${formatNumber(shares, 4)} sh` : null,
+    price !== null && price !== undefined ? `@ ${formatNumber(price, 4)}` : null,
+    odds !== null && odds !== undefined ? formatPercent(odds, 2) : null,
+  ].filter(Boolean);
+  return parts.join(" · ") || "—";
+}
+
+function exitTimestamp(item: BullpenTradeAnalysisListItem) {
+  return (
+    item.sell_executed_at ||
+    item.redeemed_at ||
+    item.closed_at ||
+    item.sold_at
+  );
+}
+
+function pnlOutcomeLabel(item: BullpenTradeAnalysisListItem) {
+  if (item.pnl_outcome_tag && item.pnl_outcome_tag !== "OPEN") {
+    return humanizeTag(item.pnl_outcome_tag);
+  }
+  return item.is_squared_off ? "REALIZED" : "OPEN";
 }
 
 function LearningCard({
@@ -372,6 +409,12 @@ export function TradeAnalysisListClient() {
                       <div className="flex flex-wrap gap-2">
                         <TradeAnalysisBadge value={item.final_tag} />
                         <TradeAnalysisBadge value={item.status} />
+                        {item.pnl_outcome_tag !== item.final_tag ? (
+                          <TradeAnalysisBadge value={item.pnl_outcome_tag} />
+                        ) : null}
+                        {item.is_squared_off ? (
+                          <TradeAnalysisBadge value="SQUARED_OFF" className="border-slate-200 bg-white text-slate-700" />
+                        ) : null}
                         {item.buy_tags.slice(0, 4).map((tag) => (
                           <TradeAnalysisBadge key={tag} value={tag} className="border-slate-200 bg-white text-slate-700" />
                         ))}
@@ -385,30 +428,64 @@ export function TradeAnalysisListClient() {
                   <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <div className="space-y-1 text-sm text-slate-700">
                       <p className="font-semibold text-slate-950">Entry</p>
-                      <p>Buy time: {formatDateTime(item.bought_at)}</p>
-                      <p>Buy price: {formatNumber(item.buy_price, 4)}</p>
-                      <p>Buy odds: {formatPercent(item.buy_odds, 2)}</p>
-                      <p>Buy amount: {formatCurrency(item.buy_amount)}</p>
+                      <p>Outcome: {item.outcome_name || "—"}</p>
+                      <p>Buy submitted: {formatDateTime(item.buy_submitted_at || item.bought_at)}</p>
+                      <p>Buy executed: {formatDateTime(item.buy_executed_at || item.bought_at)}</p>
+                      <p>Requested: {formatExecutionSummary({
+                        amount: item.buy_requested_amount ?? item.buy_amount,
+                        shares: item.buy_requested_shares ?? item.buy_shares,
+                        price: item.buy_requested_price ?? item.buy_price,
+                        odds: item.buy_requested_odds ?? item.buy_odds,
+                      })}</p>
+                      <p>Filled: {formatExecutionSummary({
+                        amount: item.buy_filled_amount ?? item.buy_amount,
+                        shares: item.buy_filled_shares ?? item.buy_shares,
+                        price: item.buy_average_fill_price ?? item.buy_price,
+                        odds: item.buy_average_fill_odds ?? item.buy_odds,
+                      })}</p>
+                      <p>Status: {item.buy_status || "—"}</p>
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
                       <p className="font-semibold text-slate-950">Exit</p>
-                      <p>Exit time: {formatDateTime(item.closed_at || item.sold_at || item.redeemed_at)}</p>
-                      <p>Exit price: {formatNumber(item.exit_price, 4)}</p>
-                      <p>Exit odds: {formatPercent(item.exit_odds, 2)}</p>
-                      <p>Current price: {formatNumber(item.current_price, 2)}</p>
+                      <p>Exit type: {item.exit_type ? humanizeTag(item.exit_type) : "—"}</p>
+                      <p>Exit submitted: {formatDateTime(item.sell_submitted_at)}</p>
+                      <p>Exit executed: {formatDateTime(exitTimestamp(item))}</p>
+                      <p>Requested: {formatExecutionSummary({
+                        amount: item.sell_requested_amount ?? item.exit_amount,
+                        shares: item.sell_requested_shares ?? item.exit_shares,
+                        price: item.sell_requested_price ?? item.exit_price,
+                        odds: item.sell_requested_odds ?? item.exit_odds,
+                      })}</p>
+                      <p>Filled: {formatExecutionSummary({
+                        amount: item.sell_filled_amount ?? item.exit_amount,
+                        shares: item.sell_filled_shares ?? item.exit_shares,
+                        price: item.sell_average_fill_price ?? item.exit_price,
+                        odds: item.sell_average_fill_odds ?? item.exit_odds,
+                      })}</p>
+                      <p>Status: {item.sell_status || (item.is_squared_off ? "completed" : "—")}</p>
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
                       <p className="font-semibold text-slate-950">Outcome</p>
+                      <p>P&amp;L outcome: {pnlOutcomeLabel(item)}</p>
+                      <p>Gross P&amp;L: {formatCurrency(item.gross_pnl)}</p>
                       <p>Net P&amp;L: {formatCurrency(item.net_pnl)}</p>
                       <p>P&amp;L %: {formatPercent(item.pnl_percent)}</p>
+                      <p>Realized return: {formatPercent(
+                        item.realized_return !== null && item.realized_return !== undefined
+                          ? item.realized_return * 100
+                          : null,
+                      )}</p>
+                      <p>Fees: {formatCurrency(item.fees_total)}</p>
                       <p>Holding: {formatDuration(item.holding_period_seconds)}</p>
-                      <p>Risk score: {formatNumber(item.risk_score, 2)}</p>
+                      <p>Current odds: {formatPercent(item.current_price, 2)}</p>
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
                       <p className="font-semibold text-slate-950">Reasoning</p>
                       <p>Confidence: {formatPercent((item.confidence ?? 0) * 100)}</p>
+                      <p>Risk score: {formatNumber(item.risk_score, 2)}</p>
                       <p>{item.short_reason || "No buy summary stored."}</p>
                       <p>{item.exit_reason ? `Exit reason: ${item.exit_reason}` : "Position still open or exit reason unavailable."}</p>
+                      <p>{item.analysis_summary || "No post-trade learning summary stored yet."}</p>
                     </div>
                   </CardContent>
                 </Card>

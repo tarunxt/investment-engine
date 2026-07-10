@@ -76,6 +76,7 @@ class BullpenTradeAnalysisRecordResponse(BaseModel):
     lifecycle_state: str
     final_tag: str
     pnl_outcome_tag: str
+    is_squared_off: bool = False
     position_key: str | None = None
     event_id: str | None = None
     event_slug: str | None = None
@@ -203,8 +204,11 @@ class BullpenTradeAnalysisListItem(BaseModel):
     status: str
     final_tag: str
     pnl_outcome_tag: str
+    is_squared_off: bool = False
     category: str | None = None
     topic: str | None = None
+    outcome_name: str | None = None
+    exit_type: str | None = None
     run_id: str | None = None
     strategy_name: str | None = None
     strategy_version: str | None = None
@@ -212,18 +216,47 @@ class BullpenTradeAnalysisListItem(BaseModel):
     sold_at: datetime | None = None
     redeemed_at: datetime | None = None
     closed_at: datetime | None = None
+    buy_submitted_at: datetime | None = None
+    buy_executed_at: datetime | None = None
+    sell_submitted_at: datetime | None = None
+    sell_executed_at: datetime | None = None
     buy_amount: float | None = None
     buy_price: float | None = None
     buy_odds: float | None = None
+    buy_shares: float | None = None
+    buy_requested_amount: float | None = None
+    buy_requested_shares: float | None = None
+    buy_requested_price: float | None = None
+    buy_requested_odds: float | None = None
+    buy_filled_amount: float | None = None
+    buy_filled_shares: float | None = None
+    buy_average_fill_price: float | None = None
+    buy_average_fill_odds: float | None = None
     current_price: float | None = None
     exit_price: float | None = None
     exit_odds: float | None = None
+    exit_amount: float | None = None
+    exit_shares: float | None = None
+    sell_requested_amount: float | None = None
+    sell_requested_shares: float | None = None
+    sell_requested_price: float | None = None
+    sell_requested_odds: float | None = None
+    sell_filled_amount: float | None = None
+    sell_filled_shares: float | None = None
+    sell_average_fill_price: float | None = None
+    sell_average_fill_odds: float | None = None
+    buy_status: str | None = None
+    sell_status: str | None = None
+    gross_pnl: float | None = None
     net_pnl: float | None = None
     pnl_percent: float | None = None
+    fees_total: float | None = None
     holding_period_seconds: int | None = None
+    realized_return: float | None = None
     buy_tags: list[str] = Field(default_factory=list)
     short_reason: str | None = None
     exit_reason: str | None = None
+    analysis_summary: str | None = None
     confidence: float | None = None
     risk_score: float | None = None
 
