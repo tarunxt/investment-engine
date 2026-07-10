@@ -4334,11 +4334,7 @@ export function BullpenAutoRunScheduleCard({
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() =>
-                    setScheduleStartInput(
-                      formatScheduleInputFromDate(new Date()),
-                    )
-                  }
+                  onClick={() => setScheduleStartInput("Now")}
                   disabled={action !== null}
                   className="ml-2 h-8 rounded-lg px-3 text-xs shadow-none"
                 >
