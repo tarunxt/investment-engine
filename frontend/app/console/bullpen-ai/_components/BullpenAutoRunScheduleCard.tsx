@@ -817,9 +817,16 @@ function isSubmittedOrSuccessfulDecision(decision: BullpenAutoLiveDecision) {
   return isSubmittedOrSuccessfulOrderPlan(decision.order_plan);
 }
 
-function getRunSummaryLineItems(summary: string | null | undefined) {
+type RunSummaryDetails = {
+  overview: string | null;
+  warnings: { label: string; detail: string }[];
+};
+
+function getRunSummaryDetails(
+  summary: string | null | undefined,
+): RunSummaryDetails {
   const text = summary?.trim();
-  if (!text) return [];
+  if (!text) return { overview: null, warnings: [] };
 
   const normalized = text
     .replace(/\s+([✗✓✔])\s+/g, "\n$1 ")
@@ -827,10 +834,41 @@ function getRunSummaryLineItems(summary: string | null | undefined) {
     .replace(/:\s+(\[(?:warn|warning|error|fail|info)\])/gi, ":\n$1")
     .replace(/\s+(?=\[(?:warn|warning|error|fail|info)\])/gi, "\n");
 
-  return normalized
+  const lineItems = normalized
     .split(/\n+/)
     .map((item) => item.trim())
     .filter(Boolean);
+
+  const firstDetailIndex = lineItems.findIndex((item) =>
+    /^(?:0x[a-f0-9]{6,}:|[✗✓✔]|\[(?:warn|warning|error|fail|info)\])/i.test(
+      item,
+    ),
+  );
+  const overviewItems =
+    firstDetailIndex === -1 ? lineItems : lineItems.slice(0, firstDetailIndex);
+  const detailItems =
+    firstDetailIndex === -1 ? [] : lineItems.slice(firstDetailIndex);
+
+  return {
+    overview: overviewItems.join(" ").trim() || null,
+    warnings: detailItems.map((detail, index) => {
+      const bracketMatch = detail.match(/^\[([^\]]+)\]\s*(.*)$/);
+      if (bracketMatch) {
+        return {
+          label: bracketMatch[1].trim(),
+          detail: bracketMatch[2].trim() || "—",
+        };
+      }
+      const prefixedMatch = detail.match(/^(0x[a-f0-9]{6,}:)\s*(.*)$/i);
+      if (prefixedMatch) {
+        return {
+          label: prefixedMatch[1],
+          detail: prefixedMatch[2].trim() || "—",
+        };
+      }
+      return { label: `Detail ${index + 1}`, detail };
+    }),
+  };
 }
 
 function buildLatestSubmittedBuyTimestampsByMarketId(
@@ -2354,34 +2392,24 @@ function RunDetailDialog({
   onOpenScanFilters?: () => void;
   onOpenStageTwoInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
-  onOpenMetricDetails?: (run: BullpenAutoLiveRun, kind: InvestMetricDialogKind) => void;
+  onOpenMetricDetails?: (
+    run: BullpenAutoLiveRun,
+    kind: InvestMetricDialogKind,
+  ) => void;
 }) {
   const { run, decisions } = state;
-  const summaryLineItems = getRunSummaryLineItems(run.summary);
+  const summaryDetails = getRunSummaryDetails(run.summary);
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-[92rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+      <div className="flex max-h-[90vh] min-h-0 w-full max-w-[92rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               Run Details
             </p>
-            {summaryLineItems.length > 0 ? (
-              <div className="max-w-5xl space-y-2">
-                {summaryLineItems.map((item, index) => (
-                  <div
-                    key={`${item}-${index}`}
-                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold leading-5 text-slate-950"
-                  >
-                    {item}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <h2 className="max-w-5xl text-base font-semibold leading-6 text-slate-950">
-                Run summary unavailable.
-              </h2>
-            )}
+            <h2 className="max-w-5xl rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold leading-5 text-slate-950">
+              {summaryDetails.overview ?? "Run summary unavailable."}
+            </h2>
             <p className="text-xs text-slate-500">Run {run.id}</p>
           </div>
           <button
@@ -2393,7 +2421,7 @@ function RunDetailDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-auto px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <div className="grid gap-3 md:grid-cols-3">
             <InvestMetricSummaryCard
               label="Decisions"
@@ -2423,6 +2451,34 @@ function RunDetailDialog({
               }
             />
           </div>
+          {summaryDetails.warnings.length > 0 ? (
+            <section className="mt-4 overflow-hidden rounded-2xl border border-amber-200 bg-amber-50/60">
+              <div className="border-b border-amber-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+                Brief warnings / errors
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-xs">
+                  <tbody className="divide-y divide-amber-100">
+                    {summaryDetails.warnings.map((warning, index) => (
+                      <tr
+                        key={`${warning.label}-${index}`}
+                        className="align-top"
+                      >
+                        <th className="w-36 whitespace-nowrap px-3 py-2 font-semibold text-amber-900">
+                          {warning.label}
+                        </th>
+                        <td className="max-w-0 px-3 py-2 text-slate-700">
+                          <span className="line-clamp-2 break-words">
+                            {warning.detail}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
           {run.error_message ? (
             <p className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">
               {run.error_message}
