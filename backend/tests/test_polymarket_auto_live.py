@@ -35,6 +35,7 @@ from app.domains.polymarket_auto_live.config import (
 )
 from app.domains.polymarket_auto_live.engine import (
     BullpenAutoLiveEngine,
+    CONSOLE_FRESH_LLM_CANDIDATE_CAP,
     PositionSnapshot,
     _auto_live_record_id,
 )
@@ -91,6 +92,10 @@ def test_auto_live_record_id_caps_long_action_labels_for_database_columns():
     assert len(record_id) <= 64
     assert record_id.startswith("decision-")
     assert record_id.rsplit("-", 1)[-1]
+
+
+def test_console_fresh_llm_candidate_cap_is_50():
+    assert CONSOLE_FRESH_LLM_CANDIDATE_CAP == 50
 
 @pytest.mark.anyio
 async def test_refresh_live_controls_allows_auto_live_stage3_when_copy_bot_is_paper(monkeypatch):
