@@ -817,10 +817,17 @@ function isSubmittedOrSuccessfulDecision(decision: BullpenAutoLiveDecision) {
   return isSubmittedOrSuccessfulOrderPlan(decision.order_plan);
 }
 
+type RunSummaryWarning = { label: string; detail: string };
 type RunSummaryDetails = {
   overview: string | null;
-  warnings: { label: string; detail: string }[];
+  warnings: RunSummaryWarning[];
 };
+type PlannedOrderDetailState = {
+  title: string;
+  summary: string;
+  detail: string;
+};
+type DecisionLlmOddsState = { decision: BullpenAutoLiveDecision };
 
 function getRunSummaryDetails(
   summary: string | null | undefined,
@@ -2399,6 +2406,11 @@ function RunDetailDialog({
 }) {
   const { run, decisions } = state;
   const summaryDetails = getRunSummaryDetails(run.summary);
+  const [warningsDialogOpen, setWarningsDialogOpen] = useState(false);
+  const [plannedOrderDetail, setPlannedOrderDetail] =
+    useState<PlannedOrderDetailState | null>(null);
+  const [decisionLlmOdds, setDecisionLlmOdds] =
+    useState<DecisionLlmOddsState | null>(null);
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4">
       <div className="flex max-h-[90vh] min-h-0 w-full max-w-[92rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
@@ -2452,30 +2464,18 @@ function RunDetailDialog({
             />
           </div>
           {summaryDetails.warnings.length > 0 ? (
-            <section className="mt-4 overflow-hidden rounded-2xl border border-amber-200 bg-amber-50/60">
-              <div className="border-b border-amber-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">
-                Brief warnings / errors
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-left text-xs">
-                  <tbody className="divide-y divide-amber-100">
-                    {summaryDetails.warnings.map((warning, index) => (
-                      <tr
-                        key={`${warning.label}-${index}`}
-                        className="align-top"
-                      >
-                        <th className="w-36 whitespace-nowrap px-3 py-2 font-semibold text-amber-900">
-                          {warning.label}
-                        </th>
-                        <td className="max-w-0 px-3 py-2 text-slate-700">
-                          <span className="line-clamp-2 break-words">
-                            {warning.detail}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 px-3 py-2">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+                <span>Brief warnings / errors</span>
+                <button
+                  type="button"
+                  onClick={() => setWarningsDialogOpen(true)}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-200 bg-white text-amber-800 transition hover:bg-amber-100"
+                  aria-label="Open detailed warnings and errors"
+                  title="Open detailed warnings and errors"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
               </div>
             </section>
           ) : null}
@@ -2484,7 +2484,11 @@ function RunDetailDialog({
               {run.error_message}
             </p>
           ) : null}
-          <SubmittedExecutionEventsTable decisions={decisions} />
+          <SubmittedExecutionEventsTable
+            decisions={decisions}
+            onOpenPlannedOrderDetail={setPlannedOrderDetail}
+            onOpenLlmOdds={(decision) => setDecisionLlmOdds({ decision })}
+          />
           <RunDetailWorkerStages
             run={run}
             decisions={decisions}
@@ -2526,145 +2530,222 @@ function RunDetailDialog({
 
         </div>
       </div>
+      {warningsDialogOpen ? (
+        <RunWarningsDialog
+          warnings={summaryDetails.warnings}
+          onClose={() => setWarningsDialogOpen(false)}
+        />
+      ) : null}
+      {decisionLlmOdds ? (
+        <DecisionLlmOddsDialog
+          state={decisionLlmOdds}
+          onClose={() => setDecisionLlmOdds(null)}
+        />
+      ) : null}
+      {plannedOrderDetail ? (
+        <PlannedOrderDetailDialog
+          state={plannedOrderDetail}
+          onClose={() => setPlannedOrderDetail(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
-function SubmittedExecutionEventsTable({
-  decisions,
+function RunWarningsDialog({
+  warnings,
+  onClose,
 }: {
-  decisions: BullpenAutoLiveDecision[];
+  warnings: RunSummaryWarning[];
+  onClose: () => void;
 }) {
-  const submittedDecisions = decisions.filter(
-    (decision) => isSubmittedOrSuccessfulDecision(decision),
-  );
-  const submittedSellCount = submittedDecisions.filter(
-    (decision) =>
-      decision.order_plan?.action === "sell" ||
-      decision.order_plan?.action === "redeem",
-  ).length;
-  const submittedBuyCount = submittedDecisions.filter(
-    (decision) => decision.order_plan?.action === "buy",
-  ).length;
-
   return (
-    <section className="mt-5 overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-sky-50 to-violet-50">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/80 px-4 py-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
-            Executed Stage 3 Events
-          </p>
-          <h3 className="mt-1 text-sm font-semibold text-slate-950">
-            Step 1 exits + Step 2 buys submitted to Bullpen
-          </h3>
+    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-amber-100 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">Brief warnings / errors</p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">Detailed messages</h3>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close warnings"><X className="h-4 w-4" /></button>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs font-semibold">
-          <span className="rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-emerald-800">
-            {submittedDecisions.length.toLocaleString("en-IN")} total
-          </span>
-          <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-800">
-            {submittedSellCount.toLocaleString("en-IN")} exits
-          </span>
-          <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-800">
-            {submittedBuyCount.toLocaleString("en-IN")} buys
-          </span>
+        <div className="overflow-y-auto px-6 py-5">
+          <div className="space-y-3">
+            {warnings.map((warning, index) => (
+              <div key={`${warning.label}-${index}`} className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-800">{warning.label}</p>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{warning.detail}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-      {submittedDecisions.length ? (
+    </div>
+  );
+}
+
+function DecisionLlmOddsDialog({
+  state,
+  onClose,
+}: {
+  state: DecisionLlmOddsState;
+  onClose: () => void;
+}) {
+  const { decision } = state;
+  return (
+    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-700">LLM Odds Breakdown</p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">{decision.market_title}</h3>
+            <p className="mt-2 text-sm text-slate-600">Consensus Yes {formatOddsPercent(decision.fair_yes_probability_pct ?? null)} · Consensus No {formatOddsPercent(decision.fair_no_probability_pct ?? null)}</p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close LLM odds breakdown"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="overflow-y-auto px-6 py-5">
+          {decision.llm_outputs.length ? (
+            <div className="space-y-3">
+              {decision.llm_outputs.map((output, index) => (
+                <div key={`${output.provider}-${output.model}-${index}`} className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-950">{output.provider} · {output.model}</p>
+                    <div className="flex gap-2 text-xs font-semibold">
+                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">Yes {formatOddsPercent(output.llm_yes_odds ?? null)}</span>
+                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">No {formatOddsPercent(output.llm_no_odds ?? null)}</span>
+                    </div>
+                  </div>
+                  {output.rationale ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{output.rationale}</p> : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No per-model LLM outputs were recorded for this decision.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlannedOrderDetailDialog({
+  state,
+  onClose,
+}: {
+  state: PlannedOrderDetailState;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Planned but not submitted</p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">{state.title}</h3>
+            <p className="mt-2 text-sm text-slate-600">{state.summary}</p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close planned order detail"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="overflow-y-auto px-6 py-5">
+          <pre className="whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">{state.detail}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getDecisionDaysLeft(decision: BullpenAutoLiveDecision) {
+  if (!decision.close_time) return "—";
+  const closeMs = Date.parse(decision.close_time);
+  if (!Number.isFinite(closeMs)) return "—";
+  const days = (closeMs - Date.now()) / (24 * 60 * 60 * 1000);
+  return days.toLocaleString("en-IN", { maximumFractionDigits: 1 });
+}
+
+function getDecisionReturnsPerDay(decision: BullpenAutoLiveDecision) {
+  if (!decision.hours_remaining || decision.hours_remaining <= 0) return null;
+  return (decision.edge_pp / decision.hours_remaining) * 24;
+}
+
+function getPlannedOrderBrief(decision: BullpenAutoLiveDecision) {
+  return (
+    decision.order_plan?.detail ??
+    decision.reason ??
+    decision.summary ??
+    "Planned buy order was not submitted."
+  );
+}
+
+function Stage3DecisionTable({
+  title,
+  rows,
+  emptyMessage,
+  plannedButNotSubmitted = false,
+  onOpenPlannedOrderDetail,
+  onOpenLlmOdds,
+}: {
+  title: string;
+  rows: BullpenAutoLiveDecision[];
+  emptyMessage: string;
+  plannedButNotSubmitted?: boolean;
+  onOpenPlannedOrderDetail?: (state: PlannedOrderDetailState) => void;
+  onOpenLlmOdds?: (decision: BullpenAutoLiveDecision) => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/80 bg-white/60">
+      <div className="border-b border-white/80 px-4 py-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">{title}</p>
+      </div>
+      {rows.length ? (
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-white/80 text-left text-xs">
-            <thead className="bg-white/60 font-semibold uppercase tracking-[0.12em] text-slate-600">
+          <table className="min-w-[78rem] divide-y divide-white/80 text-left text-xs">
+            <thead className="bg-white/70 font-semibold uppercase tracking-[0.12em] text-slate-600">
               <tr>
                 <th className="px-4 py-3">Event</th>
-                <th className="px-4 py-3">Step</th>
                 <th className="px-4 py-3">Side</th>
                 <th className="px-4 py-3">Size</th>
                 <th className="px-4 py-3">Limit</th>
-                <th className="px-4 py-3">Executed</th>
-                <th className="px-4 py-3">Edge / Score</th>
+                <th className="px-4 py-3">Event Closing time</th>
+                <th className="px-4 py-3">Days left</th>
+                <th className="px-4 py-3">Category</th>
+                <th className="px-4 py-3">Current Yes odds %</th>
+                <th className="px-4 py-3">Current No odds %</th>
+                <th className="px-4 py-3">LLM Yes Odds</th>
+                <th className="px-4 py-3">LLM No Odds</th>
+                <th className="px-4 py-3">Returns/day</th>
                 <th className="px-4 py-3">Detail</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/80 bg-white/50">
-              {submittedDecisions.map((decision) => {
-                const action = decision.order_plan?.action;
-                const isExit = action === "sell" || action === "redeem";
-                const stepLabel = isExit ? "Step 1 exit" : "Step 2 buy";
-                const stepClass = isExit
-                  ? "border-rose-200 bg-rose-50 text-rose-800"
-                  : "border-blue-200 bg-blue-50 text-blue-800";
+              {rows.map((decision) => {
+                const detail = plannedButNotSubmitted ? getPlannedOrderBrief(decision) : decision.order_plan?.detail ?? "Submitted without extra execution detail.";
                 return (
-                  <tr key={decision.id} className="align-top">
-                    <td className="max-w-sm px-4 py-3">
+                  <tr key={decision.id} className="align-top hover:bg-white/70">
+                    <td className="min-w-72 px-4 py-3">
                       <div className="font-semibold text-slate-950 line-clamp-2">
-                        {decision.market_url ? (
-                          <a
-                            className="hover:text-sky-700 hover:underline"
-                            href={decision.market_url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {decision.market_title}
-                          </a>
-                        ) : (
-                          decision.market_title
-                        )}
-                      </div>
-                      <div className="mt-1 text-[11px] text-slate-500">
-                        {decision.theme} · closes{" "}
-                        {formatIstDateTime(decision.close_time)}
+                        {decision.market_url ? <a className="hover:text-sky-700 hover:underline" href={decision.market_url} target="_blank" rel="noreferrer">{decision.market_title}</a> : decision.market_title}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-full border px-2.5 py-1 font-semibold ${stepClass}`}
-                      >
-                        {stepLabel}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-semibold uppercase text-slate-800">
-                      {decision.order_plan?.side ?? decision.side}
-                    </td>
-                    <td className="px-4 py-3 font-semibold tabular-nums text-slate-950">
-                      {formatMoney(decision.order_plan?.order_size_usd ?? null)}
-                      <div className="mt-1 text-[11px] font-normal text-slate-500">
-                        {decision.order_plan?.shares.toLocaleString("en-IN", {
-                          maximumFractionDigits: 4,
-                        }) ?? "—"}{" "}
-                        shares
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700">
-                      {formatPriceCents(
-                        decision.order_plan?.limit_price_cents ?? null,
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">
-                      {formatIstDateTime(
-                        decision.order_plan?.executed_at ??
-                          decision.order_plan?.created_at,
-                      )}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700">
-                      {decision.edge_pp.toLocaleString("en-IN", {
-                        maximumFractionDigits: 2,
-                      })}{" "}
-                      pp
-                      <div className="mt-1 text-[11px] text-slate-500">
-                        Score{" "}
-                        {decision.score.toLocaleString("en-IN", {
-                          maximumFractionDigits: 2,
-                        })}
-                      </div>
-                    </td>
+                    <td className="px-4 py-3 font-semibold uppercase text-slate-800">{decision.order_plan?.side ?? decision.side}</td>
+                    <td className="px-4 py-3 font-semibold tabular-nums text-slate-950">{formatMoney(decision.order_plan?.order_size_usd ?? null)}<div className="mt-1 text-[11px] font-normal text-slate-500">{decision.order_plan?.shares.toLocaleString("en-IN", { maximumFractionDigits: 4 }) ?? "—"} shares</div></td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">{formatPriceCents(decision.order_plan?.limit_price_cents ?? null)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap text-slate-700">{formatIstDateTime(decision.close_time)}</td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">{getDecisionDaysLeft(decision)}</td>
+                    <td className="px-4 py-3 text-slate-700">{decision.theme || "—"}</td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">{formatOddsPercent(decision.current_yes_odds ?? null)}</td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">{formatOddsPercent(decision.current_no_odds ?? null)}</td>
+                    <td className="px-4 py-3 tabular-nums font-semibold text-violet-800"><button type="button" onClick={() => onOpenLlmOdds?.(decision)} className="underline decoration-violet-300 underline-offset-4 hover:text-violet-950">{formatOddsPercent(decision.fair_yes_probability_pct ?? null)}</button></td>
+                    <td className="px-4 py-3 tabular-nums font-semibold text-violet-800"><button type="button" onClick={() => onOpenLlmOdds?.(decision)} className="underline decoration-violet-300 underline-offset-4 hover:text-violet-950">{formatOddsPercent(decision.fair_no_probability_pct ?? null)}</button></td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">{formatReturnsPerDay(getDecisionReturnsPerDay(decision))}</td>
                     <td className="min-w-64 px-4 py-3 text-slate-700">
-                      <ErrorCodeWithDetails
-                        detail={
-                          decision.order_plan?.detail ??
-                          "Submitted without extra execution detail."
-                        }
-                        detailClassName="text-slate-700"
-                      />
+                      {plannedButNotSubmitted && onOpenPlannedOrderDetail ? (
+                        <div className="flex items-start gap-2">
+                          <span className="line-clamp-2 break-words">{detail}</span>
+                          <button type="button" onClick={() => onOpenPlannedOrderDetail({ title: decision.market_title, summary: detail, detail: [decision.order_plan?.detail, decision.order_plan?.execution_response, decision.reason, decision.summary].filter(Boolean).join("\n\n") || detail })} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100" aria-label="Open detailed planned order error" title="Open detailed planned order error"><Info className="h-3.5 w-3.5" /></button>
+                        </div>
+                      ) : (
+                        <ErrorCodeWithDetails detail={detail} detailClassName="text-slate-700" />
+                      )}
                     </td>
                   </tr>
                 );
@@ -2673,15 +2754,47 @@ function SubmittedExecutionEventsTable({
           </table>
         </div>
       ) : (
-        <p className="px-4 py-5 text-sm text-slate-600">
-          No Stage 3 Step 1 or Step 2 submitted events were returned for this
-          run.
-        </p>
+        <p className="px-4 py-5 text-sm text-slate-600">{emptyMessage}</p>
       )}
-    </section>
+    </div>
   );
 }
 
+function SubmittedExecutionEventsTable({
+  decisions,
+  onOpenPlannedOrderDetail,
+  onOpenLlmOdds,
+}: {
+  decisions: BullpenAutoLiveDecision[];
+  onOpenPlannedOrderDetail: (state: PlannedOrderDetailState) => void;
+  onOpenLlmOdds: (decision: BullpenAutoLiveDecision) => void;
+}) {
+  const submittedDecisions = decisions.filter((decision) => isSubmittedOrSuccessfulDecision(decision));
+  const submittedExitDecisions = submittedDecisions.filter((decision) => decision.order_plan?.action === "sell" || decision.order_plan?.action === "redeem");
+  const submittedBuyDecisions = submittedDecisions.filter((decision) => decision.order_plan?.action === "buy");
+  const plannedButNotSubmittedBuys = decisions.filter((decision) => decision.order_plan?.action === "buy" && !isSubmittedOrSuccessfulDecision(decision));
+
+  return (
+    <section className="mt-5 overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-sky-50 to-violet-50">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/80 px-4 py-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Executed Stage 3 Events</p>
+          <h3 className="mt-1 text-sm font-semibold text-slate-950">Step 1 Exit and Step 2 Buy execution results</h3>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <span className="rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-emerald-800">{submittedDecisions.length.toLocaleString("en-IN")} total</span>
+          <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-800">{submittedExitDecisions.length.toLocaleString("en-IN")} exits</span>
+          <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-800">{submittedBuyDecisions.length.toLocaleString("en-IN")} buys</span>
+        </div>
+      </div>
+      <div className="space-y-4 p-4">
+        <Stage3DecisionTable title="Step 1 Exit" rows={submittedExitDecisions} emptyMessage="No submitted Step 1 Exit events were returned for this run." onOpenLlmOdds={onOpenLlmOdds} />
+        <Stage3DecisionTable title="Step 2 Buy" rows={submittedBuyDecisions} emptyMessage="No submitted Step 2 Buy events were returned for this run." onOpenLlmOdds={onOpenLlmOdds} />
+        <Stage3DecisionTable title="Events Planned but not Submitted" rows={plannedButNotSubmittedBuys} emptyMessage="No planned buy orders were left unsubmitted for this run." plannedButNotSubmitted onOpenPlannedOrderDetail={onOpenPlannedOrderDetail} onOpenLlmOdds={onOpenLlmOdds} />
+      </div>
+    </section>
+  );
+}
 
 
 function StageTwoLlmRunDetailsDialog({

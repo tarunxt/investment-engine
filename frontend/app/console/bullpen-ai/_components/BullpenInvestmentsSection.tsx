@@ -355,6 +355,65 @@ function RowShell({
   );
 }
 
+function QuestionDetailsDialog({
+  question,
+  onClose,
+}: {
+  question: BullpenQuestionRow;
+  onClose: () => void;
+}) {
+  const details = [
+    ["Close", formatDate(question.closeTime)],
+    ["Category", question.category || "—"],
+    ["Current Yes odds", question.yesOdds === null ? "—" : `${question.yesOdds.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`],
+    ["Current No odds", question.noOdds === null ? "—" : `${question.noOdds.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`],
+    ["LLM Yes odds", question.llmYesOdds === null ? "—" : `${question.llmYesOdds.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`],
+    ["LLM No odds", question.llmNoOdds === null ? "—" : `${question.llmNoOdds.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`],
+    ["Returns/day", formatReturnsPerDay(question.returnsPerDay)],
+    ["Added", formatIstTimestamp(question.investmentTableAddedAt ?? null)],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+      <div className="flex max-h-[84vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-fuchsia-700">Opportunity details</p>
+            <h2 className="mt-2 text-lg font-semibold text-slate-950">{question.question}</h2>
+          </div>
+          <button type="button" onClick={onClose} className="text-sm font-semibold text-slate-500 hover:text-slate-900">Close</button>
+        </div>
+        <div className="overflow-y-auto p-6">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {details.map(([label, value]) => (
+              <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+                <p className="mt-2 break-words text-sm font-semibold text-slate-900">{value}</p>
+              </div>
+            ))}
+          </div>
+          {question.rules || question.marketContext || question.resolutionSource ? (
+            <div className="mt-4 space-y-3">
+              {question.rules ? <DetailBlock label="Rules" value={question.rules} /> : null}
+              {question.marketContext ? <DetailBlock label="Market context" value={question.marketContext} /> : null}
+              {question.resolutionSource ? <DetailBlock label="Resolution source" value={question.resolutionSource} /> : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{value}</p>
+    </div>
+  );
+}
+
 export function BullpenInvestmentsSection({
   activePositionsCount,
   activePositions,
@@ -394,6 +453,8 @@ export function BullpenInvestmentsSection({
     position?: BullpenActivePositionView;
   } | null>(null);
   const [isPositionsDialogOpen, setIsPositionsDialogOpen] = useState(false);
+  const [detailsQuestion, setDetailsQuestion] =
+    useState<BullpenQuestionRow | null>(null);
   const [isGroupingInfoOpen, setIsGroupingInfoOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
@@ -697,15 +758,25 @@ export function BullpenInvestmentsSection({
                             className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400"
                           />
                           <div className="space-y-2">
-                            <label
-                              htmlFor={checkboxId}
-                              className="block cursor-pointer font-medium text-slate-950"
-                            >
-                              {question.question}
-                            </label>
+                            <div className="flex items-start gap-2">
+                              <label
+                                htmlFor={checkboxId}
+                                className="block cursor-pointer font-medium text-slate-950"
+                              >
+                                {question.question}
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => setDetailsQuestion(question)}
+                                className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-fuchsia-200 bg-white text-fuchsia-700 transition hover:bg-fuchsia-50"
+                                aria-label={`Open structured details for ${question.question}`}
+                                title="Open structured event details"
+                              >
+                                <Info className="h-3 w-3" />
+                              </button>
+                            </div>
                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                               <span>Close: {formatDate(question.closeTime)}</span>
-                              <span>Category: {question.category || "—"}</span>
                               <span>Outcome: Buy {investOutcome}</span>
                               <span>
                                 Added: {formatIstTimestamp(question.investmentTableAddedAt ?? null)}
@@ -876,6 +947,13 @@ export function BullpenInvestmentsSection({
             </p>
           </div>
         </div>
+      ) : null}
+
+      {detailsQuestion ? (
+        <QuestionDetailsDialog
+          question={detailsQuestion}
+          onClose={() => setDetailsQuestion(null)}
+        />
       ) : null}
 
       {breakdownQuestion ? (
