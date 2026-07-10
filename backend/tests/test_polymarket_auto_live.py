@@ -36,6 +36,7 @@ from app.domains.polymarket_auto_live.config import (
 from app.domains.polymarket_auto_live.engine import (
     BullpenAutoLiveEngine,
     PositionSnapshot,
+    _auto_live_record_id,
 )
 from app.domains.polymarket_auto_live.llm import run_llm_consensus
 from app.domains.polymarket_auto_live.models import (
@@ -77,6 +78,19 @@ from app.domains.trading_bots.service import (
     build_trading_bots_summary,
 )
 
+
+
+def test_auto_live_record_id_caps_long_action_labels_for_database_columns():
+    record_id = _auto_live_record_id(
+        "decision",
+        run_id="2d09bb75-d8ba-48a1-bbdf-f42c7e43f58a",
+        market_id="very-long-polymarket-market-id-that-does-not-affect-id-length",
+        action="EVENT_EXIT_REDEEM_CLAIM_WITH_EXTREMELY_LONG_MANUAL_ACTION_LABEL",
+    )
+
+    assert len(record_id) <= 64
+    assert record_id.startswith("decision-")
+    assert record_id.rsplit("-", 1)[-1]
 
 @pytest.mark.anyio
 async def test_refresh_live_controls_allows_auto_live_stage3_when_copy_bot_is_paper(monkeypatch):
