@@ -54,6 +54,25 @@ export function isProcessedInvestOrderPlan(
   return Boolean(orderPlan && orderPlan.status !== "planned");
 }
 
+
+export function isSubmittedOrSuccessfulInvestOrderPlan(
+  orderPlan: BullpenAutoLiveOrderPlan | null | undefined,
+) {
+  if (!orderPlan) return false;
+  if (orderPlan.status === "submitted") return true;
+
+  const successText = `${orderPlan.detail ?? ""}
+${orderPlan.execution_response ?? ""}`;
+  return (
+    /successfully|submitted|filled|redeemed|claimed|executed/i.test(successText) &&
+    !/failed|refusing|cancelled|canceled|skipped|not submitted/i.test(successText)
+  );
+}
+
+function isSubmittedOrSuccessfulDecision(decision: BullpenAutoLiveDecision) {
+  return isSubmittedOrSuccessfulInvestOrderPlan(decision.order_plan);
+}
+
 export function deriveInvestExecutionStepStatus({
   status,
   plannedOrders,
@@ -106,7 +125,7 @@ export function getInvestMetricDialogDefinition(
         title: "Stage 3 submitted orders",
         description:
           "Decision rows where the planned order reached submitted status.",
-        includes: (decision) => decision.order_plan?.status === "submitted",
+        includes: (decision) => isSubmittedOrSuccessfulDecision(decision),
       };
     case "sell-planned":
       return {
@@ -131,7 +150,7 @@ export function getInvestMetricDialogDefinition(
           "Event Exit sell rows whose order reached submitted status.",
         includes: (decision) =>
           hasOrderAction(decision, "sell") &&
-          decision.order_plan?.status === "submitted",
+          isSubmittedOrSuccessfulDecision(decision),
       };
     case "buy-planned":
       return {
@@ -156,7 +175,7 @@ export function getInvestMetricDialogDefinition(
           "Stage 3 buy rows whose order reached submitted status.",
         includes: (decision) =>
           hasOrderAction(decision, "buy") &&
-          decision.order_plan?.status === "submitted",
+          isSubmittedOrSuccessfulDecision(decision),
       };
     case "sell-exit-rows":
       return {
