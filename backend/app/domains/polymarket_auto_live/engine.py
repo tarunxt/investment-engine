@@ -131,11 +131,16 @@ def _auto_live_record_id(
     market_id: str,
     action: str,
 ) -> str:
-    action_slug = str(action).strip().lower().replace("_", "-") or "unknown"
+    raw_action_slug = str(action).strip().lower().replace("_", "-") or "unknown"
     digest = uuid5(
         NAMESPACE_URL,
-        f"bullpen-auto-live:{prefix}:{run_id}:{market_id}:{action_slug}",
+        f"bullpen-auto-live:{prefix}:{run_id}:{market_id}:{raw_action_slug}",
     ).hex
+    # Auto-Live decision and order IDs are persisted in String(64) columns.
+    # Keep the full UUID5 digest for uniqueness and trim only the readable
+    # action label so long explicit actions cannot crash Stage 3 persistence.
+    max_action_length = max(1, 64 - len(prefix) - len(digest) - 2)
+    action_slug = raw_action_slug[:max_action_length].rstrip("-") or "unknown"
     return f"{prefix}-{action_slug}-{digest}"
 
 
