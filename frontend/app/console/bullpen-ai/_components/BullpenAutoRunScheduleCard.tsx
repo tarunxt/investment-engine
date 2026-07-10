@@ -412,8 +412,7 @@ function StageOneRunStats({
       )}
       <div className="pt-2">
         Total Events Scanned:{" "}
-        <span className="font-semibold tabular-nums">{stats.totalScanned}</span>{" "}
-        (total questions)
+        <span className="font-semibold tabular-nums">{stats.totalScanned}</span>
       </div>
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
         <div className="flex items-center justify-between gap-2">
@@ -469,11 +468,16 @@ function StageTwoRunStats({
   decisions = [],
   onOpenInvestEvents,
   onOpenLlmRunDetails,
+  onOpenScanCandidateDialog,
 }: {
   stage: WorkflowStageView;
   decisions?: BullpenAutoLiveDecision[];
   onOpenInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
   onOpenLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
+  onOpenScanCandidateDialog?: (
+    stage: WorkflowStageView,
+    mode: ScanCandidateDialogMode,
+  ) => void;
 }) {
   const investableDecisions = getStageTwoInvestableDecisions(decisions);
   const stats = getStageTwoStats(stage, decisions);
@@ -485,16 +489,46 @@ function StageTwoRunStats({
   return (
     <div className="space-y-0.5 pt-2">
       <div>
-        Active Positions:{" "}
-        <span className="font-semibold tabular-nums">
-          {stats.activePositions}
-        </span>
+        {onOpenScanCandidateDialog ? (
+          <button
+            type="button"
+            onClick={() => onOpenScanCandidateDialog(stage, "active-positions")}
+            className="text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+          >
+            Active Positions:{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.activePositions}
+            </span>
+          </button>
+        ) : (
+          <>
+            Active Positions:{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.activePositions}
+            </span>
+          </>
+        )}
       </div>
       <div>
-        New Opportunities:{" "}
-        <span className="font-semibold tabular-nums">
-          {stats.newOpportunities}
-        </span>
+        {onOpenScanCandidateDialog ? (
+          <button
+            type="button"
+            onClick={() => onOpenScanCandidateDialog(stage, "fresh-opportunities")}
+            className="text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+          >
+            New Opportunities:{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.newOpportunities}
+            </span>
+          </button>
+        ) : (
+          <>
+            New Opportunities:{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.newOpportunities}
+            </span>
+          </>
+        )}
       </div>
       <div>
         {onOpenLlmRunDetails ? (
@@ -1900,11 +1934,13 @@ function StageTwoExecutionShortlist({
   decisions,
   onOpenEventExitInfo,
   onOpenInvestEligibilityInfo,
+  onOpenInvestMetricDialog,
 }: {
   steps: InvestExecutionStepView[];
   decisions: BullpenAutoLiveDecision[];
   onOpenEventExitInfo: () => void;
   onOpenInvestEligibilityInfo: () => void;
+  onOpenInvestMetricDialog?: (kind: InvestMetricDialogKind) => void;
 }) {
   if (steps.length === 0) return null;
 
@@ -1947,9 +1983,24 @@ function StageTwoExecutionShortlist({
                   </button>
                 </div>
               </div>
-              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-900">
-                {step.plannedOrders ?? 0} planned
-              </span>
+              {onOpenInvestMetricDialog ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onOpenInvestMetricDialog(
+                      getInvestStepMetricDialogKind(step.key, "planned"),
+                    )
+                  }
+                  className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-900 transition hover:border-emerald-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                  aria-label={`Open ${step.label} planned orders`}
+                >
+                  {step.plannedOrders ?? 0} planned
+                </button>
+              ) : (
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-900">
+                  {step.plannedOrders ?? 0} planned
+                </span>
+              )}
             </div>
             <p className="mt-2 text-[11px] leading-4 text-emerald-900/80 dark:text-emerald-100/75">
               {step.detail ??
@@ -4531,6 +4582,7 @@ export function BullpenAutoRunScheduleCard({
                           })
                         }
                         onOpenLlmRunDetails={setStageTwoLlmRunDialog}
+                        onOpenScanCandidateDialog={openScanCandidateDialog}
                       />
                     ) : null}
                     {stage.key === "invest" &&
@@ -4554,6 +4606,7 @@ export function BullpenAutoRunScheduleCard({
                       onOpenInvestEligibilityInfo={() =>
                         setIsInvestEligibilityInfoDialogOpen(true)
                       }
+                      onOpenInvestMetricDialog={openInvestMetricDialog}
                     />
                   ) : null}
 
