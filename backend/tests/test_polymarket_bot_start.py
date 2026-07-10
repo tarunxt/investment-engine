@@ -21,6 +21,7 @@ from app.domains.polymarket.bullpen import (
     extract_bullpen_insufficient_collateral_amount,
     is_claim_command_unavailable_warning,
     is_redeem_metadata_lookup_warning,
+    run_first_bullpen_json,
     sell_min_price_for_execution,
 )
 from app.domains.polymarket.config import load_polymarket_config
@@ -1360,6 +1361,50 @@ async def test_bullpen_redeem_uses_extended_timeout(monkeypatch):
             "read_only": False,
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_run_first_bullpen_json_waits_for_login_then_retries_original_command(
+    monkeypatch,
+):
+    json_calls: list[list[str]] = []
+    status_calls: list[list[str]] = []
+    sleep_calls: list[float] = []
+
+    async def fake_run_bullpen_json(args, *, timeout_seconds):
+        json_calls.append(args)
+        if len(json_calls) == 1:
+            raise BullpenCommandError(
+                "AUTH_REQUIRED: Your session has expired. Run: bullpen login"
+            )
+        return {"ok": True}
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        status_calls.append(args)
+        return "JWT expires: 2099-01-01 00:00:00 UTC"
+
+    async def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(
+        "app.domains.polymarket.bullpen.run_bullpen_json",
+        fake_run_bullpen_json,
+    )
+    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
+    monkeypatch.setattr("app.domains.polymarket.bullpen.asyncio.sleep", fake_sleep)
+
+    result = await run_first_bullpen_json(
+        [["polymarket", "positions", "--output", "json"]],
+        timeout_seconds=3,
+    )
+
+    assert result == {"ok": True}
+    assert json_calls == [
+        ["polymarket", "positions", "--output", "json"],
+        ["polymarket", "positions", "--output", "json"],
+    ]
+    assert status_calls == [["status"]]
+    assert sleep_calls == []
 
 
 def test_bullpen_execution_limit_prices_include_safety_buffer(monkeypatch):

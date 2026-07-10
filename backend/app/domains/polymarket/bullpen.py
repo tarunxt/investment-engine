@@ -52,6 +52,8 @@ def is_claim_command_unavailable_warning(message: str) -> bool:
 
 BULLPEN_REDEEM_TIMEOUT_SECONDS = 180
 BULLPEN_BALANCE_TIMEOUT_SECONDS = 8
+BULLPEN_LOGIN_POLL_INTERVAL_SECONDS = 10
+BULLPEN_LOGIN_POLL_TIMEOUT_SECONDS = 5 * 60
 DEFAULT_BULLPEN_BUY_MAX_PRICE_BUFFER = 0.10
 DEFAULT_BULLPEN_BUY_MIN_PRICE_BUFFER = 0.02
 DEFAULT_BULLPEN_BUY_RETRY_PRICE_BUFFER = 0.02
@@ -405,17 +407,63 @@ async def run_bullpen_json(args: list[str], *, timeout_seconds: int = 20) -> obj
 async def run_first_bullpen_json(
     command_variants: Iterable[list[str]], *, timeout_seconds: int = 20
 ) -> object:
+    variants = list(command_variants)
     errors: list[str] = []
     runtime_context = bullpen_runtime_context(read_only=True)
-    for args in command_variants:
+    for args in variants:
         try:
             return await run_bullpen_json(args, timeout_seconds=timeout_seconds)
         except Exception as exc:
             errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
+    if errors and _is_auth_required_error(" | ".join(errors)):
+        login_confirmed = await wait_for_bullpen_login()
+        if login_confirmed:
+            retry_errors: list[str] = []
+            for args in variants:
+                try:
+                    return await run_bullpen_json(args, timeout_seconds=timeout_seconds)
+                except Exception as exc:
+                    retry_errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
+            errors.extend(
+                [
+                    "Login was confirmed automatically; retried original Bullpen command variants.",
+                    *retry_errors,
+                ]
+            )
+        else:
+            errors.append(
+                "Bullpen login was still not confirmed after "
+                f"{BULLPEN_LOGIN_POLL_TIMEOUT_SECONDS}s of automatic 10s status checks."
+            )
     raise BullpenCommandError(
         "All Bullpen command variants failed "
         f"({format_bullpen_runtime_context(runtime_context)}): " + " | ".join(errors)
     )
+
+
+async def wait_for_bullpen_login(
+    *,
+    poll_interval_seconds: int = BULLPEN_LOGIN_POLL_INTERVAL_SECONDS,
+    timeout_seconds: int = BULLPEN_LOGIN_POLL_TIMEOUT_SECONDS,
+) -> bool:
+    """Poll Bullpen status until a manually completed login is visible."""
+    deadline = asyncio.get_running_loop().time() + max(0, timeout_seconds)
+    while True:
+        try:
+            stdout = await run_bullpen(
+                ["status"],
+                timeout_seconds=min(15, max(1, poll_interval_seconds)),
+                read_only=True,
+            )
+            if _has_active_bullpen_session(parse_bullpen_session(stdout)):
+                return True
+        except Exception:
+            pass
+
+        remaining_seconds = deadline - asyncio.get_running_loop().time()
+        if remaining_seconds <= 0:
+            return False
+        await asyncio.sleep(min(poll_interval_seconds, remaining_seconds))
 
 
 def _has_active_bullpen_session(session: dict[str, object]) -> bool:
