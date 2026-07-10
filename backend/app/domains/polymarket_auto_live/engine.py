@@ -109,6 +109,7 @@ CONFIDENCE_WEIGHT = {"Low": 0.55, "Medium": 0.8, "High": 1.0}
 EVIDENCE_WEIGHT = {"Low": 0.55, "Moderate": 0.8, "Strong": 1.0}
 HIGH_LLM_PROVIDER_ERROR_RATE = 0.5
 SUPPORTED_OUTCOME_SIDES = {"YES", "NO"}
+CONSOLE_FRESH_LLM_CANDIDATE_CAP = 50
 
 logger = get_logger("app.domains.polymarket_auto_live.engine")
 BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS = 60
@@ -3465,6 +3466,13 @@ class BullpenAutoLiveEngine:
                 stage_outputs["llm_candidate_count_before_cap"] = llm_candidate_count_before_cap
                 stage_outputs["max_llm_candidates_per_run"] = max_llm_candidates
                 stage_outputs["llm_candidates_skipped_by_cap"] = len(skipped_llm_markets)
+                stage_outputs["fresh_llm_candidate_cap"] = fresh_llm_candidate_cap
+                stage_outputs["fresh_llm_candidate_count_before_cap"] = (
+                    fresh_llm_candidate_count_before_cap
+                )
+                stage_outputs["fresh_llm_candidates_skipped_by_cap"] = len(
+                    skipped_fresh_llm_markets
+                )
             if reused_existing_llm_outputs:
                 stage_outputs["reused_existing_llm_outputs"] = True
             if current_candidate_index is not None:
@@ -3573,29 +3581,31 @@ class BullpenAutoLiveEngine:
                 )
             )
             candidate_rows_before_llm = len(candidate_rows)
-            llm_markets = [
-                *active_llm_rows,
-                *[
-                    {
-                        "kind": "candidate",
-                        "market": market,
-                        "returns_per_day": returns_per_day,
-                    }
-                    for market, returns_per_day in candidate_rows
-                ],
+            fresh_llm_rows = [
+                {
+                    "kind": "candidate",
+                    "market": market,
+                    "returns_per_day": returns_per_day,
+                }
+                for market, returns_per_day in candidate_rows
             ]
-            llm_candidate_count_before_cap = len(llm_markets)
+            fresh_llm_candidate_count_before_cap = len(fresh_llm_rows)
             configured_max_llm_candidates = max(1, settings.max_llm_candidates_per_run)
-            max_llm_candidates = (
-                100
-                if configured_max_llm_candidates == 20
-                else configured_max_llm_candidates
+            fresh_llm_candidate_cap = min(
+                configured_max_llm_candidates,
+                CONSOLE_FRESH_LLM_CANDIDATE_CAP,
             )
-            if len(llm_markets) > max_llm_candidates:
-                skipped_llm_markets = llm_markets[max_llm_candidates:]
-                llm_markets = llm_markets[:max_llm_candidates]
-            else:
-                skipped_llm_markets = []
+            skipped_fresh_llm_markets = fresh_llm_rows[fresh_llm_candidate_cap:]
+            fresh_llm_rows = fresh_llm_rows[:fresh_llm_candidate_cap]
+            llm_candidate_count_before_cap = (
+                len(active_llm_rows) + fresh_llm_candidate_count_before_cap
+            )
+            llm_markets = [*active_llm_rows, *fresh_llm_rows]
+            max_llm_candidates = max(
+                len(active_llm_rows) + fresh_llm_candidate_cap,
+                configured_max_llm_candidates,
+            )
+            skipped_llm_markets = skipped_fresh_llm_markets
             llm_candidate_count = len(llm_markets)
             set_run_stage_result(
                 run,
@@ -3623,6 +3633,9 @@ class BullpenAutoLiveEngine:
                         "llm_candidate_count_before_cap": llm_candidate_count_before_cap,
                         "max_llm_candidates_per_run": max_llm_candidates,
                         "llm_candidates_skipped_by_cap": len(skipped_llm_markets),
+                        "fresh_llm_candidate_cap": fresh_llm_candidate_cap,
+                        "fresh_llm_candidate_count_before_cap": fresh_llm_candidate_count_before_cap,
+                        "fresh_llm_candidates_skipped_by_cap": len(skipped_fresh_llm_markets),
                         "unsupported_wallet_positions_skipped": len(unsupported_live_wallet_positions),
                         "unsupported_wallet_positions": [
                             {
@@ -3862,7 +3875,7 @@ class BullpenAutoLiveEngine:
                     selected_side is not None
                     and returns_per_day is not None
                 )
-                qualified = qualified_by_thresholds
+                qualified = qualified_by_thresholds and not rules_fail_reason
                 stage_results.append(
                     build_stage_result(
                         stage_number=3,
@@ -3993,6 +4006,9 @@ class BullpenAutoLiveEngine:
                     "llm_candidate_count_before_cap": llm_candidate_count_before_cap if "llm_candidate_count_before_cap" in locals() else llm_candidate_count,
                     "max_llm_candidates_per_run": max_llm_candidates if "max_llm_candidates" in locals() else settings.max_llm_candidates_per_run,
                     "llm_candidates_skipped_by_cap": len(skipped_llm_markets) if "skipped_llm_markets" in locals() else 0,
+                    "fresh_llm_candidate_cap": fresh_llm_candidate_cap if "fresh_llm_candidate_cap" in locals() else CONSOLE_FRESH_LLM_CANDIDATE_CAP,
+                    "fresh_llm_candidate_count_before_cap": fresh_llm_candidate_count_before_cap if "fresh_llm_candidate_count_before_cap" in locals() else candidate_rows_before_llm,
+                    "fresh_llm_candidates_skipped_by_cap": len(skipped_fresh_llm_markets) if "skipped_fresh_llm_markets" in locals() else 0,
                     "qualified_candidate_count": len(qualifying_candidates),
                     "qualified_candidate_market_ids": [
                         context["market"].market_id for context in qualifying_candidates

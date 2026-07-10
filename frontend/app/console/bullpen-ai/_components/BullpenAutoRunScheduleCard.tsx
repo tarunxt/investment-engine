@@ -4370,6 +4370,7 @@ export function BullpenAutoRunScheduleCard({
                 stage.key === "invest" &&
                 investExecutionSteps.length === 0 &&
                 stage.state === "queued" &&
+                workflowView.runStatus !== "running" &&
                 Array.isArray(stage.inputs.llm_review_rows)
                   ? buildQueuedInvestPreviewSteps(
                       investOnlyPlan,
