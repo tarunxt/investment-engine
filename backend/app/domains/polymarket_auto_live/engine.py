@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Callable
+from uuid import NAMESPACE_URL, uuid5
 
 from app.core.logging import get_logger
 from app.domains.bullpen_trade_analysis.helpers import (
@@ -121,6 +122,21 @@ def utc_now() -> datetime:
 
 def utc_now_iso() -> str:
     return utc_now().isoformat()
+
+
+def _auto_live_record_id(
+    prefix: str,
+    *,
+    run_id: str,
+    market_id: str,
+    action: str,
+) -> str:
+    action_slug = str(action).strip().lower().replace("_", "-") or "unknown"
+    digest = uuid5(
+        NAMESPACE_URL,
+        f"bullpen-auto-live:{prefix}:{run_id}:{market_id}:{action_slug}",
+    ).hex
+    return f"{prefix}-{action_slug}-{digest}"
 
 
 def round_money(value: float | None) -> float | None:
@@ -2447,7 +2463,12 @@ class BullpenAutoLiveEngine:
             )
             initial_price_cents = _current_price_for_side(candidate.market, order_side)
             order_plan = BullpenAutoLiveOrderPlan(
-                id=f"order-{candidate.market.market_id}-{candidate.decision_action.lower()}",
+                id=_auto_live_record_id(
+                    "order",
+                    run_id=run.id,
+                    market_id=candidate.market.market_id,
+                    action=candidate.decision_action,
+                ),
                 action=order_action,  # type: ignore[arg-type]
                 side=order_side,  # type: ignore[arg-type]
                 market_id=candidate.market.market_id,
@@ -4457,7 +4478,12 @@ class BullpenAutoLiveEngine:
             order_plan = None
             if include_order_plan and decision_action in {"BUY_NEW", "EXIT"}:
                 order_plan = BullpenAutoLiveOrderPlan(
-                    id=f"order-{run.id}-{market.market_id}-{decision_action.lower()}",
+                    id=_auto_live_record_id(
+                        "order",
+                        run_id=run.id,
+                        market_id=market.market_id,
+                        action=decision_action,
+                    ),
                     action="buy" if decision_action == "BUY_NEW" else "sell",
                     side=side,  # type: ignore[arg-type]
                     market_id=market.market_id,
@@ -4472,7 +4498,12 @@ class BullpenAutoLiveEngine:
                 )
 
             return BullpenAutoLiveDecision(
-                id=f"decision-{run.id}-{market.market_id}-{decision_action.lower()}",
+                id=_auto_live_record_id(
+                    "decision",
+                    run_id=run.id,
+                    market_id=market.market_id,
+                    action=decision_action,
+                ),
                 run_id=run.id,
                 created_at=utc_now_iso(),
                 updated_at=utc_now_iso(),
@@ -6165,7 +6196,12 @@ class BullpenAutoLiveEngine:
                 )
             )
         return BullpenAutoLiveDecision(
-            id=f"decision-{run_id}-{candidate.market.market_id}-{candidate.decision_action.lower()}",
+            id=_auto_live_record_id(
+                "decision",
+                run_id=run_id,
+                market_id=candidate.market.market_id,
+                action=candidate.decision_action,
+            ),
             run_id=run_id,
             created_at=utc_now_iso(),
             updated_at=utc_now_iso(),

@@ -1706,8 +1706,12 @@ async def test_console_profile_reviews_all_stage1_events_before_building_ranked_
 @pytest.mark.anyio
 async def test_console_profile_redeems_claimable_positions_without_llm(monkeypatch):
     fixed_now = datetime(2026, 7, 8, 12, 0, tzinfo=UTC)
+    long_market_slug = (
+        "gpt-56-released-by-july-7-2026-with-an-extra-long-market-identifier-"
+        "to-cover-stage-3-persistence"
+    )
     claimable_position = _console_wallet_position(
-        slug="gpt-56-released-by-july-7-2026",
+        slug=long_market_slug,
         market_title="GPT-5.6 released by July 7, 2026?",
         current_price_cents=100,
         shares=2.353,
@@ -1812,6 +1816,8 @@ async def test_console_profile_redeems_claimable_positions_without_llm(monkeypat
     )
     assert invest_stage.outputs["redeem_planned"] == 1
     assert invest_stage.outputs["redeem_submitted"] == 1
+    assert len(redeem_decision.id) <= 64
+    assert len(redeem_decision.order_plan.id) <= 64
     assert redeem_decision.order_plan.status == "submitted"
 
 
