@@ -205,10 +205,10 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.doesNotMatch(autoRunProgressSource, /Step 2 invests in the Stage 3 planned orders/);
   assert.match(autoRunCardSource, /InvestExecutionStepsSummary/);
   assert.match(autoRunCardSource, /execution_steps/);
-  assert.match(autoRunCardSource, /6:00 AM IST/);
-  assert.match(autoRunCardSource, /12:00 PM IST/);
-  assert.match(autoRunCardSource, /6:00 PM IST/);
-  assert.match(autoRunCardSource, /12:00 AM IST/);
+  assert.match(autoRunCardSource, /6 AM/);
+  assert.match(autoRunCardSource, /12 PM/);
+  assert.match(autoRunCardSource, /6 PM/);
+  assert.match(autoRunCardSource, /12 AM IST/);
   assert.match(autoRunCardSource, /Background execution monitor/);
   assert.match(autoRunCardSource, /Worker stages/);
   assert.match(autoRunCardSource, /refreshes every 4 seconds/);
@@ -237,7 +237,21 @@ test("Bullpen x AI auto-run card exposes a saved per-trade amount input", () => 
   assert.match(autoRunCardSource, /Trade amount per new opportunity/);
   assert.match(autoRunCardSource, /console_order_usd/);
   assert.match(autoRunCardSource, /Future Bullpen x AI trades and automations will use/);
-  assert.match(autoRunCardSource, /Default is \$5\./);
+  assert.match(autoRunCardSource, /DEFAULT_CONSOLE_ORDER_USD = 5/);
+});
+
+test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel", () => {
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(autoRunCardSource, /onClick=\{\(\) => setScheduleStartInput\("Now"\)\}/);
+  assert.match(autoRunCardSource, /setScheduleStartInput\("Now"\);/);
+  assert.match(autoRunCardSource, /Run and Enable Auto Runs/);
 });
 
 test("Bullpen x AI run-now request can reuse the current scan snapshot before manual LLM selection exists", () => {
