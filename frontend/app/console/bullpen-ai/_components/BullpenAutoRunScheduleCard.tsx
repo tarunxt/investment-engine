@@ -796,6 +796,43 @@ function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision) {
   );
 }
 
+
+function isSubmittedOrSuccessfulOrderPlan(
+  orderPlan: BullpenAutoLiveDecision["order_plan"],
+) {
+  if (!orderPlan) return false;
+  const status = orderPlan.status?.trim().toLowerCase();
+  if (status === "submitted") return true;
+
+  const detail = orderPlan.detail?.trim() ?? "";
+  const response = orderPlan.execution_response?.trim() ?? "";
+  const successText = `${detail}\n${response}`;
+  return (
+    /successfully|submitted|filled|redeemed|claimed|executed/i.test(successText) &&
+    !/failed|refusing|cancelled|canceled|skipped|not submitted/i.test(successText)
+  );
+}
+
+function isSubmittedOrSuccessfulDecision(decision: BullpenAutoLiveDecision) {
+  return isSubmittedOrSuccessfulOrderPlan(decision.order_plan);
+}
+
+function getRunSummaryLineItems(summary: string | null | undefined) {
+  const text = summary?.trim();
+  if (!text) return [];
+
+  const normalized = text
+    .replace(/\s+([✗✓✔])\s+/g, "\n$1 ")
+    .replace(/\s+(?=0x[a-f0-9]{6,}:)/gi, "\n")
+    .replace(/:\s+(\[(?:warn|warning|error|fail|info)\])/gi, ":\n$1")
+    .replace(/\s+(?=\[(?:warn|warning|error|fail|info)\])/gi, "\n");
+
+  return normalized
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function buildLatestSubmittedBuyTimestampsByMarketId(
   decisions: BullpenAutoLiveDecision[],
 ) {
@@ -2310,14 +2347,17 @@ function RunDetailDialog({
   onOpenScanFilters,
   onOpenStageTwoInvestEvents,
   onOpenStageTwoLlmRunDetails,
+  onOpenMetricDetails,
 }: {
   state: RunDetailDialogState;
   onClose: () => void;
   onOpenScanFilters?: () => void;
   onOpenStageTwoInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
+  onOpenMetricDetails?: (run: BullpenAutoLiveRun, kind: InvestMetricDialogKind) => void;
 }) {
   const { run, decisions } = state;
+  const summaryLineItems = getRunSummaryLineItems(run.summary);
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4">
       <div className="flex max-h-[90vh] w-full max-w-[92rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
@@ -2326,9 +2366,22 @@ function RunDetailDialog({
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               Run Details
             </p>
-            <h2 className="max-w-5xl text-base font-semibold leading-6 text-slate-950 line-clamp-3">
-              {run.summary || "Run summary unavailable."}
-            </h2>
+            {summaryLineItems.length > 0 ? (
+              <div className="max-w-5xl space-y-2">
+                {summaryLineItems.map((item, index) => (
+                  <div
+                    key={`${item}-${index}`}
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold leading-5 text-slate-950"
+                  >
+                    {item}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <h2 className="max-w-5xl text-base font-semibold leading-6 text-slate-950">
+                Run summary unavailable.
+              </h2>
+            )}
             <p className="text-xs text-slate-500">Run {run.id}</p>
           </div>
           <button
@@ -2345,14 +2398,29 @@ function RunDetailDialog({
             <InvestMetricSummaryCard
               label="Decisions"
               value={run.decisions_count}
+              onClick={
+                onOpenMetricDetails
+                  ? () => onOpenMetricDetails(run, "decisions")
+                  : undefined
+              }
             />
             <InvestMetricSummaryCard
               label="Planned"
               value={run.orders_planned}
+              onClick={
+                onOpenMetricDetails
+                  ? () => onOpenMetricDetails(run, "planned")
+                  : undefined
+              }
             />
             <InvestMetricSummaryCard
               label="Submitted"
               value={run.orders_submitted}
+              onClick={
+                onOpenMetricDetails
+                  ? () => onOpenMetricDetails(run, "submitted")
+                  : undefined
+              }
             />
           </div>
           {run.error_message ? (
@@ -2412,7 +2480,7 @@ function SubmittedExecutionEventsTable({
   decisions: BullpenAutoLiveDecision[];
 }) {
   const submittedDecisions = decisions.filter(
-    (decision) => decision.order_plan?.status === "submitted",
+    (decision) => isSubmittedOrSuccessfulDecision(decision),
   );
   const submittedSellCount = submittedDecisions.filter(
     (decision) =>
@@ -2806,11 +2874,11 @@ function InvestMetricDetailsDialog({
     isProcessedInvestOrderPlan(decision.order_plan),
   ).length;
   const filteredSubmittedCount = rows.filter(
-    (decision) => decision.order_plan?.status === "submitted",
+    (decision) => isSubmittedOrSuccessfulDecision(decision),
   ).length;
   const filteredUnsubmittedRows = rows.filter(
     (decision) =>
-      decision.order_plan && decision.order_plan.status !== "submitted",
+      decision.order_plan && !isSubmittedOrSuccessfulDecision(decision),
   );
   const filteredFailedRows = filteredUnsubmittedRows.filter(
     (decision) =>
@@ -3958,12 +4026,19 @@ export function BullpenAutoRunScheduleCard({
     });
   };
   const openRunDetailDialog = (run: BullpenAutoLiveRun) => {
+    const stage =
+      buildBullpenAutoRunWorkflowView(run).stages.find(
+        (workflowStage) => workflowStage.key === "invest",
+      ) ?? null;
     setRunDetailDialog({
       run,
-      decisions:
-        summary?.recent_decisions.filter(
-          (decision) => decision.run_id === run.id,
-        ) ?? [],
+      decisions: mergeInvestStageDecisionRows({
+        stage,
+        persistedDecisions:
+          summary?.recent_decisions.filter(
+            (decision) => decision.run_id === run.id,
+          ) ?? [],
+      }),
     });
   };
   const latestCompletedRun =
@@ -5227,6 +5302,7 @@ export function BullpenAutoRunScheduleCard({
               setStageTwoInvestEventsDialog({ decisions: investDecisions })
             }
             onOpenStageTwoLlmRunDetails={setStageTwoLlmRunDialog}
+            onOpenMetricDetails={openRunInvestMetricDialog}
           />
         ) : null}
 
@@ -5248,7 +5324,7 @@ export function BullpenAutoRunScheduleCard({
           <InvestMetricDetailsDialog
             state={investMetricDialog}
             onClose={() => setInvestMetricDialog(null)}
-            onSelectKind={openInvestMetricDialog}
+            onSelectKind={(kind) => openRunInvestMetricDialog(investMetricDialog.run, kind)}
             onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
             onOpenInvestEligibilityInfo={() =>
               setIsInvestEligibilityInfoDialogOpen(true)
