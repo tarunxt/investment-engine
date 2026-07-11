@@ -2760,6 +2760,68 @@ function Stage3DecisionTable({
   );
 }
 
+type SubmittedExecutionStatus = "not-submitted" | "submitted" | "in-progress" | "partial";
+
+function getSubmittedExecutionStatus(totalOrders: number, submittedOrders: number): SubmittedExecutionStatus {
+  if (totalOrders < 1) return "in-progress";
+  if (submittedOrders >= totalOrders) return "submitted";
+  if (submittedOrders < 1) return "not-submitted";
+  return "partial";
+}
+
+function SubmittedExecutionStatusIcon({ status }: { status: SubmittedExecutionStatus }) {
+  const config: Record<SubmittedExecutionStatus, { label: string; className: string; icon: ReactNode }> = {
+    "not-submitted": {
+      label: "All not submitted",
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+      icon: <X className="h-3.5 w-3.5 stroke-[3]" />,
+    },
+    submitted: {
+      label: "All submitted",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      icon: <CheckCircle2 className="h-3.5 w-3.5 stroke-[2.75]" />,
+    },
+    "in-progress": {
+      label: "In progress",
+      className: "border-sky-200 bg-sky-50 text-sky-700",
+      icon: <Loader2 className="h-3.5 w-3.5 animate-spin stroke-[2.75]" />,
+    },
+    partial: {
+      label: "Partial",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+      icon: <Square className="h-3.5 w-3.5 fill-current stroke-[2.75]" />,
+    },
+  };
+  const { label, className, icon } = config[status];
+
+  return (
+    <span
+      className={`inline-flex h-6 w-6 items-center justify-center rounded-full border ${className}`}
+      aria-label={label}
+      title={label}
+    >
+      {icon}
+    </span>
+  );
+}
+
+function SubmittedExecutionCountPill({
+  children,
+  className,
+  status,
+}: {
+  children: ReactNode;
+  className: string;
+  status?: SubmittedExecutionStatus;
+}) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 ${className}`}>
+      <span>{children}</span>
+      {status ? <SubmittedExecutionStatusIcon status={status} /> : null}
+    </span>
+  );
+}
+
 function SubmittedExecutionEventsTable({
   decisions,
   onOpenPlannedOrderDetail,
@@ -2770,9 +2832,13 @@ function SubmittedExecutionEventsTable({
   onOpenLlmOdds: (decision: BullpenAutoLiveDecision) => void;
 }) {
   const submittedDecisions = decisions.filter((decision) => isSubmittedOrSuccessfulDecision(decision));
+  const exitDecisions = decisions.filter((decision) => decision.order_plan?.action === "sell" || decision.order_plan?.action === "redeem");
+  const buyDecisions = decisions.filter((decision) => decision.order_plan?.action === "buy");
   const submittedExitDecisions = submittedDecisions.filter((decision) => decision.order_plan?.action === "sell" || decision.order_plan?.action === "redeem");
   const submittedBuyDecisions = submittedDecisions.filter((decision) => decision.order_plan?.action === "buy");
-  const plannedButNotSubmittedBuys = decisions.filter((decision) => decision.order_plan?.action === "buy" && !isSubmittedOrSuccessfulDecision(decision));
+  const plannedButNotSubmittedBuys = buyDecisions.filter((decision) => !isSubmittedOrSuccessfulDecision(decision));
+  const exitStatus = getSubmittedExecutionStatus(exitDecisions.length, submittedExitDecisions.length);
+  const buyStatus = getSubmittedExecutionStatus(buyDecisions.length, submittedBuyDecisions.length);
 
   return (
     <section className="mt-5 overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-sky-50 to-violet-50">
@@ -2782,9 +2848,15 @@ function SubmittedExecutionEventsTable({
           <h3 className="mt-1 text-sm font-semibold text-slate-950">Step 1 Exit and Step 2 Buy execution results</h3>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-semibold">
-          <span className="rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-emerald-800">{submittedDecisions.length.toLocaleString("en-IN")} total</span>
-          <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-800">{submittedExitDecisions.length.toLocaleString("en-IN")} exits</span>
-          <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-800">{submittedBuyDecisions.length.toLocaleString("en-IN")} buys</span>
+          <SubmittedExecutionCountPill className="border-emerald-200 bg-white/80 text-emerald-800">
+            {submittedDecisions.length.toLocaleString("en-IN")} total
+          </SubmittedExecutionCountPill>
+          <SubmittedExecutionCountPill className="border-rose-200 bg-rose-50 text-rose-800" status={exitStatus}>
+            {submittedExitDecisions.length.toLocaleString("en-IN")} exits
+          </SubmittedExecutionCountPill>
+          <SubmittedExecutionCountPill className="border-blue-200 bg-blue-50 text-blue-800" status={buyStatus}>
+            {submittedBuyDecisions.length.toLocaleString("en-IN")} buys
+          </SubmittedExecutionCountPill>
         </div>
       </div>
       <div className="space-y-4 p-4">
