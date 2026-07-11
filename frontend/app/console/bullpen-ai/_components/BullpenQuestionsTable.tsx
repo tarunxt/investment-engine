@@ -54,7 +54,7 @@ export type BullpenTableSortState = {
   direction: BullpenTableSortDirection;
 };
 
-type ResizableBullpenTableColumnId = Exclude<BullpenTableColumnId, "select">;
+type ResizableBullpenTableColumnId = Exclude<BullpenTableColumnId, "select" | "serialNumber">;
 
 type ResizeState = {
   columnId: ResizableBullpenTableColumnId;
@@ -428,10 +428,19 @@ function LlmOddsDisplay({
   value: number | null;
 }) {
   const reviewState = value === null ? null : getBullpenLlmReviewState(question);
+  const fetchError = value === null ? question.llmNotes : null;
 
   return (
-    <span className="inline-flex items-center gap-1">
+    <span
+      className="inline-flex max-w-[10rem] items-center gap-1"
+      title={fetchError || undefined}
+    >
       <span>{formatOdds(value)}</span>
+      {fetchError ? (
+        <span className="truncate text-[11px] font-medium text-rose-600">
+          {fetchError}
+        </span>
+      ) : null}
       {reviewState ? (
         <AlertTriangle
           aria-label={reviewState.label}
@@ -621,6 +630,7 @@ export function BullpenQuestionsTable({
                   className="h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </th>
+              <th className="whitespace-nowrap px-4 py-3 text-center">S. No</th>
               <ResizableColumnHeader
                 columnId="question"
                 label="Question"
@@ -790,7 +800,7 @@ export function BullpenQuestionsTable({
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {rows.length > 0 ? (
-              rows.map((question) => {
+              rows.map((question, rowIndex) => {
                 const hasLlmAnalysis = hasBullpenLlmAnalysis(question);
 
                 return (
@@ -803,6 +813,9 @@ export function BullpenQuestionsTable({
                         onChange={() => onToggleQuestion(question.id)}
                         className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
                       />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-600">
+                      {rowIndex + 1}
                     </td>
                     <td className="px-4 py-3 font-medium text-slate-900">
                       <div className="break-words leading-5">{question.question}</div>
@@ -911,7 +924,7 @@ export function BullpenQuestionsTable({
             ) : (
               <tr>
                 <td
-                  colSpan={14}
+                  colSpan={15}
                   className="px-4 py-12 text-center text-slate-500"
                 >
                   {isLoading ? "Scanning Bullpen..." : emptyMessage}

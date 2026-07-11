@@ -80,16 +80,112 @@ function isLikelyUrl(value: string) {
 function StatCard({
   label,
   value,
+  onClick,
 }: {
   label: string;
   value: string;
+  onClick?: () => void;
 }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+  const content = (
+    <>
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
       <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-indigo-200 hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+      {content}
+    </div>
+  );
+}
+
+
+type MetricExplanation = {
+  label: string;
+  value: string;
+  meaning: string;
+  rationale: string;
+};
+
+function getMetricExplanation(
+  label: string,
+  value: string,
+  question: BullpenQuestionRow,
+): MetricExplanation {
+  const modelCount = question.llmBreakdown.length.toLocaleString();
+  const consensusMethod = formatDisagreementLabel(
+    computeBullpenLlmConsensus(question.llmBreakdown).consensusMethod,
+  );
+  const spread = formatSpread(question.llmSpreadYesOdds);
+  const median = formatOdds(question.llmMedianYesOdds);
+  const trimmed = formatOdds(question.llmTrimmedMeanYesOdds);
+  const explanations: Record<string, string> = {
+    "Consensus Yes": "Final robust Yes probability used by the table after combining usable model outputs.",
+    "Consensus No": "Final robust No probability paired with Consensus Yes.",
+    "Average Yes": "Simple average of usable per-model Yes odds before robust outlier handling.",
+    "Median Yes": "Middle usable Yes odds estimate; this is resistant to one-off outliers.",
+    "Trimmed Mean Yes": "Average after trimming extreme usable Yes estimates when enough outputs exist.",
+    IQR: "Interquartile range of usable Yes estimates, showing middle-spread disagreement.",
+    "Trimmed Range": "Range after excluding extremes where possible, used to separate true disagreement from outliers.",
+    "Min / Max Yes": "Lowest and highest usable model Yes probabilities observed in this scan.",
+    Spread: "Raw max-minus-min spread across usable model Yes probabilities.",
+    "Disagreement Level": "Low/Medium/High summary of how far usable model estimates diverge.",
+    "Consensus Signal": "Category assigned from model camps, robust center, and outlier checks.",
+    "Current Yes vs Consensus": "Current market Yes odds minus the LLM consensus Yes odds.",
+    "Model Outputs": "Number of per-model LLM outputs saved for this event.",
+    "Rationale Mismatches": "Count of outputs where the written rationale appears inconsistent with the numeric odds.",
+    "Evidence Status": "Consensus label for whether available evidence is strong, moderate, low, or conflicting.",
+    "Event State": "Consensus label for whether the event appears resolved, scheduled, conflicting, or uncertain.",
+  };
+
+  return {
+    label,
+    value,
+    meaning: explanations[label] || "This tile summarizes one part of the latest LLM odds calculation.",
+    rationale: `This event has ${modelCount} model output(s). The consensus method is ${consensusMethod || "—"}; median Yes is ${median}, trimmed mean Yes is ${trimmed}, and raw spread is ${spread}. The tile value is shown as ${value} because it was derived from the latest saved breakdown for this event.`,
+  };
+}
+
+function MetricExplanationDialog({
+  explanation,
+  onClose,
+}: {
+  explanation: MetricExplanation;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/35 p-4">
+      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-24px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Metric explanation</p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-950">{explanation.label}</h3>
+            <p className="mt-1 text-2xl font-semibold text-slate-950">{explanation.value}</p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-100" aria-label="Close metric explanation">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
+          <p><span className="font-semibold text-slate-950">Meaning:</span> {explanation.meaning}</p>
+          <p><span className="font-semibold text-slate-950">Why this event is in this category:</span> {explanation.rationale}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -203,6 +299,8 @@ export function BullpenLlmBreakdownDialog({
   onClose,
 }: BullpenLlmBreakdownDialogProps) {
   const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
+  const [metricExplanation, setMetricExplanation] =
+    useState<MetricExplanation | null>(null);
   const reviewState = getBullpenLlmReviewState(question);
   const disagreementLabel = getBullpenLlmDisagreementCategoryLabel(
     question.llmDisagreementCategory,
@@ -229,30 +327,37 @@ export function BullpenLlmBreakdownDialog({
               <StatCard
                 label="Consensus Yes"
                 value={formatOdds(question.llmYesOdds)}
+                onClick={() => setMetricExplanation(getMetricExplanation("Consensus Yes", formatOdds(question.llmYesOdds), question))}
               />
               <StatCard
                 label="Consensus No"
                 value={formatOdds(question.llmNoOdds)}
+                onClick={() => setMetricExplanation(getMetricExplanation("Consensus No", formatOdds(question.llmNoOdds), question))}
               />
               <StatCard
                 label="Average Yes"
                 value={formatOdds(question.llmAverageYesOdds)}
+                onClick={() => setMetricExplanation(getMetricExplanation("Average Yes", formatOdds(question.llmAverageYesOdds), question))}
               />
               <StatCard
                 label="Median Yes"
                 value={formatOdds(question.llmMedianYesOdds)}
+                onClick={() => setMetricExplanation(getMetricExplanation("Median Yes", formatOdds(question.llmMedianYesOdds), question))}
               />
               <StatCard
                 label="Trimmed Mean Yes"
                 value={formatOdds(question.llmTrimmedMeanYesOdds)}
+                onClick={() => setMetricExplanation(getMetricExplanation("Trimmed Mean Yes", formatOdds(question.llmTrimmedMeanYesOdds), question))}
               />
               <StatCard
                 label="IQR"
                 value={formatSpread(question.llmIqrYesOdds)}
+                onClick={() => setMetricExplanation(getMetricExplanation("IQR", formatSpread(question.llmIqrYesOdds), question))}
               />
               <StatCard
                 label="Trimmed Range"
                 value={formatSpread(question.llmTrimmedRangeYesOdds)}
+                onClick={() => setMetricExplanation(getMetricExplanation("Trimmed Range", formatSpread(question.llmTrimmedRangeYesOdds), question))}
               />
               <StatCard
                 label="Min / Max Yes"
@@ -260,18 +365,22 @@ export function BullpenLlmBreakdownDialog({
                   question.llmMinYesOdds,
                   question.llmMaxYesOdds,
                 )}
+                onClick={() => setMetricExplanation(getMetricExplanation("Min / Max Yes", formatRange(question.llmMinYesOdds, question.llmMaxYesOdds), question))}
               />
               <StatCard
                 label="Spread"
                 value={formatSpread(question.llmSpreadYesOdds)}
+                onClick={() => setMetricExplanation(getMetricExplanation("Spread", formatSpread(question.llmSpreadYesOdds), question))}
               />
               <StatCard
                 label="Disagreement Level"
                 value={question.llmDisagreementLevel || "—"}
+                onClick={() => setMetricExplanation(getMetricExplanation("Disagreement Level", question.llmDisagreementLevel || "—", question))}
               />
               <StatCard
                 label="Consensus Signal"
                 value={disagreementLabel || "—"}
+                onClick={() => setMetricExplanation(getMetricExplanation("Consensus Signal", disagreementLabel || "—", question))}
               />
               <StatCard
                 label="Current Yes vs Consensus"
@@ -285,22 +394,40 @@ export function BullpenLlmBreakdownDialog({
                         },
                       )
                 }
+                onClick={() =>
+                  setMetricExplanation(
+                    getMetricExplanation(
+                      "Current Yes vs Consensus",
+                      question.currentVsLlmOddsDifference === null
+                        ? "—"
+                        : question.currentVsLlmOddsDifference.toLocaleString(
+                            undefined,
+                            { maximumFractionDigits: 2 },
+                          ),
+                      question,
+                    ),
+                  )
+                }
               />
               <StatCard
                 label="Model Outputs"
                 value={question.llmBreakdown.length.toLocaleString()}
+                onClick={() => setMetricExplanation(getMetricExplanation("Model Outputs", question.llmBreakdown.length.toLocaleString(), question))}
               />
               <StatCard
                 label="Rationale Mismatches"
                 value={question.llmRationaleMismatchCount.toLocaleString()}
+                onClick={() => setMetricExplanation(getMetricExplanation("Rationale Mismatches", question.llmRationaleMismatchCount.toLocaleString(), question))}
               />
               <StatCard
                 label="Evidence Status"
                 value={formatDisagreementLabel(question.evidenceStatus)}
+                onClick={() => setMetricExplanation(getMetricExplanation("Evidence Status", formatDisagreementLabel(question.evidenceStatus), question))}
               />
               <StatCard
                 label="Event State"
                 value={formatDisagreementLabel(question.eventState)}
+                onClick={() => setMetricExplanation(getMetricExplanation("Event State", formatDisagreementLabel(question.eventState), question))}
               />
             </div>
           </div>
@@ -552,6 +679,12 @@ export function BullpenLlmBreakdownDialog({
         <HighDisagreementCriteriaDialog
           question={question}
           onClose={() => setIsCriteriaOpen(false)}
+        />
+      ) : null}
+      {metricExplanation ? (
+        <MetricExplanationDialog
+          explanation={metricExplanation}
+          onClose={() => setMetricExplanation(null)}
         />
       ) : null}
     </div>

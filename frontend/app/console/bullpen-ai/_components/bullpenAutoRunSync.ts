@@ -367,6 +367,32 @@ function buildReviewedCandidateBreakdown(
     );
 }
 
+
+function getLatestLlmFetchError(reviewedCandidate: Record<string, unknown>) {
+  const directError =
+    readString(reviewedCandidate.llm_error) ??
+    readString(reviewedCandidate.error) ??
+    readString(reviewedCandidate.review_error);
+  if (directError) return directError;
+
+  const outputs = Array.isArray(reviewedCandidate.llm_outputs)
+    ? reviewedCandidate.llm_outputs
+    : [];
+  const outputErrors = outputs
+    .map((item) => (isRecord(item) ? readString(item.error) : null))
+    .filter((item): item is string => Boolean(item));
+
+  if (outputErrors.length > 0) {
+    return outputErrors.slice(0, 2).join("; ");
+  }
+
+  if (outputs.length === 0) {
+    return "Latest scan did not return LLM outputs for this event.";
+  }
+
+  return "Latest scan returned no usable LLM odds for this event.";
+}
+
 function latestBreakdownTimestamp(
   llmBreakdown: BullpenQuestionLlmBreakdownItem[],
 ) {
@@ -570,47 +596,48 @@ function applyStage2OutputsToSnapshot({
     const nextCloseTime = readString(reviewedCandidate.close_time) ?? question.closeTime;
     const llmBreakdown = buildReviewedCandidateBreakdown(reviewedCandidate);
     const consensus = computeBullpenLlmConsensus(llmBreakdown);
-    const llmCompletedAt =
-      latestBreakdownTimestamp(llmBreakdown) ??
-      stage2?.completed_at ??
-      question.llmCompletedAt;
+    const llmCompletedAt = latestBreakdownTimestamp(llmBreakdown) ?? stage2?.completed_at ?? null;
+    const latestLlmFetchError = getLatestLlmFetchError(reviewedCandidate);
+    const latestLlmYesOdds =
+      readNumber(reviewedCandidate.fair_yes_probability_pct) ??
+      consensus.consensusYesOdds;
+    const latestLlmNoOdds =
+      readNumber(reviewedCandidate.fair_no_probability_pct) ??
+      consensus.consensusNoOdds;
+    const hasLatestLlmOdds = latestLlmYesOdds !== null || latestLlmNoOdds !== null;
     const nextQuestion = createBullpenQuestionRow({
       ...question,
       marketUrl: readString(reviewedCandidate.market_url) ?? question.marketUrl,
       category: readCandidateCategory(reviewedCandidate, question.category),
       closeTime: nextCloseTime,
-      llmYesOdds:
-        readNumber(reviewedCandidate.fair_yes_probability_pct) ??
-        consensus.consensusYesOdds ??
-        question.llmYesOdds,
-      llmNoOdds:
-        readNumber(reviewedCandidate.fair_no_probability_pct) ??
-        consensus.consensusNoOdds ??
-        question.llmNoOdds,
+      llmYesOdds: latestLlmYesOdds,
+      llmNoOdds: latestLlmNoOdds,
       llmDisagreementLevel:
         readDisagreementLevel(reviewedCandidate.disagreement_level) ??
         consensus.llmDisagreementLevel ??
-        question.llmDisagreementLevel,
+        null,
       llmDisagreementCategory:
         readDisagreementCategory(reviewedCandidate.disagreement_category) ??
         consensus.llmDisagreementCategory ??
-        question.llmDisagreementCategory,
+        null,
       adjudicationRequired:
         readBoolean(reviewedCandidate.adjudication_required) ??
-        question.adjudicationRequired,
+        false,
       evidenceStatus:
-        readString(reviewedCandidate.evidence_status) ?? question.evidenceStatus,
-      eventState: readString(reviewedCandidate.event_state) ?? question.eventState,
+        readString(reviewedCandidate.evidence_status) ?? null,
+      eventState: readString(reviewedCandidate.event_state) ?? null,
       llmNotes:
         llmBreakdown.length > 0
           ? summarizeBullpenLlmNotes(llmBreakdown)
-          : question.llmNotes,
+          : hasLatestLlmOdds
+            ? null
+            : latestLlmFetchError,
       llmProvider:
-        llmBreakdown.length === 1 ? llmBreakdown[0]?.provider ?? null : question.llmProvider,
+        llmBreakdown.length === 1 ? llmBreakdown[0]?.provider ?? null : null,
       llmModel:
-        llmBreakdown.length === 1 ? llmBreakdown[0]?.model ?? null : question.llmModel,
+        llmBreakdown.length === 1 ? llmBreakdown[0]?.model ?? null : null,
       llmCompletedAt,
-      llmBreakdown: llmBreakdown.length > 0 ? llmBreakdown : question.llmBreakdown,
+      llmBreakdown,
       daysUntilClose:
         calculateDaysUntilClose(nextCloseTime) ?? question.daysUntilClose,
     });
