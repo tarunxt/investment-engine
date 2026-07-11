@@ -3081,6 +3081,133 @@ function SubmittedExecutionEventsTable({
 }
 
 
+type RunHistoryMetricTilesProps = {
+  run: BullpenAutoLiveRun;
+  decisions: BullpenAutoLiveDecision[];
+  onOpenMetricDetails: (kind: InvestMetricDialogKind) => void;
+};
+
+function getInvestFailureCode(decisions: BullpenAutoLiveDecision[]) {
+  const failureText = decisions
+    .map((decision) => `${decision.order_plan?.detail ?? ""}\n${decision.order_plan?.execution_response ?? ""}`)
+    .join("\n")
+    .trim();
+  if (!failureText) return null;
+  const quotedReason = failureText.match(/reason\s*[:=]\s*["']([^"']+)["']/i)?.[1];
+  if (quotedReason) return quotedReason;
+  const snakeCode = failureText.match(/\b([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\b/i)?.[1];
+  return snakeCode ?? null;
+}
+
+function RunHistoryMetricButton({
+  label,
+  value,
+  onClick,
+  tone = "slate",
+}: {
+  label: string;
+  value: number;
+  onClick: () => void;
+  tone?: "slate" | "rose" | "blue" | "emerald" | "amber";
+}) {
+  const toneClass = {
+    slate: "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
+    rose: "border-rose-200 bg-rose-50 text-rose-800 hover:border-rose-300 hover:bg-rose-100",
+    blue: "border-blue-200 bg-blue-50 text-blue-800 hover:border-blue-300 hover:bg-blue-100",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100",
+    amber: "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100",
+  }[tone];
+
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${toneClass}`}
+    >
+      <span className="text-sm tabular-nums text-slate-950">{value.toLocaleString("en-IN")}</span>{" "}
+      {label}
+    </button>
+  );
+}
+
+function RunHistoryMetricTiles({
+  run,
+  decisions,
+  onOpenMetricDetails,
+}: RunHistoryMetricTilesProps) {
+  const availableForClaimCount = getInvestMetricRows("sell-redeem", decisions).length;
+  const eventOutOfTopTenCount = getInvestMetricRows("sell-ranking-llm", decisions).length;
+  const forcedExitCount = getInvestMetricRows("sell-forced-exit", decisions).length;
+  const newEventsToInvestCount = getInvestMetricRows("buy-planned", decisions).length;
+  const newEventsInvestedCount = getInvestMetricRows("buy-submitted", decisions).length;
+  const investmentFailedRows = getInvestMetricRows("buy-planned", decisions).filter(
+    (decision) =>
+      decision.order_plan &&
+      !isSubmittedOrSuccessfulDecision(decision) &&
+      ["failed", "cancelled", "skipped"].includes(decision.order_plan.status),
+  );
+  const failureCode = getInvestFailureCode(investmentFailedRows);
+
+  return (
+    <div className="mt-3 space-y-3 text-xs" onClick={(event) => event.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => onOpenMetricDetails("decisions")}
+        className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-800 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
+      >
+        {run.decisions_count.toLocaleString("en-IN")} decisions |
+      </button>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
+          <RunHistoryMetricButton label="Planned" value={run.orders_planned} onClick={() => onOpenMetricDetails("planned")} tone="amber" />
+          <div className="mt-3 grid gap-2">
+            <div className="rounded-xl border border-rose-100 bg-white/85 p-3">
+              <p className="font-semibold text-rose-900">Step 1 of 2 Event Exits</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <RunHistoryMetricButton label="Available for Claim" value={availableForClaimCount} onClick={() => onOpenMetricDetails("sell-redeem")} tone="emerald" />
+                <RunHistoryMetricButton label="Event out of Top 10" value={eventOutOfTopTenCount} onClick={() => onOpenMetricDetails("sell-ranking-llm")} tone="rose" />
+                <RunHistoryMetricButton label="Forced Exit" value={forcedExitCount} onClick={() => onOpenMetricDetails("sell-forced-exit")} tone="rose" />
+              </div>
+            </div>
+            <div className="rounded-xl border border-blue-100 bg-white/85 p-3">
+              <p className="font-semibold text-blue-900">Step 2</p>
+              <div className="mt-2">
+                <RunHistoryMetricButton label="New Events to Invest in" value={newEventsToInvestCount} onClick={() => onOpenMetricDetails("buy-planned")} tone="blue" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3">
+          <RunHistoryMetricButton label="Submitted" value={run.orders_submitted} onClick={() => onOpenMetricDetails("submitted")} tone="emerald" />
+          <div className="mt-3 grid gap-2">
+            <div className="rounded-xl border border-rose-100 bg-white/85 p-3">
+              <p className="font-semibold text-rose-900">Step 1 of 2 Event Exits</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <RunHistoryMetricButton label="Available for Claim" value={availableForClaimCount} onClick={() => onOpenMetricDetails("sell-redeem")} tone="emerald" />
+                <RunHistoryMetricButton label="Event out of Top 10" value={eventOutOfTopTenCount} onClick={() => onOpenMetricDetails("sell-ranking-llm")} tone="rose" />
+                <RunHistoryMetricButton label="Forced Exit" value={forcedExitCount} onClick={() => onOpenMetricDetails("sell-forced-exit")} tone="rose" />
+              </div>
+            </div>
+            <div className="rounded-xl border border-blue-100 bg-white/85 p-3">
+              <p className="font-semibold text-blue-900">Step 2</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <RunHistoryMetricButton label="New Events Invested in" value={newEventsInvestedCount} onClick={() => onOpenMetricDetails("buy-submitted")} tone="blue" />
+                <RunHistoryMetricButton label={`Investments failed${failureCode ? ` (${failureCode})` : ""}`} value={investmentFailedRows.length} onClick={() => onOpenMetricDetails("buy-planned")} tone="rose" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function StageTwoLlmRunDetailsDialog({
   state,
   onClose,
@@ -4635,6 +4762,7 @@ export function BullpenAutoRunScheduleCard({
                 variant="outline"
                 onClick={handleStopAutoRuns}
                 disabled={action !== null}
+                className="border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100 hover:text-rose-800 disabled:opacity-60"
               >
                 {action === "stop" ? (
                   <>
@@ -5581,6 +5709,17 @@ export function BullpenAutoRunScheduleCard({
                         run.triggered_by === "scheduler"
                           ? "Auto Run"
                           : "Manual Run";
+                      const stage =
+                        buildBullpenAutoRunWorkflowView(run).stages.find(
+                          (workflowStage) => workflowStage.key === "invest",
+                        ) ?? null;
+                      const runDecisions = mergeInvestStageDecisionRows({
+                        stage,
+                        persistedDecisions:
+                          summary?.recent_decisions.filter(
+                            (decision) => decision.run_id === run.id,
+                          ) ?? [],
+                      });
                       return (
                         <div
                           key={run.id}
@@ -5611,47 +5750,13 @@ export function BullpenAutoRunScheduleCard({
                               </p>
                               <p className="mt-1 text-xs text-slate-600">Run {run.id}</p>
                             </div>
-                            <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openRunInvestMetricDialog(run, "planned");
-                                }}
-                                className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50"
-                              >
-                                <div className="font-semibold text-slate-950">
-                                  {run.decisions_count}
-                                </div>
-                                <div className="text-slate-500">decisions</div>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openRunInvestMetricDialog(run, "planned");
-                                }}
-                                className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50"
-                              >
-                                <div className="font-semibold text-slate-950">
-                                  {run.orders_planned}
-                                </div>
-                                <div className="text-slate-500">planned</div>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openRunInvestMetricDialog(run, "planned");
-                                }}
-                                className="rounded-xl bg-white px-3 py-2 transition hover:bg-emerald-50"
-                              >
-                                <div className="font-semibold text-slate-950">
-                                  {run.orders_submitted}
-                                </div>
-                                <div className="text-slate-500">submitted</div>
-                              </button>
-                            </div>
+                            <RunHistoryMetricTiles
+                              run={run}
+                              decisions={runDecisions}
+                              onOpenMetricDetails={(kind) =>
+                                openRunInvestMetricDialog(run, kind)
+                              }
+                            />
                           </div>
                           {run.error_message ? (
                             <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-800">
