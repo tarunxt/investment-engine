@@ -149,23 +149,28 @@ export const SOCIAL_POST_COUNT_KEYWORDS =
   SOCIAL_POST_COUNT_KEYWORD_GROUPS.flat();
 
 export function normalizeCustomExclusionKeywordVariants(keyword: string) {
-  const normalized = keyword.trim().toLowerCase();
-  if (!normalized) return [];
+  const normalizedKeywords = keyword
+    .split(",")
+    .map((part) => part.trim().toLowerCase().replace(/^['"]+|['"]+$/g, ""))
+    .filter(Boolean);
 
-  const variants = [normalized];
-  const withoutLeadingOperator = normalized
-    .replace(/^(?:\d+\s*)?\+\s+/, "")
-    .replace(
-      /^(?:at least|at most|over|under|more than|less than)\s+\d+\s+/,
-      "",
-    )
-    .trim();
+  const variants: string[] = [];
+  for (const normalized of normalizedKeywords) {
+    variants.push(normalized);
+    const withoutLeadingOperator = normalized
+      .replace(/^(?:\d+\s*)?\+\s+/, "")
+      .replace(
+        /^(?:at least|at most|over|under|more than|less than)\s+\d+\s+/,
+        "",
+      )
+      .trim();
 
-  if (withoutLeadingOperator && withoutLeadingOperator !== normalized) {
-    variants.push(withoutLeadingOperator);
+    if (withoutLeadingOperator && withoutLeadingOperator !== normalized) {
+      variants.push(withoutLeadingOperator);
+    }
   }
 
-  return variants;
+  return Array.from(new Set(variants));
 }
 
 export const SOCIAL_POST_COUNT_PATTERNS = [
@@ -179,6 +184,9 @@ export const SOCIAL_POST_COUNT_PATTERNS = [
 export const SPORTS_PATTERNS = [
   /\b(?:both teams to score|exact score|leading at halftime|draw at halftime|penalty shootout|extra time)\b/i,
   /(?:^|\W)(?:\d+\s*)?\+\s+(?:shots?\s+on\s+target|shots?|assists?|goals?|saves?|tackles?|cards?)(?=$|\W)/i,
+  /\b(?:assists?|rebounds?|points?|blocks?|steals?|threes?|3-pointers?)\s+(?:o\s*\/\s*u|over\s*\/\s*under)\b/i,
+  /\bplayer\s+(?:assists?|rebounds?|points?|blocks?|steals?)\b/i,
+  /\b(?:over|under)\s+\d+(?:\.\d+)?\s+(?:assists?|rebounds?|points?|blocks?|steals?)\b/i,
   /\b(?:first|second) half\b/i,
   /\bhalftime\b/i,
   /\bmap\s+\d+\b/i,
