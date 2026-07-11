@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   useEffect,
   useEffectEvent,
@@ -16,6 +15,7 @@ import {
   Copy,
   History,
   Info,
+  Bot,
   Loader2,
   LogIn,
   LogOut,
@@ -37,7 +37,6 @@ import {
 import { formatApiTimestamp } from "@/lib/datetime";
 import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
-import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type {
   BullpenAutoLiveDecision,
@@ -52,7 +51,6 @@ import {
 } from "./bullpenAutoRunProgress";
 import {
   buildBullpenStage3InvestPreviewSteps,
-  NO_STAGE2_QUALIFIED_EVENTS_REASON,
   buildBullpenStage3OnlyInvestExecutionPlan,
   type BullpenStage3AlreadyInvestedRecord,
   selectBullpenStage3OnlyInvestSource,
@@ -70,6 +68,7 @@ import {
 import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
 import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
+import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import {
   formatElapsedRunTime,
   formatStageElapsedTime,
@@ -1375,82 +1374,6 @@ function getInvestExecutionStepStatusLabel(status: InvestExecutionStepStatus) {
   if (status === "blocked") return "Blocked";
   if (status === "running") return "Working";
   return "Pending";
-}
-
-function getInvestStageExecutionStatus(
-  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
-) {
-  if (stage.key !== "invest") return null;
-
-  const immediateSuccess = getInvestStageImmediateSuccess(stage);
-  if (immediateSuccess) {
-    return {
-      label: "Execution complete",
-      message: immediateSuccess.message,
-      className: "border-emerald-200 bg-emerald-50/80 text-emerald-900",
-      detailClassName: "text-emerald-800",
-    };
-  }
-
-  const stageError = readStageOutputString(stage.outputs.error_message);
-  if (stageError) {
-    return {
-      label: "Worker error",
-      message: stageError,
-      className: "border-rose-200 bg-rose-50/80 text-rose-900",
-      detailClassName: "text-rose-800",
-    };
-  }
-
-  const executionGateReason = readStageOutputString(
-    stage.outputs.execution_gate_reason,
-  );
-  if (executionGateReason) {
-    return {
-      label: "Execution gate",
-      message: executionGateReason,
-      className: "border-rose-200 bg-rose-50/80 text-rose-900",
-      detailClassName: "text-rose-800",
-    };
-  }
-
-  const executionModeReason = readStageOutputString(
-    stage.outputs.execution_mode_reason,
-  );
-  if (executionModeReason) {
-    return {
-      label: "Execution mode",
-      message: executionModeReason,
-      className: "border-sky-200 bg-sky-50/80 text-sky-900",
-      detailClassName: "text-sky-800",
-    };
-  }
-
-  const latestOrderDecision = [...readInvestStageDecisionRows(stage)]
-    .reverse()
-    .find((decision) => decision.order_plan);
-  const latestOrderStatus = latestOrderDecision?.order_plan?.status ?? null;
-  const latestOrderDetail =
-    latestOrderDecision?.order_plan?.detail?.trim() ?? null;
-  if (
-    latestOrderDecision &&
-    latestOrderStatus &&
-    latestOrderStatus !== "submitted" &&
-    latestOrderDetail
-  ) {
-    const isFailure =
-      latestOrderStatus === "failed" || latestOrderStatus === "cancelled";
-    return {
-      label: "Latest order",
-      message: `${latestOrderDecision.market_title}: ${latestOrderDetail}`,
-      className: isFailure
-        ? "border-rose-200 bg-rose-50/80 text-rose-900"
-        : "border-amber-200 bg-amber-50/80 text-amber-900",
-      detailClassName: isFailure ? "text-rose-800" : "text-amber-800",
-    };
-  }
-
-  return null;
 }
 
 function getInvestStageCounters(
@@ -3908,8 +3831,6 @@ export function BullpenAutoRunScheduleCard({
   >(null);
   const [investMetricDialog, setInvestMetricDialog] =
     useState<InvestMetricDialogState | null>(null);
-  const [isScheduleInfoDialogOpen, setIsScheduleInfoDialogOpen] =
-    useState(false);
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
   const [runDetailDialog, setRunDetailDialog] =
     useState<RunDetailDialogState | null>(null);
@@ -4695,21 +4616,6 @@ export function BullpenAutoRunScheduleCard({
                 ) : null}
               </span>
             </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold text-slate-950">
-                  Bullpen Scan + LLM + Exit and Invest auto-run schedule
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setIsScheduleInfoDialogOpen(true)}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-fuchsia-200 bg-white text-fuchsia-700 shadow-sm transition hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:text-fuchsia-900 focus:outline-none focus:ring-2 focus:ring-fuchsia-400 focus:ring-offset-2"
-                  aria-label="Show auto-run schedule details"
-                >
-                  <Info className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
           </div>
 
           <div className="flex shrink-0 flex-wrap justify-end gap-2">
@@ -5163,15 +5069,6 @@ export function BullpenAutoRunScheduleCard({
               <p className="text-sm font-semibold text-slate-950">
                 {workflowStatusCopy}
               </p>
-              <p className="text-xs text-slate-600">
-                {workflowRun
-                  ? `Run ${workflowRun.id} · started ${formatIstDateTime(workflowRun.started_at)}`
-                  : "The 3-stage monitor turns yellow while working, green when finished, and blue while queued."}
-              </p>
-              <p className="text-xs text-slate-500">
-                Worker stages. This panel refreshes every 4 seconds while the
-                run is active.
-              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
@@ -5252,18 +5149,11 @@ export function BullpenAutoRunScheduleCard({
                 displayedInvestSteps.every(
                   (step) => step.status === "completed",
                 );
-              const investPreviewNoQualifiedCandidates =
-                investPreviewFinished &&
-                investOnlyPlan.readyCandidateCount === 0 &&
-                investOnlyPlan.blockedReason ===
-                  NO_STAGE2_QUALIFIED_EVENTS_REASON;
               const toneClasses = getWorkflowToneClasses(
                 immediateSuccess || investPreviewFinished
                   ? "green"
                   : stage.tone,
               );
-              const investExecutionStatus =
-                getInvestStageExecutionStatus(stage);
               const stageStatusLabel = immediateSuccess
                 ? "Finished"
                 : investPreviewFinished
@@ -5281,12 +5171,6 @@ export function BullpenAutoRunScheduleCard({
                 investPreviewFinished && stage.key === "invest"
                   ? "Finished"
                   : stage.progressLabel;
-              const stageDetail =
-                investPreviewFinished && stage.key === "invest"
-                  ? investPreviewNoQualifiedCandidates
-                    ? "Stage 3 had nothing to process: no Event Exits were pending and no Stage 2-qualified events were available for the planned queue."
-                    : "Stage 3 had nothing new to process: no Event Exits were pending and the Stage 2-qualified events were already invested."
-                  : stage.detail;
               const showStageSpinner =
                 stage.isCurrent && !immediateSuccess && !investPreviewFinished;
 
@@ -5464,26 +5348,6 @@ export function BullpenAutoRunScheduleCard({
                     </div>
                   ) : null}
 
-                  {investExecutionStatus ? (
-                    <div
-                      className={`mt-3 rounded-xl border px-3 py-2 ${investExecutionStatus.className}`}
-                    >
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">
-                        {investExecutionStatus.label}
-                      </p>
-                      <p
-                        className={`mt-1 text-xs leading-5 ${investExecutionStatus.detailClassName}`}
-                      >
-                        <ErrorCodeWithDetails
-                          detail={investExecutionStatus.message}
-                          detailClassName={
-                            investExecutionStatus.detailClassName
-                          }
-                        />
-                      </p>
-                    </div>
-                  ) : null}
-
                   {stage.key === "invest" ? (
                     <div className="mt-3 space-y-2 rounded-xl border border-white/60 bg-white/50 px-3 py-3 dark:border-slate-700/80 dark:bg-slate-950/70">
                       <button
@@ -5577,10 +5441,20 @@ export function BullpenAutoRunScheduleCard({
                   </div>
 
                   <div className="mt-auto flex items-end justify-between gap-3 pt-3">
-                    {stage.key === "invest" ? <span /> : (
-                      <p className={`text-xs leading-5 ${toneClasses.muted}`}>
-                        {stageDetail}
-                      </p>
+                    {stage.key === "llm" ? (
+                      <EventScanRunControls
+                        buttonClassName="hidden"
+                        buttonLabel="Run LLM"
+                        containerClassName="gap-0"
+                        selectionMode="multiple"
+                        onRunMultiple={() => undefined}
+                        pickerDialogLabel="Select LLMs"
+                        pickerIcon={<Bot className="h-5 w-5" />}
+                        pickerPlacement="center"
+                        pickerButtonClassName={`h-10 w-10 rounded-full bg-white/75 dark:bg-slate-950/80 ${toneClasses.badge}`}
+                      />
+                    ) : (
+                      <span />
                     )}
                     {stage.key === "scan" ||
                     Object.keys(stage.outputs).length > 0 ? (
@@ -5723,59 +5597,6 @@ export function BullpenAutoRunScheduleCard({
                     No Bullpen run history is available yet.
                   </div>
                 )}
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {isScheduleInfoDialogOpen ? (
-          <div
-            className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget)
-                setIsScheduleInfoDialogOpen(false);
-            }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="bullpen-auto-run-schedule-info-title"
-              className="w-full max-w-xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]"
-            >
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-600">
-                    Auto Run Architecture
-                  </p>
-                  <h2
-                    id="bullpen-auto-run-schedule-info-title"
-                    className="mt-2 text-xl font-semibold text-slate-950"
-                  >
-                    Scheduled Bullpen x AI execution
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsScheduleInfoDialogOpen(false)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-                  aria-label="Close auto-run schedule details"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="px-6 py-5 text-sm leading-6 text-slate-700">
-                <p>
-                  Scheduled runs use the Bullpen console top-10 profile: scan
-                  upcoming markets, run LLM consensus on every Stage 1 event,
-                  process Event Exits from both the ranking / LLM strategy and
-                  the capital-aware forced-exit strategy so capital is freed
-                  first, and then buy{" "}
-                  <span className="font-semibold">
-                    {formatMoney(savedConsoleOrderUsd)}
-                  </span>{" "}
-                  of each new opportunity on the stronger LLM side when it ranks
-                  inside the investable top 10 list.
-                </p>
               </div>
             </div>
           </div>
@@ -5929,18 +5750,6 @@ export function BullpenAutoRunScheduleCard({
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
-          <span>
-            Need deeper guardrail control? Open the dedicated Auto-Live
-            dashboard for the same execution pipeline.
-          </span>
-          <Link
-            href={URLs.routes.console.bullpenAiAutoLive()}
-            className="font-semibold text-fuchsia-700 hover:text-fuchsia-900"
-          >
-            Open Auto-Live Controls
-          </Link>
-        </div>
 
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-slate-600">
