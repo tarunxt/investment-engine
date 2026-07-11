@@ -34,6 +34,7 @@ export type BullpenAutoRunActivePositionView = {
   currentNoOdds: number | null;
   closeTime: string | null;
   conditionId: string | null;
+  isClaimable: boolean;
 };
 
 export type BullpenAutoRunWorkflowStageView = {
@@ -378,6 +379,7 @@ function readActivePositionsFound(stage: BullpenAutoLiveStageResult | null) {
         currentNoOdds: readNumber(record.current_no_odds),
         closeTime: readString(record.close_time),
         conditionId: readString(record.condition_id),
+        isClaimable: readBoolean(record.is_claimable) || readBoolean(record.isClaimable),
       } satisfies BullpenAutoRunActivePositionView;
     })
     .filter((position): position is BullpenAutoRunActivePositionView => Boolean(position));

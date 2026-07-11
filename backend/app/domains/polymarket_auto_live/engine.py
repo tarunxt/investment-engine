@@ -988,6 +988,7 @@ def _serialize_active_wallet_position(
         "current_no_odds": position.current_no_odds,
         "close_time": position.close_time,
         "condition_id": position.condition_id,
+        "is_claimable": position.is_claimable,
     }
 
 
