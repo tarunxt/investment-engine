@@ -15,6 +15,7 @@ from app.domains.polymarket.bullpen import (
     BullpenLiveExecutor,
     BullpenRedeemedTradesReader,
     LiveTradeGuard,
+    is_claim_command_unavailable_warning,
     is_redeem_metadata_lookup_warning,
     live_position_key,
     utc_now,
@@ -1569,6 +1570,19 @@ class PolymarketPaperCopyBot:
                 self._add_activity(
                     "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
                 )
+
+            try:
+                await self.live_executor.claim(dry_run=False)
+            except BullpenCommandError as exc:
+                message = redact_secrets(str(exc))
+                if is_claim_command_unavailable_warning(message):
+                    await self.logger.warn(
+                        "Bullpen claim command is unavailable after redeem; continuing with redeem result: "
+                        f"{message}"
+                    )
+                    return had_redeem_metadata_warning
+                raise
+
             return had_redeem_metadata_warning
 
     async def _redeem_live_positions_unlocked(
