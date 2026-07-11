@@ -249,8 +249,8 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel", () => {
     "utf8",
   );
 
-  assert.match(autoRunCardSource, /onClick=\{\(\) => setScheduleStartInput\("Now"\)\}/);
   assert.match(autoRunCardSource, /setScheduleStartInput\("Now"\);/);
+  assert.match(autoRunCardSource, /setScheduleSettingsDirty\(true\);/);
   assert.match(autoRunCardSource, /Run and Enable Auto Runs/);
 });
 

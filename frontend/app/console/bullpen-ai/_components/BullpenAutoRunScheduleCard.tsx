@@ -315,10 +315,18 @@ type WorkflowStageView = ReturnType<
 >["stages"][number];
 
 function getStageOneStats(stage: WorkflowStageView) {
+  const walletPositions = readStageOutputNumber(
+    stage.outputs.active_wallet_positions,
+  );
+  const activeRowsBeforeLlm = readStageOutputNumber(
+    stage.outputs.active_position_rows_before_llm,
+  );
+  const claimablePositions =
+    walletPositions !== null && activeRowsBeforeLlm !== null
+      ? Math.max(0, walletPositions - activeRowsBeforeLlm)
+      : 0;
   const activePositions =
-    readStageOutputNumber(stage.outputs.active_wallet_positions) ??
-    readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
-    stage.activePositionsFound.length;
+    activeRowsBeforeLlm ?? walletPositions ?? stage.activePositionsFound.length;
   const totalScanned =
     readStageOutputNumber(stage.outputs.scanned_candidates) ??
     readStageOutputNumber(stage.outputs.total_items) ??
@@ -328,17 +336,25 @@ function getStageOneStats(stage: WorkflowStageView) {
     readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ??
     stage.scanCandidates.length;
 
-  return { activePositions, totalScanned, passedFilters };
+  return { activePositions, claimablePositions, totalScanned, passedFilters };
 }
 
 function getStageTwoStats(
   stage: WorkflowStageView,
   decisions: BullpenAutoLiveDecision[] = [],
 ) {
-  const activePositions =
+  const walletPositions =
+    readStageOutputNumber(stage.outputs.active_wallet_positions) ??
+    readStageOutputNumber(stage.inputs.active_wallet_positions);
+  const activeRowsBeforeLlm =
     readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
-    readStageOutputNumber(stage.inputs.active_position_rows_before_llm) ??
-    stage.activePositionsFound.length;
+    readStageOutputNumber(stage.inputs.active_position_rows_before_llm);
+  const claimablePositions =
+    walletPositions !== null && activeRowsBeforeLlm !== null
+      ? Math.max(0, walletPositions - activeRowsBeforeLlm)
+      : 0;
+  const activePositions =
+    activeRowsBeforeLlm ?? walletPositions ?? stage.activePositionsFound.length;
   const newOpportunities =
     readStageOutputNumber(stage.outputs.stage1_accepted_candidate_count) ??
     readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ??
@@ -351,7 +367,13 @@ function getStageTwoStats(
 
   const newEventsToInvestIn = getStageTwoInvestableDecisions(decisions).length;
 
-  return { activePositions, newOpportunities, llmRanOn, newEventsToInvestIn };
+  return {
+    activePositions,
+    claimablePositions,
+    newOpportunities,
+    llmRanOn,
+    newEventsToInvestIn,
+  };
 }
 
 function getStageTwoInvestableDecisions(
@@ -397,14 +419,24 @@ function StageOneRunStats({
           onClick={() => onOpenScanCandidateDialog(stage, "active-positions")}
           className={`${rowClassName} pt-2`}
         >
-          Active Positions Found:{" "}
+          Available for Claim:{" "}
+          <span className="font-semibold tabular-nums">
+            {stats.claimablePositions}
+          </span>
+          <br />
+          Active Positions:{" "}
           <span className="font-semibold tabular-nums">
             {stats.activePositions}
           </span>
         </button>
       ) : (
         <div className="pt-2">
-          Active Positions Found:{" "}
+          Available for Claim:{" "}
+          <span className="font-semibold tabular-nums">
+            {stats.claimablePositions}
+          </span>
+          <br />
+          Active Positions:{" "}
           <span className="font-semibold tabular-nums">
             {stats.activePositions}
           </span>
@@ -495,6 +527,11 @@ function StageTwoRunStats({
             onClick={() => onOpenScanCandidateDialog(stage, "active-positions")}
             className="text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
           >
+            Available for Claim:{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.claimablePositions}
+            </span>
+            <br />
             Active Positions:{" "}
             <span className="font-semibold tabular-nums">
               {stats.activePositions}
@@ -502,6 +539,11 @@ function StageTwoRunStats({
           </button>
         ) : (
           <>
+            Available for Claim:{" "}
+            <span className="font-semibold tabular-nums">
+              {stats.claimablePositions}
+            </span>
+            <br />
             Active Positions:{" "}
             <span className="font-semibold tabular-nums">
               {stats.activePositions}
@@ -3616,6 +3658,9 @@ export function BullpenAutoRunScheduleCard({
   >(null);
   const [scheduleStartInput, setScheduleStartInput] = useState("");
   const [scheduleRefreshInput, setScheduleRefreshInput] = useState("60");
+  const [scheduleSettingsDirty, setScheduleSettingsDirty] = useState(false);
+  const [scheduleSettingsSaveBusy, setScheduleSettingsSaveBusy] =
+    useState(false);
   const [scheduleSavedSummary, setScheduleSavedSummary] = useState<
     string | null
   >(null);
@@ -3624,6 +3669,7 @@ export function BullpenAutoRunScheduleCard({
     summary?.settings.console_order_usd ?? DEFAULT_CONSOLE_ORDER_USD;
 
   useEffect(() => {
+    if (scheduleSettingsDirty) return;
     const nextStart = summary?.settings.console_auto_start_at ?? "";
     const nextRefresh = summary?.settings.console_auto_refresh_minutes ?? 60;
     window.queueMicrotask(() => {
@@ -3634,6 +3680,7 @@ export function BullpenAutoRunScheduleCard({
       );
     });
   }, [
+    scheduleSettingsDirty,
     summary?.settings.console_auto_start_at,
     summary?.settings.console_auto_refresh_minutes,
   ]);
@@ -3739,13 +3786,7 @@ export function BullpenAutoRunScheduleCard({
   }
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void loadSummary();
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
+    void loadSummary();
     // loadSummary intentionally reads the latest pending run id at execution time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -3810,7 +3851,22 @@ export function BullpenAutoRunScheduleCard({
     };
   }, [summary?.settings.auto_live_enabled, trackedRunId]);
 
-  async function handleSaveScheduleSettings() {
+  useEffect(() => {
+    if (!scheduleSettingsDirty || action !== null) return;
+    const timeoutId = window.setTimeout(() => {
+      void handleSaveScheduleSettings({ silentSuccess: true });
+    }, 600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+    // handleSaveScheduleSettings intentionally reads the latest schedule input values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleSettingsDirty, scheduleStartInput, scheduleRefreshInput, action]);
+
+  async function handleSaveScheduleSettings(options?: {
+    silentSuccess?: boolean;
+  }) {
     const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
     if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
       setError({
@@ -3820,6 +3876,7 @@ export function BullpenAutoRunScheduleCard({
       return false;
     }
     setError(null);
+    setScheduleSettingsSaveBusy(true);
     const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
     const normalizedStart = startWasNow
       ? formatScheduleInputFromDate(new Date())
@@ -3832,6 +3889,7 @@ export function BullpenAutoRunScheduleCard({
           refreshMinutes,
         ),
       );
+      setScheduleSettingsDirty(false);
       setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
       const nextSummaryText = buildScheduleSummary(
         startWasNow ? "Now" : normalizedStart,
@@ -3839,11 +3897,15 @@ export function BullpenAutoRunScheduleCard({
       );
       setScheduleSavedSummary(nextSummaryText);
       await loadSummary({ preserveLoading: true });
-      setNotice(nextSummaryText);
+      if (!options?.silentSuccess) {
+        setNotice(nextSummaryText);
+      }
       return true;
     } catch (nextError) {
       setError(normalizeError(nextError));
       return false;
+    } finally {
+      setScheduleSettingsSaveBusy(false);
     }
   }
 
@@ -4368,7 +4430,7 @@ export function BullpenAutoRunScheduleCard({
               variant="outline"
               onClick={() => setIsRunHistoryDialogOpen(true)}
               aria-label="Show Bullpen run history"
-              className="border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              className="border-[#f4d458] bg-[#f4d458] text-slate-950 hover:border-[#e7c845] hover:bg-[#e7c845]"
             >
               <History className="mr-2 h-4 w-4" />
               History
@@ -4509,9 +4571,10 @@ export function BullpenAutoRunScheduleCard({
                   id="bullpen-auto-run-start-time"
                   type="text"
                   value={scheduleStartInput}
-                  onChange={(event) =>
-                    setScheduleStartInput(event.target.value)
-                  }
+                  onChange={(event) => {
+                    setScheduleStartInput(event.target.value);
+                    setScheduleSettingsDirty(true);
+                  }}
                   disabled={action !== null}
                   className="h-full w-full border-0 bg-transparent p-0 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
                   placeholder="13:00:00 06 July, 2026"
@@ -4519,7 +4582,10 @@ export function BullpenAutoRunScheduleCard({
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setScheduleStartInput("Now")}
+                  onClick={() => {
+                    setScheduleStartInput("Now");
+                    setScheduleSettingsDirty(true);
+                  }}
                   disabled={action !== null}
                   className="ml-2 h-8 rounded-lg px-3 text-xs shadow-none"
                 >
@@ -4539,13 +4605,14 @@ export function BullpenAutoRunScheduleCard({
                     <input
                       type="datetime-local"
                       defaultValue={formatDateTimeLocalValue(new Date())}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setScheduleStartInput(
                           formatScheduleInputFromDateTimeLocal(
                             event.target.value,
                           ),
-                        )
-                      }
+                        );
+                        setScheduleSettingsDirty(true);
+                      }}
                       className="h-10 w-full rounded-lg border border-blue-500 px-3 text-sm outline-none"
                     />
                     <div className="mt-3 flex justify-between gap-2">
@@ -4554,6 +4621,7 @@ export function BullpenAutoRunScheduleCard({
                         variant="outline"
                         onClick={() => {
                           setScheduleStartInput("Now");
+                          setScheduleSettingsDirty(true);
                           setIsSchedulePickerOpen(false);
                         }}
                       >
@@ -4587,9 +4655,10 @@ export function BullpenAutoRunScheduleCard({
                   min="1"
                   step="1"
                   value={scheduleRefreshInput}
-                  onChange={(event) =>
-                    setScheduleRefreshInput(event.target.value)
-                  }
+                  onChange={(event) => {
+                    setScheduleRefreshInput(event.target.value);
+                    setScheduleSettingsDirty(true);
+                  }}
                   disabled={action !== null}
                   className="h-full w-full border-0 bg-transparent p-0 text-sm font-semibold text-slate-950 outline-none disabled:cursor-not-allowed disabled:text-slate-400"
                 />
@@ -4599,18 +4668,11 @@ export function BullpenAutoRunScheduleCard({
               </div>
             </div>
           </div>
-          <div className="mt-3 flex justify-end">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                void handleSaveScheduleSettings();
-              }}
-              disabled={action !== null}
-            >
-              Save Auto-run Settings
-            </Button>
-          </div>
+          {scheduleSettingsSaveBusy ? (
+            <p className="mt-3 text-right text-xs font-semibold text-slate-500">
+              Saving auto-run settings…
+            </p>
+          ) : null}
         </div>
 
         {showActiveRunControls ? (
@@ -4678,7 +4740,7 @@ export function BullpenAutoRunScheduleCard({
 
           <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Last completed run
+              {runIsActive ? "Run in Progress" : "Last completed run"}
             </div>
             <button
               type="button"
@@ -4690,8 +4752,11 @@ export function BullpenAutoRunScheduleCard({
               disabled={!latestCompletedRun}
               className="mt-2 block text-left text-sm font-semibold text-slate-950 underline-offset-4 transition hover:text-blue-700 hover:underline disabled:cursor-not-allowed disabled:no-underline"
             >
+              {runIsActive ? "Started " : ""}
               {formatIstDateTime(
-                latestCompletedRun?.started_at ?? summary?.state.last_run_at,
+                runIsActive
+                  ? runTimerStartedAt
+                  : latestCompletedRun?.started_at ?? summary?.state.last_run_at,
               )}
             </button>
             <p className="mt-1 text-xs text-slate-600">
