@@ -4670,8 +4670,8 @@ export function BullpenAutoRunScheduleCard({
   return (
     <Card className="border-fuchsia-200 bg-[linear-gradient(135deg,rgba(253,242,248,0.98),rgba(239,246,255,0.98))] shadow-sm dark:border-fuchsia-500/30 dark:bg-[linear-gradient(135deg,rgba(91,33,182,0.24),rgba(15,23,42,0.94),rgba(14,165,233,0.16))]">
       <CardContent className="space-y-4 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="max-w-3xl space-y-2">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-fuchsia-700">
                 Auto Run Schedule
@@ -4712,7 +4712,7 @@ export function BullpenAutoRunScheduleCard({
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
             <Button
               type="button"
               variant="outline"
@@ -4780,9 +4780,10 @@ export function BullpenAutoRunScheduleCard({
               </Button>
               {showRunTimer ? (
                 <div
-                  className="text-center text-xs font-semibold tabular-nums text-sky-800"
+                  className="inline-flex items-center justify-center gap-1 text-center text-xs font-semibold tabular-nums text-sky-800"
                   aria-live="polite"
                 >
+                  <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
                   {elapsedRunTime}
                 </div>
               ) : null}
@@ -4791,8 +4792,8 @@ export function BullpenAutoRunScheduleCard({
         </div>
 
         <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-[16rem] flex-1">
+          <div className="grid gap-3 lg:grid-cols-3">
+            <div className="min-w-0">
               <label
                 htmlFor="bullpen-auto-run-trade-amount"
                 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
@@ -4848,7 +4849,7 @@ export function BullpenAutoRunScheduleCard({
                 {consoleOrderHelperMessage}
               </p>
             </div>
-            <div className="min-w-[16rem] flex-1">
+            <div className="min-w-0">
               <label
                 htmlFor="bullpen-auto-run-start-time"
                 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
@@ -4927,7 +4928,7 @@ export function BullpenAutoRunScheduleCard({
                 ) : null}
               </div>
             </div>
-            <div className="min-w-[12rem] flex-1">
+            <div className="min-w-0">
               <label
                 htmlFor="bullpen-auto-run-refresh-minutes"
                 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
