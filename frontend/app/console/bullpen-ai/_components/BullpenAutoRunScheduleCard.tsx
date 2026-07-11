@@ -4722,11 +4722,23 @@ export function BullpenAutoRunScheduleCard({
               <span className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-fuchsia-700">
                 Auto Run Schedule
               </span>
-              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
                 Status: {statusLabel(summary, runIsActive)}
+                {loading && !summary ? (
+                  <Loader2
+                    aria-label="Checking auto-run status"
+                    className="size-3.5 animate-spin text-slate-500"
+                  />
+                ) : null}
               </span>
-              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
                 Mode: {mode}
+                {loading && !summary ? (
+                  <Loader2
+                    aria-label="Checking auto-run mode"
+                    className="size-3.5 animate-spin text-slate-500"
+                  />
+                ) : null}
               </span>
             </div>
             <div>
