@@ -51,6 +51,13 @@ export default function DashboardLayout({
             router.replace(cleanedUrl, { scroll: false });
         }
     }, [hasRedirectToParam, pathname, router, searchParamString]);
+
+    useEffect(() => {
+        if (loading || user) return;
+        const currentPath = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+        router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
+    }, [loading, pathname, router, searchParamString, user]);
+
     if (loading) {
         return (
             <ConsoleShellSkeleton>
@@ -70,6 +77,14 @@ export default function DashboardLayout({
                 ) : null}
             </ConsoleShellSkeleton>
         )
+    }
+
+    if (!user) {
+        return (
+            <ConsoleShellSkeleton>
+                <ConsoleLoadingBanner timedOut />
+            </ConsoleShellSkeleton>
+        );
     }
 
     return (

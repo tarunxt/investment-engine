@@ -150,6 +150,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [update]);
 
+  // Avoid leaving protected pages on a permanent loading shell when the
+  // NextAuth session endpoint stalls behind the production proxy.
+  useEffect(() => {
+    if (devAuthDisabled || status !== "loading") {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setStructuredError(
+        "Authentication timed out while opening the console.",
+        [
+          "Please sign in again. If this keeps happening, the frontend cannot reach the Auth.js session endpoint.",
+        ],
+      );
+      setUser(null);
+      setLoading(false);
+    }, 10000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [setStructuredError, status]);
+
   // Sync NextAuth session with custom storage
   useEffect(() => {
     if (devAuthDisabled) {
