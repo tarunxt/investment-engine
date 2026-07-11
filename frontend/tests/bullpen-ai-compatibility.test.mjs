@@ -200,7 +200,7 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
 
   assert.match(bullpenAiPageSource, /BullpenAutoRunScheduleCard/);
   assert.match(autoRunCardSource, /Run Scans and Invest Now/);
-  assert.match(autoRunCardSource, /Bullpen Scan \+ LLM \+ Exit and Invest auto-run schedule/);
+  assert.doesNotMatch(autoRunCardSource, /Bullpen Scan \+ LLM \+ Exit and Invest auto-run schedule/);
   assert.doesNotMatch(autoRunProgressSource, /Step 1 processes Event Exits/);
   assert.doesNotMatch(autoRunProgressSource, /Step 2 invests in the Stage 3 planned orders/);
   assert.match(autoRunCardSource, /InvestExecutionStepsSummary/);
@@ -211,7 +211,7 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.match(autoRunCardSource, /12 AM IST/);
   assert.match(autoRunCardSource, /Background execution monitor/);
   assert.match(autoRunCardSource, /Worker stages/);
-  assert.match(autoRunCardSource, /refreshes every 4 seconds/);
+  assert.doesNotMatch(autoRunCardSource, /refreshes every 4 seconds/);
   assert.match(autoRunCardSource, /Pause/);
   assert.match(autoRunCardSource, /Kill/);
   assert.match(autoRunCardSource, /Open .* output/);

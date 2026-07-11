@@ -439,21 +439,25 @@ export function LlmModelSelectionPanel({
                               compatible ? "text-slate-700" : "text-slate-400",
                             )}
                           >
-                            <span
-                              className={cn(
-                                "block truncate text-sm",
-                                selected ? "font-medium text-slate-800" : "",
-                              )}
-                            >
-                              {model}
+                            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                              <span
+                                className={cn(
+                                  "min-w-0 truncate text-sm",
+                                  selected ? "font-medium text-slate-800" : "",
+                                )}
+                              >
+                                {model}
+                              </span>
+                              {internetAccess.mode !== "none" ? (
+                                <span
+                                  title={getInternetAccessTooltipText(internetAccess)}
+                                  className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 ring-1 ring-sky-100"
+                                >
+                                  {getInternetAccessBadgeText(internetAccess)}
+                                </span>
+                              ) : null}
                             </span>
                             <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-                              <span
-                                title={getInternetAccessTooltipText(internetAccess)}
-                                className="rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700 ring-1 ring-sky-100"
-                              >
-                                {getInternetAccessBadgeText(internetAccess)}
-                              </span>
                               {lastRunWebUsed ? (
                                 <span
                                   title="The most recent completed run for this model executed at least one live web/search call."

@@ -44,6 +44,7 @@ interface EventScanRunControlsBaseProps {
   pickerButtonClassName?: string;
   pickerDialogLabel?: string;
   pickerIcon?: ReactNode;
+  pickerPlacement?: "anchored" | "center";
   running?: boolean;
 }
 
@@ -301,6 +302,7 @@ export function EventScanRunControls({
   pickerButtonClassName,
   pickerDialogLabel = "Select LLMs",
   pickerIcon,
+  pickerPlacement = "anchored",
   running,
   selectionMode = "single",
   ...runProps
@@ -341,9 +343,18 @@ export function EventScanRunControls({
       viewportPadding,
       window.innerWidth - width - viewportPadding,
     );
-    const left = Math.min(Math.max(viewportPadding, rect.left), maxLeft);
-    const top = rect.bottom + 12;
-    const maxHeight = Math.max(280, window.innerHeight - top - viewportPadding);
+    let left = Math.min(Math.max(viewportPadding, rect.left), maxLeft);
+    let top = rect.bottom + 12;
+    let maxHeight = Math.max(280, window.innerHeight - top - viewportPadding);
+
+    if (pickerPlacement === "center") {
+      left = Math.max(viewportPadding, (window.innerWidth - width) / 2);
+      maxHeight = Math.min(
+        820,
+        Math.max(280, window.innerHeight - viewportPadding * 2),
+      );
+      top = Math.max(viewportPadding, (window.innerHeight - maxHeight) / 2);
+    }
 
     setPickerPosition({
       top,
@@ -351,7 +362,7 @@ export function EventScanRunControls({
       width,
       maxHeight,
     });
-  }, [selectionMode]);
+  }, [pickerPlacement, selectionMode]);
 
   useEffect(() => {
     const controller = new AbortController();
