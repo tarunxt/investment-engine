@@ -672,7 +672,7 @@ export function EventScanRunControls({
               ref={pickerPanelRef}
               role="dialog"
               aria-label={pickerDialogLabel}
-              className="fixed z-[110] overflow-hidden rounded-[26px] border border-slate-200 bg-white text-slate-900 shadow-[0_28px_70px_-26px_rgba(15,23,42,0.45)]"
+              className="fixed z-[110] flex flex-col overflow-hidden rounded-[26px] border border-slate-200 bg-white text-slate-900 shadow-[0_28px_70px_-26px_rgba(15,23,42,0.45)]"
               style={{
                 top: pickerPosition.top,
                 left: pickerPosition.left,
@@ -680,8 +680,8 @@ export function EventScanRunControls({
                 maxHeight: pickerPosition.maxHeight,
               }}
             >
-              <div className="flex max-h-full flex-col">
-                <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
                   <div className="space-y-1">
                     <h2 className="text-lg font-semibold text-slate-950">
                       {pickerDialogLabel}
@@ -701,7 +701,7 @@ export function EventScanRunControls({
                     <X className="size-4" />
                   </button>
                 </div>
-                <div className="max-h-full overflow-y-auto px-4 pb-4 pt-4">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 pt-4">
                   {providerError ? (
                     <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                       {providerError}
