@@ -1,5 +1,6 @@
 export type BullpenTableColumnId =
   | "select"
+  | "serialNumber"
   | "question"
   | "closeTime"
   | "daysUntilClose"
@@ -18,6 +19,7 @@ export type BullpenTableColumnWidths = Record<BullpenTableColumnId, number>;
 
 export const BULLPEN_TABLE_COLUMN_IDS: BullpenTableColumnId[] = [
   "select",
+  "serialNumber",
   "question",
   "closeTime",
   "daysUntilClose",
@@ -35,6 +37,7 @@ export const BULLPEN_TABLE_COLUMN_IDS: BullpenTableColumnId[] = [
 
 export const DEFAULT_BULLPEN_TABLE_COLUMN_WIDTHS: BullpenTableColumnWidths = {
   select: 56,
+  serialNumber: 72,
   question: 340,
   closeTime: 210,
   daysUntilClose: 110,
@@ -52,6 +55,7 @@ export const DEFAULT_BULLPEN_TABLE_COLUMN_WIDTHS: BullpenTableColumnWidths = {
 
 const MIN_BULLPEN_TABLE_COLUMN_WIDTHS: BullpenTableColumnWidths = {
   select: 56,
+  serialNumber: 68,
   question: 220,
   closeTime: 180,
   daysUntilClose: 96,
