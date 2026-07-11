@@ -805,7 +805,7 @@ export function BullpenQuestionsTable({
                       />
                     </td>
                     <td className="px-4 py-3 font-medium text-slate-900">
-                      <div>{question.question}</div>
+                      <div className="break-words leading-5">{question.question}</div>
                       {question.marketUrl ? (
                         <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
                           <a
@@ -820,16 +820,16 @@ export function BullpenQuestionsTable({
                         </div>
                       ) : null}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={formatDate(question.closeTime) || undefined}>
                       {formatDate(question.closeTime)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                       {formatDays(question.daysUntilClose)}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={question.category || undefined}>
                       {question.category}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={formatOutcomeSummary(question)}>
                       {formatOutcomeSummary(question)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-semibold text-emerald-700">
@@ -899,10 +899,10 @@ export function BullpenQuestionsTable({
                     >
                       {formatMoney(question.amountToBeInvested)}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={question.volume || "—"}>
                       {question.volume || "—"}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={question.liquidity || "—"}>
                       {question.liquidity || "—"}
                     </td>
                   </tr>

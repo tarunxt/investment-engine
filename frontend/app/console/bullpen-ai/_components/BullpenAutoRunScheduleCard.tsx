@@ -713,11 +713,13 @@ function calculateDaysUntilClose(closeTime: string | null) {
 function buildScanCandidateDialogRows({
   candidates,
   run,
+  decisions,
 }: {
   candidates: ReturnType<
     typeof buildBullpenAutoRunWorkflowView
   >["stages"][number]["scanCandidates"];
   run: BullpenAutoLiveRun | null;
+  decisions: BullpenAutoLiveDecision[];
 }): ScanCandidateDialogCandidate[] {
   const stage2 = findRunStage(run, "llm", 2);
   const rawReviewedCandidates = stage2?.outputs?.llm_reviewed_candidates;
@@ -733,6 +735,25 @@ function buildScanCandidateDialogRows({
       amountToBeInvested: number | null;
     }
   >();
+
+  const addReviewedCandidateLookup = (
+    keys: Array<string | null>,
+    lookupValue: {
+      llmYesOdds: number | null;
+      llmNoOdds: number | null;
+      returnsPerDay: number | null;
+      amountToBeInvested: number | null;
+    },
+  ) => {
+    keys
+      .map((key) => normalizeMatchKey(key))
+      .filter((key): key is string => Boolean(key))
+      .forEach((key) => {
+        if (!reviewedCandidateByLookupKey.has(key)) {
+          reviewedCandidateByLookupKey.set(key, lookupValue);
+        }
+      });
+  };
 
   for (const reviewedCandidate of reviewedCandidates) {
     const llmYesOdds =
@@ -758,18 +779,34 @@ function buildScanCandidateDialogRows({
       amountToBeInvested,
     };
 
-    [
-      normalizeMatchKey(readStageOutputString(reviewedCandidate.market_id)),
-      normalizeMatchKey(readStageOutputString(reviewedCandidate.slug)),
-      normalizeMatchKey(readStageOutputString(reviewedCandidate.market_url)),
-      normalizeMatchKey(readStageOutputString(reviewedCandidate.question)),
-    ]
-      .filter((key): key is string => Boolean(key))
-      .forEach((key) => {
-        if (!reviewedCandidateByLookupKey.has(key)) {
-          reviewedCandidateByLookupKey.set(key, lookupValue);
-        }
-      });
+    addReviewedCandidateLookup(
+      [
+        readStageOutputString(reviewedCandidate.market_id),
+        readStageOutputString(reviewedCandidate.slug),
+        readStageOutputString(reviewedCandidate.market_url),
+        readStageOutputString(reviewedCandidate.question),
+      ],
+      lookupValue,
+    );
+  }
+
+  for (const decision of decisions) {
+    const llmYesOdds = readStageOutputNumber(decision.fair_yes_probability_pct);
+    const llmNoOdds = readStageOutputNumber(decision.fair_no_probability_pct);
+    const returnsPerDay = getDecisionReturnsPerDay(decision);
+    addReviewedCandidateLookup(
+      [decision.market_id, decision.slug ?? null, decision.market_url ?? null, decision.market_title],
+      {
+        llmYesOdds,
+        llmNoOdds,
+        returnsPerDay,
+        amountToBeInvested: getBullpenAmountToBeInvestedBreakdown({
+          llmYesOdds,
+          llmNoOdds,
+          returnsPerDay,
+        }).result,
+      },
+    );
   }
 
   return candidates.map((candidate) => {
@@ -4397,6 +4434,7 @@ export function BullpenAutoRunScheduleCard({
       candidates: buildScanCandidateDialogRows({
         candidates: stage.scanCandidates,
         run: workflowRun,
+        decisions: summary?.recent_decisions ?? [],
       }),
       activePositions: stage.activePositionsFound,
       activePositionCount: activePositionCounts.open,
