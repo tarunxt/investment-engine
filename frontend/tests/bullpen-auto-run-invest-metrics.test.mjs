@@ -155,7 +155,7 @@ test("schedule card wires step metric tiles into the shared popup flow", () => {
   assert.match(source, /Orders still not submitted/);
 });
 
-test("schedule card clearly states whether Stage 3 Step 1 shortlisted active exits", () => {
+test("schedule card hides removed Stage 3 Step 1 exit shortlist copy", () => {
   const source = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
@@ -164,7 +164,11 @@ test("schedule card clearly states whether Stage 3 Step 1 shortlisted active exi
     "utf8",
   );
 
-  assert.match(source, /Active positions shortlisted for exits/);
-  assert.match(source, /Stage 3 Step 1 reviews active positions before any buy\s+orders/);
-  assert.match(source, /No · 0 shortlisted/);
+  assert.doesNotMatch(source, /Active positions shortlisted for exits/);
+  assert.doesNotMatch(source, /Stage 3 Step 1 reviews active positions before any buy\s+orders/);
+  assert.doesNotMatch(source, /No · 0 shortlisted/);
+  assert.doesNotMatch(source, /Exit rows/);
+  assert.doesNotMatch(source, /Rows counted/);
+  assert.doesNotMatch(source, /Reuses the latest Stage 2-qualified rows/);
+  assert.doesNotMatch(source, /No Step 2 Stage 3 planned orders were created/);
 });

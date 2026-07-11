@@ -1458,34 +1458,16 @@ function getInvestStageCounters(
 ) {
   if (stage.key !== "invest") return [];
 
-  const decisions = readStageOutputNumber(stage.outputs.decisions_count);
   const planned = readStageOutputNumber(stage.outputs.orders_planned);
   const submitted = readStageOutputNumber(stage.outputs.orders_submitted);
-  if (decisions === null && planned === null && submitted === null) {
+  if (planned === null && submitted === null) {
     return [];
   }
 
   return [
-    { label: "Decisions", value: decisions ?? 0 },
     { label: "Planned", value: planned ?? 0 },
     { label: "Submitted", value: submitted ?? 0 },
   ];
-}
-
-function formatInvestStageRowMix(
-  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
-) {
-  if (stage.key !== "invest") return null;
-
-  const activePositionRows = readStageOutputNumber(
-    stage.outputs.active_position_rows,
-  );
-  const candidateRows = readStageOutputNumber(
-    stage.outputs.candidate_decision_rows,
-  );
-  if (activePositionRows === null && candidateRows === null) return null;
-
-  return `${activePositionRows ?? 0} Bullpen position ${activePositionRows === 1 ? "row" : "rows"} + ${candidateRows ?? 0} candidate ${candidateRows === 1 ? "row" : "rows"}`;
 }
 
 type InvestProgressLogEntry = {
@@ -1738,9 +1720,11 @@ function InvestExecutionStepsSummary({
                 {renderedStatusLabel}
               </span>
             </div>
-            <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
-              {step.detail ?? "Waiting for the worker to update this step."}
-            </p>
+            {step.key === "buy" && step.plannedOrders === 0 ? null : (
+              <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
+                {step.detail ?? "Waiting for the worker to update this step."}
+              </p>
+            )}
             <div
               className={`mt-3 flex flex-wrap gap-2 text-xs ${toneClasses.muted}`}
             >
@@ -1765,30 +1749,6 @@ function InvestExecutionStepsSummary({
             </div>
             {step.key === "sell" ? (
               <div className={`mt-3 grid gap-2 text-xs ${toneClasses.muted}`}>
-                <div
-                  className={`rounded-lg border border-white/70 bg-white/60 px-2.5 py-2 ${toneClasses.text}`}
-                >
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">
-                    Active positions shortlisted for exits
-                  </p>
-                  <p className="mt-1 text-sm font-semibold">
-                    {(step.eventExitRows ?? step.plannedOrders ?? 0) > 0
-                      ? `Yes · ${step.eventExitRows ?? step.plannedOrders} shortlisted`
-                      : "No · 0 shortlisted"}
-                  </p>
-                  <p
-                    className={`mt-1 text-[11px] leading-4 ${toneClasses.muted}`}
-                  >
-                    Stage 3 Step 1 reviews active positions before any buy
-                    orders.
-                  </p>
-                </div>
-                {renderMetricCard({
-                  label: "Exit rows",
-                  value: step.eventExitRows,
-                  kind: getSellInvestMetricDialogKind("event-exit-rows"),
-                  toneClasses,
-                })}
                 <div className="flex flex-wrap gap-2">
                   {renderMetricCard({
                     label: "Event out of Top 10",
@@ -2523,14 +2483,6 @@ function RunDetailWorkerStages({
                     onOpenLlmRunDetails={onOpenStageTwoLlmRunDetails}
                   />
                 ) : null}
-                {stage.key === "invest" && formatInvestStageRowMix(stage) ? (
-                  <div>
-                    Rows counted:{" "}
-                    <span className="font-semibold">
-                      {formatInvestStageRowMix(stage)}
-                    </span>
-                  </div>
-                ) : null}
               </div>
 
               {stage.key === "llm" && stageTwoExecutionSteps.length > 0 ? (
@@ -2543,7 +2495,7 @@ function RunDetailWorkerStages({
               ) : null}
 
               {investStageCounters.length > 0 ? (
-                <div className="mt-3 grid grid-cols-3 gap-2">
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   {investStageCounters.map((counter) => (
                     <div
                       key={counter.label}
@@ -2584,9 +2536,11 @@ function RunDetailWorkerStages({
               <p className={`mt-3 text-xs font-semibold ${toneClasses.text}`}>
                 {immediateSuccess ? "Finished" : stage.progressLabel}
               </p>
-              <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
-                {stage.detail}
-              </p>
+              {stage.key === "invest" ? null : (
+                <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
+                  {stage.detail}
+                </p>
+              )}
             </div>
           );
         })}
@@ -5446,15 +5400,6 @@ export function BullpenAutoRunScheduleCard({
                         )}
                       />
                     ) : null}
-                    {stage.key === "invest" &&
-                    formatInvestStageRowMix(stage) ? (
-                      <div>
-                        Rows counted:{" "}
-                        <span className="font-semibold">
-                          {formatInvestStageRowMix(stage)}
-                        </span>
-                      </div>
-                    ) : null}
                   </div>
 
                   {stage.key === "llm" && stageTwoExecutionSteps.length > 0 ? (
@@ -5472,7 +5417,7 @@ export function BullpenAutoRunScheduleCard({
                   ) : null}
 
                   {investStageCounters.length > 0 ? (
-                    <div className="mt-3 grid grid-cols-3 gap-2">
+                    <div className="mt-3 grid grid-cols-2 gap-2">
                       {investStageCounters.map((counter) => (
                         <button
                           key={counter.label}
@@ -5575,19 +5520,7 @@ export function BullpenAutoRunScheduleCard({
                           </>
                         )}
                       </button>
-                      <p
-                        className={`text-[11px] leading-5 ${toneClasses.muted}`}
-                      >
-                        Reuses the latest Stage 2-qualified rows and skips the
-                        Bullpen rescan plus LLM rerun.
-                      </p>
-                      {investOnlyDisabledReason ? (
-                        <p
-                          className={`text-[11px] leading-5 ${toneClasses.muted}`}
-                        >
-                          {investOnlyDisabledReason}
-                        </p>
-                      ) : investOnlyPlan.readyCandidateCount > 0 ? (
+                      {!investOnlyDisabledReason && investOnlyPlan.readyCandidateCount > 0 ? (
                         <p
                           className={`text-[11px] leading-5 ${toneClasses.muted}`}
                         >
@@ -5643,9 +5576,11 @@ export function BullpenAutoRunScheduleCard({
                   </div>
 
                   <div className="mt-auto flex items-end justify-between gap-3 pt-3">
-                    <p className={`text-xs leading-5 ${toneClasses.muted}`}>
-                      {stageDetail}
-                    </p>
+                    {stage.key === "invest" ? <span /> : (
+                      <p className={`text-xs leading-5 ${toneClasses.muted}`}>
+                        {stageDetail}
+                      </p>
+                    )}
                     {stage.key === "scan" ||
                     Object.keys(stage.outputs).length > 0 ? (
                       <button
