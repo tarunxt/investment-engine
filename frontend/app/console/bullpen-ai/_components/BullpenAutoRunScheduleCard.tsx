@@ -13,6 +13,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Clock3,
+  Copy,
   History,
   Info,
   Loader2,
@@ -73,6 +74,9 @@ import {
   formatElapsedRunTime,
   formatStageElapsedTime,
 } from "./bullpenAutoRunTimers";
+
+const BULLPEN_LOGIN_COMMAND =
+  "sudo -u investor env HOME=/home/investor BULLPEN_BIN=/usr/local/bin/bullpen /usr/local/bin/bullpen login --no-browser";
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
@@ -3552,6 +3556,31 @@ function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
   return "Skipped";
 }
 
+function runNeedsBullpenLogin(run: BullpenAutoLiveRun | null) {
+  if (!run) return false;
+  const searchableText = [
+    run.summary,
+    run.error_message,
+    ...run.stage_results.flatMap((stage) => [
+      stage.reason,
+      JSON.stringify(stage.outputs ?? {}),
+      ...stage.guardrails_checked.map((check) => check.detail),
+    ]),
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    /bullpen login/i.test(searchableText) ||
+    /login required/i.test(searchableText) ||
+    /requires_login/i.test(searchableText) ||
+    /auth_required/i.test(searchableText) ||
+    /session expired/i.test(searchableText) ||
+    /invalid refresh token/i.test(searchableText) ||
+    /could not resolve your polymarket address/i.test(searchableText)
+  );
+}
+
 function getVisibleRun(
   summary: BullpenAutoLiveSummaryResponse | null,
   pendingRunId: string | null,
@@ -4155,6 +4184,7 @@ export function BullpenAutoRunScheduleCard({
   const workflowRun =
     visibleRun ??
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
+  const workflowRunNeedsLogin = runNeedsBullpenLogin(workflowRun);
   const investOnlySource = selectBullpenStage3OnlyInvestSource(
     summary
       ? [summary.latest_run, ...summary.recent_runs]
@@ -4759,9 +4789,33 @@ export function BullpenAutoRunScheduleCard({
                   : latestCompletedRun?.started_at ?? summary?.state.last_run_at,
               )}
             </button>
-            <p className="mt-1 text-xs text-slate-600">
-              {latestCompletedRun?.summary || "No auto-run result yet."}
-            </p>
+            {runIsActive && workflowRunNeedsLogin ? (
+              <div className="mt-2 space-y-2">
+                <p className="text-sm font-bold text-rose-700">
+                  Failed : Login Needed
+                </p>
+                <div className="flex items-start gap-2 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
+                  <code className="min-w-0 flex-1 break-words text-xs font-semibold leading-5 text-rose-950">
+                    {BULLPEN_LOGIN_COMMAND}
+                  </code>
+                  <button
+                    type="button"
+                    aria-label="Copy Bullpen login command"
+                    title="Copy command"
+                    className="rounded-full border border-rose-200 bg-white p-1.5 text-rose-700 transition hover:bg-rose-100"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(BULLPEN_LOGIN_COMMAND);
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-1 text-xs text-slate-600">
+                {latestCompletedRun?.summary || "No auto-run result yet."}
+              </p>
+            )}
           </div>
 
           <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
