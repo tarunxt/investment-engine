@@ -141,6 +141,7 @@ type ScanCandidateDialogState = {
     typeof buildBullpenAutoRunWorkflowView
   >["stages"][number]["activePositionsFound"];
   activePositionCount: number;
+  claimablePositionCount: number;
 };
 
 type ScanCandidateDialogCandidate = ReturnType<
@@ -516,9 +517,11 @@ function StageTwoRunStats({
   onOpenInvestEvents,
   onOpenLlmRunDetails,
   onOpenScanCandidateDialog,
+  scanStageForPositionSnapshot,
 }: {
   stage: WorkflowStageView;
   decisions?: BullpenAutoLiveDecision[];
+  scanStageForPositionSnapshot?: WorkflowStageView;
   onOpenInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
   onOpenLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
   onOpenScanCandidateDialog?: (
@@ -528,9 +531,16 @@ function StageTwoRunStats({
 }) {
   const investableDecisions = getStageTwoInvestableDecisions(decisions);
   const stats = getStageTwoStats(stage, decisions);
+  const positionDialogStage = scanStageForPositionSnapshot ?? stage;
+  const positionStats = scanStageForPositionSnapshot
+    ? getStageOneStats(scanStageForPositionSnapshot)
+    : {
+        activePositions: stats.activePositions,
+        claimablePositions: stats.claimablePositions,
+      };
   const deDuplicatedCount = Math.max(
     0,
-    stats.activePositions + stats.newOpportunities - stats.llmRanOn,
+    positionStats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
 
   return (
@@ -539,29 +549,31 @@ function StageTwoRunStats({
         {onOpenScanCandidateDialog ? (
           <button
             type="button"
-            onClick={() => onOpenScanCandidateDialog(stage, "active-positions")}
+            onClick={() =>
+              onOpenScanCandidateDialog(positionDialogStage, "active-positions")
+            }
             className="text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
           >
             Available for Claim:{" "}
             <span className="font-semibold tabular-nums">
-              {stats.claimablePositions}
+              {positionStats.claimablePositions}
             </span>
             <br />
             Active Positions:{" "}
             <span className="font-semibold tabular-nums">
-              {stats.activePositions}
+              {positionStats.activePositions}
             </span>
           </button>
         ) : (
           <>
             Available for Claim:{" "}
             <span className="font-semibold tabular-nums">
-              {stats.claimablePositions}
+              {positionStats.claimablePositions}
             </span>
             <br />
             Active Positions:{" "}
             <span className="font-semibold tabular-nums">
-              {stats.activePositions}
+              {positionStats.activePositions}
             </span>
           </>
         )}
@@ -570,7 +582,12 @@ function StageTwoRunStats({
         {onOpenScanCandidateDialog ? (
           <button
             type="button"
-            onClick={() => onOpenScanCandidateDialog(stage, "fresh-opportunities")}
+            onClick={() =>
+              onOpenScanCandidateDialog(
+                positionDialogStage,
+                "fresh-opportunities",
+              )
+            }
             className="text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
           >
             New Opportunities:{" "}
@@ -1812,6 +1829,12 @@ function StageOneOutputDialog({
   onClose: () => void;
 }) {
   const showActivePositionsFirst = state.mode === "active-positions";
+  const claimablePositions = state.activePositions.filter(
+    (position) => position.isClaimable,
+  );
+  const activePositions = state.activePositions.filter(
+    (position) => !position.isClaimable,
+  );
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
@@ -1843,26 +1866,121 @@ function StageOneOutputDialog({
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-5">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Fresh Bullpen Opportunities
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                Available for claim
               </p>
-              <p className="mt-2 text-2xl font-semibold text-slate-950">
-                {state.candidates.length}
+              <p className="mt-2 text-2xl font-semibold text-emerald-950">
+                {state.claimablePositionCount}
               </p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
                 Active Bullpen positions found
               </p>
-              <p className="mt-2 text-2xl font-semibold text-slate-950">
+              <p className="mt-2 text-2xl font-semibold text-amber-950">
                 {state.activePositionCount}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-pink-200 bg-pink-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-pink-700">
+                Fresh Bullpen Opportunities
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-pink-950">
+                {state.candidates.length}
               </p>
             </div>
           </div>
 
           <div className="mt-5 space-y-5">
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                    Available for Claim
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Claimable Bullpen wallet positions separated from active
+                    positions.
+                  </p>
+                </div>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  {state.claimablePositionCount}{" "}
+                  {state.claimablePositionCount === 1
+                    ? "position"
+                    : "positions"}
+                </span>
+              </div>
+
+              {claimablePositions.length > 0 ? (
+                <div className="overflow-hidden rounded-2xl border border-emerald-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-emerald-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                      <tr>
+                        <th className="px-4 py-3">Position</th>
+                        <th className="px-4 py-3">Side & size</th>
+                        <th className="px-4 py-3">Odds</th>
+                        <th className="px-4 py-3">Close time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {claimablePositions.map((position) => (
+                        <tr key={position.positionKey}>
+                          <td className="px-4 py-3 align-top">
+                            <div className="font-semibold text-slate-950">
+                              {position.marketUrl ? (
+                                <a
+                                  className="hover:text-sky-700 hover:underline"
+                                  href={position.marketUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {position.marketTitle}
+                                </a>
+                              ) : (
+                                position.marketTitle
+                              )}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                              {position.theme ? (
+                                <span>{position.theme}</span>
+                              ) : null}
+                              {position.conditionId ? (
+                                <span>{position.conditionId}</span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            {position.side ?? "—"}
+                            <br />
+                            Shares {formatShares(position.shares)}
+                            <br />
+                            Exposure {formatMoney(position.exposureUsd)}
+                            <br />
+                            Avg {formatPriceCents(position.averagePriceCents)}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            Yes {formatOddsPercent(position.currentYesOdds)}
+                            <br />
+                            No {formatOddsPercent(position.currentNoOdds)}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            {formatIstDateTime(position.closeTime)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-6 text-sm text-emerald-700">
+                  No claimable Bullpen positions were recorded for this Stage 1
+                  scan.
+                </div>
+              )}
+            </section>
+
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1880,7 +1998,7 @@ function StageOneOutputDialog({
                 </span>
               </div>
 
-              {state.activePositions.length > 0 ? (
+              {activePositions.length > 0 ? (
                 <div className="overflow-hidden rounded-2xl border border-slate-200">
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
                     <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -1892,7 +2010,7 @@ function StageOneOutputDialog({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
-                      {state.activePositions.map((position) => (
+                      {activePositions.map((position) => (
                         <tr key={position.positionKey}>
                           <td className="px-4 py-3 align-top">
                             <div className="font-semibold text-slate-950">
@@ -4270,6 +4388,7 @@ export function BullpenAutoRunScheduleCard({
     stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
     mode: ScanCandidateDialogMode,
   ) => {
+    const activePositionCounts = getStageActivePositionCounts(stage);
     setScanCandidateDialog({
       mode,
       scanCompletedAt: stage.timerCompletedAt,
@@ -4278,7 +4397,8 @@ export function BullpenAutoRunScheduleCard({
         run: workflowRun,
       }),
       activePositions: stage.activePositionsFound,
-      activePositionCount: getStageActivePositionCounts(stage).open,
+      activePositionCount: activePositionCounts.open,
+      claimablePositionCount: activePositionCounts.claimable,
     });
   };
   const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
@@ -5181,6 +5301,9 @@ export function BullpenAutoRunScheduleCard({
                         }
                         onOpenLlmRunDetails={setStageTwoLlmRunDialog}
                         onOpenScanCandidateDialog={openScanCandidateDialog}
+                        scanStageForPositionSnapshot={workflowView.stages.find(
+                          (item) => item.key === "scan",
+                        )}
                       />
                     ) : null}
                     {stage.key === "invest" &&
