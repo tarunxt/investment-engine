@@ -3309,8 +3309,42 @@ class BullpenAutoLiveEngine:
         persisted_positions_by_key = {
             f"{position.market_id}::{position.side}": position for position in positions
         }
+
+        def _is_bullpen_wallet_position(position: ConsoleWalletPosition) -> bool:
+            position_key = f"{position.market_id}::{position.side}"
+            return (
+                position_key in persisted_positions_by_key
+                or bool(position.slug and position.slug in market_by_slug)
+                or bool(position.market_id and position.market_id in market_by_id)
+            )
+
+        bullpen_wallet_positions = [
+            position
+            for position in enriched_wallet_positions
+            if _is_bullpen_wallet_position(position)
+        ]
+        non_bullpen_wallet_positions = [
+            position
+            for position in enriched_wallet_positions
+            if not _is_bullpen_wallet_position(position)
+        ]
+        if non_bullpen_wallet_positions:
+            logger.info(
+                "Skipping %s non-Bullpen wallet position(s) for Auto-Live console profile: %s",
+                len(non_bullpen_wallet_positions),
+                [
+                    {
+                        "market_id": position.market_id,
+                        "market_title": position.market_title,
+                        "side": position.side,
+                        "is_claimable": position.is_claimable,
+                    }
+                    for position in non_bullpen_wallet_positions
+                ],
+            )
+
         position_snapshots: list[PositionSnapshot] = []
-        for position in enriched_wallet_positions:
+        for position in bullpen_wallet_positions:
             if position.is_claimable:
                 continue
             position_key = f"{position.market_id}::{position.side}"
@@ -3375,7 +3409,7 @@ class BullpenAutoLiveEngine:
                 )
             )
         claimable_wallet_positions = [
-            position for position in enriched_wallet_positions if position.is_claimable
+            position for position in bullpen_wallet_positions if position.is_claimable
         ]
         active_position_rows_before_llm = len(position_snapshots) + len(
             claimable_wallet_positions
@@ -3397,9 +3431,10 @@ class BullpenAutoLiveEngine:
                     "active_wallet_positions": active_position_rows_before_llm,
                     "active_positions_found": [
                         _serialize_active_wallet_position(position)
-                        for position in enriched_wallet_positions
+                        for position in bullpen_wallet_positions
                     ],
                     "claimable_wallet_positions": len(claimable_wallet_positions),
+                    "non_bullpen_wallet_positions_skipped": len(non_bullpen_wallet_positions),
                     "scanned_candidates": scanned_total_candidates,
                     "active_position_rows_before_llm": active_position_rows_before_llm,
                     "candidate_rows_before_llm": candidate_rows_before_llm,
@@ -3570,7 +3605,7 @@ class BullpenAutoLiveEngine:
                     ),
                     "returns_per_day": position_returns_per_day(position, now=now),
                 }
-                for position in enriched_wallet_positions
+                for position in bullpen_wallet_positions
                 if not position.is_claimable
             ]
             candidate_rows.sort(
@@ -3624,9 +3659,10 @@ class BullpenAutoLiveEngine:
                         "active_wallet_positions": active_position_rows_before_llm,
                         "active_positions_found": [
                             _serialize_active_wallet_position(position)
-                            for position in enriched_wallet_positions
+                            for position in bullpen_wallet_positions
                         ],
                         "claimable_wallet_positions": len(claimable_wallet_positions),
+                        "non_bullpen_wallet_positions_skipped": len(non_bullpen_wallet_positions),
                         "scanned_candidates": scanned_total_candidates,
                         "active_position_rows_before_llm": active_position_rows_before_llm,
                         "candidate_rows_before_llm": candidate_rows_before_llm,
@@ -4023,7 +4059,7 @@ class BullpenAutoLiveEngine:
         )
         self._report_progress(progress_callback, run, state)
         active_rank_rows = []
-        for position in enriched_wallet_positions:
+        for position in bullpen_wallet_positions:
             if position.is_claimable:
                 active_rank_rows.append(
                     {
@@ -4600,7 +4636,7 @@ class BullpenAutoLiveEngine:
         }
         evaluated_active_positions: list[dict[str, object]] = []
 
-        for position in enriched_wallet_positions:
+        for position in bullpen_wallet_positions:
             if position.is_claimable:
                 continue
             returns_per_day = position_returns_per_day(position, now=now)
