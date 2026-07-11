@@ -281,7 +281,7 @@ def _extract_claimable(row: dict[str, object]) -> bool:
             return bool(value)
         if isinstance(value, str):
             normalized = value.strip().lower()
-            if normalized in {"true", "1", "yes", "claimable", "redeemable", "won"}:
+            if normalized in {"true", "1", "yes", "claimable", "redeemable"}:
                 return True
             if normalized in {"false", "0", "no", "open"}:
                 return False
@@ -293,7 +293,7 @@ def _extract_claimable(row: dict[str, object]) -> bool:
     ).lower()
     return any(
         token in claim_text
-        for token in ("claim", "redeem", "claimable", "redeemable", "won")
+        for token in ("claim", "redeem", "claimable", "redeemable")
     )
 
 

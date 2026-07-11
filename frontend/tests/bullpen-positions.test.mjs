@@ -115,6 +115,42 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
   assert.equal(aggregated[0].averagePrice, 0.4833);
 });
 
+test("Bullpen positions do not treat plain won status as claimable", async () => {
+  const { normalizeBullpenPosition } = await loadBullpenPositionsModule();
+
+  const wonHistoryPosition = normalizeBullpenPosition(
+    {
+      slug: "closed-history-row",
+      market: "Historical winning position",
+      outcome: "No",
+      shares: "6",
+      avg_price: "0.92",
+      current_price: "0.95",
+      status: "won",
+    },
+    () => null,
+  );
+  const redeemablePosition = normalizeBullpenPosition(
+    {
+      slug: "redeemable-row",
+      market: "Redeemable position",
+      outcome: "No",
+      shares: "3",
+      avg_price: "0.8",
+      current_price: "1",
+      status: "won",
+      redeemable: true,
+    },
+    () => null,
+  );
+
+  assert.equal(wonHistoryPosition.isClaimable, false);
+  assert.equal(wonHistoryPosition.claimableValue, null);
+  assert.equal(redeemablePosition.isClaimable, true);
+  assert.equal(redeemablePosition.claimableValue, 3);
+});
+
+
 test("Bullpen positions refresh current odds and use end-of-day ET for returns/day", async () => {
   const {
     applyBullpenPositionMarketData,

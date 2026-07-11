@@ -2239,6 +2239,45 @@ async def test_console_wallet_positions_aggregate_duplicate_lots(monkeypatch):
     assert positions[0].current_no_odds == 39
 
 
+@pytest.mark.anyio
+async def test_console_wallet_positions_do_not_treat_won_status_as_claimable(monkeypatch):
+    async def fake_run_first_bullpen_json(*_args, **_kwargs):
+        return {
+            "positions": [
+                {
+                    "slug": "closed-history-row",
+                    "market": "Historical winning position",
+                    "outcome": "No",
+                    "shares": 6,
+                    "avg_price": 0.92,
+                    "current_price": 0.95,
+                    "status": "won",
+                },
+                {
+                    "slug": "redeemable-row",
+                    "market": "Redeemable position",
+                    "outcome": "No",
+                    "shares": 3,
+                    "avg_price": 0.8,
+                    "current_price": 1,
+                    "status": "won",
+                    "redeemable": True,
+                },
+            ]
+        }
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        fake_run_first_bullpen_json,
+    )
+
+    positions = await read_console_wallet_positions()
+
+    by_slug = {position.slug: position for position in positions}
+    assert by_slug["closed-history-row"].is_claimable is False
+    assert by_slug["redeemable-row"].is_claimable is True
+
+
 def test_market_rules_extract_resolution_criteria_and_deadline():
     market = _market(
         description=(

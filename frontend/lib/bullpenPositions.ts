@@ -400,7 +400,7 @@ function extractClaimableStatus(value: BullpenCliPosition) {
     .join(" ")
     .toLowerCase();
 
-  return /\b(claim|redeem|claimable|redeemable|won)\b/.test(claimText);
+  return /\b(claim|redeem|claimable|redeemable)\b/.test(claimText);
 }
 
 function buildBullpenCliAliases(position: BullpenCliPosition) {
