@@ -74,6 +74,7 @@ import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
 import type {
   BullpenAutoLiveDecision,
+  BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
   PolymarketEventRunContext,
   PolymarketManualInvestOrderRequest,
@@ -644,6 +645,35 @@ function parseTimestampMs(value: string | null | undefined) {
   if (!value) return 0;
   const timestamp = new Date(value).getTime();
   return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function pickLatestTimestamp(
+  ...values: Array<string | null | undefined>
+): string | null {
+  return values.reduce<string | null>((latest, value) => {
+    if (!value) return latest;
+    const valueMs = parseTimestampMs(value);
+    if (valueMs === 0) return latest;
+    return valueMs > parseTimestampMs(latest) ? value : latest;
+  }, null);
+}
+
+function getBullpenAutoRunCompletedAt(run: BullpenAutoLiveRun | null | undefined) {
+  if (!run || run.status !== "completed") return null;
+  return run.completed_at || run.started_at || null;
+}
+
+function getLatestBullpenAutoRunCompletedAt(
+  summary: {
+    latest_run?: BullpenAutoLiveRun | null;
+    recent_runs?: BullpenAutoLiveRun[];
+  } | null,
+) {
+  if (!summary) return null;
+  return pickLatestTimestamp(
+    getBullpenAutoRunCompletedAt(summary.latest_run),
+    ...(summary.recent_runs || []).map(getBullpenAutoRunCompletedAt),
+  );
 }
 
 function hasKnownUsdCost(value: number | null | undefined): value is number {
@@ -1425,6 +1455,9 @@ function BullpenAiPageContent() {
   >(null);
   const [isClaimingPositions, setIsClaimingPositions] = useState(false);
   const [positionsLastUpdatedAt, setPositionsLastUpdatedAt] = useState<
+    string | null
+  >(null);
+  const [autoRunLastCompletedAt, setAutoRunLastCompletedAt] = useState<
     string | null
   >(null);
   const [positionsSource, setPositionsSource] =
@@ -3496,6 +3529,7 @@ function BullpenAiPageContent() {
         hasActivePositionsSnapshot={Boolean(positionsLastUpdatedAt)}
         onSummaryUpdated={({ summary, run }) => {
           setRecentAutoRunDecisions(summary.recent_decisions ?? []);
+          setAutoRunLastCompletedAt(getLatestBullpenAutoRunCompletedAt(summary));
           setAutoSnapshotsByMode((current) =>
             syncBullpenAutoRunSummarySnapshots({
               snapshotsByMode: current,
@@ -4076,6 +4110,10 @@ function BullpenAiPageContent() {
               positionsFallback={positionsFallback}
               positionsHealth={positionsHealth}
               positionsLastUpdatedAt={positionsLastUpdatedAt}
+              sectionsLastRefreshedAt={pickLatestTimestamp(
+                positionsLastUpdatedAt,
+                autoRunLastCompletedAt,
+              )}
               positionsSource={positionsSource}
               progressMessage={isManualScanView ? investmentProgress : null}
               recentDecisions={recentAutoRunDecisions}

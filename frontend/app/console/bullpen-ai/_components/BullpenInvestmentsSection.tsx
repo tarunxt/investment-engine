@@ -60,6 +60,7 @@ type BullpenInvestmentsSectionProps = {
   positionsFallback: BullpenPositionsFallback | null;
   positionsHealth: BullpenLiveHealth | null;
   positionsLastUpdatedAt: string | null;
+  sectionsLastRefreshedAt?: string | null;
   positionsSource: BullpenPositionsSource | null;
   progressMessage: string | null;
   recentDecisions: BullpenAutoLiveDecision[];
@@ -440,6 +441,7 @@ export function BullpenInvestmentsSection({
   positionsFallback,
   positionsHealth,
   positionsLastUpdatedAt,
+  sectionsLastRefreshedAt,
   positionsSource,
   progressMessage,
   recentDecisions,
@@ -646,7 +648,11 @@ export function BullpenInvestmentsSection({
             <div className="mt-4 space-y-6">
               {activeInvestmentRows.length > 0 ? (
                 <div className="space-y-3">
-                  <EventsSectionHeader title="Active Bullpen Positions" tone="active" lastRefreshedAt={positionsLastUpdatedAt} />
+                  <EventsSectionHeader
+                    title="Active Bullpen Positions"
+                    tone="active"
+                    lastRefreshedAt={sectionsLastRefreshedAt ?? positionsLastUpdatedAt}
+                  />
                   {activeInvestmentRows.map((row) => {
                     const position = row.position;
                     const question = activePositionQuestionByKey.get(position.key);
@@ -733,7 +739,7 @@ export function BullpenInvestmentsSection({
                   <EventsSectionHeader
                     title="New Scanned Opportunities"
                     tone="candidate"
-                    lastRefreshedAt={positionsLastUpdatedAt}
+                    lastRefreshedAt={sectionsLastRefreshedAt ?? positionsLastUpdatedAt}
                   />
                   {candidateInvestmentRows.map((row) => {
                     const question = row.question;
