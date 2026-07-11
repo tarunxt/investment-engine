@@ -2343,6 +2343,45 @@ def test_candidate_filter_reasons_block_uncategorized_player_prop_threshold_mark
         assert "Excluded sports market." in reasons, question
 
 
+def test_candidate_filter_reasons_block_uncategorized_scoreline_win_markets():
+    for question, slug in (
+        ("Team Falcons to win 2-0?", "team-falcons-to-win-2-0"),
+        ("Xtreme Gaming to win 2-0?", "xtreme-gaming-to-win-2-0"),
+    ):
+        market = _market(
+            question=question,
+            theme="Uncategorized",
+            slug=slug,
+        )
+
+        reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+        assert "Excluded sports market." in reasons, question
+
+
+def test_candidate_filter_reasons_block_uncategorized_msi_league_markets():
+    for question, slug in (
+        (
+            "Will a team from LCK (South Korea) win MSI 2026?",
+            "team-from-lck-win-msi-2026",
+        ),
+        (
+            "Will a team from LPL (China) win MSI 2026?",
+            "team-from-lpl-win-msi-2026",
+        ),
+        ("Will Bilibili Gaming win MSI 2026?", "bilibili-gaming-win-msi-2026"),
+    ):
+        market = _market(
+            question=question,
+            theme="Uncategorized",
+            slug=slug,
+        )
+
+        reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+        assert "Excluded sports market." in reasons, question
+
+
 def test_candidate_filter_reasons_block_uncategorized_win_on_date_markets():
     market = _market(
         question="Will Norway win on 2026-06-26?",
