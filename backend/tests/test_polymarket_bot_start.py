@@ -1763,7 +1763,7 @@ async def test_manual_live_redeem_treats_gamma_condition_miss_as_non_fatal(tmp_p
     await bot.redeem_live_positions()
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 0
+    assert executor.claim_calls == 1
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
     assert bot.recent_activity[0].message == (
         "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
@@ -1804,7 +1804,7 @@ async def test_startup_balance_refresh_runs_auto_redeem(tmp_path):
     await bot._refresh_startup_balance_background()
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 0
+    assert executor.claim_calls == 1
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
 
 
@@ -1837,7 +1837,7 @@ async def test_manual_live_redeem_submits_and_refreshes_balance(tmp_path):
     await bot.redeem_live_positions(["0xaaa", "0xbbb"])
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 0
+    assert executor.claim_calls == 1
     assert executor.redeem_condition_ids == ["0xaaa", "0xbbb"]
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
     assert bot.recent_activity[0].message == (
@@ -1876,7 +1876,7 @@ async def test_manual_live_redeem_runs_without_live_trading_when_doctor_passes(
     await bot.redeem_live_positions(["0xaaa"])
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 0
+    assert executor.claim_calls == 1
     assert executor.redeem_condition_ids == ["0xaaa"]
     assert bot.doctor_status.ok is True
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
@@ -1884,6 +1884,45 @@ async def test_manual_live_redeem_runs_without_live_trading_when_doctor_passes(
         "Manual Bullpen redeem/claim submitted for all resolved positions."
     )
 
+
+
+@pytest.mark.anyio
+async def test_manual_live_redeem_ignores_missing_claim_command_after_redeem(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": False,
+            "live_trading": True,
+            "use_live_reads": True,
+            "auto_redeem_live": False,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = EmptyProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+
+    class MissingClaimExecutor(RedeemTrackingExecutor):
+        async def claim(self, *, dry_run: bool):
+            self.claim_calls += 1
+            raise BullpenCommandError("unknown command: claim for polymarket")
+
+    executor = MissingClaimExecutor()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=executor,
+        balance_reader=ReadyBalanceReader(),
+        logger=logger,
+    )
+
+    await bot.redeem_live_positions(["0xaaa"])
+
+    assert executor.redeem_calls == 1
+    assert executor.claim_calls == 1
+    assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
 
 def test_claim_command_unavailable_warning_detects_missing_claim_command():
     assert is_claim_command_unavailable_warning("unknown command: claim for polymarket")
@@ -1923,7 +1962,7 @@ async def test_forced_redeem_claim_runs_even_when_auto_redeem_disabled(tmp_path)
     await bot._force_redeem_claim_background()
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 0
+    assert executor.claim_calls == 1
     assert bot.recent_activity[0].message == (
         "Forced redeem/claim checked completed Bullpen positions."
     )
@@ -1965,5 +2004,5 @@ async def test_auto_redeem_background_runs_without_live_trading_when_doctor_read
     await bot._refresh_startup_balance_background()
 
     assert executor.redeem_calls == 1
-    assert executor.claim_calls == 0
+    assert executor.claim_calls == 1
     assert bot.balance_state.message == "Bullpen account value: 114.07 USD"
