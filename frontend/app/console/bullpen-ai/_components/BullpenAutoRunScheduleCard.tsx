@@ -318,19 +318,40 @@ type WorkflowStageView = ReturnType<
   typeof buildBullpenAutoRunWorkflowView
 >["stages"][number];
 
-function getStageOneStats(stage: WorkflowStageView) {
-  const walletPositions = readStageOutputNumber(
-    stage.outputs.active_wallet_positions,
-  );
-  const activeRowsBeforeLlm = readStageOutputNumber(
-    stage.outputs.active_position_rows_before_llm,
-  );
-  const claimablePositions =
+function getStageActivePositionCounts(stage: WorkflowStageView) {
+  const claimableFromSnapshot = stage.activePositionsFound.filter(
+    (position) => position.isClaimable,
+  ).length;
+  const openFromSnapshot = stage.activePositionsFound.filter(
+    (position) => !position.isClaimable,
+  ).length;
+  const totalFromSnapshot = stage.activePositionsFound.length;
+  const walletPositions =
+    readStageOutputNumber(stage.outputs.active_wallet_positions) ??
+    readStageOutputNumber(stage.inputs.active_wallet_positions);
+  const activeRowsBeforeLlm =
+    readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
+    readStageOutputNumber(stage.inputs.active_position_rows_before_llm);
+  const derivedClaimable =
     walletPositions !== null && activeRowsBeforeLlm !== null
       ? Math.max(0, walletPositions - activeRowsBeforeLlm)
-      : 0;
-  const activePositions =
-    activeRowsBeforeLlm ?? walletPositions ?? stage.activePositionsFound.length;
+      : null;
+
+  return {
+    open:
+      totalFromSnapshot > 0
+        ? openFromSnapshot
+        : activeRowsBeforeLlm ?? walletPositions ?? 0,
+    claimable:
+      totalFromSnapshot > 0
+        ? claimableFromSnapshot
+        : derivedClaimable ?? 0,
+  };
+}
+
+function getStageOneStats(stage: WorkflowStageView) {
+  const { open: activePositions, claimable: claimablePositions } =
+    getStageActivePositionCounts(stage);
   const totalScanned =
     readStageOutputNumber(stage.outputs.scanned_candidates) ??
     readStageOutputNumber(stage.outputs.total_items) ??
@@ -347,18 +368,8 @@ function getStageTwoStats(
   stage: WorkflowStageView,
   decisions: BullpenAutoLiveDecision[] = [],
 ) {
-  const walletPositions =
-    readStageOutputNumber(stage.outputs.active_wallet_positions) ??
-    readStageOutputNumber(stage.inputs.active_wallet_positions);
-  const activeRowsBeforeLlm =
-    readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
-    readStageOutputNumber(stage.inputs.active_position_rows_before_llm);
-  const claimablePositions =
-    walletPositions !== null && activeRowsBeforeLlm !== null
-      ? Math.max(0, walletPositions - activeRowsBeforeLlm)
-      : 0;
-  const activePositions =
-    activeRowsBeforeLlm ?? walletPositions ?? stage.activePositionsFound.length;
+  const { open: activePositions, claimable: claimablePositions } =
+    getStageActivePositionCounts(stage);
   const newOpportunities =
     readStageOutputNumber(stage.outputs.stage1_accepted_candidate_count) ??
     readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ??
@@ -1299,9 +1310,43 @@ function ErrorCodeWithDetails({
       </span>
       {isOpen ? (
         <span
-          className={`mt-2 block whitespace-pre-wrap break-words rounded-lg border border-current/15 bg-white/60 px-2.5 py-2 text-[11px] leading-5 ${detailClassName}`}
+          className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bullpen-error-detail-title"
+          onClick={() => setIsOpen(false)}
         >
-          {detail}
+          <span
+            className="flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-[0_28px_80px_-24px_rgba(15,23,42,0.55)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <span>
+                <span className="block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Error detail
+                </span>
+                <span
+                  id="bullpen-error-detail-title"
+                  className="mt-1 block text-lg font-semibold text-slate-950"
+                >
+                  {code}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                aria-label="Close error details"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </span>
+            <span
+              className={`block flex-1 overflow-auto whitespace-pre-wrap break-words bg-rose-50/80 px-5 py-4 text-xs leading-6 ${detailClassName}`}
+            >
+              {detail}
+            </span>
+          </span>
         </span>
       ) : null}
     </span>
@@ -2526,9 +2571,12 @@ function RunDetailDialog({
             </section>
           ) : null}
           {run.error_message ? (
-            <p className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">
-              {run.error_message}
-            </p>
+            <div className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              <ErrorCodeWithDetails
+                detail={run.error_message}
+                detailClassName="text-rose-800"
+              />
+            </div>
           ) : null}
           <SubmittedExecutionEventsTable
             decisions={decisions}
@@ -4230,10 +4278,7 @@ export function BullpenAutoRunScheduleCard({
         run: workflowRun,
       }),
       activePositions: stage.activePositionsFound,
-      activePositionCount:
-        readStageOutputNumber(stage.outputs.active_wallet_positions) ??
-        readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
-        stage.activePositionsFound.length,
+      activePositionCount: getStageActivePositionCounts(stage).open,
     });
   };
   const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
@@ -5486,9 +5531,12 @@ export function BullpenAutoRunScheduleCard({
                             </div>
                           </div>
                           {run.error_message ? (
-                            <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-800">
-                              {run.error_message}
-                            </p>
+                            <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                              <ErrorCodeWithDetails
+                                detail={run.error_message}
+                                detailClassName="text-rose-800"
+                              />
+                            </div>
                           ) : null}
                         </div>
                       );
