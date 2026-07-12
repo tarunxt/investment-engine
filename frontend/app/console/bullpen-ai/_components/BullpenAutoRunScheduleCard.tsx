@@ -4281,7 +4281,9 @@ function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "slate") {
 }
 
 
-function isUsableBullpenBalance(balance: PolymarketBotState["live"]["balance"] | null | undefined) {
+function isUsableBullpenBalance(
+  balance: PolymarketBotState["live"]["balance"] | null | undefined,
+): balance is PolymarketBotState["live"]["balance"] & { status: "ready" } {
   return balance?.status === "ready";
 }
 
