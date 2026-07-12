@@ -12,6 +12,7 @@ import {
 import {
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   Copy,
   History,
@@ -427,7 +428,10 @@ function getStageTwoStats(
   const llmsSelected =
     readStageOutputNumber(stage.outputs.llm_provider_target_count) ??
     readStageOutputNumber(stage.outputs.llm_selected_target_count) ??
+    readStageOutputNumber(stage.outputs.llm_target_count) ??
     readStageOutputNumber(stage.inputs.llm_provider_target_count) ??
+    readStageOutputNumber(stage.inputs.llm_selected_target_count) ??
+    readStageOutputNumber(stage.inputs.llm_target_count) ??
     Math.max(llmsCompleted, 0);
   const newEventsToInvestIn = getStageTwoInvestableDecisions(decisions).length;
 
@@ -4888,6 +4892,8 @@ export function BullpenAutoRunScheduleCard({
   const [isSchedulePickerOpen, setIsSchedulePickerOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
+  const [isLlmExecutionModePickerOpen, setIsLlmExecutionModePickerOpen] =
+    useState(false);
   const [
     isInvestEligibilityInfoDialogOpen,
     setIsInvestEligibilityInfoDialogOpen,
@@ -6656,63 +6662,71 @@ export function BullpenAutoRunScheduleCard({
                           pickerPlacement="center"
                           pickerButtonClassName={`h-10 w-10 rounded-full bg-white/75 dark:bg-slate-950/80 ${toneClasses.badge}`}
                         />
-                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-slate-600">
-                          <label
-                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 font-semibold transition ${
-                              llmExecutionMode === "single_combined"
-                                ? "border-slate-900 bg-slate-900 text-white"
-                                : "border-slate-200 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-white"
-                            }`}
+                        <div className="relative flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-slate-600">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setIsLlmExecutionModePickerOpen((isOpen) => !isOpen)
+                            }
+                            disabled={llmExecutionSettingsSaveBusy}
+                            className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-2 font-semibold text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-expanded={isLlmExecutionModePickerOpen}
+                            aria-haspopup="listbox"
                           >
-                            <input
-                              type="radio"
-                              name="stage-2-llm-execution-mode"
-                              value="single_combined"
-                              checked={llmExecutionMode === "single_combined"}
-                              onChange={() =>
-                                handleLlmExecutionModeChange("single_combined")
-                              }
-                              disabled={llmExecutionSettingsSaveBusy}
-                              className="h-3.5 w-3.5 accent-slate-950"
-                            />
-                            <span>Single combined</span>
-                          </label>
-                          <label
-                            className={`inline-flex min-w-0 flex-wrap items-center gap-2 rounded-full border px-3 py-1.5 font-semibold transition ${
-                              llmExecutionMode === "chunked_parallel"
-                                ? "border-slate-900 bg-slate-900 text-white"
-                                : "border-slate-200 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-white"
-                            }`}
-                          >
-                            <input
-                              type="radio"
-                              name="stage-2-llm-execution-mode"
-                              value="chunked_parallel"
-                              checked={llmExecutionMode === "chunked_parallel"}
-                              onChange={() =>
-                                handleLlmExecutionModeChange("chunked_parallel")
-                              }
-                              disabled={llmExecutionSettingsSaveBusy}
-                              className="h-3.5 w-3.5 accent-slate-950"
-                            />
-                            <span>Batched parallel (</span>
-                            <input
-                              type="number"
-                              min={1}
-                              max={100}
-                              step={1}
-                              value={llmEventsPerPromptInput}
-                              onChange={handleLlmEventsPerPromptInputChange}
-                              disabled={llmExecutionSettingsSaveBusy}
-                              className={`h-7 w-14 rounded-lg border px-2 text-center text-sm font-bold outline-none transition focus:border-slate-400 ${
-                                llmExecutionMode === "chunked_parallel"
-                                  ? "border-white/40 bg-white/15 text-white"
-                                  : "border-slate-200 bg-white text-slate-900"
+                            <span className="truncate">
+                              {llmExecutionMode === "chunked_parallel"
+                                ? `Batched parallel · ${llmEventsPerPromptInput || DEFAULT_LLM_EVENTS_PER_PROMPT} events/prompt`
+                                : "Single combined"}
+                            </span>
+                            <ChevronDown
+                              className={`h-3.5 w-3.5 transition ${
+                                isLlmExecutionModePickerOpen ? "rotate-180" : ""
                               }`}
-                              aria-label="Stage 2 events per prompt"
                             />
-                            <span>Events/prompt)</span>
-                          </label>
+                          </button>
+                          {isLlmExecutionModePickerOpen ? (
+                            <div className="absolute bottom-full left-0 z-20 mb-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-3xl border border-slate-200 bg-white p-2 text-slate-700 shadow-xl ring-1 ring-slate-900/5">
+                              <label className="flex cursor-pointer items-center gap-2 rounded-2xl px-3 py-2.5 font-semibold transition hover:bg-slate-50">
+                                <input
+                                  type="radio"
+                                  name="stage-2-llm-execution-mode"
+                                  value="single_combined"
+                                  checked={llmExecutionMode === "single_combined"}
+                                  onChange={() => {
+                                    handleLlmExecutionModeChange("single_combined");
+                                    setIsLlmExecutionModePickerOpen(false);
+                                  }}
+                                  disabled={llmExecutionSettingsSaveBusy}
+                                  className="h-3.5 w-3.5 accent-slate-950"
+                                />
+                                <span>Single combined</span>
+                              </label>
+                              <label className="mt-1 flex cursor-pointer flex-wrap items-center gap-2 rounded-2xl px-3 py-2.5 font-semibold transition hover:bg-slate-50">
+                                <input
+                                  type="radio"
+                                  name="stage-2-llm-execution-mode"
+                                  value="chunked_parallel"
+                                  checked={llmExecutionMode === "chunked_parallel"}
+                                  onChange={() => handleLlmExecutionModeChange("chunked_parallel")}
+                                  disabled={llmExecutionSettingsSaveBusy}
+                                  className="h-3.5 w-3.5 accent-slate-950"
+                                />
+                                <span>Batched parallel</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={100}
+                                  step={1}
+                                  value={llmEventsPerPromptInput}
+                                  onChange={handleLlmEventsPerPromptInputChange}
+                                  disabled={llmExecutionSettingsSaveBusy}
+                                  className="h-7 w-16 rounded-lg border border-slate-200 bg-white px-2 text-center text-sm font-bold text-slate-900 outline-none transition focus:border-slate-400"
+                                  aria-label="Stage 2 events per prompt"
+                                />
+                                <span className="basis-full pl-5 text-[11px] text-slate-500">Events/prompt</span>
+                              </label>
+                            </div>
+                          ) : null}
                           {llmExecutionFieldError ? (
                             <p className="basis-full text-[11px] font-semibold text-rose-700">
                               {llmExecutionFieldError}
