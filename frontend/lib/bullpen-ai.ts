@@ -61,7 +61,7 @@ export type BullpenQuestionAnalysis = {
   llmNotes: string | null;
   llmProvider: string | null;
   llmModel: string | null;
-  llmRunId: number | null;
+  llmRunId: string | number | null;
   llmCompletedAt: string | null;
   preflightEvidenceBlock?: string | null;
   llmBreakdown: BullpenQuestionLlmBreakdownItem[];
