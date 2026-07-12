@@ -18,12 +18,19 @@ const DEFAULT_EVENT_TARGET: ProviderModelTarget = {
   model: "gpt-4o-mini",
 };
 const MODEL_MIX_STORAGE_KEY = "investment-engine:model-mixes:v1";
+const LAST_MODEL_SELECTION_STORAGE_KEY =
+  "investment-engine:last-llm-selection:v1";
 
 type SavedModelMix = {
   id: string;
   name: string;
   targets: string[];
   updated_at?: string;
+};
+
+type LastModelSelection = {
+  targets: string[];
+  selectedMixId?: string;
 };
 
 interface EventScanRunControlsBaseProps {
@@ -35,10 +42,13 @@ interface EventScanRunControlsBaseProps {
   getSelectionConstraint?: (
     provider: ProviderInfo,
     model: string,
-  ) => {
-    selectable: boolean;
-    reason?: string | null;
-  } | null | undefined;
+  ) =>
+    | {
+        selectable: boolean;
+        reason?: string | null;
+      }
+    | null
+    | undefined;
   historicalEstimatedCostInrByTarget?: Record<string, number>;
   pickerHeaderContent?: ReactNode;
   pickerButtonClassName?: string;
@@ -112,6 +122,45 @@ function writeSavedModelMixes(mixes: SavedModelMix[]) {
   }
 }
 
+function readLastModelSelection(): LastModelSelection | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LAST_MODEL_SELECTION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.targets)) return null;
+    const targets = parsed.targets.filter(
+      (target: unknown) => typeof target === "string",
+    );
+    if (targets.length === 0) return null;
+    return {
+      targets,
+      selectedMixId:
+        typeof parsed.selectedMixId === "string"
+          ? parsed.selectedMixId
+          : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeLastModelSelection(selection: LastModelSelection | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!selection || selection.targets.length === 0) {
+      window.localStorage.removeItem(LAST_MODEL_SELECTION_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(
+      LAST_MODEL_SELECTION_STORAGE_KEY,
+      JSON.stringify(selection),
+    );
+  } catch {
+    // Keep the picker usable if localStorage is unavailable.
+  }
+}
+
 function normalizeError(err: unknown) {
   if (err instanceof APIError) return err.message;
   if (err instanceof Error) return err.message;
@@ -133,10 +182,13 @@ function isSelectableModel(
   getSelectionConstraint?: (
     provider: ProviderInfo,
     model: string,
-  ) => {
-    selectable: boolean;
-    reason?: string | null;
-  } | null | undefined,
+  ) =>
+    | {
+        selectable: boolean;
+        reason?: string | null;
+      }
+    | null
+    | undefined,
 ) {
   if (!isCompatibleModel(provider, model)) return false;
   const selectionConstraint = getSelectionConstraint?.(provider, model);
@@ -149,10 +201,13 @@ function isSelectableTarget(
   getSelectionConstraint?: (
     provider: ProviderInfo,
     model: string,
-  ) => {
-    selectable: boolean;
-    reason?: string | null;
-  } | null | undefined,
+  ) =>
+    | {
+        selectable: boolean;
+        reason?: string | null;
+      }
+    | null
+    | undefined,
 ) {
   const key = targetKey(target);
   if (!key) return false;
@@ -173,10 +228,13 @@ function getFirstCompatibleTarget(
   getSelectionConstraint?: (
     provider: ProviderInfo,
     model: string,
-  ) => {
-    selectable: boolean;
-    reason?: string | null;
-  } | null | undefined,
+  ) =>
+    | {
+        selectable: boolean;
+        reason?: string | null;
+      }
+    | null
+    | undefined,
 ) {
   for (const provider of providers) {
     if (!provider.configured) continue;
@@ -199,10 +257,13 @@ function getPreferredTarget(
   getSelectionConstraint?: (
     provider: ProviderInfo,
     model: string,
-  ) => {
-    selectable: boolean;
-    reason?: string | null;
-  } | null | undefined,
+  ) =>
+    | {
+        selectable: boolean;
+        reason?: string | null;
+      }
+    | null
+    | undefined,
 ) {
   const candidates = [defaultTarget, DEFAULT_EVENT_TARGET];
   for (const candidate of candidates) {
@@ -228,10 +289,13 @@ function getPreferredTargets(
   getSelectionConstraint?: (
     provider: ProviderInfo,
     model: string,
-  ) => {
-    selectable: boolean;
-    reason?: string | null;
-  } | null | undefined,
+  ) =>
+    | {
+        selectable: boolean;
+        reason?: string | null;
+      }
+    | null
+    | undefined,
 ) {
   const compatibleTargets: ProviderModelTarget[] = [];
   const seenKeys = new Set<string>();
@@ -267,10 +331,13 @@ function getTargetsFromKeys(
   getSelectionConstraint?: (
     provider: ProviderInfo,
     model: string,
-  ) => {
-    selectable: boolean;
-    reason?: string | null;
-  } | null | undefined,
+  ) =>
+    | {
+        selectable: boolean;
+        reason?: string | null;
+      }
+    | null
+    | undefined,
 ) {
   const targets: ProviderModelTarget[] = [];
 
@@ -319,18 +386,35 @@ export function EventScanRunControls({
   const [pickerPosition, setPickerPosition] = useState<PickerPosition | null>(
     null,
   );
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
-  const [hasTouchedSelection, setHasTouchedSelection] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => {
+    const lastSelection = readLastModelSelection();
+    return new Set(lastSelection?.targets ?? []);
+  });
+  const [hasTouchedSelection, setHasTouchedSelection] = useState(() =>
+    Boolean(readLastModelSelection()?.targets.length),
+  );
   const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
     readSavedModelMixes(),
   );
-  const [selectedMixId, setSelectedMixId] = useState("");
+  const [selectedMixId, setSelectedMixId] = useState(
+    () => readLastModelSelection()?.selectedMixId ?? "",
+  );
   const lastSelectionChangeRef = useRef("");
 
   const persistSavedMixes = useCallback((mixes: SavedModelMix[]) => {
     setSavedMixes(mixes);
     writeSavedModelMixes(mixes);
   }, []);
+
+  const persistLastSelection = useCallback(
+    (targets: Iterable<string>, nextSelectedMixId = selectedMixId) => {
+      writeLastModelSelection({
+        targets: Array.from(targets),
+        selectedMixId: nextSelectedMixId || undefined,
+      });
+    },
+    [selectedMixId],
+  );
 
   const updatePickerPosition = useCallback(() => {
     if (!containerRef.current || typeof window === "undefined") {
@@ -460,7 +544,9 @@ export function EventScanRunControls({
     Array.from(selectedKeys).filter((key) => compatibleTargets.has(key)),
   );
   const webCapableCompatibleTargets = new Set(
-    getWebCapableModelKeys(providers).filter((key) => compatibleTargets.has(key)),
+    getWebCapableModelKeys(providers).filter((key) =>
+      compatibleTargets.has(key),
+    ),
   );
   const defaultSelectedKeys = new Set(
     getPreferredTargets(
@@ -540,14 +626,13 @@ export function EventScanRunControls({
           );
         }
         setHasTouchedSelection(true);
-        setSelectedKeys(
-          new Set(
-            selectionMode === "multiple"
-              ? compatibleMixTargets
-              : compatibleMixTargets.slice(0, 1),
-          ),
-        );
+        const nextTargets =
+          selectionMode === "multiple"
+            ? compatibleMixTargets
+            : compatibleMixTargets.slice(0, 1);
+        setSelectedKeys(new Set(nextTargets));
         setSelectedMixId(id);
+        persistLastSelection(nextTargets, id);
       }}
       onSave={() => {
         const targetsToSave = Array.from(effectiveSelectedKeys);
@@ -579,6 +664,7 @@ export function EventScanRunControls({
             savedMixes.map((mix) => (mix.id === existing.id ? updated : mix)),
           );
           setSelectedMixId(existing.id);
+          persistLastSelection(targets, existing.id);
           return;
         }
         const created = {
@@ -589,6 +675,7 @@ export function EventScanRunControls({
         };
         persistSavedMixes([created, ...savedMixes]);
         setSelectedMixId(created.id);
+        persistLastSelection(targets, created.id);
       }}
       onEdit={() => {
         if (!selectedMixId) return;
@@ -612,12 +699,15 @@ export function EventScanRunControls({
         if (!selectedMixId) return;
         const current = savedMixes.find((mix) => mix.id === selectedMixId);
         if (
-          !window.confirm(`Delete model mix "${current?.name || selectedMixId}"?`)
+          !window.confirm(
+            `Delete model mix "${current?.name || selectedMixId}"?`,
+          )
         ) {
           return;
         }
         persistSavedMixes(savedMixes.filter((mix) => mix.id !== selectedMixId));
         setSelectedMixId("");
+        persistLastSelection(effectiveSelectedKeys, "");
       }}
     />
   );
@@ -638,10 +728,12 @@ export function EventScanRunControls({
       <Button
         onClick={() => {
           if (selectionMode === "multiple" && "onRunMultiple" in runProps) {
+            persistLastSelection(effectiveSelectedKeys);
             void runProps.onRunMultiple?.(activeTargets);
             return;
           }
           if ("onRun" in runProps) {
+            persistLastSelection(effectiveSelectedKeys);
             void runProps.onRun?.(activeSingleTarget);
           }
         }}
@@ -741,17 +833,24 @@ export function EventScanRunControls({
                           } else {
                             next.add(key);
                           }
+                          persistLastSelection(next, "");
+                          setSelectedMixId("");
                           return next;
                         });
                         return;
                       }
-                      setSelectedKeys(new Set([key]));
+                      const next = new Set([key]);
+                      setSelectedKeys(next);
+                      setSelectedMixId("");
+                      persistLastSelection(next, "");
                     }}
                     onSelectAll={
                       selectionMode === "multiple"
                         ? () => {
                             setHasTouchedSelection(true);
                             setSelectedKeys(new Set(compatibleTargets));
+                            setSelectedMixId("");
+                            persistLastSelection(compatibleTargets, "");
                           }
                         : undefined
                     }
@@ -760,6 +859,8 @@ export function EventScanRunControls({
                         ? () => {
                             setHasTouchedSelection(true);
                             setSelectedKeys(new Set());
+                            setSelectedMixId("");
+                            writeLastModelSelection(null);
                           }
                         : undefined
                     }
@@ -767,7 +868,14 @@ export function EventScanRunControls({
                       selectionMode === "multiple"
                         ? () => {
                             setHasTouchedSelection(true);
-                            setSelectedKeys(new Set(webCapableCompatibleTargets));
+                            setSelectedKeys(
+                              new Set(webCapableCompatibleTargets),
+                            );
+                            setSelectedMixId("");
+                            persistLastSelection(
+                              webCapableCompatibleTargets,
+                              "",
+                            );
                           }
                         : undefined
                     }
@@ -792,6 +900,8 @@ export function EventScanRunControls({
                                 }
                               });
 
+                              persistLastSelection(next, "");
+                              setSelectedMixId("");
                               return next;
                             });
                           }
