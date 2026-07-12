@@ -2181,6 +2181,63 @@ function StageTwoExecutionShortlist({
     (decision) => decision.order_plan?.action === "buy",
   );
 
+  const renderPlannedExitMetricCard = ({
+    label,
+    value,
+    kind,
+  }: {
+    label: string;
+    value: number;
+    kind: InvestMetricDialogKind;
+  }) => {
+    const body = (
+      <>
+        <p className="flex items-center gap-1 text-[10px] uppercase tracking-[0.1em]">
+          <span>{label}</span>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenEventExitInfo();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                onOpenEventExitInfo();
+              }
+            }}
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-current/30 bg-white/70"
+            aria-label={`Explain ${label}`}
+            title={`Explain ${label}`}
+          >
+            <Info className="h-2.5 w-2.5" />
+          </span>
+        </p>
+        <p className="mt-1 text-sm font-semibold text-emerald-950 dark:text-emerald-50">
+          {value}
+        </p>
+      </>
+    );
+    const className =
+      "min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2 text-left";
+
+    if (!onOpenInvestMetricDialog) {
+      return <div className={className}>{body}</div>;
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenInvestMetricDialog(kind)}
+        className={`${className} transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300`}
+      >
+        {body}
+      </button>
+    );
+  };
+
   return (
     <div className="mt-3 grid gap-2 text-xs">
       {steps.map((step) => {
@@ -2238,6 +2295,34 @@ function StageTwoExecutionShortlist({
                   ? "Stage 3 Step 1 will process shortlisted Event Exits first."
                   : "Stage 3 Step 2 will process shortlisted buy orders after exits.")}
             </p>
+            {step.key === "sell" ? (
+              <div className="mt-3 flex flex-wrap gap-2 text-xs text-emerald-900/80 dark:text-emerald-100/75">
+                {renderPlannedExitMetricCard({
+                  label: "Event out of Top 10",
+                  value: getInvestMetricRows(
+                    getSellInvestMetricDialogKind("ranking-llm-planned"),
+                    decisions,
+                  ).length,
+                  kind: getSellInvestMetricDialogKind("ranking-llm-planned"),
+                })}
+                {renderPlannedExitMetricCard({
+                  label: "Forced Exit",
+                  value: getInvestMetricRows(
+                    getSellInvestMetricDialogKind("forced-exit-planned"),
+                    decisions,
+                  ).length,
+                  kind: getSellInvestMetricDialogKind("forced-exit-planned"),
+                })}
+                {renderPlannedExitMetricCard({
+                  label: "Redeem",
+                  value: getInvestMetricRows(
+                    getSellInvestMetricDialogKind("redeem-planned"),
+                    decisions,
+                  ).length,
+                  kind: getSellInvestMetricDialogKind("redeem-planned"),
+                })}
+              </div>
+            ) : null}
             {stepDecisions.length > 0 ? (
               <div className="mt-2 space-y-1.5">
                 {stepDecisions.slice(0, 3).map((decision) => {

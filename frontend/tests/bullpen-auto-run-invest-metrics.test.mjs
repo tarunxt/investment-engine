@@ -133,6 +133,67 @@ test("Stage 3 metric filters break out sell, processed, and forced-exit rows", a
   );
 });
 
+
+test("planned Event Exit strategy filters exclude submitted rows", async () => {
+  const { getInvestMetricRows, getSellInvestMetricDialogKind } =
+    await loadInvestMetricsModule();
+
+  const decisions = [
+    createDecision({
+      id: "top10-planned",
+      action: "sell",
+      status: "planned",
+      exitStrategies: ["OUTSIDE_TOP_10_RETURNS_DAY"],
+    }),
+    createDecision({
+      id: "top10-submitted",
+      action: "sell",
+      status: "submitted",
+      exitStrategies: ["OUTSIDE_TOP_10_RETURNS_DAY"],
+    }),
+    createDecision({
+      id: "forced-planned",
+      action: "sell",
+      status: "planned",
+      exitStrategies: ["CAPITAL_AWARE_FORCED_EXIT"],
+    }),
+    createDecision({
+      id: "redeem-planned",
+      action: "redeem",
+      status: "planned",
+      exitStrategies: ["REDEEM_CLAIM"],
+    }),
+    createDecision({
+      id: "redeem-submitted",
+      action: "redeem",
+      status: "submitted",
+      exitStrategies: ["REDEEM_CLAIM"],
+    }),
+  ];
+
+  assert.deepEqual(
+    getInvestMetricRows(
+      getSellInvestMetricDialogKind("ranking-llm-planned"),
+      decisions,
+    ).map((decision) => decision.id),
+    ["top10-planned"],
+  );
+  assert.deepEqual(
+    getInvestMetricRows(
+      getSellInvestMetricDialogKind("forced-exit-planned"),
+      decisions,
+    ).map((decision) => decision.id),
+    ["forced-planned"],
+  );
+  assert.deepEqual(
+    getInvestMetricRows(
+      getSellInvestMetricDialogKind("redeem-planned"),
+      decisions,
+    ).map((decision) => decision.id),
+    ["redeem-planned"],
+  );
+});
+
 test("schedule card wires step metric tiles into the shared popup flow", () => {
   const source = readFileSync(
     new URL(
