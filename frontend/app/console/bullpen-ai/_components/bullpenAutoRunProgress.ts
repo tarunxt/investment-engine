@@ -305,6 +305,10 @@ function readInvestStageDecisionRows(stage: BullpenAutoLiveStageResult | null) {
   });
 }
 
+function isCompletedInvestOrderStatus(status: string | null | undefined) {
+  return status === "submitted" || status === "confirmed";
+}
+
 function isInvestStageEffectivelyCompleted(
   workflowDefinition: WorkflowDefinition,
   stage: BullpenAutoLiveStageResult | null,
@@ -325,8 +329,8 @@ function isInvestStageEffectivelyCompleted(
   );
   if (plannedDecisionRows.length < plannedOrders) return false;
 
-  return plannedDecisionRows.every(
-    (decision) => decision.order_plan?.status === "submitted",
+  return plannedDecisionRows.every((decision) =>
+    isCompletedInvestOrderStatus(decision.order_plan?.status),
   );
 }
 

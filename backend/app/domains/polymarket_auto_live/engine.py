@@ -21,6 +21,14 @@ from app.domains.bullpen_trade_analysis.service import (
     capture_auto_live_exit_result_sync,
 )
 from app.domains.polymarket import bullpen as bullpen_module
+from app.domains.polymarket.redeem_coordinator import (
+    REDEEM_ATTEMPT_ALREADY_REDEEMED,
+    REDEEM_ATTEMPT_CONFIRMED,
+    REDEEM_ATTEMPT_PENDING,
+    REDEEM_ATTEMPT_RESOLVED_ZERO_PAYOUT,
+    normalize_redeem_condition_ids,
+    submit_scoped_redeem,
+)
 from app.domains.polymarket.bullpen_llm_execution import (
     DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
     build_bullpen_prompt_template_hash,
@@ -140,6 +148,10 @@ _ORIGINAL_RUN_LLM_CONSENSUS = run_llm_consensus
 
 logger = get_logger("app.domains.polymarket_auto_live.engine")
 BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS = 60
+EXIT_SETTLEMENT_POLL_INTERVAL_SECONDS = 3
+EXIT_SETTLEMENT_TIMEOUT_SECONDS = 18
+_SETTLED_ORDER_STATUSES = {"submitted", "confirmed"}
+_UNSETTLED_EXIT_ORDER_STATUSES = {"submitted", "settlement_pending"}
 
 ProgressCallback = Callable[[BullpenAutoLiveRun, BullpenAutoLiveState], None]
 
@@ -927,7 +939,11 @@ def _today_order_counts(
             continue
         executed_at = _parse_iso_datetime(order_plan.executed_at)
         created_at = _parse_iso_datetime(decision.created_at)
-        if executed_at and executed_at.date() == today and order_plan.status == "submitted":
+        if (
+            executed_at
+            and executed_at.date() == today
+            and order_plan.status in _SETTLED_ORDER_STATUSES
+        ):
             executed += 1
             continue
         if (
@@ -958,7 +974,7 @@ def _count_consecutive_failed_orders(decisions: list[BullpenAutoLiveDecision]) -
         if status == "failed":
             streak += 1
             continue
-        if status == "submitted":
+        if status in _SETTLED_ORDER_STATUSES:
             break
     return streak
 
@@ -1002,7 +1018,11 @@ def _collect_live_order_issues(
     issues: list[dict[str, object]] = []
     for decision in decisions:
         order_plan = decision.order_plan
-        if order_plan is None or order_plan.dry_run or order_plan.status == "submitted":
+        if (
+            order_plan is None
+            or order_plan.dry_run
+            or order_plan.status in _SETTLED_ORDER_STATUSES
+        ):
             continue
         stage7 = _decision_stage_result(decision, 7)
         detail = order_plan.detail.strip() or "No execution detail was recorded."
@@ -1055,8 +1075,11 @@ def _summarize_live_order_issues(
     issue_label = issue_label[:1].upper() + issue_label[1:]
     example_rows = issue_rows[:2]
     examples = "; ".join(
-        f"{row.get('market_title') or 'Unknown market'}: "
-        f"{row.get('detail') or 'No execution detail was recorded.'}"
+        (
+            f"The {'Event Exit order' if row.get('action') == 'sell' else 'planned buy order'} "
+            f"for {row.get('market_title') or 'an unknown market'} was not submitted: "
+            f"{row.get('detail') or 'No execution detail was recorded.'}"
+        )
         for row in example_rows
     )
     remaining_count = total_issues - len(example_rows)
@@ -1073,6 +1096,184 @@ def _llm_provider_error_rate_high(evaluated: list[CandidateEvaluation]) -> bool:
         and candidate.llm_consensus.provider_error_rate >= HIGH_LLM_PROVIDER_ERROR_RATE
         for candidate in evaluated
     )
+
+
+def _completed_order_status(status: str | None) -> bool:
+    return status in _SETTLED_ORDER_STATUSES
+
+
+def _redeem_condition_ids_for_decision(decision: BullpenAutoLiveDecision) -> list[str]:
+    condition_ids: list[str] = []
+    seen: set[str] = set()
+    for stage in decision.stage_results:
+        value = stage.outputs.get("condition_id")
+        if isinstance(value, str) and value.strip() and value not in seen:
+            seen.add(value)
+            condition_ids.append(value)
+    return condition_ids
+
+
+def _wallet_position_matches_redeem_condition(
+    position: ConsoleWalletPosition,
+    condition_ids: set[str],
+) -> bool:
+    return isinstance(position.condition_id, str) and position.condition_id in condition_ids
+
+
+def _is_rpc_rate_limited_error(message: str) -> bool:
+    lowered = message.lower()
+    return (
+        "429" in lowered
+        or "too many requests" in lowered
+        or "retry-after" in lowered
+        or "rate limit" in lowered
+        or "rate-limit" in lowered
+    )
+
+
+def _reconcile_historical_pending_exit_keys(
+    historical_decisions: list[BullpenAutoLiveDecision],
+    live_wallet_positions: list[ConsoleWalletPosition],
+) -> tuple[set[str], set[str]]:
+    pending_sell_keys: set[str] = set()
+    pending_redeem_condition_ids: set[str] = set()
+
+    by_position_key = {
+        f"{position.market_id}::{position.side}": position for position in live_wallet_positions
+    }
+
+    for decision in reversed(historical_decisions):
+        order_plan = decision.order_plan
+        if (
+            order_plan is None
+            or order_plan.dry_run
+            or order_plan.status not in _UNSETTLED_EXIT_ORDER_STATUSES
+        ):
+            continue
+        if order_plan.action == "redeem":
+            condition_ids = set(_redeem_condition_ids_for_decision(decision))
+            if any(
+                _wallet_position_matches_redeem_condition(position, condition_ids)
+                and position.is_claimable
+                for position in live_wallet_positions
+            ):
+                pending_redeem_condition_ids.update(condition_ids)
+            continue
+
+        if order_plan.action != "sell":
+            continue
+        position_key = f"{decision.market_id}::{order_plan.side}"
+        current_position = by_position_key.get(position_key)
+        if current_position is None:
+            continue
+        if current_position.shares + 0.000001 >= max(0.0, order_plan.shares):
+            pending_sell_keys.add(position_key)
+
+    return pending_sell_keys, pending_redeem_condition_ids
+
+
+async def _poll_exit_settlement(
+    *,
+    decisions: list[BullpenAutoLiveDecision],
+    baseline_balance_usd: float | None,
+) -> tuple[list[ConsoleWalletPosition] | None, float | None]:
+    if not decisions:
+        return None, baseline_balance_usd
+
+    deadline = asyncio.get_running_loop().time() + EXIT_SETTLEMENT_TIMEOUT_SECONDS
+    latest_positions: list[ConsoleWalletPosition] | None = None
+    latest_balance_usd = baseline_balance_usd
+
+    while True:
+        latest_positions = await read_console_wallet_positions()
+        balance_state = await refresh_balance()
+        if balance_state.status == "ready":
+            latest_balance_usd = balance_state.available_balance_usd
+
+        unsettled = 0
+        for decision in decisions:
+            order_plan = decision.order_plan
+            if (
+                order_plan is None
+                or order_plan.action not in {"sell", "redeem"}
+                or order_plan.status not in {"submitted", "settlement_pending"}
+            ):
+                continue
+
+            if order_plan.action == "redeem":
+                condition_ids = set(_redeem_condition_ids_for_decision(decision))
+                matching_positions = [
+                    position
+                    for position in latest_positions
+                    if _wallet_position_matches_redeem_condition(position, condition_ids)
+                ]
+                if not matching_positions:
+                    order_plan.status = "confirmed"
+                    order_plan.detail = (
+                        "Bullpen no longer shows the redeemable position after submission."
+                    )
+                    continue
+                if all(
+                    position.classification == "resolved_zero_payout"
+                    for position in matching_positions
+                ):
+                    order_plan.status = "resolved_zero_payout"
+                    order_plan.detail = (
+                        "Bullpen still shows the residue in diagnostics, but the payout is "
+                        "explicitly zero so no further redeem is needed."
+                    )
+                    continue
+                if (
+                    baseline_balance_usd is not None
+                    and latest_balance_usd is not None
+                    and latest_balance_usd > baseline_balance_usd + 0.009
+                ):
+                    order_plan.status = "confirmed"
+                    order_plan.detail = (
+                        "Bullpen collateral increased after the redeem submission."
+                    )
+                    continue
+                order_plan.status = "settlement_pending"
+                order_plan.detail = (
+                    "Redeem submitted, but Bullpen still shows the position while settlement finishes."
+                )
+                unsettled += 1
+                continue
+
+            matching_position = next(
+                (
+                    position
+                    for position in latest_positions
+                    if position.market_id == decision.market_id and position.side == order_plan.side
+                ),
+                None,
+            )
+            current_shares = matching_position.shares if matching_position is not None else 0.0
+            if matching_position is None or current_shares + 0.000001 < order_plan.shares:
+                order_plan.status = "confirmed"
+                order_plan.detail = (
+                    "Bullpen wallet shares dropped after the exit submission."
+                )
+                continue
+            if (
+                baseline_balance_usd is not None
+                and latest_balance_usd is not None
+                and latest_balance_usd > baseline_balance_usd + 0.009
+            ):
+                order_plan.status = "confirmed"
+                order_plan.detail = (
+                    "Bullpen collateral increased after the exit submission."
+                )
+                continue
+            order_plan.status = "settlement_pending"
+            order_plan.detail = (
+                "Exit submitted, but the wallet still shows the original shares while settlement finishes."
+            )
+            unsettled += 1
+
+        if unsettled == 0 or asyncio.get_running_loop().time() >= deadline:
+            return latest_positions, latest_balance_usd
+        await asyncio.sleep(EXIT_SETTLEMENT_POLL_INTERVAL_SECONDS)
 
 
 def _run_guardrails(
@@ -3836,6 +4037,13 @@ class BullpenAutoLiveEngine:
         claimable_wallet_positions = [
             position for position in bullpen_wallet_positions if position.is_claimable
         ]
+        (
+            pending_historical_sell_keys,
+            pending_historical_redeem_condition_ids,
+        ) = _reconcile_historical_pending_exit_keys(
+            historical_decisions,
+            bullpen_wallet_positions,
+        )
         active_position_rows_before_llm = len(position_snapshots) + len(
             claimable_wallet_positions
         )
@@ -3859,6 +4067,10 @@ class BullpenAutoLiveEngine:
                         for position in bullpen_wallet_positions
                     ],
                     "claimable_wallet_positions": len(claimable_wallet_positions),
+                    "pending_historical_exit_positions": len(pending_historical_sell_keys),
+                    "pending_historical_redeem_conditions": len(
+                        pending_historical_redeem_condition_ids
+                    ),
                     "excluded_wallet_positions": [
                         _serialize_active_wallet_position(position)
                         for position in excluded_wallet_positions
@@ -4989,7 +5201,12 @@ class BullpenAutoLiveEngine:
                             redeem_processed += 1
                     else:
                         buy_processed += 1
-                if order_plan.status == "submitted":
+                if order_plan.status in {
+                    "submitted",
+                    "settlement_pending",
+                    "confirmed",
+                    "already_redeemed",
+                }:
                     if is_sell:
                         sell_submitted += 1
                         if is_redeem:
@@ -5022,6 +5239,46 @@ class BullpenAutoLiveEngine:
                 "processed": (sell_processed - redeem_processed) + buy_processed,
                 "submitted": (sell_submitted - redeem_submitted) + buy_submitted,
             }
+
+        def _canonical_order_metric_status(status: str) -> str:
+            if status == "already_redeemed":
+                return "confirmed"
+            if status == "resolved_zero_payout":
+                return "resolved_zero_payout_excluded"
+            return status
+
+        def _current_stage3_order_metrics() -> dict[str, dict[str, int]]:
+            metric_keys = (
+                "planned",
+                "submitted",
+                "settlement_pending",
+                "confirmed",
+                "deferred",
+                "rpc_rate_limited",
+                "waiting_for_collateral",
+                "failed",
+                "resolved_zero_payout_excluded",
+            )
+            metrics = {
+                action: {key: 0 for key in metric_keys}
+                for action in ("sell", "redeem", "buy")
+            }
+
+            for current in decisions:
+                order_plan = current.order_plan
+                if order_plan is None:
+                    continue
+                action = (
+                    order_plan.action
+                    if order_plan.action in {"sell", "redeem", "buy"}
+                    else "sell"
+                )
+                metric_status = _canonical_order_metric_status(order_plan.status)
+                if metric_status not in metrics[action]:
+                    continue
+                metrics[action][metric_status] += 1
+
+            return metrics
 
         def _build_stage3_execution_steps(
             *,
@@ -5156,6 +5413,7 @@ class BullpenAutoLiveEngine:
                 execution_gate_reason=execution_gate_reason,
                 execution_mode_reason=execution_mode_reason,
             )
+            order_metrics = _current_stage3_order_metrics()
             stage_outputs: dict[str, object] = {
                 "top_table_size": len(top_rows),
                 "active_rows_ranked": len(active_rank_rows),
@@ -5184,6 +5442,7 @@ class BullpenAutoLiveEngine:
                 "buy_orders_processed": counts["buy_processed"],
                 "buy_orders_submitted": counts["buy_submitted"],
                 "execution_steps": execution_steps,
+                "order_metrics": order_metrics,
                 "execution_step_key": current_step_key,
                 "execution_step_label": (
                     "Step 1 · Event Exits"
@@ -5420,6 +5679,53 @@ class BullpenAutoLiveEngine:
                 continue
             returns_per_day = position_returns_per_day(position, now=now)
             key = f"{position.market_id}::{position.side}"
+            if key in pending_historical_sell_keys:
+                market = _active_position_market(
+                    position,
+                    market_by_slug=market_by_slug,
+                    market_by_id=market_by_id,
+                )
+                pending_reason = (
+                    "A previous Stage 3 exit for this Bullpen position is still settling, "
+                    "so this run reconciled it and did not submit another sell."
+                )
+                pending_stage_results = [
+                    build_stage_result(
+                        stage_number=1,
+                        status="pass",
+                        reason="Live wallet position was included in the top-10 ranking review.",
+                        outputs={
+                            "side": position.side,
+                            "shares": position.shares,
+                            "close_time": position.close_time,
+                            "returns_per_day": returns_per_day,
+                        },
+                    ),
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason=pending_reason,
+                        outputs={"returns_per_day": returns_per_day},
+                    ),
+                ]
+                pending_position = position_snapshot_by_key.get(key)
+                decision = _build_decision(
+                    market=market,
+                    decision_action="EXIT",
+                    reason=pending_reason,
+                    stage_results=pending_stage_results,
+                    current_position=pending_position,
+                    current_exposure_usd=position.exposure_usd,
+                    target_exposure_usd=0,
+                    order_usd=position.exposure_usd,
+                    order_shares=position.shares,
+                    exit_state="EVENT_EXIT_PLANNED",
+                )
+                if decision.order_plan is not None:
+                    decision.order_plan.status = "settlement_pending"
+                    decision.order_plan.detail = pending_reason
+                record_invest_decision(decision, market=market)
+                continue
             review_context = active_review_context_by_key.get(key)
             market = (
                 review_context["market"]
@@ -5637,6 +5943,11 @@ class BullpenAutoLiveEngine:
                 market_by_slug=market_by_slug,
                 market_by_id=market_by_id,
             )
+            redeem_condition_candidates = (
+                {position.condition_id}
+                if isinstance(position.condition_id, str) and position.condition_id
+                else set()
+            )
             current_position = PositionSnapshot(
                 market_id=position.market_id,
                 slug=position.slug,
@@ -5660,6 +5971,11 @@ class BullpenAutoLiveEngine:
                 "Resolved winning Bullpen position is redeemable/claimable; "
                 "Stage 2 LLM review is intentionally skipped and Stage 3 Step 1 will redeem/claim it."
             )
+            if redeem_condition_candidates & pending_historical_redeem_condition_ids:
+                reason = (
+                    "A previous Stage 3 redeem for this resolved Bullpen position is still "
+                    "settling, so this run reconciled it and did not submit another redeem."
+                )
             stage_results = [
                 build_stage_result(
                     stage_number=1,
@@ -5714,7 +6030,13 @@ class BullpenAutoLiveEngine:
             )
             if decision.order_plan is not None:
                 decision.order_plan.action = "redeem"  # type: ignore[assignment]
-                decision.order_plan.detail = "Redeem/claim planned for resolved Bullpen position."
+                if redeem_condition_candidates & pending_historical_redeem_condition_ids:
+                    decision.order_plan.status = "settlement_pending"
+                    decision.order_plan.detail = reason
+                else:
+                    decision.order_plan.detail = (
+                        "Redeem/claim planned for resolved Bullpen position."
+                    )
             record_invest_decision(decision, market=market)
 
         for entry in evaluated_active_positions:
@@ -6071,13 +6393,18 @@ class BullpenAutoLiveEngine:
             for decision in decisions
             if (
                 decision.order_plan is not None
+                and decision.order_plan.status == "planned"
                 and decision.order_plan.action in {"sell", "redeem"}
             )
         ]
         buy_execution_decisions = [
             decision
             for decision in decisions
-            if decision.order_plan is not None and decision.order_plan.action == "buy"
+            if (
+                decision.order_plan is not None
+                and decision.order_plan.status == "planned"
+                and decision.order_plan.action == "buy"
+            )
         ]
         actionable_decisions = [*sell_execution_decisions, *buy_execution_decisions]
         planned_order_counts = _current_stage3_order_counts()
@@ -6085,11 +6412,13 @@ class BullpenAutoLiveEngine:
         sell_planned_orders = planned_order_counts["sell_planned"]
         buy_planned_orders = planned_order_counts["buy_planned"]
         execution_block_reasons: list[str] = []
+        available_balance_before_step1: float | None = None
         if actionable_decisions and not state.dry_run:
             live_controls = await refresh_live_controls(user_id=user_id)
             state.doctor_status = "pass" if live_controls.doctor.ok else "fail"
             state.balance_status = "pass" if live_controls.balance.status == "ready" else "fail"
             state.emergency_stopped = settings.emergency_stop or live_controls.emergency_stopped
+            available_balance_before_step1 = live_controls.balance.available_balance_usd
             if settings.emergency_stop or live_controls.emergency_stopped:
                 execution_block_reasons.append("Emergency stop is active.")
             if not live_controls.unlocked:
@@ -6183,7 +6512,7 @@ class BullpenAutoLiveEngine:
             nonlocal new_positions, running_failed_orders
 
             order_plan = decision.order_plan
-            if order_plan is None:
+            if order_plan is None or order_plan.status != "planned":
                 return
 
             step_number = _stage3_step_number(step_key)
@@ -6257,53 +6586,117 @@ class BullpenAutoLiveEngine:
                             for stage in decision.stage_results
                             if stage.outputs.get("condition_id")
                         ]
-                        condition_ids = [
-                            condition_id
-                            for condition_id in (
-                                *stage_condition_ids,
-                                order_plan.market_id,
-                                decision.market_id,
+                        condition_ids = normalize_redeem_condition_ids(stage_condition_ids)
+                        if not condition_ids:
+                            order_plan.status = "deferred"
+                            order_plan.detail = (
+                                "Redeem requires explicit verified condition IDs, so this row "
+                                "was deferred until Bullpen can map the condition safely."
                             )
-                            if condition_id
-                        ][:1]
-                        order_plan.execution_response = await asyncio.wait_for(
-                            executor.redeem(dry_run=False, condition_ids=condition_ids),
-                            timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
-                        )
-                        claim = getattr(executor, "claim", None)
-                        if claim is not None:
-                            try:
-                                claim_response = await asyncio.wait_for(
-                                    claim(dry_run=False),
-                                    timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                        else:
+                            redeem_result = await asyncio.wait_for(
+                                submit_scoped_redeem(
+                                    user_id=user_id,
+                                    condition_ids=condition_ids,
+                                    source="auto_live_stage3_redeem",
+                                    executor=executor,
+                                    read_wallet_positions=read_console_wallet_positions,
+                                ),
+                                timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                            )
+                            order_plan.execution_response = redeem_result.submission_response
+                            if redeem_result.submitted_condition_ids:
+                                claim = getattr(executor, "claim", None)
+                                if claim is not None:
+                                    try:
+                                        claim_response = await asyncio.wait_for(
+                                            claim(dry_run=False),
+                                            timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                                        )
+                                    except Exception as claim_exc:
+                                        claim_response = (
+                                            "Bullpen claim follow-up did not complete after redeem "
+                                            f"was submitted: {claim_exc}"
+                                        )
+                                    if claim_response:
+                                        order_plan.execution_response = (
+                                            f"{order_plan.execution_response}\n{claim_response}"
+                                            if order_plan.execution_response
+                                            else claim_response
+                                        )
+
+                            final_outcome = next(
+                                (
+                                    outcome
+                                    for outcome in redeem_result.outcomes
+                                    if outcome.condition_id in condition_ids
+                                ),
+                                None,
+                            )
+                            if final_outcome is None:
+                                order_plan.status = "deferred"
+                                order_plan.detail = (
+                                    "Redeem reconciliation did not produce a fresh outcome, so "
+                                    "the row was deferred for the next run."
                                 )
-                            except Exception as claim_exc:
-                                claim_response = (
-                                    "Bullpen claim follow-up did not complete after redeem "
-                                    f"was submitted: {claim_exc}"
+                            elif final_outcome.status == REDEEM_ATTEMPT_CONFIRMED:
+                                order_plan.status = "confirmed"
+                                order_plan.executed_at = utc_now_iso()
+                                order_plan.detail = final_outcome.detail
+                                running_failed_orders = 0
+                            elif final_outcome.status == REDEEM_ATTEMPT_ALREADY_REDEEMED:
+                                order_plan.status = "already_redeemed"
+                                order_plan.executed_at = utc_now_iso()
+                                order_plan.detail = final_outcome.detail
+                                running_failed_orders = 0
+                            elif final_outcome.status == REDEEM_ATTEMPT_RESOLVED_ZERO_PAYOUT:
+                                order_plan.status = "resolved_zero_payout"
+                                order_plan.executed_at = utc_now_iso()
+                                order_plan.detail = final_outcome.detail
+                                running_failed_orders = 0
+                            elif final_outcome.status == REDEEM_ATTEMPT_PENDING:
+                                order_plan.status = "settlement_pending"
+                                order_plan.executed_at = utc_now_iso()
+                                order_plan.detail = final_outcome.detail
+                                running_failed_orders = 0
+                            else:
+                                order_plan.status = "submitted"
+                                order_plan.executed_at = utc_now_iso()
+                                order_plan.detail = (
+                                    final_outcome.detail
+                                    if final_outcome is not None
+                                    else "Bullpen redeem/claim submitted successfully."
                                 )
-                            if claim_response:
-                                order_plan.execution_response = (
-                                    f"{order_plan.execution_response}\n{claim_response}"
-                                    if order_plan.execution_response
-                                    else claim_response
-                                )
-                        order_plan.status = "submitted"
-                        order_plan.executed_at = utc_now_iso()
-                        order_plan.detail = "Bullpen redeem/claim submitted successfully."
-                        running_failed_orders = 0
+                                running_failed_orders = 0
                     except Exception as exc:
-                        order_plan.status = "failed"
-                        order_plan.detail = str(exc)
-                        running_failed_orders += 1
+                        message = str(exc)
+                        if _is_rpc_rate_limited_error(message):
+                            order_plan.status = "rpc_rate_limited"
+                            order_plan.detail = (
+                                "Bullpen redeem/claim hit an RPC rate limit, so the row was "
+                                "deferred without any fallback wallet write."
+                            )
+                        else:
+                            order_plan.status = "failed"
+                            order_plan.detail = message
+                            running_failed_orders += 1
                 decision.stage_results.append(
                     build_stage_result(
                         stage_number=7,
                         status=(
                             "pass"
-                            if order_plan.status == "submitted"
+                            if order_plan.status
+                            in {
+                                "submitted",
+                                "confirmed",
+                                "settlement_pending",
+                                "already_redeemed",
+                                "resolved_zero_payout",
+                            }
+                            else "warning"
+                            if order_plan.status == "rpc_rate_limited"
                             else "skipped"
-                            if state.dry_run
+                            if state.dry_run or order_plan.status == "deferred"
                             else "fail"
                         ),
                         reason=order_plan.detail,
@@ -6317,7 +6710,7 @@ class BullpenAutoLiveEngine:
                     reason=(
                         f"Stage 3 Step {step_number} of 2 submitted {step_submitted} of "
                         f"{step_total_orders} redeem/claim orders. Latest: {decision.market_title}"
-                        if order_plan.status == "submitted"
+                        if order_plan.status in {"submitted", "confirmed"}
                         else f"Stage 3 Step {step_number} of 2 processed {step_processed} of "
                         f"{step_total_orders} redeem/claim orders. Latest: {decision.market_title}"
                     ),
@@ -6509,47 +6902,54 @@ class BullpenAutoLiveEngine:
                     context=exit_context,
                 )
 
-            try:
-                market_id_for_execution = decision.slug or decision.market_id
-                if order_plan.action == "buy":
-                    order_plan.execution_response = await asyncio.wait_for(
-                        executor.buy_limit(
-                            market_id=market_id_for_execution,
-                            outcome="Yes" if order_plan.side == "YES" else "No",
-                            amount_usd=order_plan.order_size_usd,
-                            max_price=cents_to_decimal(order_plan.limit_price_cents),
+            market_id_for_execution = decision.slug or decision.market_id
+
+            async def _submit_buy_order() -> str:
+                return await asyncio.wait_for(
+                    executor.buy_limit(
+                        market_id=market_id_for_execution,
+                        outcome="Yes" if order_plan.side == "YES" else "No",
+                        amount_usd=order_plan.order_size_usd,
+                        max_price=cents_to_decimal(order_plan.limit_price_cents),
+                    ),
+                    timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                )
+
+            def _record_submitted_buy_position() -> None:
+                new_positions.append(
+                    PositionSnapshot(
+                        market_id=decision.market_id,
+                        slug=decision.slug,
+                        market_title=decision.market_title,
+                        market_url=decision.market_url,
+                        theme=decision.theme,
+                        side=order_plan.side,
+                        exposure_usd=round(order_plan.order_size_usd, 2),
+                        shares=round(order_plan.shares, 6),
+                        average_price_cents=order_plan.limit_price_cents,
+                        opened_at=now,
+                        updated_at=now,
+                        close_time=decision.close_time,
+                        current_price_cents=order_plan.limit_price_cents,
+                        current_yes_odds=decision.current_yes_odds,
+                        current_no_odds=decision.current_no_odds,
+                        best_bid_cents=(
+                            order_plan.limit_price_cents if order_plan.side == "YES" else None
                         ),
-                        timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                        best_ask_cents=(
+                            round(100 - order_plan.limit_price_cents, 2)
+                            if order_plan.side == "NO"
+                            else None
+                        ),
+                        exit_signals=[],
+                        exit_state="ACTIVE",
                     )
-                    new_positions.append(
-                        PositionSnapshot(
-                            market_id=decision.market_id,
-                            slug=decision.slug,
-                            market_title=decision.market_title,
-                            market_url=decision.market_url,
-                            theme=decision.theme,
-                            side=order_plan.side,
-                            exposure_usd=round(order_plan.order_size_usd, 2),
-                            shares=round(order_plan.shares, 6),
-                            average_price_cents=order_plan.limit_price_cents,
-                            opened_at=now,
-                            updated_at=now,
-                            close_time=decision.close_time,
-                            current_price_cents=order_plan.limit_price_cents,
-                            current_yes_odds=decision.current_yes_odds,
-                            current_no_odds=decision.current_no_odds,
-                            best_bid_cents=(
-                                order_plan.limit_price_cents if order_plan.side == "YES" else None
-                            ),
-                            best_ask_cents=(
-                                round(100 - order_plan.limit_price_cents, 2)
-                                if order_plan.side == "NO"
-                                else None
-                            ),
-                            exit_signals=[],
-                            exit_state="ACTIVE",
-                        )
-                    )
+                )
+
+            try:
+                if order_plan.action == "buy":
+                    order_plan.execution_response = await _submit_buy_order()
+                    _record_submitted_buy_position()
                 else:
                     order_plan.execution_response = await asyncio.wait_for(
                         executor.sell_limit(
@@ -6645,6 +7045,132 @@ class BullpenAutoLiveEngine:
                         sell_reason=decision.reason,
                     )
             except Exception as exc:
+                if order_plan.action == "buy":
+                    error_message = str(exc)
+                    if (
+                        bullpen_module.extract_bullpen_insufficient_collateral_amount(
+                            error_message
+                        )
+                        is not None
+                    ):
+                        recovery_decisions = [
+                            candidate
+                            for candidate in decisions
+                            if candidate.order_plan is not None
+                            and candidate.order_plan.action in {"sell", "redeem"}
+                            and candidate.order_plan.status
+                            in {"submitted", "settlement_pending", "confirmed"}
+                        ]
+                        _, recovered_balance = await _poll_exit_settlement(
+                            decisions=recovery_decisions,
+                            baseline_balance_usd=available_balance_before_step1,
+                        )
+                        collateral_confirmed = (
+                            available_balance_before_step1 is not None
+                            and recovered_balance is not None
+                            and recovered_balance > available_balance_before_step1 + 0.009
+                        ) or (
+                            bool(recovery_decisions)
+                            and not any(
+                                candidate.order_plan is not None
+                                and candidate.order_plan.status == "settlement_pending"
+                                for candidate in recovery_decisions
+                            )
+                        )
+                        if collateral_confirmed:
+                            try:
+                                order_plan.execution_response = await _submit_buy_order()
+                                _record_submitted_buy_position()
+                                order_plan.status = "submitted"
+                                order_plan.executed_at = utc_now_iso()
+                                order_plan.detail = (
+                                    "Limit order submitted successfully after collateral "
+                                    "reconciliation confirmed settlement."
+                                )
+                                decision.stage_results.append(
+                                    build_stage_result(
+                                        stage_number=7,
+                                        status="pass",
+                                        reason=order_plan.detail,
+                                        outputs=order_plan.model_dump(mode="json"),
+                                    )
+                                )
+                                running_failed_orders = 0
+                                _safe_trade_analysis_capture(
+                                    "auto-live stage3 buy execution",
+                                    capture_auto_live_buy_result_sync,
+                                    user_id=user_id,
+                                    entry_reference=trade_analysis_reference,
+                                    raw_execution_response=order_plan.execution_response,
+                                )
+                                return
+                            except Exception as retry_exc:
+                                exc = retry_exc
+                                error_message = str(retry_exc)
+                        else:
+                            order_plan.status = "waiting_for_collateral"
+                            order_plan.detail = (
+                                "Bullpen buy is still waiting for confirmed collateral "
+                                "settlement, so the row was deferred without submitting a new buy."
+                            )
+                            decision.stage_results.append(
+                                build_stage_result(
+                                    stage_number=7,
+                                    status="warning",
+                                    reason=order_plan.detail,
+                                    outputs=order_plan.model_dump(mode="json"),
+                                )
+                            )
+                            _safe_trade_analysis_capture(
+                                "auto-live stage3 buy deferred",
+                                capture_auto_live_buy_result_sync,
+                                user_id=user_id,
+                                entry_reference=trade_analysis_reference,
+                                raw_execution_response=None,
+                                failed=True,
+                                failure_reason=order_plan.detail,
+                            )
+                            return
+                if _is_rpc_rate_limited_error(str(exc)):
+                    order_plan.status = "rpc_rate_limited"
+                    order_plan.detail = (
+                        "Bullpen order handling hit an RPC rate limit, so this row was "
+                        "deferred without any fallback transaction."
+                    )
+                    decision.stage_results.append(
+                        build_stage_result(
+                            stage_number=7,
+                            status="warning",
+                            reason=order_plan.detail,
+                            outputs=order_plan.model_dump(mode="json"),
+                        )
+                    )
+                    if order_plan.action == "buy":
+                        _safe_trade_analysis_capture(
+                            "auto-live stage3 buy deferred",
+                            capture_auto_live_buy_result_sync,
+                            user_id=user_id,
+                            entry_reference=trade_analysis_reference,
+                            raw_execution_response=None,
+                            failed=True,
+                            failure_reason=order_plan.detail,
+                        )
+                    else:
+                        _safe_trade_analysis_capture(
+                            "auto-live stage3 exit deferred",
+                            capture_auto_live_exit_result_sync,
+                            user_id=user_id,
+                            exit_reference=trade_analysis_reference,
+                            market_id=decision.market_id,
+                            outcome_name=order_plan.side,
+                            title=decision.market_title,
+                            raw_execution_response=None,
+                            exit_type=exit_type,
+                            failed=True,
+                            failure_reason=order_plan.detail,
+                            sell_reason=decision.reason,
+                        )
+                    return
                 order_plan.status = "failed"
                 order_plan.detail = str(exc)
                 decision.stage_results.append(
@@ -6706,6 +7232,65 @@ class BullpenAutoLiveEngine:
 
         for decision in sell_execution_decisions:
             await _execute_actionable_decision(decision, step_key="sell")
+        if sell_execution_decisions and not state.dry_run:
+            _, available_balance_after_step1 = await _poll_exit_settlement(
+                decisions=sell_execution_decisions,
+                baseline_balance_usd=available_balance_before_step1,
+            )
+            blocked_exit_orders = [
+                decision
+                for decision in sell_execution_decisions
+                if decision.order_plan is not None
+                and decision.order_plan.status in {"failed", "deferred", "rpc_rate_limited"}
+            ]
+            unsettled_exit_orders = [
+                decision
+                for decision in sell_execution_decisions
+                if decision.order_plan is not None
+                and decision.order_plan.status == "settlement_pending"
+            ]
+            if blocked_exit_orders or unsettled_exit_orders:
+                waiting_reason = (
+                    "Waiting for earlier sell/redeem settlement confirmation before "
+                    "submitting dependent buys."
+                    if unsettled_exit_orders and not blocked_exit_orders
+                    else "An earlier sell/redeem did not settle cleanly, so dependent buys "
+                    "stayed waiting for collateral instead of submitting a new write."
+                )
+                for decision in buy_execution_decisions:
+                    if decision.order_plan is None or decision.order_plan.status != "planned":
+                        continue
+                    decision.order_plan.status = "waiting_for_collateral"
+                    decision.order_plan.detail = waiting_reason
+                    decision.stage_results.append(
+                        build_stage_result(
+                            stage_number=7,
+                            status="warning",
+                            reason=waiting_reason,
+                            outputs=decision.order_plan.model_dump(mode="json"),
+                        )
+                    )
+                report_invest_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        "Stage 3 Step 2 is waiting for Step 1 sell/redeem settlement "
+                        "before it can invest the planned buy rows."
+                        if unsettled_exit_orders and not blocked_exit_orders
+                        else "Stage 3 Step 2 kept the planned buy rows waiting because "
+                        "Step 1 did not settle cleanly."
+                    ),
+                    completed_items=processed_decision_rows,
+                    execution_gate_reason=waiting_reason,
+                    current_step_key="buy",
+                    current_step_detail=waiting_reason,
+                    completed_at=None,
+                )
+            elif (
+                available_balance_before_step1 is not None
+                and available_balance_after_step1 is not None
+                and available_balance_after_step1 > available_balance_before_step1
+            ):
+                available_balance_before_step1 = available_balance_after_step1
         for decision in buy_execution_decisions:
             await _execute_actionable_decision(decision, step_key="buy")
 
@@ -6735,6 +7320,7 @@ class BullpenAutoLiveEngine:
             execution_gate_reason=execution_pause_reason,
             execution_mode_reason=simulation_reason if state.dry_run else None,
         )
+        final_order_metrics = _current_stage3_order_metrics()
         live_order_issues = _collect_live_order_issues(decisions)
         live_order_issue_count = len(live_order_issues)
         live_order_hard_failure_count = sum(
@@ -6848,6 +7434,7 @@ class BullpenAutoLiveEngine:
                     "buy_orders_failed": buy_order_hard_failure_count,
                     "buy_orders_unsubmitted": buy_order_issue_count,
                     "execution_steps": final_execution_steps,
+                    "order_metrics": final_order_metrics,
                     "execution_step_key": (
                         "blocked"
                         if actionable_decisions and state.paused

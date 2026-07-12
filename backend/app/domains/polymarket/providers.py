@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
@@ -42,11 +45,18 @@ POLYMARKET_POLYGON_RPC_FALLBACK_URLS = [
 POLYMARKET_PUSD_TOKEN_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 POLYMARKET_PUSD_DECIMALS = 1_000_000
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-polymarket-bot/1.0"}
+POLYGON_CHAIN_ID = "0x89"
+POLYGON_RPC_MAX_ATTEMPTS = 3
+POLYGON_RPC_BACKOFF_BASE_SECONDS = 0.25
+POLYGON_RPC_BACKOFF_MAX_SECONDS = 2.0
+POLYGON_RPC_JITTER_MAX_SECONDS = 0.1
+POLYGON_RPC_CONCURRENCY_LIMIT = 2
 LEADERBOARD_PERIOD_MAX_AGE = {
     "today": timedelta(days=1),
     "weekly": timedelta(days=7),
 }
 logger = logging.getLogger(__name__)
+_polygon_rpc_semaphore = asyncio.Semaphore(POLYGON_RPC_CONCURRENCY_LIMIT)
 
 
 @dataclass(frozen=True)
@@ -56,6 +66,13 @@ class PolymarketNetWorthEstimate:
     cash_balance_usd: float
     redeemable_value_usd: float
     net_worth_usd: float
+
+
+@dataclass(frozen=True)
+class PolygonRpcProbeResult:
+    ok: bool
+    classification: str
+    detail: str
 
 
 MOCK_MARKETS: list[tuple[str, str, str]] = [
@@ -913,6 +930,7 @@ def _extract_positions_value(payload: Any) -> float:
 
 
 async def _read_pusd_balance(client: httpx.AsyncClient, wallet: str) -> float:
+    probe_cache: dict[str, PolygonRpcProbeResult] = {}
     body = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -928,13 +946,15 @@ async def _read_pusd_balance(client: httpx.AsyncClient, wallet: str) -> float:
     errors: list[str] = []
     for rpc_url in _polygon_rpc_urls():
         try:
-            response = await client.post(
+            probe = await _probe_polygon_rpc_endpoint(
+                client,
                 rpc_url,
-                json=body,
-                headers={"content-type": "application/json", **POLYMARKET_HTTP_HEADERS},
+                probe_cache=probe_cache,
             )
-            response.raise_for_status()
-            payload = response.json()
+            if not probe.ok:
+                errors.append(f"{rpc_url} [{probe.classification}]: {probe.detail}")
+                continue
+            payload = await _post_polygon_rpc_with_backoff(client, rpc_url, body)
             result = payload.get("result") if isinstance(payload, dict) else None
             if not isinstance(result, str) or not result.startswith("0x"):
                 raise RuntimeError("Polygon RPC did not return a pUSD balance result.")
@@ -951,6 +971,208 @@ async def _read_pusd_balance(client: httpx.AsyncClient, wallet: str) -> float:
     # provide a useful lower-bound estimate, so use a zero cash balance when
     # every configured RPC endpoint fails.
     return 0.0
+
+
+async def _probe_polygon_rpc_endpoint(
+    client: httpx.AsyncClient,
+    rpc_url: str,
+    *,
+    probe_cache: dict[str, PolygonRpcProbeResult],
+) -> PolygonRpcProbeResult:
+    cached = probe_cache.get(rpc_url)
+    if cached is not None:
+        return cached
+
+    try:
+        chain_payload = await _post_polygon_rpc_with_backoff(
+            client,
+            rpc_url,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_chainId",
+                "params": [],
+            },
+        )
+        chain_id = chain_payload.get("result") if isinstance(chain_payload, dict) else None
+        if chain_id != POLYGON_CHAIN_ID:
+            result = PolygonRpcProbeResult(
+                ok=False,
+                classification="wrong_chain",
+                detail=(
+                    f"Expected Polygon chainId {POLYGON_CHAIN_ID}, but RPC returned "
+                    f"{chain_id or 'unknown'}."
+                ),
+            )
+            probe_cache[rpc_url] = result
+            return result
+
+        logs_payload = await _post_polygon_rpc_with_backoff(
+            client,
+            rpc_url,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_getLogs",
+                "params": [
+                    {
+                        "fromBlock": "latest",
+                        "toBlock": "latest",
+                        "address": POLYMARKET_PUSD_TOKEN_ADDRESS,
+                    }
+                ],
+            },
+        )
+        logs_result = logs_payload.get("result") if isinstance(logs_payload, dict) else None
+        if not isinstance(logs_result, list):
+            raise RuntimeError("eth_getLogs did not return a JSON array result.")
+
+        result = PolygonRpcProbeResult(
+            ok=True,
+            classification="ready",
+            detail="Polygon RPC passed chainId and eth_getLogs readiness checks.",
+        )
+    except Exception as exc:
+        detail = redact_secrets(str(exc))
+        normalized = detail.lower()
+        if "429" in normalized or "rate limit" in normalized or "retry-after" in normalized:
+            classification = "rate_limited"
+        elif chain_hint := _polygon_rpc_capability_classification(normalized):
+            classification = chain_hint
+        else:
+            classification = "unavailable"
+        result = PolygonRpcProbeResult(
+            ok=False,
+            classification=classification,
+            detail=detail,
+        )
+
+    probe_cache[rpc_url] = result
+    return result
+
+
+def _polygon_rpc_capability_classification(message: str) -> str | None:
+    if any(marker in message for marker in ("method not found", "unsupported method")):
+        return "missing_capability"
+    if any(
+        marker in message
+        for marker in (
+            "wrong chain",
+            "chain id",
+            "chainid",
+            "expected polygon",
+        )
+    ):
+        return "wrong_chain"
+    if "eth_getlogs" in message or "getlogs" in message:
+        return "missing_capability"
+    return None
+
+
+def _retry_after_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    try:
+        parsed = float(normalized)
+        return max(0.0, parsed)
+    except ValueError:
+        pass
+    try:
+        parsed_date = parsedate_to_datetime(normalized)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if parsed_date.tzinfo is None:
+        parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+    return max(
+        0.0,
+        (parsed_date - datetime.now(timezone.utc)).total_seconds(),
+    )
+
+
+def _polygon_rpc_error_message(
+    rpc_url: str,
+    response: httpx.Response,
+    payload: object | None,
+) -> str:
+    if response.status_code == 429:
+        retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+        if retry_after is not None:
+            return (
+                f"Polygon RPC rate limited at {rpc_url} (HTTP 429, Retry-After {retry_after:g}s)."
+            )
+        return f"Polygon RPC rate limited at {rpc_url} (HTTP 429)."
+
+    if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+        error = payload["error"]
+        message = error.get("message") if isinstance(error, dict) else None
+        if isinstance(message, str) and message.strip():
+            return f"{rpc_url}: {message.strip()}"
+
+    return f"{rpc_url}: HTTP {response.status_code}"
+
+
+async def _post_polygon_rpc_with_backoff(
+    client: httpx.AsyncClient,
+    rpc_url: str,
+    body: dict[str, object],
+) -> object:
+    last_error: Exception | None = None
+    for attempt in range(POLYGON_RPC_MAX_ATTEMPTS):
+        async with _polygon_rpc_semaphore:
+            response = await client.post(
+                rpc_url,
+                json=body,
+                headers={"content-type": "application/json", **POLYMARKET_HTTP_HEADERS},
+            )
+
+        payload: object | None
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        response_error = None
+        if response.status_code >= 400:
+            response_error = RuntimeError(
+                _polygon_rpc_error_message(rpc_url, response, payload)
+            )
+        elif isinstance(payload, dict) and payload.get("error"):
+            error_payload = payload.get("error")
+            message = (
+                error_payload.get("message")
+                if isinstance(error_payload, dict)
+                else error_payload
+            )
+            response_error = RuntimeError(
+                f"{rpc_url}: {message or 'JSON-RPC error response'}"
+            )
+
+        if response_error is None:
+            return payload
+
+        last_error = response_error
+        normalized = str(response_error).lower()
+        if attempt + 1 >= POLYGON_RPC_MAX_ATTEMPTS or (
+            "429" not in normalized
+            and "rate limit" not in normalized
+            and "retry-after" not in normalized
+        ):
+            raise response_error
+
+        retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+        backoff = retry_after
+        if backoff is None:
+            backoff = min(
+                POLYGON_RPC_BACKOFF_MAX_SECONDS,
+                POLYGON_RPC_BACKOFF_BASE_SECONDS * (2**attempt)
+                + (random.random() * POLYGON_RPC_JITTER_MAX_SECONDS),
+            )
+        await asyncio.sleep(backoff)
+
+    raise last_error or RuntimeError(f"{rpc_url}: Polygon RPC request failed.")
 
 
 def _polygon_rpc_urls() -> list[str]:

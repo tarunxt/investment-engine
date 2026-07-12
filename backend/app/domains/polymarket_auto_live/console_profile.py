@@ -997,14 +997,15 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
             or _read_string(row.get("market"))
             or f"wallet-position-{index + 1}"
         )
-        current_price_cents = _normalize_price_to_cents(
-            row.get("current_price") or row.get("currentPrice")
-        )
+        raw_current_price = row.get("current_price")
+        if raw_current_price is None:
+            raw_current_price = row.get("currentPrice")
+        current_price_cents = _normalize_price_to_cents(raw_current_price)
         yes_odds, no_odds = _position_yes_no_odds(side, current_price_cents)
-        average_price_cents = (
-            _normalize_price_to_cents(row.get("avg_price") or row.get("avgPrice"))
-            or 0.0
-        )
+        raw_average_price = row.get("avg_price")
+        if raw_average_price is None:
+            raw_average_price = row.get("avgPrice")
+        average_price_cents = _normalize_price_to_cents(raw_average_price) or 0.0
         shares = round(_read_number(row.get("shares")) or 0.0, 6)
         exposure_usd = round(
             (
@@ -1014,7 +1015,10 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
             ),
             2,
         )
-        current_value_usd = _read_number(row.get("current_value") or row.get("currentValue"))
+        raw_current_value = row.get("current_value")
+        if raw_current_value is None:
+            raw_current_value = row.get("currentValue")
+        current_value_usd = _read_number(raw_current_value)
         if current_value_usd is None and current_price_cents is not None:
             current_value_usd = round(shares * (current_price_cents / 100), 2)
         event_slug = _read_string(row.get("event_slug") or row.get("eventSlug"))

@@ -141,6 +141,72 @@ function createSubmittedBuyDecision({
   };
 }
 
+function createSubmittedRedeemDecision({
+  runId = "run-stage3-exit",
+  marketId = "market-1",
+  marketTitle = "Will event one happen?",
+} = {}) {
+  return {
+    id: `decision-${runId}-${marketId}-redeem`,
+    run_id: runId,
+    created_at: "2026-07-02T12:05:30Z",
+    updated_at: "2026-07-02T12:05:30Z",
+    market_id: marketId,
+    market_title: marketTitle,
+    market_url: `https://example.com/${marketId}`,
+    slug: marketId,
+    close_time: "2026-07-07T12:00:00Z",
+    theme: "Politics",
+    side: "NO",
+    decision: "EXIT",
+    risk_status: "Ready",
+    price_cents: 100,
+    current_yes_odds: 0,
+    current_no_odds: 100,
+    fair_probability_pct: 100,
+    fair_yes_probability_pct: 0,
+    fair_no_probability_pct: 100,
+    edge_pp: 0,
+    score: 5,
+    confidence: "High",
+    evidence_status: "Strong",
+    event_state: "Resolved",
+    adjudication_required: false,
+    disagreement_level: "Low",
+    current_exposure_usd: 5,
+    target_exposure_usd: 0,
+    realized_pnl_usd: 1.1,
+    hours_remaining: 0,
+    key_evidence: [],
+    red_flags: [],
+    rationale: null,
+    reason: "Redeemed after settlement.",
+    summary: "Redeemed after settlement.",
+    order_plan: {
+      id: `order-${runId}-${marketId}-redeem`,
+      action: "redeem",
+      side: "NO",
+      order_type: "market",
+      status: "submitted",
+      market_id: marketId,
+      market_title: marketTitle,
+      order_size_usd: 5,
+      shares: 6.097561,
+      limit_price_cents: 100,
+      refreshed_market_price_cents: 100,
+      max_slippage_cents: 0,
+      dry_run: false,
+      detail: "Bullpen redeem/claim submitted successfully.",
+      execution_response: null,
+      created_at: "2026-07-02T12:05:30Z",
+      executed_at: "2026-07-02T12:05:31Z",
+    },
+    llm_outputs: [],
+    stage_results: [],
+    guardrail_checks: [],
+  };
+}
+
 test("Stage 3 invest plan reuses only Stage 2-qualified candidate rows", async () => {
   const { buildBullpenStage3OnlyInvestPlan } = await loadStage3InvestModule();
 
@@ -565,6 +631,144 @@ test("Stage 3 invest execution plan keeps reuse enabled while skipping already i
       (preview) => preview.candidate.market_id === "market-1",
     )?.investedSource,
     "live-position",
+  );
+});
+
+test("Stage 3 invest execution plan ignores saved claimable positions when reconciling already-invested markets", async () => {
+  const { buildBullpenStage3OnlyInvestExecutionPlan } = await loadStage3InvestModule();
+
+  const run = createRun({
+    id: "run-stage3-claimable-saved",
+    stageResults: [
+      createStage(1, "scan", {
+        active_positions_found: [
+          {
+            market_id: "market-1",
+            market_title: "Will event one happen?",
+            side: "NO",
+            is_claimable: true,
+            classification: "positive_payout_claimable",
+          },
+        ],
+        accepted_candidates: [
+          {
+            question_id: "question-1",
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_title: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            theme: "Politics",
+            current_yes_odds: 43,
+            current_no_odds: 57,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            returns_per_day: 1.7,
+            qualified: true,
+            fair_yes_probability_pct: 18,
+            fair_no_probability_pct: 82,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+        ],
+      }),
+    ],
+  });
+
+  const executionPlan = buildBullpenStage3OnlyInvestExecutionPlan(run);
+
+  assert.equal(executionPlan.blockedReason, null);
+  assert.equal(executionPlan.readyCandidateCount, 1);
+  assert.equal(executionPlan.alreadyInvestedCandidateCount, 0);
+  assert.deepEqual(executionPlan.alreadyInvestedMarketIds, []);
+  assert.equal(
+    executionPlan.candidatePreviews.find(
+      (preview) => preview.candidate.market_id === "market-1",
+    )?.status,
+    "ready",
+  );
+});
+
+test("Stage 3 invest execution plan reopens a saved-run buy after a later redeem reconciles it", async () => {
+  const { buildBullpenStage3OnlyInvestExecutionPlan } = await loadStage3InvestModule();
+
+  const run = createRun({
+    id: "run-stage3-redeem-reconciled",
+    stageResults: [
+      createStage(1, "scan", {
+        accepted_candidates: [
+          {
+            question_id: "question-1",
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_title: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            theme: "Politics",
+            current_yes_odds: 43,
+            current_no_odds: 57,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            returns_per_day: 1.7,
+            qualified: true,
+            fair_yes_probability_pct: 18,
+            fair_no_probability_pct: 82,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+        ],
+      }),
+    ],
+  });
+
+  const executionPlan = buildBullpenStage3OnlyInvestExecutionPlan(run, [
+    createSubmittedBuyDecision({
+      runId: "run-stage3-redeem-reconciled",
+      marketId: "market-1",
+    }),
+    createSubmittedRedeemDecision({
+      runId: "run-stage3-exit",
+      marketId: "market-1",
+    }),
+  ]);
+
+  assert.equal(executionPlan.blockedReason, null);
+  assert.equal(executionPlan.readyCandidateCount, 1);
+  assert.equal(executionPlan.alreadyInvestedCandidateCount, 0);
+  assert.deepEqual(executionPlan.alreadyInvestedMarketIds, []);
+  assert.equal(
+    executionPlan.candidatePreviews.find(
+      (preview) => preview.candidate.market_id === "market-1",
+    )?.status,
+    "ready",
   );
 });
 

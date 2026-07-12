@@ -242,7 +242,10 @@ function deriveStatusLabel(
   stage7: BullpenAutoLiveStageResult | null,
   defaultDryRun: boolean,
 ): AutoLiveDecisionStatusLabel {
-  if (decision.order_plan?.status === "submitted") {
+  if (
+    decision.order_plan?.status === "submitted" ||
+    decision.order_plan?.status === "confirmed"
+  ) {
     return "EXECUTED";
   }
 
@@ -645,7 +648,10 @@ export function buildAutoLiveRunSummary({
     const stage6 = decision.stage_results.find((stage) => stage.stage_number === 6) ?? null;
     const proposedOrderUsd = extractProposedOrderUsd(decision, stage6);
     totalProposedExposureUsd += proposedOrderUsd;
-    if (decision.order_plan?.status === "submitted") {
+    if (
+      decision.order_plan?.status === "submitted" ||
+      decision.order_plan?.status === "confirmed"
+    ) {
       executedCount += 1;
       totalExecutedExposureUsd += decision.order_plan.order_size_usd;
     }

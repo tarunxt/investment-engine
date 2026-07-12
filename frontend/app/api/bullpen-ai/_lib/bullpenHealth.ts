@@ -255,17 +255,34 @@ function buildBullpenRedeemErrorMessage(error: unknown) {
   return redactBullpenSensitiveText(String(error))?.trim() || "Bullpen redeem failed.";
 }
 
+function buildClaimableConditionIds(snapshot: BullpenLiveSnapshot) {
+  return Array.from(
+    new Set(
+      snapshot.positions
+        .filter((position) => position.isClaimable && position.conditionId)
+        .map((position) => position.conditionId as string),
+    ),
+  );
+}
+
 async function runBullpenRedeemCommand({
   commandCandidates = BULLPEN_BIN_CANDIDATES,
   execFileImpl = execBullpenCommand,
   timeoutMs = DEFAULT_REDEEM_TIMEOUT_MS,
   maxBuffer = DEFAULT_MAX_BUFFER,
+  conditionIds,
 }: {
   commandCandidates?: string[];
   execFileImpl?: BullpenCliExecImplementation;
   timeoutMs?: number;
   maxBuffer?: number;
+  conditionIds: string[];
 }) {
+  if (conditionIds.length === 0) {
+    throw new Error(
+      "Bullpen redeem requires explicit verified condition IDs. No scoped claimable conditions were available.",
+    );
+  }
   const env = buildBullpenProcessEnv({ readOnly: false });
   let lastError: unknown = null;
 
@@ -273,7 +290,16 @@ async function runBullpenRedeemCommand({
     try {
       await execFileImpl(
         candidate,
-        ["polymarket", "redeem", "--yes", "--non-interactive", "--output", "json"],
+        [
+          "polymarket",
+          "redeem",
+          "--condition-ids",
+          conditionIds.join(","),
+          "--yes",
+          "--non-interactive",
+          "--output",
+          "json",
+        ],
         {
           env,
           timeoutMs,
@@ -368,8 +394,13 @@ export async function autoClaimBullpenResolvedPositions(
   } = {},
 ): Promise<BullpenAutoClaimResult> {
   const enabled = isBullpenAutoClaimEnabled();
-  const claimableSignature = buildClaimableBullpenSignature(snapshot.positions) || null;
-  const claimableCount = snapshot.positions.filter((position) => position.isClaimable).length;
+  const claimableConditionIds = buildClaimableConditionIds(snapshot);
+  const verifiedClaimablePositions = snapshot.positions.filter(
+    (position) => position.isClaimable && position.conditionId,
+  );
+  const claimableSignature =
+    buildClaimableBullpenSignature(verifiedClaimablePositions) || null;
+  const claimableCount = claimableConditionIds.length;
 
   if (!enabled) {
     return {
@@ -438,6 +469,7 @@ export async function autoClaimBullpenResolvedPositions(
       commandCandidates,
       execFileImpl,
       maxBuffer,
+      conditionIds: claimableConditionIds,
     });
     await writeBullpenAutoClaimState({
       lastClaimableSignature: claimableSignature,

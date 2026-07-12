@@ -6,7 +6,7 @@ Cred-X now exposes:
 - `GET /api/bullpen-ai/positions`
 - `scripts/bullpen-healthcheck.ts`
 
-The healthcheck script reads the live Bullpen wallet snapshot, retries Bullpen redeem/claim whenever resolved positions are still claimable, writes a JSON health report, and optionally posts the report to `BULLPEN_HEALTH_WEBHOOK_URL`.
+The healthcheck script reads the live Bullpen wallet snapshot, retries Bullpen redeem/claim whenever resolved positions still have verified positive payouts, writes a JSON health report, and optionally posts the report to `BULLPEN_HEALTH_WEBHOOK_URL`.
 
 ## Required env
 
@@ -20,7 +20,7 @@ BULLPEN_HOME=/var/lib/credx/bullpen
 BULLPEN_CREDENTIALS_HOME=/var/lib/credx/bullpen
 BULLPEN_HEALTH_STATE_DIR=/var/lib/credx/bullpen-health
 BULLPEN_HEALTH_WEBHOOK_URL=
-BULLPEN_AUTO_CLAIM_RESOLVED=true
+BULLPEN_AUTO_CLAIM_RESOLVED=false
 BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS=60000
 ```
 
@@ -28,6 +28,11 @@ BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS=60000
 used for the Bullpen login on the server. If the backend worker reads a different
 `HOME`, Cred-X can still show `Session expired` even when a manual Bullpen login
 looked successful in another shell context.
+
+Bullpen credential homes are valid when they contain either `credentials.json.enc`
+or `credentials.json`. The encrypted `credentials.json.enc` file is the normal
+production credential artifact and should be treated as the canonical server login
+state.
 
 ## Manual run
 
@@ -57,7 +62,7 @@ After=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/srv/investment-engine
-EnvironmentFile=/srv/investment-engine/deploy/no-docker/frontend.env
+EnvironmentFile=/etc/investor/frontend.env
 ExecStart=/usr/bin/node /srv/investment-engine/scripts/bullpen-healthcheck.ts
 User=investment-engine
 Group=investment-engine
@@ -97,7 +102,7 @@ journalctl -u credx-bullpen-healthcheck.service -n 50 --no-pager
 If you prefer cron, add:
 
 ```cron
-*/5 * * * * cd /srv/investment-engine && set -a && . /srv/investment-engine/deploy/no-docker/frontend.env && set +a && /usr/bin/node scripts/bullpen-healthcheck.ts >> /var/log/credx-bullpen-healthcheck.log 2>&1
+*/5 * * * * cd /srv/investment-engine && set -a && . /etc/investor/frontend.env && set +a && /usr/bin/node scripts/bullpen-healthcheck.ts >> /var/log/credx-bullpen-healthcheck.log 2>&1
 ```
 
 ## Operator action
@@ -111,7 +116,8 @@ The health endpoint and Bullpen popup will classify failures as:
 - `TIMEOUT`
 - `UNKNOWN_ERROR`
 
-If the UI shows `AUTH_EXPIRED`, re-login on the server using the configured `HOME`:
+If the UI shows `AUTH_EXPIRED`, re-login on the server using the configured `HOME`
+from `/etc/investor/frontend.env` and `/etc/investor/backend.env`:
 
 ```bash
 sudo -u investor env HOME=/var/lib/credx/bullpen bullpen login

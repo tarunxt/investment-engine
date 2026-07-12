@@ -1,3 +1,6 @@
+import { access } from "node:fs/promises";
+import path from "node:path";
+
 export type BullpenCliFailureClassification =
   | "AUTH_REQUIRED"
   | "AUTH_EXPIRED"
@@ -19,6 +22,7 @@ export type BullpenCliHealth = {
   timedOut: boolean;
   timestamp: string;
   credentialHome: string | null;
+  credentialArtifact?: string | null;
   message: string;
   actionNeeded: string | null;
 };
@@ -58,12 +62,13 @@ export type BullpenCliHealthCheckResult<TPayload = unknown> = {
 
 const OUTPUT_PREVIEW_LIMIT = 4_000;
 const TOKEN_LABEL_PATTERNS = [
-  /\b(authorization|bearer|token|jwt|secret|session|cookie)\b\s*[:=]\s*["']?([A-Za-z0-9._~+/-]{8,})["']?/gi,
-  /\b(authorization|bearer|token|jwt|secret|session|cookie)\b\s+([A-Za-z0-9._~+/-]{8,})/gi,
+  /\b(authorization|bearer|token|jwt|secret|session|cookie|access[_-]?token|refresh[_-]?token|api[_-]?key|private[_-]?key|credential(?:s)?|turnkey(?:[_-]?bundle)?|rpc[_-]?url)\b\s*[:=]\s*["']?([A-Za-z0-9._~+/:?-]{8,})["']?/gi,
+  /\b(authorization|bearer|token|jwt|secret|session|cookie|access[_-]?token|refresh[_-]?token|api[_-]?key|private[_-]?key|credential(?:s)?|turnkey(?:[_-]?bundle)?|rpc[_-]?url)\b\s+([A-Za-z0-9._~+/:?-]{8,})/gi,
 ];
 const JWT_PATTERN = /\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
+const AUTHED_URL_PATTERN = /(https?:\/\/)([^/\s:@]+):([^/\s@]+)@/gi;
 const QUERY_TOKEN_PATTERN =
-  /([?&](?:token|jwt|auth|authorization|session|secret)=)([^&\s]+)/gi;
+  /([?&](?:token|jwt|auth|authorization|session|secret|api[_-]?key|refresh[_-]?token)=)([^&\s]+)/gi;
 const LONG_TOKEN_PATTERN = /\b[A-Za-z0-9._~-]{24,}\b/g;
 const AUTH_REQUIRED_PATTERNS = [
   /\bauth(?:entication)? (?:expired|required|failed|invalid)\b/i,
@@ -113,6 +118,10 @@ const BINARY_MISSING_PATTERNS = [
   /\bexecutable file not found\b/i,
   /\bnot found\b/i,
 ];
+const BULLPEN_CREDENTIAL_FILE_NAMES = [
+  "credentials.json.enc",
+  "credentials.json",
+] as const;
 
 function truncateText(value: string) {
   if (value.length <= OUTPUT_PREVIEW_LIMIT) return value;
@@ -147,6 +156,10 @@ export function redactBullpenSensitiveText(value: string | null | undefined) {
   }
 
   redacted = redacted.replace(JWT_PATTERN, "[REDACTED_JWT]");
+  redacted = redacted.replace(
+    AUTHED_URL_PATTERN,
+    (_match, prefix: string) => `${prefix}[REDACTED]@`,
+  );
   redacted = redacted.replace(
     QUERY_TOKEN_PATTERN,
     (_, prefix: string) => `${prefix}[REDACTED]`,
@@ -202,18 +215,23 @@ function buildBinaryMissingMessage(commandPath: string | null, attemptedPaths: s
 function buildFailureMessage({
   classification,
   credentialHome,
+  credentialArtifact,
   commandPath,
   attemptedPaths,
 }: {
   classification: BullpenCliFailureClassification;
   credentialHome: string | null;
+  credentialArtifact: string | null;
   commandPath: string | null;
   attemptedPaths: string[];
 }) {
+  const credentialDetail = credentialArtifact
+    ? ` Detected ${credentialArtifact} in that HOME.`
+    : "";
   switch (classification) {
     case "AUTH_REQUIRED":
       return {
-        message: `Bullpen CLI auth is required for HOME=${credentialHome || "unknown"}. Re-login on server.`,
+        message: `Bullpen CLI auth is required for HOME=${credentialHome || "unknown"}.${credentialDetail} Re-login on server.`,
         actionNeeded:
           credentialHome && credentialHome !== "unknown"
             ? `Re-run Bullpen login on the server using the same HOME. Example: env HOME=${credentialHome} bullpen login.`
@@ -221,7 +239,7 @@ function buildFailureMessage({
       };
     case "AUTH_EXPIRED":
       return {
-        message: `Bullpen CLI auth appears expired for HOME=${credentialHome || "unknown"}. Re-login on server.`,
+        message: `Bullpen CLI auth appears expired for HOME=${credentialHome || "unknown"}.${credentialDetail} Re-login on server.`,
         actionNeeded:
           credentialHome && credentialHome !== "unknown"
             ? `Re-login Bullpen on the server using the same HOME. Example: env HOME=${credentialHome} bullpen login. Logging into a different home directory will not refresh this runtime.`
@@ -280,6 +298,7 @@ export function classifyBullpenCliFailure({
   timedOut = false,
   timestamp,
   credentialHome,
+  credentialArtifact = null,
   errorMessage,
 }: {
   stdout?: string | null;
@@ -291,6 +310,7 @@ export function classifyBullpenCliFailure({
   timedOut?: boolean;
   timestamp: string;
   credentialHome: string | null;
+  credentialArtifact?: string | null;
   errorMessage?: string | null;
 }): BullpenCliHealth {
   const combined = normalizeCombinedOutput({ stdout, stderr, errorMessage });
@@ -311,6 +331,7 @@ export function classifyBullpenCliFailure({
   const failureMessage = buildFailureMessage({
     classification,
     credentialHome,
+    credentialArtifact,
     commandPath: commandPath || null,
     attemptedPaths,
   });
@@ -327,6 +348,7 @@ export function classifyBullpenCliFailure({
     timedOut,
     timestamp,
     credentialHome,
+    credentialArtifact,
     message: failureMessage.message,
     actionNeeded: failureMessage.actionNeeded,
   };
@@ -341,6 +363,7 @@ export function buildBullpenCliSuccessHealth({
   attemptedPaths = [],
   timestamp,
   credentialHome,
+  credentialArtifact = null,
 }: {
   stdout: string;
   stderr?: string | null;
@@ -350,6 +373,7 @@ export function buildBullpenCliSuccessHealth({
   attemptedPaths?: string[];
   timestamp: string;
   credentialHome: string | null;
+  credentialArtifact?: string | null;
 }): BullpenCliHealth {
   return {
     ok: true,
@@ -363,6 +387,7 @@ export function buildBullpenCliSuccessHealth({
     timedOut: false,
     timestamp,
     credentialHome,
+    credentialArtifact,
     message: "Bullpen CLI live wallet sync is healthy.",
     actionNeeded: null,
   };
@@ -375,6 +400,7 @@ export function buildBullpenCliJsonParseHealth({
   attemptedPaths = [],
   timestamp,
   credentialHome,
+  credentialArtifact = null,
 }: {
   stdout: string;
   stderr?: string | null;
@@ -382,10 +408,12 @@ export function buildBullpenCliJsonParseHealth({
   attemptedPaths?: string[];
   timestamp: string;
   credentialHome: string | null;
+  credentialArtifact?: string | null;
 }) {
   const details = buildFailureMessage({
     classification: "JSON_PARSE_ERROR",
     credentialHome,
+    credentialArtifact,
     commandPath,
     attemptedPaths,
   });
@@ -402,6 +430,7 @@ export function buildBullpenCliJsonParseHealth({
     timedOut: false,
     timestamp,
     credentialHome,
+    credentialArtifact,
     message: details.message,
     actionNeeded: details.actionNeeded,
   };
@@ -411,6 +440,21 @@ export function isBullpenCliTimeout(error: unknown) {
   if (!(error instanceof Error)) return false;
   const processError = error as BullpenCliProcessError;
   return Boolean(processError.killed) || /timed out/i.test(processError.message);
+}
+
+async function detectBullpenCredentialArtifact(credentialHome: string | null) {
+  if (!credentialHome) return null;
+
+  for (const candidate of BULLPEN_CREDENTIAL_FILE_NAMES) {
+    try {
+      await access(path.join(credentialHome, candidate));
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 export async function runBullpenCliHealthCheckWithExecutor<TPayload>({
@@ -432,6 +476,7 @@ export async function runBullpenCliHealthCheckWithExecutor<TPayload>({
 }): Promise<BullpenCliHealthCheckResult<TPayload>> {
   const attemptedPaths: string[] = [];
   const credentialHome = env.HOME || null;
+  const credentialArtifact = await detectBullpenCredentialArtifact(credentialHome);
   let lastMissingError: BullpenCliProcessError | null = null;
 
   for (const candidate of commandCandidates) {
@@ -464,6 +509,7 @@ export async function runBullpenCliHealthCheckWithExecutor<TPayload>({
             attemptedPaths,
             timestamp,
             credentialHome,
+            credentialArtifact,
           }),
           payload,
         };
@@ -477,6 +523,7 @@ export async function runBullpenCliHealthCheckWithExecutor<TPayload>({
             attemptedPaths,
             timestamp,
             credentialHome,
+            credentialArtifact,
           }),
           payload: null,
         };
@@ -493,6 +540,7 @@ export async function runBullpenCliHealthCheckWithExecutor<TPayload>({
         timedOut: isBullpenCliTimeout(processError),
         timestamp,
         credentialHome,
+        credentialArtifact,
         errorMessage: processError.message || null,
       });
 
@@ -525,6 +573,7 @@ export async function runBullpenCliHealthCheckWithExecutor<TPayload>({
       timedOut: false,
       timestamp,
       credentialHome,
+      credentialArtifact,
       errorMessage:
         lastMissingError?.message || "Bullpen CLI binary could not be found.",
     }),

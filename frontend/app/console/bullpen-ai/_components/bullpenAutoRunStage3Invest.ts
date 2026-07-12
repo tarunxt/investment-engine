@@ -78,6 +78,13 @@ export type BullpenStage3OnlyInvestExecutionPlanOptions = {
   hasActivePositionsSnapshot?: boolean;
 };
 
+const SAVED_RUN_NON_ACTIVE_CLASSIFICATIONS = new Set([
+  "closed",
+  "positive_payout_claimable",
+  "resolved_zero_payout",
+]);
+const RECONCILING_EXIT_ACTIONS = new Set(["sell", "redeem"]);
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -328,6 +335,17 @@ function buildSavedRunActivePositionMarketIdSet(
   const scanOutputs = workflowStageOutputs(run, "scan");
   const marketIds = asArray(scanOutputs?.active_positions_found)
     .map((item) => asRecord(item))
+    .filter((record) => {
+      const classification = readString(record?.classification);
+      return (
+        !readBoolean(record?.is_claimable) &&
+        !readBoolean(record?.isClaimable) &&
+        !(
+          classification &&
+          SAVED_RUN_NON_ACTIVE_CLASSIFICATIONS.has(classification)
+        )
+      );
+    })
     .map((record) => readString(record?.market_id))
     .filter((marketId): marketId is string => Boolean(marketId));
   return new Set(marketIds);
@@ -348,36 +366,78 @@ function buildSubmittedBuyMarketIdSet(
   run: BullpenAutoLiveRun | null,
   decisions: BullpenAutoLiveDecision[],
 ): Set<string> {
-  if (!run) return new Set<string>();
-
-  const marketIds = decisions
-    .filter(
-      (decision) =>
-        decision.run_id === run.id &&
-        decision.order_plan?.status === "submitted" &&
-        decision.order_plan.action === "buy",
-    )
-    .map((decision) => decision.market_id)
-    .filter((marketId) => typeof marketId === "string" && marketId.trim().length > 0);
-  return new Set(marketIds);
-}
-
-function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision): string | null {
-  return (
-    readString(decision.order_plan?.executed_at) ??
-    readString(decision.updated_at) ??
-    readString(decision.created_at)
+  return new Set(
+    buildSubmittedBuyTimestampLookup(run, decisions).keys(),
   );
 }
 
-function buildLatestSubmittedBuyTimestampLookup(
+function readTimestampMs(value: string | null): number | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function shouldPreferTimestamp(next: string, current: string | null | undefined) {
+  if (!current) {
+    return true;
+  }
+
+  const nextMs = readTimestampMs(next);
+  const currentMs = readTimestampMs(current);
+  if (nextMs === null) {
+    return currentMs === null;
+  }
+  if (currentMs === null) {
+    return true;
+  }
+  return nextMs >= currentMs;
+}
+
+function isCompletedInvestOrderStatus(status: string | null | undefined) {
+  return status === "submitted" || status === "confirmed";
+}
+
+function buildLatestSubmittedExitTimestampLookup(
   decisions: BullpenAutoLiveDecision[],
 ): Map<string, string> {
   const lookup = new Map<string, string>();
 
   for (const decision of decisions) {
     if (
-      decision.order_plan?.status !== "submitted" ||
+      !isCompletedInvestOrderStatus(decision.order_plan?.status) ||
+      !RECONCILING_EXIT_ACTIONS.has(decision.order_plan.action)
+    ) {
+      continue;
+    }
+
+    const marketId = readString(decision.market_id);
+    const timestamp = readDecisionExecutionTimestamp(decision);
+    if (!marketId || !timestamp) {
+      continue;
+    }
+
+    if (shouldPreferTimestamp(timestamp, lookup.get(marketId))) {
+      lookup.set(marketId, timestamp);
+    }
+  }
+
+  return lookup;
+}
+
+function buildSubmittedBuyTimestampLookup(
+  run: BullpenAutoLiveRun | null,
+  decisions: BullpenAutoLiveDecision[],
+): Map<string, string> {
+  if (!run) return new Map<string, string>();
+
+  const lookup = new Map<string, string>();
+  const latestExitTimestampByMarketId =
+    buildLatestSubmittedExitTimestampLookup(decisions);
+
+  for (const decision of decisions) {
+    if (
+      decision.run_id !== run.id ||
+      !isCompletedInvestOrderStatus(decision.order_plan?.status) ||
       decision.order_plan.action !== "buy"
     ) {
       continue;
@@ -389,21 +449,35 @@ function buildLatestSubmittedBuyTimestampLookup(
       continue;
     }
 
-    const current = lookup.get(marketId);
-    const currentMs = current ? Date.parse(current) : Number.NaN;
-    const nextMs = Date.parse(timestamp);
-
-    if (!current) {
-      lookup.set(marketId, timestamp);
+    const latestExitTimestamp = latestExitTimestampByMarketId.get(marketId);
+    if (
+      latestExitTimestamp &&
+      shouldPreferTimestamp(latestExitTimestamp, timestamp)
+    ) {
       continue;
     }
 
-    if (Number.isFinite(nextMs) && (!Number.isFinite(currentMs) || nextMs >= currentMs)) {
+    if (shouldPreferTimestamp(timestamp, lookup.get(marketId))) {
       lookup.set(marketId, timestamp);
     }
   }
 
   return lookup;
+}
+
+function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision): string | null {
+  return (
+    readString(decision.order_plan?.executed_at) ??
+    readString(decision.updated_at) ??
+    readString(decision.created_at)
+  );
+}
+
+function buildLatestSubmittedBuyTimestampLookup(
+  run: BullpenAutoLiveRun | null,
+  decisions: BullpenAutoLiveDecision[],
+): Map<string, string> {
+  return buildSubmittedBuyTimestampLookup(run, decisions);
 }
 
 export function buildBullpenStage3OnlyInvestExecutionPlan(
@@ -437,7 +511,7 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
       : savedRunActivePositionMarketIds;
   const submittedBuyMarketIds = buildSubmittedBuyMarketIdSet(run, decisions);
   const latestSubmittedBuyTimestampByMarketId =
-    buildLatestSubmittedBuyTimestampLookup(decisions);
+    buildLatestSubmittedBuyTimestampLookup(run, decisions);
   const alreadyInvestedMarketIds = new Set([
     ...activePositionMarketIds,
     ...submittedBuyMarketIds,

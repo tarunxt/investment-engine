@@ -152,6 +152,21 @@ async function enrichPositionsWithPolymarketData(
   }
 }
 
+function normalizeSnapshotResponse(
+  positions: BullpenActivePositionView[] | undefined,
+  summary: Record<string, unknown> | null | undefined,
+) {
+  const normalizedPositions = Array.isArray(positions) ? positions : [];
+  const filteredPositions = filterDisplayBullpenPositions(normalizedPositions);
+  const diagnostics = buildBullpenPositionsDiagnostics(normalizedPositions);
+
+  return {
+    positions: filteredPositions,
+    summary: summarizeBullpenPositions(filteredPositions, summary || {}),
+    diagnostics,
+  };
+}
+
 export async function GET(request: NextRequest) {
   const liveResult = await syncBullpenLiveSnapshot();
 
@@ -159,28 +174,23 @@ export async function GET(request: NextRequest) {
     const enrichedPositions = await enrichPositionsWithPolymarketData(
       liveResult.snapshot.positions,
     );
-    const diagnostics =
-      liveResult.snapshot.diagnostics ||
-      buildBullpenPositionsDiagnostics(enrichedPositions);
+    const normalized = normalizeSnapshotResponse(
+      enrichedPositions,
+      liveResult.snapshot.summary,
+    );
     return NextResponse.json({
-      positions: filterDisplayBullpenPositions(enrichedPositions),
-      summary: summarizeBullpenPositions(
-        filterDisplayBullpenPositions(enrichedPositions),
-        liveResult.snapshot.summary,
-      ),
-      diagnostics,
+      positions: normalized.positions,
+      summary: normalized.summary,
+      diagnostics: normalized.diagnostics,
       fetchedAt: liveResult.snapshot.fetchedAt,
       liveAvailable: true,
       positionsSource: "live-cli",
       health: liveResult.health,
       lastSuccessfulLiveSnapshot: {
         ...liveResult.snapshot,
-        positions: enrichedPositions,
-        summary: summarizeBullpenPositions(
-          filterDisplayBullpenPositions(enrichedPositions),
-          liveResult.snapshot.summary,
-        ),
-        diagnostics,
+        positions: normalized.positions,
+        summary: normalized.summary,
+        diagnostics: normalized.diagnostics,
       },
       fallback: buildFallbackResponse({
         source: null,
@@ -193,15 +203,24 @@ export async function GET(request: NextRequest) {
     await readLastSuccessfulBullpenLiveSnapshot();
 
   if (lastSuccessfulLiveSnapshot) {
+    const normalized = normalizeSnapshotResponse(
+      lastSuccessfulLiveSnapshot.positions,
+      lastSuccessfulLiveSnapshot.summary,
+    );
     return NextResponse.json({
-      positions: lastSuccessfulLiveSnapshot.positions,
-      summary: lastSuccessfulLiveSnapshot.summary,
-      diagnostics: lastSuccessfulLiveSnapshot.diagnostics,
+      positions: normalized.positions,
+      summary: normalized.summary,
+      diagnostics: normalized.diagnostics,
       fetchedAt: lastSuccessfulLiveSnapshot.fetchedAt,
       liveAvailable: false,
       positionsSource: "last-successful-live-snapshot",
       health: liveResult.health,
-      lastSuccessfulLiveSnapshot,
+      lastSuccessfulLiveSnapshot: {
+        ...lastSuccessfulLiveSnapshot,
+        positions: normalized.positions,
+        summary: normalized.summary,
+        diagnostics: normalized.diagnostics,
+      },
       fallback: buildFallbackResponse({
         source: "last-successful-live-snapshot",
         message:

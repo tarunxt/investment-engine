@@ -26,6 +26,7 @@ from app.domains.bullpen_trade_analysis.service import (
     sync_redeemed_trades_async,
 )
 from app.domains.polymarket.logger import PolymarketFileLogger, redact_secrets
+from app.domains.polymarket.redeem_coordinator import submit_scoped_redeem
 from app.domains.polymarket.providers import (
     BullpenReadOnlyProvider,
     MarketDataProvider,
@@ -61,6 +62,7 @@ from app.domains.polymarket.schemas import (
     PolymarketTrader,
 )
 from app.domains.polymarket.storage import JsonModelStore, JsonObjectStore
+from app.domains.polymarket_auto_live.console_profile import read_console_wallet_positions
 
 BALANCE_REFRESH_INTERVAL_SECONDS = max(
     5, int(float(os.getenv("POLYMARKET_BALANCE_REFRESH_INTERVAL_SECONDS", "5")))
@@ -1133,7 +1135,9 @@ class PolymarketPaperCopyBot:
                     bypass_trade_risk=True,
                     require_active_runtime=True,
                 )
-                await self._redeem_and_claim_completed_positions()
+                await self._redeem_and_claim_completed_positions(
+                    source="auto_exit_redeem"
+                )
                 self._add_activity(
                     f"Auto-exited and redeemed favorable live position: {position.market_title} "
                     f"{position.outcome} at {trigger_price * 100:.1f}¢."
@@ -1550,13 +1554,61 @@ class PolymarketPaperCopyBot:
             )
 
     async def _redeem_and_claim_completed_positions(
-        self, *, condition_ids: list[str] | None = None
+        self,
+        *,
+        condition_ids: list[str] | None = None,
+        source: str = "manual_redeem",
     ) -> bool:
         had_redeem_metadata_warning = False
         async with self._redeem_claim_lock:
+            scoped_condition_ids = list(condition_ids or [])
+            if self.user_id is not None and not scoped_condition_ids:
+                wallet_positions = await read_console_wallet_positions()
+                scoped_condition_ids = [
+                    position.condition_id
+                    for position in wallet_positions
+                    if position.is_claimable and position.condition_id
+                ]
+
+            if self.user_id is not None and scoped_condition_ids:
+                try:
+                    result = await submit_scoped_redeem(
+                        user_id=self.user_id,
+                        condition_ids=scoped_condition_ids,
+                        source=source,
+                        executor=self.live_executor,
+                        read_wallet_positions=read_console_wallet_positions,
+                    )
+                except BullpenCommandError as exc:
+                    message = redact_secrets(str(exc))
+                    if not is_redeem_metadata_lookup_warning(message):
+                        raise
+                    had_redeem_metadata_warning = True
+                    await self.logger.warn(
+                        "Bullpen redeem skipped a resolved market missing Gamma metadata: "
+                        f"{message}"
+                    )
+                    self._add_activity(
+                        "Bullpen redeem checked resolved positions but skipped a market missing Gamma metadata."
+                    )
+                else:
+                    if result.submitted_condition_ids:
+                        try:
+                            await self.live_executor.claim(dry_run=False)
+                        except BullpenCommandError as exc:
+                            message = redact_secrets(str(exc))
+                            if is_claim_command_unavailable_warning(message):
+                                await self.logger.warn(
+                                    "Bullpen claim command is unavailable after redeem; continuing with redeem result: "
+                                    f"{message}"
+                                )
+                                return had_redeem_metadata_warning
+                            raise
+                    return had_redeem_metadata_warning
+
             try:
                 await self.live_executor.redeem(
-                    dry_run=False, condition_ids=condition_ids
+                    dry_run=False, condition_ids=scoped_condition_ids or condition_ids
                 )
             except BullpenCommandError as exc:
                 message = redact_secrets(str(exc))
@@ -1595,7 +1647,8 @@ class PolymarketPaperCopyBot:
         try:
             had_redeem_metadata_warning = (
                 await self._redeem_and_claim_completed_positions(
-                    condition_ids=condition_ids
+                    condition_ids=condition_ids,
+                    source="auto_redeem" if automatic else "manual_redeem",
                 )
             )
         except BullpenCommandError as exc:
@@ -1658,7 +1711,9 @@ class PolymarketPaperCopyBot:
     async def _run_redeem_claim_background(self, *, success_message: str) -> None:
         try:
             had_redeem_metadata_warning = (
-                await self._redeem_and_claim_completed_positions()
+                await self._redeem_and_claim_completed_positions(
+                    source="auto_redeem_background"
+                )
             )
         except Exception as exc:
             await self.logger.error("Bullpen redeem/claim background check failed", exc)

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { parseBullpenJsonOutput } from "../app/api/bullpen-ai/_lib/bullpenCli.ts";
@@ -89,6 +92,37 @@ test("Bullpen CLI health classifies structured refresh rejection and preserves p
   assert.equal(result.health.classification, "AUTH_EXPIRED");
   assert.match(result.health.actionNeeded || "", /bullpen login/i);
   assert.match(result.health.stdout || "", new RegExp(publicConditionId));
+});
+
+test("Bullpen CLI health recognizes encrypted Bullpen credentials homes", async (t) => {
+  const { runBullpenCliHealthCheckWithExecutor } = await coreModulePromise;
+  const credentialHome = await mkdtemp(
+    path.join(os.tmpdir(), "bullpen-health-credentials-"),
+  );
+  await writeFile(path.join(credentialHome, "credentials.json.enc"), "encrypted");
+
+  t.after(async () => {
+    await rm(credentialHome, { recursive: true, force: true });
+  });
+
+  const result = await runBullpenCliHealthCheckWithExecutor(
+    {
+      ...buildBaseOptions(async () => {
+        throw createExecError({
+          message: "Bullpen login required",
+          stderr: "Bullpen login required. Run: bullpen login",
+        });
+      }),
+      env: {
+        HOME: credentialHome,
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.health.classification, "AUTH_REQUIRED");
+  assert.equal(result.health.credentialArtifact, "credentials.json.enc");
+  assert.match(result.health.message, /credentials\.json\.enc/);
 });
 
 test("Bullpen CLI health reports binary missing after checking every candidate", async () => {

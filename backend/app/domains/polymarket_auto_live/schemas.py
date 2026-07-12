@@ -13,7 +13,20 @@ AutoLiveRunStatus = Literal["running", "completed", "failed", "skipped"]
 AutoLiveStageStatus = Literal["pass", "fail", "warning", "skipped"]
 AutoLiveRuntimeStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 AutoLiveRuntimeMode = Literal["dry-run", "analysis-only", "live-trading"]
-AutoLiveOrderPlanStatus = Literal["planned", "submitted", "skipped", "cancelled", "failed"]
+AutoLiveOrderPlanStatus = Literal[
+    "planned",
+    "submitted",
+    "settlement_pending",
+    "confirmed",
+    "waiting_for_collateral",
+    "deferred",
+    "rpc_rate_limited",
+    "already_redeemed",
+    "resolved_zero_payout",
+    "skipped",
+    "cancelled",
+    "failed",
+]
 AutoLiveOrderAction = Literal["buy", "sell", "hold", "redeem"]
 AutoLiveOutcomeSide = Literal["YES", "NO"]
 AutoLiveTriggeredBy = Literal["manual", "scheduler", "start", "resume"]
