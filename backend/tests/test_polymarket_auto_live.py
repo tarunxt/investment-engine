@@ -2462,6 +2462,60 @@ async def test_console_wallet_positions_do_not_treat_won_status_as_claimable(mon
     assert by_slug["redeemable-row"].is_claimable is True
 
 
+@pytest.mark.anyio
+async def test_console_wallet_positions_ignore_nested_history_claim_rows(monkeypatch):
+    async def fake_run_first_bullpen_json(*_args, **_kwargs):
+        return {
+            "data": {
+                "positions": [
+                    {
+                        "slug": "active-open-row",
+                        "market": "Active open position",
+                        "outcome": "No",
+                        "shares": 5,
+                        "avg_price": 0.44,
+                        "current_price": 0.41,
+                        "invested_usd": 2.2,
+                        "end_date": "2026-06-30T23:59:00+00:00",
+                    }
+                ],
+                "history": [
+                    {
+                        "slug": "stale-history-claim",
+                        "market": "Historical resolved position",
+                        "outcome": "No",
+                        "shares": 3,
+                        "avg_price": 0.88,
+                        "current_price": 1,
+                        "status": "won",
+                        "redeemable": True,
+                    }
+                ],
+                "activities": [
+                    {
+                        "slug": "stale-activity-claim",
+                        "market": "Historical activity row",
+                        "outcome": "Yes",
+                        "shares": 2,
+                        "avg_price": 0.73,
+                        "current_price": 1,
+                        "action": "Redeem",
+                    }
+                ],
+            }
+        }
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        fake_run_first_bullpen_json,
+    )
+
+    positions = await read_console_wallet_positions()
+
+    assert [position.slug for position in positions] == ["active-open-row"]
+    assert positions[0].is_claimable is False
+
+
 def test_market_rules_extract_resolution_criteria_and_deadline():
     market = _market(
         description=(

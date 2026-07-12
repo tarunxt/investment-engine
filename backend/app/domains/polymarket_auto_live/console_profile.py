@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from app.domains.polymarket.bullpen import _collect_bullpen_rows, run_first_bullpen_json
+from app.domains.polymarket.bullpen import run_first_bullpen_json
 from app.domains.polymarket_auto_live.scanner import (
     MARKET_PREDICTION_KEYWORDS,
     MARKET_PREDICTION_PATTERNS,
@@ -91,6 +91,45 @@ _CLOSE_TIME_KEYS = (
     "closedAt",
     "deadline",
     "expiry",
+)
+_POSITION_HISTORY_CONTAINER_KEYS = frozenset(
+    {
+        "activities",
+        "activity",
+        "history",
+        "transactions",
+        "trades",
+        "redemptions",
+    }
+)
+_POSITION_IDENTIFIER_KEYS = (
+    "slug",
+    "condition_id",
+    "conditionId",
+    "market",
+    "title",
+    "event_slug",
+    "eventSlug",
+)
+_POSITION_SIGNAL_KEYS = (
+    "avg_price",
+    "avgPrice",
+    "current_price",
+    "currentPrice",
+    "current_value",
+    "currentValue",
+    "invested_usd",
+    "investedUsd",
+    "claimableValue",
+    "claimable_value",
+    "redeemableValue",
+    "redeemable_value",
+    "redeemable",
+    "isRedeemable",
+    "claimable",
+    "isClaimable",
+    "end_date",
+    "endDate",
 )
 
 
@@ -367,6 +406,46 @@ def _iter_list_like(value: object) -> list[object]:
     if isinstance(value, list):
         return value
     return _parse_json_list(value)
+
+
+def _looks_like_console_position_row(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+
+    has_identifier = any(_read_string(value.get(key)) for key in _POSITION_IDENTIFIER_KEYS)
+    has_position_signal = any(key in value for key in _POSITION_SIGNAL_KEYS)
+    return has_identifier and has_position_signal
+
+
+def _collect_console_position_rows(value: object) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    seen_object_ids: set[int] = set()
+
+    def walk(current: object) -> None:
+        if isinstance(current, list):
+            for item in current:
+                walk(item)
+            return
+        if not isinstance(current, dict):
+            return
+
+        object_id = id(current)
+        if object_id in seen_object_ids:
+            return
+        seen_object_ids.add(object_id)
+
+        if _looks_like_console_position_row(current):
+            rows.append(current)
+            return
+
+        for key, nested in current.items():
+            if key in _POSITION_HISTORY_CONTAINER_KEYS:
+                continue
+            if isinstance(nested, (dict, list)):
+                walk(nested)
+
+    walk(value)
+    return rows
 
 
 def _read_nested_number(
@@ -911,7 +990,7 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
     parsed = await run_first_bullpen_json(
         _POSITIONS_COMMAND_VARIANTS, timeout_seconds=30
     )
-    rows = _collect_bullpen_rows(parsed)
+    rows = _collect_console_position_rows(parsed)
     positions: list[ConsoleWalletPosition] = []
 
     for index, row in enumerate(rows):

@@ -151,6 +151,63 @@ test("Bullpen positions do not treat plain won status as claimable", async () =>
 });
 
 
+test("Bullpen CLI position extraction ignores nested history and activity rows", async () => {
+  const {
+    extractBullpenCliPositionRows,
+    normalizeBullpenPosition,
+    summarizeBullpenPositions,
+  } = await loadBullpenPositionsModule();
+
+  const rows = extractBullpenCliPositionRows({
+    data: {
+      positions: [
+        {
+          slug: "active-open-row",
+          market: "Active open position",
+          outcome: "No",
+          shares: 5,
+          avg_price: 0.44,
+          current_price: 0.41,
+          invested_usd: 2.2,
+          end_date: "2026-06-30",
+        },
+      ],
+      history: [
+        {
+          slug: "stale-history-claim",
+          market: "Historical resolved position",
+          outcome: "No",
+          shares: 3,
+          avg_price: 0.88,
+          current_price: 1,
+          status: "won",
+          redeemable: true,
+        },
+      ],
+      activities: [
+        {
+          slug: "stale-activity-claim",
+          market: "Historical activity row",
+          outcome: "Yes",
+          shares: 2,
+          avg_price: 0.73,
+          current_price: 1,
+          action: "Redeem",
+        },
+      ],
+    },
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].slug, "active-open-row");
+
+  const positions = rows.map((row) => normalizeBullpenPosition(row, () => null));
+  const summary = summarizeBullpenPositions(positions, null);
+
+  assert.equal(summary.claimableCount, 0);
+});
+
+
 test("Bullpen positions refresh current odds and use end-of-day ET for returns/day", async () => {
   const {
     applyBullpenPositionMarketData,

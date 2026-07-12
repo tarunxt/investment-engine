@@ -17,9 +17,9 @@ import {
   aggregateBullpenCliPositions,
   applyBullpenPositionMarketData,
   buildClaimableBullpenSignature,
+  extractBullpenCliPositionRows,
   normalizeBullpenPosition,
   summarizeBullpenPositions,
-  type BullpenCliPosition,
   type BullpenCliPositionsPayload,
   type BullpenLiveSnapshot,
 } from "../../../../lib/bullpenPositions.ts";
@@ -133,9 +133,7 @@ async function buildBullpenLiveSnapshot(
   payload: BullpenCliPositionsPayload,
   fetchedAt: string,
 ) {
-  const rawPositions = Array.isArray(payload.positions)
-    ? (payload.positions as BullpenCliPosition[])
-    : [];
+  const rawPositions = extractBullpenCliPositionRows(payload.positions ?? payload);
   const aggregatedRawPositions = aggregateBullpenCliPositions(rawPositions);
   const positions = aggregatedRawPositions.map((position) =>
     normalizeBullpenPosition(position, buildPolymarketEventUrl),

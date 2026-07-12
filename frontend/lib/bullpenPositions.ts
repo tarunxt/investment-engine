@@ -156,6 +156,14 @@ const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const EASTERN_TIME_ZONE = "America/New_York";
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CONDITION_ID_PATTERN = /^0x[a-f0-9]{64}$/i;
+const BULLPEN_POSITION_HISTORY_CONTAINER_KEYS = new Set([
+  "activities",
+  "activity",
+  "history",
+  "transactions",
+  "trades",
+  "redemptions",
+]);
 const MONTH_INDEX_BY_NAME: Record<string, string> = {
   january: "01",
   february: "02",
@@ -401,6 +409,81 @@ function extractClaimableStatus(value: BullpenCliPosition) {
     .toLowerCase();
 
   return /\b(claim|redeem|claimable|redeemable)\b/.test(claimText);
+}
+
+function isBullpenCliPositionRecord(value: unknown): value is BullpenCliPosition {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  const hasIdentifier = Boolean(
+    readString(record.slug) ||
+      readString(record.condition_id ?? record.conditionId) ||
+      readString(record.market) ||
+      readString(record.title) ||
+      readString(record.event_slug ?? record.eventSlug),
+  );
+  const hasPositionSignal = [
+    "avg_price",
+    "avgPrice",
+    "current_price",
+    "currentPrice",
+    "current_value",
+    "currentValue",
+    "invested_usd",
+    "investedUsd",
+    "claimableValue",
+    "claimable_value",
+    "redeemableValue",
+    "redeemable_value",
+    "redeemable",
+    "isRedeemable",
+    "claimable",
+    "isClaimable",
+    "end_date",
+    "endDate",
+  ].some((key) => key in record);
+
+  return hasIdentifier && hasPositionSignal;
+}
+
+export function extractBullpenCliPositionRows(value: unknown) {
+  const rows: BullpenCliPosition[] = [];
+  const seen = new Set<object>();
+
+  const walk = (current: unknown) => {
+    if (Array.isArray(current)) {
+      current.forEach(walk);
+      return;
+    }
+    if (!current || typeof current !== "object") {
+      return;
+    }
+
+    const record = current as Record<string, unknown>;
+    if (seen.has(record)) {
+      return;
+    }
+    seen.add(record);
+
+    if (isBullpenCliPositionRecord(record)) {
+      rows.push(record);
+      return;
+    }
+
+    Object.entries(record).forEach(([key, nested]) => {
+      if (BULLPEN_POSITION_HISTORY_CONTAINER_KEYS.has(key)) {
+        return;
+      }
+      if (nested && typeof nested === "object") {
+        walk(nested);
+      }
+    });
+  };
+
+  walk(value);
+  return rows;
 }
 
 function buildBullpenCliAliases(position: BullpenCliPosition) {
