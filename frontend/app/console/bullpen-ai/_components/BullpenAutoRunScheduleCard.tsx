@@ -2521,9 +2521,7 @@ function RunDetailWorkerStages({
             Background execution monitor
           </p>
           <h3 className="mt-2 text-base font-semibold text-slate-950">
-            {isBullpenAutoRunWorkflowSettled(workflowView)
-              ? "The latest Bullpen Scan + LLM + Rebalance and Invest run finished all 3 stages."
-              : workflowView.statusCopy}
+            {workflowView.statusCopy}
           </h3>
           <p className="mt-1 text-xs text-slate-500">
             Run {run.id} · started {formatIstDateTime(run.started_at)}
@@ -3650,8 +3648,12 @@ function getStageTwoDecisionLlmContext(
   );
 }
 
+function hasReturnedValue(value: unknown) {
+  return value !== undefined && value !== null && value !== "";
+}
+
 function formatJsonForDisplay(value: unknown) {
-  if (value === undefined || value === null || value === "") return "Not returned for this run.";
+  if (!hasReturnedValue(value)) return "Not returned for this run.";
   if (typeof value === "string") return value;
   try {
     return JSON.stringify(value, null, 2);
@@ -3660,6 +3662,59 @@ function formatJsonForDisplay(value: unknown) {
   }
 }
 
+function readNestedRecord(
+  value: unknown,
+  keys: string[],
+): Record<string, unknown> | null {
+  let cursor = value;
+  for (const key of keys) {
+    if (!isRecord(cursor)) return null;
+    cursor = cursor[key];
+  }
+  return isRecord(cursor) ? cursor : null;
+}
+
+function readFirstReturnedValue(...values: unknown[]) {
+  return values.find(hasReturnedValue);
+}
+
+function getStageTwoLlmPromptInputs(llmContext: Record<string, unknown> | null) {
+  return readFirstReturnedValue(
+    llmContext?.llm_prompt_inputs,
+    llmContext?.prompt_inputs,
+  );
+}
+
+function getStageTwoLlmPromptInputMarket(llmContext: Record<string, unknown> | null) {
+  return readNestedRecord(getStageTwoLlmPromptInputs(llmContext), ["market"]);
+}
+
+function getStageTwoLlmPromptInputEvidencePacket(llmContext: Record<string, unknown> | null) {
+  return readFirstReturnedValue(
+    llmContext?.evidence_packet,
+    readNestedRecord(getStageTwoLlmPromptInputs(llmContext), ["evidence_packet"]),
+  );
+}
+
+function getStageTwoLlmMissingValueReason(
+  label: string,
+  primaryValue: unknown,
+  fallbackValue?: unknown,
+) {
+  if (hasReturnedValue(primaryValue)) return null;
+  if (hasReturnedValue(fallbackValue)) {
+    return `${label} was not returned as a top-level Stage 2 field for this run, so the console is showing it from the organised prompt inputs captured with the LLM review.`;
+  }
+  return `${label} was not returned in this run payload. This usually means the run was created before that field was persisted, or the upstream Polymarket scan did not supply that optional value for this market.`;
+}
+
+function MissingValueNote({ children }: { children: ReactNode }) {
+  return (
+    <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] leading-4 text-amber-800">
+      {children}
+    </p>
+  );
+}
 
 function StageTwoLlmEventInputDialog({
   state,
@@ -3670,21 +3725,22 @@ function StageTwoLlmEventInputDialog({
 }) {
   const { title, llmContext } = state;
   const prompt = llmContext?.llm_prompt;
-  const promptInputs = llmContext?.llm_prompt_inputs ?? llmContext?.prompt_inputs;
-  const evidencePacket = llmContext?.evidence_packet;
-  const eventInput = {
-    market_id: llmContext?.market_id,
-    slug: llmContext?.slug,
-    question: llmContext?.question ?? llmContext?.market_title,
-    market_url: llmContext?.market_url,
-    current_yes_odds: llmContext?.current_yes_odds,
-    current_no_odds: llmContext?.current_no_odds,
-    volume_usd: llmContext?.volume_usd,
-    liquidity_usd: llmContext?.liquidity_usd,
-    close_time: llmContext?.close_time,
-    theme: llmContext?.theme,
-    source: llmContext?.source,
-  };
+  const promptInputs = getStageTwoLlmPromptInputs(llmContext);
+  const promptInputMarket = getStageTwoLlmPromptInputMarket(llmContext);
+  const evidencePacket = getStageTwoLlmPromptInputEvidencePacket(llmContext);
+  const eventInputEntries = [
+    ["market_id", llmContext?.market_id, promptInputMarket?.market_id],
+    ["slug", llmContext?.slug, promptInputMarket?.slug],
+    ["question", llmContext?.question ?? llmContext?.market_title, promptInputMarket?.question],
+    ["market_url", llmContext?.market_url, promptInputMarket?.market_url],
+    ["current_yes_odds", llmContext?.current_yes_odds, promptInputMarket?.current_yes_odds],
+    ["current_no_odds", llmContext?.current_no_odds, promptInputMarket?.current_no_odds],
+    ["volume_usd", llmContext?.volume_usd, promptInputMarket?.volume_usd],
+    ["liquidity_usd", llmContext?.liquidity_usd, promptInputMarket?.liquidity_usd],
+    ["close_time", llmContext?.close_time, promptInputMarket?.close_time],
+    ["theme", llmContext?.theme, promptInputMarket?.theme],
+    ["source", llmContext?.source, promptInputMarket?.source],
+  ] as const;
 
   return (
     <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
@@ -3702,17 +3758,29 @@ function StageTwoLlmEventInputDialog({
             <section className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
               <p className="font-semibold text-sky-950">Easy-read event input</p>
               <dl className="mt-3 space-y-2">
-                {Object.entries(eventInput).map(([key, value]) => (
-                  <div key={key} className="rounded-xl bg-white/80 px-3 py-2">
-                    <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{key.replaceAll("_", " ")}</dt>
-                    <dd className="mt-1 break-words font-medium text-slate-900">{formatJsonForDisplay(value)}</dd>
-                  </div>
-                ))}
+                {eventInputEntries.map(([key, primaryValue, fallbackValue]) => {
+                  const value = readFirstReturnedValue(primaryValue, fallbackValue);
+                  const missingReason = getStageTwoLlmMissingValueReason(
+                    key.replaceAll("_", " "),
+                    primaryValue,
+                    fallbackValue,
+                  );
+                  return (
+                    <div key={key} className="rounded-xl bg-white/80 px-3 py-2">
+                      <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{key.replaceAll("_", " ")}</dt>
+                      <dd className="mt-1 break-words font-medium text-slate-900">{formatJsonForDisplay(value)}</dd>
+                      {missingReason ? <MissingValueNote>{missingReason}</MissingValueNote> : null}
+                    </div>
+                  );
+                })}
               </dl>
             </section>
             <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
               <p className="font-semibold text-violet-950">Common prompt sent to LLM</p>
               <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
+              {getStageTwoLlmMissingValueReason("Common prompt sent to LLM", prompt) ? (
+                <MissingValueNote>{getStageTwoLlmMissingValueReason("Common prompt sent to LLM", prompt)}</MissingValueNote>
+              ) : null}
             </section>
           </div>
           <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
@@ -3722,6 +3790,9 @@ function StageTwoLlmEventInputDialog({
           <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
             <p className="font-semibold text-amber-950">Evidence packet</p>
             <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(evidencePacket)}</pre>
+            {getStageTwoLlmMissingValueReason("Evidence packet", llmContext?.evidence_packet, evidencePacket) ? (
+              <MissingValueNote>{getStageTwoLlmMissingValueReason("Evidence packet", llmContext?.evidence_packet, evidencePacket)}</MissingValueNote>
+            ) : null}
           </section>
         </div>
       </div>
@@ -3740,8 +3811,8 @@ function StageTwoDecisionDetailDialog({
 }) {
   const { decision, llmContext } = state;
   const prompt = llmContext?.llm_prompt;
-  const promptInputs = llmContext?.llm_prompt_inputs;
-  const evidencePacket = llmContext?.evidence_packet;
+  const promptInputs = getStageTwoLlmPromptInputs(llmContext);
+  const evidencePacket = getStageTwoLlmPromptInputEvidencePacket(llmContext);
   const title = mode === "tag" ? "Decision tag details" : "LLM prompt + input packet";
 
   return (
@@ -5423,9 +5494,7 @@ export function BullpenAutoRunScheduleCard({
   const workflowCurrentStageLabel = workflowSettled
     ? "All 3 stages finished"
     : workflowView.currentStageLabel;
-  const workflowStatusCopy = workflowSettled
-    ? "The latest Bullpen Scan + LLM + Rebalance and Invest run finished all 3 stages."
-    : workflowView.statusCopy;
+  const workflowStatusCopy = workflowView.statusCopy;
   const monitorRunStatusLabel =
     workflowRunForMonitor && !workflowSettled
       ? formatRunStatusLabel(workflowRunForMonitor.status)
