@@ -299,9 +299,10 @@ test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM 
     bullpenAiPageSource,
     /summary\.settings\.console_llm_prompt_template/,
   );
-  assert.match(autoRunCardSource, /Stage 2 execution/);
+  assert.match(autoRunCardSource, /stage-2-llm-execution-mode/);
   assert.match(autoRunCardSource, /Batched parallel/);
   assert.match(autoRunCardSource, /Single combined/);
+  assert.match(autoRunCardSource, /Events\/prompt/);
   assert.match(autoRunCardSource, /llm_execution_mode/);
   assert.match(autoRunCardSource, /llm_events_per_prompt/);
 });
