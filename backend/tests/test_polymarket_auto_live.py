@@ -2382,6 +2382,24 @@ def test_candidate_filter_reasons_block_uncategorized_player_prop_threshold_mark
         assert "Excluded sports market." in reasons, question
 
 
+def test_candidate_filter_reasons_block_uncategorized_player_prop_ou_markets():
+    for question, slug in (
+        ("A'ja Wilson: Assists O/U 2.5", "aja-wilson-assists-ou-2-5"),
+        ("Alyssa Thomas: Rebounds O/U 6.5", "alyssa-thomas-rebounds-ou-6-5"),
+        ("Chelsea Gray: Points O/U 14.5", "chelsea-gray-points-ou-14-5"),
+        ("Breanna Stewart: Over 2.5 assists", "breanna-stewart-over-2-5-assists"),
+    ):
+        market = _market(
+            question=question,
+            theme="Uncategorized",
+            slug=slug,
+        )
+
+        reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+        assert "Excluded sports market." in reasons, question
+
+
 def test_candidate_filter_reasons_block_uncategorized_scoreline_win_markets():
     for question, slug in (
         ("Team Falcons to win 2-0?", "team-falcons-to-win-2-0"),
@@ -2466,6 +2484,21 @@ def test_console_market_filter_reasons_block_exact_score_markets_when_uncategori
         question="Exact Score: Argentina 1 - 0 Egypt?",
         theme="Uncategorized",
         slug="argentina-egypt-exact-score",
+    )
+
+    reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+    )
+
+    assert "Excluded sports market." in reasons
+
+
+def test_console_market_filter_reasons_block_player_prop_ou_markets():
+    market = _market(
+        question="Alyssa Thomas: Rebounds O/U 6.5",
+        theme="Uncategorized",
+        slug="alyssa-thomas-rebounds-ou-6-5",
     )
 
     reasons = console_market_filter_reasons(
