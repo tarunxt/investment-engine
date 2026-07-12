@@ -4129,6 +4129,7 @@ class BullpenAutoLiveEngine:
             "llm_execution_mode": settings.llm_execution_mode,
             "llm_events_per_prompt": settings.llm_events_per_prompt,
             "llm_target_count": len(console_llm_targets),
+            "llm_prompt_template": console_prompt_template,
             "llm_targets": [
                 {"provider": provider_name, "model": model_name}
                 for provider_name, model_name in console_llm_targets

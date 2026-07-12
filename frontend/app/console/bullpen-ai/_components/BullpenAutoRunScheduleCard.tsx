@@ -3471,6 +3471,7 @@ function StageTwoLlmRunDetailsDialog({
   const llmTableRows = getStageTwoLlmTableRows(state);
   const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
   const stageTwoPromptContext = llmTableRows.find((row) => row.row)?.row ?? null;
+  const stagePromptTemplate = getStageTwoRunPromptTemplate(state.stage);
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
@@ -3691,12 +3692,14 @@ function StageTwoLlmRunDetailsDialog({
       {stageTwoPromptDialogOpen ? (
         <StageTwoInputPromptDialog
           llmContext={stageTwoPromptContext}
+          promptTemplate={stagePromptTemplate}
           onClose={() => setStageTwoPromptDialogOpen(false)}
         />
       ) : null}
       {eventInputDialog ? (
         <StageTwoLlmEventInputDialog
           state={eventInputDialog}
+          promptTemplate={stagePromptTemplate}
           onClose={() => setEventInputDialog(null)}
         />
       ) : null}
@@ -3704,6 +3707,7 @@ function StageTwoLlmRunDetailsDialog({
         <StageTwoDecisionDetailDialog
           mode={decisionDialog.mode}
           state={decisionDialog.state}
+          promptTemplate={stagePromptTemplate}
           onClose={() => setDecisionDialog(null)}
         />
       ) : null}
@@ -3772,6 +3776,19 @@ function readFirstReturnedValue(...values: unknown[]) {
   return values.find(hasReturnedValue);
 }
 
+function getStageTwoRunPromptTemplate(
+  stage: WorkflowStageView | null | undefined,
+) {
+  return readFirstReturnedValue(stage?.outputs?.llm_prompt_template);
+}
+
+function getStageTwoDisplayedPrompt(
+  llmContext: Record<string, unknown> | null,
+  promptTemplate: unknown,
+) {
+  return readFirstReturnedValue(llmContext?.llm_prompt, promptTemplate);
+}
+
 function getStageTwoLlmPromptInputs(llmContext: Record<string, unknown> | null) {
   return readFirstReturnedValue(
     llmContext?.llm_prompt_inputs,
@@ -3802,6 +3819,19 @@ function getStageTwoLlmMissingValueReason(
   return `${label} was not returned in this run payload. This usually means the run was created before that field was persisted, or the upstream Polymarket scan did not supply that optional value for this market.`;
 }
 
+function getStageTwoPromptMissingValueReason(
+  label: string,
+  llmContext: Record<string, unknown> | null,
+  promptTemplate: unknown,
+) {
+  const prompt = llmContext?.llm_prompt;
+  if (hasReturnedValue(prompt)) return null;
+  if (hasReturnedValue(promptTemplate)) {
+    return `${label} was not returned as a per-row Stage 2 field for this run, so the console is showing the saved Stage 2 prompt template used for shared LLM execution.`;
+  }
+  return getStageTwoLlmMissingValueReason(label, prompt);
+}
+
 function MissingValueNote({ children }: { children: ReactNode }) {
   return (
     <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] leading-4 text-amber-800">
@@ -3812,12 +3842,19 @@ function MissingValueNote({ children }: { children: ReactNode }) {
 
 function StageTwoInputPromptDialog({
   llmContext,
+  promptTemplate,
   onClose,
 }: {
   llmContext: Record<string, unknown> | null;
+  promptTemplate: unknown;
   onClose: () => void;
 }) {
-  const prompt = llmContext?.llm_prompt;
+  const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
+  const missingReason = getStageTwoPromptMissingValueReason(
+    "Stage 2 Input prompt",
+    llmContext,
+    promptTemplate,
+  );
 
   return (
     <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
@@ -3831,9 +3868,7 @@ function StageTwoInputPromptDialog({
         </div>
         <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
           <pre className="max-h-[62vh] overflow-auto whitespace-pre-wrap rounded-2xl border border-violet-200 bg-violet-50/60 p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
-          {getStageTwoLlmMissingValueReason("Stage 2 Input prompt", prompt) ? (
-            <MissingValueNote>{getStageTwoLlmMissingValueReason("Stage 2 Input prompt", prompt)}</MissingValueNote>
-          ) : null}
+          {missingReason ? <MissingValueNote>{missingReason}</MissingValueNote> : null}
         </div>
       </div>
     </div>
@@ -3842,16 +3877,23 @@ function StageTwoInputPromptDialog({
 
 function StageTwoLlmEventInputDialog({
   state,
+  promptTemplate,
   onClose,
 }: {
   state: StageTwoLlmEventInputDialogState;
+  promptTemplate: unknown;
   onClose: () => void;
 }) {
   const { title, llmContext } = state;
-  const prompt = llmContext?.llm_prompt;
+  const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
   const promptInputs = getStageTwoLlmPromptInputs(llmContext);
   const promptInputMarket = getStageTwoLlmPromptInputMarket(llmContext);
   const evidencePacket = getStageTwoLlmPromptInputEvidencePacket(llmContext);
+  const promptMissingReason = getStageTwoPromptMissingValueReason(
+    "Common prompt sent to LLM",
+    llmContext,
+    promptTemplate,
+  );
   const eventInputEntries = [
     ["market_id", llmContext?.market_id, promptInputMarket?.market_id],
     ["slug", llmContext?.slug, promptInputMarket?.slug],
@@ -3902,9 +3944,7 @@ function StageTwoLlmEventInputDialog({
             <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
               <p className="font-semibold text-violet-950">Common prompt sent to LLM</p>
               <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
-              {getStageTwoLlmMissingValueReason("Common prompt sent to LLM", prompt) ? (
-                <MissingValueNote>{getStageTwoLlmMissingValueReason("Common prompt sent to LLM", prompt)}</MissingValueNote>
-              ) : null}
+              {promptMissingReason ? <MissingValueNote>{promptMissingReason}</MissingValueNote> : null}
             </section>
           </div>
           <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
@@ -3927,17 +3967,24 @@ function StageTwoLlmEventInputDialog({
 function StageTwoDecisionDetailDialog({
   mode,
   state,
+  promptTemplate,
   onClose,
 }: {
   mode: StageTwoDecisionDialogMode;
   state: StageTwoDecisionDialogState;
+  promptTemplate: unknown;
   onClose: () => void;
 }) {
   const { decision, llmContext } = state;
-  const prompt = llmContext?.llm_prompt;
+  const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
   const promptInputs = getStageTwoLlmPromptInputs(llmContext);
   const evidencePacket = getStageTwoLlmPromptInputEvidencePacket(llmContext);
   const title = mode === "tag" ? "Decision tag details" : "LLM prompt + input packet";
+  const promptMissingReason = getStageTwoPromptMissingValueReason(
+    "Prompt sent to the LLM",
+    llmContext,
+    promptTemplate,
+  );
 
   return (
     <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
@@ -3971,6 +4018,7 @@ function StageTwoDecisionDetailDialog({
               <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
                 <p className="font-semibold text-violet-950">Prompt sent to the LLM</p>
                 <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
+                {promptMissingReason ? <MissingValueNote>{promptMissingReason}</MissingValueNote> : null}
               </section>
               <section className="rounded-2xl border border-slate-200 bg-white p-4">
                 <p className="font-semibold text-slate-950">Organised prompt inputs</p>

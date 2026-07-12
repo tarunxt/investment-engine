@@ -307,6 +307,23 @@ test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM 
   assert.match(autoRunCardSource, /llm_events_per_prompt/);
 });
 
+test("Bullpen x AI Stage 2 prompt dialogs fall back to the saved run prompt template", () => {
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(autoRunCardSource, /llm_prompt_template/);
+  assert.match(autoRunCardSource, /getStageTwoDisplayedPrompt/);
+  assert.match(
+    autoRunCardSource,
+    /showing the saved Stage 2 prompt template used for shared LLM execution/,
+  );
+});
+
 test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {
   const bullpenAiPageSource = readFileSync(
     new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
