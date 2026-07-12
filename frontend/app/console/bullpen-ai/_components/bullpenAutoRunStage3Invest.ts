@@ -393,6 +393,10 @@ function shouldPreferTimestamp(next: string, current: string | null | undefined)
   return nextMs >= currentMs;
 }
 
+function isCompletedInvestOrderStatus(status: string | null | undefined) {
+  return status === "submitted" || status === "confirmed";
+}
+
 function buildLatestSubmittedExitTimestampLookup(
   decisions: BullpenAutoLiveDecision[],
 ): Map<string, string> {
@@ -400,7 +404,7 @@ function buildLatestSubmittedExitTimestampLookup(
 
   for (const decision of decisions) {
     if (
-      decision.order_plan?.status !== "submitted" ||
+      !isCompletedInvestOrderStatus(decision.order_plan?.status) ||
       !RECONCILING_EXIT_ACTIONS.has(decision.order_plan.action)
     ) {
       continue;
@@ -433,7 +437,7 @@ function buildSubmittedBuyTimestampLookup(
   for (const decision of decisions) {
     if (
       decision.run_id !== run.id ||
-      decision.order_plan?.status !== "submitted" ||
+      !isCompletedInvestOrderStatus(decision.order_plan?.status) ||
       decision.order_plan.action !== "buy"
     ) {
       continue;

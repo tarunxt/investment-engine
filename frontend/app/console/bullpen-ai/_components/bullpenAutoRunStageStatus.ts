@@ -45,6 +45,10 @@ function readInvestStageDecisionRows(stage: BullpenAutoRunWorkflowStageView) {
   return rawDecisionRows.filter(isInvestStageDecisionRow);
 }
 
+function isCompletedInvestOrderStatus(status: string | null | undefined) {
+  return status === "submitted" || status === "confirmed";
+}
+
 export function getInvestStageImmediateSuccess(
   stage: BullpenAutoRunWorkflowStageView | null,
 ): InvestStageImmediateSuccess | null {
@@ -64,13 +68,17 @@ export function getInvestStageImmediateSuccess(
   if (plannedDecisionRows.length < plannedOrders) {
     return null;
   }
-  if (plannedDecisionRows.some((decision) => decision.order_plan?.status !== "submitted")) {
+  if (
+    plannedDecisionRows.some(
+      (decision) => !isCompletedInvestOrderStatus(decision.order_plan?.status),
+    )
+  ) {
     return null;
   }
 
   const latestSubmittedDecision =
     [...plannedDecisionRows].reverse().find(
-      (decision) => decision.order_plan?.status === "submitted",
+      (decision) => isCompletedInvestOrderStatus(decision.order_plan?.status),
     ) ?? null;
   const orderLabel = plannedOrders === 1 ? "order" : "orders";
   const message = latestSubmittedDecision
