@@ -380,27 +380,10 @@ function getStageActivePositionCounts(stage: WorkflowStageView) {
   const openFromSnapshot = stage.activePositionsFound.filter(
     (position) => !position.isClaimable,
   ).length;
-  const totalFromSnapshot = stage.activePositionsFound.length;
-  const walletPositions =
-    readStageOutputNumber(stage.outputs.active_wallet_positions) ??
-    readStageOutputNumber(stage.inputs.active_wallet_positions);
-  const activeRowsBeforeLlm =
-    readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
-    readStageOutputNumber(stage.inputs.active_position_rows_before_llm);
-  const derivedClaimable =
-    walletPositions !== null && activeRowsBeforeLlm !== null
-      ? Math.max(0, walletPositions - activeRowsBeforeLlm)
-      : null;
 
   return {
-    open:
-      totalFromSnapshot > 0
-        ? openFromSnapshot
-        : activeRowsBeforeLlm ?? walletPositions ?? 0,
-    claimable:
-      totalFromSnapshot > 0
-        ? claimableFromSnapshot
-        : derivedClaimable ?? 0,
+    open: openFromSnapshot,
+    claimable: claimableFromSnapshot,
   };
 }
 
@@ -435,6 +418,12 @@ function getStageTwoStats(
     readStageOutputNumber(stage.outputs.total_items) ??
     activePositions + newOpportunities;
 
+  const llmsCompleted = getStageTwoCompletedLlmCount(stage);
+  const llmsSelected =
+    readStageOutputNumber(stage.outputs.llm_provider_target_count) ??
+    readStageOutputNumber(stage.outputs.llm_selected_target_count) ??
+    readStageOutputNumber(stage.inputs.llm_provider_target_count) ??
+    Math.max(llmsCompleted, 0);
   const newEventsToInvestIn = getStageTwoInvestableDecisions(decisions).length;
 
   return {
@@ -442,8 +431,38 @@ function getStageTwoStats(
     claimablePositions,
     newOpportunities,
     llmRanOn,
+    llmsCompleted,
+    llmsSelected,
     newEventsToInvestIn,
   };
+}
+
+function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
+  const completedFromOutput =
+    readStageOutputNumber(stage.outputs.llm_completed_provider_target_count) ??
+    readStageOutputNumber(stage.outputs.llms_completed) ??
+    readStageOutputNumber(stage.outputs.llm_completed_model_count);
+  if (completedFromOutput !== null) return completedFromOutput;
+
+  const completedTargets = new Set<string>();
+  const addTarget = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    const provider = typeof record.provider === "string" ? record.provider.trim() : "";
+    const model = typeof record.model === "string" ? record.model.trim() : "";
+    if (provider || model) completedTargets.add(`${provider}/${model}`);
+  };
+
+  const reviewedCandidates = stage.outputs.llm_reviewed_candidates;
+  if (Array.isArray(reviewedCandidates)) {
+    reviewedCandidates.forEach((candidate) => {
+      if (!candidate || typeof candidate !== "object") return;
+      const llmOutputs = (candidate as Record<string, unknown>).llm_outputs;
+      if (Array.isArray(llmOutputs)) llmOutputs.forEach(addTarget);
+    });
+  }
+
+  return completedTargets.size;
 }
 
 function getStageTwoInvestableDecisions(
@@ -700,6 +719,16 @@ function StageTwoRunStats({
             {deDuplicatedCount > 0 ? `, ${displayStat(deDuplicatedCount)} overlap/de-duped` : ""})
           </>
         )}
+      </div>
+      <div>
+        LLMs completed:{" "}
+        <span className="font-semibold tabular-nums">
+          {displayStat(stats.llmsCompleted)}
+        </span>
+        /
+        <span className="font-semibold tabular-nums">
+          {displayStat(stats.llmsSelected)}
+        </span>
       </div>
       <div>
         {onOpenInvestEvents && stats.newEventsToInvestIn > 0 ? (

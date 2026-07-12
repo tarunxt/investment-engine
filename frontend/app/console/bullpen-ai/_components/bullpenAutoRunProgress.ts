@@ -473,9 +473,20 @@ export function buildBullpenAutoRunWorkflowView(
           : state === "current"
             ? 45
             : 0;
+    const llmExecutionMode =
+      definition.key === "llm"
+        ? readString(stage?.outputs?.llm_execution_mode) ??
+          readString(stage?.inputs?.llm_execution_mode)
+        : null;
     const progressLabel =
       !shouldShowStageData
         ? "Queued"
+        : definition.key === "llm" && llmExecutionMode === "single_combined"
+        ? state === "finished"
+          ? "Single combined finished"
+          : state === "current"
+            ? "Single combined in progress"
+            : "Single combined"
         : totalItems !== null
         ? `${completedItems ?? (state === "finished" ? totalItems : 0)}/${totalItems} ${itemLabel}`
         : state === "finished"
