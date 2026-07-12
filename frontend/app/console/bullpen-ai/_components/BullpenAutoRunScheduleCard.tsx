@@ -145,6 +145,11 @@ type StageTwoDecisionDialogState = {
 
 type StageTwoDecisionDialogMode = "tag" | "llm-inputs";
 
+type StageTwoLlmEventInputDialogState = {
+  title: string;
+  llmContext: Record<string, unknown> | null;
+};
+
 type StageTwoLlmRunBreakupKind =
   | "active-positions"
   | "new-opportunities"
@@ -721,14 +726,34 @@ function StageTwoRunStats({
         )}
       </div>
       <div>
-        LLMs completed:{" "}
-        <span className="font-semibold tabular-nums">
-          {displayStat(stats.llmsCompleted)}
-        </span>
-        /
-        <span className="font-semibold tabular-nums">
-          {displayStat(stats.llmsSelected)}
-        </span>
+        {onOpenLlmRunDetails ? (
+          <button
+            type="button"
+            onClick={() => onOpenLlmRunDetails({ stage, decisions })}
+            className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+            aria-label={`Open details for ${displayStat(stats.llmsCompleted)} completed LLM runs`}
+          >
+            LLMs completed:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsCompleted)}
+            </span>
+            /
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsSelected)}
+            </span>
+          </button>
+        ) : (
+          <>
+            LLMs completed:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsCompleted)}
+            </span>
+            /
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsSelected)}
+            </span>
+          </>
+        )}
       </div>
       <div>
         {onOpenInvestEvents && stats.newEventsToInvestIn > 0 ? (
@@ -3297,6 +3322,100 @@ function RunHistoryMetricTiles({
 }
 
 
+
+function readLlmContextString(record: Record<string, unknown> | null, key: string) {
+  if (!record) return null;
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readLlmContextNumber(record: Record<string, unknown> | null, key: string) {
+  if (!record) return null;
+  return readStageOutputNumber(record[key]);
+}
+
+function getStageTwoLlmReviewedRows(stage: WorkflowStageView) {
+  const rows = Array.isArray(stage.outputs.llm_reviewed_candidates)
+    ? stage.outputs.llm_reviewed_candidates
+    : [];
+  return rows.filter(
+    (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object",
+  );
+}
+
+function getStageTwoLlmOutputs(row: Record<string, unknown>) {
+  const outputs = row.llm_outputs;
+  if (!Array.isArray(outputs)) return [];
+  return outputs.filter(
+    (output): output is Record<string, unknown> => Boolean(output) && typeof output === "object",
+  );
+}
+
+function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
+  const rows = getStageTwoLlmReviewedRows(state.stage);
+  const decisionByKey = new Map<string, BullpenAutoLiveDecision>();
+  state.decisions.forEach((decision) => {
+    [decision.market_id, decision.slug ?? null, decision.market_url ?? null, decision.market_title]
+      .map(getStageTwoBreakupMatchKey)
+      .filter((key): key is string => Boolean(key))
+      .forEach((key) => decisionByKey.set(key, decision));
+  });
+
+  return rows.flatMap((row, rowIndex) => {
+    const rowKeys = [row.market_id, row.slug, row.market_url, row.question, row.market_title]
+      .map((value) => getStageTwoBreakupMatchKey(typeof value === "string" ? value : null))
+      .filter((key): key is string => Boolean(key));
+    const decision = rowKeys.map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
+    const outputs = getStageTwoLlmOutputs(row);
+    const title =
+      readLlmContextString(row, "question") ??
+      readLlmContextString(row, "market_title") ??
+      decision?.market_title ??
+      `Event ${rowIndex + 1}`;
+    const base = outputs.length ? outputs : [null];
+    return base.map((output, outputIndex) => ({
+      id: `${rowIndex}-${outputIndex}-${title}`,
+      title,
+      row,
+      output,
+      decision,
+      provider: readLlmContextString(output, "provider") ?? "—",
+      model: readLlmContextString(output, "model") ?? "—",
+      yesOdds:
+        readLlmContextNumber(output, "yes_odds") ??
+        readLlmContextNumber(output, "llm_yes_odds") ??
+        readLlmContextNumber(row, "llm_yes_odds") ??
+        decision?.fair_yes_probability_pct ??
+        (decision?.side === "YES" ? decision?.fair_probability_pct : null) ??
+        null,
+      noOdds:
+        readLlmContextNumber(output, "no_odds") ??
+        readLlmContextNumber(output, "llm_no_odds") ??
+        readLlmContextNumber(row, "llm_no_odds") ??
+        decision?.fair_no_probability_pct ??
+        (decision?.side === "NO" ? decision?.fair_probability_pct : null) ??
+        null,
+      action:
+        readLlmContextString(output, "decision") ??
+        readLlmContextString(output, "action") ??
+        decision?.decision ??
+        "—",
+      risk: readLlmContextString(output, "risk_status") ?? decision?.risk_status ?? "—",
+      summary:
+        readLlmContextString(output, "summary") ??
+        readLlmContextString(row, "summary") ??
+        decision?.summary ??
+        decision?.reason ??
+        "—",
+      rationale:
+        readLlmContextString(output, "rationale") ??
+        readLlmContextString(row, "rationale") ??
+        decision?.rationale ??
+        "—",
+    }));
+  });
+}
+
 function StageTwoLlmRunDetailsDialog({
   state,
   onClose,
@@ -3310,11 +3429,14 @@ function StageTwoLlmRunDetailsDialog({
     mode: StageTwoDecisionDialogMode;
     state: StageTwoDecisionDialogState;
   } | null>(null);
+  const [eventInputDialog, setEventInputDialog] =
+    useState<StageTwoLlmEventInputDialogState | null>(null);
   const stats = getStageTwoStats(state.stage, state.decisions);
   const overlapCount = Math.max(
     0,
     stats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
+  const llmTableRows = getStageTwoLlmTableRows(state);
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
@@ -3382,6 +3504,61 @@ function StageTwoLlmRunDetailsDialog({
               Stage 2 reviews the unique union of active-position rows and fresh opportunity rows. It does not add the two displayed source counts when a market appears in both groups.
             </p>
           </div>
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                LLM-wise output ({llmTableRows.length} rows)
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                Each row represents an event/provider output. Use the info icon to inspect the exact event input packet and common prompt sent to the LLM.
+              </p>
+            </div>
+            <div className="overflow-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                <thead className="bg-slate-50 text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                  <tr>
+                    <th className="px-3 py-3">Info</th>
+                    <th className="min-w-64 px-3 py-3">Event</th>
+                    <th className="px-3 py-3">Provider</th>
+                    <th className="px-3 py-3">Model</th>
+                    <th className="px-3 py-3">LLM Yes</th>
+                    <th className="px-3 py-3">LLM No</th>
+                    <th className="px-3 py-3">Action</th>
+                    <th className="px-3 py-3">Risk</th>
+                    <th className="min-w-80 px-3 py-3">Summary / rationale</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                  {llmTableRows.length ? llmTableRows.map((row) => (
+                    <tr key={row.id} className="align-top hover:bg-amber-50/40">
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setEventInputDialog({ title: row.title, llmContext: row.row })}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 transition hover:border-sky-300 hover:bg-sky-100"
+                          aria-label={`Open LLM input details for ${row.title}`}
+                          title="Show event input and common LLM prompt"
+                        >
+                          <Info className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                      <td className="px-3 py-3 font-semibold text-slate-950">{row.title}</td>
+                      <td className="px-3 py-3">{row.provider}</td>
+                      <td className="px-3 py-3">{row.model}</td>
+                      <td className="px-3 py-3 tabular-nums">{formatOddsPercent(row.yesOdds)}</td>
+                      <td className="px-3 py-3 tabular-nums">{formatOddsPercent(row.noOdds)}</td>
+                      <td className="px-3 py-3">{row.action}</td>
+                      <td className="px-3 py-3">{row.risk}</td>
+                      <td className="px-3 py-3"><span className="font-semibold">{row.summary}</span><br /><span className="text-slate-500">{row.rationale}</span></td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-slate-500">No LLM row-level output was returned for this run.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="mt-5 space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               Indepth details ({state.decisions.length} decisions currently returned)
@@ -3425,6 +3602,12 @@ function StageTwoLlmRunDetailsDialog({
           </div>
         </div>
       </div>
+      {eventInputDialog ? (
+        <StageTwoLlmEventInputDialog
+          state={eventInputDialog}
+          onClose={() => setEventInputDialog(null)}
+        />
+      ) : null}
       {decisionDialog ? (
         <StageTwoDecisionDetailDialog
           mode={decisionDialog.mode}
@@ -3475,6 +3658,75 @@ function formatJsonForDisplay(value: unknown) {
   } catch {
     return String(value);
   }
+}
+
+
+function StageTwoLlmEventInputDialog({
+  state,
+  onClose,
+}: {
+  state: StageTwoLlmEventInputDialogState;
+  onClose: () => void;
+}) {
+  const { title, llmContext } = state;
+  const prompt = llmContext?.llm_prompt;
+  const promptInputs = llmContext?.llm_prompt_inputs ?? llmContext?.prompt_inputs;
+  const evidencePacket = llmContext?.evidence_packet;
+  const eventInput = {
+    market_id: llmContext?.market_id,
+    slug: llmContext?.slug,
+    question: llmContext?.question ?? llmContext?.market_title,
+    market_url: llmContext?.market_url,
+    current_yes_odds: llmContext?.current_yes_odds,
+    current_no_odds: llmContext?.current_no_odds,
+    volume_usd: llmContext?.volume_usd,
+    liquidity_usd: llmContext?.liquidity_usd,
+    close_time: llmContext?.close_time,
+    theme: llmContext?.theme,
+    source: llmContext?.source,
+  };
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Event LLM input</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">{title}</h2>
+            <p className="mt-2 text-sm text-slate-600">Input data and common prompt used for the LLM review of this event.</p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close event LLM input"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
+              <p className="font-semibold text-sky-950">Easy-read event input</p>
+              <dl className="mt-3 space-y-2">
+                {Object.entries(eventInput).map(([key, value]) => (
+                  <div key={key} className="rounded-xl bg-white/80 px-3 py-2">
+                    <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{key.replaceAll("_", " ")}</dt>
+                    <dd className="mt-1 break-words font-medium text-slate-900">{formatJsonForDisplay(value)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+            <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
+              <p className="font-semibold text-violet-950">Common prompt sent to LLM</p>
+              <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
+            </section>
+          </div>
+          <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="font-semibold text-slate-950">Full organised prompt inputs</p>
+            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(promptInputs)}</pre>
+          </section>
+          <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+            <p className="font-semibold text-amber-950">Evidence packet</p>
+            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(evidencePacket)}</pre>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function StageTwoDecisionDetailDialog({
