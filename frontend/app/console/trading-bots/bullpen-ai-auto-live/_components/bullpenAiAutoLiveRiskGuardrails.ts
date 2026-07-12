@@ -110,6 +110,7 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   new_scan_interval_minutes: 60,
   llm_rerun_interval_minutes: 240,
   max_llm_candidates_per_run: 100,
+  console_llm_targets: [{ provider: "deepseek", model: "deepseek-v4-flash" }],
   auto_live_enabled: false,
   dry_run: true,
   require_manual_confirmation: true,
