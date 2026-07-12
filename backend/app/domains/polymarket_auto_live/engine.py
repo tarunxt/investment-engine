@@ -1867,7 +1867,12 @@ class BullpenAutoLiveEngine:
                 built_at=utc_now_iso(),
             )
             candidate.evidence_packet = evidence_packet
-            llm_outputs, llm_consensus = run_llm_consensus(market, rules, evidence_packet)
+            llm_outputs, llm_consensus = run_llm_consensus(
+                market,
+                rules,
+                evidence_packet,
+                settings,
+            )
             candidate.llm_outputs = llm_outputs
             candidate.llm_consensus = llm_consensus
             candidate.confidence = normalize_auto_live_confidence(
@@ -3794,6 +3799,7 @@ class BullpenAutoLiveEngine:
                         market,
                         rules,
                         evidence_packet,
+                        settings,
                     )
                     selected_side, _ = _stronger_probability_side(
                         yes_probability=llm_consensus.fair_yes_probability_pct,
@@ -3901,7 +3907,12 @@ class BullpenAutoLiveEngine:
                 )
 
                 evidence_packet = build_evidence_packet(market, rules, built_at=utc_now_iso())
-                llm_outputs, llm_consensus = run_llm_consensus(market, rules, evidence_packet)
+                llm_outputs, llm_consensus = run_llm_consensus(
+                    market,
+                    rules,
+                    evidence_packet,
+                    settings,
+                )
                 fair_no = llm_consensus.fair_no_probability_pct
                 selected_side, strongest_llm_odds = _stronger_probability_side(
                     yes_probability=llm_consensus.fair_yes_probability_pct,
