@@ -84,6 +84,18 @@ SPORTS_PATTERNS = (
         r"(?:^|\W)(?:\d+\s*)?\+\s+(?:shots?\s+on\s+target|shots?|assists?|goals?|saves?|tackles?|cards?)(?=$|\W)",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"\b(?:assists?|rebounds?|points?|blocks?|steals?|threes?|3-pointers?)\s+(?:o\s*\/\s*u|over\s*\/\s*under)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bplayer\s+(?:assists?|rebounds?|points?|blocks?|steals?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:over|under)\s+\d+(?:\.\d+)?\s+(?:assists?|rebounds?|points?|blocks?|steals?)\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\b(?:first|second) half\b", re.IGNORECASE),
     re.compile(r"\bhalftime\b", re.IGNORECASE),
     re.compile(r"\bmap\s+\d+\b", re.IGNORECASE),
