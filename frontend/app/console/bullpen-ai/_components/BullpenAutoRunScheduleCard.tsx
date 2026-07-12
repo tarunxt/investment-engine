@@ -3414,6 +3414,35 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
   });
 }
 
+function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTableRows>) {
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      label: string;
+      rows: typeof rows;
+    }
+  >();
+
+  rows.forEach((row) => {
+    const provider = row.provider || "—";
+    const model = row.model || "—";
+    const key = `${provider}::${model}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.rows.push(row);
+      return;
+    }
+    groups.set(key, {
+      key,
+      label: provider === "—" ? model : `${provider} · ${model}`,
+      rows: [row],
+    });
+  });
+
+  return [...groups.values()];
+}
+
 function StageTwoLlmRunDetailsDialog({
   state,
   onClose,
@@ -3435,6 +3464,7 @@ function StageTwoLlmRunDetailsDialog({
     stats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
   const llmTableRows = getStageTwoLlmTableRows(state);
+  const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
@@ -3508,52 +3538,105 @@ function StageTwoLlmRunDetailsDialog({
                 LLM-wise output ({llmTableRows.length} rows)
               </p>
               <p className="mt-1 text-sm text-slate-600">
-                Each row represents an event/provider output. Use the info icon to inspect the exact event input packet and common prompt sent to the LLM.
+                Outputs are grouped into a separate table for each LLM model. Use the model info icon to inspect the full prompt, and click Action/Risk tags to see why the row was tagged that way.
               </p>
             </div>
-            <div className="overflow-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                <thead className="bg-slate-50 text-[11px] uppercase tracking-[0.14em] text-slate-500">
-                  <tr>
-                    <th className="px-3 py-3">Info</th>
-                    <th className="min-w-64 px-3 py-3">Event</th>
-                    <th className="px-3 py-3">Provider</th>
-                    <th className="px-3 py-3">Model</th>
-                    <th className="px-3 py-3">LLM Yes</th>
-                    <th className="px-3 py-3">LLM No</th>
-                    <th className="px-3 py-3">Action</th>
-                    <th className="px-3 py-3">Risk</th>
-                    <th className="min-w-80 px-3 py-3">Summary / rationale</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
-                  {llmTableRows.length ? llmTableRows.map((row) => (
-                    <tr key={row.id} className="align-top hover:bg-amber-50/40">
-                      <td className="px-3 py-3">
-                        <button
-                          type="button"
-                          onClick={() => setEventInputDialog({ title: row.title, llmContext: row.row })}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 transition hover:border-sky-300 hover:bg-sky-100"
-                          aria-label={`Open LLM input details for ${row.title}`}
-                          title="Show event input and common LLM prompt"
-                        >
-                          <Info className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-950">{row.title}</td>
-                      <td className="px-3 py-3">{row.provider}</td>
-                      <td className="px-3 py-3">{row.model}</td>
-                      <td className="px-3 py-3 tabular-nums">{formatOddsPercent(row.yesOdds)}</td>
-                      <td className="px-3 py-3 tabular-nums">{formatOddsPercent(row.noOdds)}</td>
-                      <td className="px-3 py-3">{row.action}</td>
-                      <td className="px-3 py-3">{row.risk}</td>
-                      <td className="px-3 py-3"><span className="font-semibold">{row.summary}</span><br /><span className="text-slate-500">{row.rationale}</span></td>
-                    </tr>
-                  )) : (
-                    <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-slate-500">No LLM row-level output was returned for this run.</td></tr>
-                  )}
-                </tbody>
-              </table>
+            <div className="space-y-4 p-4">
+              {llmModelGroups.length ? llmModelGroups.map((group) => {
+                const promptContext = group.rows.find((row) => row.row)?.row ?? null;
+                return (
+                  <section key={group.key} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
+                            {group.label}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setEventInputDialog({ title: group.label, llmContext: promptContext })}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                            aria-label={`Open full prompt for ${group.label}`}
+                            title="Show full prompt definition sent to this LLM model"
+                          >
+                            <Info className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {group.rows.length} event/provider {group.rows.length === 1 ? "row" : "rows"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="overflow-auto">
+                      <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                        <thead className="bg-white text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                          <tr>
+                            <th className="px-3 py-3">Event info</th>
+                            <th className="min-w-64 px-3 py-3">Event</th>
+                            <th className="px-3 py-3">LLM Yes</th>
+                            <th className="px-3 py-3">LLM No</th>
+                            <th className="px-3 py-3">Action</th>
+                            <th className="px-3 py-3">Risk</th>
+                            <th className="min-w-80 px-3 py-3">Summary / rationale</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                          {group.rows.map((row) => {
+                            const dialogState = row.decision ? { decision: row.decision, llmContext: row.row } : null;
+                            return (
+                              <tr key={row.id} className="align-top hover:bg-amber-50/40">
+                                <td className="px-3 py-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEventInputDialog({ title: row.title, llmContext: row.row })}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 transition hover:border-sky-300 hover:bg-sky-100"
+                                    aria-label={`Open LLM input details for ${row.title}`}
+                                    title="Show event input and common LLM prompt"
+                                  >
+                                    <Info className="h-3.5 w-3.5" />
+                                  </button>
+                                </td>
+                                <td className="px-3 py-3 font-semibold text-slate-950">{row.title}</td>
+                                <td className="px-3 py-3 tabular-nums">{formatOddsPercent(row.yesOdds)}</td>
+                                <td className="px-3 py-3 tabular-nums">{formatOddsPercent(row.noOdds)}</td>
+                                <td className="px-3 py-3">
+                                  {dialogState ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDecisionDialog({ mode: "tag", state: dialogState })}
+                                      className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700"
+                                      aria-label={`Explain action ${row.action} for ${row.title}`}
+                                      title="Show reason and details behind this action tag"
+                                    >
+                                      {row.action}
+                                    </button>
+                                  ) : row.action}
+                                </td>
+                                <td className="px-3 py-3">
+                                  {dialogState ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDecisionDialog({ mode: "tag", state: dialogState })}
+                                      className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700"
+                                      aria-label={`Explain risk ${row.risk} for ${row.title}`}
+                                      title="Show reason and details behind this risk tag"
+                                    >
+                                      {row.risk}
+                                    </button>
+                                  ) : row.risk}
+                                </td>
+                                <td className="px-3 py-3"><span className="font-semibold">{row.summary}</span><br /><span className="text-slate-500">{row.rationale}</span></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                );
+              }) : (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">No LLM row-level output was returned for this run.</div>
+              )}
             </div>
           </div>
 
