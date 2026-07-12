@@ -326,10 +326,6 @@ function parseLlmEventsPerPrompt(value: string) {
   return parsed;
 }
 
-function formatLlmExecutionModeLabel(mode: BullpenLlmExecutionMode) {
-  return mode === "single_combined" ? "Single combined" : "Batched parallel";
-}
-
 function buildLlmExecutionSummary(
   mode: BullpenLlmExecutionMode,
   eventsPerPrompt: number,
@@ -6151,66 +6147,7 @@ export function BullpenAutoRunScheduleCard({
 
                   <div className="mt-auto flex items-end justify-between gap-3 pt-3">
                     {stage.key === "llm" ? (
-                      <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
-                        <div className="min-w-[250px] flex-1 rounded-2xl border border-slate-200 bg-white/75 px-3 py-2.5 text-xs text-slate-600 shadow-sm">
-                          <p className="font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Stage 2 execution
-                          </p>
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            {(
-                              [
-                                "chunked_parallel",
-                                "single_combined",
-                              ] as BullpenLlmExecutionMode[]
-                            ).map((mode) => {
-                              const isSelected = llmExecutionMode === mode;
-                              return (
-                                <button
-                                  key={mode}
-                                  type="button"
-                                  onClick={() => handleLlmExecutionModeChange(mode)}
-                                  disabled={llmExecutionSettingsSaveBusy}
-                                  className={`rounded-full border px-3 py-1.5 font-semibold transition ${
-                                    isSelected
-                                      ? "border-slate-900 bg-slate-900 text-white"
-                                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-                                  }`}
-                                >
-                                  {formatLlmExecutionModeLabel(mode)}
-                                </button>
-                              );
-                            })}
-                            <label className="ml-auto flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                              <span>Events / prompt</span>
-                              <input
-                                type="number"
-                                min={1}
-                                max={100}
-                                step={1}
-                                value={llmEventsPerPromptInput}
-                                onChange={handleLlmEventsPerPromptInputChange}
-                                disabled={llmExecutionSettingsSaveBusy}
-                                className="h-9 w-20 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400"
-                                aria-label="Stage 2 events per prompt"
-                              />
-                            </label>
-                          </div>
-                          <p
-                            className={`mt-2 leading-5 ${
-                              llmExecutionFieldError
-                                ? "text-rose-700"
-                                : "text-slate-500"
-                            }`}
-                          >
-                            {llmExecutionFieldError
-                              ? llmExecutionFieldError
-                              : llmExecutionSettingsSaveBusy
-                                ? "Saving Stage 2 settings..."
-                                : llmExecutionMode === "single_combined"
-                                  ? "Single combined uses one request for the full Stage 2 set. The events-per-prompt value is kept for Batched parallel."
-                                  : "Batched parallel is recommended. These settings apply to the next run."}
-                          </p>
-                        </div>
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
                         <EventScanRunControls
                           buttonClassName="hidden"
                           buttonLabel="Run LLM"
@@ -6224,6 +6161,73 @@ export function BullpenAutoRunScheduleCard({
                           pickerPlacement="center"
                           pickerButtonClassName={`h-10 w-10 rounded-full bg-white/75 dark:bg-slate-950/80 ${toneClasses.badge}`}
                         />
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-slate-600">
+                          <label
+                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 font-semibold transition ${
+                              llmExecutionMode === "single_combined"
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-white"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="stage-2-llm-execution-mode"
+                              value="single_combined"
+                              checked={llmExecutionMode === "single_combined"}
+                              onChange={() =>
+                                handleLlmExecutionModeChange("single_combined")
+                              }
+                              disabled={llmExecutionSettingsSaveBusy}
+                              className="h-3.5 w-3.5 accent-slate-950"
+                            />
+                            <span>Single combined</span>
+                          </label>
+                          <label
+                            className={`inline-flex min-w-0 flex-wrap items-center gap-2 rounded-full border px-3 py-1.5 font-semibold transition ${
+                              llmExecutionMode === "chunked_parallel"
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-white"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="stage-2-llm-execution-mode"
+                              value="chunked_parallel"
+                              checked={llmExecutionMode === "chunked_parallel"}
+                              onChange={() =>
+                                handleLlmExecutionModeChange("chunked_parallel")
+                              }
+                              disabled={llmExecutionSettingsSaveBusy}
+                              className="h-3.5 w-3.5 accent-slate-950"
+                            />
+                            <span>Batched parallel (</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={100}
+                              step={1}
+                              value={llmEventsPerPromptInput}
+                              onChange={handleLlmEventsPerPromptInputChange}
+                              disabled={llmExecutionSettingsSaveBusy}
+                              className={`h-7 w-14 rounded-lg border px-2 text-center text-sm font-bold outline-none transition focus:border-slate-400 ${
+                                llmExecutionMode === "chunked_parallel"
+                                  ? "border-white/40 bg-white/15 text-white"
+                                  : "border-slate-200 bg-white text-slate-900"
+                              }`}
+                              aria-label="Stage 2 events per prompt"
+                            />
+                            <span>Events/prompt)</span>
+                          </label>
+                          {llmExecutionFieldError ? (
+                            <p className="basis-full text-[11px] font-semibold text-rose-700">
+                              {llmExecutionFieldError}
+                            </p>
+                          ) : llmExecutionSettingsSaveBusy ? (
+                            <p className="basis-full text-[11px] font-semibold text-slate-500">
+                              Saving Stage 2 settings...
+                            </p>
+                          ) : null}
+                        </div>
                       </div>
                     ) : (
                       <span />
