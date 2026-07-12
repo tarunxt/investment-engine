@@ -109,6 +109,8 @@ test("Bullpen auto-claim retries unchanged claimable positions after cooldown an
   assert.deepEqual(calls[0].args, [
     "polymarket",
     "redeem",
+    "--condition-ids",
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
     "--yes",
     "--non-interactive",
     "--output",
@@ -161,4 +163,58 @@ test("Bullpen auto-claim retries unchanged claimable positions after cooldown an
   assert.equal(fourth.attempted, true);
   assert.equal(fourth.submitted, true);
   assert.equal(calls.length, 3);
+});
+
+test("Bullpen auto-claim skips claimable rows that do not have verified condition ids", async (t) => {
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "bullpen-health-auto-claim-missing-condition-"),
+  );
+  const previousStateDir = process.env.BULLPEN_HEALTH_STATE_DIR;
+  const previousAutoClaim = process.env.BULLPEN_AUTO_CLAIM_RESOLVED;
+
+  process.env.BULLPEN_HEALTH_STATE_DIR = tempDir;
+  process.env.BULLPEN_AUTO_CLAIM_RESOLVED = "true";
+
+  t.after(async () => {
+    if (previousStateDir === undefined) {
+      delete process.env.BULLPEN_HEALTH_STATE_DIR;
+    } else {
+      process.env.BULLPEN_HEALTH_STATE_DIR = previousStateDir;
+    }
+    if (previousAutoClaim === undefined) {
+      delete process.env.BULLPEN_AUTO_CLAIM_RESOLVED;
+    } else {
+      process.env.BULLPEN_AUTO_CLAIM_RESOLVED = previousAutoClaim;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  const calls = [];
+  const snapshot = {
+    ...buildClaimableSnapshot(),
+    positions: [
+      {
+        ...buildClaimableSnapshot().positions[0],
+        conditionId: null,
+      },
+    ],
+  };
+
+  const result = await autoClaimBullpenResolvedPositions(snapshot, {
+    commandCandidates: ["/usr/local/bin/bullpen"],
+    execFileImpl: async (...args) => {
+      calls.push(args);
+      return {
+        stdout: "{}",
+        stderr: "",
+        exitCode: 0,
+        signal: null,
+      };
+    },
+    now: () => "2026-07-01T00:00:00.000Z",
+  });
+
+  assert.equal(result.attempted, false);
+  assert.equal(result.skippedReason, "no-claimable-positions");
+  assert.equal(calls.length, 0);
 });

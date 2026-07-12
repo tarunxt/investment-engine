@@ -602,14 +602,6 @@ class BullpenLiveExecutor:
         )
         return redact_secrets(stdout)
 
-    async def _redeem_before_buy_retry(self) -> None:
-        try:
-            await self.redeem(dry_run=False)
-        except BullpenCommandError as exc:
-            if is_redeem_metadata_lookup_warning(str(exc)):
-                return
-            raise
-
     async def buy_limit(
         self,
         *,

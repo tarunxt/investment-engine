@@ -62,7 +62,9 @@ export function isSubmittedOrSuccessfulInvestOrderPlan(
   orderPlan: BullpenAutoLiveOrderPlan | null | undefined,
 ) {
   if (!orderPlan) return false;
-  if (orderPlan.status === "submitted") return true;
+  if (orderPlan.status === "submitted" || orderPlan.status === "confirmed") {
+    return true;
+  }
 
   const successText = `${orderPlan.detail ?? ""}
 ${orderPlan.execution_response ?? ""}`;

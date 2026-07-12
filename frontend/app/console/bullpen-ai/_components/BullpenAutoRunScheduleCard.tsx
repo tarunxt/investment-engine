@@ -1031,7 +1031,7 @@ function isSubmittedOrSuccessfulOrderPlan(
 ) {
   if (!orderPlan) return false;
   const status = orderPlan.status?.trim().toLowerCase();
-  if (status === "submitted") return true;
+  if (status === "submitted" || status === "confirmed") return true;
 
   const detail = orderPlan.detail?.trim() ?? "";
   const response = orderPlan.execution_response?.trim() ?? "";

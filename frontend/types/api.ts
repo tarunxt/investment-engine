@@ -1636,6 +1636,13 @@ export type BullpenAutoLiveRuntimeMode =
 export type BullpenAutoLiveOrderPlanStatus =
   | "planned"
   | "submitted"
+  | "settlement_pending"
+  | "confirmed"
+  | "waiting_for_collateral"
+  | "deferred"
+  | "rpc_rate_limited"
+  | "already_redeemed"
+  | "resolved_zero_payout"
   | "skipped"
   | "cancelled"
   | "failed";

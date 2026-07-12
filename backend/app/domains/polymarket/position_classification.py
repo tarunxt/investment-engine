@@ -159,16 +159,20 @@ def classify_bullpen_position(
 ) -> BullpenPositionClassification:
     current_time = (now or datetime.now(UTC)).astimezone(UTC)
     parsed_shares = shares if shares is not None else (_read_number(row.get("shares")) or 0.0)
+    raw_current_price = row.get("current_price")
+    if raw_current_price is None:
+        raw_current_price = row.get("currentPrice")
     parsed_current_price = (
         current_price
         if current_price is not None
-        else _read_number(row.get("current_price") or row.get("currentPrice"))
+        else _read_number(raw_current_price)
     )
     parsed_current_value = current_value
     if parsed_current_value is None:
-        parsed_current_value = _read_number(
-            row.get("current_value") or row.get("currentValue")
-        )
+        raw_current_value = row.get("current_value")
+        if raw_current_value is None:
+            raw_current_value = row.get("currentValue")
+        parsed_current_value = _read_number(raw_current_value)
         if parsed_current_value is None and parsed_current_price is not None:
             normalized_price = (
                 parsed_current_price / 100
@@ -326,4 +330,3 @@ def is_displayable_bullpen_position(
         "settlement_pending",
         "stale_or_unknown",
     }
-
