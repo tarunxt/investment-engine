@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useEffectEvent,
   useState,
@@ -16,6 +17,8 @@ import {
   History,
   Info,
   Bot,
+  RefreshCw,
+  Wallet,
   Loader2,
   LogIn,
   LogOut,
@@ -45,6 +48,7 @@ import type {
   BullpenAutoLiveSummaryResponse,
   BullpenLlmExecutionMode,
   ProviderModelTarget,
+  PolymarketBotState,
 } from "@/types/api";
 
 import {
@@ -102,6 +106,7 @@ type ActionState =
   | "pause-run"
   | "resume-run"
   | "kill-run"
+  | "balance"
   | null;
 type ErrorState = {
   message: string;
@@ -1771,6 +1776,13 @@ function InvestExecutionStepsSummary({
               <div className={`mt-3 grid gap-2 text-xs ${toneClasses.muted}`}>
                 <div className="flex flex-wrap gap-2">
                   {renderMetricCard({
+                    label: "Redeem",
+                    value: step.redeemPlannedOrders,
+                    kind: getSellInvestMetricDialogKind("redeem"),
+                    toneClasses,
+                    onOpenInfo: onOpenEventExitInfo,
+                  })}
+                  {renderMetricCard({
                     label: "Event out of Top 10",
                     value: step.rankingLlmPlannedOrders,
                     kind: getSellInvestMetricDialogKind("ranking-llm"),
@@ -1781,13 +1793,6 @@ function InvestExecutionStepsSummary({
                     label: "Forced Exit",
                     value: step.forcedExitPlannedOrders,
                     kind: getSellInvestMetricDialogKind("forced-exit"),
-                    toneClasses,
-                    onOpenInfo: onOpenEventExitInfo,
-                  })}
-                  {renderMetricCard({
-                    label: "Redeem",
-                    value: step.redeemPlannedOrders,
-                    kind: getSellInvestMetricDialogKind("redeem"),
                     toneClasses,
                     onOpenInfo: onOpenEventExitInfo,
                   })}
@@ -2339,28 +2344,28 @@ function StageTwoExecutionShortlist({
             {step.key === "sell" ? (
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-emerald-900/80 dark:text-emerald-100/75">
                 {renderPlannedExitMetricCard({
-                  label: "Event out of Top 10",
+                  label: "Redeem",
                   value: getInvestMetricRows(
-                    getSellInvestMetricDialogKind("ranking-llm-planned"),
+                    getSellInvestMetricDialogKind("redeem"),
                     decisions,
                   ).length,
-                  kind: getSellInvestMetricDialogKind("ranking-llm-planned"),
+                  kind: getSellInvestMetricDialogKind("redeem"),
+                })}
+                {renderPlannedExitMetricCard({
+                  label: "Event out of Top 10",
+                  value: getInvestMetricRows(
+                    getSellInvestMetricDialogKind("ranking-llm"),
+                    decisions,
+                  ).length,
+                  kind: getSellInvestMetricDialogKind("ranking-llm"),
                 })}
                 {renderPlannedExitMetricCard({
                   label: "Forced Exit",
                   value: getInvestMetricRows(
-                    getSellInvestMetricDialogKind("forced-exit-planned"),
+                    getSellInvestMetricDialogKind("forced-exit"),
                     decisions,
                   ).length,
-                  kind: getSellInvestMetricDialogKind("forced-exit-planned"),
-                })}
-                {renderPlannedExitMetricCard({
-                  label: "Redeem",
-                  value: getInvestMetricRows(
-                    getSellInvestMetricDialogKind("redeem-planned"),
-                    decisions,
-                  ).length,
-                  kind: getSellInvestMetricDialogKind("redeem-planned"),
+                  kind: getSellInvestMetricDialogKind("forced-exit"),
                 })}
               </div>
             ) : null}
@@ -4279,6 +4284,85 @@ function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "slate") {
   };
 }
 
+
+function isUsableBullpenBalance(balance: PolymarketBotState["live"]["balance"] | null | undefined) {
+  return balance?.status === "ready";
+}
+
+function BullpenPortfolioSnapshot({
+  state,
+  activePositions,
+  loading,
+  refreshing,
+  onRefresh,
+}: {
+  state: PolymarketBotState | null;
+  activePositions: BullpenActivePositionView[];
+  loading: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  const balance = state?.live.balance ?? null;
+  const usableBalance = isUsableBullpenBalance(balance);
+  const accountValue = usableBalance ? (balance.account_value_usd ?? null) : null;
+  const cash = usableBalance ? (balance.available_balance_usd ?? null) : null;
+  const pnl = usableBalance ? (balance.pnl_usd ?? null) : null;
+  const upnl = usableBalance ? (balance.upnl_usd ?? null) : null;
+  const openPositions = state?.open_positions ?? [];
+  const activePositionCount = activePositions.length || openPositions.length;
+  const activeInvested = activePositions.reduce((total, position) => {
+    const amount = typeof position.costBasis === "number" ? position.costBasis : 0;
+    return total + amount;
+  }, 0) || openPositions.reduce((total, position) => total + (position.cost_basis || 0), 0);
+  const claimableRows = (state?.live.redeemed_trades ?? []).filter((trade) => {
+    const text = `${trade.status ?? ""} ${trade.detail ?? ""}`.toLowerCase();
+    return text.includes("claim") || text.includes("redeem") || text.includes("pending");
+  });
+  const claimableAmount = claimableRows.reduce((total, trade) => total + Math.max(0, trade.amount || 0), 0);
+  const lastRefresh = balance?.checked_at ? formatIstDateTime(balance.checked_at) : "—";
+
+  const metricCards = [
+    { label: "Total portfolio value", value: formatMoney(accountValue), detail: "Bullpen account value" },
+    { label: "Cash in hand", value: formatMoney(cash), detail: "Available pUSD balance" },
+    { label: "Events available for claim", value: claimableRows.length.toLocaleString("en-IN"), detail: formatMoney(claimableAmount) },
+    { label: "Active positions", value: activePositionCount.toLocaleString("en-IN"), detail: `${formatMoney(activeInvested)} invested` },
+    { label: "PnL", value: formatMoney(pnl), detail: "Realized PnL" },
+    { label: "uPnL", value: formatMoney(upnl), detail: "Unrealized PnL" },
+    { label: "Live trades today", value: (state?.live.live_trades_today ?? 0).toLocaleString("en-IN"), detail: `Mode: ${state?.mode ?? "—"}` },
+    { label: "Pending confirmations", value: (state?.live.pending_confirmations.length ?? 0).toLocaleString("en-IN"), detail: state?.live.balance.status ?? "not loaded" },
+  ];
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 p-5 text-white shadow-xl shadow-slate-950/10">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">
+            <Wallet className="size-3.5" /> Bullpen Portfolio
+          </div>
+          <h3 className="mt-3 text-2xl font-semibold tracking-tight">{formatMoney(accountValue)} total portfolio value</h3>
+          <p className="mt-1 text-sm text-slate-300">Cash {formatMoney(cash)} · Active invested {formatMoney(activeInvested)} · Claimable {formatMoney(claimableAmount)}</p>
+          <p className="mt-1 text-xs text-slate-400">{balance?.message || (loading ? "Loading Bullpen portfolio snapshot..." : "Bullpen balance has not refreshed yet.")}</p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Button type="button" size="sm" variant="outline" onClick={onRefresh} disabled={refreshing} className="rounded-full border-sky-300/50 bg-sky-300/10 text-sky-100 hover:border-sky-200 hover:bg-sky-300/20 hover:text-white disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-400">
+            <RefreshCw className={`mr-2 size-3.5 ${refreshing ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+          <span className="text-right text-[11px] text-slate-400">Last successful refresh: {lastRefresh}</span>
+        </div>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {metricCards.map((metric) => (
+          <div key={metric.label} className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+            <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">{metric.label}</div>
+            <div className="mt-2 text-xl font-semibold">{metric.value}</div>
+            <div className="mt-1 text-xs text-slate-400">{metric.detail}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function BullpenAutoRunScheduleCard({
   onRunCompleted,
   buildRunNowRequest,
@@ -4355,6 +4439,8 @@ export function BullpenAutoRunScheduleCard({
   const [selectedRunSummaryTile, setSelectedRunSummaryTile] = useState<
     "last" | "next"
   >("last");
+  const [portfolioState, setPortfolioState] = useState<PolymarketBotState | null>(null);
+  const [portfolioLoading, setPortfolioLoading] = useState(true);
 
   const savedConsoleOrderUsd =
     summary?.settings.console_order_usd ?? DEFAULT_CONSOLE_ORDER_USD;
@@ -4580,6 +4666,40 @@ export function BullpenAutoRunScheduleCard({
     // loadSummary intentionally reads the latest pending run id at execution time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+
+  const refreshPortfolioSnapshot = useCallback(async (forceBalanceRefresh: boolean) => {
+    if (forceBalanceRefresh) {
+      setAction("balance");
+    }
+    setPortfolioLoading(true);
+    try {
+      const nextState = forceBalanceRefresh
+        ? await apiService.polymarketLiveBalanceRefresh()
+        : await apiService.polymarketState();
+      setPortfolioState(nextState);
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+    } finally {
+      setPortfolioLoading(false);
+      if (forceBalanceRefresh) {
+        setAction(null);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialTimeoutId = window.setTimeout(() => {
+      void refreshPortfolioSnapshot(false);
+    }, 0);
+    const intervalId = window.setInterval(() => {
+      void refreshPortfolioSnapshot(false);
+    }, 30_000);
+    return () => {
+      window.clearTimeout(initialTimeoutId);
+      window.clearInterval(intervalId);
+    };
+  }, [refreshPortfolioSnapshot]);
 
   const trackedRunId =
     pendingRunId ??
@@ -5163,6 +5283,13 @@ export function BullpenAutoRunScheduleCard({
   return (
     <Card className="border-fuchsia-200 bg-[linear-gradient(135deg,rgba(253,242,248,0.98),rgba(239,246,255,0.98))] shadow-sm dark:border-fuchsia-500/30 dark:bg-[linear-gradient(135deg,rgba(91,33,182,0.24),rgba(15,23,42,0.94),rgba(14,165,233,0.16))]">
       <CardContent className="space-y-4 p-5">
+        <BullpenPortfolioSnapshot
+          state={portfolioState}
+          activePositions={activePositions}
+          loading={portfolioLoading}
+          refreshing={action === "balance"}
+          onRefresh={() => void refreshPortfolioSnapshot(true)}
+        />
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -6320,8 +6447,7 @@ export function BullpenAutoRunScheduleCard({
                     submission.
                   </li>
                   <li>
-                    In invest-only reuse mode, Stage 3 uses the latest qualified
-                    rows and skips the Bullpen rescan plus LLM rerun; markets
+                    In invest-only reuse mode, Stage 3 uses the latest Stage 2-qualified rows and skips the Bullpen rescan plus LLM rerun; markets
                     that are already in the Bullpen wallet or were already
                     submitted from the saved run are skipped instead of being
                     re-planned.
