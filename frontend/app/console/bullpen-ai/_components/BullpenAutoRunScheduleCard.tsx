@@ -132,6 +132,13 @@ type StageTwoLlmRunDialogState = {
   decisions: BullpenAutoLiveDecision[];
 };
 
+type StageTwoDecisionDialogState = {
+  decision: BullpenAutoLiveDecision;
+  llmContext: Record<string, unknown> | null;
+};
+
+type StageTwoDecisionDialogMode = "tag" | "llm-inputs";
+
 type StageTwoLlmRunBreakupKind =
   | "active-positions"
   | "new-opportunities"
@@ -3143,6 +3150,10 @@ function StageTwoLlmRunDetailsDialog({
 }) {
   const [breakupKind, setBreakupKind] =
     useState<StageTwoLlmRunBreakupKind | null>(null);
+  const [decisionDialog, setDecisionDialog] = useState<{
+    mode: StageTwoDecisionDialogMode;
+    state: StageTwoDecisionDialogState;
+  } | null>(null);
   const stats = getStageTwoStats(state.stage, state.decisions);
   const overlapCount = Math.max(
     0,
@@ -3219,18 +3230,38 @@ function StageTwoLlmRunDetailsDialog({
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               Indepth details ({state.decisions.length} decisions currently returned)
             </p>
-            {state.decisions.length ? state.decisions.map((decision) => (
+            {state.decisions.length ? state.decisions.map((decision) => {
+              const llmContext = getStageTwoDecisionLlmContext(state, decision);
+              const dialogState = { decision, llmContext };
+              return (
               <article key={decision.id} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <h3 className="font-semibold text-slate-950">{decision.market_title}</h3>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                    {decision.decision} · {decision.risk_status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDecisionDialog({ mode: "llm-inputs", state: dialogState })}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                      aria-label={`Open LLM prompt and inputs for ${decision.market_title}`}
+                      title="Show LLM prompt and input packet"
+                    >
+                      <Bot className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDecisionDialog({ mode: "tag", state: dialogState })}
+                      className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
+                      aria-label={`Explain ${decision.decision} ${decision.risk_status} tag for ${decision.market_title}`}
+                    >
+                      {decision.decision} · {decision.risk_status}
+                    </button>
+                  </div>
                 </div>
                 <p className="mt-2 leading-6"><span className="font-semibold">Summary:</span> {decision.summary || decision.reason}</p>
                 <p className="mt-2 leading-6"><span className="font-semibold">Indepth details:</span> {decision.rationale || decision.reason}</p>
               </article>
-            )) : (
+              );
+            }) : (
               <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                 Decision rows are still loading or have not been returned yet for this run.
               </p>
@@ -3238,6 +3269,13 @@ function StageTwoLlmRunDetailsDialog({
           </div>
         </div>
       </div>
+      {decisionDialog ? (
+        <StageTwoDecisionDetailDialog
+          mode={decisionDialog.mode}
+          state={decisionDialog.state}
+          onClose={() => setDecisionDialog(null)}
+        />
+      ) : null}
       {breakupKind ? (
         <StageTwoLlmRunBreakupDialog
           kind={breakupKind}
@@ -3247,6 +3285,103 @@ function StageTwoLlmRunDetailsDialog({
           onClose={() => setBreakupKind(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function getStageTwoDecisionLlmContext(
+  state: StageTwoLlmRunDialogState,
+  decision: BullpenAutoLiveDecision,
+) {
+  const rows = Array.isArray(state.stage.outputs.llm_reviewed_candidates)
+    ? state.stage.outputs.llm_reviewed_candidates
+    : [];
+  const decisionKeys = [decision.market_id, decision.slug ?? null, decision.market_url ?? null, decision.market_title]
+    .map(getStageTwoBreakupMatchKey)
+    .filter((key): key is string => Boolean(key));
+  return (
+    rows.find((row): row is Record<string, unknown> => {
+      if (!row || typeof row !== "object") return false;
+      const candidate = row as Record<string, unknown>;
+      const rowKeys = [candidate.market_id, candidate.slug, candidate.market_url, candidate.question]
+        .map((value) => getStageTwoBreakupMatchKey(typeof value === "string" ? value : null))
+        .filter((key): key is string => Boolean(key));
+      return rowKeys.some((key) => decisionKeys.includes(key));
+    }) ?? null
+  );
+}
+
+function formatJsonForDisplay(value: unknown) {
+  if (value === undefined || value === null || value === "") return "Not returned for this run.";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function StageTwoDecisionDetailDialog({
+  mode,
+  state,
+  onClose,
+}: {
+  mode: StageTwoDecisionDialogMode;
+  state: StageTwoDecisionDialogState;
+  onClose: () => void;
+}) {
+  const { decision, llmContext } = state;
+  const prompt = llmContext?.llm_prompt;
+  const promptInputs = llmContext?.llm_prompt_inputs;
+  const evidencePacket = llmContext?.evidence_packet;
+  const title = mode === "tag" ? "Decision tag details" : "LLM prompt + input packet";
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{title}</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">{decision.market_title}</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              {decision.decision} · {decision.risk_status} · {decision.side} side · Current YES/NO {formatPriceCents(decision.current_yes_odds ?? null)} / {formatPriceCents(decision.current_no_odds ?? null)}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close decision details"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
+          {mode === "tag" ? (
+            <div className="space-y-4">
+              <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="font-semibold text-slate-950">What this tag means</p>
+                <p className="mt-2 leading-6">Action <b>{decision.decision}</b> with risk status <b>{decision.risk_status}</b> means the Stage 2 LLM/rules pipeline classified this event as {decision.decision === "EXIT" ? "an event exit candidate that should move to the exit flow" : decision.decision === "SKIP" ? "not currently actionable for investment" : "an actionable portfolio decision"}.</p>
+              </section>
+              <section className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="font-semibold text-slate-950">Why this event was tagged this way</p>
+                <p className="mt-2 leading-6"><span className="font-semibold">Summary:</span> {decision.summary || decision.reason}</p>
+                <p className="mt-2 leading-6"><span className="font-semibold">Rationale:</span> {decision.rationale || decision.reason}</p>
+                {decision.exit_signals.length ? <ul className="mt-3 list-disc space-y-1 pl-5">{decision.exit_signals.map((signal, index) => <li key={`${signal.reasonCode}-${index}`}><b>{signal.label}:</b> {signal.description}</li>)}</ul> : null}
+              </section>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
+                <p className="font-semibold text-violet-950">Prompt sent to the LLM</p>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
+              </section>
+              <section className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="font-semibold text-slate-950">Organised prompt inputs</p>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(promptInputs)}</pre>
+              </section>
+              <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                <p className="font-semibold text-amber-950">Evidence packet</p>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(evidencePacket)}</pre>
+              </section>
+              {!llmContext ? <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-600">This run did not return a matching Stage 2 LLM review context for this decision.</p> : null}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
