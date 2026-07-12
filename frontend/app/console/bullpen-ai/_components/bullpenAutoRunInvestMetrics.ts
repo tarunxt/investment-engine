@@ -18,7 +18,10 @@ export type InvestMetricDialogKind =
   | "sell-exit-rows"
   | "sell-ranking-llm"
   | "sell-forced-exit"
-  | "sell-redeem";
+  | "sell-redeem"
+  | "sell-ranking-llm-planned"
+  | "sell-forced-exit-planned"
+  | "sell-redeem-planned";
 
 type InvestMetricDialogDefinition = {
   title: string;
@@ -73,6 +76,10 @@ function isSubmittedOrSuccessfulDecision(decision: BullpenAutoLiveDecision) {
   return isSubmittedOrSuccessfulInvestOrderPlan(decision.order_plan);
 }
 
+function isPlannedDecision(decision: BullpenAutoLiveDecision) {
+  return decision.order_plan?.status === "planned";
+}
+
 export function deriveInvestExecutionStepStatus({
   status,
   plannedOrders,
@@ -101,11 +108,21 @@ export function getInvestStepMetricDialogKind(
 }
 
 export function getSellInvestMetricDialogKind(
-  metric: "event-exit-rows" | "ranking-llm" | "forced-exit" | "redeem",
+  metric:
+    | "event-exit-rows"
+    | "ranking-llm"
+    | "forced-exit"
+    | "redeem"
+    | "ranking-llm-planned"
+    | "forced-exit-planned"
+    | "redeem-planned",
 ): InvestMetricDialogKind {
   if (metric === "event-exit-rows") return "sell-exit-rows";
   if (metric === "ranking-llm") return "sell-ranking-llm";
+  if (metric === "ranking-llm-planned") return "sell-ranking-llm-planned";
   if (metric === "redeem") return "sell-redeem";
+  if (metric === "redeem-planned") return "sell-redeem-planned";
+  if (metric === "forced-exit-planned") return "sell-forced-exit-planned";
   return "sell-forced-exit";
 }
 
@@ -191,12 +208,30 @@ export function getInvestMetricDialogDefinition(
           "Event Exit rows triggered by the Event out of Top 10 exit logic.",
         includes: (decision) => hasExitStrategy(decision, RANKING_LLM_EXIT_STRATEGIES),
       };
+    case "sell-ranking-llm-planned":
+      return {
+        title: "Stage 3 Step 1 planned Event out of Top 10 exits",
+        description:
+          "Event Exit rows triggered by the Event out of Top 10 exit logic that still have a planned order status.",
+        includes: (decision) =>
+          isPlannedDecision(decision) &&
+          hasExitStrategy(decision, RANKING_LLM_EXIT_STRATEGIES),
+      };
     case "sell-forced-exit":
       return {
         title: "Stage 3 Step 1 forced exits",
         description:
           "Event Exit rows triggered by the capital-aware forced-exit guardrail.",
         includes: (decision) => hasExitStrategy(decision, FORCED_EXIT_STRATEGIES),
+      };
+    case "sell-forced-exit-planned":
+      return {
+        title: "Stage 3 Step 1 planned forced exits",
+        description:
+          "Event Exit rows triggered by the capital-aware forced-exit guardrail that still have a planned order status.",
+        includes: (decision) =>
+          isPlannedDecision(decision) &&
+          hasExitStrategy(decision, FORCED_EXIT_STRATEGIES),
       };
     case "sell-redeem":
       return {
@@ -206,6 +241,16 @@ export function getInvestMetricDialogDefinition(
         includes: (decision) =>
           decision.order_plan?.action === "redeem" ||
           hasExitStrategy(decision, REDEEM_EXIT_STRATEGIES),
+      };
+    case "sell-redeem-planned":
+      return {
+        title: "Stage 3 Step 1 planned redeem/claim",
+        description:
+          "Resolved winning Bullpen positions with redeem/claim order plans that still have a planned order status.",
+        includes: (decision) =>
+          isPlannedDecision(decision) &&
+          (decision.order_plan?.action === "redeem" ||
+            hasExitStrategy(decision, REDEEM_EXIT_STRATEGIES)),
       };
     case "decisions":
     default:
