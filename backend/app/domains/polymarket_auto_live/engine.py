@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -68,6 +70,7 @@ from app.domains.polymarket_auto_live.llm import (
     EVIDENCE_RANK,
     LlmConsensus,
     CONFIDENCE_RANK,
+    build_market_prompt,
     run_llm_consensus,
 )
 from app.domains.polymarket_auto_live.normalization import (
@@ -1083,6 +1086,7 @@ def _serialize_llm_review_context(
     llm_consensus = context["llm_consensus"]
     rules = context.get("rules")
     llm_outputs = context.get("llm_outputs") or []
+    evidence_packet = context.get("evidence_packet")
 
     if not isinstance(market, ScannedMarket):
         raise TypeError("Expected ScannedMarket in LLM review context.")
@@ -1138,6 +1142,15 @@ def _serialize_llm_review_context(
         ],
         "source_kind": context.get("source_kind") or "candidate",
     }
+    if evidence_packet is not None:
+        payload["evidence_packet"] = asdict(evidence_packet)
+        if rules is not None:
+            payload["llm_prompt"] = build_market_prompt(market, rules, evidence_packet)
+        payload["llm_prompt_inputs"] = {
+            "market": asdict(market),
+            "rules": asdict(rules) if rules is not None else None,
+            "evidence_packet": asdict(evidence_packet),
+        }
     if context.get("position_key") is not None:
         payload["position_key"] = context["position_key"]
     if context.get("position_side") is not None:
@@ -3843,6 +3856,7 @@ class BullpenAutoLiveEngine:
                             "market": market,
                             "returns_per_day": returns_per_day,
                             "rules": rules,
+                            "evidence_packet": evidence_packet,
                             "llm_outputs": llm_outputs,
                             "llm_consensus": llm_consensus,
                             "stage_results": stage_results,
@@ -3992,6 +4006,7 @@ class BullpenAutoLiveEngine:
                         "market": market,
                         "returns_per_day": returns_per_day,
                         "rules": rules,
+                        "evidence_packet": evidence_packet,
                         "llm_outputs": llm_outputs,
                         "llm_consensus": llm_consensus,
                         "stage_results": stage_results,
