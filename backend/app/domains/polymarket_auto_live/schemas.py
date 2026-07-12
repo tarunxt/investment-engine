@@ -62,6 +62,11 @@ TradingBotMode = Literal["paper", "live-read", "live-trading", "dry-run", "analy
 TradingBotGuardrailTone = Literal["neutral", "positive", "warning", "critical"]
 
 
+class BullpenAutoLiveLlmTarget(BaseModel):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+
+
 class BullpenAutoLiveSettingsBase(BaseModel):
     strategy_profile: AutoLiveStrategyProfile = "guardrail_kelly"
     bankroll_usd: float = Field(default=100, gt=0)
@@ -119,6 +124,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     new_scan_interval_minutes: int = Field(default=60, ge=1)
     llm_rerun_interval_minutes: int = Field(default=240, ge=1)
     max_llm_candidates_per_run: int = Field(default=100, ge=1, le=100)
+    console_llm_targets: list[BullpenAutoLiveLlmTarget] = Field(default_factory=list)
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 
@@ -225,6 +231,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     new_scan_interval_minutes: int | None = Field(default=None, ge=1)
     llm_rerun_interval_minutes: int | None = Field(default=None, ge=1)
     max_llm_candidates_per_run: int | None = Field(default=None, ge=1, le=100)
+    console_llm_targets: list[BullpenAutoLiveLlmTarget] | None = None
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 

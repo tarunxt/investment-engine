@@ -13,7 +13,10 @@ from app.domains.polymarket_auto_live.normalization import (
 )
 from app.domains.polymarket_auto_live.rules import RuleEvaluation
 from app.domains.polymarket_auto_live.scanner import ScannedMarket
-from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveLlmOutput
+from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveLlmOutput,
+    BullpenAutoLiveSettings,
+)
 
 PREFERRED_PROVIDERS = ("openai", "gemini", "anthropic", "deepseek")
 CONFIDENCE_RANK = {"Low": 0, "Medium": 1, "High": 2}
@@ -486,7 +489,21 @@ def _count_outlier_models(
     )
 
 
-def resolve_auto_live_llm_targets() -> list[tuple[str, str]]:
+def resolve_auto_live_llm_targets(
+    settings: BullpenAutoLiveSettings | None = None,
+) -> list[tuple[str, str]]:
+    if settings and settings.console_llm_targets:
+        deduped_targets: list[tuple[str, str]] = []
+        seen_targets: set[tuple[str, str]] = set()
+        for target in settings.console_llm_targets:
+            key = (target.provider.strip(), target.model.strip())
+            if not key[0] or not key[1] or key in seen_targets:
+                continue
+            seen_targets.add(key)
+            deduped_targets.append(key)
+        if deduped_targets:
+            return deduped_targets
+
     targets: list[tuple[str, str]] = []
     for provider_name in PREFERRED_PROVIDERS:
         resolved = ProviderFactory.resolve_default_target(provider_name, "")
@@ -567,8 +584,9 @@ def run_llm_consensus(
     market: ScannedMarket,
     rules: RuleEvaluation,
     evidence_packet: EvidencePacket,
+    settings: BullpenAutoLiveSettings | None = None,
 ) -> tuple[list[BullpenAutoLiveLlmOutput], LlmConsensus]:
-    targets = resolve_auto_live_llm_targets()
+    targets = resolve_auto_live_llm_targets(settings)
     outputs: list[BullpenAutoLiveLlmOutput] = []
     prompt = build_market_prompt(market, rules, evidence_packet)
 

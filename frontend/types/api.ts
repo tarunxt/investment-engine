@@ -1680,6 +1680,7 @@ export interface BullpenAutoLiveSettings {
   new_scan_interval_minutes: number;
   llm_rerun_interval_minutes: number;
   max_llm_candidates_per_run: number;
+  console_llm_targets: ProviderModelTarget[];
   console_auto_start_at?: string | null;
   console_auto_refresh_minutes?: number | null;
   auto_live_enabled: boolean;

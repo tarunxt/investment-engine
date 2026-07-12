@@ -51,6 +51,7 @@ interface EventScanRunControlsBaseProps {
 type EventScanRunControlsSingleProps = EventScanRunControlsBaseProps & {
   selectionMode?: "single";
   onRun: (target: ProviderModelTarget | null) => void | Promise<void>;
+  onSelectionChange?: (targets: ProviderModelTarget[]) => void;
   onRunMultiple?: never;
   defaultTargets?: never;
 };
@@ -58,6 +59,7 @@ type EventScanRunControlsSingleProps = EventScanRunControlsBaseProps & {
 type EventScanRunControlsMultipleProps = EventScanRunControlsBaseProps & {
   selectionMode: "multiple";
   onRunMultiple: (targets: ProviderModelTarget[]) => void | Promise<void>;
+  onSelectionChange?: (targets: ProviderModelTarget[]) => void;
   onRun?: never;
   defaultTargets?: ProviderModelTarget[] | null;
 };
@@ -305,6 +307,7 @@ export function EventScanRunControls({
   pickerPlacement = "anchored",
   running,
   selectionMode = "single",
+  onSelectionChange,
   ...runProps
 }: EventScanRunControlsProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -322,6 +325,7 @@ export function EventScanRunControls({
     readSavedModelMixes(),
   );
   const [selectedMixId, setSelectedMixId] = useState("");
+  const lastSelectionChangeRef = useRef("");
 
   const persistSavedMixes = useCallback((mixes: SavedModelMix[]) => {
     setSavedMixes(mixes);
@@ -481,6 +485,14 @@ export function EventScanRunControls({
     getSelectionConstraint,
   );
   const activeSingleTarget = activeTargets[0] ?? activeTarget;
+
+  useEffect(() => {
+    if (!onSelectionChange) return;
+    const serialized = JSON.stringify(activeTargets);
+    if (serialized === lastSelectionChangeRef.current) return;
+    lastSelectionChangeRef.current = serialized;
+    onSelectionChange(activeTargets);
+  }, [activeTargets, onSelectionChange]);
 
   const getEstimatedCostInr = useCallback(
     (providerName: string, model: string) =>

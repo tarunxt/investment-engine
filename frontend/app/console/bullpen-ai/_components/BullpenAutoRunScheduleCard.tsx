@@ -43,6 +43,7 @@ import type {
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
   BullpenAutoLiveSummaryResponse,
+  ProviderModelTarget,
 } from "@/types/api";
 
 import {
@@ -3704,12 +3705,14 @@ function buildConsoleSettingsUpdate(
   consoleOrderUsd: number,
   startAt?: string | null,
   refreshMinutes?: number | null,
+  consoleLlmTargets?: ProviderModelTarget[] | null,
 ) {
   return {
     strategy_profile: "bullpen_console_top10" as const,
     console_order_usd: consoleOrderUsd,
     console_auto_start_at: startAt ?? null,
     console_auto_refresh_minutes: refreshMinutes ?? null,
+    ...(consoleLlmTargets ? { console_llm_targets: consoleLlmTargets } : {}),
     auto_live_enabled: true,
     dry_run: false,
     allow_live_execution: true,
@@ -3898,6 +3901,9 @@ export function BullpenAutoRunScheduleCard({
   const [scheduleSavedSummary, setScheduleSavedSummary] = useState<
     string | null
   >(null);
+  const [selectedLlmTargets, setSelectedLlmTargets] = useState<ProviderModelTarget[]>(
+    [],
+  );
 
   const savedConsoleOrderUsd =
     summary?.settings.console_order_usd ?? DEFAULT_CONSOLE_ORDER_USD;
@@ -4121,6 +4127,7 @@ export function BullpenAutoRunScheduleCard({
           savedConsoleOrderUsd,
           normalizedStart || null,
           refreshMinutes,
+          selectedLlmTargets,
         ),
       );
       setScheduleSettingsDirty(false);
@@ -4171,6 +4178,7 @@ export function BullpenAutoRunScheduleCard({
           nextConsoleOrderUsd,
           normalizedStart || null,
           refreshMinutes,
+          selectedLlmTargets,
         ),
       );
       setConsoleOrderDirty(false);
@@ -4268,6 +4276,7 @@ export function BullpenAutoRunScheduleCard({
           nextConsoleOrderUsd,
           scheduleStartInput.trim() || null,
           refreshMinutes,
+          selectedLlmTargets,
         ),
       );
       setConsoleOrderDirty(false);
@@ -4313,6 +4322,7 @@ export function BullpenAutoRunScheduleCard({
           nextConsoleOrderUsd,
           scheduleStartInput.trim() || null,
           refreshMinutes,
+          selectedLlmTargets,
         ),
       );
       setConsoleOrderDirty(false);
@@ -5485,7 +5495,9 @@ export function BullpenAutoRunScheduleCard({
                         buttonLabel="Run LLM"
                         containerClassName="gap-0"
                         selectionMode="multiple"
+                        defaultTargets={summary?.settings.console_llm_targets ?? null}
                         onRunMultiple={() => undefined}
+                        onSelectionChange={setSelectedLlmTargets}
                         pickerDialogLabel="Select LLMs"
                         pickerIcon={<Bot className="h-5 w-5" />}
                         pickerPlacement="center"
