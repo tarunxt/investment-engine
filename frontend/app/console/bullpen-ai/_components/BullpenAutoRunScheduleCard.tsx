@@ -3806,7 +3806,19 @@ function getVisibleRun(
   return summary.recent_runs.find((run) => run.status === "running") ?? null;
 }
 
-function getWorkflowToneClasses(tone: "yellow" | "green" | "blue") {
+function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "slate") {
+  if (tone === "slate") {
+    return {
+      container:
+        "border-slate-200 bg-white/90 dark:border-slate-700/80 dark:bg-slate-950/65",
+      badge:
+        "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-200",
+      text: "text-slate-950 dark:text-slate-50",
+      muted: "text-slate-600 dark:text-slate-300",
+      progress: "bg-slate-300",
+      progressTrack: "bg-slate-100 dark:bg-slate-800",
+    };
+  }
   if (tone === "yellow") {
     return {
       container:
@@ -3904,6 +3916,9 @@ export function BullpenAutoRunScheduleCard({
   const [selectedLlmTargets, setSelectedLlmTargets] = useState<ProviderModelTarget[]>(
     [],
   );
+  const [selectedRunSummaryTile, setSelectedRunSummaryTile] = useState<
+    "last" | "next"
+  >("last");
 
   const savedConsoleOrderUsd =
     summary?.settings.console_order_usd ?? DEFAULT_CONSOLE_ORDER_USD;
@@ -3972,6 +3987,21 @@ export function BullpenAutoRunScheduleCard({
       return null;
     } finally {
       setConsoleOrderSaveBusy(false);
+    }
+  }
+
+
+  async function handleSelectedLlmTargetsChange(
+    nextTargets: ProviderModelTarget[],
+  ) {
+    setSelectedLlmTargets(nextTargets);
+    try {
+      await apiService.updateBullpenAutoLiveSettings({
+        console_llm_targets: nextTargets,
+      });
+      await loadSummary({ preserveLoading: true });
+    } catch (nextError) {
+      setError(normalizeError(nextError));
     }
   }
 
@@ -4428,7 +4458,7 @@ export function BullpenAutoRunScheduleCard({
       ? liveAlreadyInvestedRecords
       : investOnlyPlan.alreadyInvestedRecords;
   const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
-  const workflowView = buildBullpenAutoRunWorkflowView(
+  const liveWorkflowView = buildBullpenAutoRunWorkflowView(
     workflowRun,
     pendingRunId,
     runTimerStartedAt,
@@ -4443,7 +4473,7 @@ export function BullpenAutoRunScheduleCard({
       scanCompletedAt: stage.timerCompletedAt,
       candidates: buildScanCandidateDialogRows({
         candidates: stage.scanCandidates,
-        run: workflowRun,
+        run: workflowRunForMonitor,
         decisions: summary?.recent_decisions ?? [],
       }),
       activePositions: stage.activePositionsFound,
@@ -4451,19 +4481,26 @@ export function BullpenAutoRunScheduleCard({
       claimablePositionCount: activePositionCounts.claimable,
     });
   };
-  const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
-  const hasActiveWorkflowStage = workflowView.stages.some(
+  const liveWorkflowSettled = isBullpenAutoRunWorkflowSettled(liveWorkflowView);
+  const hasActiveWorkflowStage = liveWorkflowView.stages.some(
     (stage) => stage.isCurrent,
   );
   const runActionRequested = action === "run-now" || action === "invest-now";
   const runIsActive =
-    !workflowSettled &&
+    !liveWorkflowSettled &&
     (runActionRequested ||
       pendingRunId !== null ||
       visibleRun?.status === "running" ||
       Boolean(summary?.state.running) ||
       Boolean(summary?.state.paused) ||
       hasActiveWorkflowStage);
+  const workflowRunForMonitor =
+    selectedRunSummaryTile === "next" && !runIsActive ? null : workflowRun;
+  const workflowView =
+    selectedRunSummaryTile === "next" && !runIsActive
+      ? buildBullpenAutoRunWorkflowView(null)
+      : liveWorkflowView;
+  const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
   const showRunTimer =
     Boolean(runTimerStartedAt) && (runActionRequested || runIsActive);
   const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;
@@ -4483,9 +4520,9 @@ export function BullpenAutoRunScheduleCard({
     ? "The latest Bullpen Scan + LLM + Rebalance and Invest run finished all 3 stages."
     : workflowView.statusCopy;
   const monitorRunStatusLabel =
-    workflowRun && !workflowSettled
-      ? formatRunStatusLabel(workflowRun.status)
-      : workflowRun
+    workflowRunForMonitor && !workflowSettled
+      ? formatRunStatusLabel(workflowRunForMonitor.status)
+      : workflowRunForMonitor
         ? "Completed"
         : null;
   const investWorkflowStage =
@@ -4495,27 +4532,27 @@ export function BullpenAutoRunScheduleCard({
       ? getInvestStageImmediateSuccess(investWorkflowStage)
       : null;
   const workflowDecisionCount =
-    workflowRun !== null
+    workflowRunForMonitor !== null
       ? getInvestStageMetric(
           investWorkflowStage,
           "decisions_count",
-          workflowRun.decisions_count,
+          workflowRunForMonitor.decisions_count,
         )
       : null;
   const workflowPlannedOrderCount =
-    workflowRun !== null
+    workflowRunForMonitor !== null
       ? getInvestStageMetric(
           investWorkflowStage,
           "orders_planned",
-          workflowRun.orders_planned,
+          workflowRunForMonitor.orders_planned,
         )
       : null;
   const workflowSubmittedOrderCount =
-    workflowRun !== null
+    workflowRunForMonitor !== null
       ? getInvestStageMetric(
           investWorkflowStage,
           "orders_submitted",
-          workflowRun.orders_submitted,
+          workflowRunForMonitor.orders_submitted,
         )
       : null;
   const investOnlyActionCompleted =
@@ -4535,19 +4572,19 @@ export function BullpenAutoRunScheduleCard({
       /blocks auto-live execution/i.test(backendExecutionGuardrail.detail)),
   );
   const investRunDecisions =
-    summary && workflowRun
+    summary && workflowRunForMonitor
       ? mergeInvestStageDecisionRows({
           stage: investWorkflowStage,
           persistedDecisions: summary.recent_decisions.filter(
-            (decision) => decision.run_id === workflowRun.id,
+            (decision) => decision.run_id === workflowRunForMonitor.id,
           ),
         })
       : [];
   const openInvestMetricDialog = (kind: InvestMetricDialogKind) => {
-    if (!workflowRun) return;
+    if (!workflowRunForMonitor) return;
     setInvestMetricDialog({
       kind,
-      run: workflowRun,
+      run: workflowRunForMonitor,
       stage: investWorkflowStage,
       decisions: investRunDecisions,
     });
@@ -4969,7 +5006,16 @@ export function BullpenAutoRunScheduleCard({
         ) : null}
 
         <div className="grid gap-3 lg:grid-cols-3">
-          <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
+          <button
+            type="button"
+            onClick={() => setSelectedRunSummaryTile("next")}
+            className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-sky-300 ${
+              selectedRunSummaryTile === "next" && !runIsActive
+                ? "border-sky-200 bg-sky-50 text-sky-950 shadow-sm"
+                : "border-white/70 bg-white/80"
+            }`}
+            aria-pressed={selectedRunSummaryTile === "next" && !runIsActive}
+          >
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               <CalendarClock className="h-4 w-4" />
               Next scheduled run
@@ -4977,32 +5023,44 @@ export function BullpenAutoRunScheduleCard({
             <p className="mt-2 text-sm font-semibold text-slate-950">
               {formatIstDateTime(summary?.state.next_run_at)}
             </p>
-            <p className="mt-1 text-xs text-slate-600">
-              Fixed times: 6 AM, 12 PM, 6 PM, and 12 AM IST.
-            </p>
-          </div>
+          </button>
 
-          <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
+          <div
+            role="button"
+            tabIndex={latestCompletedRun ? 0 : -1}
+            onClick={() => {
+              setSelectedRunSummaryTile("last");
+              if (latestCompletedRun) {
+                openRunDetailDialog(latestCompletedRun);
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              setSelectedRunSummaryTile("last");
+              if (latestCompletedRun) {
+                openRunDetailDialog(latestCompletedRun);
+              }
+            }}
+            className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-emerald-300 ${
+              selectedRunSummaryTile === "last" || runIsActive
+                ? "border-emerald-200 bg-emerald-50 text-emerald-950 shadow-sm"
+                : "border-white/70 bg-white/80"
+            } ${latestCompletedRun ? "cursor-pointer" : "cursor-not-allowed"}`}
+            aria-pressed={selectedRunSummaryTile === "last" || runIsActive}
+            aria-disabled={!latestCompletedRun}
+          >
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               {runIsActive ? "Run in Progress" : "Last completed run"}
             </div>
-            <button
-              type="button"
-              onClick={() =>
-                latestCompletedRun
-                  ? openRunDetailDialog(latestCompletedRun)
-                  : undefined
-              }
-              disabled={!latestCompletedRun}
-              className="mt-2 block text-left text-sm font-semibold text-slate-950 underline-offset-4 transition hover:text-blue-700 hover:underline disabled:cursor-not-allowed disabled:no-underline"
-            >
+            <span className="mt-2 block text-left text-sm font-semibold text-slate-950 underline-offset-4 transition hover:text-blue-700 hover:underline">
               {runIsActive ? "Started " : ""}
               {formatIstDateTime(
                 runIsActive
                   ? runTimerStartedAt
                   : latestCompletedRun?.started_at ?? summary?.state.last_run_at,
               )}
-            </button>
+            </span>
             {runIsActive && workflowRunNeedsLogin ? (
               <div className="mt-2 space-y-2">
                 <p className="text-sm font-bold text-rose-700">
@@ -5017,7 +5075,8 @@ export function BullpenAutoRunScheduleCard({
                     aria-label="Copy Bullpen login command"
                     title="Copy command"
                     className="rounded-full border border-rose-200 bg-white p-1.5 text-rose-700 transition hover:bg-rose-100"
-                    onClick={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
                       void navigator.clipboard?.writeText(BULLPEN_LOGIN_COMMAND);
                     }}
                   >
@@ -5198,10 +5257,13 @@ export function BullpenAutoRunScheduleCard({
                   (step) => step.status === "completed",
                 );
               const toneClasses = getWorkflowToneClasses(
-                immediateSuccess || investPreviewFinished
-                  ? "green"
-                  : stage.tone,
+                selectedRunSummaryTile === "next" && !runIsActive
+                  ? "slate"
+                  : immediateSuccess || investPreviewFinished
+                    ? "green"
+                    : stage.tone,
               );
+              const showStageRunDetails = workflowRunForMonitor !== null;
               const stageStatusLabel = immediateSuccess
                 ? "Finished"
                 : investPreviewFinished
@@ -5288,52 +5350,54 @@ export function BullpenAutoRunScheduleCard({
                     </div>
                   </div>
 
-                  <div
-                    className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-950/70 text-[11px] leading-5 ${toneClasses.muted}`}
-                  >
-                    <div>
-                      Last stage run:{" "}
-                      <span className="font-semibold tabular-nums">
-                        {formatStageLastRunLabel(
-                          stage.timerCompletedAt ?? stage.timerStartedAt,
-                        )}
-                      </span>
+                  {showStageRunDetails ? (
+                    <div
+                      className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-950/70 text-[11px] leading-5 ${toneClasses.muted}`}
+                    >
+                      <div>
+                        Last stage run:{" "}
+                        <span className="font-semibold tabular-nums">
+                          {formatStageLastRunLabel(
+                            stage.timerCompletedAt ?? stage.timerStartedAt,
+                          )}
+                        </span>
+                      </div>
+                      <div>
+                        Time taken:{" "}
+                        <span className="font-semibold tabular-nums">
+                          {formatStageElapsedTime(
+                            stage.timerStartedAt,
+                            stage.timerCompletedAt,
+                            timerNowMs,
+                          )}
+                        </span>
+                      </div>
+                      {stage.key === "scan" ? (
+                        <StageOneRunStats
+                          stage={stage}
+                          renderInteractiveRows
+                          onOpenScanCandidateDialog={openScanCandidateDialog}
+                          onOpenScanFilters={onOpenScanFilters}
+                        />
+                      ) : null}
+                      {stage.key === "llm" ? (
+                        <StageTwoRunStats
+                          stage={stage}
+                          decisions={investRunDecisions}
+                          onOpenInvestEvents={(investDecisions) =>
+                            setStageTwoInvestEventsDialog({
+                              decisions: investDecisions,
+                            })
+                          }
+                          onOpenLlmRunDetails={setStageTwoLlmRunDialog}
+                          onOpenScanCandidateDialog={openScanCandidateDialog}
+                          scanStageForPositionSnapshot={workflowView.stages.find(
+                            (item) => item.key === "scan",
+                          )}
+                        />
+                      ) : null}
                     </div>
-                    <div>
-                      Time taken:{" "}
-                      <span className="font-semibold tabular-nums">
-                        {formatStageElapsedTime(
-                          stage.timerStartedAt,
-                          stage.timerCompletedAt,
-                          timerNowMs,
-                        )}
-                      </span>
-                    </div>
-                    {stage.key === "scan" ? (
-                      <StageOneRunStats
-                        stage={stage}
-                        renderInteractiveRows
-                        onOpenScanCandidateDialog={openScanCandidateDialog}
-                        onOpenScanFilters={onOpenScanFilters}
-                      />
-                    ) : null}
-                    {stage.key === "llm" ? (
-                      <StageTwoRunStats
-                        stage={stage}
-                        decisions={investRunDecisions}
-                        onOpenInvestEvents={(investDecisions) =>
-                          setStageTwoInvestEventsDialog({
-                            decisions: investDecisions,
-                          })
-                        }
-                        onOpenLlmRunDetails={setStageTwoLlmRunDialog}
-                        onOpenScanCandidateDialog={openScanCandidateDialog}
-                        scanStageForPositionSnapshot={workflowView.stages.find(
-                          (item) => item.key === "scan",
-                        )}
-                      />
-                    ) : null}
-                  </div>
+                  ) : null}
 
                   {stage.key === "llm" && stageTwoExecutionSteps.length > 0 ? (
                     <StageTwoExecutionShortlist
@@ -5497,7 +5561,7 @@ export function BullpenAutoRunScheduleCard({
                         selectionMode="multiple"
                         defaultTargets={summary?.settings.console_llm_targets ?? null}
                         onRunMultiple={() => undefined}
-                        onSelectionChange={setSelectedLlmTargets}
+                        onSelectionChange={handleSelectedLlmTargetsChange}
                         pickerDialogLabel="Select LLMs"
                         pickerIcon={<Bot className="h-5 w-5" />}
                         pickerPlacement="center"
