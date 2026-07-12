@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ExternalLink,
+  XCircle,
   Info,
   Loader2,
 } from "lucide-react";
@@ -65,6 +66,8 @@ type BullpenInvestmentsSectionProps = {
   progressMessage: string | null;
   recentDecisions: BullpenAutoLiveDecision[];
   resultMessage: string | null;
+  latestCompletedLlmRunId?: string | number | null;
+  currentInProgressLlmRunId?: string | number | null;
   selectedQuestionIds: Set<string>;
 };
 
@@ -255,8 +258,65 @@ function OddsPairValue({
   );
 }
 
-function LlmTimestamp({ completedAt }: { completedAt: string | null }) {
-  return <span>Last LLM: {formatIstTimestamp(completedAt)}</span>;
+type LlmFreshnessStatus = "current" | "in-progress" | "stale" | "unknown";
+
+function getLlmFreshnessStatus({
+  llmRunId,
+  latestCompletedLlmRunId,
+  currentInProgressLlmRunId,
+}: {
+  llmRunId: string | number | null | undefined;
+  latestCompletedLlmRunId?: string | number | null;
+  currentInProgressLlmRunId?: string | number | null;
+}): LlmFreshnessStatus {
+  if (llmRunId === null || llmRunId === undefined) return "unknown";
+  const normalizedLlmRunId = String(llmRunId);
+  if (
+    latestCompletedLlmRunId !== null &&
+    latestCompletedLlmRunId !== undefined &&
+    normalizedLlmRunId === String(latestCompletedLlmRunId)
+  ) {
+    return "current";
+  }
+  if (
+    currentInProgressLlmRunId !== null &&
+    currentInProgressLlmRunId !== undefined &&
+    normalizedLlmRunId === String(currentInProgressLlmRunId)
+  ) {
+    return "in-progress";
+  }
+  if (latestCompletedLlmRunId !== null && latestCompletedLlmRunId !== undefined) {
+    return "stale";
+  }
+  return "unknown";
+}
+
+function LlmFreshnessIcon({ status }: { status: LlmFreshnessStatus }) {
+  if (status === "current") {
+    return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-label="LLM odds are from the latest completed run" />;
+  }
+  if (status === "in-progress") {
+    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-500" aria-label="LLM odds are from the current run in progress" />;
+  }
+  if (status === "stale") {
+    return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-600" aria-label="LLM odds are from an older run" />;
+  }
+  return null;
+}
+
+function LlmTimestamp({
+  completedAt,
+  status,
+}: {
+  completedAt: string | null;
+  status: LlmFreshnessStatus;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>Last LLM: {formatIstTimestamp(completedAt)}</span>
+      <LlmFreshnessIcon status={status} />
+    </span>
+  );
 }
 
 function CurrentOddsMetric({
@@ -285,12 +345,21 @@ function CurrentOddsMetric({
 function LlmOddsMetric({
   question,
   onOpenBreakdown,
+  latestCompletedLlmRunId,
+  currentInProgressLlmRunId,
 }: {
   question: BullpenQuestionRow | null | undefined;
   onOpenBreakdown: (question: BullpenQuestionRow) => void;
+  latestCompletedLlmRunId?: string | number | null;
+  currentInProgressLlmRunId?: string | number | null;
 }) {
   const reviewState = question ? getBullpenLlmReviewState(question) : null;
   const hasAnalysis = hasBullpenLlmAnalysis(question);
+  const freshnessStatus = getLlmFreshnessStatus({
+    llmRunId: question?.llmRunId,
+    latestCompletedLlmRunId,
+    currentInProgressLlmRunId,
+  });
   const odds = (
     <OddsPairValue
       yesOdds={question?.llmYesOdds ?? null}
@@ -304,7 +373,7 @@ function LlmOddsMetric({
     <div className="space-y-2">
       {odds}
       <div className="border-t border-slate-200 pt-2 text-[10px] font-medium leading-4 text-slate-500">
-        <LlmTimestamp completedAt={question?.llmCompletedAt ?? null} />
+        <LlmTimestamp completedAt={question?.llmCompletedAt ?? null} status={freshnessStatus} />
       </div>
     </div>
   );
@@ -446,6 +515,8 @@ export function BullpenInvestmentsSection({
   progressMessage,
   recentDecisions,
   resultMessage,
+  latestCompletedLlmRunId,
+  currentInProgressLlmRunId,
   selectedQuestionIds,
 }: BullpenInvestmentsSectionProps) {
   const [breakdownQuestion, setBreakdownQuestion] =
@@ -711,6 +782,8 @@ export function BullpenInvestmentsSection({
                           <LlmOddsMetric
                             question={question}
                             onOpenBreakdown={setBreakdownQuestion}
+                            latestCompletedLlmRunId={latestCompletedLlmRunId}
+                            currentInProgressLlmRunId={currentInProgressLlmRunId}
                           />
                           <MetricCard label="Returns/day">
                             <div className="font-semibold text-slate-900">
@@ -811,6 +884,8 @@ export function BullpenInvestmentsSection({
                           <LlmOddsMetric
                             question={question}
                             onOpenBreakdown={setBreakdownQuestion}
+                            latestCompletedLlmRunId={latestCompletedLlmRunId}
+                            currentInProgressLlmRunId={currentInProgressLlmRunId}
                           />
                           <MetricCard label="Returns/day">
                             <div className="font-semibold text-slate-900">
@@ -924,6 +999,8 @@ export function BullpenInvestmentsSection({
                           <LlmOddsMetric
                             question={question}
                             onOpenBreakdown={setBreakdownQuestion}
+                            latestCompletedLlmRunId={latestCompletedLlmRunId}
+                            currentInProgressLlmRunId={currentInProgressLlmRunId}
                           />
                           <MetricCard label="Returns/day">
                             <div className="font-semibold text-slate-900">

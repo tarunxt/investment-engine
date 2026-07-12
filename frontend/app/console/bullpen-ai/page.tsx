@@ -1460,6 +1460,12 @@ function BullpenAiPageContent() {
   const [autoRunLastCompletedAt, setAutoRunLastCompletedAt] = useState<
     string | null
   >(null);
+  const [latestCompletedLlmRunId, setLatestCompletedLlmRunId] = useState<
+    string | number | null
+  >(null);
+  const [currentInProgressLlmRunId, setCurrentInProgressLlmRunId] = useState<
+    string | number | null
+  >(null);
   const [positionsSource, setPositionsSource] =
     useState<BullpenPositionsSource | null>(null);
   const [lastSuccessfulLiveSnapshot, setLastSuccessfulLiveSnapshot] =
@@ -2552,7 +2558,9 @@ function BullpenAiPageContent() {
         allow_parallel: true,
         polymarket_event_context: polymarketEventContext,
       });
+      setCurrentInProgressLlmRunId(run.id);
       const completedRun = await waitForBullpenRunCompletion(run.id);
+      setLatestCompletedLlmRunId(completedRun.id);
       const targetOrder = new Map(
         targets.map((target, index) => [
           `${target.provider}::${target.model}`,
@@ -2919,6 +2927,7 @@ function BullpenAiPageContent() {
         ...current,
         [activeMode]: null,
       }));
+      setCurrentInProgressLlmRunId(null);
     }
   }
 
@@ -4118,6 +4127,8 @@ function BullpenAiPageContent() {
               progressMessage={isManualScanView ? investmentProgress : null}
               recentDecisions={recentAutoRunDecisions}
               resultMessage={isManualScanView ? investmentNotice : null}
+              latestCompletedLlmRunId={latestCompletedLlmRunId}
+              currentInProgressLlmRunId={currentInProgressLlmRunId}
               selectedQuestionIds={visibleSelectedInvestmentQuestionIdSet}
             />
           ) : null}
