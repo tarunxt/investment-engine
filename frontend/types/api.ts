@@ -158,6 +158,7 @@ export interface PolymarketEventEvidenceOptions {
 export interface PolymarketEventQuestionPayload {
   question_ref: string;
   question_id: string;
+  market_id?: string | null;
   question: string;
   close_time?: string | null;
   closing_time?: string | null;
@@ -181,11 +182,30 @@ export interface PolymarketEventQuestionPayload {
   preflight_evidence_block?: string | null;
 }
 
+export type BullpenLlmExecutionMode =
+  | "chunked_parallel"
+  | "single_combined";
+
+export interface BullpenLlmExecutionOptions {
+  execution_mode: BullpenLlmExecutionMode;
+  events_per_prompt: number;
+  max_concurrent_requests: number;
+  target_count: number;
+  prompt_template_hash?: string | null;
+}
+
+export interface PreparedPolymarketEventContext {
+  question_payload: PolymarketEventQuestionPayload[];
+  runtime_metadata: Record<string, unknown>;
+}
+
 export interface PolymarketEventRunContext {
   kind: "polymarket_bullpen_event";
   prompt_template: string;
   question_payload: PolymarketEventQuestionPayload[];
   evidence_options: PolymarketEventEvidenceOptions;
+  execution_options?: BullpenLlmExecutionOptions;
+  prepared_context?: PreparedPolymarketEventContext | null;
 }
 
 export interface PolymarketEventQuestionRuntimeMetadata {
@@ -1681,6 +1701,9 @@ export interface BullpenAutoLiveSettings {
   llm_rerun_interval_minutes: number;
   max_llm_candidates_per_run: number;
   console_llm_targets: ProviderModelTarget[];
+  llm_execution_mode: BullpenLlmExecutionMode;
+  llm_events_per_prompt: number;
+  console_llm_prompt_template?: string | null;
   console_auto_start_at?: string | null;
   console_auto_refresh_minutes?: number | null;
   auto_live_enabled: boolean;
@@ -1713,6 +1736,7 @@ export interface BullpenAutoLiveLlmOutput {
   red_flags: string[];
   rationale?: string | null;
   error?: string | null;
+  invalid_reason?: string | null;
   completed_at?: string | null;
 }
 

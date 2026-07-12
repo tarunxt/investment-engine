@@ -76,6 +76,7 @@ import type {
   BullpenAutoLiveDecision,
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
+  BullpenLlmExecutionMode,
   PolymarketEventRunContext,
   PolymarketManualInvestOrderRequest,
   PolymarketManualInvestResponse,
@@ -162,6 +163,10 @@ const BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY =
   "investment-engine:bullpen-ai:custom-exclusion-keywords:v1";
 const BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY =
   "investment-engine:bullpen-ai:allow-non-web-evidence:v1";
+const DEFAULT_BULLPEN_LLM_EXECUTION_MODE: BullpenLlmExecutionMode =
+  "chunked_parallel";
+const DEFAULT_BULLPEN_LLM_EVENTS_PER_PROMPT = 20;
+const DEFAULT_BULLPEN_LLM_MAX_CONCURRENT_REQUESTS = 6;
 const MAX_BULLPEN_SNAPSHOT_HISTORY = 10;
 const RUN_POLL_INTERVAL_MS = 4_000;
 const MAX_RUN_POLLS = 90;
@@ -1228,6 +1233,11 @@ function writeBullpenLlmPromptToStorage(template: string) {
   }
 }
 
+function normalizeServerBullpenLlmPromptTemplate(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
 function readStoredBoolean(key: string, fallback: boolean) {
   if (typeof window === "undefined") return fallback;
   try {
@@ -1491,6 +1501,11 @@ function BullpenAiPageContent() {
   >({});
   const [bullpenLlmPromptTemplate, setBullpenLlmPromptTemplate] = useState(
     DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
+  );
+  const [bullpenLlmExecutionMode, setBullpenLlmExecutionMode] =
+    useState<BullpenLlmExecutionMode>(DEFAULT_BULLPEN_LLM_EXECUTION_MODE);
+  const [bullpenLlmEventsPerPrompt, setBullpenLlmEventsPerPrompt] = useState(
+    DEFAULT_BULLPEN_LLM_EVENTS_PER_PROMPT,
   );
   const [requireFreshInternetEvidence, setRequireFreshInternetEvidence] =
     useState(true);
@@ -2547,6 +2562,12 @@ function BullpenAiPageContent() {
           allow_evidence_grounded_non_web_models:
             allowEvidenceGroundedNonWebModels,
         },
+        execution_options: {
+          execution_mode: bullpenLlmExecutionMode,
+          events_per_prompt: bullpenLlmEventsPerPrompt,
+          max_concurrent_requests: DEFAULT_BULLPEN_LLM_MAX_CONCURRENT_REQUESTS,
+          target_count: targets.length,
+        },
       };
       const run = await apiService.createRun({
         prompt: buildBullpenLlmPrompt(
@@ -3312,7 +3333,15 @@ function BullpenAiPageContent() {
         : "This Auto Scan snapshot does not have qualifying LLM odds yet."
       : "No rows are currently pink. Rows appear here when LLM Yes or No Odds is above 80%.";
 
-  function handlePromptTemplateSave(template: string) {
+  async function handlePromptTemplateSave(template: string) {
+    try {
+      await apiService.updateBullpenAutoLiveSettings({
+        console_llm_prompt_template: template,
+      });
+    } catch (saveError) {
+      const normalizedError = normalizeError(saveError);
+      throw new Error(normalizedError);
+    }
     setBullpenLlmPromptTemplate(template);
     writeBullpenLlmPromptToStorage(template);
   }
@@ -3537,6 +3566,21 @@ function BullpenAiPageContent() {
         activePositions={openActivePositions}
         hasActivePositionsSnapshot={Boolean(positionsLastUpdatedAt)}
         onSummaryUpdated={({ summary, run }) => {
+          const serverPromptTemplate = normalizeServerBullpenLlmPromptTemplate(
+            summary.settings.console_llm_prompt_template,
+          );
+          if (serverPromptTemplate) {
+            setBullpenLlmPromptTemplate(serverPromptTemplate);
+            writeBullpenLlmPromptToStorage(serverPromptTemplate);
+          }
+          setBullpenLlmExecutionMode(
+            summary.settings.llm_execution_mode ??
+              DEFAULT_BULLPEN_LLM_EXECUTION_MODE,
+          );
+          setBullpenLlmEventsPerPrompt(
+            summary.settings.llm_events_per_prompt ??
+              DEFAULT_BULLPEN_LLM_EVENTS_PER_PROMPT,
+          );
           setRecentAutoRunDecisions(summary.recent_decisions ?? []);
           setAutoRunLastCompletedAt(getLatestBullpenAutoRunCompletedAt(summary));
           setAutoSnapshotsByMode((current) =>

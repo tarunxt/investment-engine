@@ -12,7 +12,7 @@ import {
 type BullpenPromptEditorDialogProps = {
   value: string;
   onClose: () => void;
-  onSave: (value: string) => void;
+  onSave: (value: string) => Promise<void> | void;
 };
 
 export function BullpenPromptEditorDialog({
@@ -22,19 +22,31 @@ export function BullpenPromptEditorDialog({
 }: BullpenPromptEditorDialogProps) {
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const hasPlaceholder = draft.includes(BULLPEN_LLM_PROMPT_PLACEHOLDER);
   const isDirty = draft !== value;
 
-  function handleSave() {
+  async function handleSave() {
     const trimmed = draft.trim();
     if (!trimmed) {
       setError("Prompt cannot be empty.");
       return;
     }
 
-    onSave(trimmed);
-    onClose();
+    setIsSaving(true);
+    try {
+      await onSave(trimmed);
+      onClose();
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Unable to save the prompt right now.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -56,6 +68,7 @@ export function BullpenPromptEditorDialog({
           <button
             type="button"
             onClick={onClose}
+            disabled={isSaving}
             className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
             aria-label="Close prompt editor"
           >
@@ -66,13 +79,14 @@ export function BullpenPromptEditorDialog({
         <div className="flex-1 overflow-y-auto px-6 py-5">
           <div className="space-y-3">
             <textarea
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value);
-                if (error) setError(null);
-              }}
-              spellCheck={false}
-              className="min-h-[420px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 font-mono text-sm leading-6 text-slate-900 outline-none transition focus:border-slate-400"
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              if (error) setError(null);
+            }}
+            disabled={isSaving}
+            spellCheck={false}
+            className="min-h-[420px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 font-mono text-sm leading-6 text-slate-900 outline-none transition focus:border-slate-400"
             />
 
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
@@ -101,6 +115,7 @@ export function BullpenPromptEditorDialog({
                 setDraft(DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE);
                 setError(null);
               }}
+              disabled={isSaving}
             >
               <RotateCcw className="h-3.5 w-3.5" />
               Reset default
@@ -112,19 +127,19 @@ export function BullpenPromptEditorDialog({
                 setDraft(value);
                 setError(null);
               }}
-              disabled={!isDirty}
+              disabled={!isDirty || isSaving}
             >
               Revert changes
             </Button>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={onClose}>
+            <Button variant="outline" size="sm" onClick={onClose} disabled={isSaving}>
               Cancel
             </Button>
-            <Button size="sm" onClick={handleSave}>
+            <Button size="sm" onClick={() => void handleSave()} disabled={isSaving}>
               <Save className="h-3.5 w-3.5" />
-              Save prompt
+              {isSaving ? "Saving..." : "Save prompt"}
             </Button>
           </div>
         </div>

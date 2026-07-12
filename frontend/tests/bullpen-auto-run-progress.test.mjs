@@ -891,3 +891,41 @@ test("Bullpen auto-run workflow view keeps the failed stage highlighted when bac
   assert.equal(view.stages[1].isCurrent, true);
   assert.equal(view.stages[1].outputs.llm_candidate_count, 4);
 });
+
+test("Bullpen auto-run workflow view explains the saved Stage 2 execution mode", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage-2-settings",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 2 is running.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+      }),
+      createStage(2, "Stage 2 is processing candidates.", {
+        workflow_stage_key: "llm",
+        phase_status: "running",
+        llm_execution_mode: "chunked_parallel",
+        llm_events_per_prompt: 20,
+      }),
+    ],
+  });
+
+  assert.match(
+    view.stages[1].detail,
+    /Execution mode: Batched parallel with up to 20 events per prompt\./,
+  );
+});

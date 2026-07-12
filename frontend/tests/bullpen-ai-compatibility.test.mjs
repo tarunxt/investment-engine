@@ -106,6 +106,7 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
 
   assert.match(defaultPrompt, /Selected questions:/);
   assert.match(defaultPrompt, /"question_ref": "Q1"/);
+  assert.match(defaultPrompt, /"market_id": "Q1"/);
   assert.match(defaultPrompt, /"current_yes_odds": 44/);
   assert.match(defaultPrompt, /"current_no_odds": 56/);
   assert.match(defaultPrompt, /"preflight_evidence_block": "Preflight Evidence Block:/);
@@ -117,6 +118,7 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
     defaultPrompt,
     /"polymarket_market_context": "Experimental AI-generated summary referencing Polymarket data\. Candidate X has gained support\."/,
   );
+  assert.match(defaultPrompt, /Copy each market_id exactly from the input when provided\./);
   assert.match(defaultPrompt, /polymarket_rules/);
   assert.match(defaultPrompt, /Do not contradict populated facts in preflight_evidence_block\./);
   assert.match(
@@ -271,6 +273,37 @@ test("Bullpen x AI run-now request can reuse the current scan snapshot before ma
   );
   assert.match(bullpenAiPageSource, /candidate_rows_prefiltered:\s*true/);
   assert.match(bullpenAiPageSource, /reuse_saved_llm_outputs:\s*false/);
+});
+
+test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM runs", () => {
+  const bullpenAiPageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(bullpenAiPageSource, /execution_options:\s*\{/);
+  assert.match(bullpenAiPageSource, /execution_mode:\s*bullpenLlmExecutionMode/);
+  assert.match(bullpenAiPageSource, /events_per_prompt:\s*bullpenLlmEventsPerPrompt/);
+  assert.match(
+    bullpenAiPageSource,
+    /console_llm_prompt_template:\s*template/,
+  );
+  assert.match(
+    bullpenAiPageSource,
+    /summary\.settings\.console_llm_prompt_template/,
+  );
+  assert.match(autoRunCardSource, /Stage 2 execution/);
+  assert.match(autoRunCardSource, /Batched parallel/);
+  assert.match(autoRunCardSource, /Single combined/);
+  assert.match(autoRunCardSource, /llm_execution_mode/);
+  assert.match(autoRunCardSource, /llm_events_per_prompt/);
 });
 
 test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {

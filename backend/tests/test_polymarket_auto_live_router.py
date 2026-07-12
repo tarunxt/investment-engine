@@ -177,11 +177,27 @@ async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
                 "bankroll_usd": 250,
                 "auto_live_enabled": True,
                 "dry_run": True,
+                "llm_execution_mode": "single_combined",
+                "llm_events_per_prompt": 7,
+                "console_llm_prompt_template": "Saved prompt {{SELECTED_QUESTIONS}}",
             },
         )
         assert update_response.status_code == 200
         assert update_response.json()["bankroll_usd"] == 250
         assert update_response.json()["auto_live_enabled"] is True
+        assert update_response.json()["llm_execution_mode"] == "single_combined"
+        assert update_response.json()["llm_events_per_prompt"] == 7
+        assert (
+            update_response.json()["console_llm_prompt_template"]
+            == "Saved prompt {{SELECTED_QUESTIONS}}"
+        )
+
+        invalid_llm_events_response = await client.put(
+            "/polymarket/auto-live/settings",
+            json={"llm_events_per_prompt": "7.5"},
+        )
+        assert invalid_llm_events_response.status_code == 422
+        assert "llm_events_per_prompt" in str(invalid_llm_events_response.json())
 
         reset_response = await client.post("/polymarket/auto-live/settings/reset")
         assert reset_response.status_code == 200

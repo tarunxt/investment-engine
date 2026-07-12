@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 AutoLiveEvidenceStatus = Literal["Low", "Moderate", "Strong"]
 AutoLiveConfidence = Literal["Low", "Medium", "High"]
@@ -60,6 +60,7 @@ AutoLiveExitState = Literal[
 TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 TradingBotMode = Literal["paper", "live-read", "live-trading", "dry-run", "analysis-only"]
 TradingBotGuardrailTone = Literal["neutral", "positive", "warning", "critical"]
+BullpenLlmExecutionMode = Literal["chunked_parallel", "single_combined"]
 
 
 class BullpenAutoLiveLlmTarget(BaseModel):
@@ -125,6 +126,9 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     llm_rerun_interval_minutes: int = Field(default=240, ge=1)
     max_llm_candidates_per_run: int = Field(default=100, ge=1, le=100)
     console_llm_targets: list[BullpenAutoLiveLlmTarget] = Field(default_factory=list)
+    llm_execution_mode: BullpenLlmExecutionMode = "chunked_parallel"
+    llm_events_per_prompt: int = Field(default=20, ge=1, le=100)
+    console_llm_prompt_template: str | None = None
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 
@@ -132,6 +136,31 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     dry_run: bool = True
     require_manual_confirmation: bool = True
     allow_live_execution: bool = False
+
+    @field_validator("llm_events_per_prompt", mode="before")
+    @classmethod
+    def validate_llm_events_per_prompt(cls, value: object) -> int:
+        if isinstance(value, bool):
+            raise ValueError("llm_events_per_prompt must be an integer from 1 to 100")
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError("llm_events_per_prompt must be an integer from 1 to 100")
+            value = int(value)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                raise ValueError("llm_events_per_prompt must be an integer from 1 to 100")
+            if any(char in normalized for char in {".", "e", "E"}):
+                raise ValueError("llm_events_per_prompt must be an integer from 1 to 100")
+            try:
+                value = int(normalized)
+            except ValueError as exc:
+                raise ValueError(
+                    "llm_events_per_prompt must be an integer from 1 to 100"
+                ) from exc
+        if not isinstance(value, int):
+            raise ValueError("llm_events_per_prompt must be an integer from 1 to 100")
+        return value
 
     @model_validator(mode="after")
     def validate_cross_field_rules(self) -> "BullpenAutoLiveSettingsBase":
@@ -232,6 +261,9 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     llm_rerun_interval_minutes: int | None = Field(default=None, ge=1)
     max_llm_candidates_per_run: int | None = Field(default=None, ge=1, le=100)
     console_llm_targets: list[BullpenAutoLiveLlmTarget] | None = None
+    llm_execution_mode: BullpenLlmExecutionMode | None = None
+    llm_events_per_prompt: int | None = Field(default=None, ge=1, le=100)
+    console_llm_prompt_template: str | None = None
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 
@@ -239,6 +271,13 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     dry_run: bool | None = None
     require_manual_confirmation: bool | None = None
     allow_live_execution: bool | None = None
+
+    @field_validator("llm_events_per_prompt", mode="before")
+    @classmethod
+    def validate_optional_llm_events_per_prompt(cls, value: object) -> object:
+        if value is None:
+            return None
+        return BullpenAutoLiveSettingsBase.validate_llm_events_per_prompt(value)
 
 
 class BullpenAutoLiveGuardrailCheck(BaseModel):
@@ -267,6 +306,7 @@ class BullpenAutoLiveLlmOutput(BaseModel):
     red_flags: list[str] = Field(default_factory=list)
     rationale: str | None = None
     error: str | None = None
+    invalid_reason: str | None = None
     completed_at: str | None = None
 
 

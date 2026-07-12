@@ -109,6 +109,12 @@ function appendStageDetail(detail: string, suffix: string) {
   return detail.endsWith(".") ? `${detail} ${suffix}` : `${detail}. ${suffix}`;
 }
 
+function readLlmExecutionMode(value: unknown) {
+  return value === "single_combined" || value === "chunked_parallel"
+    ? value
+    : null;
+}
+
 function readBoolean(value: unknown) {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -134,6 +140,19 @@ function buildStageDetail(
       nextDetail,
       "Reused the current Bullpen x AI table's saved LLM outputs instead of making fresh LLM calls.",
     );
+  }
+  if (workflowDefinition.key === "llm") {
+    const executionMode = readLlmExecutionMode(stage?.outputs?.llm_execution_mode);
+    const eventsPerPrompt = readNumber(stage?.outputs?.llm_events_per_prompt);
+    const executionDetail =
+      executionMode === "single_combined"
+        ? "Execution mode: Single combined."
+        : executionMode === "chunked_parallel"
+          ? `Execution mode: Batched parallel${eventsPerPrompt !== null ? ` with up to ${eventsPerPrompt} events per prompt` : ""}.`
+          : null;
+    if (executionDetail && !nextDetail.includes(executionDetail)) {
+      nextDetail = appendStageDetail(nextDetail, executionDetail);
+    }
   }
   if (workflowDefinition.key === "invest") {
     const executionGateReason = readString(stage?.outputs?.execution_gate_reason);

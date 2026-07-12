@@ -14,10 +14,8 @@ from app.core.logging import WorkerLogHelper, get_logger
 from app.domains.ai_providers.web_metadata import merge_web_metadata
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
-from app.domains.polymarket.event_preflight import (
-    build_polymarket_event_prompt_and_metadata,
-    finalize_polymarket_event_runtime_metadata,
-)
+from app.domains.polymarket.bullpen_llm_execution import execute_bullpen_llm_target
+from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
 from app.domains.runs.schemas import PolymarketEventRunContext
 from app.infrastructure.messaging.task_registry import register_job_task_sync
 from app.shared.types import JobStatus
@@ -1145,20 +1143,103 @@ def execute_ai_job(self, job_id: int) -> None:
                 polymarket_event_context = PolymarketEventRunContext.model_validate(
                     job.request_context_json
                 )
-                prompt_to_execute, runtime_metadata_json = (
-                    build_polymarket_event_prompt_and_metadata(
-                        polymarket_event_context,
-                        provider_name=job.provider.strip().lower(),
+                if polymarket_event_context.prepared_context is None:
+                    prepared_context = prepare_polymarket_event_context(
+                        polymarket_event_context
                     )
+                    polymarket_event_context = polymarket_event_context.model_copy(
+                        update={"prepared_context": prepared_context}
+                    )
+                    job.request_context_json = polymarket_event_context.model_dump(
+                        mode="json"
+                    )
+                    try:
+                        from sqlalchemy import select as sa_select
+
+                        from app.domains.runs.models import RunJob
+
+                        run_job = db.execute(
+                            sa_select(RunJob).where(RunJob.job_id == job_id)
+                        ).scalar_one_or_none()
+                        if run_job is not None:
+                            sibling_jobs = db.execute(
+                                sa_select(Job)
+                                .join(RunJob, RunJob.job_id == Job.id)
+                                .where(RunJob.run_id == run_job.run_id)
+                            ).scalars().all()
+                            prepared_json = prepared_context.model_dump(mode="json")
+                            for sibling_job in sibling_jobs:
+                                if not isinstance(sibling_job.request_context_json, dict):
+                                    continue
+                                sibling_job.request_context_json = {
+                                    **sibling_job.request_context_json,
+                                    "prepared_context": prepared_json,
+                                }
+                            db.commit()
+                    except Exception:
+                        db.commit()
+
+                execution_result = execute_bullpen_llm_target(
+                    polymarket_event_context,
+                    provider_name=job.provider.strip().lower(),
+                    model_name=job.model,
+                    prepared_context=polymarket_event_context.prepared_context,
                 )
+                content = execution_result.response_text
+                tokens_in = execution_result.tokens_in
+                tokens_out = execution_result.tokens_out
+                estimated_cost = execution_result.estimated_cost
+                runtime_metadata_json = execution_result.runtime_metadata
                 web_search_used, web_search_queries, web_sources = merge_web_metadata(
                     web_search_used,
                     web_search_queries,
                     web_sources,
-                    response_used=runtime_metadata_json.get("web_search_used"),
-                    response_queries=runtime_metadata_json.get("web_search_queries"),
-                    response_sources=runtime_metadata_json.get("web_sources"),
+                    response_used=execution_result.web_search_used,
+                    response_queries=execution_result.web_search_queries,
+                    response_sources=execution_result.web_sources,
                 )
+                if _job_was_cancelled(repo, job_id):
+                    logger.info("Skipping completion update for cancelled job %s", job_id)
+                    return
+
+                final_status = (
+                    JobStatus.COMPLETED
+                    if execution_result.status == "completed"
+                    else JobStatus.PARTIAL
+                    if content
+                    else JobStatus.FAILED
+                )
+                error_message = None
+                if execution_result.status != "completed":
+                    error_message = (
+                        runtime_metadata_json.get("invalid_reason")
+                        if isinstance(runtime_metadata_json, dict)
+                        else None
+                    ) or (
+                        "Bullpen LLM execution completed with partial or blocked event results."
+                    )
+                repo.update_status(
+                    job,
+                    final_status,
+                    response=content,
+                    error_message=error_message,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    estimated_cost=estimated_cost,
+                    web_search_used=web_search_used,
+                    web_search_queries=web_search_queries,
+                    web_sources=web_sources,
+                    runtime_metadata_json=runtime_metadata_json,
+                )
+                _publish_job_update(job)
+                _refresh_run_status(db, job_id)
+                WorkerLogHelper.log_task_complete(
+                    "execute_ai_job",
+                    "n/a",
+                    (monotonic() - started_at) * 1000,
+                    job_id,
+                )
+                return
 
         provider = ProviderFactory.create(job.provider)
         result = provider.generate(prompt=prompt_to_execute, model=job.model)
@@ -1356,16 +1437,6 @@ def execute_ai_job(self, job_id: int) -> None:
                 repaired_content = (repair_result.content or "").strip()
                 if repaired_content:
                     content = _sanitize_portfolio_event_content(job.prompt, repaired_content)
-        if polymarket_event_context is not None and runtime_metadata_json is not None:
-            runtime_metadata_json = finalize_polymarket_event_runtime_metadata(
-                polymarket_event_context,
-                provider_name=job.provider.strip().lower(),
-                content=content,
-                model_web_search_used=bool(result.web_search_used),
-                model_web_search_queries=result.web_search_queries,
-                model_web_sources=result.web_sources,
-                runtime_metadata=runtime_metadata_json,
-            )
         if _job_was_cancelled(repo, job_id):
             logger.info("Skipping completion update for cancelled job %s", job_id)
             return

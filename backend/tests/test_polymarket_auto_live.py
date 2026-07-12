@@ -36,6 +36,7 @@ from app.domains.polymarket_auto_live.config import (
 from app.domains.polymarket_auto_live.engine import (
     BullpenAutoLiveEngine,
     CONSOLE_FRESH_LLM_CANDIDATE_CAP,
+    ConsoleStageTwoSharedReview,
     PositionSnapshot,
     _auto_live_record_id,
 )
@@ -73,6 +74,10 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveSettings,
     BullpenAutoLiveState,
     BullpenAutoLiveSummary,
+)
+from app.domains.runs.schemas import (
+    BullpenLlmExecutionOptions,
+    PolymarketEventQuestionPayload,
 )
 from app.domains.trading_bots.service import (
     build_trading_bots_overview,
@@ -945,6 +950,185 @@ async def test_console_profile_caps_stage_2_llm_reviews_to_keep_runs_bounded(mon
     assert llm_stage.outputs["llm_candidate_count_before_cap"] == 5
     assert llm_stage.outputs["max_llm_candidates_per_run"] == 2
     assert llm_stage.outputs["llm_candidates_skipped_by_cap"] == 3
+
+
+@pytest.mark.anyio
+async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will the shared Stage 2 path use the saved settings?",
+        slug="shared-stage-2-settings",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        assert side == "NO"
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=candidate_market.current_no_odds,
+            spread_cents=2,
+        )
+
+    async def fake_execute_console_stage_two_shared_llm(
+        *,
+        llm_markets,
+        rules_by_market_id,
+        settings,
+        now,
+    ):
+        assert now == fixed_now
+        assert len(llm_markets) == 1
+        assert rules_by_market_id[candidate_market.market_id].hours_remaining == 96
+        assert settings.llm_execution_mode == "single_combined"
+        assert settings.llm_events_per_prompt == 7
+        assert (
+            settings.console_llm_prompt_template
+            == "Saved Stage 2 prompt {{SELECTED_QUESTIONS}}"
+        )
+        outputs, consensus = _fake_llm_consensus(fair_yes=8, fair_no=92)
+        return ConsoleStageTwoSharedReview(
+            prepared_payload_by_market_id={
+                candidate_market.market_id: PolymarketEventQuestionPayload(
+                    question_ref="Q1",
+                    question_id=candidate_market.market_id,
+                    market_id=candidate_market.market_id,
+                    question=candidate_market.question,
+                    close_time=candidate_market.close_time,
+                    current_time_utc=fixed_now.isoformat(),
+                    current_time_et=fixed_now.isoformat(),
+                    deadline_et="2026-06-24 08:00:00 PM ET",
+                    hours_remaining=96,
+                    category=candidate_market.theme,
+                    outcomes=["Yes", "No"],
+                    current_yes_odds=12,
+                    current_no_odds=88,
+                    market_url=candidate_market.market_url,
+                    slug=candidate_market.slug,
+                    polymarket_rules=(
+                        'This market will resolve to "Yes" if candidate X wins by the deadline.'
+                    ),
+                    preflight_evidence_block="Verified Evidence Block:",
+                )
+            },
+            question_runtime_by_market_id={
+                candidate_market.market_id: {
+                    "question_id": candidate_market.market_id,
+                    "preflight_evidence_block": "Verified Evidence Block:",
+                }
+            },
+            outputs_by_market_id={candidate_market.market_id: outputs},
+            consensus_by_market_id={candidate_market.market_id: consensus},
+            execution_options=BullpenLlmExecutionOptions(
+                execution_mode="single_combined",
+                events_per_prompt=7,
+                target_count=1,
+                prompt_template_hash="shared-stage-2-hash",
+            ),
+            runtime_outputs={
+                "llm_execution_mode": "single_combined",
+                "llm_events_per_prompt": 7,
+                "llm_prompt_template_hash": "shared-stage-2-hash",
+                "llm_primary_request_count": 1,
+                "llm_retry_request_count": 0,
+                "llm_recovery_batch_count": 0,
+                "llm_failed_event_count": 0,
+                "llm_invalid_event_count": 0,
+                "llm_blocked_event_count": 0,
+                "llm_max_observed_concurrency": 1,
+                "llm_target_runs": [
+                    {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "status": "completed",
+                        "primary_request_count": 1,
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda *_args, **_kwargs: 9.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.resolve_auto_live_llm_targets",
+        lambda _settings: [("openai", "gpt-4o-mini")],
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        fake_execute_console_stage_two_shared_llm,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            llm_execution_mode="single_combined",
+            llm_events_per_prompt=7,
+            console_llm_prompt_template="Saved Stage 2 prompt {{SELECTED_QUESTIONS}}",
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    llm_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+
+    assert llm_stage.outputs["llm_execution_mode"] == "single_combined"
+    assert llm_stage.outputs["llm_events_per_prompt"] == 7
+    assert llm_stage.outputs["llm_primary_request_count"] == 1
+    assert llm_stage.outputs["llm_prompt_template_hash"] == "shared-stage-2-hash"
+    assert llm_stage.outputs["llm_reviewed_candidates"][0]["prepared_question_payload"][
+        "market_id"
+    ] == candidate_market.market_id
+    assert result.run.orders_planned == 1
 
 
 @pytest.mark.anyio

@@ -192,6 +192,7 @@ export type BullpenQuestionLlmBreakdownItem = {
 type BullpenLlmPromptQuestionPayload = {
   question_ref: string;
   question_id: string;
+  market_id: string | null;
   question: string;
   close_time: string | null;
   closing_time: string | null;
@@ -335,7 +336,7 @@ Do not reason from the market title alone.
 If the title, close time, and market_url rules appear inconsistent, the supplied Polymarket rules win.
 
 Input fields may include:
-question_ref, question_id, question, slug, market_url, close_time, closing_time, close_time_et, current_time_utc, current_time_et, deadline_et, hours_remaining, deadline_source, title_date_hint, title_deadline_et_assumption, category, outcomes, current_yes_odds, current_no_odds, polymarket_rules, polymarket_market_context, polymarket_resolution_source, preflight_evidence_block.
+question_ref, question_id, market_id, question, slug, market_url, close_time, closing_time, close_time_et, current_time_utc, current_time_et, deadline_et, hours_remaining, deadline_source, title_date_hint, title_deadline_et_assumption, category, outcomes, current_yes_odds, current_no_odds, polymarket_rules, polymarket_market_context, polymarket_resolution_source, preflight_evidence_block.
 
 Each market may include:
 - polymarket_rules
@@ -387,6 +388,8 @@ Output requirements:
 - Do not include markdown.
 - Do not include commentary outside JSON.
 - Copy each question_ref exactly from the input.
+- Copy each question_id exactly from the input.
+- Copy each market_id exactly from the input when provided.
 - question should echo the input question text.
 - llm_yes_odds must be a number from 0.00 to 100.00.
 - llm_no_odds must be a number from 0.00 to 100.00.
@@ -404,6 +407,8 @@ JSON schema:
   "markets": [
     {
       "question_ref": "Q1",
+      "question_id": "question-id",
+      "market_id": "market-id",
       "question": "string",
       "yes_definition": "exact YES resolution meaning",
       "deadline_et": "YYYY-MM-DD hh:mm:ss AM/PM ET",
@@ -1780,6 +1785,8 @@ function resolveBullpenQuestionId(
     return (
       readStringValue(record.question_id) ||
       readStringValue(record.questionId) ||
+      readStringValue(record.market_id) ||
+      readStringValue(record.marketId) ||
       readStringValue(record.question_ref) ||
       readStringValue(record.questionRef) ||
       readStringValue(record.question) ||
@@ -1796,6 +1803,8 @@ function resolveBullpenQuestionId(
     readStringValue(record.questionRef),
     readStringValue(record.question_id),
     readStringValue(record.questionId),
+    readStringValue(record.market_id),
+    readStringValue(record.marketId),
     readStringValue(record.question),
     readStringValue(record.market_question),
     readStringValue(record.title),
@@ -2351,6 +2360,7 @@ function buildBullpenPreflightEvidenceBlock(
     "",
     "Verified current facts:",
     `- question_id: ${question.id}`,
+    `- market_id: ${question.id}`,
     `- category: ${formatBullpenPreflightText(payload.category, "Unknown")}`,
     `- outcomes: ${formatBullpenPreflightOutcomes(question)}`,
     `- current time (UTC): ${payload.current_time_utc}`,
@@ -2389,6 +2399,7 @@ function buildBullpenLlmPromptQuestionPayload(
     {
       question_ref: getBullpenQuestionRef(index),
       question_id: question.id,
+      market_id: question.id,
       question: question.question,
       close_time: question.closeTime,
       closing_time: question.closeTime,

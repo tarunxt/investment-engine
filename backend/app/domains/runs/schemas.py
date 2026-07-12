@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
 
@@ -21,6 +23,7 @@ class PolymarketEventEvidenceOptions(BaseModel):
 class PolymarketEventQuestionPayload(BaseModel):
     question_ref: str
     question_id: str
+    market_id: str | None = None
     question: str
     close_time: str | None = None
     closing_time: str | None = None
@@ -51,6 +54,51 @@ class PolymarketEventRunContext(BaseModel):
     evidence_options: PolymarketEventEvidenceOptions = Field(
         default_factory=PolymarketEventEvidenceOptions
     )
+    execution_options: BullpenLlmExecutionOptions = Field(
+        default_factory=lambda: BullpenLlmExecutionOptions()
+    )
+    prepared_context: PreparedPolymarketEventContext | None = None
+
+
+BullpenLlmExecutionMode = Literal["chunked_parallel", "single_combined"]
+
+
+class BullpenLlmExecutionOptions(BaseModel):
+    execution_mode: BullpenLlmExecutionMode = "chunked_parallel"
+    events_per_prompt: int = Field(default=20, ge=1, le=100)
+    max_concurrent_requests: int = Field(default=6, ge=1)
+    target_count: int = Field(default=1, ge=1)
+    prompt_template_hash: str | None = None
+
+    @field_validator("events_per_prompt", mode="before")
+    @classmethod
+    def validate_events_per_prompt(cls, value: object) -> int:
+        if isinstance(value, bool):
+            raise ValueError("events_per_prompt must be an integer from 1 to 100")
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError("events_per_prompt must be an integer from 1 to 100")
+            value = int(value)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                raise ValueError("events_per_prompt must be an integer from 1 to 100")
+            if any(char in normalized for char in {".", "e", "E"}):
+                raise ValueError("events_per_prompt must be an integer from 1 to 100")
+            try:
+                value = int(normalized)
+            except ValueError as exc:
+                raise ValueError(
+                    "events_per_prompt must be an integer from 1 to 100"
+                ) from exc
+        if not isinstance(value, int):
+            raise ValueError("events_per_prompt must be an integer from 1 to 100")
+        return value
+
+
+class PreparedPolymarketEventContext(BaseModel):
+    question_payload: list[PolymarketEventQuestionPayload] = Field(default_factory=list)
+    runtime_metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class AutoRebalanceRunReservationRequest(BaseModel):

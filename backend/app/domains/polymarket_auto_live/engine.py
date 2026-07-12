@@ -5,7 +5,7 @@ from dataclasses import asdict
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Callable
+from typing import Any, Callable
 from uuid import NAMESPACE_URL, uuid5
 
 from app.core.logging import get_logger
@@ -21,6 +21,14 @@ from app.domains.bullpen_trade_analysis.service import (
     capture_auto_live_exit_result_sync,
 )
 from app.domains.polymarket import bullpen as bullpen_module
+from app.domains.polymarket.bullpen_llm_execution import (
+    DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE,
+    build_bullpen_prompt_template_hash,
+    build_prepared_bullpen_events,
+    event_result_to_auto_live_output,
+    execute_bullpen_llm_target,
+)
+from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
 from app.domains.polymarket_auto_live.console_profile import (
     DEFAULT_CONSOLE_ORDER_USD,
     CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
@@ -71,6 +79,8 @@ from app.domains.polymarket_auto_live.llm import (
     LlmConsensus,
     CONFIDENCE_RANK,
     build_market_prompt,
+    compute_llm_consensus,
+    resolve_auto_live_llm_targets,
     run_llm_consensus,
 )
 from app.domains.polymarket_auto_live.normalization import (
@@ -96,6 +106,11 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveStageResult,
     BullpenAutoLiveState,
 )
+from app.domains.runs.schemas import (
+    BullpenLlmExecutionOptions,
+    PolymarketEventQuestionPayload,
+    PolymarketEventRunContext,
+)
 
 STAGE_NAMES = {
     1: "Candidate Scan",
@@ -113,6 +128,12 @@ EVIDENCE_WEIGHT = {"Low": 0.55, "Moderate": 0.8, "Strong": 1.0}
 HIGH_LLM_PROVIDER_ERROR_RATE = 0.5
 SUPPORTED_OUTCOME_SIDES = {"YES", "NO"}
 CONSOLE_FRESH_LLM_CANDIDATE_CAP = 50
+AUTO_LIVE_SHARED_EVIDENCE_OPTIONS = {
+    "require_fresh_internet_evidence": True,
+    "allow_evidence_grounded_non_web_models": False,
+}
+
+_ORIGINAL_RUN_LLM_CONSENSUS = run_llm_consensus
 
 logger = get_logger("app.domains.polymarket_auto_live.engine")
 BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS = 60
@@ -325,6 +346,16 @@ class CandidateEvaluation:
 
 
 @dataclass
+class ConsoleStageTwoSharedReview:
+    prepared_payload_by_market_id: dict[str, PolymarketEventQuestionPayload]
+    question_runtime_by_market_id: dict[str, dict[str, Any]]
+    outputs_by_market_id: dict[str, list[BullpenAutoLiveLlmOutput]]
+    consensus_by_market_id: dict[str, LlmConsensus]
+    execution_options: BullpenLlmExecutionOptions
+    runtime_outputs: dict[str, Any]
+
+
+@dataclass
 class EngineResult:
     run: BullpenAutoLiveRun
     decisions: list[BullpenAutoLiveDecision]
@@ -337,6 +368,318 @@ def live_execution_requested(settings: BullpenAutoLiveSettings) -> bool:
         settings.auto_live_enabled
         and not settings.dry_run
         and settings.allow_live_execution
+    )
+
+
+def _console_stage_two_prompt_template(
+    settings: BullpenAutoLiveSettings,
+) -> str:
+    saved_template = (settings.console_llm_prompt_template or "").strip()
+    return saved_template or DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE
+
+
+def _should_use_legacy_console_stage_two_path() -> bool:
+    return run_llm_consensus is not _ORIGINAL_RUN_LLM_CONSENSUS
+
+
+def _build_console_stage_two_question_payload(
+    market: ScannedMarket,
+    rules: RuleEvaluation,
+    *,
+    index: int,
+    now: datetime,
+) -> PolymarketEventQuestionPayload:
+    raw = market.raw if isinstance(market.raw, dict) else {}
+    return PolymarketEventQuestionPayload(
+        question_ref=f"Q{index + 1}",
+        question_id=market.market_id,
+        market_id=market.market_id,
+        question=market.question,
+        close_time=market.close_time,
+        closing_time=market.close_time,
+        close_time_et=rules.deadline_et,
+        current_time_utc=now.isoformat(),
+        current_time_et=now.isoformat(),
+        deadline_et=rules.deadline_et,
+        hours_remaining=rules.hours_remaining,
+        deadline_source=None,
+        title_date_hint=None,
+        title_deadline_et_assumption=None,
+        category=market.theme,
+        outcomes=list(market.outcome_labels),
+        current_yes_odds=market.current_yes_odds,
+        current_no_odds=market.current_no_odds,
+        market_url=market.market_url,
+        slug=market.slug,
+        polymarket_rules=market.description or rules.resolution_criteria or rules.yes_definition,
+        polymarket_market_context=(
+            str(raw.get("market_context")).strip()
+            if isinstance(raw.get("market_context"), str)
+            and str(raw.get("market_context")).strip()
+            else None
+        ),
+        polymarket_resolution_source=(
+            str(raw.get("resolution_source")).strip()
+            if isinstance(raw.get("resolution_source"), str)
+            and str(raw.get("resolution_source")).strip()
+            else None
+        ),
+        preflight_evidence_block=(
+            str(raw.get("preflight_evidence_block")).strip()
+            if isinstance(raw.get("preflight_evidence_block"), str)
+            and str(raw.get("preflight_evidence_block")).strip()
+            else None
+        ),
+    )
+
+
+async def _execute_console_stage_two_shared_llm(
+    *,
+    llm_markets: list[dict[str, object]],
+    rules_by_market_id: dict[str, RuleEvaluation],
+    settings: BullpenAutoLiveSettings,
+    now: datetime,
+) -> ConsoleStageTwoSharedReview:
+    prompt_template = _console_stage_two_prompt_template(settings)
+    targets = resolve_auto_live_llm_targets(settings)
+    execution_options = BullpenLlmExecutionOptions(
+        execution_mode=settings.llm_execution_mode,
+        events_per_prompt=settings.llm_events_per_prompt,
+        target_count=max(1, len(targets)),
+        prompt_template_hash=build_bullpen_prompt_template_hash(prompt_template),
+    )
+    question_payload = [
+        _build_console_stage_two_question_payload(
+            market,
+            rules_by_market_id[market.market_id],
+            index=index,
+            now=now,
+        )
+        for index, llm_row in enumerate(llm_markets)
+        if isinstance((market := llm_row.get("market")), ScannedMarket)
+        and market.market_id in rules_by_market_id
+    ]
+    context = PolymarketEventRunContext(
+        prompt_template=prompt_template,
+        question_payload=question_payload,
+        evidence_options=AUTO_LIVE_SHARED_EVIDENCE_OPTIONS,
+        execution_options=execution_options,
+    )
+    prepared_context = await asyncio.to_thread(
+        prepare_polymarket_event_context,
+        context,
+    )
+    prepared_events = build_prepared_bullpen_events(prepared_context)
+
+    outputs_by_market_id: dict[str, list[BullpenAutoLiveLlmOutput]] = {
+        str(event.question_payload.market_id or event.question_payload.question_id): []
+        for event in prepared_events
+    }
+    prepared_payload_by_market_id = {
+        str(event.question_payload.market_id or event.question_payload.question_id): event.question_payload
+        for event in prepared_events
+    }
+    prepared_event_by_market_id = {
+        str(event.question_payload.market_id or event.question_payload.question_id): event
+        for event in prepared_events
+    }
+    question_runtime = (
+        prepared_context.runtime_metadata.get("question_runtime")
+        if isinstance(prepared_context.runtime_metadata, dict)
+        else None
+    )
+    question_runtime = question_runtime if isinstance(question_runtime, dict) else {}
+    question_runtime_by_market_id = {
+        market_id: dict(question_runtime.get(event.question_payload.question_id) or {})
+        for market_id, event in prepared_event_by_market_id.items()
+    }
+    question_id_to_market_id = {
+        event.question_payload.question_id: market_id
+        for market_id, event in prepared_event_by_market_id.items()
+    }
+
+    def merge_question_runtime_entry(
+        market_id: str,
+        incoming: dict[str, Any],
+    ) -> None:
+        existing = question_runtime_by_market_id.setdefault(market_id, {})
+        for field_name in (
+            "question_ref",
+            "question_id",
+            "question",
+            "preflight_evidence_block",
+        ):
+            if incoming.get(field_name) and not existing.get(field_name):
+                existing[field_name] = incoming[field_name]
+        for field_name in (
+            "web_search_used",
+            "evidence_block_used",
+            "internet_verified",
+            "stale_fact_detected",
+        ):
+            if field_name in incoming:
+                existing[field_name] = bool(existing.get(field_name) or incoming.get(field_name))
+        for field_name in ("web_search_queries", "web_sources"):
+            incoming_values = incoming.get(field_name)
+            if not isinstance(incoming_values, list):
+                continue
+            merged_values: list[str] = []
+            seen_values: set[str] = set()
+            for value in [
+                *(existing.get(field_name) or []),
+                *incoming_values,
+            ]:
+                if not isinstance(value, str):
+                    continue
+                normalized = value.strip()
+                key = normalized.lower()
+                if not normalized or key in seen_values:
+                    continue
+                seen_values.add(key)
+                merged_values.append(normalized)
+            existing[field_name] = merged_values
+        if incoming.get("invalid_reason") and not existing.get("invalid_reason"):
+            existing["invalid_reason"] = incoming["invalid_reason"]
+
+    async def run_target(
+        provider_name: str,
+        model_name: str,
+    ) -> tuple[str, str, object]:
+        try:
+            return (
+                provider_name,
+                model_name,
+                await asyncio.to_thread(
+                    execute_bullpen_llm_target,
+                    context,
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    prepared_context=prepared_context,
+                ),
+            )
+        except Exception as exc:  # pragma: no cover - defensive guardrail
+            return provider_name, model_name, exc
+
+    target_results = await asyncio.gather(
+        *[
+            run_target(provider_name, model_name)
+            for provider_name, model_name in targets
+        ]
+    )
+
+    total_primary_request_count = 0
+    total_retry_request_count = 0
+    total_recovery_batch_count = 0
+    total_failed_event_count = 0
+    total_invalid_event_count = 0
+    total_blocked_event_count = 0
+    max_observed_concurrency = 0
+    runtime_output_targets: list[dict[str, Any]] = []
+
+    for provider_name, model_name, target_result in target_results:
+        if isinstance(target_result, Exception):
+            runtime_output_targets.append(
+                {
+                    "provider": provider_name,
+                    "model": model_name,
+                    "status": "failed",
+                    "error": str(target_result),
+                }
+            )
+            completed_at = utc_now_iso()
+            for market_id in outputs_by_market_id:
+                outputs_by_market_id[market_id].append(
+                    BullpenAutoLiveLlmOutput(
+                        provider=provider_name,
+                        model=model_name,
+                        error=str(target_result),
+                        completed_at=completed_at,
+                    )
+                )
+            continue
+
+        total_primary_request_count += target_result.primary_request_count
+        total_retry_request_count += target_result.retry_request_count
+        total_recovery_batch_count += target_result.recovery_batch_count
+        total_failed_event_count += target_result.failed_event_count
+        total_invalid_event_count += target_result.invalid_event_count
+        total_blocked_event_count += target_result.blocked_event_count
+        max_observed_concurrency = max(
+            max_observed_concurrency,
+            target_result.max_observed_concurrency,
+        )
+        runtime_output_targets.append(
+            {
+                "provider": provider_name,
+                "model": model_name,
+                "status": target_result.status,
+                "primary_request_count": target_result.primary_request_count,
+                "retry_request_count": target_result.retry_request_count,
+                "recovery_batch_count": target_result.recovery_batch_count,
+                "failed_event_count": target_result.failed_event_count,
+                "invalid_event_count": target_result.invalid_event_count,
+                "blocked_event_count": target_result.blocked_event_count,
+                "max_observed_concurrency": target_result.max_observed_concurrency,
+            }
+        )
+        target_question_runtime = target_result.runtime_metadata.get("question_runtime")
+        if isinstance(target_question_runtime, dict):
+            for question_id, incoming in target_question_runtime.items():
+                market_id = question_id_to_market_id.get(str(question_id))
+                if not market_id or not isinstance(incoming, dict):
+                    continue
+                merge_question_runtime_entry(market_id, incoming)
+
+        for market_id, event in prepared_event_by_market_id.items():
+            event_result = target_result.event_results.get(event.event_id)
+            if event_result is None:
+                outputs_by_market_id[market_id].append(
+                    BullpenAutoLiveLlmOutput(
+                        provider=provider_name,
+                        model=model_name,
+                        error="No terminal result was recorded for this event.",
+                        completed_at=utc_now_iso(),
+                    )
+                )
+                continue
+            outputs_by_market_id[market_id].append(
+                event_result_to_auto_live_output(event_result)
+            )
+
+    consensus_by_market_id = {
+        market_id: compute_llm_consensus(outputs)
+        for market_id, outputs in outputs_by_market_id.items()
+    }
+    runtime_outputs = {
+        "llm_execution_mode": execution_options.execution_mode,
+        "llm_events_per_prompt": execution_options.events_per_prompt,
+        "llm_prompt_template_hash": execution_options.prompt_template_hash,
+        "llm_target_count": len(targets),
+        "llm_targets": [
+            {"provider": provider_name, "model": model_name}
+            for provider_name, model_name in targets
+        ],
+        "llm_prompt_template_source": (
+            "server_saved"
+            if (settings.console_llm_prompt_template or "").strip()
+            else "default"
+        ),
+        "llm_primary_request_count": total_primary_request_count,
+        "llm_retry_request_count": total_retry_request_count,
+        "llm_recovery_batch_count": total_recovery_batch_count,
+        "llm_failed_event_count": total_failed_event_count,
+        "llm_invalid_event_count": total_invalid_event_count,
+        "llm_blocked_event_count": total_blocked_event_count,
+        "llm_max_observed_concurrency": max_observed_concurrency,
+        "llm_target_runs": runtime_output_targets,
+    }
+    return ConsoleStageTwoSharedReview(
+        prepared_payload_by_market_id=prepared_payload_by_market_id,
+        question_runtime_by_market_id=question_runtime_by_market_id,
+        outputs_by_market_id=outputs_by_market_id,
+        consensus_by_market_id=consensus_by_market_id,
+        execution_options=execution_options,
+        runtime_outputs=runtime_outputs,
     )
 
 
@@ -1079,6 +1422,21 @@ async def _hydrate_missing_active_position_markets(
     return next_market_by_slug, next_market_by_id
 
 
+def _serialize_dataclass_like(value: object) -> dict[str, object]:
+    if value is None:
+        return {}
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        return asdict(value)
+    except TypeError:
+        if hasattr(value, "__dict__"):
+            return dict(vars(value))
+        raise
+
+
 def _serialize_llm_review_context(
     context: dict[str, object],
 ) -> dict[str, object]:
@@ -1087,6 +1445,8 @@ def _serialize_llm_review_context(
     rules = context.get("rules")
     llm_outputs = context.get("llm_outputs") or []
     evidence_packet = context.get("evidence_packet")
+    prepared_question_payload = context.get("prepared_question_payload")
+    question_runtime = context.get("question_runtime")
 
     if not isinstance(market, ScannedMarket):
         raise TypeError("Expected ScannedMarket in LLM review context.")
@@ -1143,14 +1503,38 @@ def _serialize_llm_review_context(
         "source_kind": context.get("source_kind") or "candidate",
     }
     if evidence_packet is not None:
-        payload["evidence_packet"] = asdict(evidence_packet)
+        serialized_evidence_packet = _serialize_dataclass_like(evidence_packet)
+        payload["evidence_packet"] = serialized_evidence_packet
         if rules is not None:
             payload["llm_prompt"] = build_market_prompt(market, rules, evidence_packet)
         payload["llm_prompt_inputs"] = {
             "market": asdict(market),
             "rules": asdict(rules) if rules is not None else None,
-            "evidence_packet": asdict(evidence_packet),
+            "evidence_packet": serialized_evidence_packet,
         }
+    if isinstance(prepared_question_payload, PolymarketEventQuestionPayload):
+        payload["prepared_question_payload"] = prepared_question_payload.model_dump(
+            mode="json"
+        )
+        payload["preflight_evidence_block"] = (
+            prepared_question_payload.preflight_evidence_block
+        )
+        if evidence_packet is None:
+            payload["llm_prompt_inputs"] = {
+                "market": asdict(market),
+                "rules": asdict(rules) if rules is not None else None,
+                "question_payload": prepared_question_payload.model_dump(mode="json"),
+            }
+    elif isinstance(prepared_question_payload, dict):
+        payload["prepared_question_payload"] = prepared_question_payload
+        if evidence_packet is None:
+            payload["llm_prompt_inputs"] = {
+                "market": asdict(market),
+                "rules": asdict(rules) if rules is not None else None,
+                "question_payload": prepared_question_payload,
+            }
+    if isinstance(question_runtime, dict):
+        payload["question_runtime"] = question_runtime
     if context.get("position_key") is not None:
         payload["position_key"] = context["position_key"]
     if context.get("position_side") is not None:
@@ -3330,6 +3714,11 @@ class BullpenAutoLiveEngine:
 
         def _is_bullpen_wallet_position(position: ConsoleWalletPosition) -> bool:
             position_key = f"{position.market_id}::{position.side}"
+            if position.is_claimable:
+                # Resolved winning positions can disappear from the market scan
+                # before the wallet finishes redemption, so keep them eligible
+                # for Stage 3 even when hydration cannot recover the market row.
+                return True
             return (
                 position_key in persisted_positions_by_key
                 or bool(position.slug and position.slug in market_by_slug)
@@ -3493,6 +3882,26 @@ class BullpenAutoLiveEngine:
         self._report_progress(progress_callback, run, state)
         llm_stage_started_at = utc_now_iso()
         stage1_accepted_candidate_count = len(stage1_accepted_candidates)
+        console_llm_targets = resolve_auto_live_llm_targets(settings)
+        console_prompt_template = _console_stage_two_prompt_template(settings)
+        llm_execution_runtime_outputs: dict[str, object] = {}
+        llm_execution_stage_outputs: dict[str, object] = {
+            "llm_execution_mode": settings.llm_execution_mode,
+            "llm_events_per_prompt": settings.llm_events_per_prompt,
+            "llm_target_count": len(console_llm_targets),
+            "llm_targets": [
+                {"provider": provider_name, "model": model_name}
+                for provider_name, model_name in console_llm_targets
+            ],
+            "llm_prompt_template_hash": build_bullpen_prompt_template_hash(
+                console_prompt_template
+            ),
+            "llm_prompt_template_source": (
+                "server_saved"
+                if (settings.console_llm_prompt_template or "").strip()
+                else "default"
+            ),
+        }
 
         def report_llm_stage_progress(
             *,
@@ -3527,6 +3936,8 @@ class BullpenAutoLiveEngine:
                 stage_outputs["fresh_llm_candidates_skipped_by_cap"] = len(
                     skipped_fresh_llm_markets
                 )
+            stage_outputs.update(llm_execution_stage_outputs)
+            stage_outputs.update(llm_execution_runtime_outputs)
             if reused_existing_llm_outputs:
                 stage_outputs["reused_existing_llm_outputs"] = True
             if current_candidate_index is not None:
@@ -3741,6 +4152,308 @@ class BullpenAutoLiveEngine:
                 completed_items=0,
                 completed_at=None,
             )
+
+            if (
+                llm_candidate_count > 0
+                and not _should_use_legacy_console_stage_two_path()
+            ):
+                rules_by_market_id = {
+                    market.market_id: evaluate_market_rules(market, now=now)
+                    for llm_row in llm_markets
+                    if isinstance((market := llm_row.get("market")), ScannedMarket)
+                }
+                shared_review = await _execute_console_stage_two_shared_llm(
+                    llm_markets=llm_markets,
+                    rules_by_market_id=rules_by_market_id,
+                    settings=settings,
+                    now=now,
+                )
+                llm_execution_runtime_outputs.update(shared_review.runtime_outputs)
+
+                for llm_row in llm_markets:
+                    market = llm_row["market"]
+                    returns_per_day = llm_row["returns_per_day"]
+                    if not isinstance(market, ScannedMarket):
+                        continue
+
+                    rules = rules_by_market_id[market.market_id]
+                    rules_fail_reason = rules.fail_reason
+                    llm_outputs = shared_review.outputs_by_market_id.get(
+                        market.market_id,
+                        [],
+                    )
+                    llm_consensus = shared_review.consensus_by_market_id.get(
+                        market.market_id,
+                    ) or compute_llm_consensus(llm_outputs)
+                    prepared_question_payload = (
+                        shared_review.prepared_payload_by_market_id.get(market.market_id)
+                    )
+                    question_runtime = shared_review.question_runtime_by_market_id.get(
+                        market.market_id,
+                        {},
+                    )
+                    has_usable_llm_output = any(
+                        output.error is None
+                        and output.invalid_reason is None
+                        and output.llm_yes_odds is not None
+                        for output in llm_outputs
+                    )
+
+                    if llm_row["kind"] == "active_position":
+                        position = llm_row["position"]
+                        if not isinstance(position, ConsoleWalletPosition):
+                            continue
+                        selected_side, _ = _stronger_probability_side(
+                            yes_probability=llm_consensus.fair_yes_probability_pct,
+                            no_probability=llm_consensus.fair_no_probability_pct,
+                            minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                        )
+                        review_reason = (
+                            "LLM consensus completed for the active position."
+                            if has_usable_llm_output and not rules_fail_reason
+                            else (
+                                "LLM execution finished for the active position, but no usable odds were returned."
+                                if not has_usable_llm_output
+                                else (
+                                    "LLM consensus completed for the active position, but rule parsing "
+                                    f"remained incomplete because {rules_fail_reason.rstrip('.')}."
+                                )
+                            )
+                        )
+                        active_position_contexts.append(
+                            {
+                                "source_kind": "active_position",
+                                "position_key": f"{position.market_id}::{position.side}",
+                                "position_side": position.side,
+                                "market": market,
+                                "returns_per_day": returns_per_day,
+                                "rules": rules,
+                                "prepared_question_payload": prepared_question_payload,
+                                "question_runtime": question_runtime,
+                                "llm_outputs": llm_outputs,
+                                "llm_consensus": llm_consensus,
+                                "stage_results": [
+                                    build_stage_result(
+                                        stage_number=1,
+                                        status="pass",
+                                        reason="Live wallet position was included for LLM review.",
+                                        outputs={
+                                            "source_kind": "active_position",
+                                            "position_key": f"{position.market_id}::{position.side}",
+                                            "position_side": position.side,
+                                            "shares": position.shares,
+                                            "close_time": position.close_time,
+                                            "current_yes_odds": position.current_yes_odds,
+                                            "current_no_odds": position.current_no_odds,
+                                            "returns_per_day": returns_per_day,
+                                        },
+                                    ),
+                                    build_stage_result(
+                                        stage_number=2,
+                                        status="warning" if rules_fail_reason else "pass",
+                                        reason=(
+                                            "Resolution criteria and deadline were parsed successfully."
+                                            if not rules_fail_reason
+                                            else (
+                                                f"{rules_fail_reason} LLM consensus still ran so the active "
+                                                "position could be monitored."
+                                            )
+                                        ),
+                                        outputs={
+                                            "close_time": market.close_time,
+                                            "yes_definition": rules.yes_definition,
+                                            "deadline_et": rules.deadline_et,
+                                            "hours_remaining": rules.hours_remaining,
+                                            "rules_fail_reason": rules_fail_reason,
+                                        },
+                                        hard_block=False,
+                                    ),
+                                    build_stage_result(
+                                        stage_number=3,
+                                        status="warning"
+                                        if (
+                                            not has_usable_llm_output
+                                            or rules_fail_reason
+                                            or llm_consensus.disagreement_level
+                                            in {"Medium", "High"}
+                                        )
+                                        else "pass",
+                                        reason=review_reason,
+                                        outputs={
+                                            "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
+                                            "fair_no_probability_pct": llm_consensus.fair_no_probability_pct,
+                                            "disagreement_level": llm_consensus.disagreement_level,
+                                            "disagreement_category": llm_consensus.disagreement_category,
+                                            "adjudication_required": llm_consensus.adjudication_required,
+                                            "confidence": llm_consensus.confidence,
+                                            "evidence_status": llm_consensus.evidence_status,
+                                            "event_state": llm_consensus.event_state,
+                                            "rules_fail_reason": rules_fail_reason,
+                                        },
+                                    ),
+                                ],
+                                "qualified": False,
+                                "selected_side": selected_side,
+                                "reason": review_reason,
+                            }
+                        )
+                        continue
+
+                    selected_for_auto_invest = (
+                        market.market_id in selected_manual_candidate_id_set
+                    )
+                    selected_required = manual_console_rows_used and bool(
+                        selected_manual_candidate_id_set
+                    )
+                    fair_no = llm_consensus.fair_no_probability_pct
+                    selected_side, strongest_llm_odds = _stronger_probability_side(
+                        yes_probability=llm_consensus.fair_yes_probability_pct,
+                        no_probability=fair_no,
+                        minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                    )
+                    qualified_by_thresholds = bool(
+                        selected_side is not None and returns_per_day is not None
+                    )
+                    qualified = (
+                        has_usable_llm_output
+                        and qualified_by_thresholds
+                        and not rules_fail_reason
+                    )
+                    qualification_reason = (
+                        "Candidate qualifies for the Events to invest in table."
+                        if qualified
+                        else (
+                            "LLM execution finished, but no usable odds were returned for this candidate."
+                            if not has_usable_llm_output
+                            else (
+                                "Candidate did not pass the Events to invest in table thresholds."
+                                if not rules_fail_reason
+                                else (
+                                    "LLM consensus completed, but the market is still blocked because "
+                                    f"{rules_fail_reason.rstrip('.')}."
+                                )
+                            )
+                        )
+                    )
+                    if not qualified:
+                        _record_rejected_candidate(
+                            rejected_candidate_map,
+                            market=market,
+                            reason=qualification_reason,
+                        )
+                    candidate_contexts.append(
+                        {
+                            "source_kind": "candidate",
+                            "market": market,
+                            "returns_per_day": returns_per_day,
+                            "rules": rules,
+                            "prepared_question_payload": prepared_question_payload,
+                            "question_runtime": question_runtime,
+                            "llm_outputs": llm_outputs,
+                            "llm_consensus": llm_consensus,
+                            "stage_results": [
+                                build_stage_result(
+                                    stage_number=1,
+                                    status="pass",
+                                    reason="Candidate passed the console scan filters.",
+                                    outputs={
+                                        "question": market.question,
+                                        "market_url": market.market_url,
+                                        "slug": market.slug,
+                                        "close_time": market.close_time,
+                                        "current_no_odds": market.current_no_odds,
+                                        "returns_per_day": returns_per_day,
+                                    },
+                                ),
+                                build_stage_result(
+                                    stage_number=2,
+                                    status="warning" if rules_fail_reason else "pass",
+                                    reason=(
+                                        "Resolution criteria and deadline were parsed successfully."
+                                        if not rules_fail_reason
+                                        else (
+                                            f"{rules_fail_reason} LLM consensus still ran, but this event "
+                                            "stayed blocked from Stage 3 qualification."
+                                        )
+                                    ),
+                                    outputs={
+                                        "close_time": market.close_time,
+                                        "yes_definition": rules.yes_definition,
+                                        "deadline_et": rules.deadline_et,
+                                        "hours_remaining": rules.hours_remaining,
+                                        "rules_fail_reason": rules_fail_reason,
+                                        "selected": selected_for_auto_invest,
+                                        "selected_required": selected_required,
+                                    },
+                                    hard_block=False,
+                                ),
+                                build_stage_result(
+                                    stage_number=3,
+                                    status="warning"
+                                    if (
+                                        not has_usable_llm_output
+                                        or rules_fail_reason
+                                        or llm_consensus.disagreement_level
+                                        in {"Medium", "High"}
+                                    )
+                                    else "pass",
+                                    reason=(
+                                        "LLM consensus completed for the candidate market."
+                                        if has_usable_llm_output and not rules_fail_reason
+                                        else (
+                                            "LLM execution finished, but no usable odds were returned for this candidate."
+                                            if not has_usable_llm_output
+                                            else (
+                                                f"LLM consensus completed; rules parsing noted "
+                                                f"{rules_fail_reason.rstrip('.')} for review."
+                                            )
+                                        )
+                                    ),
+                                    outputs={
+                                        "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
+                                        "fair_no_probability_pct": fair_no,
+                                        "disagreement_level": llm_consensus.disagreement_level,
+                                        "adjudication_required": llm_consensus.adjudication_required,
+                                        "confidence": llm_consensus.confidence,
+                                        "evidence_status": llm_consensus.evidence_status,
+                                        "event_state": llm_consensus.event_state,
+                                        "rules_fail_reason": rules_fail_reason,
+                                    },
+                                ),
+                                build_stage_result(
+                                    stage_number=4,
+                                    status="pass" if qualified else "warning",
+                                    reason=qualification_reason,
+                                    outputs={
+                                        "returns_per_day": returns_per_day,
+                                        "selected_side": selected_side,
+                                        "strongest_llm_odds": strongest_llm_odds,
+                                        "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
+                                        "fair_no_probability_pct": fair_no,
+                                        "min_strongest_llm_odds": CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                                        "rules_fail_reason": rules_fail_reason,
+                                    },
+                                    hard_block=not qualified,
+                                ),
+                            ],
+                            "qualified": qualified,
+                            "selected_for_auto_invest": selected_for_auto_invest,
+                            "selected_side": selected_side,
+                            "reason": qualification_reason,
+                        }
+                    )
+
+                report_llm_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        "Stage 2 completed shared LLM execution for "
+                        f"{llm_candidate_count} Bullpen events."
+                    ),
+                    completed_items=llm_candidate_count,
+                    reviewed_contexts=[*active_position_contexts, *candidate_contexts],
+                    completed_at=None,
+                )
+                llm_markets = []
 
             for index, llm_row in enumerate(llm_markets, start=1):
                 market = llm_row["market"]
@@ -4078,6 +4791,8 @@ class BullpenAutoLiveEngine:
                     ],
                     "llm_reviewed_candidates": llm_stage_candidates,
                     "reused_existing_llm_outputs": manual_console_rows_have_reusable_llm,
+                    **llm_execution_stage_outputs,
+                    **llm_execution_runtime_outputs,
                 },
                 guardrails_checked=global_guardrails,
                 started_at=llm_stage_started_at if "llm_stage_started_at" in locals() else utc_now_iso(),

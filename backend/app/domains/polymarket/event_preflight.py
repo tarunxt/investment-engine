@@ -12,6 +12,7 @@ import httpx
 from app.domains.ai_providers.tools import web_search as web_search_tool
 from app.domains.ai_providers.web_metadata import dedupe_strings
 from app.domains.runs.schemas import (
+    PreparedPolymarketEventContext,
     PolymarketEventQuestionPayload,
     PolymarketEventRunContext,
 )
@@ -688,52 +689,51 @@ def detect_stale_fact(
     return False, None
 
 
-def build_polymarket_event_prompt_and_metadata(
+def prepare_polymarket_event_context(
     context: PolymarketEventRunContext,
-    *,
-    provider_name: str,
-) -> tuple[str, dict[str, Any]]:
+) -> PreparedPolymarketEventContext:
     if not context.evidence_options.require_fresh_internet_evidence:
-        payload = [question.model_dump(mode="json") for question in context.question_payload]
-        prompt = _build_prompt(context.prompt_template, payload)
-        return prompt, {
-            "kind": context.kind,
-            "require_fresh_internet_evidence": False,
-            "allow_evidence_grounded_non_web_models": context.evidence_options.allow_evidence_grounded_non_web_models,
-            "web_search_used": False,
-            "web_search_queries": [],
-            "web_sources": [],
-            "evidence_block_used": any(
-                bool((question.preflight_evidence_block or "").strip())
-                for question in context.question_payload
-            ),
-            "internet_verified": False,
-            "stale_fact_detected": False,
-            "invalid_reason": None,
-            "question_runtime": {
-                question.question_id: {
-                    "question_ref": question.question_ref,
-                    "question_id": question.question_id,
-                    "question": question.question,
-                    "web_search_used": False,
-                    "web_search_queries": [],
-                    "web_sources": [],
-                    "evidence_block_used": bool(
-                        (question.preflight_evidence_block or "").strip()
-                    ),
-                    "internet_verified": False,
-                    "stale_fact_detected": False,
-                    "invalid_reason": None,
-                    "preflight_evidence_block": question.preflight_evidence_block,
-                }
-                for question in context.question_payload
+        return PreparedPolymarketEventContext(
+            question_payload=[question.model_copy() for question in context.question_payload],
+            runtime_metadata={
+                "kind": context.kind,
+                "require_fresh_internet_evidence": False,
+                "allow_evidence_grounded_non_web_models": context.evidence_options.allow_evidence_grounded_non_web_models,
+                "web_search_used": False,
+                "web_search_queries": [],
+                "web_sources": [],
+                "evidence_block_used": any(
+                    bool((question.preflight_evidence_block or "").strip())
+                    for question in context.question_payload
+                ),
+                "internet_verified": False,
+                "stale_fact_detected": False,
+                "invalid_reason": None,
+                "question_runtime": {
+                    question.question_id: {
+                        "question_ref": question.question_ref,
+                        "question_id": question.question_id,
+                        "question": question.question,
+                        "web_search_used": False,
+                        "web_search_queries": [],
+                        "web_sources": [],
+                        "evidence_block_used": bool(
+                            (question.preflight_evidence_block or "").strip()
+                        ),
+                        "internet_verified": False,
+                        "stale_fact_detected": False,
+                        "invalid_reason": None,
+                        "preflight_evidence_block": question.preflight_evidence_block,
+                    }
+                    for question in context.question_payload
+                },
+                "warnings": [],
             },
-            "warnings": [],
-        }
+        )
 
     now_utc = datetime.now(UTC)
     now_et = now_utc.astimezone(ET_ZONE)
-    refreshed_payload: list[dict[str, Any]] = []
+    refreshed_payload: list[PolymarketEventQuestionPayload] = []
     question_runtime: dict[str, dict[str, Any]] = {}
     all_queries: list[str] = []
     all_sources: list[str] = []
@@ -823,6 +823,7 @@ def build_polymarket_event_prompt_and_metadata(
                     "current_time_et": _format_ts(now_et),
                     "market_url": refreshed_market_url,
                     "slug": refreshed_slug,
+                    "market_id": question.market_id or refreshed_slug,
                     "current_yes_odds": refreshed_yes_odds,
                     "current_no_odds": refreshed_no_odds,
                     "polymarket_rules": refreshed_rules,
@@ -830,7 +831,7 @@ def build_polymarket_event_prompt_and_metadata(
                     "polymarket_resolution_source": refreshed_resolution_source,
                     "preflight_evidence_block": verified_block,
                 }
-            ).model_dump(mode="json")
+            )
         )
         question_runtime[question.question_id] = {
             "question_ref": question.question_ref,
@@ -852,31 +853,59 @@ def build_polymarket_event_prompt_and_metadata(
             "preflight_evidence_block": verified_block,
         }
 
-    prompt = _build_prompt(context.prompt_template, refreshed_payload)
+    return PreparedPolymarketEventContext(
+        question_payload=refreshed_payload,
+        runtime_metadata={
+            "kind": context.kind,
+            "require_fresh_internet_evidence": context.evidence_options.require_fresh_internet_evidence,
+            "allow_evidence_grounded_non_web_models": context.evidence_options.allow_evidence_grounded_non_web_models,
+            "web_search_used": bool(all_queries or all_sources),
+            "web_search_queries": dedupe_strings(all_queries, limit=MAX_EVENT_SOURCES * 2),
+            "web_sources": dedupe_strings(all_sources, limit=MAX_EVENT_SOURCES * 2),
+            "evidence_block_used": bool(question_runtime),
+            "internet_verified": all(
+                bool(item.get("internet_verified")) for item in question_runtime.values()
+            )
+            if question_runtime
+            else False,
+            "stale_fact_detected": False,
+            "invalid_reason": None,
+            "question_runtime": question_runtime,
+            "warnings": dedupe_strings(all_warnings, limit=MAX_EVENT_SOURCES * 2),
+        },
+    )
+
+
+def build_polymarket_event_prompt_from_prepared_context(
+    context: PolymarketEventRunContext,
+    prepared_context: PreparedPolymarketEventContext,
+    *,
+    provider_name: str,
+) -> tuple[str, dict[str, Any]]:
+    prompt = _build_prompt(
+        context.prompt_template,
+        [question.model_dump(mode="json") for question in prepared_context.question_payload],
+    )
     if context.evidence_options.require_fresh_internet_evidence and provider_name == "openai":
         prompt = _prepend_openai_search_token(prompt)
     if context.evidence_options.require_fresh_internet_evidence:
         prompt = _append_required_search_instruction(prompt, provider_name)
+    return prompt, dict(prepared_context.runtime_metadata)
 
-    runtime_metadata = {
-        "kind": context.kind,
-        "require_fresh_internet_evidence": context.evidence_options.require_fresh_internet_evidence,
-        "allow_evidence_grounded_non_web_models": context.evidence_options.allow_evidence_grounded_non_web_models,
-        "web_search_used": bool(all_queries or all_sources),
-        "web_search_queries": dedupe_strings(all_queries, limit=MAX_EVENT_SOURCES * 2),
-        "web_sources": dedupe_strings(all_sources, limit=MAX_EVENT_SOURCES * 2),
-        "evidence_block_used": bool(question_runtime),
-        "internet_verified": all(
-            bool(item.get("internet_verified")) for item in question_runtime.values()
-        )
-        if question_runtime
-        else False,
-        "stale_fact_detected": False,
-        "invalid_reason": None,
-        "question_runtime": question_runtime,
-        "warnings": dedupe_strings(all_warnings, limit=MAX_EVENT_SOURCES * 2),
-    }
-    return prompt, runtime_metadata
+
+def build_polymarket_event_prompt_and_metadata(
+    context: PolymarketEventRunContext,
+    *,
+    provider_name: str,
+) -> tuple[str, dict[str, Any]]:
+    prepared_context = (
+        context.prepared_context if context.prepared_context is not None else prepare_polymarket_event_context(context)
+    )
+    return build_polymarket_event_prompt_from_prepared_context(
+        context,
+        prepared_context,
+        provider_name=provider_name,
+    )
 
 
 def finalize_polymarket_event_runtime_metadata(

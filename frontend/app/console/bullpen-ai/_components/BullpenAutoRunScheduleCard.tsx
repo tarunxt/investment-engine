@@ -43,6 +43,7 @@ import type {
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
   BullpenAutoLiveSummaryResponse,
+  BullpenLlmExecutionMode,
   ProviderModelTarget,
 } from "@/types/api";
 
@@ -167,6 +168,8 @@ type ScanCandidateDialogCandidate = ReturnType<
 
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
 const DEFAULT_CONSOLE_ORDER_USD = 5;
+const DEFAULT_LLM_EXECUTION_MODE: BullpenLlmExecutionMode = "chunked_parallel";
+const DEFAULT_LLM_EVENTS_PER_PROMPT = 20;
 const POLL_INTERVAL_MS = 4_000;
 const RUN_TIMER_INTERVAL_MS = 1_000;
 
@@ -306,6 +309,44 @@ function parseConsoleOrderAmount(value: string) {
   const rounded = Number(parsed.toFixed(2));
   if (rounded <= 0) return null;
   return rounded;
+}
+
+function parseLlmEventsPerPrompt(value: string) {
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) return null;
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 100) {
+    return null;
+  }
+  return parsed;
+}
+
+function formatLlmExecutionModeLabel(mode: BullpenLlmExecutionMode) {
+  return mode === "single_combined" ? "Single combined" : "Batched parallel";
+}
+
+function buildLlmExecutionSummary(
+  mode: BullpenLlmExecutionMode,
+  eventsPerPrompt: number,
+) {
+  if (mode === "single_combined") {
+    return "Stage 2 will use Single combined mode on the next run.";
+  }
+  return `Stage 2 will use Batched parallel with up to ${eventsPerPrompt} events per prompt on the next run.`;
+}
+
+function areProviderTargetsEqual(
+  left: ProviderModelTarget[],
+  right: ProviderModelTarget[],
+) {
+  if (left.length !== right.length) return false;
+  return left.every((target, index) => {
+    const other = right[index];
+    return (
+      other?.provider === target.provider &&
+      other?.model === target.model
+    );
+  });
 }
 
 function formatPriceCents(value: number | null) {
@@ -4299,6 +4340,18 @@ export function BullpenAutoRunScheduleCard({
   const [selectedLlmTargets, setSelectedLlmTargets] = useState<ProviderModelTarget[]>(
     [],
   );
+  const [llmExecutionMode, setLlmExecutionMode] =
+    useState<BullpenLlmExecutionMode>(DEFAULT_LLM_EXECUTION_MODE);
+  const [llmEventsPerPromptInput, setLlmEventsPerPromptInput] = useState(
+    String(DEFAULT_LLM_EVENTS_PER_PROMPT),
+  );
+  const [llmExecutionSettingsDirty, setLlmExecutionSettingsDirty] =
+    useState(false);
+  const [llmExecutionSettingsSaveBusy, setLlmExecutionSettingsSaveBusy] =
+    useState(false);
+  const [llmExecutionFieldError, setLlmExecutionFieldError] = useState<
+    string | null
+  >(null);
   const [selectedRunSummaryTile, setSelectedRunSummaryTile] = useState<
     "last" | "next"
   >("last");
@@ -4331,6 +4384,34 @@ export function BullpenAutoRunScheduleCard({
     });
   }, [consoleOrderDirty, savedConsoleOrderUsd]);
 
+  useEffect(() => {
+    const nextTargets = summary?.settings.console_llm_targets ?? [];
+    window.queueMicrotask(() => {
+      setSelectedLlmTargets((currentTargets) =>
+        areProviderTargetsEqual(currentTargets, nextTargets)
+          ? currentTargets
+          : nextTargets,
+      );
+    });
+  }, [summary?.settings.console_llm_targets]);
+
+  useEffect(() => {
+    if (llmExecutionSettingsDirty) return;
+    const nextExecutionMode =
+      summary?.settings.llm_execution_mode ?? DEFAULT_LLM_EXECUTION_MODE;
+    const nextEventsPerPrompt =
+      summary?.settings.llm_events_per_prompt ?? DEFAULT_LLM_EVENTS_PER_PROMPT;
+    window.queueMicrotask(() => {
+      setLlmExecutionMode(nextExecutionMode);
+      setLlmEventsPerPromptInput(String(nextEventsPerPrompt));
+      setLlmExecutionFieldError(null);
+    });
+  }, [
+    llmExecutionSettingsDirty,
+    summary?.settings.llm_execution_mode,
+    summary?.settings.llm_events_per_prompt,
+  ]);
+
   function resolveConsoleOrderAmount() {
     const parsedAmount = parseConsoleOrderAmount(consoleOrderInput);
     if (parsedAmount === null) {
@@ -4338,6 +4419,15 @@ export function BullpenAutoRunScheduleCard({
       return null;
     }
     return parsedAmount;
+  }
+
+  function resolveLlmEventsPerPromptValue() {
+    const parsedValue = parseLlmEventsPerPrompt(llmEventsPerPromptInput);
+    if (parsedValue === null) {
+      setLlmExecutionFieldError("Enter a whole number from 1 to 100.");
+      return null;
+    }
+    return parsedValue;
   }
 
   async function saveConsoleOrderAmount(options?: { silentSuccess?: boolean }) {
@@ -4388,10 +4478,57 @@ export function BullpenAutoRunScheduleCard({
     }
   }
 
+  async function handleSaveLlmExecutionSettings(options?: {
+    silentSuccess?: boolean;
+  }) {
+    const nextEventsPerPrompt = resolveLlmEventsPerPromptValue();
+    if (nextEventsPerPrompt === null) {
+      return false;
+    }
+
+    setError(null);
+    setLlmExecutionSettingsSaveBusy(true);
+    try {
+      await apiService.updateBullpenAutoLiveSettings({
+        llm_execution_mode: llmExecutionMode,
+        llm_events_per_prompt: nextEventsPerPrompt,
+      });
+      setLlmExecutionSettingsDirty(false);
+      setLlmEventsPerPromptInput(String(nextEventsPerPrompt));
+      setLlmExecutionFieldError(null);
+      await loadSummary({ preserveLoading: true });
+      if (!options?.silentSuccess) {
+        setNotice(
+          buildLlmExecutionSummary(llmExecutionMode, nextEventsPerPrompt),
+        );
+      }
+      return true;
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+      return false;
+    } finally {
+      setLlmExecutionSettingsSaveBusy(false);
+    }
+  }
+
   function handleConsoleOrderInputChange(event: ChangeEvent<HTMLInputElement>) {
     setConsoleOrderInput(event.target.value);
     setConsoleOrderDirty(true);
     setConsoleOrderFieldError(null);
+  }
+
+  function handleLlmEventsPerPromptInputChange(
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
+    setLlmEventsPerPromptInput(event.target.value);
+    setLlmExecutionSettingsDirty(true);
+    setLlmExecutionFieldError(null);
+  }
+
+  function handleLlmExecutionModeChange(nextMode: BullpenLlmExecutionMode) {
+    setLlmExecutionMode(nextMode);
+    setLlmExecutionSettingsDirty(true);
+    setLlmExecutionFieldError(null);
   }
 
   function handleConsoleOrderInputBlur() {
@@ -4516,6 +4653,24 @@ export function BullpenAutoRunScheduleCard({
     // handleSaveScheduleSettings intentionally reads the latest schedule input values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheduleSettingsDirty, scheduleStartInput, scheduleRefreshInput, action]);
+
+  useEffect(() => {
+    if (!llmExecutionSettingsDirty || action !== null) return;
+    const timeoutId = window.setTimeout(() => {
+      void handleSaveLlmExecutionSettings({ silentSuccess: true });
+    }, 600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+    // handleSaveLlmExecutionSettings intentionally reads the latest execution setting values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    llmExecutionSettingsDirty,
+    llmExecutionMode,
+    llmEventsPerPromptInput,
+    action,
+  ]);
 
   async function handleSaveScheduleSettings(options?: {
     silentSuccess?: boolean;
@@ -5869,19 +6024,80 @@ export function BullpenAutoRunScheduleCard({
 
                   <div className="mt-auto flex items-end justify-between gap-3 pt-3">
                     {stage.key === "llm" ? (
-                      <EventScanRunControls
-                        buttonClassName="hidden"
-                        buttonLabel="Run LLM"
-                        containerClassName="gap-0"
-                        selectionMode="multiple"
-                        defaultTargets={summary?.settings.console_llm_targets ?? null}
-                        onRunMultiple={() => undefined}
-                        onSelectionChange={handleSelectedLlmTargetsChange}
-                        pickerDialogLabel="Select LLMs"
-                        pickerIcon={<Bot className="h-5 w-5" />}
-                        pickerPlacement="center"
-                        pickerButtonClassName={`h-10 w-10 rounded-full bg-white/75 dark:bg-slate-950/80 ${toneClasses.badge}`}
-                      />
+                      <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
+                        <div className="min-w-[250px] flex-1 rounded-2xl border border-slate-200 bg-white/75 px-3 py-2.5 text-xs text-slate-600 shadow-sm">
+                          <p className="font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            Stage 2 execution
+                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {(
+                              [
+                                "chunked_parallel",
+                                "single_combined",
+                              ] as BullpenLlmExecutionMode[]
+                            ).map((mode) => {
+                              const isSelected = llmExecutionMode === mode;
+                              return (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  onClick={() => handleLlmExecutionModeChange(mode)}
+                                  disabled={llmExecutionSettingsSaveBusy}
+                                  className={`rounded-full border px-3 py-1.5 font-semibold transition ${
+                                    isSelected
+                                      ? "border-slate-900 bg-slate-900 text-white"
+                                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  {formatLlmExecutionModeLabel(mode)}
+                                </button>
+                              );
+                            })}
+                            <label className="ml-auto flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                              <span>Events / prompt</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={100}
+                                step={1}
+                                value={llmEventsPerPromptInput}
+                                onChange={handleLlmEventsPerPromptInputChange}
+                                disabled={llmExecutionSettingsSaveBusy}
+                                className="h-9 w-20 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400"
+                                aria-label="Stage 2 events per prompt"
+                              />
+                            </label>
+                          </div>
+                          <p
+                            className={`mt-2 leading-5 ${
+                              llmExecutionFieldError
+                                ? "text-rose-700"
+                                : "text-slate-500"
+                            }`}
+                          >
+                            {llmExecutionFieldError
+                              ? llmExecutionFieldError
+                              : llmExecutionSettingsSaveBusy
+                                ? "Saving Stage 2 settings..."
+                                : llmExecutionMode === "single_combined"
+                                  ? "Single combined uses one request for the full Stage 2 set. The events-per-prompt value is kept for Batched parallel."
+                                  : "Batched parallel is recommended. These settings apply to the next run."}
+                          </p>
+                        </div>
+                        <EventScanRunControls
+                          buttonClassName="hidden"
+                          buttonLabel="Run LLM"
+                          containerClassName="gap-0"
+                          selectionMode="multiple"
+                          defaultTargets={summary?.settings.console_llm_targets ?? null}
+                          onRunMultiple={() => undefined}
+                          onSelectionChange={handleSelectedLlmTargetsChange}
+                          pickerDialogLabel="Select LLMs"
+                          pickerIcon={<Bot className="h-5 w-5" />}
+                          pickerPlacement="center"
+                          pickerButtonClassName={`h-10 w-10 rounded-full bg-white/75 dark:bg-slate-950/80 ${toneClasses.badge}`}
+                        />
+                      </div>
                     ) : (
                       <span />
                     )}

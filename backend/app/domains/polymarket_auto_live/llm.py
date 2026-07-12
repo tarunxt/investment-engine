@@ -382,7 +382,11 @@ def _detect_rationale_odds_mismatch(
 def _build_model_signals(outputs: list[BullpenAutoLiveLlmOutput]) -> list[LlmModelSignal]:
     signals: list[LlmModelSignal] = []
     for output in outputs:
-        if output.error is not None or output.llm_yes_odds is None:
+        if (
+            output.error is not None
+            or output.invalid_reason is not None
+            or output.llm_yes_odds is None
+        ):
             continue
         mismatch, mismatch_reason, effective_weight = _detect_rationale_odds_mismatch(
             output.rationale,
@@ -586,7 +590,11 @@ def run_llm_consensus(
     evidence_packet: EvidencePacket,
     settings: BullpenAutoLiveSettings | None = None,
 ) -> tuple[list[BullpenAutoLiveLlmOutput], LlmConsensus]:
-    targets = resolve_auto_live_llm_targets(settings)
+    targets = (
+        resolve_auto_live_llm_targets(settings)
+        if settings is not None
+        else resolve_auto_live_llm_targets()
+    )
     outputs: list[BullpenAutoLiveLlmOutput] = []
     prompt = build_market_prompt(market, rules, evidence_packet)
 
@@ -613,6 +621,12 @@ def run_llm_consensus(
                 )
             )
 
+    return outputs, compute_llm_consensus(outputs)
+
+
+def compute_llm_consensus(
+    outputs: list[BullpenAutoLiveLlmOutput],
+) -> LlmConsensus:
     model_signals = _build_model_signals(outputs)
     usable_yes_values = [signal.yes_odds for signal in model_signals]
     provider_signals = _build_provider_signals(model_signals)
@@ -620,7 +634,7 @@ def run_llm_consensus(
     provider_error_rate = round(error_count / len(outputs), 4) if outputs else 1.0
 
     if not usable_yes_values:
-        return outputs, LlmConsensus(
+        return LlmConsensus(
             fair_yes_probability_pct=None,
             fair_no_probability_pct=None,
             average_yes=None,
@@ -758,7 +772,7 @@ def run_llm_consensus(
             if output.confidence is not None
             else None
             for output in outputs
-            if output.error is None
+            if output.error is None and output.invalid_reason is None
         ],
         tie_breaker="Low",
         rank_map=CONFIDENCE_RANK,
@@ -769,17 +783,21 @@ def run_llm_consensus(
             if output.evidence_status is not None
             else None
             for output in outputs
-            if output.error is None
+            if output.error is None and output.invalid_reason is None
         ],
         tie_breaker="Low",
         rank_map=EVIDENCE_RANK,
     )
     event_state = _pick_consensus_label(
-        [output.event_state for output in outputs if output.error is None],
+        [
+            output.event_state
+            for output in outputs
+            if output.error is None and output.invalid_reason is None
+        ],
         tie_breaker="conflicting",
     )
 
-    return outputs, LlmConsensus(
+    return LlmConsensus(
         fair_yes_probability_pct=fair_yes,
         fair_no_probability_pct=fair_no,
         average_yes=average_yes,
