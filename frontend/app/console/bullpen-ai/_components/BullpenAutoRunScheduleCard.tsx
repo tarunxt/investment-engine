@@ -4289,35 +4289,52 @@ function isUsableBullpenBalance(
 
 function BullpenPortfolioSnapshot({
   state,
+  lastUsableBalance,
   activePositions,
+  hasActivePositionsSnapshot,
   loading,
   refreshing,
   onRefresh,
 }: {
   state: PolymarketBotState | null;
+  lastUsableBalance: (PolymarketBotState["live"]["balance"] & { status: "ready" }) | null;
   activePositions: BullpenActivePositionView[];
+  hasActivePositionsSnapshot: boolean;
   loading: boolean;
   refreshing: boolean;
   onRefresh: () => void;
 }) {
-  const balance = state?.live.balance ?? null;
+  const liveBalance = state?.live.balance ?? null;
+  const balance = isUsableBullpenBalance(liveBalance) ? liveBalance : lastUsableBalance;
   const usableBalance = isUsableBullpenBalance(balance);
   const accountValue = usableBalance ? (balance.account_value_usd ?? null) : null;
   const cash = usableBalance ? (balance.available_balance_usd ?? null) : null;
   const pnl = usableBalance ? (balance.pnl_usd ?? null) : null;
   const upnl = usableBalance ? (balance.upnl_usd ?? null) : null;
   const openPositions = state?.open_positions ?? [];
-  const activePositionCount = activePositions.length || openPositions.length;
-  const activeInvested = activePositions.reduce((total, position) => {
-    const amount = typeof position.costBasis === "number" ? position.costBasis : 0;
-    return total + amount;
-  }, 0) || openPositions.reduce((total, position) => total + (position.cost_basis || 0), 0);
+  const activePositionCount = hasActivePositionsSnapshot
+    ? activePositions.length
+    : openPositions.filter((position) => position.shares > 0).length;
+  const activeInvested = hasActivePositionsSnapshot
+    ? activePositions.reduce((total, position) => {
+        const amount = typeof position.costBasis === "number" ? position.costBasis : 0;
+        return total + amount;
+      }, 0)
+    : openPositions.reduce((total, position) => total + (position.cost_basis || 0), 0);
   const claimableRows = (state?.live.redeemed_trades ?? []).filter((trade) => {
     const text = `${trade.status ?? ""} ${trade.detail ?? ""}`.toLowerCase();
     return text.includes("claim") || text.includes("redeem") || text.includes("pending");
   });
   const claimableAmount = claimableRows.reduce((total, trade) => total + Math.max(0, trade.amount || 0), 0);
   const lastRefresh = balance?.checked_at ? formatIstDateTime(balance.checked_at) : "—";
+  const balanceMessage = balance?.message ||
+    (loading && !balance
+      ? "Loading Bullpen portfolio snapshot..."
+      : balance
+        ? "Showing the last successful Bullpen balance refresh."
+        : "Bullpen balance has not refreshed yet.");
+  const pendingConfirmationsCount = state?.live.pending_confirmations.length ?? 0;
+  const balanceStatus = liveBalance?.status ?? balance?.status ?? "not loaded";
 
   const metricCards = [
     { label: "Total portfolio value", value: formatMoney(accountValue), detail: "Bullpen account value" },
@@ -4327,7 +4344,7 @@ function BullpenPortfolioSnapshot({
     { label: "PnL", value: formatMoney(pnl), detail: "Realized PnL" },
     { label: "uPnL", value: formatMoney(upnl), detail: "Unrealized PnL" },
     { label: "Live trades today", value: (state?.live.live_trades_today ?? 0).toLocaleString("en-IN"), detail: `Mode: ${state?.mode ?? "—"}` },
-    { label: "Pending confirmations", value: (state?.live.pending_confirmations.length ?? 0).toLocaleString("en-IN"), detail: state?.live.balance.status ?? "not loaded" },
+    { label: "Pending confirmations", value: pendingConfirmationsCount.toLocaleString("en-IN"), detail: balanceStatus },
   ];
 
   return (
@@ -4339,7 +4356,7 @@ function BullpenPortfolioSnapshot({
           </div>
           <h3 className="mt-3 text-2xl font-semibold tracking-tight">{formatMoney(accountValue)} total portfolio value</h3>
           <p className="mt-1 text-sm text-slate-300">Cash {formatMoney(cash)} · Active invested {formatMoney(activeInvested)} · Claimable {formatMoney(claimableAmount)}</p>
-          <p className="mt-1 text-xs text-slate-400">{balance?.message || (loading ? "Loading Bullpen portfolio snapshot..." : "Bullpen balance has not refreshed yet.")}</p>
+          <p className="mt-1 text-xs text-slate-400">{balanceMessage}</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <Button type="button" size="sm" variant="outline" onClick={onRefresh} disabled={refreshing} className="rounded-full border-sky-300/50 bg-sky-300/10 text-sky-100 hover:border-sky-200 hover:bg-sky-300/20 hover:text-white disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-400">
@@ -4438,6 +4455,7 @@ export function BullpenAutoRunScheduleCard({
     "last" | "next"
   >("last");
   const [portfolioState, setPortfolioState] = useState<PolymarketBotState | null>(null);
+  const [lastUsablePortfolioBalance, setLastUsablePortfolioBalance] = useState<(PolymarketBotState["live"]["balance"] & { status: "ready" }) | null>(null);
   const [portfolioLoading, setPortfolioLoading] = useState(true);
 
   const savedConsoleOrderUsd =
@@ -4676,6 +4694,9 @@ export function BullpenAutoRunScheduleCard({
         ? await apiService.polymarketLiveBalanceRefresh()
         : await apiService.polymarketState();
       setPortfolioState(nextState);
+      if (isUsableBullpenBalance(nextState.live.balance)) {
+        setLastUsablePortfolioBalance(nextState.live.balance);
+      }
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
@@ -5283,7 +5304,9 @@ export function BullpenAutoRunScheduleCard({
       <CardContent className="space-y-4 p-5">
         <BullpenPortfolioSnapshot
           state={portfolioState}
+          lastUsableBalance={lastUsablePortfolioBalance}
           activePositions={activePositions}
+          hasActivePositionsSnapshot={hasActivePositionsSnapshot}
           loading={portfolioLoading}
           refreshing={action === "balance"}
           onRefresh={() => void refreshPortfolioSnapshot(true)}
