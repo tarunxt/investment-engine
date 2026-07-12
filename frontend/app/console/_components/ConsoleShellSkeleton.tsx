@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import { FullLoader, SkeletonLoader } from "@/components/shared/Loader";
 
@@ -78,9 +78,16 @@ export function ConsoleShellSkeleton({
   children?: ReactNode;
   showDefaultContent?: boolean;
 }) {
+  const consoleSidebarStyle = {
+    "--console-sidebar-width": "22rem",
+  } as CSSProperties;
+
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-border bg-sidebar text-sidebar-foreground lg:block">
+    <div
+      className="min-h-screen bg-background text-foreground"
+      style={consoleSidebarStyle}
+    >
+      <div className="fixed inset-y-0 left-0 z-30 hidden border-r border-border bg-sidebar text-sidebar-foreground lg:block lg:w-[var(--console-sidebar-width)]">
         <div className="flex h-full flex-col">
           <div className="flex min-h-28 flex-col items-center justify-center gap-3 border-b border-sidebar-border px-5 py-5">
             <SkeletonLoader
@@ -115,7 +122,7 @@ export function ConsoleShellSkeleton({
         </div>
       </div>
 
-      <div className="lg:pl-64">
+      <div className="lg:pl-[var(--console-sidebar-width)]">
         <div className="fixed left-4 top-4 z-10 rounded-full border border-border bg-background p-2 shadow-sm lg:hidden">
           <SkeletonLoader
             variant="circular"

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
@@ -22,6 +22,9 @@ export default function DashboardLayout({
 }: {
     children: React.ReactNode;
 }) {
+    const consoleSidebarStyle = {
+        '--console-sidebar-width': '22rem',
+    } as CSSProperties;
     const brandExpansionLines = getBrandExpansionLines();
     const { user, logout, loading } = useAuth();
     const router = useRouter();
@@ -73,7 +76,7 @@ export default function DashboardLayout({
     }
 
     return (
-        <div className="min-h-screen bg-background text-foreground">
+        <div className="min-h-screen bg-background text-foreground" style={consoleSidebarStyle}>
             {/* Mobile sidebar backdrop */}
             {sidebarOpen && (
                 <div
@@ -84,7 +87,7 @@ export default function DashboardLayout({
 
             {/* Sidebar */}
             <div
-                className={`fixed inset-y-0 left-0 z-30 w-64 border-r border-border bg-sidebar text-sidebar-foreground shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                className={`fixed inset-y-0 left-0 z-30 w-[min(92vw,var(--console-sidebar-width))] border-r border-border bg-sidebar text-sidebar-foreground shadow-lg transform transition-transform duration-300 ease-in-out lg:w-[var(--console-sidebar-width)] lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
                     }`}
             >
                 <div className="flex flex-col h-full">
@@ -113,7 +116,7 @@ export default function DashboardLayout({
                     </div>
 
                     {/* Navigation */}
-                    <nav className="flex-1 py-4">
+                    <div className="flex-1 min-h-0 py-4">
                         <SidebarNavigation
                             pathname={pathname}
                             user={user}
@@ -121,13 +124,13 @@ export default function DashboardLayout({
                             onLogout={logout}
                             onNavigate={() => setSidebarOpen(false)}
                         />
-                    </nav>
+                    </div>
 
                 </div>
             </div>
 
             {/* Main content area */}
-            <div className="lg:pl-64">
+            <div className="lg:pl-[var(--console-sidebar-width)]">
                 <button
                     type="button"
                     onClick={() => setSidebarOpen(true)}

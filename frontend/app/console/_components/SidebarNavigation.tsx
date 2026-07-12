@@ -21,48 +21,38 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
-import type { IconType } from 'react-icons';
 import {
-    HiOutlineBookOpen,
-    HiOutlineBriefcase,
-    HiOutlineCube,
-    HiOutlineTrendingUp,
-    HiOutlineUser,
-    HiOutlineCog,
-    HiOutlineLogout,
-    HiOutlineChartBar,
-    HiOutlineViewGrid,
-} from 'react-icons/hi';
+    ChevronDown,
+    ChevronRight,
+    GripVertical,
+} from 'lucide-react';
+
 import type { User } from '@/hooks/useAuth';
-import { URLs } from '@/lib/urls';
+import { cn } from '@/lib/utils';
+
 import { SidebarThemeToggle } from './SidebarThemeToggle';
-
-type NavigationItem = {
-    id: string;
-    name: string;
-    href: string;
-    icon: IconType;
-};
-
-type NavigationSubGroup = {
-    id: string;
-    name: string;
-    href?: string;
-    icon: IconType;
-    children: NavigationItem[];
-};
-
-type NavigationChild = NavigationItem | NavigationSubGroup;
-
-type NavigationGroup = {
-    id: string;
-    name: string;
-    icon: IconType;
-    children: NavigationChild[];
-};
-
-type NavigationEntry = NavigationItem | NavigationGroup;
+import {
+    ACCOUNT_ACTIONS,
+    ACCOUNT_NAVIGATION,
+    SIDEBAR_SECTIONS,
+    type NavigationBadge as NavigationBadgeType,
+    type NavigationEntry,
+    type NavigationGroup,
+    type NavigationLeaf,
+    type NavigationSection,
+} from './sidebarNavigationConfig';
+import {
+    buildSidebarOrderStorageKey,
+    collectEntrySectionIds,
+    createDefaultSidebarOrder,
+    findActiveGroupIds,
+    isEntryActive,
+    isLeafActive,
+    isNavigationGroup,
+    reconcileSidebarOrder,
+    type SidebarOrder,
+    orderNavigationSections,
+} from './sidebarNavigationUtils';
 
 type SidebarNavigationProps = {
     pathname: string;
@@ -73,253 +63,115 @@ type SidebarNavigationProps = {
 };
 
 type SortableListeners = ReturnType<typeof useSortable>['listeners'];
-
-type SortableNavigationRowProps = {
-    isActive: (href: string) => boolean;
-    isPortfolioActive: boolean;
-    isPortfolioExpanded: boolean;
-    isReordering: boolean;
-    item: NavigationEntry;
-    onNavigate: () => void;
-    isTradingBotsActive: boolean;
-    isTradingBotsExpanded: boolean;
-    onTogglePortfolio: () => void;
-    onToggleTradingBots: () => void;
+type NavigationOrderSnapshot = {
+    raw: string | null;
+    value: SidebarOrder;
 };
 
-const TRADING_BOTS_OVERVIEW_HREF = URLs.routes.console.tradingBots();
+type DragHandleProps = {
+    attributes: DraggableAttributes;
+    listeners?: SortableListeners;
+    setActivatorNodeRef: (element: HTMLElement | null) => void;
+    label: string;
+};
 
-const PORTFOLIO_CHILDREN: NavigationChild[] = [
-    {
-        id: 'portfolio-zerodha',
-        name: 'Zerodha',
-        href: URLs.routes.console.zerodha(),
-        icon: HiOutlineTrendingUp,
-    },
-    {
-        id: 'portfolio-indmoney-us',
-        name: 'IndMoney US',
-        href: URLs.routes.console.indmoneyUs(),
-        icon: HiOutlineTrendingUp,
-    },
-    {
-        id: 'portfolio-trading-bots',
-        name: 'Trading Bots',
-        href: TRADING_BOTS_OVERVIEW_HREF,
-        icon: HiOutlineTrendingUp,
-        children: [
-            {
-                id: 'portfolio-polymarket-bot',
-                name: 'Bullpen x Polymarket',
-                href: URLs.routes.console.polymarketBot(),
-                icon: HiOutlineTrendingUp,
-            },
-            {
-                id: 'portfolio-polymarket-direct-bot',
-                name: 'Polymarket Direct',
-                href: URLs.routes.console.polymarketDirectBot(),
-                icon: HiOutlineTrendingUp,
-            },
-            {
-                id: 'portfolio-bullpen-ai',
-                name: 'Bullpen x AI',
-                href: URLs.routes.console.bullpenAi(),
-                icon: HiOutlineTrendingUp,
-            },
-            {
-                id: 'portfolio-bullpen-ai-auto-live',
-                name: 'Bullpen AI Auto-Live',
-                href: URLs.routes.console.bullpenAiAutoLive(),
-                icon: HiOutlineTrendingUp,
-            },
-        ],
-    },
-];
+type NavigationLeafLinkProps = {
+    leaf: NavigationLeaf;
+    active: boolean;
+    onNavigate: () => void;
+    depth?: 'root' | 'child';
+};
 
-const DEFAULT_NAVIGATION: NavigationEntry[] = [
-    {
-        id: 'dashboard',
-        name: 'Dashboard',
-        href: URLs.routes.console.dashboard(),
-        icon: HiOutlineViewGrid,
-    },
-    {
-        id: 'runs',
-        name: 'Runs',
-        href: URLs.routes.console.runs(),
-        icon: HiOutlineBriefcase,
-    },
-    {
-        id: 'prompts',
-        name: 'Prompts',
-        href: URLs.routes.console.prompts(),
-        icon: HiOutlineBookOpen,
-    },
-    {
-        id: 'portfolio',
-        name: 'Portfolio',
-        icon: HiOutlineTrendingUp,
-        children: PORTFOLIO_CHILDREN,
-    },
-    {
-        id: 'apis',
-        name: 'APIs',
-        href: URLs.routes.console.apis(),
-        icon: HiOutlineCube,
-    },
-    {
-        id: 'llms',
-        name: 'LLMs',
-        href: URLs.routes.console.llms(),
-        icon: HiOutlineCube,
-    },
-    {
-        id: 'technical-setups',
-        name: 'Technical Setups',
-        href: URLs.routes.console.technicalSetups(),
-        icon: HiOutlineChartBar,
-    },
-    {
-        id: 'google-sheets',
-        name: 'Google Sheets',
-        href: URLs.routes.console.googleSheets(),
-        icon: HiOutlineViewGrid,
-    },
-    {
-        id: 'profile',
-        name: 'Profile',
-        href: URLs.routes.profile.root(),
-        icon: HiOutlineUser,
-    },
-    {
-        id: 'platform-cost-drivers',
-        name: 'Platform Cost Drivers',
-        href: URLs.routes.profile.costDrivers(),
-        icon: HiOutlineChartBar,
-    },
-    {
-        id: 'settings',
-        name: 'Settings',
-        href: URLs.routes.profile.preferences(),
-        icon: HiOutlineCog,
-    },
-];
+type NavigationGroupRowProps = {
+    active: boolean;
+    expanded: boolean;
+    group: NavigationGroup;
+    onNavigate: () => void;
+    onToggle: () => void;
+    pathname: string;
+};
 
-const DEFAULT_NAVIGATION_ORDER = DEFAULT_NAVIGATION.map((item) => item.id);
-const DEFAULT_NAVIGATION_ID_SET = new Set(DEFAULT_NAVIGATION_ORDER);
-function isNavigationItem(item: NavigationChild): item is NavigationItem {
-    return !('children' in item);
-}
+type SortableNavigationEntryProps = {
+    entry: NavigationEntry;
+    expandedGroupIds: ReadonlySet<string>;
+    isReordering: boolean;
+    onNavigate: () => void;
+    onToggleGroup: (groupId: string) => void;
+    pathname: string;
+    sectionLabel: string;
+};
 
-function getNavigationChildRoutes(children: NavigationChild[]): string[] {
-    return children.flatMap((child) => (
-        isNavigationItem(child)
-            ? [child.href]
-            : [...(child.href ? [child.href] : []), ...getNavigationChildRoutes(child.children)]
-    ));
-}
+type SidebarSectionProps = {
+    expandedGroupIds: ReadonlySet<string>;
+    isReordering: boolean;
+    onNavigate: () => void;
+    onToggleGroup: (groupId: string) => void;
+    pathname: string;
+    section: NavigationSection;
+};
 
-const PORTFOLIO_ROUTES = getNavigationChildRoutes(PORTFOLIO_CHILDREN);
-const TRADING_BOTS_CHILDREN = PORTFOLIO_CHILDREN.find(
-    (child): child is NavigationSubGroup => child.id === 'portfolio-trading-bots' && !isNavigationItem(child),
-)?.children ?? [];
-const TRADING_BOTS_ROUTES = [
-    TRADING_BOTS_OVERVIEW_HREF,
-    ...getNavigationChildRoutes(TRADING_BOTS_CHILDREN),
-];
+type AccountFooterProps = {
+    onLogout?: () => Promise<void>;
+    onNavigate: () => void;
+    pathname: string;
+    user?: User | null;
+};
+
+type NavigationExpansionState = {
+    pathname: string;
+    expandedGroupId: string | null;
+};
+
 const SIDEBAR_ORDER_UPDATED_EVENT = 'investment-engine:sidebar-order-updated';
-const navigationOrderSnapshotCache = new Map<string, { raw: string | null; value: string[] }>();
+const navigationOrderSnapshotCache = new Map<string, NavigationOrderSnapshot>();
 
-function isNavigationGroup(item: NavigationEntry): item is NavigationGroup {
-    return 'children' in item;
+function cloneSidebarOrder(order: Record<string, readonly string[]>) {
+    return Object.fromEntries(
+        Object.entries(order).map(([sectionId, entryIds]) => [sectionId, [...entryIds]]),
+    );
 }
 
-function buildStorageKey(userId?: number | null) {
-    return `investment-engine:console-sidebar-order:user:${userId ?? 'guest'}:v1`;
-}
+function readNavigationOrder(
+    storageKey: string,
+    defaultOrder: Record<string, readonly string[]>,
+    entrySectionById: Readonly<Record<string, string>>,
+) {
+    const fallback = cloneSidebarOrder(defaultOrder);
 
-function reconcileNavigationOrder(order: string[]) {
-    const seen = new Set<string>();
-    const normalized: string[] = [];
-
-    for (const id of order) {
-        if (!DEFAULT_NAVIGATION_ID_SET.has(id) || seen.has(id)) {
-            continue;
-        }
-
-        normalized.push(id);
-        seen.add(id);
-    }
-
-    for (const id of DEFAULT_NAVIGATION_ORDER) {
-        if (seen.has(id)) {
-            continue;
-        }
-
-        const defaultIndex = DEFAULT_NAVIGATION_ORDER.indexOf(id);
-        const previousDefaultId = DEFAULT_NAVIGATION_ORDER
-            .slice(0, defaultIndex)
-            .findLast((candidateId) => seen.has(candidateId));
-
-        if (!previousDefaultId) {
-            normalized.unshift(id);
-        } else {
-            normalized.splice(normalized.indexOf(previousDefaultId) + 1, 0, id);
-        }
-
-        seen.add(id);
-    }
-
-    return normalized;
-}
-
-function orderNavigation(order: string[]) {
-    const orderedIds = reconcileNavigationOrder(order);
-    const entriesById = new Map(DEFAULT_NAVIGATION.map((item) => [item.id, item]));
-
-    return orderedIds
-        .map((id) => entriesById.get(id))
-        .filter((item): item is NavigationEntry => Boolean(item));
-}
-
-function readNavigationOrder(storageKey: string) {
     if (typeof window === 'undefined') {
-        return DEFAULT_NAVIGATION_ORDER;
+        return fallback;
     }
 
     const raw = window.localStorage.getItem(storageKey);
+    const cachedSnapshot = navigationOrderSnapshotCache.get(storageKey);
+
+    if (cachedSnapshot && cachedSnapshot.raw === raw) {
+        return cachedSnapshot.value;
+    }
+
+    if (!raw) {
+        navigationOrderSnapshotCache.set(storageKey, {
+            raw,
+            value: fallback,
+        });
+        return fallback;
+    }
 
     try {
-        const cachedSnapshot = navigationOrderSnapshotCache.get(storageKey);
-
-        if (cachedSnapshot && cachedSnapshot.raw === raw) {
-            return cachedSnapshot.value;
-        }
-
-        if (!raw) {
-            navigationOrderSnapshotCache.set(storageKey, {
-                raw,
-                value: DEFAULT_NAVIGATION_ORDER,
-            });
-            return DEFAULT_NAVIGATION_ORDER;
-        }
-
         const parsed = JSON.parse(raw);
+        const value = reconcileSidebarOrder(parsed, defaultOrder, entrySectionById);
 
-        if (Array.isArray(parsed)) {
-            const value = reconcileNavigationOrder(parsed.filter((entry): entry is string => typeof entry === 'string'));
-            navigationOrderSnapshotCache.set(storageKey, { raw, value });
-            return value;
-        }
+        navigationOrderSnapshotCache.set(storageKey, { raw, value });
+        return value;
     } catch (error) {
         console.warn('Failed to restore sidebar order:', error);
     }
 
     navigationOrderSnapshotCache.set(storageKey, {
         raw,
-        value: DEFAULT_NAVIGATION_ORDER,
+        value: fallback,
     });
-    return DEFAULT_NAVIGATION_ORDER;
+    return fallback;
 }
 
 function subscribeToNavigationOrder(storageKey: string, onStoreChange: () => void) {
@@ -350,22 +202,45 @@ function subscribeToNavigationOrder(storageKey: string, onStoreChange: () => voi
     };
 }
 
-function persistNavigationOrder(storageKey: string, order: string[]) {
+function persistNavigationOrder(
+    storageKey: string,
+    order: SidebarOrder,
+    defaultOrder: Record<string, readonly string[]>,
+    entrySectionById: Readonly<Record<string, string>>,
+) {
     if (typeof window === 'undefined') {
         return;
     }
 
-    const normalized = reconcileNavigationOrder(order);
+    const normalized = reconcileSidebarOrder(order, defaultOrder, entrySectionById);
     const raw = JSON.stringify(normalized);
     const cachedSnapshot = navigationOrderSnapshotCache.get(storageKey);
 
-    if (cachedSnapshot && cachedSnapshot.raw === raw) {
+    if (cachedSnapshot?.raw === raw) {
         return;
     }
 
     navigationOrderSnapshotCache.set(storageKey, { raw, value: normalized });
     window.localStorage.setItem(storageKey, raw);
     window.dispatchEvent(new CustomEvent(SIDEBAR_ORDER_UPDATED_EVENT, { detail: storageKey }));
+}
+
+function getUserInitials(user?: User | null) {
+    const name = user?.full_name?.trim();
+
+    if (name) {
+        const initials = name
+            .split(/\s+/)
+            .map((part) => part[0]?.toUpperCase() ?? '')
+            .join('')
+            .slice(0, 2);
+
+        if (initials) {
+            return initials;
+        }
+    }
+
+    return user?.username?.[0]?.toUpperCase() || 'U';
 }
 
 function ReorderIcon({ className }: { className?: string }) {
@@ -389,21 +264,43 @@ function ReorderIcon({ className }: { className?: string }) {
     );
 }
 
+function NavigationBadge({ badge }: { badge: NavigationBadgeType }) {
+    return (
+        <span
+            aria-hidden="true"
+            className={cn(
+                'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em]',
+                badge.variant === 'live'
+                    ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                    : '',
+                badge.variant === 'review'
+                    ? 'border-sidebar-border bg-sidebar text-muted-foreground'
+                    : '',
+                badge.variant === 'direct'
+                    ? 'hidden border-sidebar-border bg-transparent text-sidebar-foreground/70 min-[360px]:inline-flex'
+                    : '',
+                badge.variant === 'default'
+                    ? 'border-sidebar-border bg-sidebar-accent text-sidebar-foreground/75'
+                    : '',
+            )}
+        >
+            {badge.label}
+        </span>
+    );
+}
+
 function DragHandle({
     attributes,
     listeners,
     setActivatorNodeRef,
-}: {
-    attributes: DraggableAttributes;
-    listeners?: SortableListeners;
-    setActivatorNodeRef: (element: HTMLElement | null) => void;
-}) {
+    label,
+}: DragHandleProps) {
     return (
         <button
             ref={setActivatorNodeRef}
             type="button"
-            aria-label="Drag to reorder navigation item"
-            className="flex h-8 w-8 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:cursor-grabbing"
+            aria-label={label}
+            className="flex h-8 w-8 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar hover:text-sidebar-foreground active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
             {...attributes}
             {...listeners}
         >
@@ -412,18 +309,124 @@ function DragHandle({
     );
 }
 
-function SortableNavigationRow({
-    isActive,
-    isPortfolioActive,
-    isPortfolioExpanded,
-    isReordering,
-    item,
-    isTradingBotsActive,
-    isTradingBotsExpanded,
+function NavigationLeafLink({
+    leaf,
+    active,
     onNavigate,
-    onTogglePortfolio,
-    onToggleTradingBots,
-}: SortableNavigationRowProps) {
+    depth = 'root',
+}: NavigationLeafLinkProps) {
+    const isChild = depth === 'child';
+
+    return (
+        <Link
+            href={leaf.href}
+            onClick={onNavigate}
+            aria-current={active ? 'page' : undefined}
+            title={leaf.title ?? leaf.name}
+            className={cn(
+                'group flex w-full items-center rounded-xl text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
+                isChild
+                    ? 'gap-2 px-3 py-2.5'
+                    : 'gap-3 px-3.5 py-3',
+                active
+                    ? 'bg-sidebar-accent text-sidebar-primary ring-1 ring-sidebar-border'
+                    : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+            )}
+        >
+            {isChild ? (
+                <span
+                    aria-hidden="true"
+                    className={cn(
+                        'mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full',
+                        active ? 'bg-sidebar-primary' : 'bg-muted-foreground/45',
+                    )}
+                />
+            ) : leaf.icon ? (
+                <leaf.icon
+                    className={cn(
+                        'h-5 w-5 shrink-0',
+                        active ? 'text-sidebar-primary' : 'text-muted-foreground',
+                    )}
+                />
+            ) : null}
+            <span className="min-w-0 flex-1 truncate">{leaf.name}</span>
+            {leaf.badge ? <NavigationBadge badge={leaf.badge} /> : null}
+        </Link>
+    );
+}
+
+function NavigationGroupRow({
+    active,
+    expanded,
+    group,
+    onNavigate,
+    onToggle,
+    pathname,
+}: NavigationGroupRowProps) {
+    const childrenId = `${group.id}-children`;
+
+    return (
+        <div className="space-y-1.5">
+            <button
+                type="button"
+                aria-expanded={expanded}
+                aria-controls={childrenId}
+                title={group.name}
+                onClick={onToggle}
+                className={cn(
+                    'flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
+                    active
+                        ? 'bg-sidebar-accent text-sidebar-primary shadow-sm ring-1 ring-sidebar-border'
+                        : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                )}
+            >
+                <group.icon
+                    className={cn(
+                        'h-5 w-5 shrink-0',
+                        active ? 'text-sidebar-primary' : 'text-muted-foreground',
+                    )}
+                />
+                <span className="min-w-0 flex-1 truncate text-left">{group.name}</span>
+                <span className={cn('shrink-0 text-muted-foreground', active ? 'text-sidebar-primary' : '')}>
+                    {expanded ? (
+                        <ChevronDown className="h-4 w-4" />
+                    ) : (
+                        <ChevronRight className="h-4 w-4" />
+                    )}
+                </span>
+            </button>
+
+            {expanded ? (
+                <div
+                    id={childrenId}
+                    role="group"
+                    aria-label={group.name}
+                    className="ml-5 space-y-1 border-l border-sidebar-border/80 pl-3"
+                >
+                    {group.children.map((child) => (
+                        <NavigationLeafLink
+                            key={child.id}
+                            leaf={child}
+                            active={isLeafActive(pathname, child)}
+                            onNavigate={onNavigate}
+                            depth="child"
+                        />
+                    ))}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function SortableNavigationEntry({
+    entry,
+    expandedGroupIds,
+    isReordering,
+    onNavigate,
+    onToggleGroup,
+    pathname,
+    sectionLabel,
+}: SortableNavigationEntryProps) {
     const {
         attributes,
         isDragging,
@@ -433,21 +436,23 @@ function SortableNavigationRow({
         transform,
         transition,
     } = useSortable({
-        id: item.id,
+        id: entry.id,
         disabled: !isReordering,
     });
-
+    const active = isEntryActive(pathname, entry);
     const style = {
         transform: CSS.Transform.toString(transform),
         transition,
     };
 
-    const rowIsActive = isNavigationGroup(item) ? isPortfolioActive : isActive(item.href);
-    const rowClassName = `flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition ${rowIsActive
-        ? 'bg-sidebar-accent text-sidebar-primary shadow-sm ring-1 ring-sidebar-border'
-        : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-        } ${isDragging ? 'bg-sidebar shadow-lg ring-1 ring-sidebar-border' : ''} ${isReordering ? 'select-none' : ''}`;
-    const iconClassName = `h-5 w-5 shrink-0 ${rowIsActive ? 'text-sidebar-primary' : 'text-muted-foreground'}`;
+    const rowClassName = cn(
+        'flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition',
+        active
+            ? 'bg-sidebar-accent text-sidebar-primary shadow-sm ring-1 ring-sidebar-border'
+            : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+        isDragging ? 'bg-sidebar shadow-lg ring-1 ring-sidebar-border' : '',
+        isReordering ? 'select-none' : '',
+    );
 
     return (
         <div
@@ -455,135 +460,150 @@ function SortableNavigationRow({
             style={style}
             className={isDragging ? 'relative z-20' : undefined}
         >
-            {isNavigationGroup(item) ? (
-                <div className="space-y-1">
-                    {isReordering ? (
-                        <div className={rowClassName}>
-                            <DragHandle
-                                attributes={attributes}
-                                listeners={listeners}
-                                setActivatorNodeRef={setActivatorNodeRef}
-                            />
-                            <item.icon className={iconClassName} />
-                            <span className="truncate">{item.name}</span>
-                        </div>
-                    ) : (
-                        <button
-                            type="button"
-                            onClick={onTogglePortfolio}
-                            className={rowClassName}
-                        >
-                            <item.icon className={iconClassName} />
-                            <span className="truncate">{item.name}</span>
-                            <span className="ml-auto text-muted-foreground">
-                                {isPortfolioExpanded ? (
-                                    <ChevronDown className="h-4 w-4" />
-                                ) : (
-                                    <ChevronRight className="h-4 w-4" />
-                                )}
-                            </span>
-                        </button>
-                    )}
-
-                    {!isReordering && isPortfolioExpanded ? (
-                        <div className="ml-6 space-y-1 border-l border-sidebar-border pl-3">
-                            {item.children.map((child) => (
-                                isNavigationItem(child) ? (
-                                    <Link
-                                        key={child.id}
-                                        href={child.href}
-                                        onClick={onNavigate}
-                                        className={`flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isActive(child.href)
-                                            ? 'bg-sidebar-accent text-sidebar-primary'
-                                            : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                                            }`}
-                                    >
-                                        <span className={`mr-2 text-xs ${isActive(child.href) ? 'text-sidebar-primary' : 'text-muted-foreground/60'}`}>
-                                            •
-                                        </span>
-                                        {child.name}
-                                    </Link>
-                                ) : (
-                                    <div key={child.id} className="space-y-1">
-                                        <div
-                                            className={`flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isTradingBotsActive
-                                                ? 'bg-sidebar-accent text-sidebar-primary'
-                                                : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                                                }`}
-                                        >
-                                            <span className={`mr-2 text-xs ${isTradingBotsActive ? 'text-sidebar-primary' : 'text-muted-foreground/60'}`}>
-                                                •
-                                            </span>
-                                            {child.href ? (
-                                                <Link
-                                                    href={child.href}
-                                                    onClick={onNavigate}
-                                                    className="min-w-0 flex-1 truncate"
-                                                >
-                                                    {child.name}
-                                                </Link>
-                                            ) : (
-                                                <span className="min-w-0 flex-1 truncate">{child.name}</span>
-                                            )}
-                                            <button
-                                                type="button"
-                                                onClick={onToggleTradingBots}
-                                                className={`ml-2 rounded-md p-1 text-muted-foreground transition hover:bg-sidebar hover:text-sidebar-foreground ${isTradingBotsExpanded ? 'text-sidebar-primary' : ''}`}
-                                                aria-label={isTradingBotsExpanded ? 'Collapse trading bots' : 'Expand trading bots'}
-                                            >
-                                                {isTradingBotsExpanded ? (
-                                                    <ChevronDown className="h-4 w-4" />
-                                                ) : (
-                                                    <ChevronRight className="h-4 w-4" />
-                                                )}
-                                            </button>
-                                        </div>
-                                        {isTradingBotsExpanded ? (
-                                            <div className="ml-5 space-y-1 border-l border-sidebar-border pl-3">
-                                                {child.children.map((subChild) => (
-                                                    <Link
-                                                        key={subChild.id}
-                                                        href={subChild.href}
-                                                        onClick={onNavigate}
-                                                        className={`flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isActive(subChild.href)
-                                                            ? 'bg-sidebar-accent text-sidebar-primary'
-                                                            : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                                                            }`}
-                                                    >
-                                                        <span className={`mr-2 text-xs ${isActive(subChild.href) ? 'text-sidebar-primary' : 'text-muted-foreground/60'}`}>
-                                                            •
-                                                        </span>
-                                                        {subChild.name}
-                                                    </Link>
-                                                ))}
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                )
-                            ))}
-                        </div>
-                    ) : null}
-                </div>
-            ) : isReordering ? (
+            {isReordering ? (
                 <div className={rowClassName}>
                     <DragHandle
                         attributes={attributes}
                         listeners={listeners}
                         setActivatorNodeRef={setActivatorNodeRef}
+                        label={`Drag to reorder ${entry.name} within ${sectionLabel}`}
                     />
-                    <item.icon className={iconClassName} />
-                    <span className="truncate">{item.name}</span>
+                    {entry.icon ? (
+                        <entry.icon
+                            className={cn(
+                                'h-5 w-5 shrink-0',
+                                active ? 'text-sidebar-primary' : 'text-muted-foreground',
+                            )}
+                        />
+                    ) : null}
+                    <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 </div>
+            ) : isNavigationGroup(entry) ? (
+                <NavigationGroupRow
+                    active={active}
+                    expanded={expandedGroupIds.has(entry.id)}
+                    group={entry}
+                    onNavigate={onNavigate}
+                    onToggle={() => onToggleGroup(entry.id)}
+                    pathname={pathname}
+                />
             ) : (
-                <Link
-                    href={item.href}
-                    onClick={onNavigate}
-                    className={rowClassName}
-                >
-                    <item.icon className={iconClassName} />
-                    <span className="truncate">{item.name}</span>
-                </Link>
+                <NavigationLeafLink
+                    leaf={entry}
+                    active={active}
+                    onNavigate={onNavigate}
+                />
             )}
+        </div>
+    );
+}
+
+function SidebarSection({
+    expandedGroupIds,
+    isReordering,
+    onNavigate,
+    onToggleGroup,
+    pathname,
+    section,
+}: SidebarSectionProps) {
+    const headingId = `${section.id}-heading`;
+
+    return (
+        <section aria-labelledby={headingId} className="space-y-2">
+            <div className="px-1">
+                <h2
+                    id={headingId}
+                    className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground"
+                >
+                    {section.label}
+                </h2>
+            </div>
+            <SortableContext
+                items={section.entries.map((entry) => entry.id)}
+                strategy={verticalListSortingStrategy}
+            >
+                <div className="space-y-1.5">
+                    {section.entries.map((entry) => (
+                        <SortableNavigationEntry
+                            key={entry.id}
+                            entry={entry}
+                            expandedGroupIds={expandedGroupIds}
+                            isReordering={isReordering}
+                            onNavigate={onNavigate}
+                            onToggleGroup={onToggleGroup}
+                            pathname={pathname}
+                            sectionLabel={section.label}
+                        />
+                    ))}
+                </div>
+            </SortableContext>
+        </section>
+    );
+}
+
+function AccountFooter({
+    onLogout,
+    onNavigate,
+    pathname,
+    user,
+}: AccountFooterProps) {
+    const displayName = user?.full_name || user?.username || 'User';
+    const LogoutIcon = ACCOUNT_ACTIONS.logout.icon;
+
+    return (
+        <div className="border-t border-sidebar-border/80 pt-4">
+            <div className="px-3">
+                <h2 className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                    Account
+                </h2>
+            </div>
+
+            <div className="mx-3 mt-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 p-3">
+                <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-600 to-purple-600 text-sm font-semibold text-white">
+                        {getUserInitials(user)}
+                    </div>
+                    <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-sidebar-accent-foreground">
+                            {displayName}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                            {user?.email}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                    {ACCOUNT_NAVIGATION.map((item) => (
+                        <NavigationLeafLink
+                            key={item.id}
+                            leaf={item}
+                            active={isLeafActive(pathname, item)}
+                            onNavigate={onNavigate}
+                        />
+                    ))}
+                </div>
+            </div>
+
+            <div className="mt-3">
+                <SidebarThemeToggle />
+            </div>
+
+            {onLogout ? (
+                <div className="px-3 pt-3">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            onNavigate();
+                            void onLogout();
+                        }}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-sidebar-border bg-sidebar px-3 py-2.5 text-sm font-semibold text-sidebar-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                    >
+                        <LogoutIcon className="h-4 w-4" />
+                        {ACCOUNT_ACTIONS.logout.label}
+                    </button>
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -596,16 +616,35 @@ export function SidebarNavigation({
     onNavigate,
 }: SidebarNavigationProps) {
     const [isReordering, setIsReordering] = useState(false);
-    const [portfolioOpen, setPortfolioOpen] = useState(true);
-    const [tradingBotsOpen, setTradingBotsOpen] = useState(true);
-
-    const storageKey = useMemo(() => buildStorageKey(userId), [userId]);
+    const defaultOrder = useMemo(() => createDefaultSidebarOrder(SIDEBAR_SECTIONS), []);
+    const entrySectionById = useMemo(() => collectEntrySectionIds(SIDEBAR_SECTIONS), []);
+    const storageKey = useMemo(() => buildSidebarOrderStorageKey(userId), [userId]);
     const navigationOrder = useSyncExternalStore(
         (onStoreChange) => subscribeToNavigationOrder(storageKey, onStoreChange),
-        () => readNavigationOrder(storageKey),
-        () => DEFAULT_NAVIGATION_ORDER,
+        () => readNavigationOrder(storageKey, defaultOrder, entrySectionById),
+        () => cloneSidebarOrder(defaultOrder),
     );
-    const navigation = useMemo(() => orderNavigation(navigationOrder), [navigationOrder]);
+    const sections = useMemo(
+        () => orderNavigationSections(SIDEBAR_SECTIONS, navigationOrder),
+        [navigationOrder],
+    );
+    const activeGroupId = useMemo(
+        () => findActiveGroupIds(pathname, sections)[0] ?? null,
+        [pathname, sections],
+    );
+    const [navigationExpansion, setNavigationExpansion] = useState<NavigationExpansionState>(
+        () => ({
+            pathname,
+            expandedGroupId: activeGroupId,
+        }),
+    );
+    const expandedGroupId = navigationExpansion.pathname === pathname
+        ? navigationExpansion.expandedGroupId
+        : activeGroupId;
+    const expandedGroupIds = useMemo<ReadonlySet<string>>(
+        () => new Set(expandedGroupId ? [expandedGroupId] : []),
+        [expandedGroupId],
+    );
 
     const sensors = useSensors(
         useSensor(MouseSensor, {
@@ -624,46 +663,40 @@ export function SidebarNavigation({
         }),
     );
 
-    const isActive = (href: string) => {
-        if (href === URLs.routes.console.dashboard()) {
-            return pathname === href;
-        }
-
-        if (PORTFOLIO_ROUTES.includes(href)) {
-            return pathname === href || pathname.startsWith(`${href}/`);
-        }
-
-        return pathname.startsWith(href);
-    };
-
-    const isPortfolioActive = PORTFOLIO_ROUTES.some(
-        (href) => pathname === href || pathname.startsWith(`${href}/`),
-    );
-    const isPortfolioExpanded = !isReordering && (portfolioOpen || isPortfolioActive);
-    const isTradingBotsActive = TRADING_BOTS_ROUTES.some(
-        (href) => pathname === href || pathname.startsWith(`${href}/`),
-    );
-    const isTradingBotsExpanded = !isReordering && isPortfolioExpanded && (tradingBotsOpen || isTradingBotsActive);
-
     const handleDragEnd = ({ active, over }: DragEndEvent) => {
         if (!over || active.id === over.id) {
             return;
         }
 
-        const normalized = reconcileNavigationOrder(navigationOrder);
-        const oldIndex = normalized.indexOf(String(active.id));
-        const newIndex = normalized.indexOf(String(over.id));
+        const activeSectionId = entrySectionById[String(active.id)];
+        const overSectionId = entrySectionById[String(over.id)];
+
+        if (!activeSectionId || activeSectionId !== overSectionId) {
+            return;
+        }
+
+        const currentSectionOrder = navigationOrder[activeSectionId] ?? defaultOrder[activeSectionId];
+        const oldIndex = currentSectionOrder.indexOf(String(active.id));
+        const newIndex = currentSectionOrder.indexOf(String(over.id));
 
         if (oldIndex === -1 || newIndex === -1) {
             return;
         }
 
-        persistNavigationOrder(storageKey, arrayMove(normalized, oldIndex, newIndex));
+        persistNavigationOrder(
+            storageKey,
+            {
+                ...navigationOrder,
+                [activeSectionId]: arrayMove(currentSectionOrder, oldIndex, newIndex),
+            },
+            defaultOrder,
+            entrySectionById,
+        );
     };
 
     return (
-        <div className="space-y-3">
-            <div className="px-2">
+        <div className="flex h-full min-h-0 flex-col">
+            <div className="shrink-0 px-3">
                 <div className="flex items-center justify-between gap-3">
                     <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                         Navigation
@@ -672,8 +705,8 @@ export function SidebarNavigation({
                         {isReordering ? (
                             <button
                                 type="button"
-                                onClick={() => persistNavigationOrder(storageKey, DEFAULT_NAVIGATION_ORDER)}
-                                className="text-xs font-medium text-muted-foreground transition hover:text-sidebar-foreground"
+                                onClick={() => persistNavigationOrder(storageKey, cloneSidebarOrder(defaultOrder), defaultOrder, entrySectionById)}
+                                className="text-xs font-medium text-muted-foreground transition hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                             >
                                 Reset
                             </button>
@@ -682,10 +715,13 @@ export function SidebarNavigation({
                             type="button"
                             onClick={() => setIsReordering((current) => !current)}
                             aria-label={isReordering ? 'Finish reordering navigation' : 'Reorder navigation'}
-                            title={isReordering ? 'Done' : 'Reorder'}
-                            className={`rounded-full border border-sidebar-border text-xs font-semibold text-sidebar-foreground/75 transition hover:border-sidebar-ring hover:text-sidebar-foreground ${
-                                isReordering ? 'px-3 py-1' : 'flex h-9 w-9 items-center justify-center p-0'
-                            }`}
+                            title={isReordering ? 'Finish reordering navigation' : 'Reorder navigation'}
+                            className={cn(
+                                'rounded-full border border-sidebar-border text-xs font-semibold text-sidebar-foreground/75 transition hover:border-sidebar-ring hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
+                                isReordering
+                                    ? 'px-3 py-1.5'
+                                    : 'flex h-9 w-9 items-center justify-center p-0',
+                            )}
                         >
                             {isReordering ? 'Done' : <ReorderIcon className="h-5 w-5" />}
                         </button>
@@ -693,69 +729,49 @@ export function SidebarNavigation({
                 </div>
                 {isReordering ? (
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                        Drag the grip to move items up or down. Your order saves automatically for this account on this browser.
+                        Drag the handle to reorder items within each section. Your order saves automatically for this account on this browser.
                     </p>
                 ) : null}
             </div>
 
-            <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
-            >
-                <SortableContext
-                    items={navigation.map((item) => item.id)}
-                    strategy={verticalListSortingStrategy}
-                >
-                    <div className="space-y-1 overflow-y-auto px-2 pb-4">
-                        {navigation.map((item) => (
-                            <SortableNavigationRow
-                                key={item.id}
-                                item={item}
-                                isActive={isActive}
-                                isPortfolioActive={isPortfolioActive}
-                                isPortfolioExpanded={isPortfolioExpanded}
-                                isTradingBotsActive={isTradingBotsActive}
-                                isTradingBotsExpanded={isTradingBotsExpanded}
-                                isReordering={isReordering}
-                                onNavigate={onNavigate}
-                                onTogglePortfolio={() => setPortfolioOpen((current) => !current)}
-                                onToggleTradingBots={() => setTradingBotsOpen((current) => !current)}
-                            />
-                        ))}
-                    </div>
-                </SortableContext>
-            </DndContext>
-
-            <div className="mt-4">
-                <SidebarThemeToggle />
+            <div className="mt-4 min-h-0 flex-1">
+                <nav aria-label="Console navigation" className="h-full overflow-y-auto px-2 pb-4">
+                    <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handleDragEnd}
+                    >
+                        <div className="space-y-5 pr-1">
+                            {sections.map((section) => (
+                                <SidebarSection
+                                    key={section.id}
+                                    expandedGroupIds={expandedGroupIds}
+                                    isReordering={isReordering}
+                                    onNavigate={onNavigate}
+                                    onToggleGroup={(groupId) => {
+                                        setNavigationExpansion({
+                                            pathname,
+                                            expandedGroupId: expandedGroupId === groupId
+                                                ? null
+                                                : groupId,
+                                        });
+                                    }}
+                                    pathname={pathname}
+                                    section={section}
+                                />
+                            ))}
+                        </div>
+                    </DndContext>
+                </nav>
             </div>
 
-            <div className="mx-3 rounded-2xl border border-sidebar-border bg-sidebar-accent p-3">
-                <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-600 to-purple-600 text-sm font-semibold text-white">
-                        {user?.full_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'}
-                    </div>
-                    <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-sidebar-accent-foreground">
-                            {user?.full_name || user?.username || 'User'}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
-                    </div>
-                </div>
-                {onLogout ? (
-                    <button
-                        type="button"
-                        onClick={() => {
-                            onNavigate();
-                            void onLogout();
-                        }}
-                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-sidebar-border bg-sidebar px-3 py-2 text-sm font-semibold text-sidebar-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                    >
-                        <HiOutlineLogout className="h-4 w-4" />
-                        Sign out
-                    </button>
-                ) : null}
+            <div className="shrink-0 pb-2">
+                <AccountFooter
+                    onLogout={onLogout}
+                    onNavigate={onNavigate}
+                    pathname={pathname}
+                    user={user}
+                />
             </div>
         </div>
     );
