@@ -196,10 +196,12 @@ function buildQuestionFromAcceptedCandidate({
   candidate,
   existingQuestion,
   sourceUrl,
+  preserveExistingLlm = true,
 }: {
   candidate: unknown;
   existingQuestion: BullpenQuestionRow | null;
   sourceUrl: string;
+  preserveExistingLlm?: boolean;
 }) {
   const record = isRecord(candidate) ? candidate : {};
   const questionId =
@@ -245,18 +247,33 @@ function buildQuestionFromAcceptedCandidate({
     slug: readString(record.slug) ?? baseQuestion.slug,
     marketUrl: readString(record.market_url) ?? baseQuestion.marketUrl,
     rules: readString(record.rules) ?? baseQuestion.rules,
-    llmYesOdds: readNumber(record.llm_yes_odds) ?? baseQuestion.llmYesOdds,
-    llmNoOdds: readNumber(record.llm_no_odds) ?? baseQuestion.llmNoOdds,
+    llmYesOdds:
+      readNumber(record.llm_yes_odds) ??
+      (preserveExistingLlm ? baseQuestion.llmYesOdds : null),
+    llmNoOdds:
+      readNumber(record.llm_no_odds) ??
+      (preserveExistingLlm ? baseQuestion.llmNoOdds : null),
     llmDisagreementLevel:
       readDisagreementLevel(record.llm_disagreement_level) ??
-      baseQuestion.llmDisagreementLevel,
+      (preserveExistingLlm ? baseQuestion.llmDisagreementLevel : null),
     llmDisagreementCategory:
       readDisagreementCategory(record.llm_disagreement_category) ??
-      baseQuestion.llmDisagreementCategory,
+      (preserveExistingLlm ? baseQuestion.llmDisagreementCategory : null),
     adjudicationRequired:
-      readBoolean(record.adjudication_required) ?? baseQuestion.adjudicationRequired,
-    evidenceStatus: readString(record.evidence_status) ?? baseQuestion.evidenceStatus,
-    eventState: readString(record.event_state) ?? baseQuestion.eventState,
+      readBoolean(record.adjudication_required) ??
+      (preserveExistingLlm ? baseQuestion.adjudicationRequired : false),
+    evidenceStatus:
+      readString(record.evidence_status) ??
+      (preserveExistingLlm ? baseQuestion.evidenceStatus : null),
+    eventState:
+      readString(record.event_state) ??
+      (preserveExistingLlm ? baseQuestion.eventState : null),
+    llmNotes: preserveExistingLlm ? baseQuestion.llmNotes : null,
+    llmProvider: preserveExistingLlm ? baseQuestion.llmProvider : null,
+    llmModel: preserveExistingLlm ? baseQuestion.llmModel : null,
+    llmRunId: preserveExistingLlm ? baseQuestion.llmRunId : null,
+    llmCompletedAt: preserveExistingLlm ? baseQuestion.llmCompletedAt : null,
+    llmBreakdown: preserveExistingLlm ? baseQuestion.llmBreakdown : [],
     daysUntilClose:
       calculateDaysUntilClose(readString(record.close_time) ?? baseQuestion.closeTime) ??
       baseQuestion.daysUntilClose,
@@ -544,7 +561,8 @@ function applyDecisionOutputsToSnapshot({
           .map((entry) => entry.timestamp)
           .filter((timestamp): timestamp is string => Boolean(timestamp))
           .sort()
-          .at(-1) ?? question.llmCompletedAt,
+          .at(-1) ?? run.completed_at ?? question.llmCompletedAt,
+      llmRunId: run.id,
       llmBreakdown,
     });
 
@@ -637,6 +655,7 @@ function applyStage2OutputsToSnapshot({
       llmModel:
         llmBreakdown.length === 1 ? llmBreakdown[0]?.model ?? null : null,
       llmCompletedAt,
+      llmRunId: run.id,
       llmBreakdown,
       daysUntilClose:
         calculateDaysUntilClose(nextCloseTime) ?? question.daysUntilClose,
@@ -756,6 +775,7 @@ export function syncBullpenAutoRunSummarySnapshots({
         candidate,
         existingQuestion: questionId ? existingQuestionById.get(questionId) ?? null : null,
         sourceUrl,
+        preserveExistingLlm: false,
       });
     }),
   };
