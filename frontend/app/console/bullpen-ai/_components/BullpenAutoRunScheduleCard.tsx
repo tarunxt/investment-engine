@@ -133,6 +133,12 @@ type StageTwoLlmRunDialogState = {
   decisions: BullpenAutoLiveDecision[];
 };
 
+type StageTwoLlmRunBreakupKind =
+  | "active-positions"
+  | "new-opportunities"
+  | "overlap"
+  | "unique-llm-rows";
+
 type ScanCandidateDialogState = {
   mode: ScanCandidateDialogMode;
   scanCompletedAt: string | null;
@@ -3130,6 +3136,8 @@ function StageTwoLlmRunDetailsDialog({
   state: StageTwoLlmRunDialogState;
   onClose: () => void;
 }) {
+  const [breakupKind, setBreakupKind] =
+    useState<StageTwoLlmRunBreakupKind | null>(null);
   const stats = getStageTwoStats(state.stage, state.decisions);
   const overlapCount = Math.max(
     0,
@@ -3163,15 +3171,37 @@ function StageTwoLlmRunDetailsDialog({
         <div className="flex-1 overflow-auto px-6 py-5">
           <div className="grid gap-3 md:grid-cols-4">
             {[
-              ["Active positions", stats.activePositions],
-              ["New opportunities", stats.newOpportunities],
-              ["Overlap / de-duped", overlapCount],
-              ["Unique LLM rows", stats.llmRanOn],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
-                <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">{value}</p>
-              </div>
+              {
+                label: "Active positions",
+                value: stats.activePositions,
+                kind: "active-positions" as const,
+              },
+              {
+                label: "New opportunities",
+                value: stats.newOpportunities,
+                kind: "new-opportunities" as const,
+              },
+              {
+                label: "Overlap / de-duped",
+                value: overlapCount,
+                kind: "overlap" as const,
+              },
+              {
+                label: "Unique LLM rows",
+                value: stats.llmRanOn,
+                kind: "unique-llm-rows" as const,
+              },
+            ].map((tile) => (
+              <button
+                key={tile.kind}
+                type="button"
+                onClick={() => setBreakupKind(tile.kind)}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:-translate-y-0.5 hover:border-amber-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-amber-300"
+                aria-label={`Open breakup details for ${tile.label}`}
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{tile.label}</p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">{tile.value}</p>
+              </button>
             ))}
           </div>
           <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-950">
@@ -3199,6 +3229,134 @@ function StageTwoLlmRunDetailsDialog({
               <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                 Decision rows are still loading or have not been returned yet for this run.
               </p>
+            )}
+          </div>
+        </div>
+      </div>
+      {breakupKind ? (
+        <StageTwoLlmRunBreakupDialog
+          kind={breakupKind}
+          state={state}
+          stats={stats}
+          overlapCount={overlapCount}
+          onClose={() => setBreakupKind(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function getStageTwoBreakupMatchKey(value: string | null | undefined) {
+  return normalizeMatchKey(value);
+}
+
+function getStageTwoBreakupRows(
+  state: StageTwoLlmRunDialogState,
+  kind: StageTwoLlmRunBreakupKind,
+) {
+  const activeRows = state.stage.activePositionsFound.map((position) => ({
+    id: `active-${position.positionKey}`,
+    title: position.marketTitle,
+    summary: `${position.isClaimable ? "Claimable" : "Open"} ${position.side ?? "position"} position${position.exposureUsd !== null ? ` · ${formatMoney(position.exposureUsd)} exposure` : ""}.`,
+    detail: `Shares: ${formatShares(position.shares)} · Avg price: ${formatPriceCents(position.averagePriceCents)} · Current YES/NO: ${formatPriceCents(position.currentYesOdds)} / ${formatPriceCents(position.currentNoOdds)}${position.closeTime ? ` · Closes ${formatIstDateTime(position.closeTime)}` : ""}.`,
+    keys: [position.marketId, position.slug, position.marketUrl, position.marketTitle],
+  }));
+  const newRows = state.stage.scanCandidates.map((candidate) => ({
+    id: `candidate-${candidate.marketId ?? candidate.questionId ?? candidate.question}`,
+    title: candidate.question,
+    summary: `${candidate.forceInclude ? "Force-included" : "Passed filters"} opportunity${candidate.theme ? ` · ${candidate.theme}` : ""}.`,
+    detail: `Current YES/NO: ${formatPriceCents(candidate.currentYesOdds)} / ${formatPriceCents(candidate.currentNoOdds)} · Volume: ${formatMoney(candidate.volumeUsd)} · Liquidity: ${formatMoney(candidate.liquidityUsd)}${candidate.closeTime ? ` · Closes ${formatIstDateTime(candidate.closeTime)}` : ""}.`,
+    keys: [candidate.marketId, candidate.slug, candidate.marketUrl, candidate.question],
+  }));
+  const newRowKeySet = new Set(
+    newRows.flatMap((row) => row.keys.map(getStageTwoBreakupMatchKey)).filter((key): key is string => Boolean(key)),
+  );
+  const overlappingActiveRows = activeRows.filter((row) =>
+    row.keys.some((key) => {
+      const normalized = getStageTwoBreakupMatchKey(key);
+      return normalized ? newRowKeySet.has(normalized) : false;
+    }),
+  );
+
+  if (kind === "active-positions") return activeRows;
+  if (kind === "new-opportunities") return newRows;
+  if (kind === "overlap") return overlappingActiveRows;
+
+  const decisionRows = state.decisions.map((decision) => ({
+    id: `decision-${decision.id}`,
+    title: decision.market_title,
+    summary: decision.summary || decision.reason || `${decision.decision} · ${decision.risk_status}`,
+    detail: decision.rationale || decision.reason || "No LLM rationale returned for this row yet.",
+    keys: [decision.market_id, decision.slug ?? null, decision.market_url ?? null, decision.market_title],
+  }));
+  return decisionRows.length ? decisionRows : [...activeRows, ...newRows].slice(0, state.stage.outputs.llm_candidate_count ? Number(state.stage.outputs.llm_candidate_count) : undefined);
+}
+
+function StageTwoLlmRunBreakupDialog({
+  kind,
+  state,
+  stats,
+  overlapCount,
+  onClose,
+}: {
+  kind: StageTwoLlmRunBreakupKind;
+  state: StageTwoLlmRunDialogState;
+  stats: ReturnType<typeof getStageTwoStats>;
+  overlapCount: number;
+  onClose: () => void;
+}) {
+  const config = {
+    "active-positions": {
+      title: "Active positions",
+      count: stats.activePositions,
+      summary: "Open wallet position rows that Stage 2 considers alongside fresh scan opportunities.",
+    },
+    "new-opportunities": {
+      title: "New opportunities",
+      count: stats.newOpportunities,
+      summary: "Fresh Stage 1 scan candidates that passed filters and were eligible for Stage 2 review.",
+    },
+    overlap: {
+      title: "Overlap / de-duped",
+      count: overlapCount,
+      summary: "Rows that appear in both active positions and new opportunities and are counted once for the LLM.",
+    },
+    "unique-llm-rows": {
+      title: "Unique LLM rows",
+      count: stats.llmRanOn,
+      summary: "The de-duplicated Stage 2 review set after active positions and new opportunities are unioned.",
+    },
+  }[kind];
+  const rows = getStageTwoBreakupRows(state, kind);
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Tile breakup</p>
+            <h3 className="mt-1 text-xl font-semibold text-slate-950">{config.title}: {config.count}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{config.summary}</p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close tile breakup details">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-950">
+            <p className="font-semibold">Summary</p>
+            <p className="mt-1 leading-6">{config.summary} Displayed count: <span className="font-semibold tabular-nums">{config.count}</span>. Rows available below: <span className="font-semibold tabular-nums">{rows.length}</span>.</p>
+          </div>
+          <div className="mt-5 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Indepth details</p>
+            {rows.length ? rows.map((row) => (
+              <article key={row.id} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                <h4 className="font-semibold text-slate-950">{row.title}</h4>
+                <p className="mt-2 leading-6"><span className="font-semibold">Summary:</span> {row.summary}</p>
+                <p className="mt-2 leading-6"><span className="font-semibold">Indepth details:</span> {row.detail}</p>
+              </article>
+            )) : (
+              <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No row-level details have been returned for this tile yet.</p>
             )}
           </div>
         </div>
