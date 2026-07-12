@@ -1,4 +1,7 @@
-import type { BullpenAutoLiveRun, BullpenAutoLiveStageResult } from "@/types/api";
+import type {
+  BullpenAutoLiveRun,
+  BullpenAutoLiveStageResult,
+} from "@/types/api";
 
 type WorkflowTone = "yellow" | "green" | "blue";
 type WorkflowState = "current" | "finished" | "queued";
@@ -65,8 +68,13 @@ export type BullpenAutoRunWorkflowView = {
 export function isBullpenAutoRunWorkflowSettled(
   workflowView: BullpenAutoRunWorkflowView,
 ) {
-  const hasQueuedStage = workflowView.stages.some((stage) => stage.state === "queued");
-  return !hasQueuedStage && workflowView.stages.every((stage) => stage.state === "finished");
+  const hasQueuedStage = workflowView.stages.some(
+    (stage) => stage.state === "queued",
+  );
+  return (
+    !hasQueuedStage &&
+    workflowView.stages.every((stage) => stage.state === "finished")
+  );
 }
 
 type WorkflowDefinition = {
@@ -96,13 +104,58 @@ const WORKFLOW_DEFINITIONS: WorkflowDefinition[] = [
     key: "invest",
     title: "Stage 3 · Exit and Invest",
     subtitle: "",
-    defaultDetail: "Waiting for Stage 2 to finish before exit and investment planning starts.",
+    defaultDetail:
+      "Waiting for Stage 2 to finish before exit and investment planning starts.",
     defaultItemLabel: "rows",
   },
 ];
 
 function readString(value: unknown) {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+const RAW_PAYLOAD_START_PATTERN =
+  /\s+(?=\{["']?(?:action|fail_count|results|status)["']?\s*:)/i;
+
+function formatBullpenRunSummaryForMonitor(
+  summary: string | null | undefined,
+  fallback: string,
+) {
+  const text = readString(summary);
+  if (!text) return fallback;
+
+  const [humanPrefix] = text.split(RAW_PAYLOAD_START_PATTERN, 1);
+  const concise = readString(humanPrefix) ?? text;
+  const rejectedCount = (
+    text.match(/relayer rejected redeem submission/gi) ?? []
+  ).length;
+  const rateLimitedCount = (text.match(/429 Too Many Requests/gi) ?? []).length;
+  const payoutPreflightCount = (text.match(/payout preflight failed/gi) ?? [])
+    .length;
+  const notes: string[] = [];
+
+  if (rejectedCount > 0) {
+    notes.push(
+      `${rejectedCount} redeem submission${rejectedCount === 1 ? "" : "s"} rejected by the relayer`,
+    );
+  }
+  if (payoutPreflightCount > 0) {
+    notes.push(
+      `${payoutPreflightCount} payout preflight check${payoutPreflightCount === 1 ? "" : "s"} failed`,
+    );
+  }
+  if (rateLimitedCount > 0) {
+    notes.push(`Polygon RPC returned HTTP 429 rate-limit responses`);
+  }
+
+  const suffix = notes.length > 0 ? ` Details: ${notes.join("; ")}.` : "";
+  const combined = `${concise.replace(/\s+/g, " ").trim()}${suffix}`;
+
+  return combined.length > 360
+    ? `${combined.slice(0, 357).trimEnd()}…`
+    : combined;
 }
 
 function appendStageDetail(detail: string, suffix: string) {
@@ -142,7 +195,9 @@ function buildStageDetail(
     );
   }
   if (workflowDefinition.key === "llm") {
-    const executionMode = readLlmExecutionMode(stage?.outputs?.llm_execution_mode);
+    const executionMode = readLlmExecutionMode(
+      stage?.outputs?.llm_execution_mode,
+    );
     const eventsPerPrompt = readNumber(stage?.outputs?.llm_events_per_prompt);
     const executionDetail =
       executionMode === "single_combined"
@@ -155,8 +210,12 @@ function buildStageDetail(
     }
   }
   if (workflowDefinition.key === "invest") {
-    const executionGateReason = readString(stage?.outputs?.execution_gate_reason);
-    const executionModeReason = readString(stage?.outputs?.execution_mode_reason);
+    const executionGateReason = readString(
+      stage?.outputs?.execution_gate_reason,
+    );
+    const executionModeReason = readString(
+      stage?.outputs?.execution_mode_reason,
+    );
     const investDetail = executionGateReason
       ? `Execution gate: ${executionGateReason}`
       : executionModeReason
@@ -258,13 +317,17 @@ function isInvestStageEffectivelyCompleted(
   const submittedOrders = readNumber(stage?.outputs?.orders_submitted) ?? 0;
   if (plannedOrders < 1 || submittedOrders < plannedOrders) return false;
 
-  const plannedDecisionRows = readInvestStageDecisionRows(stage).filter((decision) => {
-    if (!isRecord(decision.order_plan)) return false;
-    return typeof decision.order_plan.status === "string";
-  });
+  const plannedDecisionRows = readInvestStageDecisionRows(stage).filter(
+    (decision) => {
+      if (!isRecord(decision.order_plan)) return false;
+      return typeof decision.order_plan.status === "string";
+    },
+  );
   if (plannedDecisionRows.length < plannedOrders) return false;
 
-  return plannedDecisionRows.every((decision) => decision.order_plan?.status === "submitted");
+  return plannedDecisionRows.every(
+    (decision) => decision.order_plan?.status === "submitted",
+  );
 }
 
 function buildDerivedInputs(
@@ -279,7 +342,8 @@ function buildDerivedInputs(
       derivedInputs.accepted_candidates = previousOutputs.accepted_candidates;
     }
     if (Array.isArray(previousOutputs.active_positions_found)) {
-      derivedInputs.active_positions_found = previousOutputs.active_positions_found;
+      derivedInputs.active_positions_found =
+        previousOutputs.active_positions_found;
     }
     return derivedInputs;
   }
@@ -321,7 +385,10 @@ function getItemLabel(
   stage: BullpenAutoLiveStageResult | null,
   workflowDefinition: WorkflowDefinition,
 ) {
-  return readString(stage?.outputs?.item_label) ?? workflowDefinition.defaultItemLabel;
+  return (
+    readString(stage?.outputs?.item_label) ??
+    workflowDefinition.defaultItemLabel
+  );
 }
 
 function getProgressItemLabel(
@@ -332,7 +399,9 @@ function getProgressItemLabel(
   if (workflowDefinition.key !== "invest") return defaultLabel;
 
   const activePositionRows = readNumber(stage?.outputs?.active_position_rows);
-  const candidateDecisionRows = readNumber(stage?.outputs?.candidate_decision_rows);
+  const candidateDecisionRows = readNumber(
+    stage?.outputs?.candidate_decision_rows,
+  );
   if (activePositionRows === null && candidateDecisionRows === null) {
     return defaultLabel;
   }
@@ -366,7 +435,9 @@ function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
         forceInclude: readBoolean(record.force_include),
       } satisfies BullpenAutoRunScanCandidateView;
     })
-    .filter((candidate): candidate is BullpenAutoRunScanCandidateView => Boolean(candidate));
+    .filter((candidate): candidate is BullpenAutoRunScanCandidateView =>
+      Boolean(candidate),
+    );
 }
 
 function readActivePositionsFound(stage: BullpenAutoLiveStageResult | null) {
@@ -378,7 +449,8 @@ function readActivePositionsFound(stage: BullpenAutoLiveStageResult | null) {
       if (!position || typeof position !== "object") return null;
       const record = position as Record<string, unknown>;
       const marketId = readString(record.market_id);
-      const marketTitle = readString(record.market_title) ?? readString(record.question);
+      const marketTitle =
+        readString(record.market_title) ?? readString(record.question);
       if (!marketId || !marketTitle) return null;
 
       return {
@@ -398,10 +470,13 @@ function readActivePositionsFound(stage: BullpenAutoLiveStageResult | null) {
         currentNoOdds: readNumber(record.current_no_odds),
         closeTime: readString(record.close_time),
         conditionId: readString(record.condition_id),
-        isClaimable: readBoolean(record.is_claimable) || readBoolean(record.isClaimable),
+        isClaimable:
+          readBoolean(record.is_claimable) || readBoolean(record.isClaimable),
       } satisfies BullpenAutoRunActivePositionView;
     })
-    .filter((position): position is BullpenAutoRunActivePositionView => Boolean(position));
+    .filter((position): position is BullpenAutoRunActivePositionView =>
+      Boolean(position),
+    );
 }
 
 function clampPercent(value: number) {
@@ -414,7 +489,8 @@ export function buildBullpenAutoRunWorkflowView(
   pendingRunStartedAt?: string | null,
 ): BullpenAutoRunWorkflowView {
   const normalizedRun = run ?? null;
-  const runStatus = normalizedRun?.status ?? (pendingRunId ? "running" : "idle");
+  const runStatus =
+    normalizedRun?.status ?? (pendingRunId ? "running" : "idle");
   const stageResults = WORKFLOW_DEFINITIONS.map((definition, index) =>
     findWorkflowStageResult(normalizedRun, definition, index + 1),
   );
@@ -447,7 +523,9 @@ export function buildBullpenAutoRunWorkflowView(
       state = "finished";
     } else if (
       index === currentStageIndex &&
-      (runStatus === "running" || runStatus === "failed" || runStatus === "skipped")
+      (runStatus === "running" ||
+        runStatus === "failed" ||
+        runStatus === "skipped")
     ) {
       state = "current";
     } else if (index < completedStageCount) {
@@ -460,7 +538,9 @@ export function buildBullpenAutoRunWorkflowView(
       state === "finished" ? "green" : state === "current" ? "yellow" : "blue";
     const shouldShowStageData = state !== "queued";
     const stageInputs = readWorkflowInputs(definition, stage, previousStage);
-    const completedItems = shouldShowStageData ? getCompletedItems(stage) : null;
+    const completedItems = shouldShowStageData
+      ? getCompletedItems(stage)
+      : null;
     const totalItems = shouldShowStageData ? getTotalItems(stage) : null;
     const itemLabel = shouldShowStageData
       ? getProgressItemLabel(stage, definition)
@@ -475,40 +555,40 @@ export function buildBullpenAutoRunWorkflowView(
             : 0;
     const llmExecutionMode =
       definition.key === "llm"
-        ? readString(stage?.outputs?.llm_execution_mode) ??
-          readString(stage?.inputs?.llm_execution_mode)
+        ? (readString(stage?.outputs?.llm_execution_mode) ??
+          readString(stage?.inputs?.llm_execution_mode))
         : null;
-    const progressLabel =
-      !shouldShowStageData
-        ? "Queued"
-        : definition.key === "llm" && llmExecutionMode === "single_combined"
+    const progressLabel = !shouldShowStageData
+      ? "Queued"
+      : definition.key === "llm" && llmExecutionMode === "single_combined"
         ? state === "finished"
           ? "Single combined finished"
           : state === "current"
             ? "Single combined in progress"
             : "Single combined"
         : totalItems !== null
-        ? `${completedItems ?? (state === "finished" ? totalItems : 0)}/${totalItems} ${itemLabel}`
-        : state === "finished"
-          ? "Finished"
-          : state === "current"
-            ? "In progress"
-            : "Queued";
-    const stageTimerStartedAt =
-      !shouldShowStageData
+          ? `${completedItems ?? (state === "finished" ? totalItems : 0)}/${totalItems} ${itemLabel}`
+          : state === "finished"
+            ? "Finished"
+            : state === "current"
+              ? "In progress"
+              : "Queued";
+    const stageTimerStartedAt = !shouldShowStageData
+      ? null
+      : (stage?.started_at ??
+        (index === 0 && runStatus === "running"
+          ? (pendingRunStartedAt ?? normalizedRun?.started_at ?? null)
+          : state === "finished"
+            ? (normalizedRun?.started_at ?? null)
+            : null));
+    const stageTimerCompletedAt = !shouldShowStageData
+      ? null
+      : explicitPhase === "running" && runStatus === "running"
         ? null
-        : stage?.started_at ??
-      (index === 0 && runStatus === "running"
-        ? pendingRunStartedAt ?? normalizedRun?.started_at ?? null
-        : state === "finished"
-          ? normalizedRun?.started_at ?? null
-          : null);
-    const stageTimerCompletedAt =
-      !shouldShowStageData
-        ? null
-        : explicitPhase === "running" && runStatus === "running"
-        ? null
-        : stage?.completed_at ?? (state === "finished" ? normalizedRun?.completed_at ?? null : null);
+        : (stage?.completed_at ??
+          (state === "finished"
+            ? (normalizedRun?.completed_at ?? null)
+            : null));
     let detail =
       (shouldShowStageData ? stage?.reason : null) ||
       (state === "current" && index === 0 && runStatus === "running"
@@ -522,7 +602,10 @@ export function buildBullpenAutoRunWorkflowView(
       index === WORKFLOW_DEFINITIONS.length - 1 &&
       state === "finished"
     ) {
-      detail = normalizedRun.summary;
+      detail = formatBullpenRunSummaryForMonitor(
+        normalizedRun.summary,
+        `${definition.title} finished in the latest run.`,
+      );
     }
     detail = buildStageDetail(stage, detail, definition, normalizedRun);
 
@@ -539,13 +622,14 @@ export function buildBullpenAutoRunWorkflowView(
       timerStartedAt: stageTimerStartedAt,
       timerCompletedAt: stageTimerCompletedAt,
       scanCandidates:
-        definition.key === "scan" && shouldShowStageData ? readScanCandidates(stage) : [],
+        definition.key === "scan" && shouldShowStageData
+          ? readScanCandidates(stage)
+          : [],
       activePositionsFound:
         definition.key === "scan" && shouldShowStageData
           ? readActivePositionsFound(stage)
           : [],
-      inputs:
-        Object.keys(stageInputs).length > 0 ? stageInputs : {},
+      inputs: Object.keys(stageInputs).length > 0 ? stageInputs : {},
       outputs: shouldShowStageData ? readOutputs(stage) : {},
     } satisfies BullpenAutoRunWorkflowStageView;
   });
@@ -557,25 +641,29 @@ export function buildBullpenAutoRunWorkflowView(
     : allStagesFinished
       ? "All 3 stages finished"
       : runStatus === "completed"
-      ? "All 3 stages finished"
-      : runStatus === "failed"
-        ? "Last run failed"
-        : runStatus === "skipped"
-          ? "Last run was skipped"
-      : "Queued for the next auto-run";
+        ? "All 3 stages finished"
+        : runStatus === "failed"
+          ? "Last run failed"
+          : runStatus === "skipped"
+            ? "Last run was skipped"
+            : "Queued for the next auto-run";
   const statusCopy =
     runStatus === "failed"
-      ? normalizedRun?.summary ||
-        normalizedRun?.error_message ||
-        "The latest Bullpen Scan + LLM + Exit and Invest run failed before finishing."
+      ? formatBullpenRunSummaryForMonitor(
+          normalizedRun?.summary,
+          normalizedRun?.error_message ||
+            "The latest Bullpen Scan + LLM + Exit and Invest run failed before finishing.",
+        )
       : currentStage
         ? `Current stage: ${currentStage.title}`
         : allStagesFinished || runStatus === "completed"
           ? "The latest Bullpen Scan + LLM + Exit and Invest run finished all 3 stages."
           : runStatus === "skipped"
-          ? normalizedRun?.summary ||
-            "The latest Bullpen Scan + LLM + Exit and Invest run was skipped."
-          : "The next Bullpen Scan + LLM + Exit and Invest run is waiting in queue.";
+            ? formatBullpenRunSummaryForMonitor(
+                normalizedRun?.summary,
+                "The latest Bullpen Scan + LLM + Exit and Invest run was skipped.",
+              )
+            : "The next Bullpen Scan + LLM + Exit and Invest run is waiting in queue.";
 
   return {
     stages,
