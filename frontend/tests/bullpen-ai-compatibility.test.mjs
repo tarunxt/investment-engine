@@ -178,7 +178,7 @@ test("Bullpen x AI investment result is shown below the Invest button", () => {
   assert.match(investmentsSectionSource, /\{resultMessage\}/);
 });
 
-test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button", () => {
+test("Bullpen x AI shows selectable auto-run schedule tiles and the run-now button", () => {
   const bullpenAiPageSource = readFileSync(
     new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
     "utf8",
@@ -205,10 +205,11 @@ test("Bullpen x AI shows the fixed IST auto-run schedule and the run-now button"
   assert.doesNotMatch(autoRunProgressSource, /Step 2 invests in the Stage 3 planned orders/);
   assert.match(autoRunCardSource, /InvestExecutionStepsSummary/);
   assert.match(autoRunCardSource, /execution_steps/);
-  assert.match(autoRunCardSource, /6 AM/);
-  assert.match(autoRunCardSource, /12 PM/);
-  assert.match(autoRunCardSource, /6 PM/);
-  assert.match(autoRunCardSource, /12 AM IST/);
+  assert.match(autoRunCardSource, /Next scheduled run/);
+  assert.match(autoRunCardSource, /Last completed run/);
+  assert.match(autoRunCardSource, /setSelectedRunSummaryTile\("next"\)/);
+  assert.match(autoRunCardSource, /setSelectedRunSummaryTile\("last"\)/);
+  assert.doesNotMatch(autoRunCardSource, /Fixed times: 6 AM, 12 PM, 6 PM, and 12 AM IST\./);
   assert.match(autoRunCardSource, /Background execution monitor/);
   assert.match(autoRunCardSource, /Worker stages/);
   assert.doesNotMatch(autoRunCardSource, /refreshes every 4 seconds/);

@@ -798,6 +798,7 @@ test("Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions", 
     closeTime: "2026-06-25T12:30:00Z",
     conditionId:
       "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+    isClaimable: false,
   });
 });
 
