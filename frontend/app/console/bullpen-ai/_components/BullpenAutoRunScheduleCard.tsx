@@ -97,7 +97,6 @@ type BullpenAutoRunScheduleCardProps = {
 type ActionState =
   | "enable"
   | "invest-now"
-  | "run-now"
   | "stop"
   | "pause-run"
   | "resume-run"
@@ -410,11 +409,13 @@ function getStageTwoInvestableDecisions(
 
 function StageOneRunStats({
   stage,
+  hideNumbers = false,
   renderInteractiveRows = false,
   onOpenScanCandidateDialog,
   onOpenScanFilters,
 }: {
   stage: WorkflowStageView;
+  hideNumbers?: boolean;
   renderInteractiveRows?: boolean;
   onOpenScanCandidateDialog?: (
     stage: WorkflowStageView,
@@ -423,6 +424,7 @@ function StageOneRunStats({
   onOpenScanFilters?: () => void;
 }) {
   const stats = getStageOneStats(stage);
+  const displayStat = (value: number) => (hideNumbers ? "—" : value);
   const rowClassName = renderInteractiveRows
     ? "block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
     : undefined;
@@ -437,30 +439,30 @@ function StageOneRunStats({
         >
           Available for Claim:{" "}
           <span className="font-semibold tabular-nums">
-            {stats.claimablePositions}
+            {displayStat(stats.claimablePositions)}
           </span>
           <br />
           Active Positions:{" "}
           <span className="font-semibold tabular-nums">
-            {stats.activePositions}
+            {displayStat(stats.activePositions)}
           </span>
         </button>
       ) : (
         <div className="pt-2">
           Available for Claim:{" "}
           <span className="font-semibold tabular-nums">
-            {stats.claimablePositions}
+            {displayStat(stats.claimablePositions)}
           </span>
           <br />
           Active Positions:{" "}
           <span className="font-semibold tabular-nums">
-            {stats.activePositions}
+            {displayStat(stats.activePositions)}
           </span>
         </div>
       )}
       <div className="pt-2">
         Total Events Scanned:{" "}
-        <span className="font-semibold tabular-nums">{stats.totalScanned}</span>
+        <span className="font-semibold tabular-nums">{displayStat(stats.totalScanned)}</span>
       </div>
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
         <div className="flex items-center justify-between gap-2">
@@ -473,7 +475,7 @@ function StageOneRunStats({
           >
             Events that passed Filters:{" "}
             <span className="font-semibold tabular-nums">
-              {stats.passedFilters}
+              {displayStat(stats.passedFilters)}
             </span>
           </button>
           {onOpenScanFilters ? (
@@ -492,7 +494,7 @@ function StageOneRunStats({
           <span>
             Events that passed Filters:{" "}
             <span className="font-semibold tabular-nums">
-              {stats.passedFilters}
+              {displayStat(stats.passedFilters)}
             </span>
           </span>
           {onOpenScanFilters ? (
@@ -513,6 +515,7 @@ function StageOneRunStats({
 
 function StageTwoRunStats({
   stage,
+  hideNumbers = false,
   decisions = [],
   onOpenInvestEvents,
   onOpenLlmRunDetails,
@@ -520,6 +523,7 @@ function StageTwoRunStats({
   scanStageForPositionSnapshot,
 }: {
   stage: WorkflowStageView;
+  hideNumbers?: boolean;
   decisions?: BullpenAutoLiveDecision[];
   scanStageForPositionSnapshot?: WorkflowStageView;
   onOpenInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
@@ -542,6 +546,7 @@ function StageTwoRunStats({
     0,
     positionStats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
+  const displayStat = (value: number) => (hideNumbers ? "—" : value);
 
   return (
     <div className="space-y-0.5 pt-2">
@@ -556,24 +561,24 @@ function StageTwoRunStats({
           >
             Available for Claim:{" "}
             <span className="font-semibold tabular-nums">
-              {positionStats.claimablePositions}
+              {displayStat(positionStats.claimablePositions)}
             </span>
             <br />
             Active Positions:{" "}
             <span className="font-semibold tabular-nums">
-              {positionStats.activePositions}
+              {displayStat(positionStats.activePositions)}
             </span>
           </button>
         ) : (
           <>
             Available for Claim:{" "}
             <span className="font-semibold tabular-nums">
-              {positionStats.claimablePositions}
+              {displayStat(positionStats.claimablePositions)}
             </span>
             <br />
             Active Positions:{" "}
             <span className="font-semibold tabular-nums">
-              {positionStats.activePositions}
+              {displayStat(positionStats.activePositions)}
             </span>
           </>
         )}
@@ -592,14 +597,14 @@ function StageTwoRunStats({
           >
             New Opportunities:{" "}
             <span className="font-semibold tabular-nums">
-              {stats.newOpportunities}
+              {displayStat(stats.newOpportunities)}
             </span>
           </button>
         ) : (
           <>
             New Opportunities:{" "}
             <span className="font-semibold tabular-nums">
-              {stats.newOpportunities}
+              {displayStat(stats.newOpportunities)}
             </span>
           </>
         )}
@@ -610,24 +615,24 @@ function StageTwoRunStats({
             type="button"
             onClick={() => onOpenLlmRunDetails({ stage, decisions })}
             className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
-            aria-label={`Open details for ${stats.llmRanOn} LLM-reviewed rows`}
+            aria-label={`Open details for ${displayStat(stats.llmRanOn)} LLM-reviewed rows`}
           >
             LLM ran on:{" "}
             <span className="font-semibold tabular-nums">
-              {stats.llmRanOn}
+              {displayStat(stats.llmRanOn)}
             </span>{" "}
             unique rows ({" "}
             <span className="font-semibold tabular-nums">
-              {stats.activePositions}
+              {displayStat(stats.activePositions)}
             </span>{" "}
             Active +{" "}
             <span className="font-semibold tabular-nums">
-              {stats.newOpportunities}
+              {displayStat(stats.newOpportunities)}
             </span>{" "}
             New Opportunities
             {deDuplicatedCount > 0 ? (
               <>
-                , <span className="font-semibold tabular-nums">{deDuplicatedCount}</span>{" "}
+                , <span className="font-semibold tabular-nums">{displayStat(deDuplicatedCount)}</span>{" "}
                 overlap/de-duped
               </>
             ) : null}
@@ -635,9 +640,9 @@ function StageTwoRunStats({
           </button>
         ) : (
           <>
-            LLM ran on: <span className="font-semibold tabular-nums">{stats.llmRanOn}</span>{" "}
-            unique rows ({stats.activePositions} Active + {stats.newOpportunities} New Opportunities
-            {deDuplicatedCount > 0 ? `, ${deDuplicatedCount} overlap/de-duped` : ""})
+            LLM ran on: <span className="font-semibold tabular-nums">{displayStat(stats.llmRanOn)}</span>{" "}
+            unique rows ({displayStat(stats.activePositions)} Active + {displayStat(stats.newOpportunities)} New Opportunities
+            {deDuplicatedCount > 0 ? `, ${displayStat(deDuplicatedCount)} overlap/de-duped` : ""})
           </>
         )}
       </div>
@@ -647,18 +652,18 @@ function StageTwoRunStats({
             type="button"
             onClick={() => onOpenInvestEvents(investableDecisions)}
             className="text-left font-medium text-emerald-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
-            aria-label={`Open details for ${stats.newEventsToInvestIn} new events to invest in`}
+            aria-label={`Open details for ${displayStat(stats.newEventsToInvestIn)} new events to invest in`}
           >
             New Events to Invest in: {" "}
             <span className="font-semibold tabular-nums">
-              {stats.newEventsToInvestIn}
+              {displayStat(stats.newEventsToInvestIn)}
             </span>
           </button>
         ) : (
           <>
             New Events to Invest in: {" "}
             <span className="font-semibold tabular-nums">
-              {stats.newEventsToInvestIn}
+              {displayStat(stats.newEventsToInvestIn)}
             </span>
           </>
         )}
@@ -4148,9 +4153,7 @@ export function BullpenAutoRunScheduleCard({
     setError(null);
     setScheduleSettingsSaveBusy(true);
     const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
-    const normalizedStart = startWasNow
-      ? formatScheduleInputFromDate(new Date())
-      : scheduleStartInput.trim();
+    const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
     try {
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
@@ -4200,9 +4203,7 @@ export function BullpenAutoRunScheduleCard({
         return;
       }
       const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
-      const normalizedStart = startWasNow
-        ? formatScheduleInputFromDate(new Date())
-        : scheduleStartInput.trim();
+      const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
           nextConsoleOrderUsd,
@@ -4235,7 +4236,7 @@ export function BullpenAutoRunScheduleCard({
                 require_manual_confirmation: false,
                 strategy_profile: CONSOLE_PROFILE_ID,
                 console_order_usd: nextConsoleOrderUsd,
-                console_auto_start_at: normalizedStart || null,
+                console_auto_start_at: startWasNow ? null : normalizedStart || null,
                 console_auto_refresh_minutes: refreshMinutes,
               },
             }
@@ -4275,53 +4276,6 @@ export function BullpenAutoRunScheduleCard({
       setError(normalizeError(nextError));
     } finally {
       setAction(null);
-    }
-  }
-
-  async function handleRunNow() {
-    const nextConsoleOrderUsd = resolveConsoleOrderAmount();
-    if (nextConsoleOrderUsd === null) {
-      return;
-    }
-
-    const startedAt = new Date().toISOString();
-    setAction("run-now");
-    setRunNowStartedAt(startedAt);
-    setTimerNowMs(Date.parse(startedAt));
-    setNotice(null);
-    setError(null);
-
-    try {
-      const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
-      const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
-      if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
-        setError({
-          message: "Enter a refresh duration of at least 1 minute.",
-          details: null,
-        });
-        return;
-      }
-      await apiService.updateBullpenAutoLiveSettings(
-        buildConsoleSettingsUpdate(
-          nextConsoleOrderUsd,
-          scheduleStartInput.trim() || null,
-          refreshMinutes,
-          selectedLlmTargets,
-        ),
-      );
-      setConsoleOrderDirty(false);
-      setConsoleOrderFieldError(null);
-      setConsoleOrderInput(formatEditableAmount(nextConsoleOrderUsd));
-      const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
-      setPendingRunId(run.id);
-      setRunNowStartedAt(run.started_at ?? new Date().toISOString());
-      await loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
-      setAction(null);
-    } catch (nextError) {
-      setError(normalizeError(nextError));
-      setAction(null);
-      setPendingRunId(null);
-      setRunNowStartedAt(null);
     }
   }
 
@@ -4485,7 +4439,7 @@ export function BullpenAutoRunScheduleCard({
   const hasActiveWorkflowStage = liveWorkflowView.stages.some(
     (stage) => stage.isCurrent,
   );
-  const runActionRequested = action === "run-now" || action === "invest-now";
+  const runActionRequested = action === "invest-now";
   const runIsActive =
     !liveWorkflowSettled &&
     (runActionRequested ||
@@ -4667,7 +4621,7 @@ export function BullpenAutoRunScheduleCard({
       if (runNowStartedAt !== null) {
         setRunNowStartedAt(null);
       }
-      if (action === "run-now" || action === "invest-now") {
+      if (action === "invest-now") {
         setAction(null);
       }
     });
@@ -4750,35 +4704,15 @@ export function BullpenAutoRunScheduleCard({
                 )}
               </Button>
             )}
-            <div className="flex flex-col items-stretch gap-1">
-              <Button
-                variant="outline"
-                onClick={handleRunNow}
-                disabled={action !== null || runIsActive}
-                className="border-blue-900 bg-blue-900 text-white hover:bg-blue-800 hover:text-white"
+            {showRunTimer ? (
+              <div
+                className="inline-flex items-center justify-center gap-1 text-center text-xs font-semibold tabular-nums text-sky-800"
+                aria-live="polite"
               >
-                {runActionRequested || runIsActive ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Running...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="mr-2 h-4 w-4" />
-                    Run Scans and Invest Now
-                  </>
-                )}
-              </Button>
-              {showRunTimer ? (
-                <div
-                  className="inline-flex items-center justify-center gap-1 text-center text-xs font-semibold tabular-nums text-sky-800"
-                  aria-live="polite"
-                >
-                  <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-                  {elapsedRunTime}
-                </div>
-              ) : null}
-            </div>
+                <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
+                {elapsedRunTime}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -5263,7 +5197,8 @@ export function BullpenAutoRunScheduleCard({
                     ? "green"
                     : stage.tone,
               );
-              const showStageRunDetails = workflowRunForMonitor !== null;
+              const showStageRunDetails = true;
+              const showStageNumbers = workflowRunForMonitor !== null;
               const stageStatusLabel = immediateSuccess
                 ? "Finished"
                 : investPreviewFinished
@@ -5375,6 +5310,7 @@ export function BullpenAutoRunScheduleCard({
                       {stage.key === "scan" ? (
                         <StageOneRunStats
                           stage={stage}
+                          hideNumbers={!showStageNumbers}
                           renderInteractiveRows
                           onOpenScanCandidateDialog={openScanCandidateDialog}
                           onOpenScanFilters={onOpenScanFilters}
@@ -5383,6 +5319,7 @@ export function BullpenAutoRunScheduleCard({
                       {stage.key === "llm" ? (
                         <StageTwoRunStats
                           stage={stage}
+                          hideNumbers={!showStageNumbers}
                           decisions={investRunDecisions}
                           onOpenInvestEvents={(investDecisions) =>
                             setStageTwoInvestEventsDialog({

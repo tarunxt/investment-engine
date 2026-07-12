@@ -178,7 +178,7 @@ test("Bullpen x AI investment result is shown below the Invest button", () => {
   assert.match(investmentsSectionSource, /\{resultMessage\}/);
 });
 
-test("Bullpen x AI shows selectable auto-run schedule tiles and the run-now button", () => {
+test("Bullpen x AI shows selectable auto-run schedule tiles without the manual run-now button", () => {
   const bullpenAiPageSource = readFileSync(
     new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
     "utf8",
@@ -199,7 +199,7 @@ test("Bullpen x AI shows selectable auto-run schedule tiles and the run-now butt
   );
 
   assert.match(bullpenAiPageSource, /BullpenAutoRunScheduleCard/);
-  assert.match(autoRunCardSource, /Run Scans and Invest Now/);
+  assert.doesNotMatch(autoRunCardSource, /Run Scans and Invest Now/);
   assert.doesNotMatch(autoRunCardSource, /Bullpen Scan \+ LLM \+ Exit and Invest auto-run schedule/);
   assert.doesNotMatch(autoRunProgressSource, /Step 1 processes Event Exits/);
   assert.doesNotMatch(autoRunProgressSource, /Step 2 invests in the Stage 3 planned orders/);
@@ -241,7 +241,7 @@ test("Bullpen x AI auto-run card exposes a saved per-trade amount input", () => 
   assert.match(autoRunCardSource, /DEFAULT_CONSOLE_ORDER_USD = 5/);
 });
 
-test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel", () => {
+test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without persisting a timestamp", () => {
   const autoRunCardSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
@@ -253,6 +253,8 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel", () => {
   assert.match(autoRunCardSource, /setScheduleStartInput\("Now"\);/);
   assert.match(autoRunCardSource, /setScheduleSettingsDirty\(true\);/);
   assert.match(autoRunCardSource, /Run and Enable Auto Runs/);
+  assert.match(autoRunCardSource, /const normalizedStart = startWasNow \? "" : scheduleStartInput\.trim\(\);/);
+  assert.match(autoRunCardSource, /runBullpenAutoLiveOnce\(runNowRequest\)/);
 });
 
 test("Bullpen x AI run-now request can reuse the current scan snapshot before manual LLM selection exists", () => {
@@ -320,7 +322,7 @@ test("Bullpen x AI keeps pause and kill controls available during an active run"
 
   assert.match(autoRunCardSource, /const runIsActive =/);
   assert.match(autoRunCardSource, /setAction\(null\);\s*\n\s*\}/);
-  assert.match(autoRunCardSource, /disabled=\{\s*action !== null \|\| runIsActive\s*\}/);
+  assert.doesNotMatch(autoRunCardSource, /Run Scans and Invest Now/);
   assert.match(autoRunCardSource, /Status: \{statusLabel\(summary, runIsActive\)\}/);
 });
 
