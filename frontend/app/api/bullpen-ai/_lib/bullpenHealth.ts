@@ -17,7 +17,9 @@ import {
   aggregateBullpenCliPositions,
   applyBullpenPositionMarketData,
   buildClaimableBullpenSignature,
+  buildBullpenPositionsDiagnostics,
   extractBullpenCliPositionRows,
+  filterDisplayBullpenPositions,
   normalizeBullpenPosition,
   summarizeBullpenPositions,
   type BullpenCliPositionsPayload,
@@ -135,24 +137,25 @@ async function buildBullpenLiveSnapshot(
 ) {
   const rawPositions = extractBullpenCliPositionRows(payload.positions ?? payload);
   const aggregatedRawPositions = aggregateBullpenCliPositions(rawPositions);
-  const positions = aggregatedRawPositions.map((position) =>
+  const normalizedPositions = aggregatedRawPositions.map((position) =>
     normalizeBullpenPosition(position, buildPolymarketEventUrl),
   );
-  let refreshedPositions = positions;
+  let refreshedPositions = normalizedPositions;
 
   try {
     const refreshedMarkets = await resolvePolymarketMarketsWithQuestionFallback(
       aggregatedRawPositions.map((position, index) => ({
-        id: positions[index]?.key || `bullpen-position-${index + 1}`,
+        id:
+          normalizedPositions[index]?.key || `bullpen-position-${index + 1}`,
         slug:
           typeof position.slug === "string" && position.slug.trim()
             ? position.slug.trim()
             : null,
-        marketUrl: positions[index]?.marketUrl ?? null,
-        question: positions[index]?.marketTitle ?? null,
+        marketUrl: normalizedPositions[index]?.marketUrl ?? null,
+        question: normalizedPositions[index]?.marketTitle ?? null,
       })),
     );
-    refreshedPositions = positions.map((position) => {
+    refreshedPositions = normalizedPositions.map((position) => {
       const refreshedMarket = refreshedMarkets[position.key];
       return refreshedMarket
         ? applyBullpenPositionMarketData(position, refreshedMarket)
@@ -162,9 +165,13 @@ async function buildBullpenLiveSnapshot(
     // Keep the live Bullpen wallet snapshot even if Polymarket enrichment fails.
   }
 
+  const diagnostics = buildBullpenPositionsDiagnostics(refreshedPositions);
+  const positions = filterDisplayBullpenPositions(refreshedPositions);
+
   return {
-    positions: refreshedPositions,
-    summary: summarizeBullpenPositions(refreshedPositions, payload.summary || {}),
+    positions,
+    summary: summarizeBullpenPositions(positions, payload.summary || {}),
+    diagnostics,
     fetchedAt,
     source: "live-cli",
   } satisfies BullpenLiveSnapshot;
@@ -173,7 +180,7 @@ async function buildBullpenLiveSnapshot(
 function isBullpenAutoClaimEnabled() {
   const configured = process.env.BULLPEN_AUTO_CLAIM_RESOLVED?.trim().toLowerCase();
   if (!configured) {
-    return true;
+    return false;
   }
 
   return configured === "true";
@@ -335,8 +342,7 @@ export function buildBullpenHealthReport({
           fetchedAt: snapshot.fetchedAt,
           source: snapshot.source,
           positionsCount: snapshot.positions.length,
-          claimableCount: snapshot.positions.filter((position) => position.isClaimable)
-            .length,
+          claimableCount: snapshot.summary.claimableCount,
         }
       : null,
   };

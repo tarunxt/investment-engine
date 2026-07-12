@@ -15,6 +15,7 @@ from app.domains.polymarket.bullpen import (
     utc_now,
 )
 from app.domains.polymarket.logger import redact_secrets
+from app.domains.polymarket.position_classification import classify_bullpen_position
 from app.domains.polymarket.schemas import (
     PolymarketBotConfig,
     PolymarketDiscoveryDebugAccepted,
@@ -974,34 +975,10 @@ def _erc20_balance_of_calldata(wallet: str) -> str:
 def _sum_redeemable_value(positions: list[dict[str, Any]]) -> float:
     total = 0.0
     for position in positions:
-        flag = string_value(
-            position.get("redeemable")
-            or position.get("isRedeemable")
-            or position.get("claimable")
-            or position.get("isClaimable")
-            or position.get("status")
-        )
-        is_redeemable = (
-            flag is not None
-            and flag.strip().lower() in {"true", "redeemable", "claimable", "won"}
-        ) or any(
-            bool(position.get(key))
-            for key in ("redeemable", "isRedeemable", "claimable", "isClaimable")
-        )
-        if not is_redeemable:
+        classification = classify_bullpen_position(position)
+        if not classification.is_claimable:
             continue
-        total += (
-            number_value(
-                position.get("redeemableValue")
-                or position.get("redeemable_value")
-                or position.get("claimableValue")
-                or position.get("claimable_value")
-                or position.get("currentValue")
-                or position.get("current_value")
-                or position.get("value")
-            )
-            or 0
-        )
+        total += classification.claimable_value_usd or 0
     return total
 
 

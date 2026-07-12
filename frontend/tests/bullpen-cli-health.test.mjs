@@ -36,7 +36,7 @@ function buildBaseOptions(execFileImpl) {
   };
 }
 
-test("Bullpen CLI health classifies auth-expired stderr and redacts token-like values", async () => {
+test("Bullpen CLI health classifies login-required stderr and redacts token-like values", async () => {
   const { runBullpenCliHealthCheckWithExecutor } = await coreModulePromise;
   const fakeJwt =
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjcmVkLXgtdGVzdCJ9.signature123456789";
@@ -51,7 +51,7 @@ test("Bullpen CLI health classifies auth-expired stderr and redacts token-like v
   );
 
   assert.equal(result.ok, false);
-  assert.equal(result.health.classification, "AUTH_EXPIRED");
+  assert.equal(result.health.classification, "AUTH_REQUIRED");
   assert.match(result.health.message, /HOME=\/var\/lib\/credx\/bullpen/);
   assert.match(
     result.health.actionNeeded || "",
@@ -59,6 +59,36 @@ test("Bullpen CLI health classifies auth-expired stderr and redacts token-like v
   );
   assert.doesNotMatch(result.health.stderr || "", new RegExp(fakeJwt.replace(/\./g, "\\.")));
   assert.match(result.health.stderr || "", /\[REDACTED/i);
+});
+
+test("Bullpen CLI health classifies structured refresh rejection and preserves public condition ids", async () => {
+  const { runBullpenCliHealthCheckWithExecutor } = await coreModulePromise;
+  const publicConditionId =
+    "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+
+  const result = await runBullpenCliHealthCheckWithExecutor(
+    buildBaseOptions(async () => {
+      throw createExecError({
+        message: "Command failed",
+        stdout: JSON.stringify({
+          auth_state: "refresh_token_rejected",
+          code: "auth.refresh_rejected",
+          error_code: "AUTH_REFRESH_REJECTED_LOGIN_REQUIRED",
+          requires_auth: true,
+          requires_login: true,
+          recoverability: "login_required",
+          next_command: "bullpen login",
+          condition_id: publicConditionId,
+        }),
+        stderr: "grpc_code = Unauthenticated",
+      });
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.health.classification, "AUTH_EXPIRED");
+  assert.match(result.health.actionNeeded || "", /bullpen login/i);
+  assert.match(result.health.stdout || "", new RegExp(publicConditionId));
 });
 
 test("Bullpen CLI health reports binary missing after checking every candidate", async () => {

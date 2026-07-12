@@ -92,6 +92,8 @@ function getLiveStatusLabel(health: BullpenLiveHealth | null, isLoading: boolean
   }
 
   switch (health.classification) {
+    case "AUTH_REQUIRED":
+      return "Login required";
     case "AUTH_EXPIRED":
       return "Auth expired";
     case "NETWORK_ERROR":
@@ -130,6 +132,7 @@ function getStatusToneClass(health: BullpenLiveHealth | null) {
   }
 
   switch (health.classification) {
+    case "AUTH_REQUIRED":
     case "AUTH_EXPIRED":
       return "border-amber-200 bg-amber-50 text-amber-950";
     case "NETWORK_ERROR":

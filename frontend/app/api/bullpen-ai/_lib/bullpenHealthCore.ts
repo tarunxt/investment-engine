@@ -1,4 +1,5 @@
 export type BullpenCliFailureClassification =
+  | "AUTH_REQUIRED"
   | "AUTH_EXPIRED"
   | "NETWORK_ERROR"
   | "BINARY_MISSING"
@@ -64,14 +65,32 @@ const JWT_PATTERN = /\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b
 const QUERY_TOKEN_PATTERN =
   /([?&](?:token|jwt|auth|authorization|session|secret)=)([^&\s]+)/gi;
 const LONG_TOKEN_PATTERN = /\b[A-Za-z0-9._~-]{24,}\b/g;
-const AUTH_PATTERNS = [
+const AUTH_REQUIRED_PATTERNS = [
   /\bauth(?:entication)? (?:expired|required|failed|invalid)\b/i,
   /\bauthori[sz](?:ation|ed)? (?:expired|required|failed|invalid)\b/i,
+  /\bauth_refresh_rejected_login_required\b/i,
+  /\bauth\.refresh_rejected\b/i,
+  /\brefresh_token_rejected\b/i,
   /\blogin required\b/i,
+  /\brequires_login\b/i,
+  /\brequires_auth\b/i,
+  /\blogin_required\b/i,
+  /\bunauthenticated\b/i,
+  /\binvalid refresh token\b/i,
+  /\brefresh token rejected\b/i,
   /\bsession expired\b/i,
   /\bre-?login\b/i,
   /\bjwt expired\b/i,
   /\brun:? bullpen login\b/i,
+];
+const AUTH_EXPIRED_PATTERNS = [
+  /\bauth_refresh_rejected_login_required\b/i,
+  /\bauth\.refresh_rejected\b/i,
+  /\brefresh_token_rejected\b/i,
+  /\binvalid refresh token\b/i,
+  /\brefresh token rejected\b/i,
+  /\bsession expired\b/i,
+  /\bjwt expired\b/i,
 ];
 const NETWORK_PATTERNS = [
   /\bnetwork error\b/i,
@@ -102,6 +121,9 @@ function truncateText(value: string) {
 }
 
 function looksTokenLike(value: string) {
+  if (/^0x[a-f0-9]{40,}$/i.test(value)) {
+    return false;
+  }
   return (
     value.length >= 24 &&
     /[A-Za-z]/.test(value) &&
@@ -189,6 +211,14 @@ function buildFailureMessage({
   attemptedPaths: string[];
 }) {
   switch (classification) {
+    case "AUTH_REQUIRED":
+      return {
+        message: `Bullpen CLI auth is required for HOME=${credentialHome || "unknown"}. Re-login on server.`,
+        actionNeeded:
+          credentialHome && credentialHome !== "unknown"
+            ? `Re-run Bullpen login on the server using the same HOME. Example: env HOME=${credentialHome} bullpen login.`
+            : "Re-run Bullpen login on the server using the same HOME as the running app.",
+      };
     case "AUTH_EXPIRED":
       return {
         message: `Bullpen CLI auth appears expired for HOME=${credentialHome || "unknown"}. Re-login on server.`,
@@ -270,8 +300,10 @@ export function classifyBullpenCliFailure({
     classification = "TIMEOUT";
   } else if (detectBinaryMissing(combined, commandPath || null)) {
     classification = "BINARY_MISSING";
-  } else if (AUTH_PATTERNS.some((pattern) => pattern.test(combined))) {
+  } else if (AUTH_EXPIRED_PATTERNS.some((pattern) => pattern.test(combined))) {
     classification = "AUTH_EXPIRED";
+  } else if (AUTH_REQUIRED_PATTERNS.some((pattern) => pattern.test(combined))) {
+    classification = "AUTH_REQUIRED";
   } else if (NETWORK_PATTERNS.some((pattern) => pattern.test(combined))) {
     classification = "NETWORK_ERROR";
   }

@@ -11,7 +11,7 @@ app_logger = get_logger(__name__)
 _SECRET_PATTERNS = [
     (
         re.compile(
-            r"(access[_-]?token|api[_-]?key|secret|private[_-]?key|credential|bearer)\s*[:=]\s*[\"']?[^\"'\s]+",
+            r"(access[_-]?token|refresh[_-]?token|api[_-]?key|secret|private[_-]?key|credential|bearer|authorization|jwt|turnkey(?:[_-]?bundle)?|signing[_-]?key)\s*[:=]\s*[\"']?[^\"'\s]+",
             re.IGNORECASE,
         ),
         lambda match: f"{match.group(1)}=[REDACTED]",
@@ -20,7 +20,14 @@ _SECRET_PATTERNS = [
         re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
         lambda _m: "Bearer [REDACTED]",
     ),
-    (re.compile(r"0x[a-fA-F0-9]{64}"), lambda _m: "[REDACTED_PRIVATE_KEY]"),
+    (
+        re.compile(r"([?&](?:token|jwt|auth|authorization|session|secret|api[_-]?key)=)[^&\s]+", re.IGNORECASE),
+        lambda match: f"{match.group(1)}[REDACTED]",
+    ),
+    (
+        re.compile(r"(https?://)([^/\s:@]+):([^/\s@]+)@", re.IGNORECASE),
+        lambda match: f"{match.group(1)}[REDACTED]@",
+    ),
 ]
 
 

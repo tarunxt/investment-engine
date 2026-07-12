@@ -1610,7 +1610,9 @@ async def test_bullpen_sell_limit_retries_when_fill_price_falls_below_minimum(
 
 
 @pytest.mark.anyio
-async def test_bullpen_execute_wraps_collateral_then_retries_buy(monkeypatch):
+async def test_bullpen_execute_wraps_collateral_once_then_fails_safely_without_global_redeem(
+    monkeypatch,
+):
     calls = []
 
     async def fake_run_bullpen(args, *, timeout_seconds, read_only):
@@ -1623,40 +1625,32 @@ async def test_bullpen_execute_wraps_collateral_then_retries_buy(monkeypatch):
 
     monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
 
-    await BullpenLiveExecutor().execute(
-        PolymarketLiveTradeDecision(
-            id="decision-1",
-            source_trade_id="source-1",
-            source_trade_key="source-key-1",
-            proposed_at="2026-06-13T00:00:00Z",
-            updated_at="2026-06-13T00:00:00Z",
-            trader_id="trader-1",
-            trader_name="Trader 1",
-            trader_address="",
-            market_id="market-1",
-            market_title="Market 1",
-            outcome="Yes",
-            side="BUY",
-            amount=1,
-            price=0.64,
-            shares=1.5625,
-            max_loss=1,
-            reason="test",
-            status="confirmed",
-            command="buy",
-            source="live-read",
+    with pytest.raises(BullpenCommandError) as exc_info:
+        await BullpenLiveExecutor().execute(
+            PolymarketLiveTradeDecision(
+                id="decision-1",
+                source_trade_id="source-1",
+                source_trade_key="source-key-1",
+                proposed_at="2026-06-13T00:00:00Z",
+                updated_at="2026-06-13T00:00:00Z",
+                trader_id="trader-1",
+                trader_name="Trader 1",
+                trader_address="",
+                market_id="market-1",
+                market_title="Market 1",
+                outcome="Yes",
+                side="BUY",
+                amount=1,
+                price=0.64,
+                shares=1.5625,
+                max_loss=1,
+                reason="test",
+                status="confirmed",
+                command="buy",
+                source="live-read",
+            )
         )
-    )
-
     assert calls[1] == [
-        "polymarket",
-        "redeem",
-        "--yes",
-        "--non-interactive",
-        "--output",
-        "json",
-    ]
-    assert calls[3] == [
         "polymarket",
         "wrap",
         "1.02",
@@ -1665,11 +1659,17 @@ async def test_bullpen_execute_wraps_collateral_then_retries_buy(monkeypatch):
         "--output",
         "json",
     ]
-    assert calls[4][0:2] == ["polymarket", "buy"]
+    assert calls[2][0:2] == ["polymarket", "buy"]
+    assert [call[0:2] for call in calls] == [
+        ["polymarket", "buy"],
+        ["polymarket", "wrap"],
+        ["polymarket", "buy"],
+    ]
+    assert "did not attempt a global redeem" in str(exc_info.value)
 
 
 @pytest.mark.anyio
-async def test_bullpen_execute_redeems_collateral_then_retries_buy(monkeypatch):
+async def test_bullpen_execute_wraps_collateral_then_retries_buy(monkeypatch):
     calls = []
 
     async def fake_run_bullpen(args, *, timeout_seconds, read_only):
@@ -1707,9 +1707,18 @@ async def test_bullpen_execute_redeems_collateral_then_retries_buy(monkeypatch):
         )
     )
 
+    assert calls[1] == [
+        "polymarket",
+        "wrap",
+        "1.02",
+        "--yes",
+        "--non-interactive",
+        "--output",
+        "json",
+    ]
     assert [call[0:2] for call in calls] == [
         ["polymarket", "buy"],
-        ["polymarket", "redeem"],
+        ["polymarket", "wrap"],
         ["polymarket", "buy"],
     ]
 
@@ -1724,7 +1733,7 @@ def test_redeem_metadata_lookup_warning_detects_gamma_condition_miss():
     assert is_redeem_metadata_lookup_warning(
         "[warn] 0xd9027272: payoutDenominator preflight RPC failed "
         "(falling through to relayer): market not found in Gamma for condition "
-        "[REDACTED_PRIVATE_KEY]"
+        "0xd9027272d9027272d9027272d9027272d9027272d9027272d9027272d9027272"
     )
 
 

@@ -8,7 +8,7 @@ import {
   formatPolymarketCategory,
   inferPolymarketCategoryFromText,
   shouldReplaceCategory,
-} from "./polymarketCategory";
+} from "./polymarketCategory.ts";
 import {
   BULLPEN_BIN_CANDIDATES,
   buildBullpenProcessEnv,

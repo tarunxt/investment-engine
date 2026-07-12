@@ -29,6 +29,9 @@ from app.domains.polymarket.bullpen_llm_execution import (
     execute_bullpen_llm_target,
 )
 from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
+from app.domains.polymarket.position_classification import (
+    is_displayable_bullpen_position,
+)
 from app.domains.polymarket_auto_live.console_profile import (
     DEFAULT_CONSOLE_ORDER_USD,
     CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
@@ -1335,6 +1338,10 @@ def _serialize_active_wallet_position(
         "close_time": position.close_time,
         "condition_id": position.condition_id,
         "is_claimable": position.is_claimable,
+        "classification": position.classification,
+        "classification_reason": position.classification_reason,
+        "expected_payout_usdc": position.expected_payout_usdc,
+        "resolution_status": position.resolution_status,
     }
 
 
@@ -3711,13 +3718,24 @@ class BullpenAutoLiveEngine:
         persisted_positions_by_key = {
             f"{position.market_id}::{position.side}": position for position in positions
         }
+        excluded_wallet_positions = [
+            position
+            for position in enriched_wallet_positions
+            if not is_displayable_bullpen_position(position.classification)
+        ]
+        displayable_wallet_positions = [
+            position
+            for position in enriched_wallet_positions
+            if is_displayable_bullpen_position(position.classification)
+        ]
 
         def _is_bullpen_wallet_position(position: ConsoleWalletPosition) -> bool:
             position_key = f"{position.market_id}::{position.side}"
-            if position.is_claimable:
+            if position.is_claimable or position.classification == "resolved_zero_payout":
                 # Resolved winning positions can disappear from the market scan
-                # before the wallet finishes redemption, so keep them eligible
-                # for Stage 3 even when hydration cannot recover the market row.
+                # before the wallet finishes settlement classification, so keep
+                # them visible for Stage 1 diagnostics even when hydration
+                # cannot recover the market row.
                 return True
             return (
                 position_key in persisted_positions_by_key
@@ -3727,12 +3745,12 @@ class BullpenAutoLiveEngine:
 
         bullpen_wallet_positions = [
             position
-            for position in enriched_wallet_positions
+            for position in displayable_wallet_positions
             if _is_bullpen_wallet_position(position)
         ]
         non_bullpen_wallet_positions = [
             position
-            for position in enriched_wallet_positions
+            for position in displayable_wallet_positions
             if not _is_bullpen_wallet_position(position)
         ]
         if non_bullpen_wallet_positions:
@@ -3841,6 +3859,16 @@ class BullpenAutoLiveEngine:
                         for position in bullpen_wallet_positions
                     ],
                     "claimable_wallet_positions": len(claimable_wallet_positions),
+                    "excluded_wallet_positions": [
+                        _serialize_active_wallet_position(position)
+                        for position in excluded_wallet_positions
+                    ],
+                    "excluded_wallet_positions_count": len(excluded_wallet_positions),
+                    "resolved_zero_payout_count": sum(
+                        1
+                        for position in excluded_wallet_positions
+                        if position.classification == "resolved_zero_payout"
+                    ),
                     "non_bullpen_wallet_positions_skipped": len(non_bullpen_wallet_positions),
                     "scanned_candidates": scanned_total_candidates,
                     "active_position_rows_before_llm": active_position_rows_before_llm,
@@ -4091,6 +4119,16 @@ class BullpenAutoLiveEngine:
                             for position in bullpen_wallet_positions
                         ],
                         "claimable_wallet_positions": len(claimable_wallet_positions),
+                        "excluded_wallet_positions": [
+                            _serialize_active_wallet_position(position)
+                            for position in excluded_wallet_positions
+                        ],
+                        "excluded_wallet_positions_count": len(excluded_wallet_positions),
+                        "resolved_zero_payout_count": sum(
+                            1
+                            for position in excluded_wallet_positions
+                            if position.classification == "resolved_zero_payout"
+                        ),
                         "non_bullpen_wallet_positions_skipped": len(non_bullpen_wallet_positions),
                         "scanned_candidates": scanned_total_candidates,
                         "active_position_rows_before_llm": active_position_rows_before_llm,

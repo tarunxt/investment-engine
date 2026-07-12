@@ -81,7 +81,7 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
     { active_count: 2 },
   );
 
-  assert.equal(summary.activeCount, 2);
+  assert.equal(summary.activeCount, 1);
   assert.equal(summary.claimableCount, 1);
   assert.equal(summary.claimableValue, 3.33);
   assert.equal(
@@ -313,4 +313,128 @@ test("Bullpen positions with custom outcomes still accept canonical Yes/No marke
   );
   assert.equal(refreshed.currentPrice, 0.1699);
   assert.equal(refreshed.currentValue, 1);
+});
+
+test("Bullpen zero-payout residues are excluded from headline positions and preserved in diagnostics", async () => {
+  const {
+    buildBullpenPositionsDiagnostics,
+    filterDisplayBullpenPositions,
+    normalizeBullpenPosition,
+    summarizeBullpenPositions,
+  } = await loadBullpenPositionsModule();
+
+  const rows = [
+    {
+      slug: "claude-fable-july-3",
+      market: "Will Claude Fable 5 be restored for US customers by July 3?",
+      outcome: "No",
+      shares: 6.0975,
+      current_price: 0,
+      current_value: 0,
+      expected_payout_usdc: 0,
+      redeemable: true,
+      resolution_status: "unknown",
+      end_date: "2026-07-03",
+    },
+    {
+      slug: "egypt-vs-iran-ou-05",
+      market: "Egypt vs. IR Iran: O/U 0.5",
+      outcome: "Under",
+      shares: 5.8823,
+      current_price: 0,
+      current_value: 0,
+      expected_payout_usdc: 0,
+      redeemable: true,
+      resolution_status: "unknown",
+      end_date: "2026-06-27",
+    },
+    {
+      slug: "claude-fable-july-2",
+      market: "Will Claude Fable 5 be restored for US customers by July 2?",
+      outcome: "No",
+      shares: 5.4347,
+      current_price: 0,
+      current_value: 0,
+      expected_payout_usdc: 0,
+      redeemable: true,
+      resolution_status: "unknown",
+      end_date: "2026-07-02",
+    },
+    {
+      slug: "claude-fable-july-1",
+      market: "Will Claude Fable 5 be restored for US customers by July 1?",
+      outcome: "No",
+      shares: 5.3763,
+      current_price: 0,
+      current_value: 0,
+      expected_payout_usdc: 0,
+      redeemable: true,
+      resolution_status: "unknown",
+      end_date: "2026-07-01",
+    },
+    {
+      slug: "senegal-vs-iraq-ou-25",
+      market: "Senegal vs. Iraq: O/U 2.5",
+      outcome: "Under",
+      shares: 5.2631,
+      current_price: 0,
+      current_value: 0,
+      expected_payout_usdc: 0,
+      redeemable: true,
+      resolution_status: "unknown",
+      end_date: "2026-06-26",
+    },
+    {
+      slug: "new-zealand-vs-belgium-ou-35",
+      market: "New Zealand vs. Belgium: O/U 3.5",
+      outcome: "Under",
+      shares: 3.9215,
+      current_price: 0,
+      current_value: 0,
+      expected_payout_usdc: 0,
+      redeemable: true,
+      resolution_status: "unknown",
+      end_date: "2026-06-27",
+    },
+  ];
+
+  const positions = rows.map((row) => normalizeBullpenPosition(row, () => null));
+  const visiblePositions = filterDisplayBullpenPositions(positions);
+  const diagnostics = buildBullpenPositionsDiagnostics(positions);
+  const summary = summarizeBullpenPositions(visiblePositions, null);
+
+  assert.equal(visiblePositions.length, 0);
+  assert.equal(summary.activeCount, 0);
+  assert.equal(summary.claimableCount, 0);
+  assert.equal(summary.claimableValue, 0);
+  assert.equal(diagnostics.excludedPositionCount, 6);
+  assert.equal(diagnostics.resolvedZeroPayoutCount, 6);
+  assert.equal(diagnostics.excludedPositions.length, 6);
+  assert.ok(
+    diagnostics.excludedPositions.every(
+      (position) => position.economicClassification === "resolved_zero_payout",
+    ),
+  );
+});
+
+test("Bullpen unresolved positions with missing pricing stay stale instead of becoming zero-payout residues", async () => {
+  const { normalizeBullpenPosition } = await loadBullpenPositionsModule();
+
+  const position = normalizeBullpenPosition(
+    {
+      slug: "fresh-open-position",
+      market: "Open position with temporary pricing gap",
+      outcome: "No",
+      shares: 4,
+      avg_price: 0.41,
+      current_price: null,
+      current_value: null,
+      resolution_status: "open",
+      end_date: "2026-08-01",
+    },
+    () => null,
+  );
+
+  assert.equal(position.economicClassification, "stale_or_unknown");
+  assert.equal(position.isClaimable, false);
 });

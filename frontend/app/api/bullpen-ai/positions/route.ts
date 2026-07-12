@@ -8,7 +8,9 @@ import { redactBullpenSensitiveText } from "../_lib/bullpenHealthCore.ts";
 import { resolvePolymarketMarketsWithQuestionFallback } from "../_lib/polymarketMarketUrls";
 import {
   applyBullpenPositionMarketData,
+  buildBullpenPositionsDiagnostics,
   buildTrackedBullpenPositionViews,
+  filterDisplayBullpenPositions,
   summarizeBullpenPositions,
   type BullpenActivePositionView,
   type BullpenPositionsResponse,
@@ -81,6 +83,7 @@ async function loadTrackedPositionsFallback(request: NextRequest) {
     return {
       positions: [],
       summary: summarizeBullpenPositions([], {}),
+      diagnostics: buildBullpenPositionsDiagnostics([]),
       fetchedAt: new Date().toISOString(),
     };
   }
@@ -104,6 +107,7 @@ async function loadTrackedPositionsFallback(request: NextRequest) {
   return {
     positions,
     summary: summarizeBullpenPositions(positions, {}),
+    diagnostics: buildBullpenPositionsDiagnostics(positions),
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -155,9 +159,16 @@ export async function GET(request: NextRequest) {
     const enrichedPositions = await enrichPositionsWithPolymarketData(
       liveResult.snapshot.positions,
     );
+    const diagnostics =
+      liveResult.snapshot.diagnostics ||
+      buildBullpenPositionsDiagnostics(enrichedPositions);
     return NextResponse.json({
-      positions: enrichedPositions,
-      summary: summarizeBullpenPositions(enrichedPositions, liveResult.snapshot.summary),
+      positions: filterDisplayBullpenPositions(enrichedPositions),
+      summary: summarizeBullpenPositions(
+        filterDisplayBullpenPositions(enrichedPositions),
+        liveResult.snapshot.summary,
+      ),
+      diagnostics,
       fetchedAt: liveResult.snapshot.fetchedAt,
       liveAvailable: true,
       positionsSource: "live-cli",
@@ -165,7 +176,11 @@ export async function GET(request: NextRequest) {
       lastSuccessfulLiveSnapshot: {
         ...liveResult.snapshot,
         positions: enrichedPositions,
-        summary: summarizeBullpenPositions(enrichedPositions, liveResult.snapshot.summary),
+        summary: summarizeBullpenPositions(
+          filterDisplayBullpenPositions(enrichedPositions),
+          liveResult.snapshot.summary,
+        ),
+        diagnostics,
       },
       fallback: buildFallbackResponse({
         source: null,
@@ -181,6 +196,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       positions: lastSuccessfulLiveSnapshot.positions,
       summary: lastSuccessfulLiveSnapshot.summary,
+      diagnostics: lastSuccessfulLiveSnapshot.diagnostics,
       fetchedAt: lastSuccessfulLiveSnapshot.fetchedAt,
       liveAvailable: false,
       positionsSource: "last-successful-live-snapshot",
@@ -199,6 +215,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       positions: trackedFallback.positions,
       summary: trackedFallback.summary,
+      diagnostics: trackedFallback.diagnostics,
       fetchedAt: trackedFallback.fetchedAt,
       liveAvailable: false,
       positionsSource: "tracked-positions",
@@ -222,6 +239,7 @@ export async function GET(request: NextRequest) {
       {
         positions: [],
         summary: summarizeBullpenPositions([], {}),
+        diagnostics: buildBullpenPositionsDiagnostics([]),
         fetchedAt: liveResult.health.timestamp,
         liveAvailable: false,
         positionsSource: null,

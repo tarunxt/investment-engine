@@ -14,16 +14,48 @@ export type BullpenActivePositionView = {
   bestAskPrice?: number | null;
   currentPrice: number | null;
   currentValue: number | null;
+  expectedPayoutUsd: number | null;
   unrealizedPnl: number | null;
   unrealizedPnlPercent: number | null;
   marketUrl: string | null;
   closeTime: string | null;
+  resolutionStatus: string | null;
+  economicClassification: BullpenPositionEconomicClassification;
+  classificationReason: string;
   isClaimable: boolean;
   claimableValue: number | null;
   returnsPerDay: number | null;
   rules: string | null;
   marketContext: string | null;
   resolutionSource: string | null;
+};
+
+export type BullpenPositionEconomicClassification =
+  | "active"
+  | "positive_payout_claimable"
+  | "settlement_pending"
+  | "resolved_zero_payout"
+  | "stale_or_unknown"
+  | "closed";
+
+export type BullpenExcludedPositionDiagnostic = {
+  key: string;
+  marketId: string;
+  conditionId: string | null;
+  marketTitle: string;
+  outcome: string;
+  shares: number;
+  closeTime: string | null;
+  currentValue: number | null;
+  expectedPayoutUsd: number | null;
+  economicClassification: BullpenPositionEconomicClassification;
+  classificationReason: string;
+};
+
+export type BullpenPositionsDiagnostics = {
+  excludedPositionCount: number;
+  resolvedZeroPayoutCount: number;
+  excludedPositions: BullpenExcludedPositionDiagnostic[];
 };
 
 export type BullpenPositionsSummary = {
@@ -37,6 +69,7 @@ export type BullpenPositionsSummary = {
 };
 
 export type BullpenLiveHealthClassification =
+  | "AUTH_REQUIRED"
   | "AUTH_EXPIRED"
   | "NETWORK_ERROR"
   | "BINARY_MISSING"
@@ -68,6 +101,7 @@ export type BullpenLiveHealth = {
 export type BullpenLiveSnapshot = {
   positions: BullpenActivePositionView[];
   summary: BullpenPositionsSummary;
+  diagnostics: BullpenPositionsDiagnostics;
   fetchedAt: string;
   source: "live-cli";
 };
@@ -81,6 +115,7 @@ export type BullpenPositionsFallback = {
 export type BullpenPositionsResponse = {
   positions?: BullpenActivePositionView[];
   summary?: BullpenPositionsSummary;
+  diagnostics?: BullpenPositionsDiagnostics;
   fetchedAt?: string;
   liveAvailable?: boolean;
   positionsSource?: BullpenPositionsSource | null;
@@ -103,6 +138,9 @@ export type BullpenCliPosition = {
   current_price?: unknown;
   currentValue?: unknown;
   current_value?: unknown;
+  expectedPayoutUsd?: unknown;
+  expectedPayoutUSDC?: unknown;
+  expected_payout_usdc?: unknown;
   endDate?: unknown;
   end_date?: unknown;
   eventSlug?: unknown;
@@ -118,6 +156,8 @@ export type BullpenCliPosition = {
   redeemable?: unknown;
   redeemableValue?: unknown;
   redeemable_value?: unknown;
+  resolutionStatus?: unknown;
+  resolution_status?: unknown;
   shares?: unknown;
   slug?: unknown;
   status?: unknown;
@@ -156,6 +196,7 @@ const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const EASTERN_TIME_ZONE = "America/New_York";
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CONDITION_ID_PATTERN = /^0x[a-f0-9]{64}$/i;
+const VALUE_EPSILON = 0.000001;
 const BULLPEN_POSITION_HISTORY_CONTAINER_KEYS = new Set([
   "activities",
   "activity",
@@ -238,6 +279,14 @@ function readBoolean(value: unknown) {
 
 function round(value: number, digits: number) {
   return Number(value.toFixed(digits));
+}
+
+function isPositiveValue(value: number | null) {
+  return value !== null && value > VALUE_EPSILON;
+}
+
+function isExplicitZeroValue(value: number | null) {
+  return value !== null && Math.abs(value) <= VALUE_EPSILON;
 }
 
 function deriveHeldSide(outcome: string) {
@@ -411,6 +460,172 @@ function extractClaimableStatus(value: BullpenCliPosition) {
   return /\b(claim|redeem|claimable|redeemable)\b/.test(claimText);
 }
 
+function readResolutionStatus(value: BullpenCliPosition) {
+  return readString(value.resolution_status ?? value.resolutionStatus ?? value.status);
+}
+
+function hasPastCloseTime(closeTime: string | null, nowMs = Date.now()) {
+  if (!closeTime) return null;
+  const closeDate = new Date(closeTime);
+  if (Number.isNaN(closeDate.getTime())) return null;
+  return closeDate.getTime() <= nowMs;
+}
+
+function classifyBullpenPosition({
+  shares,
+  closeTime,
+  currentPrice,
+  currentValue,
+  expectedPayoutUsd,
+  payoutValueUsd,
+  claimableFlag,
+  resolutionStatus,
+  nowMs = Date.now(),
+}: {
+  shares: number;
+  closeTime: string | null;
+  currentPrice: number | null;
+  currentValue: number | null;
+  expectedPayoutUsd: number | null;
+  payoutValueUsd: number | null;
+  claimableFlag: boolean;
+  resolutionStatus: string | null;
+  nowMs?: number;
+}): {
+  economicClassification: BullpenPositionEconomicClassification;
+  classificationReason: string;
+  isClaimable: boolean;
+  claimableValue: number | null;
+} {
+  const pastCloseTime = hasPastCloseTime(closeTime, nowMs);
+  const normalizedResolutionStatus = resolutionStatus?.trim().toLowerCase() || null;
+  const resolvedByStatus =
+    normalizedResolutionStatus !== null &&
+    /won|resolved|closed|expired|settled|redeemed|claimable|redeemable|final/i.test(
+      normalizedResolutionStatus,
+    );
+  const openByStatus =
+    normalizedResolutionStatus !== null &&
+    /\bopen|active|live|trading|unresolved|pending\b/i.test(
+      normalizedResolutionStatus,
+    );
+  const positivePayoutVerified =
+    isPositiveValue(expectedPayoutUsd) ||
+    (claimableFlag &&
+      (isPositiveValue(payoutValueUsd) || isPositiveValue(currentValue)));
+
+  if (shares <= VALUE_EPSILON && !claimableFlag) {
+    return {
+      economicClassification: "closed",
+      classificationReason: "No positive Bullpen shares remain for this row.",
+      isClaimable: false,
+      claimableValue: null,
+    };
+  }
+
+  if (positivePayoutVerified) {
+    const claimableValue =
+      payoutValueUsd ?? expectedPayoutUsd ?? currentValue ?? null;
+    return {
+      economicClassification: "positive_payout_claimable",
+      classificationReason:
+        "Bullpen reported fresh positive payout evidence for this resolved position.",
+      isClaimable: true,
+      claimableValue: claimableValue === null ? null : round(claimableValue, 2),
+    };
+  }
+
+  if (
+    claimableFlag &&
+    (pastCloseTime !== false || resolvedByStatus) &&
+    isExplicitZeroValue(currentValue) &&
+    isExplicitZeroValue(expectedPayoutUsd)
+  ) {
+    return {
+      economicClassification: "resolved_zero_payout",
+      classificationReason:
+        "Bullpen marked the row redeemable after close, but both current value and expected payout are explicitly zero.",
+      isClaimable: false,
+      claimableValue: null,
+    };
+  }
+
+  if (claimableFlag && (pastCloseTime !== false || resolvedByStatus)) {
+    return {
+      economicClassification: "settlement_pending",
+      classificationReason:
+        "Bullpen marked the row claimable, but no fresh positive payout value has been proven yet.",
+      isClaimable: false,
+      claimableValue: null,
+    };
+  }
+
+  if (currentPrice === null && currentValue === null && openByStatus !== false) {
+    return {
+      economicClassification: "stale_or_unknown",
+      classificationReason:
+        "The market still looks open or unresolved, but Bullpen did not provide enough fresh pricing to value it safely.",
+      isClaimable: false,
+      claimableValue: null,
+    };
+  }
+
+  if (pastCloseTime && !openByStatus && !resolvedByStatus) {
+    return {
+      economicClassification: "stale_or_unknown",
+      classificationReason:
+        "The event close time has passed, but Bullpen did not provide enough settlement evidence to classify it safely.",
+      isClaimable: false,
+      claimableValue: null,
+    };
+  }
+
+  return {
+    economicClassification: "active",
+    classificationReason:
+      "This row still looks like an economically active Bullpen position.",
+    isClaimable: false,
+    claimableValue: null,
+  };
+}
+
+function applyBullpenPositionClassification(
+  position: Omit<
+    BullpenActivePositionView,
+    "economicClassification" | "classificationReason" | "isClaimable" | "claimableValue" | "returnsPerDay"
+  > & {
+    rawClaimableFlag?: boolean;
+    claimableValue: number | null;
+    returnsPerDay?: number | null;
+  },
+) {
+  const classification = classifyBullpenPosition({
+    shares: position.shares,
+    closeTime: position.closeTime,
+    currentPrice: position.currentPrice,
+    currentValue: position.currentValue,
+    expectedPayoutUsd: position.expectedPayoutUsd,
+    payoutValueUsd: position.claimableValue,
+    claimableFlag: Boolean(position.rawClaimableFlag),
+    resolutionStatus: position.resolutionStatus,
+  });
+  const basePosition = { ...position };
+  delete basePosition.rawClaimableFlag;
+
+  return {
+    ...basePosition,
+    economicClassification: classification.economicClassification,
+    classificationReason: classification.classificationReason,
+    isClaimable: classification.isClaimable,
+    claimableValue: classification.claimableValue,
+    returnsPerDay: calculateBullpenPositionReturnsPerDay({
+      closeTime: position.closeTime,
+      currentPrice: position.currentPrice,
+      isClaimable: classification.isClaimable,
+    }),
+  } satisfies BullpenActivePositionView;
+}
+
 function isBullpenCliPositionRecord(value: unknown): value is BullpenCliPosition {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -535,6 +750,22 @@ function mergeBullpenCliPosition(
     invested_usd: investedUsd,
     current_price: currentPrice,
     current_value: currentValue,
+    expected_payout_usdc:
+      readNumber(existing.expected_payout_usdc ?? existing.expectedPayoutUSDC ?? existing.expectedPayoutUsd) !== null ||
+      readNumber(incoming.expected_payout_usdc ?? incoming.expectedPayoutUSDC ?? incoming.expectedPayoutUsd) !== null
+        ? round(
+            Math.max(
+              readNumber(existing.expected_payout_usdc ?? existing.expectedPayoutUSDC ?? existing.expectedPayoutUsd) ?? 0,
+              readNumber(incoming.expected_payout_usdc ?? incoming.expectedPayoutUSDC ?? incoming.expectedPayoutUsd) ?? 0,
+            ),
+            2,
+          )
+        : existing.expected_payout_usdc ??
+          existing.expectedPayoutUSDC ??
+          existing.expectedPayoutUsd ??
+          incoming.expected_payout_usdc ??
+          incoming.expectedPayoutUSDC ??
+          incoming.expectedPayoutUsd,
     claimableValue:
       readNumber(existing.claimableValue ?? existing.claimable_value) !== null ||
       readNumber(incoming.claimableValue ?? incoming.claimable_value) !== null
@@ -558,6 +789,13 @@ function mergeBullpenCliPosition(
       existing.eventSlug ??
       incoming.event_slug ??
       incoming.eventSlug,
+    resolution_status:
+      readString(existing.resolution_status ?? existing.resolutionStatus) ??
+      readString(incoming.resolution_status ?? incoming.resolutionStatus) ??
+      existing.resolution_status ??
+      existing.resolutionStatus ??
+      incoming.resolution_status ??
+      incoming.resolutionStatus,
   } satisfies BullpenCliPosition;
 }
 
@@ -628,7 +866,7 @@ export function normalizeBullpenPosition(
   const eventSlug = readString(value.event_slug ?? value.eventSlug);
   const closeDate = readString(value.end_date ?? value.endDate);
   const closeTime = buildBullpenCloseTimeFromDateOnly(closeDate);
-  const isClaimable = extractClaimableStatus(value);
+  const rawClaimableFlag = extractClaimableStatus(value);
   const { yesOdds, noOdds } = deriveBullpenPositionOddsPair({
     outcome,
     currentPrice,
@@ -638,9 +876,16 @@ export function normalizeBullpenPosition(
     readNumber(value.claimable_value) ??
     readNumber(value.redeemableValue) ??
     readNumber(value.redeemable_value) ??
-    (isClaimable ? currentValue ?? costBasis : null);
+    null;
+  const expectedPayoutUsd =
+    readNumber(
+      value.expected_payout_usdc ??
+        value.expectedPayoutUSDC ??
+        value.expectedPayoutUsd,
+    ) ?? null;
+  const resolutionStatus = readResolutionStatus(value);
 
-  return {
+  return applyBullpenPositionClassification({
     key: `${marketId}::${outcome}`,
     marketId,
     conditionId,
@@ -656,22 +901,20 @@ export function normalizeBullpenPosition(
     bestAskPrice: null,
     currentPrice: currentPrice === null ? null : round(currentPrice, 4),
     currentValue: currentValue === null ? null : round(currentValue, 2),
+    expectedPayoutUsd:
+      expectedPayoutUsd === null ? null : round(expectedPayoutUsd, 2),
     unrealizedPnl: unrealizedPnl === null ? null : round(unrealizedPnl, 2),
     unrealizedPnlPercent:
       unrealizedPnlPercent === null ? null : round(unrealizedPnlPercent, 2),
     marketUrl: buildMarketUrl(eventSlug),
     closeTime,
-    isClaimable,
+    resolutionStatus,
+    rawClaimableFlag,
     claimableValue: claimableValue === null ? null : round(claimableValue, 2),
-    returnsPerDay: calculateBullpenPositionReturnsPerDay({
-      closeTime,
-      currentPrice,
-      isClaimable,
-    }),
     rules: null,
     marketContext: null,
     resolutionSource: null,
-  };
+  });
 }
 
 function buildBullpenPositionAliases(position: BullpenActivePositionView) {
@@ -720,7 +963,7 @@ function mergeBullpenPositionViews(
       ? round((existing.claimableValue ?? 0) + (incoming.claimableValue ?? 0), 2)
       : null;
 
-  const merged = {
+  return applyBullpenPositionClassification({
     ...existing,
     key: existing.key,
     conditionId: existing.conditionId ?? incoming.conditionId,
@@ -736,26 +979,22 @@ function mergeBullpenPositionViews(
     bestAskPrice: existing.bestAskPrice ?? incoming.bestAskPrice,
     currentPrice,
     currentValue,
+    expectedPayoutUsd:
+      existing.expectedPayoutUsd ?? incoming.expectedPayoutUsd,
     unrealizedPnl,
     unrealizedPnlPercent,
     marketUrl: existing.marketUrl ?? incoming.marketUrl,
     closeTime: existing.closeTime ?? incoming.closeTime,
     yesOdds,
     noOdds,
+    resolutionStatus:
+      existing.resolutionStatus ?? incoming.resolutionStatus,
+    rawClaimableFlag: existing.isClaimable || incoming.isClaimable,
     claimableValue,
     rules: existing.rules ?? incoming.rules,
     marketContext: existing.marketContext ?? incoming.marketContext,
     resolutionSource: existing.resolutionSource ?? incoming.resolutionSource,
-  } satisfies BullpenActivePositionView;
-
-  return {
-    ...merged,
-    returnsPerDay: calculateBullpenPositionReturnsPerDay({
-      closeTime: merged.closeTime,
-      currentPrice: merged.currentPrice,
-      isClaimable: merged.isClaimable,
-    }),
-  } satisfies BullpenActivePositionView;
+  });
 }
 
 export function aggregateBullpenPositionViews(
@@ -765,7 +1004,7 @@ export function aggregateBullpenPositionViews(
   const aliasToGroup = new Map<string, string>();
 
   for (const [index, position] of positions.entries()) {
-    const scope = `${position.outcome.trim().toLowerCase()}::${position.isClaimable ? "claimable" : "open"}`;
+    const scope = `${position.outcome.trim().toLowerCase()}::${position.economicClassification}`;
     const aliases = buildBullpenPositionAliases(position).map((alias) => `${scope}::${alias}`);
     const existingGroupKey = aliases.find((alias) => aliasToGroup.has(alias));
     const groupKey = existingGroupKey
@@ -823,7 +1062,7 @@ export function applyBullpenPositionMarketData(
       ? null
       : round((unrealizedPnl / position.costBasis) * 100, 2);
 
-  return {
+  return applyBullpenPositionClassification({
     ...position,
     yesOdds,
     noOdds,
@@ -834,16 +1073,15 @@ export function applyBullpenPositionMarketData(
     unrealizedPnl,
     unrealizedPnlPercent,
     marketUrl: marketData.marketUrl ?? position.marketUrl,
-    returnsPerDay: calculateBullpenPositionReturnsPerDay({
-      closeTime: position.closeTime,
-      currentPrice,
-      isClaimable: position.isClaimable,
-    }),
+    rawClaimableFlag:
+      position.isClaimable ||
+      position.economicClassification === "settlement_pending" ||
+      position.economicClassification === "resolved_zero_payout",
     rules: marketData.rules ?? position.rules,
     marketContext: marketData.marketContext ?? position.marketContext,
     resolutionSource:
       marketData.resolutionSource ?? position.resolutionSource,
-  } satisfies BullpenActivePositionView;
+  });
 }
 
 export function buildTrackedBullpenPositionViews(
@@ -873,22 +1111,23 @@ export function buildTrackedBullpenPositionViews(
         bestAskPrice: marketUpdate?.bestAskPrice ?? null,
         currentPrice: null,
         currentValue: null,
+        expectedPayoutUsd: null,
         unrealizedPnl: null,
         unrealizedPnlPercent: null,
         marketUrl: marketUpdate?.marketUrl ?? null,
         closeTime,
-        isClaimable: false,
+        resolutionStatus: "open",
+        rawClaimableFlag: false,
         claimableValue: null,
-        returnsPerDay: calculateBullpenPositionReturnsPerDay({
-          closeTime,
-          currentPrice: null,
-        }),
         rules: marketUpdate?.rules ?? null,
         marketContext: marketUpdate?.marketContext ?? null,
         resolutionSource: marketUpdate?.resolutionSource ?? null,
-      } satisfies BullpenActivePositionView;
+      } satisfies Parameters<typeof applyBullpenPositionClassification>[0];
 
-      return applyBullpenPositionMarketData(basePosition, marketUpdate || {});
+      return applyBullpenPositionMarketData(
+        applyBullpenPositionClassification(basePosition),
+        marketUpdate || {},
+      );
     });
 }
 
@@ -912,11 +1151,60 @@ function sumUnrealizedPnl(positions: BullpenActivePositionView[]) {
   );
 }
 
+export function buildBullpenPositionsDiagnostics(
+  positions: BullpenActivePositionView[],
+): BullpenPositionsDiagnostics {
+  const excludedPositions = positions
+    .filter(
+      (position) =>
+        position.economicClassification === "resolved_zero_payout" ||
+        position.economicClassification === "closed",
+    )
+    .map((position) => ({
+      key: position.key,
+      marketId: position.marketId,
+      conditionId: position.conditionId,
+      marketTitle: position.marketTitle,
+      outcome: position.outcome,
+      shares: position.shares,
+      closeTime: position.closeTime,
+      currentValue: position.currentValue,
+      expectedPayoutUsd: position.expectedPayoutUsd,
+      economicClassification: position.economicClassification,
+      classificationReason: position.classificationReason,
+    }));
+
+  return {
+    excludedPositionCount: excludedPositions.length,
+    resolvedZeroPayoutCount: excludedPositions.filter(
+      (position) =>
+        position.economicClassification === "resolved_zero_payout",
+    ).length,
+    excludedPositions,
+  };
+}
+
+export function filterDisplayBullpenPositions(
+  positions: BullpenActivePositionView[],
+) {
+  return positions.filter(
+    (position) =>
+      position.economicClassification !== "resolved_zero_payout" &&
+      position.economicClassification !== "closed",
+  );
+}
+
 export function summarizeBullpenPositions(
   positions: BullpenActivePositionView[],
   summary?: Record<string, unknown> | null,
 ): BullpenPositionsSummary {
   const claimablePositions = positions.filter((position) => position.isClaimable);
+  const activePositions = positions.filter(
+    (position) =>
+      position.economicClassification === "active" ||
+      position.economicClassification === "settlement_pending" ||
+      position.economicClassification === "stale_or_unknown",
+  );
   const claimableValue = round(
     claimablePositions.reduce(
       (total, position) =>
@@ -928,7 +1216,7 @@ export function summarizeBullpenPositions(
   );
 
   return {
-    activeCount: readNumber(summary?.active_count) ?? positions.length,
+    activeCount: activePositions.length,
     claimableCount: claimablePositions.length,
     claimableValue,
     cashBalance: readNumber(summary?.cash_balance),

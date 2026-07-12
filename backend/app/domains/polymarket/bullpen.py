@@ -476,7 +476,11 @@ def _is_refresh_token_rejected_error(message: str) -> bool:
     return (
         "refresh token rejected" in lowered
         or "invalid refresh token" in lowered
+        or "auth_refresh_rejected_login_required" in lowered
+        or "auth.refresh_rejected" in lowered
+        or "refresh_token_rejected" in lowered
         or "session expired" in lowered
+        or "jwt expired" in lowered
     )
 
 
@@ -690,7 +694,6 @@ class BullpenLiveExecutor:
         attempts_remaining = buy_max_price_retry_attempts()
         current_args = args
         current_max_price = _clamp_limit_price(max_price)
-        redeemed_collateral = False
         wrapped_collateral = False
         while True:
             try:
@@ -703,11 +706,6 @@ class BullpenLiveExecutor:
                 collateral_needed = extract_bullpen_insufficient_collateral_amount(
                     error_message
                 )
-                if collateral_needed is not None and not redeemed_collateral:
-                    redeemed_collateral = True
-                    await self._redeem_before_buy_retry()
-                    continue
-
                 if collateral_needed is not None and not wrapped_collateral:
                     wrapped_collateral = True
                     wrap_amount = max(collateral_needed, amount_usd)
@@ -725,6 +723,12 @@ class BullpenLiveExecutor:
                         read_only=False,
                     )
                     continue
+
+                if collateral_needed is not None:
+                    raise BullpenCommandError(
+                        f"{error_message} Automatic collateral recovery did not attempt a global redeem. "
+                        "A later run must verify scoped claimable conditions or fresh collateral before retrying this buy."
+                    ) from exc
 
                 fill_price = extract_bullpen_buy_fill_price_error(error_message)
                 if fill_price is None or attempts_remaining <= 1:
@@ -1218,10 +1222,16 @@ def _is_auth_required_error(message: str) -> bool:
     lowered = message.lower()
     auth_markers = (
         "auth_required",
+        "auth_refresh_rejected_login_required",
+        "auth.refresh_rejected",
         "auth reauthentication required",
         "not logged in",
         "requires_auth",
         "requires_login",
+        "login_required",
+        "unauthenticated",
+        "invalid refresh token",
+        "refresh token rejected",
         "bullpen login",
     )
     return any(marker in lowered for marker in auth_markers)

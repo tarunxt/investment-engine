@@ -7,6 +7,10 @@ from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.domains.polymarket.bullpen import run_first_bullpen_json
+from app.domains.polymarket.position_classification import (
+    classify_bullpen_position,
+    extract_bullpen_claimable_flag,
+)
 from app.domains.polymarket_auto_live.scanner import (
     MARKET_PREDICTION_KEYWORDS,
     MARKET_PREDICTION_PATTERNS,
@@ -150,6 +154,10 @@ class ConsoleWalletPosition:
     close_time: str | None
     theme: str
     is_claimable: bool
+    classification: str = "active"
+    classification_reason: str = "This row still looks like an economically active Bullpen position."
+    expected_payout_usdc: float | None = None
+    resolution_status: str | None = None
 
 
 @dataclass
@@ -307,33 +315,7 @@ def _extract_close_time(value: object) -> str | None:
 
 
 def _extract_claimable(row: dict[str, object]) -> bool:
-    for key in (
-        "redeemable",
-        "isRedeemable",
-        "claimable",
-        "isClaimable",
-    ):
-        value = row.get(key)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return bool(value)
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"true", "1", "yes", "claimable", "redeemable"}:
-                return True
-            if normalized in {"false", "0", "no", "open"}:
-                return False
-
-    claim_text = " ".join(
-        value.strip()
-        for key in ("action", "status")
-        if isinstance((value := row.get(key)), str) and value.strip()
-    ).lower()
-    return any(
-        token in claim_text
-        for token in ("claim", "redeem", "claimable", "redeemable")
-    )
+    return extract_bullpen_claimable_flag(row)
 
 
 def _build_market_url(event_slug: str | None) -> str | None:
@@ -927,6 +909,11 @@ def _merge_console_wallet_position(
             )
 
     yes_odds, no_odds = _position_yes_no_odds(existing.side, current_price_cents)
+    classification = existing.classification
+    classification_reason = existing.classification_reason
+    if existing.classification == "active" and incoming.classification != "active":
+        classification = incoming.classification
+        classification_reason = incoming.classification_reason
 
     return ConsoleWalletPosition(
         market_id=existing.market_id or incoming.market_id,
@@ -950,6 +937,14 @@ def _merge_console_wallet_position(
         close_time=existing.close_time or incoming.close_time,
         theme=existing.theme or incoming.theme,
         is_claimable=existing.is_claimable or incoming.is_claimable,
+        classification=classification,
+        classification_reason=classification_reason,
+        expected_payout_usdc=(
+            existing.expected_payout_usdc
+            if existing.expected_payout_usdc is not None
+            else incoming.expected_payout_usdc
+        ),
+        resolution_status=existing.resolution_status or incoming.resolution_status,
     )
 
 
@@ -1019,7 +1014,18 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
             ),
             2,
         )
+        current_value_usd = _read_number(row.get("current_value") or row.get("currentValue"))
+        if current_value_usd is None and current_price_cents is not None:
+            current_value_usd = round(shares * (current_price_cents / 100), 2)
         event_slug = _read_string(row.get("event_slug") or row.get("eventSlug"))
+        close_time = _extract_close_time(row.get("end_date") or row.get("endDate"))
+        classification = classify_bullpen_position(
+            row,
+            shares=shares,
+            current_price=current_price_cents,
+            current_value=current_value_usd,
+            close_time=close_time,
+        )
 
         positions.append(
             ConsoleWalletPosition(
@@ -1038,17 +1044,17 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
                 current_price_cents=current_price_cents,
                 current_yes_odds=yes_odds,
                 current_no_odds=no_odds,
-                close_time=_extract_close_time(
-                    row.get("end_date") or row.get("endDate")
-                ),
+                close_time=close_time,
                 theme="Bullpen Wallet",
-                is_claimable=_extract_claimable(row),
+                is_claimable=classification.is_claimable,
+                classification=classification.state,
+                classification_reason=classification.reason,
+                expected_payout_usdc=classification.expected_payout_usdc,
+                resolution_status=classification.resolution_status,
             )
         )
 
-    positive_share_positions = [
-        position for position in positions if position.shares > 0
-    ]
+    positive_share_positions = [position for position in positions if position.shares > 0]
     return _aggregate_console_wallet_positions(positive_share_positions)
 
 
