@@ -1,3 +1,4 @@
+# Template rendered by deploy/no-docker/redeploy.sh
 [Unit]
 Description=Investment Engine FastAPI backend
 After=network-online.target
@@ -5,11 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=investment-engine
-Group=investment-engine
-WorkingDirectory=/srv/investment-engine/backend
-EnvironmentFile=/etc/investor/backend.env
-ExecStart=/srv/investment-engine/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 4
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_ROOT__/backend
+EnvironmentFile=__BACKEND_ENV_FILE__
+ExecStart=__APP_ROOT__/deploy/no-docker/scripts/run-backend.sh
 Restart=always
 RestartSec=5
 TimeoutStartSec=60

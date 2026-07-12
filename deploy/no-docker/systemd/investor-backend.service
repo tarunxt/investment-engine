@@ -1,6 +1,6 @@
 # Template rendered by deploy/no-docker/redeploy.sh
 [Unit]
-Description=Investment Engine Celery worker
+Description=Investor FastAPI backend
 After=network-online.target
 Wants=network-online.target
 
@@ -10,11 +10,12 @@ User=__APP_USER__
 Group=__APP_USER__
 WorkingDirectory=__APP_ROOT__/backend
 EnvironmentFile=__BACKEND_ENV_FILE__
-ExecStart=__APP_ROOT__/deploy/no-docker/scripts/run-celery-worker.sh
+ExecStart=__APP_ROOT__/deploy/no-docker/scripts/run-backend.sh
 Restart=always
 RestartSec=5
 TimeoutStartSec=60
 TimeoutStopSec=30
+KillSignal=SIGINT
 
 [Install]
 WantedBy=multi-user.target

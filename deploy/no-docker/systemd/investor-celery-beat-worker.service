@@ -1,3 +1,4 @@
+# Template rendered by deploy/no-docker/redeploy.sh
 [Unit]
 Description=Investor Celery beat queue worker
 After=network-online.target
@@ -5,11 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=investment-engine
-Group=investment-engine
-WorkingDirectory=/srv/investor/backend
-EnvironmentFile=/etc/investor/backend.env
-ExecStart=/srv/investor/backend/.venv/bin/celery -A app.infrastructure.messaging.celery_app worker -n beat-worker@%h -Q beat --loglevel=info --concurrency=1 --max-tasks-per-child=1000
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_ROOT__/backend
+EnvironmentFile=__BACKEND_ENV_FILE__
+ExecStart=__APP_ROOT__/deploy/no-docker/scripts/run-celery-beat-worker.sh
 Restart=always
 RestartSec=5
 TimeoutStartSec=60

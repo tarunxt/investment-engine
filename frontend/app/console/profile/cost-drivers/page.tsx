@@ -21,6 +21,7 @@ type CostDriver = {
   whyItCostsMoney: string;
   suggestedAction: string;
   estimatedMonthlySavings: number;
+  estimatedMonthlySavingsDisplay?: string | null;
   linkToAWSConsole?: string | null;
 };
 type Traffic = {
@@ -453,6 +454,11 @@ export default function PlatformCostDriversPage() {
               "Projected",
             ],
             [
+              "Projected overage cost",
+              money((data.summary.projectedOverageUsd as number) || 0),
+              "Internet transfer out only",
+            ],
+            [
               "EC2 running instances",
               data.summary.ec2RunningInstances as number,
               "CloudWatch near-real-time",
@@ -672,7 +678,10 @@ export default function PlatformCostDriversPage() {
                     </td>
                     <td className="p-2">{d.whyItCostsMoney}</td>
                     <td className="p-2">{d.suggestedAction}</td>
-                    <td className="p-2">{money(d.estimatedMonthlySavings)}</td>
+                    <td className="p-2">
+                      {d.estimatedMonthlySavingsDisplay ||
+                        money(d.estimatedMonthlySavings)}
+                    </td>
                   </tr>
                 ))
               ) : (

@@ -15,6 +15,8 @@ class CostDriver(BaseModel):
     whyItCostsMoney: str
     suggestedAction: str
     estimatedMonthlySavings: float
+    estimatedMonthlySavingsDisplay: str | None = None
+    estimatedMonthlySavingsReason: str | None = None
     linkToAWSConsole: str | None = None
 
 class TrafficRollup(BaseModel):
@@ -41,7 +43,7 @@ class Recommendation(BaseModel):
     title: str
     severity: Literal["critical", "high", "medium", "low", "info"]
     confidence: Literal["confirmed", "confirmed_billing_only", "estimated", "inferred", "not_checked", "demo"]
-    source: Literal["cost_explorer", "cloudwatch", "ec2_api", "logs_api", "app_traffic_logs", "mock"]
+    source: Literal["cost_explorer", "cloudwatch", "ec2_api", "logs_api", "lightsail_api", "app_traffic_logs", "mock"]
     whyThisMatters: str | None = None
     explanation: str
     evidence: list[EvidenceItem] = Field(default_factory=list)

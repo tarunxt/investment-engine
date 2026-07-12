@@ -1,6 +1,6 @@
 # Template rendered by deploy/no-docker/redeploy.sh
 [Unit]
-Description=Investment Engine Celery worker
+Description=Investor Celery worker
 After=network-online.target
 Wants=network-online.target
 
