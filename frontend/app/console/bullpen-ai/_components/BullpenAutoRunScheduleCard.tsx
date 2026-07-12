@@ -3458,6 +3458,7 @@ function StageTwoLlmRunDetailsDialog({
   } | null>(null);
   const [eventInputDialog, setEventInputDialog] =
     useState<StageTwoLlmEventInputDialogState | null>(null);
+  const [stageTwoPromptDialogOpen, setStageTwoPromptDialogOpen] = useState(false);
   const stats = getStageTwoStats(state.stage, state.decisions);
   const overlapCount = Math.max(
     0,
@@ -3465,6 +3466,7 @@ function StageTwoLlmRunDetailsDialog({
   );
   const llmTableRows = getStageTwoLlmTableRows(state);
   const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
+  const stageTwoPromptContext = llmTableRows.find((row) => row.row)?.row ?? null;
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
@@ -3474,12 +3476,20 @@ function StageTwoLlmRunDetailsDialog({
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               Stage 2 LLM Run
             </p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">
-              LLM ran on {stats.llmRanOn} unique rows
-            </h2>
-            <p className="mt-2 text-sm text-slate-600">
-              The previous “{stats.activePositions} Active + {stats.newOpportunities} New Opportunities = {stats.llmRanOn}” label was wrong because the two source lists can overlap. Stage 2 de-duplicates rows before sending them to the LLM.
-            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-semibold text-slate-950">
+                LLM ran on {stats.llmRanOn} unique rows
+              </h2>
+              <button
+                type="button"
+                onClick={() => setStageTwoPromptDialogOpen(true)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                aria-label="Open Stage 2 input prompt"
+                title="Show Stage 2 input prompt"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
           <button
             type="button"
@@ -3526,19 +3536,10 @@ function StageTwoLlmRunDetailsDialog({
               </button>
             ))}
           </div>
-          <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-950">
-            <p className="font-semibold">Summary</p>
-            <p className="mt-1 leading-6">
-              Stage 2 reviews the unique union of active-position rows and fresh opportunity rows. It does not add the two displayed source counts when a market appears in both groups.
-            </p>
-          </div>
           <div className="mt-5 rounded-2xl border border-slate-200 bg-white">
             <div className="border-b border-slate-200 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                 LLM-wise output ({llmTableRows.length} rows)
-              </p>
-              <p className="mt-1 text-sm text-slate-600">
-                Outputs are grouped into a separate table for each LLM model. Use the model info icon to inspect the full prompt, and click Action/Risk tags to see why the row was tagged that way.
               </p>
             </div>
             <div className="space-y-4 p-4">
@@ -3683,6 +3684,12 @@ function StageTwoLlmRunDetailsDialog({
           </div>
         </div>
       </div>
+      {stageTwoPromptDialogOpen ? (
+        <StageTwoInputPromptDialog
+          llmContext={stageTwoPromptContext}
+          onClose={() => setStageTwoPromptDialogOpen(false)}
+        />
+      ) : null}
       {eventInputDialog ? (
         <StageTwoLlmEventInputDialog
           state={eventInputDialog}
@@ -3796,6 +3803,36 @@ function MissingValueNote({ children }: { children: ReactNode }) {
     <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] leading-4 text-amber-800">
       {children}
     </p>
+  );
+}
+
+function StageTwoInputPromptDialog({
+  llmContext,
+  onClose,
+}: {
+  llmContext: Record<string, unknown> | null;
+  onClose: () => void;
+}) {
+  const prompt = llmContext?.llm_prompt;
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Stage 2 Input prompt</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Stage 2 Input prompt</h2>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close Stage 2 input prompt"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
+          <pre className="max-h-[62vh] overflow-auto whitespace-pre-wrap rounded-2xl border border-violet-200 bg-violet-50/60 p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
+          {getStageTwoLlmMissingValueReason("Stage 2 Input prompt", prompt) ? (
+            <MissingValueNote>{getStageTwoLlmMissingValueReason("Stage 2 Input prompt", prompt)}</MissingValueNote>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
