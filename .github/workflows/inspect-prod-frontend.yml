@@ -33,10 +33,31 @@ jobs:
             if ! id "$APP_SERVICE_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then
               APP_SERVICE_USER="investor"
             fi
-            FRONTEND_SERVICE_NAME="investor-frontend"
-            if ! systemctl cat "$FRONTEND_SERVICE_NAME" >/dev/null 2>&1; then
-              FRONTEND_SERVICE_NAME="investment-engine-frontend"
-            fi
+            resolve_systemd_service_name() {
+              local preferred="$1"
+              local fallback="$2"
+
+              if systemctl is-active --quiet "$preferred" >/dev/null 2>&1 || systemctl is-enabled --quiet "$preferred" >/dev/null 2>&1; then
+                printf '%s\n' "$preferred"
+                return
+              fi
+
+              if systemctl is-active --quiet "$fallback" >/dev/null 2>&1 || systemctl is-enabled --quiet "$fallback" >/dev/null 2>&1; then
+                printf '%s\n' "$fallback"
+                return
+              fi
+
+              if systemctl cat "$preferred" >/dev/null 2>&1; then
+                printf '%s\n' "$preferred"
+                return
+              fi
+
+              printf '%s\n' "$fallback"
+            }
+
+            FRONTEND_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-frontend" "investment-engine-frontend"
+            )"
 
             echo "==> App root"
             sudo test -d "$APP/frontend"

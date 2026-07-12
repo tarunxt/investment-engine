@@ -3,12 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User, UserRole
 from .schemas import CostDriversDashboard
+from .cache import RefreshCooldownError
 from .service import get_dashboard
 import re
-import time
 
 router = APIRouter(prefix="/api/admin/cost-drivers", tags=["cost-drivers"])
-_LAST_REFRESH = 0.0
 
 
 def _allowed_admin(user: User = Depends(get_current_user)) -> User:
@@ -48,9 +47,11 @@ async def recommendations(_: User = Depends(_allowed_admin)):
 
 @router.post("/refresh", response_model=CostDriversDashboard)
 async def refresh(month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"), _: User = Depends(_allowed_admin)):
-    global _LAST_REFRESH
-    now = time.time()
-    if now - _LAST_REFRESH < 60:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Refresh is rate-limited to once per minute")
-    _LAST_REFRESH = now
-    return get_dashboard(force_refresh=True, month=_month_param(month))
+    try:
+        return get_dashboard(force_refresh=True, month=_month_param(month))
+    except RefreshCooldownError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc

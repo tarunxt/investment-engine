@@ -7,6 +7,15 @@ from app.domains.cost_drivers.estimators import (
     estimate_projected_month_end,
     estimate_public_ipv4_cost,
 )
+from app.domains.cost_drivers.transfer import (
+    TRANSFER_CATEGORY_INBOUND,
+    TRANSFER_CATEGORY_INTER_AZ,
+    TRANSFER_CATEGORY_INTERNET_EGRESS,
+    TRANSFER_CATEGORY_NAT,
+    TRANSFER_CATEGORY_OTHER,
+    classify_aws_transfer_usage_type,
+    summarize_transfer_usage_types,
+)
 
 
 def test_projected_month_end():
@@ -34,3 +43,32 @@ def test_traffic_classification():
     assert classify_traffic_path("/api/rates", "application/json", "", "Chrome") == "API JSON"
     assert classify_traffic_path("/", "text/html", "", "Googlebot") == "bots/crawlers"
     assert classify_traffic_path("/_next/app.js", "application/javascript", ".js", "Chrome") == "JavaScript/CSS"
+
+
+def test_aws_transfer_usage_type_classification():
+    assert classify_aws_transfer_usage_type("DataTransfer-Out-Bytes") == TRANSFER_CATEGORY_INTERNET_EGRESS
+    assert classify_aws_transfer_usage_type("APS1-DataTransfer-xAZ-Out-Bytes") == TRANSFER_CATEGORY_INTER_AZ
+    assert classify_aws_transfer_usage_type("DataTransfer-In-Bytes") == TRANSFER_CATEGORY_INBOUND
+    assert classify_aws_transfer_usage_type("NatGateway-Bytes") == TRANSFER_CATEGORY_NAT
+    assert classify_aws_transfer_usage_type("S3-BytesDownloaded") == TRANSFER_CATEGORY_OTHER
+
+
+def test_transfer_summary_only_counts_eligible_internet_out_toward_allowance():
+    summary = summarize_transfer_usage_types(
+        [
+            {"name": "DataTransfer-Out-Bytes", "usageQuantity": 80, "cost": 7.2},
+            {"name": "APS1-DataTransfer-xAZ-Out-Bytes", "usageQuantity": 50, "cost": 5.0},
+            {"name": "DataTransfer-In-Bytes", "usageQuantity": 20, "cost": 0.0},
+            {"name": "NatGateway-Bytes", "usageQuantity": 10, "cost": 1.1},
+        ],
+        elapsed_days=15,
+        days_in_month=30,
+        free_tier_gb=100,
+        rate_per_gb=0.09,
+    )
+
+    assert summary["eligibleInternetTransferGb"] == 80
+    assert summary["remainingFreeGb"] == 20
+    assert summary["estimatedOverageGb"] == 60
+    assert summary["projectedOverageUsd"] == 5.4
+    assert summary["categories"][0]["label"] == "Internet transfer out"

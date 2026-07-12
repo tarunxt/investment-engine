@@ -56,6 +56,16 @@ jobs:
               local primary="$1"
               local legacy="$2"
 
+              if systemctl is-active --quiet "$primary" >/dev/null 2>&1 || systemctl is-enabled --quiet "$primary" >/dev/null 2>&1; then
+                printf '%s\n' "$primary"
+                return
+              fi
+
+              if systemctl is-active --quiet "$legacy" >/dev/null 2>&1 || systemctl is-enabled --quiet "$legacy" >/dev/null 2>&1; then
+                printf '%s\n' "$legacy"
+                return
+              fi
+
               if systemctl cat "$primary" >/dev/null 2>&1; then
                 printf '%s\n' "$primary"
                 return
