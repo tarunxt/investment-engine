@@ -1033,6 +1033,35 @@ def execute_bullpen_llm_target(
         }
         for batch in plan.batches
     ]
+    execution_mode_reason: str | None = None
+    if (
+        execution_options.execution_mode == "single_combined"
+        and plan.batches
+        and plan.batches[0].estimated_chars > safe_prompt_budget_chars
+    ):
+        execution_mode_reason = (
+            "Single combined prompt exceeded this target's safe prompt budget; "
+            "automatically switched to Batched parallel for this provider."
+        )
+        execution_options = execution_options.model_copy(
+            update={"execution_mode": "chunked_parallel"}
+        )
+        plan = plan_bullpen_llm_execution(
+            prepared_events,
+            execution_mode=execution_options.execution_mode,
+            events_per_prompt=execution_options.events_per_prompt,
+            safe_prompt_budget_chars=safe_prompt_budget_chars,
+            prompt_template=context.prompt_template,
+        )
+        prompt_size_estimates = [
+            {
+                "batch_id": batch.id,
+                "estimated_chars": batch.estimated_chars,
+                "event_count": len(batch.event_ids),
+                "budget_chars": safe_prompt_budget_chars,
+            }
+            for batch in plan.batches
+        ]
     target_concurrency_limit = derive_target_request_concurrency(
         max_concurrent_requests=execution_options.max_concurrent_requests,
         target_count=execution_options.target_count,
@@ -1047,75 +1076,6 @@ def execute_bullpen_llm_target(
     retry_request_count = 0
     recovery_batch_count = 0
     max_observed_concurrency = 0
-
-    if (
-        execution_options.execution_mode == "single_combined"
-        and plan.batches
-        and plan.batches[0].estimated_chars > safe_prompt_budget_chars
-    ):
-        for event in prepared_events:
-            event_results[event.event_id] = BullpenLlmEventProviderResult(
-                event_id=event.event_id,
-                provider=provider_name,
-                model=model_name,
-                status="blocked",
-                error=(
-                    "The combined prompt is too large for this target. "
-                    "Use Batched parallel or reduce the event count."
-                ),
-                invalid_reason=(
-                    "The combined prompt exceeded this target's safe prompt budget. "
-                    "Use Batched parallel."
-                ),
-            )
-        runtime_metadata = _build_runtime_metadata(
-            context=context,
-            execution_options=execution_options,
-            event_lookup=event_lookup,
-            event_results=event_results,
-            batch_metadata=batch_metadata,
-            provider_name=provider_name,
-            model_name=model_name,
-            prompt_size_estimates=prompt_size_estimates,
-            primary_request_count=0,
-            retry_request_count=0,
-            recovery_batch_count=0,
-            max_observed_concurrency=0,
-        )
-        response_text = json.dumps(
-            {
-                "markets": [
-                    _serialize_final_market_row(event, event_results.get(event.event_id))
-                    for event in sorted(prepared_events, key=lambda item: item.original_index)
-                ]
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        return BullpenLlmTargetExecutionResult(
-            provider=provider_name,
-            model=model_name,
-            response_text=response_text,
-            runtime_metadata=runtime_metadata,
-            event_results=event_results,
-            batch_metadata=batch_metadata,
-            status="failed",
-            tokens_in=0,
-            tokens_out=0,
-            estimated_cost=0.0,
-            web_search_used=False,
-            web_search_queries=[],
-            web_sources=[],
-            primary_request_count=0,
-            retry_request_count=0,
-            recovery_batch_count=0,
-            recovered_event_count=0,
-            failed_event_count=0,
-            blocked_event_count=len(prepared_events),
-            invalid_event_count=0,
-            max_observed_concurrency=0,
-            prompt_size_estimates=prompt_size_estimates,
-        )
 
     def run_batch(batch: BullpenLlmBatch) -> tuple[BullpenLlmBatch, BullpenProviderBatchCall]:
         batch_events = [event_lookup[event_id] for event_id in batch.event_ids]
@@ -1318,6 +1278,11 @@ def execute_bullpen_llm_target(
         recovery_batch_count=recovery_batch_count,
         max_observed_concurrency=max_observed_concurrency,
     )
+    if execution_mode_reason:
+        runtime_metadata["llm_execution_mode_reason"] = execution_mode_reason
+        runtime_metadata["warnings"] = _merge_unique_strings(
+            [*(runtime_metadata.get("warnings") or []), execution_mode_reason]
+        )
     response_text = json.dumps(
         {
             "markets": [
