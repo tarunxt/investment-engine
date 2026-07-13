@@ -21,6 +21,8 @@ FRONTEND_SMOKE_URL="${FRONTEND_SMOKE_URL:-http://127.0.0.1:3000/login}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-20}"
 SMOKE_RETRIES="${SMOKE_RETRIES:-30}"
 SMOKE_RETRY_SLEEP_SECONDS="${SMOKE_RETRY_SLEEP_SECONDS:-2}"
+SERVICE_STARTUP_RETRIES="${SERVICE_STARTUP_RETRIES:-30}"
+SERVICE_STARTUP_RETRY_SLEEP_SECONDS="${SERVICE_STARTUP_RETRY_SLEEP_SECONDS:-2}"
 
 declare -a CONFIG_BACKUPS=()
 declare -a INSTALLED_SYSTEMD_UNITS=()
@@ -287,6 +289,45 @@ smoke_check() {
 
   echo "Smoke check failed after $SMOKE_RETRIES attempts: $label ($url)" >&2
   curl --fail --silent --show-error --location --max-time "$SMOKE_TIMEOUT_SECONDS" "$url" >/dev/null
+}
+
+print_service_diagnostics() {
+  local service_name="$1"
+
+  echo "==> Diagnostics for $service_name" >&2
+  sudo systemctl status "$service_name" --no-pager --lines=50 >&2 || true
+  sudo journalctl -u "$service_name" --no-pager --lines=100 >&2 || true
+}
+
+verify_service_active() {
+  local service_name="$1"
+  local attempt
+  local state
+
+  echo "==> Waiting for service to become active: $service_name"
+
+  for (( attempt = 1; attempt <= SERVICE_STARTUP_RETRIES; attempt++ )); do
+    if sudo systemctl is-active --quiet "$service_name"; then
+      echo "==> Service is active: $service_name"
+      return 0
+    fi
+
+    state="$(sudo systemctl is-active "$service_name" 2>/dev/null || true)"
+    if [[ "$state" == "failed" ]]; then
+      echo "Service failed during startup: $service_name" >&2
+      print_service_diagnostics "$service_name"
+      return 1
+    fi
+
+    if (( attempt < SERVICE_STARTUP_RETRIES )); then
+      echo "==> Service not active yet: $service_name (state=${state:-unknown}, attempt $attempt/$SERVICE_STARTUP_RETRIES); retrying in ${SERVICE_STARTUP_RETRY_SLEEP_SECONDS}s"
+      sleep "$SERVICE_STARTUP_RETRY_SLEEP_SECONDS"
+    fi
+  done
+
+  echo "Service did not become active after $SERVICE_STARTUP_RETRIES attempts: $service_name (state=${state:-unknown})" >&2
+  print_service_diagnostics "$service_name"
+  return 1
 }
 
 read_env_file_var() {
@@ -743,14 +784,14 @@ if [[ "$SCOPE" == "full" ]]; then
 fi
 
 echo "==> Verify service startup"
-sudo systemctl is-active --quiet "$BACKEND_SERVICE_NAME"
-sudo systemctl is-active --quiet "$WORKER_SERVICE_NAME"
-sudo systemctl is-active --quiet "$BEAT_SERVICE_NAME"
+verify_service_active "$BACKEND_SERVICE_NAME"
+verify_service_active "$WORKER_SERVICE_NAME"
+verify_service_active "$BEAT_SERVICE_NAME"
 if [[ "$BEAT_WORKER_MANAGED" == "true" ]]; then
-  sudo systemctl is-active --quiet "$BEAT_WORKER_SERVICE_NAME"
+  verify_service_active "$BEAT_WORKER_SERVICE_NAME"
 fi
 if [[ "$SCOPE" == "full" ]]; then
-  sudo systemctl is-active --quiet "$FRONTEND_SERVICE_NAME"
+  verify_service_active "$FRONTEND_SERVICE_NAME"
 fi
 
 echo "==> Service status"
