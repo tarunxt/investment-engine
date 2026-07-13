@@ -434,6 +434,7 @@ function getStageTwoStats(
     activePositions + newOpportunities;
 
   const llmsCompleted = getStageTwoCompletedLlmCount(stage);
+  const llmOutcomeCounts = getStageTwoLlmOutcomeCounts(stage, llmsCompleted);
   const llmsSelected =
     readStageOutputNumber(stage.outputs.llm_provider_target_count) ??
     readStageOutputNumber(stage.outputs.llm_selected_target_count) ??
@@ -450,9 +451,41 @@ function getStageTwoStats(
     newOpportunities,
     llmRanOn,
     llmsCompleted,
+    llmsPassed: llmOutcomeCounts.passed,
+    llmsFailed: llmOutcomeCounts.failed,
     llmsSelected,
     newEventsToInvestIn,
   };
+}
+
+function getStageTwoLlmOutcomeCounts(
+  stage: WorkflowStageView,
+  completedCount: number,
+) {
+  const explicitPassed =
+    readStageOutputNumber(stage.outputs.llm_passed_provider_target_count) ??
+    readStageOutputNumber(stage.outputs.llm_successful_provider_target_count);
+  const explicitFailed =
+    readStageOutputNumber(stage.outputs.llm_failed_provider_target_count) ??
+    readStageOutputNumber(stage.outputs.llm_failed_model_count);
+  if (explicitPassed !== null || explicitFailed !== null) {
+    const passed = explicitPassed ?? Math.max(0, completedCount - (explicitFailed ?? 0));
+    const failed = explicitFailed ?? Math.max(0, completedCount - passed);
+    return { passed, failed };
+  }
+
+  const targetRuns = getStageTwoLlmTargetRuns(stage);
+  if (targetRuns.length) {
+    const failed = targetRuns.filter(
+      (run) => normalizeStageTwoRunStatus(readLlmContextString(run, "status")) === "failed",
+    ).length;
+    const passed = targetRuns.filter(
+      (run) => normalizeStageTwoRunStatus(readLlmContextString(run, "status")) !== "failed",
+    ).length;
+    return { passed, failed };
+  }
+
+  return { passed: completedCount, failed: 0 };
 }
 
 function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
@@ -755,7 +788,9 @@ function StageTwoRunStats({
             /
             <span className="font-semibold tabular-nums">
               {displayStat(stats.llmsSelected)}
-            </span>
+            </span>{" "}
+            (Passed: <span className="font-semibold tabular-nums">{displayStat(stats.llmsPassed)}</span> | Failed:{" "}
+            <span className="font-semibold tabular-nums">{displayStat(stats.llmsFailed)}</span>)
           </button>
         ) : (
           <>
@@ -766,7 +801,9 @@ function StageTwoRunStats({
             /
             <span className="font-semibold tabular-nums">
               {displayStat(stats.llmsSelected)}
-            </span>
+            </span>{" "}
+            (Passed: <span className="font-semibold tabular-nums">{displayStat(stats.llmsPassed)}</span> | Failed:{" "}
+            <span className="font-semibold tabular-nums">{displayStat(stats.llmsFailed)}</span>)
           </>
         )}
       </div>
