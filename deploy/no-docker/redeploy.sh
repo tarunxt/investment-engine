@@ -457,11 +457,27 @@ destination_path.write_text(text, encoding="utf-8")
 PY
 }
 
+systemd_unit_file_name() {
+  local unit_name="$1"
+
+  if [[ "$unit_name" == *.service ]]; then
+    printf '%s\n' "$unit_name"
+    return
+  fi
+
+  printf '%s.service\n' "$unit_name"
+}
+
 install_systemd_unit() {
   local unit_name="$1"
-  local template="$APP_ROOT/deploy/no-docker/systemd/$unit_name"
-  local target="/etc/systemd/system/$unit_name"
+  local unit_file
+  local template
+  local target
   local rendered
+
+  unit_file="$(systemd_unit_file_name "$unit_name")"
+  template="$APP_ROOT/deploy/no-docker/systemd/$unit_file"
+  target="/etc/systemd/system/$unit_file"
 
   if [[ ! -f "$template" ]]; then
     echo "Systemd template not found: $template" >&2
