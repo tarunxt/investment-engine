@@ -3703,6 +3703,54 @@ export function StockDetailsButton({
     () => historicalRows.filter((row) => stockConsensusMatches(row.stock, stock)),
     [historicalRows, stock],
   );
+  const directHistoricalEvidenceRows = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: Array<{
+      id: string;
+      source: string;
+      action: string;
+      units: string;
+      amount: string;
+      score: string;
+      rationale: ReactNode;
+      createdAt: string;
+      runId: number;
+      jobId: number;
+    }> = [];
+
+    const addEvidenceRow = (
+      idPrefix: string,
+      meta: LlmMeta,
+      row: CanonicalRow,
+      sourceSuffix: string,
+      rationale: ReactNode,
+    ) => {
+      const key = `${idPrefix}:${meta.runId}:${meta.jobId}:${normalizeStockSymbol(row["Stock Symbol"] || row["Stock Name"])}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({
+        id: key,
+        source: `${meta.runLabel} · ${meta.provider} ${meta.model}${sourceSuffix}`,
+        action: row[ACTION_HEADER] || "—",
+        units: row["Units to Buy"] || row["Units Change"] || row["Units to Sell/Buy"] || "—",
+        amount: row["Total Buy Amount"] || row["Amount"] || "—",
+        score: row["Score"] || row["Final Score"] || row["Confidence Score (0-100)"] || "—",
+        rationale,
+        createdAt: meta.createdAt,
+        runId: meta.runId,
+        jobId: meta.jobId,
+      });
+    };
+
+    stock.rows.forEach((row) => {
+      addEvidenceRow("rebalance", row.meta, row.cells, "", <CapturedRationalesCell row={row.cells} />);
+    });
+    stock.swingScanEntries.forEach((entry) => {
+      addEvidenceRow("swing", entry.meta, entry.row, " · direct scan fallback", <CapturedRationalesCell row={entry.row} />);
+    });
+
+    return rows.sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt));
+  }, [stock]);
 
   useEffect(() => {
     if (!open || market !== "india" || !zerodhaHolding) return;
@@ -3912,9 +3960,44 @@ export function StockDetailsButton({
                       </tbody>
                     </table>
                   </div>
+                ) : directHistoricalEvidenceRows.length ? (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                      Final Actionables history table rows were not available for this symbol, so the popup double-checked the captured LLM rows directly and recovered the prior recommendation evidence below.
+                    </div>
+                    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white/80">
+                      <table className="min-w-[64rem] text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-200 bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                            <th className="px-3 py-2 font-semibold">Run / LLM</th>
+                            <th className="px-3 py-2 font-semibold">Action</th>
+                            <th className="px-3 py-2 font-semibold">Units</th>
+                            <th className="px-3 py-2 font-semibold">Amount</th>
+                            <th className="px-3 py-2 font-semibold">Score</th>
+                            <th className="px-3 py-2 font-semibold">Rationale</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {directHistoricalEvidenceRows.map((row) => (
+                            <tr key={row.id} className="bg-white/40">
+                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                <RunJobLink runId={row.runId}>{row.source}</RunJobLink><br />
+                                <span className="text-gray-400">{formatDateTime(row.createdAt)} · Job #{row.jobId}</span>
+                              </td>
+                              <td className="px-3 py-2 align-top"><FinalActionValue value={row.action} /></td>
+                              <td className="px-3 py-2 align-top text-gray-700">{row.units}</td>
+                              <td className="px-3 py-2 align-top text-gray-700">{row.amount}</td>
+                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">{row.score}</td>
+                              <td className="min-w-80 px-3 py-2 align-top text-gray-700">{row.rationale}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 ) : (
                   <p className="rounded-lg border border-slate-200 bg-white/75 p-3 text-slate-600">
-                    No prior Final Actionables suggestions were found for this stock.
+                    No prior Final Actionables suggestions were found for this stock after checking both the Final Actionables history rows and the captured LLM output rows.
                   </p>
                 )}
               </section>
