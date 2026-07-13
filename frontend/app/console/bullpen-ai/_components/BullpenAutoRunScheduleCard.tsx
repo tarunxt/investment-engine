@@ -3469,25 +3469,71 @@ function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
 
 type StageTwoRunSummaryStatus = "completed" | "failed" | "partial";
 
+function formatStageTwoRuntimeSeconds(value: number | null) {
+  if (value === null) return "—";
+  const safeSeconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function normalizeStageTwoRunStatus(value: string | null): StageTwoRunSummaryStatus {
+  if (value === "completed" || value === "partial" || value === "failed") return value;
+  return "completed";
+}
+
+function getStageTwoLlmTargetRuns(stage: WorkflowStageView) {
+  const runs = stage.outputs.llm_target_runs;
+  if (!Array.isArray(runs)) return [];
+  return runs.filter(
+    (run): run is Record<string, unknown> => Boolean(run) && typeof run === "object",
+  );
+}
+
 function getStageTwoLlmRunSummaryRows(
+  stage: WorkflowStageView,
   groups: ReturnType<typeof groupStageTwoLlmRowsByModel>,
 ) {
-  return groups.map((group) => {
+  const groupCostByKey = new Map<string, number | null>();
+  groups.forEach((group) => {
     const costs = group.rows
       .map((row) => readStageTwoLlmOutputCost(row.output))
       .filter((value): value is number => value !== null);
-    const cost = costs.length
-      ? costs.reduce((total, value) => total + value, 0)
-      : null;
-    return {
-      key: group.key,
-      provider: group.rows[0]?.provider ?? "—",
-      model: group.rows[0]?.model ?? group.label,
-      status: "completed" as StageTwoRunSummaryStatus,
-      runtime: "—",
-      cost,
-    };
+    groupCostByKey.set(
+      group.key,
+      costs.length ? costs.reduce((total, value) => total + value, 0) : null,
+    );
   });
+
+  const targetRuns = getStageTwoLlmTargetRuns(stage);
+  if (targetRuns.length) {
+    return targetRuns.map((run, index) => {
+      const provider = readLlmContextString(run, "provider") ?? "—";
+      const model = readLlmContextString(run, "model") ?? "—";
+      const key = `${provider}::${model}`;
+      return {
+        key: `${key}-${index}`,
+        provider,
+        model,
+        status: normalizeStageTwoRunStatus(readLlmContextString(run, "status")),
+        runtime: formatStageTwoRuntimeSeconds(readLlmContextNumber(run, "elapsed_seconds")),
+        cost:
+          readLlmContextNumber(run, "estimated_cost") ??
+          readLlmContextNumber(run, "cost") ??
+          groupCostByKey.get(key) ??
+          null,
+      };
+    });
+  }
+
+  return groups.map((group) => ({
+    key: group.key,
+    provider: group.rows[0]?.provider ?? "—",
+    model: group.rows[0]?.model ?? group.label,
+    status: "completed" as StageTwoRunSummaryStatus,
+    runtime: "—",
+    cost: groupCostByKey.get(group.key) ?? null,
+  }));
 }
 
 function getStageTwoRunSummaryStatusClass(status: StageTwoRunSummaryStatus) {
@@ -3525,10 +3571,11 @@ function StageTwoLlmRunDetailsDialog({
   );
   const llmTableRows = getStageTwoLlmTableRows(state);
   const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
-  const summaryRows = getStageTwoLlmRunSummaryRows(llmModelGroups);
+  const summaryRows = getStageTwoLlmRunSummaryRows(state.stage, llmModelGroups);
   const completedSummaryCount = summaryRows.filter((row) => row.status === "completed").length;
   const partialSummaryCount = summaryRows.filter((row) => row.status === "partial").length;
-  const failedSummaryCount = Math.max(0, stats.llmsSelected - completedSummaryCount - partialSummaryCount);
+  const failedSummaryCount = summaryRows.filter((row) => row.status === "failed").length;
+  const pendingSummaryCount = Math.max(0, stats.llmsSelected - summaryRows.length);
   const cumulativeCost = summaryRows.reduce(
     (total, row) => total + (row.cost ?? 0),
     0,
@@ -3583,12 +3630,12 @@ function StageTwoLlmRunDetailsDialog({
                 <h4 className="mt-2 text-lg font-extrabold text-slate-950">
                   Bullpen AI Run {state.run ? `#${state.run.id}` : "latest"} · {formatIstDateTime(state.run?.started_at ?? state.stage.timerStartedAt)}
                   <span className="block text-sm font-semibold text-slate-600 sm:ml-2 sm:inline">
-                    LLMs used: {stats.llmsSelected || completedSummaryCount}
-                    {stageRuntime ? ` · Time taken: ${stageRuntime}` : ""}
+                    LLM progress: {summaryRows.length}/{stats.llmsSelected || summaryRows.length} returned
+                    {stageRuntime ? ` · Runtime: ${stageRuntime}` : ""}
                   </span>
                 </h4>
               </div>
-              <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold uppercase tracking-[0.14em]">
+              <div className="grid grid-cols-4 gap-2 text-center text-xs font-bold uppercase tracking-[0.14em]">
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-emerald-700">
                   <span className="block text-xl">{completedSummaryCount}</span>Completed
                 </div>
@@ -3597,6 +3644,9 @@ function StageTwoLlmRunDetailsDialog({
                 </div>
                 <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-red-700">
                   <span className="block text-xl">{failedSummaryCount}</span>Failed
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-slate-600">
+                  <span className="block text-xl">{pendingSummaryCount}</span>Pending
                 </div>
               </div>
             </div>
@@ -3642,7 +3692,7 @@ function StageTwoLlmRunDetailsDialog({
               </div>
             </div>
             <p className="mt-4 text-xs text-slate-500">
-              Stage 2 model rows are grouped from the stored LLM-reviewed candidate outputs for this Bullpen run.
+              Stage 2 model rows come from backend target-run progress first, then fall back to stored LLM-reviewed candidate outputs when legacy runs do not include target-run metadata.
             </p>
           </section>
 

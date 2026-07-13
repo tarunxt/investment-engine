@@ -640,6 +640,16 @@ async def _execute_console_stage_two_shared_llm(
                 "invalid_event_count": target_result.invalid_event_count,
                 "blocked_event_count": target_result.blocked_event_count,
                 "max_observed_concurrency": target_result.max_observed_concurrency,
+                "tokens_in": target_result.tokens_in,
+                "tokens_out": target_result.tokens_out,
+                "estimated_cost": target_result.estimated_cost,
+                "elapsed_seconds": round(
+                    sum(
+                        batch.elapsed_seconds
+                        for batch in target_result.batch_metadata
+                    ),
+                    3,
+                ),
             }
         )
         target_question_runtime = target_result.runtime_metadata.get("question_runtime")
