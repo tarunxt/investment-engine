@@ -454,6 +454,7 @@ async def _execute_console_stage_two_shared_llm(
     rules_by_market_id: dict[str, RuleEvaluation],
     settings: BullpenAutoLiveSettings,
     now: datetime,
+    target_progress_callback: Callable[[int], None] | None = None,
 ) -> ConsoleStageTwoSharedReview:
     prompt_template = _console_stage_two_prompt_template(settings)
     targets = resolve_auto_live_llm_targets(settings)
@@ -556,24 +557,28 @@ async def _execute_console_stage_two_shared_llm(
         if incoming.get("invalid_reason") and not existing.get("invalid_reason"):
             existing["invalid_reason"] = incoming["invalid_reason"]
 
+    completed_target_count = 0
+
     async def run_target(
         provider_name: str,
         model_name: str,
     ) -> tuple[str, str, object]:
+        nonlocal completed_target_count
         try:
-            return (
-                provider_name,
-                model_name,
-                await asyncio.to_thread(
-                    execute_bullpen_llm_target,
-                    context,
-                    provider_name=provider_name,
-                    model_name=model_name,
-                    prepared_context=prepared_context,
-                ),
+            target_result: object = await asyncio.to_thread(
+                execute_bullpen_llm_target,
+                context,
+                provider_name=provider_name,
+                model_name=model_name,
+                prepared_context=prepared_context,
             )
+            return provider_name, model_name, target_result
         except Exception as exc:  # pragma: no cover - defensive guardrail
             return provider_name, model_name, exc
+        finally:
+            completed_target_count += 1
+            if target_progress_callback is not None:
+                target_progress_callback(completed_target_count)
 
     target_results = await asyncio.gather(
         *[
@@ -4413,11 +4418,26 @@ class BullpenAutoLiveEngine:
                     for llm_row in llm_markets
                     if isinstance((market := llm_row.get("market")), ScannedMarket)
                 }
+                def report_llm_target_progress(completed_target_count: int) -> None:
+                    llm_execution_runtime_outputs[
+                        "llm_completed_provider_target_count"
+                    ] = completed_target_count
+                    report_llm_stage_progress(
+                        phase_status="running",
+                        reason=(
+                            "Stage 2 is running. "
+                            f"{completed_target_count}/{len(console_llm_targets)} LLM targets have returned responses."
+                        ),
+                        completed_items=0,
+                        completed_at=None,
+                    )
+
                 shared_review = await _execute_console_stage_two_shared_llm(
                     llm_markets=llm_markets,
                     rules_by_market_id=rules_by_market_id,
                     settings=settings,
                     now=now,
+                    target_progress_callback=report_llm_target_progress,
                 )
                 llm_execution_runtime_outputs.update(shared_review.runtime_outputs)
 

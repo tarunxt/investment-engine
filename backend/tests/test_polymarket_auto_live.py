@@ -991,7 +991,10 @@ async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings
         rules_by_market_id,
         settings,
         now,
+        target_progress_callback=None,
     ):
+        if target_progress_callback is not None:
+            target_progress_callback(1)
         assert now == fixed_now
         assert len(llm_markets) == 1
         assert rules_by_market_id[candidate_market.market_id].hours_remaining == 96
@@ -1124,6 +1127,7 @@ async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings
     assert llm_stage.outputs["llm_execution_mode"] == "single_combined"
     assert llm_stage.outputs["llm_events_per_prompt"] == 7
     assert llm_stage.outputs["llm_primary_request_count"] == 1
+    assert llm_stage.outputs["llm_completed_provider_target_count"] == 1
     assert (
         llm_stage.outputs["llm_prompt_template"]
         == "Saved Stage 2 prompt {{SELECTED_QUESTIONS}}"
