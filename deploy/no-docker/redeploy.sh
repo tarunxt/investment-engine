@@ -23,6 +23,7 @@ SMOKE_RETRIES="${SMOKE_RETRIES:-30}"
 SMOKE_RETRY_SLEEP_SECONDS="${SMOKE_RETRY_SLEEP_SECONDS:-2}"
 SERVICE_STARTUP_RETRIES="${SERVICE_STARTUP_RETRIES:-30}"
 SERVICE_STARTUP_RETRY_SLEEP_SECONDS="${SERVICE_STARTUP_RETRY_SLEEP_SECONDS:-2}"
+SERVICE_STABLE_SECONDS="${SERVICE_STABLE_SECONDS:-8}"
 
 declare -a CONFIG_BACKUPS=()
 declare -a INSTALLED_SYSTEMD_UNITS=()
@@ -299,17 +300,49 @@ print_service_diagnostics() {
   sudo journalctl -u "$service_name" --no-pager --lines=100 >&2 || true
 }
 
+service_restart_count() {
+  local service_name="$1"
+  local restarts
+
+  restarts="$(sudo systemctl show "$service_name" --property=NRestarts --value 2>/dev/null || true)"
+  if [[ "$restarts" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$restarts"
+    return
+  fi
+
+  printf '0\n'
+}
+
 verify_service_active() {
   local service_name="$1"
   local attempt
   local state
+  local restarts_before
+  local restarts_after
 
-  echo "==> Waiting for service to become active: $service_name"
+  echo "==> Waiting for service to become active and stable: $service_name"
 
   for (( attempt = 1; attempt <= SERVICE_STARTUP_RETRIES; attempt++ )); do
     if sudo systemctl is-active --quiet "$service_name"; then
-      echo "==> Service is active: $service_name"
-      return 0
+      restarts_before="$(service_restart_count "$service_name")"
+      echo "==> Service is active: $service_name; confirming it remains stable for ${SERVICE_STABLE_SECONDS}s"
+      sleep "$SERVICE_STABLE_SECONDS"
+
+      if sudo systemctl is-active --quiet "$service_name"; then
+        restarts_after="$(service_restart_count "$service_name")"
+        if (( restarts_after == restarts_before )); then
+          echo "==> Service is active and stable: $service_name"
+          return 0
+        fi
+
+        echo "Service restarted while stability check was running: $service_name (restarts ${restarts_before}->${restarts_after})" >&2
+      else
+        state="$(sudo systemctl is-active "$service_name" 2>/dev/null || true)"
+        echo "Service stopped being active during stability check: $service_name (state=${state:-unknown})" >&2
+      fi
+
+      print_service_diagnostics "$service_name"
+      return 1
     fi
 
     state="$(sudo systemctl is-active "$service_name" 2>/dev/null || true)"
