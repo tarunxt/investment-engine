@@ -174,6 +174,8 @@ type StageInfo = {
   activeRunId?: number | null;
   lastRunId?: number | null;
   completedLlms?: number | null;
+  passedLlms?: number | null;
+  failedLlms?: number | null;
   totalLlms?: number | null;
   recommendedStocks?: number | null;
   rebalanceInputs?: number | null;
@@ -1501,10 +1503,15 @@ function formatDuration(
 
 function getRunProgress(run: RunResponse) {
   const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
+  const classifications = jobs.map(classifyRunOutputJob);
+  const passedLlms = classifications.filter(
+    (state) => state === "completed" || state === "partial",
+  ).length;
+  const failedLlms = classifications.filter((state) => state === "failed").length;
   return {
-    completedLlms: jobs.filter((job) =>
-      ["completed", "failed"].includes((job.status || "").toLowerCase()),
-    ).length,
+    completedLlms: passedLlms + failedLlms,
+    passedLlms,
+    failedLlms,
     totalLlms: jobs.length,
   };
 }
@@ -1869,7 +1876,10 @@ function getRunOutputSummary(run: RunResponse) {
 
 function formatLlmCompletion(info: StageInfo) {
   if (!info.totalLlms) return "Not available";
-  return `${info.completedLlms ?? 0}/${info.totalLlms}`;
+  const completed = info.completedLlms ?? 0;
+  const passed = info.passedLlms ?? completed;
+  const failed = info.failedLlms ?? Math.max(0, info.totalLlms - passed);
+  return `${completed}/${info.totalLlms} (Passed: ${passed} | Failed: ${failed})`;
 }
 
 function formatRecommendedStockProgress(info: StageInfo) {
@@ -6041,6 +6051,10 @@ ${zerodhaExecutionMode === "direct_market"
                   ...summarizeThreat(threat),
                   completedLlms:
                     (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
+                  passedLlms:
+                    (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
+                  failedLlms:
+                    (threat.status || "").toLowerCase() === "failed" ? 1 : 0,
                   totalLlms: 1,
                 },
                 usdInrRate,
@@ -6268,13 +6282,17 @@ ${zerodhaExecutionMode === "direct_market"
             const status = (analysis.status || "").toLowerCase();
             updateStage(runningPortfolio, stage, {
               ...withInrCost(summarizeThreat(analysis), usdInrRate),
-              completedLlms: status === "completed" || status === "partial" ? 1 : 0,
+              completedLlms: ["completed", "partial", "failed"].includes(status) ? 1 : 0,
+              passedLlms: status === "completed" || status === "partial" ? 1 : 0,
+              failedLlms: status === "failed" ? 1 : 0,
               totalLlms: 1,
             });
             if (status === "completed") {
               markCompleted(runningPortfolio, stage, {
                 ...summarizeThreat(analysis),
                 completedLlms: 1,
+                passedLlms: 1,
+                failedLlms: 0,
                 totalLlms: 1,
               });
             } else if (status === "failed") {
