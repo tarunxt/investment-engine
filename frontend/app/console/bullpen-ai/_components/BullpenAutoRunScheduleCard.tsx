@@ -135,6 +135,7 @@ type StageTwoInvestEventsDialogState = {
 };
 
 type StageTwoLlmRunDialogState = {
+  run: BullpenAutoLiveRun | null;
   stage: WorkflowStageView;
   decisions: BullpenAutoLiveDecision[];
 };
@@ -300,6 +301,14 @@ function formatReturnsPerDay(value: number | null) {
 function formatMoney(value: number | null) {
   if (value === null) return "—";
   return `$${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+function formatUsdCost(value: number | null) {
+  if (value === null) return "—";
+  return `$${value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  })}`;
 }
 
 function formatInvestAmount(value: number | null) {
@@ -597,6 +606,7 @@ function StageOneRunStats({
 }
 
 function StageTwoRunStats({
+  run,
   stage,
   hideNumbers = false,
   decisions = [],
@@ -605,6 +615,7 @@ function StageTwoRunStats({
   onOpenScanCandidateDialog,
   scanStageForPositionSnapshot,
 }: {
+  run: BullpenAutoLiveRun | null;
   stage: WorkflowStageView;
   hideNumbers?: boolean;
   decisions?: BullpenAutoLiveDecision[];
@@ -696,7 +707,7 @@ function StageTwoRunStats({
         {onOpenLlmRunDetails ? (
           <button
             type="button"
-            onClick={() => onOpenLlmRunDetails({ stage, decisions })}
+            onClick={() => onOpenLlmRunDetails({ run, stage, decisions })}
             className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
             aria-label={`Open details for ${displayStat(stats.llmRanOn)} LLM-reviewed rows`}
           >
@@ -733,7 +744,7 @@ function StageTwoRunStats({
         {onOpenLlmRunDetails ? (
           <button
             type="button"
-            onClick={() => onOpenLlmRunDetails({ stage, decisions })}
+            onClick={() => onOpenLlmRunDetails({ run, stage, decisions })}
             className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
             aria-label={`Open details for ${displayStat(stats.llmsCompleted)} completed LLM runs`}
           >
@@ -2639,6 +2650,7 @@ function RunDetailWorkerStages({
                 ) : null}
                 {stage.key === "llm" ? (
                   <StageTwoRunStats
+                    run={run}
                     stage={stage}
                     decisions={decisions}
                     onOpenInvestEvents={onOpenStageTwoInvestEvents}
@@ -3447,6 +3459,49 @@ function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTable
   return [...groups.values()];
 }
 
+function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
+  return (
+    readLlmContextNumber(output, "estimated_cost") ??
+    readLlmContextNumber(output, "cost") ??
+    readLlmContextNumber(output, "cost_usd")
+  );
+}
+
+type StageTwoRunSummaryStatus = "completed" | "failed" | "partial";
+
+function getStageTwoLlmRunSummaryRows(
+  groups: ReturnType<typeof groupStageTwoLlmRowsByModel>,
+) {
+  return groups.map((group) => {
+    const costs = group.rows
+      .map((row) => readStageTwoLlmOutputCost(row.output))
+      .filter((value): value is number => value !== null);
+    const cost = costs.length
+      ? costs.reduce((total, value) => total + value, 0)
+      : null;
+    return {
+      key: group.key,
+      provider: group.rows[0]?.provider ?? "—",
+      model: group.rows[0]?.model ?? group.label,
+      status: "completed" as StageTwoRunSummaryStatus,
+      runtime: "—",
+      cost,
+    };
+  });
+}
+
+function getStageTwoRunSummaryStatusClass(status: StageTwoRunSummaryStatus) {
+  if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "partial") return "border-sky-200 bg-sky-50 text-sky-700";
+  return "border-red-200 bg-red-50 text-red-700";
+}
+
+function getStageTwoRunSummaryStatusLabel(status: StageTwoRunSummaryStatus) {
+  if (status === "completed") return "Completed";
+  if (status === "partial") return "Partial";
+  return "Failed";
+}
+
 function StageTwoLlmRunDetailsDialog({
   state,
   onClose,
@@ -3470,6 +3525,19 @@ function StageTwoLlmRunDetailsDialog({
   );
   const llmTableRows = getStageTwoLlmTableRows(state);
   const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
+  const summaryRows = getStageTwoLlmRunSummaryRows(llmModelGroups);
+  const completedSummaryCount = summaryRows.filter((row) => row.status === "completed").length;
+  const partialSummaryCount = summaryRows.filter((row) => row.status === "partial").length;
+  const failedSummaryCount = Math.max(0, stats.llmsSelected - completedSummaryCount - partialSummaryCount);
+  const cumulativeCost = summaryRows.reduce(
+    (total, row) => total + (row.cost ?? 0),
+    0,
+  );
+  const stageRuntime = formatStageElapsedTime(
+    state.stage.timerStartedAt,
+    state.stage.timerCompletedAt,
+    Date.parse(state.run?.completed_at ?? state.run?.started_at ?? state.stage.timerCompletedAt ?? state.stage.timerStartedAt ?? "") || 0,
+  );
   const stageTwoPromptContext = llmTableRows.find((row) => row.row)?.row ?? null;
   const stagePromptTemplate = getStageTwoRunPromptTemplate(state.stage);
 
@@ -3506,7 +3574,79 @@ function StageTwoLlmRunDetailsDialog({
           </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5">
-          <div className="grid gap-3 md:grid-cols-4">
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                  Last Run Summary
+                </p>
+                <h4 className="mt-2 text-lg font-extrabold text-slate-950">
+                  Bullpen AI Run {state.run ? `#${state.run.id}` : "latest"} · {formatIstDateTime(state.run?.started_at ?? state.stage.timerStartedAt)}
+                  <span className="block text-sm font-semibold text-slate-600 sm:ml-2 sm:inline">
+                    LLMs used: {stats.llmsSelected || completedSummaryCount}
+                    {stageRuntime ? ` · Time taken: ${stageRuntime}` : ""}
+                  </span>
+                </h4>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold uppercase tracking-[0.14em]">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-emerald-700">
+                  <span className="block text-xl">{completedSummaryCount}</span>Completed
+                </div>
+                <div className="rounded-2xl border border-sky-200 bg-sky-50 px-5 py-3 text-sky-700">
+                  <span className="block text-xl">{partialSummaryCount}</span>Partial
+                </div>
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-red-700">
+                  <span className="block text-xl">{failedSummaryCount}</span>Failed
+                </div>
+              </div>
+            </div>
+            {cumulativeCost > 0 ? (
+              <p className="mt-2 text-sm font-semibold text-slate-600">
+                Cumulative cost: {formatUsdCost(cumulativeCost)}
+              </p>
+            ) : null}
+            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3 font-bold">Provider</th>
+                      <th className="px-4 py-3 font-bold">Model</th>
+                      <th className="px-4 py-3 font-bold">Status</th>
+                      <th className="px-4 py-3 font-bold">Runtime</th>
+                      <th className="px-4 py-3 font-bold">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {summaryRows.length ? summaryRows.map((row) => (
+                      <tr key={`stage-two-summary-${row.key}`} className="bg-white">
+                        <td className="px-4 py-3 font-bold capitalize text-slate-900">{row.provider}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-700">{row.model}</td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${getStageTwoRunSummaryStatusClass(row.status)}`}>
+                            {getStageTwoRunSummaryStatusLabel(row.status)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-600">{row.runtime}</td>
+                        <td className="px-4 py-3 font-bold text-slate-700">{formatUsdCost(row.cost)}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-500">
+                          No model-level summary was returned for this Stage 2 run.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p className="mt-4 text-xs text-slate-500">
+              Stage 2 model rows are grouped from the stored LLM-reviewed candidate outputs for this Bullpen run.
+            </p>
+          </section>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-4">
             {[
               {
                 label: "Active positions",
@@ -6523,6 +6663,7 @@ export function BullpenAutoRunScheduleCard({
                       ) : null}
                       {stage.key === "llm" ? (
                         <StageTwoRunStats
+                          run={workflowRunForMonitor}
                           stage={stage}
                           hideNumbers={!showStageNumbers}
                           decisions={investRunDecisions}
