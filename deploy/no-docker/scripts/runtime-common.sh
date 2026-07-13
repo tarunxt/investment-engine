@@ -11,7 +11,8 @@ runtime_repo_root() {
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   (
-    cd "$script_dir/../.."
+    # This file lives at <repo>/deploy/no-docker/scripts/runtime-common.sh.
+    cd "$script_dir/../../.."
     pwd
   )
 }
