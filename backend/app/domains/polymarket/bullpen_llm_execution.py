@@ -9,14 +9,25 @@ import json
 import math
 import random
 import re
+import threading
 import time
 from typing import Any, Literal
 
-from app.domains.ai_providers.base import AIProviderResponse
+from pydantic import ValidationError
+
+from app.domains.ai_providers.base import (
+    AIProviderResponse,
+    ProviderCallError,
+    build_provider_call_error,
+)
 from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.polymarket.event_preflight import (
     detect_stale_fact,
     prepare_polymarket_event_context,
+)
+from app.domains.polymarket.stage2_models import (
+    Stage2ProviderMarketOutput,
+    first_present_mapping_value,
 )
 from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveLlmOutput
 from app.domains.runs.schemas import (
@@ -35,6 +46,7 @@ BULLPEN_LLM_MAX_CONCURRENT_REQUESTS = 6
 BULLPEN_LLM_REQUEST_TIMEOUT_SECONDS = 240
 BULLPEN_LLM_MAX_REQUEST_ATTEMPTS = 3
 BULLPEN_LLM_MAX_RECOVERY_BATCHES = 2
+DEFAULT_PROVIDER_CONCURRENCY_LIMIT = 2
 DEFAULT_BULLPEN_PROMPT_BUDGET_CHARS = 90_000
 PROMPT_BUDGET_CHARS_BY_PROVIDER = {
     "openai": 110_000,
@@ -42,7 +54,6 @@ PROMPT_BUDGET_CHARS_BY_PROVIDER = {
     "deepseek": 100_000,
     "anthropic": 80_000,
 }
-MODEL_SIDE_SEARCH_PROVIDERS = {"gemini", "deepseek"}
 REQUEST_RETRYABLE_PATTERNS = (
     re.compile(r"\b429\b"),
     re.compile(r"\b5\d\d\b"),
@@ -64,100 +75,41 @@ REQUEST_NON_RETRYABLE_PATTERNS = (
     re.compile(r"unsupported", re.I),
     re.compile(r"bad request", re.I),
 )
-DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE = """[ENABLE_WEB_SEARCH]
-You are an independent probability estimation engine for Polymarket questions.
+DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE = """[STAGE2_SHARED_EVIDENCE_ONLY]
+You are estimating Polymarket YES/NO probabilities from a single shared evidence packet.
 
-Analyze every selected market and return one calibrated YES/NO estimate per question.
-
-You must use the exact market_url when present, the supplied Polymarket rules, the supplied detailed Polymarket market context when present, and the current timestamps provided in the input.
-Do not reason from the market title alone.
-If the title, close time, and market_url rules appear inconsistent, the supplied Polymarket rules win.
-
-Input fields may include:
-question_ref, question_id, market_id, question, slug, market_url, close_time, closing_time, close_time_et, current_time_utc, current_time_et, deadline_et, hours_remaining, deadline_source, title_date_hint, title_deadline_et_assumption, category, outcomes, current_yes_odds, current_no_odds, polymarket_rules, polymarket_market_context, polymarket_resolution_source, preflight_evidence_block.
-
-Each market may include:
-- polymarket_rules
-- polymarket_market_context
-- polymarket_resolution_source
-- preflight_evidence_block
-
-You MUST use polymarket_rules as the authoritative resolution criteria.
-You MUST read and consider polymarket_market_context when present.
-The Market Context may include the label "Experimental AI-generated summary referencing Polymarket data." Treat it as helpful context and evidence, not as the final resolution authority.
-If polymarket_rules conflict with polymarket_market_context, polymarket_rules win.
-If preflight_evidence_block is present, treat every populated fact inside it as authoritative operator-supplied context for this run.
-Do not contradict populated facts in preflight_evidence_block.
-If a preflight_evidence_block field says "Not supplied" or "Unknown", that field is still unresolved and may require verification from current sources.
-Only estimate the unresolved condition that remains after accepting the authoritative facts and exact Polymarket rules.
-If polymarket_rules say an announcement immediately resolves the market, then an already-confirmed announcement should be treated as criteria_likely_satisfied and already_occurred.
-
-For each question:
-1. Read and consider the exact market_url, polymarket_rules, polymarket_market_context, polymarket_resolution_source, and preflight_evidence_block.
-2. State what YES means under those exact rules in yes_definition.
-3. Use current_time_utc and current_time_et as the evaluation timestamp.
-4. Determine the operative deadline in ET.
-5. For "by [date]" markets, assume 11:59 PM ET on that date unless the rules explicitly say otherwise.
-6. Compute hours_remaining from the operative deadline, not from vague intuition.
-7. Distinguish clearly between:
-   - already occurred / criteria likely satisfied
-   - scheduled but not occurred
-   - preparatory or indirect signals only
-   - weak or rumour evidence
-   - no reliable evidence
-   - conflicting evidence
-8. Never convert scheduled, expected, planned, rumored, or preparatory activity into "already happened".
-9. Use current market odds only as a weak reference signal, not as the primary basis for the answer.
-10. Set llm_no_odds = 100 - llm_yes_odds.
-11. If the supplied rules plus current credible evidence show that the market has already resolved YES, return llm_yes_odds = 100.00 and llm_no_odds = 0.00.
-12. If the supplied rules plus current credible evidence show that the market has already resolved NO, return llm_yes_odds = 0.00 and llm_no_odds = 100.00.
-13. Do not hedge at 95 or 99 once the market's own rules are already satisfied.
-
-Use these labels when possible:
-- evidence_status: criteria_likely_satisfied | scheduled_not_occurred | preparatory_or_indirect_only | weak_or_rumour_only | no_reliable_evidence | conflicting_evidence
-- event_state: already_occurred | scheduled_not_occurred | preparatory_only | rumour_only | no_confirmed_event | conflicting
-- confidence: Low | Medium | High
+Each input row contains an `event_id` and a canonical `stage2_context`. Use only that structured context.
+Do not browse. Do not add outside evidence. Treat Polymarket AI-generated market context as background only.
+Use the exact resolution rules, the deterministic deadline fields, and the structured evidence packet as the source of truth.
+Current market odds are a weak prior, not independent evidence.
 
 Output requirements:
 - Return strict JSON only.
-- Return an object with a top-level "markets" array.
-- Return exactly one object per input question.
-- Do not skip any question.
-- Do not include markdown.
-- Do not include commentary outside JSON.
-- Copy each question_ref exactly from the input.
-- Copy each question_id exactly from the input.
-- Copy each market_id exactly from the input when provided.
-- question should echo the input question text.
-- llm_yes_odds must be a number from 0.00 to 100.00.
-- llm_no_odds must be a number from 0.00 to 100.00.
-- llm_yes_odds + llm_no_odds must equal exactly 100.00.
-- Use two decimal places.
-- Do not use the % symbol.
-- If evidence is weak, still provide a calibrated estimate.
-- Avoid 0 or 100 unless the outcome is already resolved or mathematically certain.
-- Keep rationale concise and under 320 characters.
-- key_evidence should be a short array of the most decision-relevant facts.
-- red_flags should be a short array of contradictions, caveats, or missing-rule issues.
+- Return one row per expected `event_id`.
+- Use `event_id` as the primary key.
+- Do not skip events.
+- Do not invent evidence or probabilities.
+- Preserve valid 0/100 outcomes when the rules and evidence already settle the market.
+- If only one side is known, return the complement for the other side.
 
-JSON schema:
+Schema:
 {
   "markets": [
     {
-      "question_ref": "Q1",
+      "event_id": "stable-event-id",
       "question_id": "question-id",
       "market_id": "market-id",
-      "question": "string",
       "yes_definition": "exact YES resolution meaning",
-      "deadline_et": "YYYY-MM-DD hh:mm:ss AM/PM ET",
-      "hours_remaining": 24.5,
-      "evidence_status": "scheduled_not_occurred",
-      "event_state": "scheduled_not_occurred",
-      "llm_yes_odds": 50.00,
-      "llm_no_odds": 50.00,
-      "confidence": "Medium",
-      "key_evidence": ["fact 1", "fact 2"],
-      "red_flags": ["caveat 1"],
+      "deadline_utc": "2026-07-14T12:00:00+00:00",
+      "resolution_timezone": "Asia/Riyadh",
+      "hours_remaining": 4.25,
+      "evidence_status": "insufficient|weak|moderate|strong|criteria_satisfied",
+      "event_state": "already_occurred|not_confirmed|scheduled|preparatory|conflicting|unknown",
+      "llm_yes_odds": 42.25,
+      "llm_no_odds": 57.75,
+      "confidence": "Low|Medium|High",
+      "key_evidence_source_ids": ["S1", "S3"],
+      "red_flags": ["short caveat"],
       "rationale": "short explanation"
     }
   ]
@@ -165,6 +117,19 @@ JSON schema:
 
 Selected questions:
 {{SELECTED_QUESTIONS}}"""
+
+_PROVIDER_SEMAPHORE_LOCK = threading.Lock()
+_PROVIDER_SEMAPHORES: dict[str, threading.BoundedSemaphore] = {}
+
+
+def _provider_semaphore(provider_name: str) -> threading.BoundedSemaphore:
+    key = provider_name.strip().lower()
+    with _PROVIDER_SEMAPHORE_LOCK:
+        if key not in _PROVIDER_SEMAPHORES:
+            _PROVIDER_SEMAPHORES[key] = threading.BoundedSemaphore(
+                value=DEFAULT_PROVIDER_CONCURRENCY_LIMIT
+            )
+        return _PROVIDER_SEMAPHORES[key]
 
 
 @dataclass(frozen=True)
@@ -208,11 +173,14 @@ class ParsedBullpenMarketRow:
     llm_no_odds: float | None
     yes_definition: str | None
     deadline_et: str | None
+    deadline_utc: str | None
+    resolution_timezone: str | None
     hours_remaining: float | None
     evidence_status: str | None
     event_state: str | None
     confidence: str | None
     key_evidence: list[str]
+    key_evidence_source_ids: list[str]
     red_flags: list[str]
     rationale: str | None
 
@@ -235,7 +203,8 @@ class BullpenProviderBatchCall:
     attempts: int
     retry_count: int
     elapsed_seconds: float
-    error: str | None = None
+    error: ProviderCallError | None = None
+    actual_model: str | None = None
 
 
 @dataclass
@@ -243,7 +212,19 @@ class BullpenLlmEventProviderResult:
     event_id: str
     provider: str
     model: str
-    status: Literal["success", "recovered", "invalid", "failed", "blocked"]
+    status: Literal[
+        "success",
+        "recovered",
+        "provider_failed",
+        "provider_unavailable",
+        "timed_out",
+        "invalid_json",
+        "invalid_schema",
+        "missing_event",
+        "evidence_blocked",
+        "circuit_open",
+        "cancelled",
+    ]
     row: ParsedBullpenMarketRow | None = None
     error: str | None = None
     invalid_reason: str | None = None
@@ -254,6 +235,7 @@ class BullpenLlmEventProviderResult:
     web_sources: list[str] = field(default_factory=list)
     attempts: int = 1
     batch_id: str | None = None
+    diagnostic: dict[str, Any] | None = None
 
 
 @dataclass
@@ -267,6 +249,8 @@ class BullpenLlmBatchRuntimeMetadata:
     attempts: int
     elapsed_seconds: float
     error_summary: str | None = None
+    error_category: str | None = None
+    error_details: dict[str, Any] | None = None
     recovery_attempt: int = 0
     recovered_from_batch_id: str | None = None
 
@@ -433,9 +417,38 @@ def _build_prompt(
     )
     placeholder = "{{SELECTED_QUESTIONS}}"
     normalized_template = template.strip()
+    has_stage2_context = any(
+        isinstance(item, dict) and isinstance(item.get("stage2_context"), dict)
+        for item in question_payload
+    )
+    if has_stage2_context and "[stage2_shared_evidence_only]" not in normalized_template.lower():
+        normalized_template = (
+            "[STAGE2_SHARED_EVIDENCE_ONLY]\n"
+            f"{normalized_template}"
+        )
     if placeholder in normalized_template:
         return normalized_template.replace(placeholder, selected_questions_json)
     return f"{normalized_template}\n\nSelected questions:\n{selected_questions_json}"
+
+
+def _prompt_payload_for_event(event: PreparedBullpenLlmEvent) -> dict[str, Any]:
+    question = event.question_payload
+    if question.stage2_context is not None:
+        return {
+            "event_id": event.event_id,
+            "question_ref": question.question_ref,
+            "question_id": question.question_id,
+            "market_id": question.market_id,
+            "condition_id": question.condition_id,
+            "market_slug": question.market_slug,
+            "event_slug": question.event_slug,
+            "question": question.question,
+            "preflight_evidence_block": question.preflight_evidence_block,
+            "stage2_context": question.stage2_context.model_dump(mode="json"),
+        }
+    payload = question.model_dump(mode="json")
+    payload["event_id"] = event.event_id
+    return payload
 
 
 def estimate_batch_prompt_size_chars(
@@ -446,9 +459,21 @@ def estimate_batch_prompt_size_chars(
     return len(
         _build_prompt(
             prompt_template,
-            [event.question_payload.model_dump(mode="json") for event in events],
+            [_prompt_payload_for_event(event) for event in events],
         )
     )
+
+
+def estimate_batch_prompt_tokens(
+    *,
+    prompt_template: str,
+    events: list[PreparedBullpenLlmEvent],
+) -> int:
+    # Coarse but stable cross-provider estimate used only for batching diagnostics.
+    return max(1, math.ceil(estimate_batch_prompt_size_chars(
+        prompt_template=prompt_template,
+        events=events,
+    ) / 4))
 
 
 def plan_bullpen_llm_execution(
@@ -631,11 +656,6 @@ def _normalize_odds_pair(
         no = 100 - yes
     elif no is not None and yes is None:
         yes = 100 - no
-    if yes is not None and no is not None:
-        total = yes + no
-        if total > 0 and abs(total - 100) > 0.01:
-            yes = (yes / total) * 100
-            no = 100 - yes
     if yes is not None:
         yes = max(0, min(100, round(yes, 2)))
     if no is not None:
@@ -705,7 +725,12 @@ def parse_bullpen_batch_response(
         return response
 
     for record in markets:
-        matched_event_id = _match_event_id(record, identifier_maps)
+        normalized_event_id = _normalize_lookup_value(_read_str(record, "event_id", "eventId"))
+        matched_event_id = None
+        if normalized_event_id and normalized_event_id in event_by_id:
+            matched_event_id = normalized_event_id
+        if matched_event_id is None:
+            matched_event_id = _match_event_id(record, identifier_maps)
         if not matched_event_id:
             response.unexpected_rows.append(record)
             continue
@@ -715,20 +740,26 @@ def parse_bullpen_batch_response(
 
         yes, no = _normalize_odds_pair(
             _read_number(
-                record.get("llm_yes_odds")
-                or record.get("llmYesOdds")
-                or record.get("yes_odds")
-                or record.get("yesOdds")
-                or record.get("yes_probability")
-                or record.get("prob_yes")
+                first_present_mapping_value(
+                    record,
+                    "llm_yes_odds",
+                    "llmYesOdds",
+                    "yes_odds",
+                    "yesOdds",
+                    "yes_probability",
+                    "prob_yes",
+                )
             ),
             _read_number(
-                record.get("llm_no_odds")
-                or record.get("llmNoOdds")
-                or record.get("no_odds")
-                or record.get("noOdds")
-                or record.get("no_probability")
-                or record.get("prob_no")
+                first_present_mapping_value(
+                    record,
+                    "llm_no_odds",
+                    "llmNoOdds",
+                    "no_odds",
+                    "noOdds",
+                    "no_probability",
+                    "prob_no",
+                )
             ),
         )
 
@@ -739,6 +770,55 @@ def parse_bullpen_batch_response(
             continue
 
         event = event_by_id[matched_event_id]
+        try:
+            validated_row = Stage2ProviderMarketOutput.model_validate(
+                {
+                    "event_id": matched_event_id,
+                    "question_id": _read_str(record, "question_id", "questionId")
+                    or event.question_payload.question_id,
+                    "market_id": _read_str(record, "market_id", "marketId")
+                    or event.question_payload.market_id,
+                    "yes_definition": _read_str(record, "yes_definition", "yesDefinition"),
+                    "deadline_utc": _read_str(record, "deadline_utc", "deadlineUtc"),
+                    "resolution_timezone": _read_str(
+                        record,
+                        "resolution_timezone",
+                        "resolutionTimezone",
+                    ),
+                    "hours_remaining": first_present_mapping_value(
+                        record,
+                        "hours_remaining",
+                        "hoursRemaining",
+                    ),
+                    "evidence_status": _read_str(
+                        record,
+                        "evidence_status",
+                        "evidenceStatus",
+                    ),
+                    "event_state": _read_str(record, "event_state", "eventState"),
+                    "llm_yes_odds": yes,
+                    "llm_no_odds": no,
+                    "confidence": _read_str(record, "confidence"),
+                    "key_evidence_source_ids": _read_str_list(
+                        record,
+                        "key_evidence_source_ids",
+                        "keyEvidenceSourceIds",
+                    ),
+                    "red_flags": _read_str_list(record, "red_flags", "redFlags"),
+                    "rationale": _read_str(
+                        record,
+                        "rationale",
+                        "reasoning",
+                        "notes",
+                        "note",
+                        "explanation",
+                        "summary",
+                    ),
+                }
+            )
+        except ValidationError as exc:
+            response.invalid_event_errors[matched_event_id] = str(exc).splitlines()[0]
+            continue
         response.rows_by_event_id[matched_event_id] = ParsedBullpenMarketRow(
             event_id=matched_event_id,
             record=record,
@@ -749,31 +829,20 @@ def parse_bullpen_batch_response(
             market_id=_read_str(record, "market_id", "marketId")
             or event.question_payload.market_id,
             question=_read_str(record, "question") or event.question_payload.question,
-            llm_yes_odds=yes,
-            llm_no_odds=no,
-            yes_definition=_read_str(record, "yes_definition", "yesDefinition"),
+            llm_yes_odds=validated_row.llm_yes_odds,
+            llm_no_odds=validated_row.llm_no_odds,
+            yes_definition=validated_row.yes_definition,
             deadline_et=_read_str(record, "deadline_et", "deadlineEt"),
-            hours_remaining=_read_number(
-                record.get("hours_remaining") or record.get("hoursRemaining")
-            ),
-            evidence_status=_read_str(
-                record,
-                "evidence_status",
-                "evidenceStatus",
-            ),
-            event_state=_read_str(record, "event_state", "eventState"),
-            confidence=_read_str(record, "confidence"),
+            deadline_utc=validated_row.deadline_utc,
+            resolution_timezone=validated_row.resolution_timezone,
+            hours_remaining=validated_row.hours_remaining,
+            evidence_status=validated_row.evidence_status,
+            event_state=validated_row.event_state,
+            confidence=validated_row.confidence,
             key_evidence=_read_str_list(record, "key_evidence", "keyEvidence"),
-            red_flags=_read_str_list(record, "red_flags", "redFlags"),
-            rationale=_read_str(
-                record,
-                "rationale",
-                "reasoning",
-                "notes",
-                "note",
-                "explanation",
-                "summary",
-            ),
+            key_evidence_source_ids=validated_row.key_evidence_source_ids,
+            red_flags=validated_row.red_flags,
+            rationale=validated_row.rationale,
         )
 
     response.missing_event_ids = [
@@ -792,16 +861,25 @@ def _call_provider_once_with_timeout(
 ) -> AIProviderResponse:
     provider = ProviderFactory.create(provider_name)
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(provider.generate, prompt=prompt, model=model_name)
+    semaphore = _provider_semaphore(provider_name)
+    semaphore.acquire()
     try:
+        future = executor.submit(provider.generate, prompt=prompt, model=model_name)
         return future.result(timeout=BULLPEN_LLM_REQUEST_TIMEOUT_SECONDS)
     except concurrent.futures.TimeoutError as exc:
         future.cancel()
-        raise TimeoutError(
-            f"{provider_name}/{model_name} timed out after "
-            f"{BULLPEN_LLM_REQUEST_TIMEOUT_SECONDS} seconds"
+        raise ProviderCallError(
+            provider=provider_name,
+            requested_model=model_name,
+            execution_phase="request",
+            safe_message=(
+                f"{provider_name}/{model_name} timed out after "
+                f"{BULLPEN_LLM_REQUEST_TIMEOUT_SECONDS} seconds"
+            ),
+            retryable=True,
         ) from exc
     finally:
+        semaphore.release()
         executor.shutdown(wait=False, cancel_futures=True)
 
 
@@ -820,10 +898,30 @@ def execute_provider_batch_call(
     model_name: str,
     prompt: str,
 ) -> BullpenProviderBatchCall:
+    health = ProviderFactory.validate_target(provider_name, model_name)
+    if not health.available:
+        error = ProviderCallError(
+            provider=provider_name,
+            requested_model=model_name,
+            actual_model=None,
+            execution_phase="capability_check",
+            safe_message=health.reason or "Provider target is unavailable.",
+            retryable=False,
+        )
+        return BullpenProviderBatchCall(
+            provider=provider_name,
+            model=model_name,
+            response=None,
+            attempts=1,
+            retry_count=0,
+            elapsed_seconds=0.0,
+            error=error,
+            actual_model=None,
+        )
     started_at = time.monotonic()
     attempts = 0
     retry_count = 0
-    last_error: Exception | None = None
+    last_error: ProviderCallError | None = None
     response: AIProviderResponse | None = None
 
     while attempts < BULLPEN_LLM_MAX_REQUEST_ATTEMPTS:
@@ -836,13 +934,33 @@ def execute_provider_batch_call(
             )
             break
         except Exception as exc:  # pragma: no cover - exercised via tests with stubs
-            last_error = exc
-            if attempts >= BULLPEN_LLM_MAX_REQUEST_ATTEMPTS or not _is_retryable_request_error(
+            retryable = (
+                exc.retryable
+                if isinstance(exc, ProviderCallError)
+                else _is_retryable_request_error(exc)
+            )
+            last_error = (
                 exc
-            ):
+                if isinstance(exc, ProviderCallError)
+                else build_provider_call_error(
+                    provider=provider_name,
+                    requested_model=model_name,
+                    execution_phase="request",
+                    error=exc,
+                    retryable=retryable,
+                    attempt=attempts,
+                    elapsed_seconds=round(time.monotonic() - started_at, 3),
+                )
+            )
+            if attempts >= BULLPEN_LLM_MAX_REQUEST_ATTEMPTS or not retryable:
                 break
             retry_count += 1
-            backoff_seconds = min(12.0, (2 ** (attempts - 1)) + random.uniform(0.2, 0.8))
+            retry_after = last_error.retry_after_seconds if last_error else None
+            backoff_seconds = (
+                retry_after
+                if isinstance(retry_after, (int, float)) and retry_after > 0
+                else min(12.0, (2 ** (attempts - 1)) + random.uniform(0.2, 0.8))
+            )
             time.sleep(backoff_seconds)
 
     return BullpenProviderBatchCall(
@@ -852,7 +970,8 @@ def execute_provider_batch_call(
         attempts=attempts,
         retry_count=retry_count,
         elapsed_seconds=round(time.monotonic() - started_at, 3),
-        error=str(last_error) if last_error is not None and response is None else None,
+        error=last_error if last_error is not None and response is None else None,
+        actual_model=response.model if response is not None else None,
     )
 
 
@@ -863,7 +982,7 @@ def _build_batch_prompt(
 ) -> str:
     return _build_prompt(
         prompt_template,
-        [event.question_payload.model_dump(mode="json") for event in events],
+        [_prompt_payload_for_event(event) for event in events],
     )
 
 
@@ -931,14 +1050,6 @@ def _build_question_runtime_entry(
         question_runtime["invalid_reason"] = error_reason
     elif (
         context.evidence_options.require_fresh_internet_evidence
-        and provider_name in MODEL_SIDE_SEARCH_PROVIDERS
-        and not model_web_search_used
-    ):
-        question_runtime["invalid_reason"] = (
-            "Required model-side search/tool usage did not run before the final answer."
-        )
-    elif (
-        context.evidence_options.require_fresh_internet_evidence
         and not bool(question_runtime.get("web_search_used"))
         and not bool(question_runtime.get("evidence_block_used"))
     ):
@@ -954,6 +1065,14 @@ def _build_question_runtime_entry(
         or question_runtime["web_sources"]
         or question_runtime.get("evidence_block_used")
     )
+    if event.question_payload.stage2_context is not None:
+        question_runtime["stage2_context"] = event.question_payload.stage2_context.model_dump(
+            mode="json"
+        )
+    if event.question_payload.evidence_packet_v2 is not None:
+        question_runtime["evidence_packet_v2"] = (
+            event.question_payload.evidence_packet_v2.model_dump(mode="json")
+        )
     return question_runtime, stale_fact_detected, stale_fact_reason
 
 
@@ -974,12 +1093,15 @@ def _serialize_final_market_row(
             else None
         )
     return {
+        "event_id": event.event_id,
         "question_ref": row.question_ref if row is not None else event.question_payload.question_ref,
         "question_id": row.question_id if row is not None else event.question_payload.question_id,
         "market_id": row.market_id if row is not None else event.question_payload.market_id,
         "question": row.question if row is not None else event.question_payload.question,
         "yes_definition": row.yes_definition if row is not None else None,
         "deadline_et": row.deadline_et if row is not None else event.question_payload.deadline_et,
+        "deadline_utc": row.deadline_utc if row is not None else None,
+        "resolution_timezone": row.resolution_timezone if row is not None else None,
         "hours_remaining": row.hours_remaining if row is not None else event.question_payload.hours_remaining,
         "evidence_status": row.evidence_status if row is not None else None,
         "event_state": row.event_state if row is not None else None,
@@ -987,7 +1109,9 @@ def _serialize_final_market_row(
         "llm_no_odds": row.llm_no_odds if row is not None else None,
         "confidence": row.confidence if row is not None else None,
         "key_evidence": row.key_evidence if row is not None else [],
+        "key_evidence_source_ids": row.key_evidence_source_ids if row is not None else [],
         "red_flags": row.red_flags if row is not None else [],
+        "status": event_result.status if event_result is not None else "provider_failed",
         "rationale": rationale,
     }
 
@@ -1007,6 +1131,7 @@ def execute_bullpen_llm_target(
         else prepare_polymarket_event_context(context)
     )
     prepared_events = build_prepared_bullpen_events(prepared_context)
+    target_health = ProviderFactory.validate_target(provider_name, model_name)
     execution_options = normalize_bullpen_execution_options(
         context.execution_options,
         target_count=context.execution_options.target_count,
@@ -1028,6 +1153,10 @@ def execute_bullpen_llm_target(
         {
             "batch_id": batch.id,
             "estimated_chars": batch.estimated_chars,
+            "estimated_prompt_tokens": estimate_batch_prompt_tokens(
+                prompt_template=context.prompt_template,
+                events=[event for event in prepared_events if event.event_id in batch.event_ids],
+            ),
             "event_count": len(batch.event_ids),
             "budget_chars": safe_prompt_budget_chars,
         }
@@ -1057,6 +1186,10 @@ def execute_bullpen_llm_target(
             {
                 "batch_id": batch.id,
                 "estimated_chars": batch.estimated_chars,
+                "estimated_prompt_tokens": estimate_batch_prompt_tokens(
+                    prompt_template=context.prompt_template,
+                    events=[event for event in prepared_events if event.event_id in batch.event_ids],
+                ),
                 "event_count": len(batch.event_ids),
                 "budget_chars": safe_prompt_budget_chars,
             }
@@ -1076,6 +1209,74 @@ def execute_bullpen_llm_target(
     retry_request_count = 0
     recovery_batch_count = 0
     max_observed_concurrency = 0
+    circuit_open = False
+
+    if not target_health.available:
+        unavailable_error = ProviderCallError(
+            provider=provider_name,
+            requested_model=model_name,
+            execution_phase="capability_check",
+            safe_message=target_health.reason or "Provider target is unavailable.",
+            retryable=False,
+        )
+        for event in prepared_events:
+            event_results[event.event_id] = BullpenLlmEventProviderResult(
+                event_id=event.event_id,
+                provider=provider_name,
+                model=model_name,
+                status="provider_unavailable",
+                error=unavailable_error.safe_message,
+                attempts=1,
+                diagnostic=unavailable_error.to_metadata(),
+            )
+        runtime_metadata = _build_runtime_metadata(
+            context=context,
+            execution_options=execution_options,
+            event_lookup=event_lookup,
+            event_results=event_results,
+            batch_metadata=[],
+            provider_name=provider_name,
+            model_name=model_name,
+            prompt_size_estimates=prompt_size_estimates,
+            primary_request_count=0,
+            retry_request_count=0,
+            recovery_batch_count=0,
+            max_observed_concurrency=0,
+        )
+        response_text = json.dumps(
+            {
+                "markets": [
+                    _serialize_final_market_row(event, event_results.get(event.event_id))
+                    for event in sorted(prepared_events, key=lambda item: item.original_index)
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        return BullpenLlmTargetExecutionResult(
+            provider=provider_name,
+            model=model_name,
+            response_text=response_text,
+            runtime_metadata=runtime_metadata,
+            event_results=event_results,
+            batch_metadata=[],
+            status="failed",
+            tokens_in=0,
+            tokens_out=0,
+            estimated_cost=0.0,
+            web_search_used=False,
+            web_search_queries=[],
+            web_sources=[],
+            primary_request_count=0,
+            retry_request_count=0,
+            recovery_batch_count=0,
+            recovered_event_count=0,
+            failed_event_count=len(prepared_events),
+            blocked_event_count=0,
+            invalid_event_count=0,
+            max_observed_concurrency=0,
+            prompt_size_estimates=prompt_size_estimates,
+        )
 
     def run_batch(batch: BullpenLlmBatch) -> tuple[BullpenLlmBatch, BullpenProviderBatchCall]:
         batch_events = [event_lookup[event_id] for event_id in batch.event_ids]
@@ -1093,7 +1294,11 @@ def execute_bullpen_llm_target(
     with concurrent.futures.ThreadPoolExecutor(max_workers=target_concurrency_limit) as executor:
         running: dict[concurrent.futures.Future[tuple[BullpenLlmBatch, BullpenProviderBatchCall]], BullpenLlmBatch] = {}
         while pending_batches or running:
+            if circuit_open and not running:
+                break
             while pending_batches and len(running) < target_concurrency_limit:
+                if circuit_open:
+                    break
                 next_batch = pending_batches.pop(0)
                 future = executor.submit(run_batch, next_batch)
                 running[future] = next_batch
@@ -1105,7 +1310,6 @@ def execute_bullpen_llm_target(
             )
             for future in done:
                 batch = running.pop(future)
-                batch_call_error = None
                 try:
                     completed_batch, batch_call = future.result()
                 except Exception as exc:  # pragma: no cover - defensive
@@ -1117,9 +1321,14 @@ def execute_bullpen_llm_target(
                         attempts=1,
                         retry_count=0,
                         elapsed_seconds=0.0,
-                        error=str(exc),
+                        error=build_provider_call_error(
+                            provider=provider_name,
+                            requested_model=model_name,
+                            execution_phase="request",
+                            error=exc,
+                            retryable=False,
+                        ),
                     )
-                    batch_call_error = str(exc)
                 retry_request_count += batch_call.retry_count
                 if batch_call.response is not None:
                     total_tokens_in += int(batch_call.response.tokens_in or 0)
@@ -1127,25 +1336,98 @@ def execute_bullpen_llm_target(
                     total_cost = round(total_cost + float(batch_call.response.cost or 0.0), 6)
                 batch_events = [event_lookup[event_id] for event_id in completed_batch.event_ids]
                 batch_status = "completed"
-                batch_error_summary = batch_call_error or batch_call.error
+                batch_error_summary = batch_call.error.safe_message if batch_call.error else None
+                batch_error_category = batch_call.error.execution_phase if batch_call.error else None
+                batch_error_details = batch_call.error.to_metadata() if batch_call.error else None
                 if batch_call.response is None:
                     batch_status = "failed"
+                    terminal_status: Literal[
+                        "provider_failed",
+                        "provider_unavailable",
+                        "timed_out",
+                    ] = "provider_failed"
+                    if batch_call.error is not None:
+                        if batch_call.error.execution_phase == "capability_check":
+                            terminal_status = "provider_unavailable"
+                        elif "timed out" in batch_call.error.safe_message.lower():
+                            terminal_status = "timed_out"
+                        if not batch_call.error.retryable:
+                            circuit_open = True
                     for event in batch_events:
                         event_results[event.event_id] = BullpenLlmEventProviderResult(
                             event_id=event.event_id,
                             provider=provider_name,
                             model=model_name,
-                            status="failed",
+                            status=terminal_status,
                             error=batch_error_summary or "Provider batch failed.",
                             attempts=batch_call.attempts,
                             batch_id=completed_batch.id,
                             web_search_used=False,
+                            diagnostic=batch_error_details,
                         )
                 else:
-                    parsed_response = parse_bullpen_batch_response(
-                        batch_call.response.content,
-                        events=batch_events,
-                    )
+                    try:
+                        parsed_response = parse_bullpen_batch_response(
+                            batch_call.response.content,
+                            events=batch_events,
+                        )
+                    except ValueError as exc:
+                        batch_status = "partial"
+                        batch_error_summary = str(exc)
+                        batch_error_category = "invalid_json"
+                        batch_error_details = {
+                            "category": "invalid_json",
+                            "safe_message": str(exc),
+                            "provider": provider_name,
+                            "requested_model": model_name,
+                            "actual_model": getattr(batch_call, "actual_model", None),
+                            "batch_id": completed_batch.id,
+                        }
+                        if completed_batch.recovery_attempt < BULLPEN_LLM_MAX_RECOVERY_BATCHES:
+                            recovery_batch_count += 1
+                            pending_batches.append(
+                                BullpenLlmBatch(
+                                    id=f"{completed_batch.id}-recovery-{completed_batch.recovery_attempt + 1}",
+                                    event_ids=[event.event_id for event in batch_events],
+                                    estimated_chars=estimate_batch_prompt_size_chars(
+                                        prompt_template=context.prompt_template,
+                                        events=batch_events,
+                                    ),
+                                    recovery_of_batch_id=completed_batch.id,
+                                    recovery_attempt=completed_batch.recovery_attempt + 1,
+                                )
+                            )
+                        else:
+                            for event in batch_events:
+                                event_results[event.event_id] = BullpenLlmEventProviderResult(
+                                    event_id=event.event_id,
+                                    provider=provider_name,
+                                    model=model_name,
+                                    status="invalid_json",
+                                    error=str(exc),
+                                    attempts=batch_call.attempts,
+                                    batch_id=completed_batch.id,
+                                    diagnostic=batch_error_details,
+                                )
+                        batch_metadata.append(
+                            BullpenLlmBatchRuntimeMetadata(
+                                batch_id=completed_batch.id,
+                                provider=provider_name,
+                                model=model_name,
+                                event_ids=completed_batch.event_ids,
+                                event_count=len(completed_batch.event_ids),
+                                status=batch_status,
+                                attempts=batch_call.attempts,
+                                elapsed_seconds=batch_call.elapsed_seconds,
+                                error_summary=batch_error_summary,
+                                error_category=batch_error_category,
+                                error_details=batch_error_details,
+                                recovery_attempt=completed_batch.recovery_attempt,
+                                recovered_from_batch_id=completed_batch.recovery_of_batch_id,
+                            )
+                        )
+                        continue
+
                     recovery_event_ids = [
                         *parsed_response.missing_event_ids,
                         *parsed_response.invalid_event_errors.keys(),
@@ -1168,7 +1450,13 @@ def execute_bullpen_llm_target(
                         row = parsed_response.rows_by_event_id.get(event.event_id)
                         invalid_reason = parsed_response.invalid_event_errors.get(event.event_id)
                         error_reason = None
-                        status: Literal["success", "recovered", "invalid", "failed", "blocked"]
+                        status: Literal[
+                            "success",
+                            "recovered",
+                            "invalid_schema",
+                            "missing_event",
+                            "evidence_blocked",
+                        ]
                         if row is not None:
                             status = (
                                 "recovered"
@@ -1176,10 +1464,13 @@ def execute_bullpen_llm_target(
                                 else "success"
                             )
                         elif invalid_reason:
-                            status = "invalid"
+                            if completed_batch.recovery_attempt >= BULLPEN_LLM_MAX_RECOVERY_BATCHES:
+                                status = "invalid_schema"
+                            else:
+                                continue
                         elif event.event_id in parsed_response.missing_event_ids:
                             if completed_batch.recovery_attempt >= BULLPEN_LLM_MAX_RECOVERY_BATCHES:
-                                status = "failed"
+                                status = "missing_event"
                                 error_reason = (
                                     "Model did not return this event even after targeted recovery."
                                 )
@@ -1199,7 +1490,7 @@ def execute_bullpen_llm_target(
                             )
                         )
                         if question_runtime.get("invalid_reason") and row is not None:
-                            status = "invalid"
+                            status = "evidence_blocked"
                             invalid_reason = str(question_runtime.get("invalid_reason"))
                         event_results[event.event_id] = BullpenLlmEventProviderResult(
                             event_id=event.event_id,
@@ -1216,11 +1507,19 @@ def execute_bullpen_llm_target(
                             web_sources=list(batch_call.response.web_sources),
                             attempts=batch_call.attempts,
                             batch_id=completed_batch.id,
+                            diagnostic={
+                                "category": status,
+                                "provider": provider_name,
+                                "requested_model": model_name,
+                                "actual_model": getattr(batch_call, "actual_model", None),
+                                "batch_id": completed_batch.id,
+                            },
                         )
                     if (
                         parsed_response.unexpected_rows
                         or parsed_response.duplicate_event_ids
                         or parsed_response.invalid_event_errors
+                        or parsed_response.missing_event_ids
                     ):
                         batch_status = "partial"
                         details: list[str] = []
@@ -1236,6 +1535,10 @@ def execute_bullpen_llm_target(
                             details.append(
                                 f"{len(parsed_response.invalid_event_errors)} invalid row(s)"
                             )
+                        if parsed_response.missing_event_ids:
+                            details.append(
+                                f"{len(parsed_response.missing_event_ids)} missing event row(s)"
+                            )
                         batch_error_summary = ", ".join(details) if details else None
 
                 batch_metadata.append(
@@ -1249,10 +1552,54 @@ def execute_bullpen_llm_target(
                         attempts=batch_call.attempts,
                         elapsed_seconds=batch_call.elapsed_seconds,
                         error_summary=batch_error_summary,
+                        error_category=batch_error_category,
+                        error_details=batch_error_details,
                         recovery_attempt=completed_batch.recovery_attempt,
                         recovered_from_batch_id=completed_batch.recovery_of_batch_id,
                     )
                 )
+
+    if circuit_open:
+        for batch in pending_batches:
+            for event_id in batch.event_ids:
+                if event_id in event_results:
+                    continue
+                event_results[event_id] = BullpenLlmEventProviderResult(
+                    event_id=event_id,
+                    provider=provider_name,
+                    model=model_name,
+                    status="circuit_open",
+                    error="Provider circuit breaker opened after a non-retryable batch failure.",
+                    batch_id=batch.id,
+                    diagnostic={
+                        "category": "circuit_open",
+                        "provider": provider_name,
+                        "requested_model": model_name,
+                        "batch_id": batch.id,
+                    },
+                )
+            batch_metadata.append(
+                BullpenLlmBatchRuntimeMetadata(
+                    batch_id=batch.id,
+                    provider=provider_name,
+                    model=model_name,
+                    event_ids=batch.event_ids,
+                    event_count=len(batch.event_ids),
+                    status="skipped",
+                    attempts=0,
+                    elapsed_seconds=0.0,
+                    error_summary="Provider circuit breaker opened.",
+                    error_category="circuit_open",
+                    error_details={
+                        "category": "circuit_open",
+                        "provider": provider_name,
+                        "requested_model": model_name,
+                        "batch_id": batch.id,
+                    },
+                    recovery_attempt=batch.recovery_attempt,
+                    recovered_from_batch_id=batch.recovery_of_batch_id,
+                )
+            )
 
     for event in prepared_events:
         if event.event_id not in event_results:
@@ -1260,7 +1607,7 @@ def execute_bullpen_llm_target(
                 event_id=event.event_id,
                 provider=provider_name,
                 model=model_name,
-                status="failed",
+                status="provider_failed",
                 error="No terminal result was recorded for this event.",
             )
 
@@ -1298,13 +1645,19 @@ def execute_bullpen_llm_target(
         1 for event_result in event_results.values() if event_result.status == "recovered"
     )
     failed_event_count = sum(
-        1 for event_result in event_results.values() if event_result.status == "failed"
+        1
+        for event_result in event_results.values()
+        if event_result.status in {"provider_failed", "provider_unavailable", "timed_out", "circuit_open"}
     )
     blocked_event_count = sum(
-        1 for event_result in event_results.values() if event_result.status == "blocked"
+        1
+        for event_result in event_results.values()
+        if event_result.status in {"evidence_blocked", "circuit_open"}
     )
     invalid_event_count = sum(
-        1 for event_result in event_results.values() if event_result.status == "invalid"
+        1
+        for event_result in event_results.values()
+        if event_result.status in {"invalid_json", "invalid_schema", "missing_event"}
     )
     complete_event_count = sum(
         1
@@ -1312,9 +1665,14 @@ def execute_bullpen_llm_target(
         if event_result.status in {"success", "recovered"}
     )
     execution_status: Literal["completed", "partial", "failed"]
-    if complete_event_count == len(event_results) and invalid_event_count == 0:
+    if (
+        complete_event_count == len(event_results)
+        and invalid_event_count == 0
+        and failed_event_count == 0
+        and blocked_event_count == 0
+    ):
         execution_status = "completed"
-    elif complete_event_count == 0 and invalid_event_count == 0 and blocked_event_count == 0:
+    elif complete_event_count == 0:
         execution_status = "failed"
     else:
         execution_status = "partial"
@@ -1391,6 +1749,9 @@ def _build_runtime_metadata(
                 entry["invalid_reason"] = event_result.invalid_reason
             elif event_result.error and not entry.get("invalid_reason"):
                 entry["invalid_reason"] = event_result.error
+            entry["status"] = event_result.status
+            if event_result.diagnostic is not None:
+                entry["diagnostic"] = event_result.diagnostic
             entry["internet_verified"] = bool(
                 entry.get("internet_verified")
                 or entry.get("web_search_used")
@@ -1431,6 +1792,7 @@ def _build_runtime_metadata(
             bool(entry.get("web_search_used")) for entry in question_runtime.values()
         ),
         "question_runtime": question_runtime,
+        "schema_version": 2,
         "warnings": _merge_unique_strings(warnings),
         "llm_execution_mode": execution_options.execution_mode,
         "llm_events_per_prompt": execution_options.events_per_prompt,
@@ -1446,7 +1808,19 @@ def _build_runtime_metadata(
             1 for result in event_results.values() if result.status == "recovered"
         ),
         "llm_failed_event_count": sum(
-            1 for result in event_results.values() if result.status == "failed"
+            1
+            for result in event_results.values()
+            if result.status in {"provider_failed", "provider_unavailable", "timed_out", "circuit_open"}
+        ),
+        "llm_invalid_event_count": sum(
+            1
+            for result in event_results.values()
+            if result.status in {"invalid_json", "invalid_schema", "missing_event"}
+        ),
+        "llm_blocked_event_count": sum(
+            1
+            for result in event_results.values()
+            if result.status in {"evidence_blocked", "circuit_open"}
         ),
         "llm_provider_target_count": execution_options.target_count,
         "llm_request_concurrency_limit": derive_target_request_concurrency(
@@ -1467,11 +1841,24 @@ def _build_runtime_metadata(
                 "attempts": batch.attempts,
                 "elapsed_seconds": batch.elapsed_seconds,
                 "error_summary": batch.error_summary,
+                "error_category": batch.error_category,
+                "error_details": batch.error_details,
                 "recovery_attempt": batch.recovery_attempt,
                 "recovered_from_batch_id": batch.recovered_from_batch_id,
             }
             for batch in batch_metadata
         ],
+        "llm_event_results": {
+            event_id: {
+                "status": result.status,
+                "error": result.error,
+                "invalid_reason": result.invalid_reason,
+                "diagnostic": result.diagnostic,
+                "batch_id": result.batch_id,
+                "attempts": result.attempts,
+            }
+            for event_id, result in event_results.items()
+        },
         "llm_provider": provider_name,
         "llm_model": model_name,
     }
@@ -1486,6 +1873,7 @@ def event_result_to_auto_live_output(
     return BullpenAutoLiveLlmOutput(
         provider=event_result.provider,
         model=event_result.model,
+        status=event_result.status,
         llm_yes_odds=row.llm_yes_odds if row is not None else None,
         llm_no_odds=row.llm_no_odds if row is not None else None,
         confidence=row.confidence if row is not None else None,
@@ -1497,4 +1885,5 @@ def event_result_to_auto_live_output(
         error=event_result.error,
         completed_at=completed_at or datetime.now(UTC).isoformat(),
         invalid_reason=event_result.invalid_reason,
+        diagnostic=event_result.diagnostic,
     )

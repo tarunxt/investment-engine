@@ -306,6 +306,7 @@ class BullpenAutoLiveGuardrailCheck(BaseModel):
 class BullpenAutoLiveLlmOutput(BaseModel):
     provider: str
     model: str
+    status: str | None = None
     llm_yes_odds: float | None = Field(default=None, ge=0, le=100)
     llm_no_odds: float | None = Field(default=None, ge=0, le=100)
     direction: str | None = None
@@ -320,6 +321,7 @@ class BullpenAutoLiveLlmOutput(BaseModel):
     rationale: str | None = None
     error: str | None = None
     invalid_reason: str | None = None
+    diagnostic: dict[str, object] | None = None
     completed_at: str | None = None
 
 

@@ -155,10 +155,104 @@ export interface PolymarketEventEvidenceOptions {
   allow_evidence_grounded_non_web_models: boolean;
 }
 
+export interface Stage2FieldProvenance {
+  source?: string | null;
+  fetched_at_utc?: string | null;
+  validation_status?: string | null;
+  notes?: string[] | null;
+}
+
+export interface Stage2EvidenceSource {
+  source_id: string;
+  title?: string | null;
+  url?: string | null;
+  publisher?: string | null;
+  domain?: string | null;
+  published_at?: string | null;
+  fetched_at?: string | null;
+  source_type?: string | null;
+  relevance_score?: number | null;
+  entity_match?: boolean | null;
+  event_date_match?: boolean | null;
+  resolution_criterion_match?: boolean | null;
+  is_generic_landing_page?: boolean | null;
+  snippet?: string | null;
+  extracted_claims?: string[] | null;
+  source_warning?: string | null;
+  content_fingerprint?: string | null;
+}
+
+export interface Stage2EvidenceClaim {
+  claim_id: string;
+  claim_text: string;
+  supporting_source_ids?: string[] | null;
+  contradicting_source_ids?: string[] | null;
+  verification_status?: string | null;
+  confidence?: number | null;
+}
+
+export interface EvidencePacketV2 {
+  schema_version?: number | null;
+  built_at_utc: string;
+  event_id: string;
+  exact_resolution_question?: string | null;
+  search_objective?: string | null;
+  queries: string[];
+  sources: Stage2EvidenceSource[];
+  claims: Stage2EvidenceClaim[];
+  warnings: string[];
+  sufficiency_status?: string | null;
+  legacy_preflight_evidence_block?: string | null;
+}
+
+export interface Stage2MarketContext {
+  schema_version?: number | null;
+  event_id: string;
+  question_ref?: string | null;
+  question_id?: string | null;
+  market_id?: string | null;
+  condition_id?: string | null;
+  question: string;
+  canonical_market_url?: string | null;
+  canonical_market_slug?: string | null;
+  canonical_event_slug?: string | null;
+  category?: string | null;
+  theme?: string | null;
+  outcome_labels?: string[] | null;
+  current_yes_odds?: number | null;
+  current_no_odds?: number | null;
+  best_bid_cents?: number | null;
+  best_ask_cents?: number | null;
+  spread_cents?: number | null;
+  volume_usd?: number | null;
+  liquidity_usd?: number | null;
+  exact_resolution_rules?: string | null;
+  exact_yes_definition?: string | null;
+  resolution_source_description?: string | null;
+  background_market_context?: string | null;
+  background_context_warning?: string | null;
+  resolution_timezone_name?: string | null;
+  resolution_timezone_iana?: string | null;
+  deadline_local?: string | null;
+  deadline_utc?: string | null;
+  hours_remaining?: number | null;
+  deadline_source?: string | null;
+  deadline_confidence?: string | null;
+  current_time_utc: string;
+  rule_quality_status?: string | null;
+  url_validation_status?: string | null;
+  warnings?: string[] | null;
+  field_provenance?: Record<string, Stage2FieldProvenance> | null;
+  field_fetched_at?: Record<string, string> | null;
+  evidence_packet?: EvidencePacketV2 | null;
+  legacy_preflight_evidence_block?: string | null;
+}
+
 export interface PolymarketEventQuestionPayload {
   question_ref: string;
   question_id: string;
   market_id?: string | null;
+  condition_id?: string | null;
   question: string;
   close_time?: string | null;
   closing_time?: string | null;
@@ -176,10 +270,14 @@ export interface PolymarketEventQuestionPayload {
   current_no_odds?: number | null;
   market_url?: string | null;
   slug?: string | null;
+  market_slug?: string | null;
+  event_slug?: string | null;
   polymarket_rules?: string | null;
   polymarket_market_context?: string | null;
   polymarket_resolution_source?: string | null;
   preflight_evidence_block?: string | null;
+  evidence_packet_v2?: EvidencePacketV2 | null;
+  stage2_context?: Stage2MarketContext | null;
 }
 
 export type BullpenLlmExecutionMode =
@@ -220,6 +318,12 @@ export interface PolymarketEventQuestionRuntimeMetadata {
   stale_fact_detected?: boolean | null;
   invalid_reason?: string | null;
   preflight_evidence_block?: string | null;
+  stage2_context?: Stage2MarketContext | null;
+  evidence_packet_v2?: EvidencePacketV2 | null;
+  status?: string | null;
+  diagnostic?: Record<string, unknown> | null;
+  rule_quality_status?: string | null;
+  rule_fail_reason?: string | null;
 }
 
 export interface PolymarketEventRuntimeMetadata {
@@ -235,6 +339,8 @@ export interface PolymarketEventRuntimeMetadata {
   invalid_reason?: string | null;
   model_side_search_used?: boolean | null;
   question_runtime?: Record<string, PolymarketEventQuestionRuntimeMetadata> | null;
+  canonical_stage2_contexts?: Record<string, Stage2MarketContext> | null;
+  schema_version?: number | null;
   warnings?: string[] | null;
 }
 
@@ -1735,6 +1841,7 @@ export interface BullpenAutoLiveGuardrailCheck {
 export interface BullpenAutoLiveLlmOutput {
   provider: string;
   model: string;
+  status?: string | null;
   llm_yes_odds?: number | null;
   llm_no_odds?: number | null;
   confidence?: BullpenAutoLiveConfidence | string | null;
@@ -1745,6 +1852,7 @@ export interface BullpenAutoLiveLlmOutput {
   rationale?: string | null;
   error?: string | null;
   invalid_reason?: string | null;
+  diagnostic?: Record<string, unknown> | null;
   completed_at?: string | null;
 }
 

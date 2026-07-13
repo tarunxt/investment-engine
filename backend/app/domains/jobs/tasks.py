@@ -1067,7 +1067,8 @@ def _mark_failed(
         db.rollback()
         job = repo.get(job_id)
         if job:
-            repo.update_status(
+            _update_job_status(
+                repo,
                 job,
                 JobStatus.FAILED,
                 response=response,
@@ -1084,6 +1085,22 @@ def _mark_failed(
             _refresh_run_status(db, job_id)
     except Exception:
         logger.exception("Could not mark job %s as failed", job_id)
+
+
+def _update_job_status(repo, job, status, **kwargs) -> None:
+    try:
+        repo.update_status(job, status, **kwargs)
+        return
+    except TypeError as exc:
+        if "runtime_metadata_json" not in kwargs or "runtime_metadata_json" not in str(exc):
+            raise
+    runtime_metadata_json = kwargs.pop("runtime_metadata_json", None)
+    repo.update_status(job, status, **kwargs)
+    if runtime_metadata_json is not None:
+        try:
+            job.runtime_metadata_json = runtime_metadata_json
+        except Exception:
+            pass
 
 
 def _job_was_cancelled(repo: SyncJobRepository, job_id: int) -> bool:
@@ -1137,11 +1154,12 @@ def execute_ai_job(self, job_id: int) -> None:
 
         prompt_to_execute = job.prompt
         polymarket_event_context: PolymarketEventRunContext | None = None
-        if isinstance(job.request_context_json, dict):
-            request_kind = str(job.request_context_json.get("kind") or "").strip()
+        request_context_json = getattr(job, "request_context_json", None)
+        if isinstance(request_context_json, dict):
+            request_kind = str(request_context_json.get("kind") or "").strip()
             if request_kind == "polymarket_bullpen_event":
                 polymarket_event_context = PolymarketEventRunContext.model_validate(
-                    job.request_context_json
+                    request_context_json
                 )
                 if polymarket_event_context.prepared_context is None:
                     prepared_context = prepare_polymarket_event_context(
@@ -1205,9 +1223,9 @@ def execute_ai_job(self, job_id: int) -> None:
                 final_status = (
                     JobStatus.COMPLETED
                     if execution_result.status == "completed"
-                    else JobStatus.PARTIAL
-                    if content
                     else JobStatus.FAILED
+                    if execution_result.status == "failed"
+                    else JobStatus.PARTIAL
                 )
                 error_message = None
                 if execution_result.status != "completed":
@@ -1216,9 +1234,17 @@ def execute_ai_job(self, job_id: int) -> None:
                         if isinstance(runtime_metadata_json, dict)
                         else None
                     ) or (
+                        runtime_metadata_json.get("warnings", [None])[0]
+                        if isinstance(runtime_metadata_json, dict)
+                        and isinstance(runtime_metadata_json.get("warnings"), list)
+                        else None
+                    ) or (
                         "Bullpen LLM execution completed with partial or blocked event results."
+                        if execution_result.status == "partial"
+                        else "Bullpen LLM execution failed before producing any usable estimate."
                     )
-                repo.update_status(
+                _update_job_status(
+                    repo,
                     job,
                     final_status,
                     response=content,
@@ -1441,7 +1467,8 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.info("Skipping completion update for cancelled job %s", job_id)
             return
 
-        repo.update_status(
+        _update_job_status(
+            repo,
             job,
             JobStatus.COMPLETED,
             response=content,

@@ -190,6 +190,15 @@ export type BullpenQuestionLlmBreakdownItem = {
 };
 
 type BullpenLlmPromptQuestionPayload = {
+  event_id: string;
+  question_ref: string;
+  question_id: string;
+  market_id: string | null;
+  stage2_context: Record<string, unknown>;
+  preflight_evidence_block: string | null;
+};
+
+type BullpenLegacyPreflightPayload = {
   question_ref: string;
   question_id: string;
   market_id: string | null;
@@ -213,7 +222,6 @@ type BullpenLlmPromptQuestionPayload = {
   polymarket_rules: string | null;
   polymarket_market_context: string | null;
   polymarket_resolution_source: string | null;
-  preflight_evidence_block: string;
 };
 
 export type BullpenLlmPromptInputs = {
@@ -326,100 +334,41 @@ JSON schema:
 Selected questions:
 ${BULLPEN_LLM_PROMPT_PLACEHOLDER}`];
 
-export const DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE = `[ENABLE_WEB_SEARCH]
-You are an independent probability estimation engine for Polymarket questions.
+export const DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE = `[STAGE2_SHARED_EVIDENCE_ONLY]
+You are estimating Polymarket YES/NO probabilities from a single shared evidence packet.
 
-Analyze every selected market and return one calibrated YES/NO estimate per question.
-
-You must use the exact market_url when present, the supplied Polymarket rules, the supplied detailed Polymarket market context when present, and the current timestamps provided in the input.
-Do not reason from the market title alone.
-If the title, close time, and market_url rules appear inconsistent, the supplied Polymarket rules win.
-
-Input fields may include:
-question_ref, question_id, market_id, question, slug, market_url, close_time, closing_time, close_time_et, current_time_utc, current_time_et, deadline_et, hours_remaining, deadline_source, title_date_hint, title_deadline_et_assumption, category, outcomes, current_yes_odds, current_no_odds, polymarket_rules, polymarket_market_context, polymarket_resolution_source, preflight_evidence_block.
-
-Each market may include:
-- polymarket_rules
-- polymarket_market_context
-- polymarket_resolution_source
-- preflight_evidence_block
-
-You MUST use polymarket_rules as the authoritative resolution criteria.
-You MUST read and consider polymarket_market_context when present.
-The Market Context may include the label "Experimental AI-generated summary referencing Polymarket data." Treat it as helpful context and evidence, not as the final resolution authority.
-If polymarket_rules conflict with polymarket_market_context, polymarket_rules win.
-If preflight_evidence_block is present, treat every populated fact inside it as authoritative operator-supplied context for this run.
-Do not contradict populated facts in preflight_evidence_block.
-If a preflight_evidence_block field says "Not supplied" or "Unknown", that field is still unresolved and may require verification from current sources.
-Only estimate the unresolved condition that remains after accepting the authoritative facts and exact Polymarket rules.
-If polymarket_rules say an announcement immediately resolves the market, then an already-confirmed announcement should be treated as criteria_likely_satisfied and already_occurred.
-
-For each question:
-1. Read and consider the exact market_url, polymarket_rules, polymarket_market_context, polymarket_resolution_source, and preflight_evidence_block.
-2. State what YES means under those exact rules in yes_definition.
-3. Use current_time_utc and current_time_et as the evaluation timestamp.
-4. Determine the operative deadline in ET.
-5. For "by [date]" markets, assume 11:59 PM ET on that date unless the rules explicitly say otherwise.
-6. Compute hours_remaining from the operative deadline, not from vague intuition.
-7. Distinguish clearly between:
-   - already occurred / criteria likely satisfied
-   - scheduled but not occurred
-   - preparatory or indirect signals only
-   - weak or rumour evidence
-   - no reliable evidence
-   - conflicting evidence
-8. Never convert scheduled, expected, planned, rumored, or preparatory activity into "already happened".
-9. Use current market odds only as a weak reference signal, not as the primary basis for the answer.
-10. Set llm_no_odds = 100 - llm_yes_odds.
-11. If the supplied rules plus current credible evidence show that the market has already resolved YES, return llm_yes_odds = 100.00 and llm_no_odds = 0.00.
-12. If the supplied rules plus current credible evidence show that the market has already resolved NO, return llm_yes_odds = 0.00 and llm_no_odds = 100.00.
-13. Do not hedge at 95 or 99 once the market's own rules are already satisfied.
-
-Use these labels when possible:
-- evidence_status: criteria_likely_satisfied | scheduled_not_occurred | preparatory_or_indirect_only | weak_or_rumour_only | no_reliable_evidence | conflicting_evidence
-- event_state: already_occurred | scheduled_not_occurred | preparatory_only | rumour_only | no_confirmed_event | conflicting
-- confidence: Low | Medium | High
+Each input row contains an event_id and a canonical stage2_context. Use only that structured context.
+Do not browse. Do not add outside evidence. Treat Polymarket AI-generated market context as background only.
+Use the exact resolution rules, the deterministic deadline fields, and the structured evidence packet as the source of truth.
+Current market odds are a weak prior, not independent evidence.
 
 Output requirements:
 - Return strict JSON only.
-- Return an object with a top-level "markets" array.
-- Return exactly one object per input question.
-- Do not skip any question.
-- Do not include markdown.
-- Do not include commentary outside JSON.
-- Copy each question_ref exactly from the input.
-- Copy each question_id exactly from the input.
-- Copy each market_id exactly from the input when provided.
-- question should echo the input question text.
-- llm_yes_odds must be a number from 0.00 to 100.00.
-- llm_no_odds must be a number from 0.00 to 100.00.
-- llm_yes_odds + llm_no_odds must equal exactly 100.00.
-- Use two decimal places.
-- Do not use the % symbol.
-- If evidence is weak, still provide a calibrated estimate.
-- Avoid 0 or 100 unless the outcome is already resolved or mathematically certain.
-- Keep rationale concise and under 320 characters.
-- key_evidence should be a short array of the most decision-relevant facts.
-- red_flags should be a short array of contradictions, caveats, or missing-rule issues.
+- Return one row per expected event_id.
+- Use event_id as the primary key.
+- Do not skip events.
+- Do not invent evidence or probabilities.
+- Preserve valid 0/100 outcomes when the rules and evidence already settle the market.
+- If only one side is known, return the complement for the other side.
 
-JSON schema:
+Schema:
 {
   "markets": [
     {
-      "question_ref": "Q1",
+      "event_id": "stable-event-id",
       "question_id": "question-id",
       "market_id": "market-id",
-      "question": "string",
       "yes_definition": "exact YES resolution meaning",
-      "deadline_et": "YYYY-MM-DD hh:mm:ss AM/PM ET",
-      "hours_remaining": 24.5,
-      "evidence_status": "scheduled_not_occurred",
-      "event_state": "scheduled_not_occurred",
-      "llm_yes_odds": 50.00,
-      "llm_no_odds": 50.00,
-      "confidence": "Medium",
-      "key_evidence": ["fact 1", "fact 2"],
-      "red_flags": ["caveat 1"],
+      "deadline_utc": "2026-07-14T12:00:00+00:00",
+      "resolution_timezone": "Asia/Riyadh",
+      "hours_remaining": 4.25,
+      "evidence_status": "insufficient|weak|moderate|strong|criteria_satisfied",
+      "event_state": "already_occurred|not_confirmed|scheduled|preparatory|conflicting|unknown",
+      "llm_yes_odds": 42.25,
+      "llm_no_odds": 57.75,
+      "confidence": "Low|Medium|High",
+      "key_evidence_source_ids": ["S1", "S3"],
+      "red_flags": ["short caveat"],
       "rationale": "short explanation"
     }
   ]
@@ -2351,7 +2300,7 @@ function formatBullpenPreflightOutcomes(question: BullpenQuestionRow) {
 
 function buildBullpenPreflightEvidenceBlock(
   question: BullpenQuestionRow,
-  payload: Omit<BullpenLlmPromptQuestionPayload, "preflight_evidence_block">,
+  payload: BullpenLegacyPreflightPayload,
 ) {
   const lines = [
     "Preflight Evidence Block:",
@@ -2395,7 +2344,80 @@ function buildBullpenLlmPromptQuestionPayload(
     BULLPEN_ET_TIME_ZONE,
   );
   const deadlineInfo = buildBullpenDeadlineInfo(question, referenceTime);
+  const stage2Context = {
+    schema_version: 2,
+    event_id: question.id,
+    question_ref: getBullpenQuestionRef(index),
+    question_id: question.id,
+    market_id: question.id,
+    question: question.question,
+    canonical_market_url: question.marketUrl,
+    canonical_market_slug: question.slug,
+    canonical_event_slug: question.slug,
+    category: question.category,
+    theme: question.category,
+    outcome_labels: question.outcomeLabels,
+    current_yes_odds: question.yesOdds,
+    current_no_odds: question.noOdds,
+    exact_resolution_rules: question.rules,
+    exact_yes_definition: question.rules,
+    resolution_source_description: question.resolutionSource,
+    background_market_context: question.marketContext,
+    background_context_warning: question.marketContext
+      ? "Experimental AI-generated Polymarket summary is background context only."
+      : null,
+    resolution_timezone_name: "ET",
+    resolution_timezone_iana: BULLPEN_ET_TIME_ZONE,
+    deadline_local: deadlineInfo.deadlineEt,
+    deadline_utc: question.closeTime,
+    hours_remaining: deadlineInfo.hoursRemaining,
+    deadline_source: deadlineInfo.deadlineSource,
+    deadline_confidence: deadlineInfo.deadlineEt ? "medium" : "unresolved",
+    current_time_utc: currentTimeUtc,
+    rule_quality_status: question.rules ? "partial" : "missing",
+    url_validation_status: question.marketUrl ? "legacy" : "unresolved",
+    warnings: question.marketContext
+      ? [
+          "Frontend prompt builder is using legacy console market context. Fresh shared evidence is added on the backend before execution.",
+        ]
+      : [],
+    field_provenance: {
+      canonical_market_url: {
+        source: "frontend_snapshot",
+        fetched_at_utc: currentTimeUtc,
+        validation_status: question.marketUrl ? "legacy" : "missing",
+        notes: [],
+      },
+    },
+    field_fetched_at: {
+      canonical_market_url: currentTimeUtc,
+    },
+    evidence_packet: {
+      schema_version: 2,
+      built_at_utc: currentTimeUtc,
+      event_id: question.id,
+      exact_resolution_question: question.question,
+      search_objective: question.rules,
+      queries: [],
+      sources: [],
+      claims: [],
+      warnings: [
+        "Frontend prompt preview uses legacy local context. The backend replaces this with a structured evidence packet before provider execution.",
+      ],
+      sufficiency_status: "missing",
+    },
+    legacy_preflight_evidence_block: null,
+  } satisfies Record<string, unknown>;
   const basePayload: Omit<BullpenLlmPromptQuestionPayload, "preflight_evidence_block"> =
+    {
+      event_id: question.id,
+      question_ref: getBullpenQuestionRef(index),
+      question_id: question.id,
+      market_id: question.id,
+      stage2_context: stage2Context,
+    };
+  const preflightEvidenceBlock = buildBullpenPreflightEvidenceBlock(
+    question,
     {
       question_ref: getBullpenQuestionRef(index),
       question_id: question.id,
@@ -2420,11 +2442,11 @@ function buildBullpenLlmPromptQuestionPayload(
       polymarket_rules: question.rules,
       polymarket_market_context: question.marketContext,
       polymarket_resolution_source: question.resolutionSource,
-    };
-  const preflightEvidenceBlock = buildBullpenPreflightEvidenceBlock(
-    question,
-    basePayload,
+    },
   );
+  stage2Context.legacy_preflight_evidence_block = preflightEvidenceBlock;
+  (stage2Context.evidence_packet as { legacy_preflight_evidence_block?: string }).legacy_preflight_evidence_block =
+    preflightEvidenceBlock;
 
   return {
     questionPayload: {

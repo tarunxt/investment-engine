@@ -112,15 +112,15 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
   assert.match(defaultPrompt, /"preflight_evidence_block": "Preflight Evidence Block:/);
   assert.match(
     defaultPrompt,
-    /"polymarket_rules": "This market resolves to \\"Yes\\" if candidate X wins\."/,
+    /"exact_resolution_rules": "This market resolves to \\"Yes\\" if candidate X wins\."/,
   );
   assert.match(
     defaultPrompt,
-    /"polymarket_market_context": "Experimental AI-generated summary referencing Polymarket data\. Candidate X has gained support\."/,
+    /"background_market_context": "Experimental AI-generated summary referencing Polymarket data\. Candidate X has gained support\."/,
   );
-  assert.match(defaultPrompt, /Copy each market_id exactly from the input when provided\./);
-  assert.match(defaultPrompt, /polymarket_rules/);
-  assert.match(defaultPrompt, /Do not contradict populated facts in preflight_evidence_block\./);
+  assert.match(defaultPrompt, /Use event_id as the primary key\./);
+  assert.match(defaultPrompt, /stage2_context/);
+  assert.match(defaultPrompt, /Do not browse\. Do not add outside evidence\./);
   assert.match(
     defaultPrompt,
     /Experimental AI-generated summary referencing Polymarket data\./,

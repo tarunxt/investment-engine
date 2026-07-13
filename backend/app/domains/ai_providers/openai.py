@@ -278,6 +278,8 @@ class OpenAIProvider(BaseAIProvider):
     @staticmethod
     def _requires_live_web_context(prompt: str) -> bool:
         text = (prompt or "").lower()
+        if "[stage2_shared_evidence_only]" in text:
+            return False
         if "[enable_web_search]" in text:
             return True
         keywords = (

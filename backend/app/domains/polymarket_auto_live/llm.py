@@ -107,6 +107,13 @@ def _parse_number(value: object) -> float | None:
     return None
 
 
+def _first_present(record: dict[str, object], *keys: str) -> object:
+    for key in keys:
+        if key in record and record[key] is not None:
+            return record[key]
+    return None
+
+
 def _normalize_odds_pair(
     yes_value: float | None, no_value: float | None
 ) -> tuple[float | None, float | None]:
@@ -116,11 +123,6 @@ def _normalize_odds_pair(
         no = 100 - yes
     elif no is not None and yes is None:
         yes = 100 - no
-    if yes is not None and no is not None:
-        total = yes + no
-        if total > 0 and abs(total - 100) > 0.01:
-            yes = (yes / total) * 100
-            no = 100 - yes
     if yes is not None:
         yes = max(0, min(100, round(yes, 2)))
     if no is not None:
@@ -189,6 +191,51 @@ def _read_str_list(record: dict[str, object], *keys: str) -> list[str]:
     return []
 
 
+def _read_object_attr(value: object, key: str, default: object = None) -> object:
+    if isinstance(value, dict):
+        return value.get(key, default)
+    return getattr(value, key, default)
+
+
+def _read_object_str(value: object, *keys: str) -> str | None:
+    for key in keys:
+        raw = _read_object_attr(value, key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
+def _read_object_str_list(value: object, *keys: str) -> list[str]:
+    for key in keys:
+        raw = _read_object_attr(value, key)
+        if isinstance(raw, list):
+            items = [str(item).strip() for item in raw if str(item).strip()]
+            if items:
+                return items
+        if isinstance(raw, str) and raw.strip():
+            return [raw.strip()]
+    return []
+
+
+def _read_evidence_sources(evidence_packet: object) -> list[object]:
+    raw = _read_object_attr(evidence_packet, "sources")
+    if not isinstance(raw, list):
+        raw = _read_object_attr(evidence_packet, "results")
+    return raw if isinstance(raw, list) else []
+
+
+def _read_evidence_claims(evidence_packet: object) -> list[object]:
+    raw = _read_object_attr(evidence_packet, "claims")
+    return raw if isinstance(raw, list) else []
+
+
+def _read_evidence_warnings(evidence_packet: object) -> list[str]:
+    raw = _read_object_attr(evidence_packet, "warnings")
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    return []
+
+
 def _parse_single_output(
     response_text: str,
     *,
@@ -206,20 +253,26 @@ def _parse_single_output(
 
     yes, no = _normalize_odds_pair(
         _parse_number(
-            record.get("llm_yes_odds")
-            or record.get("llmYesOdds")
-            or record.get("yes_odds")
-            or record.get("yesOdds")
-            or record.get("yes_probability")
-            or record.get("prob_yes")
+            _first_present(
+                record,
+                "llm_yes_odds",
+                "llmYesOdds",
+                "yes_odds",
+                "yesOdds",
+                "yes_probability",
+                "prob_yes",
+            )
         ),
         _parse_number(
-            record.get("llm_no_odds")
-            or record.get("llmNoOdds")
-            or record.get("no_odds")
-            or record.get("noOdds")
-            or record.get("no_probability")
-            or record.get("prob_no")
+            _first_present(
+                record,
+                "llm_no_odds",
+                "llmNoOdds",
+                "no_odds",
+                "noOdds",
+                "no_probability",
+                "prob_no",
+            )
         ),
     )
     confidence = _read_str(record, "confidence")
@@ -227,6 +280,7 @@ def _parse_single_output(
     return BullpenAutoLiveLlmOutput(
         provider=provider,
         model=model,
+        status="success",
         llm_yes_odds=yes,
         llm_no_odds=no,
         confidence=(
@@ -240,7 +294,14 @@ def _parse_single_output(
             else None
         ),
         event_state=_read_str(record, "event_state", "eventState"),
-        key_evidence=_read_str_list(record, "key_evidence", "keyEvidence"),
+        key_evidence=(
+            _read_str_list(record, "key_evidence", "keyEvidence")
+            or _read_str_list(
+                record,
+                "key_evidence_source_ids",
+                "keyEvidenceSourceIds",
+            )
+        ),
         red_flags=_read_str_list(record, "red_flags", "redFlags"),
         rationale=_read_str(
             record,
@@ -522,61 +583,110 @@ def build_market_prompt(
     rules: RuleEvaluation,
     evidence_packet: EvidencePacket,
 ) -> str:
-    evidence_lines = "\n".join(
+    evidence_sources = _read_evidence_sources(evidence_packet)
+    evidence_claims = _read_evidence_claims(evidence_packet)
+    evidence_warnings = _read_evidence_warnings(evidence_packet)
+    built_at_utc = (
+        _read_object_str(evidence_packet, "built_at_utc", "built_at")
+        or datetime.now(UTC).isoformat()
+    )
+    sufficiency_status = _read_object_str(evidence_packet, "sufficiency_status") or "missing"
+    search_objective = _read_object_str(evidence_packet, "search_objective") or "unknown"
+    queries = _read_object_str_list(evidence_packet, "queries")
+    source_lines = "\n".join(
         [
-            f"- {item.title} | {item.url or 'no-url'} | {item.published_date or 'date-unknown'} | {item.content}"
-            for item in evidence_packet.results
+            (
+                f"- {_read_object_str(item, 'source_id') or 'source'}: "
+                f"{_read_object_str(item, 'title') or 'Untitled'} | "
+                f"{_read_object_str(item, 'url') or 'no-url'} | "
+                f"{_read_object_str(item, 'published_at') or 'date-unknown'} | "
+                f"type={_read_object_str(item, 'source_type') or 'unknown'} | "
+                f"relevance={_read_object_attr(item, 'relevance_score', 0)} | "
+                f"generic={bool(_read_object_attr(item, 'is_generic_landing_page', False))} | "
+                f"{_read_object_str(item, 'snippet') or 'no snippet'}"
+            )
+            for item in evidence_sources
         ]
-    ) or "- No reliable external evidence packet results were retrieved."
-    warning_lines = "\n".join(f"- {warning}" for warning in evidence_packet.warnings) or "- None"
+    ) or "- No structured evidence sources were captured."
+    claim_lines = "\n".join(
+        [
+            (
+                f"- {_read_object_str(item, 'claim_id') or 'claim'}: "
+                f"{_read_object_str(item, 'claim_text') or 'No claim text'} | "
+                f"support={','.join(_read_object_str_list(item, 'supporting_source_ids')) or 'none'} | "
+                f"status={_read_object_str(item, 'verification_status') or 'unverified'} | "
+                f"confidence={_read_object_attr(item, 'confidence', 0)}"
+            )
+            for item in evidence_claims
+        ]
+    ) or "- No extracted claims."
+    warning_lines = "\n".join(f"- {warning}" for warning in evidence_warnings) or "- None"
 
     return f"""
-You are an independent probability estimation engine for Polymarket markets.
+[STAGE2_SHARED_EVIDENCE_ONLY]
+You are estimating one Polymarket YES/NO probability using a canonical shared market context.
+Do not browse. Do not use evidence outside the packet below.
 
-Analyze the market using ONLY the shared market rules and shared evidence packet below.
-Do not browse or use evidence outside this packet.
-Do not reason from the market title alone.
+Evaluation timestamp:
+- current_time_utc: {rules.current_time_utc or built_at_utc}
 
-Market:
+Canonical market context:
+- event_id: {market.market_id}
 - question: {market.question}
 - market_id: {market.market_id}
-- slug: {market.slug or "unknown"}
 - market_url: {market.market_url or "unknown"}
+- market_slug: {market.slug or "unknown"}
+- event_slug: {market.event_slug or "unknown"}
+- theme: {market.theme}
 - current_yes_odds: {market.current_yes_odds if market.current_yes_odds is not None else "unknown"}
 - current_no_odds: {market.current_no_odds if market.current_no_odds is not None else "unknown"}
-- close_time_utc: {market.close_time or "unknown"}
-- theme: {market.theme}
+- best_bid_cents: {market.best_bid_cents if market.best_bid_cents is not None else "unknown"}
+- best_ask_cents: {market.best_ask_cents if market.best_ask_cents is not None else "unknown"}
+- spread_cents: {market.spread_cents if market.spread_cents is not None else "unknown"}
+- volume_usd: {market.volume_usd if market.volume_usd is not None else "unknown"}
+- liquidity_usd: {market.liquidity_usd if market.liquidity_usd is not None else "unknown"}
 
-Shared market rules:
-- yes_definition: {rules.yes_definition or "unknown"}
-- resolution_criteria: {rules.resolution_criteria or "unknown"}
-- deadline_et: {rules.deadline_et or "unknown"}
+Rules and deadline:
+- exact_yes_definition: {rules.yes_definition or "unknown"}
+- exact_resolution_rules: {rules.resolution_criteria or "unknown"}
+- resolution_timezone_name: {rules.resolution_timezone_name or "unknown"}
+- resolution_timezone_iana: {rules.resolution_timezone_iana or "unknown"}
+- deadline_local: {rules.deadline_local or "unknown"}
+- deadline_utc: {rules.deadline_utc or "unknown"}
 - hours_remaining: {rules.hours_remaining if rules.hours_remaining is not None else "unknown"}
+- deadline_source: {rules.deadline_source or "unknown"}
+- deadline_confidence: {rules.deadline_confidence}
 
-Shared evidence packet:
-- built_at_utc: {evidence_packet.built_at}
-- queries: {", ".join(evidence_packet.queries) or "none"}
+Evidence packet:
+- built_at_utc: {built_at_utc}
+- sufficiency_status: {sufficiency_status}
+- search_objective: {search_objective}
+- queries: {", ".join(queries) or "none"}
 - warnings:
 {warning_lines}
-- evidence:
-{evidence_lines}
+- claims:
+{claim_lines}
+- sources:
+{source_lines}
 
-Return strict JSON only with a top-level "markets" array containing exactly one object.
-Use this schema:
+Return strict JSON only:
 {{
   "markets": [
     {{
-      "question": "{market.question}",
-      "yes_definition": "string",
-      "deadline_et": "YYYY-MM-DD hh:mm:ss AM/PM ET",
-      "hours_remaining": 24.5,
-      "evidence_status": "Low | Moderate | Strong",
-      "event_state": "already_occurred | scheduled_not_occurred | preparatory_only | rumour_only | no_confirmed_event | conflicting",
+      "event_id": "{market.market_id}",
+      "question_id": "{market.market_id}",
+      "market_id": "{market.market_id}",
+      "yes_definition": "exact YES resolution meaning",
+      "deadline_utc": "{rules.deadline_utc or ''}",
+      "resolution_timezone": "{rules.resolution_timezone_iana or rules.resolution_timezone_name or ''}",
+      "hours_remaining": {rules.hours_remaining if rules.hours_remaining is not None else "null"},
+      "evidence_status": "insufficient|weak|moderate|strong|criteria_satisfied",
+      "event_state": "already_occurred|not_confirmed|scheduled|preparatory|conflicting|unknown",
       "llm_yes_odds": 50.0,
       "llm_no_odds": 50.0,
-      "confidence": "Low | Medium | High",
-      "key_evidence": ["fact 1", "fact 2"],
-      "red_flags": ["risk 1"],
+      "confidence": "Low|Medium|High",
+      "key_evidence_source_ids": ["S1"],
+      "red_flags": ["short caveat"],
       "rationale": "short explanation"
     }}
   ]
@@ -616,6 +726,7 @@ def run_llm_consensus(
                 BullpenAutoLiveLlmOutput(
                     provider=provider_name,
                     model=model_name,
+                    status="provider_failed",
                     error=str(exc),
                     completed_at=completed_at,
                 )
@@ -630,7 +741,13 @@ def compute_llm_consensus(
     model_signals = _build_model_signals(outputs)
     usable_yes_values = [signal.yes_odds for signal in model_signals]
     provider_signals = _build_provider_signals(model_signals)
-    error_count = len([output for output in outputs if output.error])
+    error_count = len(
+        [
+            output
+            for output in outputs
+            if output.error is not None or output.invalid_reason is not None
+        ]
+    )
     provider_error_rate = round(error_count / len(outputs), 4) if outputs else 1.0
 
     if not usable_yes_values:

@@ -60,7 +60,7 @@ class PolymarketEventPreflightTests(unittest.TestCase):
     @patch("app.domains.polymarket.event_preflight.web_search_tool.execute")
     @patch("app.domains.polymarket.event_preflight._fetch_event_market_context")
     @patch("app.domains.polymarket.event_preflight._fetch_gamma_market")
-    def test_build_prompt_rebuilds_verified_evidence_and_openai_force_token(
+    def test_build_prompt_rebuilds_verified_stage2_context_without_force_token(
         self,
         fetch_gamma_market_mock,
         fetch_event_market_context_mock,
@@ -99,8 +99,9 @@ class PolymarketEventPreflightTests(unittest.TestCase):
             provider_name="openai",
         )
 
-        self.assertTrue(prompt.startswith("[enable_web_search]\n"))
-        self.assertIn("Verified Evidence Block:", prompt)
+        self.assertFalse(prompt.startswith("[ENABLE_WEB_SEARCH]\n"))
+        self.assertIn("stage2_context", prompt)
+        self.assertIn("[STAGE2_SHARED_EVIDENCE_ONLY]", prompt)
         self.assertEqual(runtime_metadata["web_search_used"], True)
         self.assertIn(
             "https://www.nasdaq.com/acme-ipo",
@@ -115,7 +116,7 @@ class PolymarketEventPreflightTests(unittest.TestCase):
             True,
         )
 
-    def test_finalize_marks_missing_required_model_search_and_stale_fact(self):
+    def test_finalize_marks_stale_fact_without_requiring_model_side_search(self):
         context = _sample_context()
         runtime_metadata = {
             "kind": "polymarket_bullpen_event",
@@ -177,7 +178,7 @@ class PolymarketEventPreflightTests(unittest.TestCase):
         question_runtime = finalized["question_runtime"]["12345"]
         self.assertEqual(
             question_runtime["invalid_reason"],
-            "Required model-side search/tool usage did not run before the final answer.",
+            "Rationale contradicted verified evidence that already confirmed the company is public.",
         )
         self.assertEqual(question_runtime["stale_fact_detected"], True)
         self.assertEqual(finalized["model_side_search_used"], False)

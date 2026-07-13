@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Literal, TypedDict
 
 from app.domains.ai_providers.anthropic import AnthropicProvider
@@ -19,6 +21,15 @@ class InternetAccessInfo(TypedDict, total=False):
     caveat: str
 
 
+@dataclass(frozen=True)
+class ProviderTargetHealth:
+    provider: str
+    model: str
+    available: bool
+    reason: str | None = None
+    checked_at_utc: str | None = None
+
+
 class ProviderFactory:
     _default_provider_priority: tuple[str, ...] = (
         "openai",
@@ -36,10 +47,10 @@ class ProviderFactory:
         "openai": {
             "mode": "conditional",
             "label": "Search only if forced",
-            "force_token": "[enable_web_search]",
+            "force_token": "[ENABLE_WEB_SEARCH]",
             "caveat": (
                 "The OpenAI adapter enables live web tools when the prompt asks for "
-                "current context or explicitly includes [enable_web_search]."
+                "current context or explicitly includes [ENABLE_WEB_SEARCH]."
             ),
         },
         "gemini": {
@@ -97,6 +108,8 @@ class ProviderFactory:
             "deepseek-v3": "Unsupported by current DeepSeek API account.",
         },
     }
+    _target_health_cache: dict[tuple[str, str], ProviderTargetHealth] = {}
+    _target_health_ttl = timedelta(minutes=5)
 
     @classmethod
     def create(cls, provider_name: str) -> BaseAIProvider:
@@ -151,6 +164,58 @@ class ProviderFactory:
         if reason:
             return False, reason
         return True, None
+
+    @classmethod
+    def validate_target(cls, provider_name: str, model: str) -> ProviderTargetHealth:
+        provider = provider_name.strip().lower()
+        model_name = model.strip()
+        cache_key = (provider, model_name)
+        cached = cls._target_health_cache.get(cache_key)
+        if cached and cached.checked_at_utc:
+            try:
+                checked_at = datetime.fromisoformat(cached.checked_at_utc)
+            except ValueError:
+                checked_at = None
+            if checked_at is not None:
+                if checked_at.tzinfo is None:
+                    checked_at = checked_at.replace(tzinfo=UTC)
+                if datetime.now(UTC) - checked_at.astimezone(UTC) <= cls._target_health_ttl:
+                    return cached
+
+        provider_class = cls._providers.get(provider)
+        now_iso = datetime.now(UTC).isoformat()
+        if provider_class is None:
+            result = ProviderTargetHealth(
+                provider=provider,
+                model=model_name,
+                available=False,
+                reason=f"Unsupported provider '{provider_name}'.",
+                checked_at_utc=now_iso,
+            )
+            cls._target_health_cache[cache_key] = result
+            return result
+        if not provider_class.is_configured():
+            result = ProviderTargetHealth(
+                provider=provider,
+                model=model_name,
+                available=False,
+                reason=f"{provider} is not configured on this worker.",
+                checked_at_utc=now_iso,
+            )
+            cls._target_health_cache[cache_key] = result
+            return result
+        # Provider model catalogs are advisory and can lag upstream releases.
+        # Only hard-fail explicit incompatibilities that we know are broken.
+        is_compatible, reason = cls.model_compatibility(provider, model_name)
+        result = ProviderTargetHealth(
+            provider=provider,
+            model=model_name,
+            available=is_compatible,
+            reason=reason,
+            checked_at_utc=now_iso,
+        )
+        cls._target_health_cache[cache_key] = result
+        return result
 
     @classmethod
     def resolve_default_target(

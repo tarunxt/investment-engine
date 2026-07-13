@@ -368,6 +368,7 @@ class ConsoleStageTwoSharedReview:
     consensus_by_market_id: dict[str, LlmConsensus]
     execution_options: BullpenLlmExecutionOptions
     runtime_outputs: dict[str, Any]
+    refreshed_rules_by_market_id: dict[str, RuleEvaluation] = field(default_factory=dict)
 
 
 @dataclass
@@ -409,6 +410,13 @@ def _build_console_stage_two_question_payload(
         question_ref=f"Q{index + 1}",
         question_id=market.market_id,
         market_id=market.market_id,
+        condition_id=(
+            str(raw.get("condition_id")).strip()
+            if isinstance(raw.get("condition_id"), str) and str(raw.get("condition_id")).strip()
+            else str(raw.get("conditionId")).strip()
+            if isinstance(raw.get("conditionId"), str) and str(raw.get("conditionId")).strip()
+            else None
+        ),
         question=market.question,
         close_time=market.close_time,
         closing_time=market.close_time,
@@ -426,6 +434,8 @@ def _build_console_stage_two_question_payload(
         current_no_odds=market.current_no_odds,
         market_url=market.market_url,
         slug=market.slug,
+        market_slug=market.slug,
+        event_slug=market.event_slug,
         polymarket_rules=market.description or rules.resolution_criteria or rules.yes_definition,
         polymarket_market_context=(
             str(raw.get("market_context")).strip()
@@ -495,6 +505,24 @@ async def _execute_console_stage_two_shared_llm(
         str(event.question_payload.market_id or event.question_payload.question_id): event.question_payload
         for event in prepared_events
     }
+    refreshed_rules_by_market_id: dict[str, RuleEvaluation] = {}
+    for market_id, payload in prepared_payload_by_market_id.items():
+        payload_market = None
+        for llm_row in llm_markets:
+            market_candidate = llm_row.get("market")
+            if isinstance(market_candidate, ScannedMarket) and market_candidate.market_id == market_id:
+                payload_market = market_candidate
+                break
+        if isinstance(payload_market, ScannedMarket):
+            refreshed_rules_by_market_id[market_id] = evaluate_market_rules(
+                payload_market,
+                now=now,
+                resolution_text=(
+                    payload.stage2_context.exact_resolution_rules
+                    if payload.stage2_context is not None
+                    else payload.polymarket_rules
+                ),
+            )
     prepared_event_by_market_id = {
         str(event.question_payload.market_id or event.question_payload.question_id): event
         for event in prepared_events
@@ -604,6 +632,7 @@ async def _execute_console_stage_two_shared_llm(
                     "model": model_name,
                     "status": "failed",
                     "error": str(target_result),
+                    "failure_category": "provider_failed",
                 }
             )
             completed_at = utc_now_iso()
@@ -631,7 +660,8 @@ async def _execute_console_stage_two_shared_llm(
         runtime_output_targets.append(
             {
                 "provider": provider_name,
-                "model": model_name,
+                "requested_model": model_name,
+                "model": target_result.runtime_metadata.get("llm_model") or model_name,
                 "status": target_result.status,
                 "primary_request_count": target_result.primary_request_count,
                 "retry_request_count": target_result.retry_request_count,
@@ -650,6 +680,27 @@ async def _execute_console_stage_two_shared_llm(
                     ),
                     3,
                 ),
+                "first_error": next(
+                    (
+                        batch.error_details
+                        for batch in target_result.runtime_metadata.get("llm_batches", [])
+                        if isinstance(batch, dict) and batch.get("error_details")
+                    ),
+                    None,
+                ),
+                "last_error": next(
+                    (
+                        batch.error_details
+                        for batch in reversed(target_result.runtime_metadata.get("llm_batches", []))
+                        if isinstance(batch, dict) and batch.get("error_details")
+                    ),
+                    None,
+                ),
+                "batch_errors": [
+                    batch
+                    for batch in target_result.runtime_metadata.get("llm_batches", [])
+                    if isinstance(batch, dict) and batch.get("error_details")
+                ],
             }
         )
         target_question_runtime = target_result.runtime_metadata.get("question_runtime")
@@ -705,6 +756,7 @@ async def _execute_console_stage_two_shared_llm(
     }
     return ConsoleStageTwoSharedReview(
         prepared_payload_by_market_id=prepared_payload_by_market_id,
+        refreshed_rules_by_market_id=refreshed_rules_by_market_id,
         question_runtime_by_market_id=question_runtime_by_market_id,
         outputs_by_market_id=outputs_by_market_id,
         consensus_by_market_id=consensus_by_market_id,
@@ -1742,10 +1794,26 @@ def _serialize_llm_review_context(
         payload["preflight_evidence_block"] = (
             prepared_question_payload.preflight_evidence_block
         )
+        if prepared_question_payload.stage2_context is not None:
+            payload["stage2_context"] = prepared_question_payload.stage2_context.model_dump(
+                mode="json"
+            )
+            payload["canonical_market_url"] = (
+                prepared_question_payload.stage2_context.canonical_market_url
+            )
+        if prepared_question_payload.evidence_packet_v2 is not None:
+            payload["evidence_packet"] = prepared_question_payload.evidence_packet_v2.model_dump(
+                mode="json"
+            )
         if evidence_packet is None:
             payload["llm_prompt_inputs"] = {
                 "market": asdict(market),
                 "rules": asdict(rules) if rules is not None else None,
+                "stage2_context": (
+                    prepared_question_payload.stage2_context.model_dump(mode="json")
+                    if prepared_question_payload.stage2_context is not None
+                    else None
+                ),
                 "question_payload": prepared_question_payload.model_dump(mode="json"),
             }
     elif isinstance(prepared_question_payload, dict):
@@ -1754,6 +1822,7 @@ def _serialize_llm_review_context(
             payload["llm_prompt_inputs"] = {
                 "market": asdict(market),
                 "rules": asdict(rules) if rules is not None else None,
+                "stage2_context": prepared_question_payload.get("stage2_context"),
                 "question_payload": prepared_question_payload,
             }
     if isinstance(question_runtime, dict):
@@ -4457,7 +4526,9 @@ class BullpenAutoLiveEngine:
                     if not isinstance(market, ScannedMarket):
                         continue
 
-                    rules = rules_by_market_id[market.market_id]
+                    rules = shared_review.refreshed_rules_by_market_id.get(
+                        market.market_id
+                    ) or rules_by_market_id[market.market_id]
                     rules_fail_reason = rules.fail_reason
                     llm_outputs = shared_review.outputs_by_market_id.get(
                         market.market_id,
@@ -5030,15 +5101,49 @@ class BullpenAutoLiveEngine:
             _serialize_llm_review_context(context)
             for context in [*active_position_contexts, *candidate_contexts]
         ]
+        usable_llm_review_count = sum(
+            1
+            for context_row in [*active_position_contexts, *candidate_contexts]
+            if any(
+                isinstance(output, BullpenAutoLiveLlmOutput)
+                and output.error is None
+                and output.invalid_reason is None
+                and output.llm_yes_odds is not None
+                for output in context_row.get("llm_outputs", [])
+            )
+        )
+        total_reviewed_contexts = len(active_position_contexts) + len(candidate_contexts)
+        llm_stage_status = (
+            "warning"
+            if 0 < usable_llm_review_count < total_reviewed_contexts
+            else "fail"
+            if total_reviewed_contexts > 0 and usable_llm_review_count == 0
+            else "pass"
+            if total_reviewed_contexts > 0
+            else "warning"
+        )
+        llm_phase_status = (
+            "failed"
+            if total_reviewed_contexts > 0 and usable_llm_review_count == 0
+            else "completed"
+        )
         set_run_stage_result(
             run,
             build_workflow_stage_result(
                 stage_number=2,
                 workflow_stage_key="llm",
-                phase_status="completed",
-                status="pass" if llm_candidate_count > 0 else "warning",
+                phase_status=llm_phase_status,
+                status=llm_stage_status,
                 reason=(
                     (
+                        "No selected LLM target produced a usable probability estimate, so Stage 2 failed and Stage 3 remained blocked."
+                    )
+                    if total_reviewed_contexts > 0 and usable_llm_review_count == 0
+                    else (
+                        "At least one LLM target produced usable estimates, but some targets or rows still failed."
+                    )
+                    if 0 < usable_llm_review_count < total_reviewed_contexts
+                    else (
                         "LLM review completed for "
                         f"{llm_candidate_count} events from {stage1_accepted_candidate_count} "
                         f"Stage 1 candidates and {len(active_position_contexts)} active positions."
@@ -5066,6 +5171,7 @@ class BullpenAutoLiveEngine:
                     "fresh_llm_candidate_cap": fresh_llm_candidate_cap if "fresh_llm_candidate_cap" in locals() else CONSOLE_FRESH_LLM_CANDIDATE_CAP,
                     "fresh_llm_candidate_count_before_cap": fresh_llm_candidate_count_before_cap if "fresh_llm_candidate_count_before_cap" in locals() else candidate_rows_before_llm,
                     "fresh_llm_candidates_skipped_by_cap": len(skipped_fresh_llm_markets) if "skipped_fresh_llm_markets" in locals() else 0,
+                    "usable_llm_review_count": usable_llm_review_count,
                     "qualified_candidate_count": len(qualifying_candidates),
                     "qualified_candidate_market_ids": [
                         context["market"].market_id for context in qualifying_candidates

@@ -11,6 +11,15 @@ import httpx
 
 from app.domains.ai_providers.tools import web_search as web_search_tool
 from app.domains.ai_providers.web_metadata import dedupe_strings
+from app.domains.polymarket.stage2_models import (
+    EvidencePacketV2,
+    Stage2EvidenceClaim,
+    Stage2EvidenceSource,
+    Stage2FieldProvenance,
+    Stage2MarketContext,
+)
+from app.domains.polymarket_auto_live.rules import evaluate_market_rules
+from app.domains.polymarket_auto_live.scanner import ScannedMarket
 from app.domains.runs.schemas import (
     PreparedPolymarketEventContext,
     PolymarketEventQuestionPayload,
@@ -369,17 +378,33 @@ def _fetch_gamma_market(question: PolymarketEventQuestionPayload) -> dict[str, A
     if not isinstance(payload, list):
         return None
 
+    requested_market_slug = _normalize_text(question.market_slug or question.slug)
+    requested_event_slug = _normalize_text(question.event_slug)
+    requested_market_url = _normalize_text(question.market_url)
+    requested_condition_id = _normalize_text(question.condition_id)
+
     for item in payload:
         if not isinstance(item, dict):
             continue
         item_id = _read_string(item, ["id"])
-        item_slug = _canonical_market_slug(item)
-        if item_id == question.question_id or (
-            question.slug and item_slug == question.slug
-        ):
-            return item
-    for item in payload:
-        if isinstance(item, dict):
+        item_slug = _normalize_text(_canonical_market_slug(item))
+        item_event_slug = _normalize_text(_canonical_event_slug(item))
+        item_condition_id = _normalize_text(
+            _read_string(item, ["conditionId", "condition_id"])
+        )
+        item_market_url = _event_url(item_event_slug)
+        id_matches = item_id == question.question_id if question.question_id else False
+        market_slug_matches = bool(requested_market_slug and item_slug == requested_market_slug)
+        event_slug_matches = bool(requested_event_slug and item_event_slug == requested_event_slug)
+        condition_matches = bool(
+            requested_condition_id and item_condition_id == requested_condition_id
+        )
+        url_matches = bool(
+            requested_market_url
+            and item_market_url
+            and requested_market_url.rstrip("/") == item_market_url.rstrip("/")
+        )
+        if id_matches or market_slug_matches or event_slug_matches or condition_matches or url_matches:
             return item
     return None
 
@@ -431,7 +456,9 @@ def _is_finance_relevant(question: PolymarketEventQuestionPayload, context_text:
         ]
         if part
     )
-    return any(hint in haystack for hint in FINANCE_HINTS)
+    for phrase in ("not trading advice", "no trading advice", "this is not trading advice"):
+        haystack = haystack.replace(phrase, " ")
+    return any(re.search(rf"\b{re.escape(hint)}\b", haystack) for hint in FINANCE_HINTS)
 
 
 def _dedupe_queries(values: list[str]) -> list[str]:
@@ -456,12 +483,25 @@ def _build_search_queries(
     rules_text: str | None,
     resolution_source: str | None,
     market_context: str | None,
+    deadline_hint: str | None = None,
+    timezone_hint: str | None = None,
+    yes_definition: str | None = None,
 ) -> list[str]:
     queries = [
         refreshed_question,
         f"{refreshed_question} official source",
-        f"{refreshed_question} latest news",
     ]
+    if yes_definition:
+        queries.append(yes_definition)
+        queries.append(f"{yes_definition} official confirmation")
+    if deadline_hint:
+        queries.append(
+            " ".join(
+                part
+                for part in [refreshed_question, deadline_hint, timezone_hint or ""]
+                if part
+            )
+        )
     if resolution_source:
         queries.append(f"{refreshed_question} {resolution_source}")
     if _is_finance_relevant(question, market_context or rules_text):
@@ -482,6 +522,163 @@ def _build_evidence_highlights(results: list[dict[str, str | None]]) -> list[str
     return highlights
 
 
+def _normalize_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    normalized = url.strip().rstrip("/")
+    return normalized or None
+
+
+def _content_fingerprint(*values: str | None) -> str | None:
+    payload = " | ".join(value.strip() for value in values if value and value.strip())
+    if not payload:
+        return None
+    import hashlib
+
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _source_domain(url: str | None) -> str | None:
+    if not url:
+        return None
+    match = re.match(r"https?://([^/]+)", url)
+    return match.group(1).lower() if match else None
+
+
+def _classify_source_type(domain: str | None) -> str:
+    if not domain:
+        return "unknown"
+    if re.search(r"\.gov$|\bgov\.", domain, re.I):
+        return "official_government"
+    if re.search(r"\.mil$|\bmil\.", domain, re.I):
+        return "official_military"
+    if re.search(r"(reuters|apnews|nytimes|wsj|bloomberg|ft|bbc)\.", domain, re.I):
+        return "major_news"
+    if re.search(r"(defense|politico|axios|aljazeera|haaretz|techcrunch|theverge)\.", domain, re.I):
+        return "specialist_news"
+    if re.search(r"(google\.com|news\.google|wikipedia\.org)\.", domain, re.I):
+        return "aggregator"
+    return "unknown"
+
+
+def _is_generic_landing_page(
+    *,
+    title: str | None,
+    url: str | None,
+    content: str | None,
+    question_text: str,
+) -> bool:
+    domain = _source_domain(url) or ""
+    if "wikipedia.org" in domain:
+        return True
+    if url and re.fullmatch(r"https?://[^/]+/?", url.strip()):
+        return True
+    question_tokens = [
+        token
+        for token in re.findall(r"[A-Za-z0-9]{4,}", question_text.lower())
+        if token not in {"will", "what", "when", "with", "this", "that", "from"}
+    ]
+    haystack = " ".join(part for part in [(title or "").lower(), (content or "").lower(), (url or "").lower()] if part)
+    if question_tokens and not any(token in haystack for token in question_tokens[:5]):
+        return True
+    return False
+
+
+def _build_evidence_packet_v2(
+    *,
+    event_id: str,
+    question_text: str,
+    search_objective: str | None,
+    search_queries: list[str],
+    search_results: list[dict[str, str | None]],
+    warnings: list[str],
+    built_at_utc: str,
+) -> EvidencePacketV2:
+    sources: list[Stage2EvidenceSource] = []
+    claims: list[Stage2EvidenceClaim] = []
+    seen_source_keys: set[str] = set()
+    for result in search_results:
+        normalized_url = _normalize_url(result.get("url"))
+        fingerprint = _content_fingerprint(
+            result.get("title"),
+            normalized_url,
+            result.get("content"),
+        )
+        dedupe_key = normalized_url or fingerprint
+        if not dedupe_key or dedupe_key in seen_source_keys:
+            continue
+        seen_source_keys.add(dedupe_key)
+        domain = _source_domain(normalized_url)
+        generic = _is_generic_landing_page(
+            title=result.get("title"),
+            url=normalized_url,
+            content=result.get("content"),
+            question_text=question_text,
+        )
+        source_type = (
+            "generic_landing_page"
+            if generic
+            else _classify_source_type(domain)
+        )
+        source = Stage2EvidenceSource(
+            source_id=f"S{len(sources) + 1}",
+            title=result.get("title"),
+            url=normalized_url,
+            publisher=domain,
+            domain=domain,
+            published_at=result.get("published_date"),
+            fetched_at=built_at_utc,
+            source_type=source_type,  # type: ignore[arg-type]
+            relevance_score=0.25 if generic else 0.65,
+            entity_match=bool(result.get("title")),
+            event_date_match=False,
+            resolution_criterion_match=bool(search_objective),
+            is_generic_landing_page=generic,
+            snippet=result.get("content"),
+            extracted_claims=[result["content"]] if result.get("content") else [],
+            source_warning="Generic landing page was down-ranked." if generic else None,
+            content_fingerprint=fingerprint,
+        )
+        sources.append(source)
+        if result.get("content"):
+            claims.append(
+                Stage2EvidenceClaim(
+                    claim_id=f"C{len(claims) + 1}",
+                    claim_text=result["content"],
+                    supporting_source_ids=[source.source_id],
+                    verification_status=(
+                        "supported"
+                        if source_type != "generic_landing_page"
+                        else "unverified"
+                    ),
+                    confidence=0.3 if generic else 0.7,
+                )
+            )
+        if len(sources) >= MAX_EVENT_SOURCES:
+            break
+    sufficiency_status = (
+        "sufficient"
+        if any(not source.is_generic_landing_page for source in sources)
+        else "insufficient"
+        if sources
+        else "missing"
+    )
+    packet_warnings = list(warnings)
+    if not sources:
+        packet_warnings.append("No relevant external evidence sources were captured.")
+    return EvidencePacketV2(
+        built_at_utc=built_at_utc,
+        event_id=event_id,
+        exact_resolution_question=question_text,
+        search_objective=search_objective,
+        queries=search_queries,
+        sources=sources,
+        claims=claims,
+        warnings=dedupe_strings(packet_warnings, limit=MAX_EVENT_SOURCES * 2),
+        sufficiency_status=sufficiency_status,  # type: ignore[arg-type]
+    )
+
+
 def _build_verified_evidence_block(
     question: PolymarketEventQuestionPayload,
     *,
@@ -492,6 +689,10 @@ def _build_verified_evidence_block(
     slug: str | None,
     current_yes_odds: float | None,
     current_no_odds: float | None,
+    close_time: str | None,
+    close_time_et: str | None,
+    deadline_et: str | None,
+    hours_remaining: float | None,
     rules_text: str | None,
     market_context: str | None,
     resolution_source: str | None,
@@ -515,10 +716,10 @@ def _build_verified_evidence_block(
         f"- category: {_format_text(question.category, 'Unknown')}",
         f"- current time (UTC): {current_time_utc}",
         f"- current time (ET): {current_time_et}",
-        f"- close time: {_format_text(question.close_time, 'Unknown')}",
-        f"- close time (ET): {_format_text(question.close_time_et, 'Unknown')}",
-        f"- deadline (ET): {_format_text(question.deadline_et, 'Unknown')}",
-        f"- hours remaining: {question.hours_remaining if question.hours_remaining is not None else 'Unknown'}",
+        f"- close time: {_format_text(close_time, 'Unknown')}",
+        f"- close time (ET): {_format_text(close_time_et, 'Unknown')}",
+        f"- deadline (ET): {_format_text(deadline_et, 'Unknown')}",
+        f"- hours remaining: {hours_remaining if hours_remaining is not None else 'Unknown'}",
         f"- current yes odds: {_format_odds(current_yes_odds)}",
         f"- current no odds: {_format_odds(current_no_odds)}",
         f"- market URL: {_format_text(market_url)}",
@@ -561,6 +762,15 @@ def _build_prompt(template: str, question_payload: list[dict[str, Any]]) -> str:
     selected_questions_json = json.dumps(question_payload, ensure_ascii=False, indent=2)
     placeholder = "{{SELECTED_QUESTIONS}}"
     normalized_template = template.strip()
+    has_stage2_context = any(
+        isinstance(item, dict) and isinstance(item.get("stage2_context"), dict)
+        for item in question_payload
+    )
+    if has_stage2_context and "[stage2_shared_evidence_only]" not in normalized_template.lower():
+        normalized_template = (
+            "[STAGE2_SHARED_EVIDENCE_ONLY]\n"
+            f"{normalized_template}"
+        )
     if placeholder in normalized_template:
         return normalized_template.replace(placeholder, selected_questions_json)
     return f"{normalized_template}\n\nSelected questions:\n{selected_questions_json}"
@@ -692,45 +902,6 @@ def detect_stale_fact(
 def prepare_polymarket_event_context(
     context: PolymarketEventRunContext,
 ) -> PreparedPolymarketEventContext:
-    if not context.evidence_options.require_fresh_internet_evidence:
-        return PreparedPolymarketEventContext(
-            question_payload=[question.model_copy() for question in context.question_payload],
-            runtime_metadata={
-                "kind": context.kind,
-                "require_fresh_internet_evidence": False,
-                "allow_evidence_grounded_non_web_models": context.evidence_options.allow_evidence_grounded_non_web_models,
-                "web_search_used": False,
-                "web_search_queries": [],
-                "web_sources": [],
-                "evidence_block_used": any(
-                    bool((question.preflight_evidence_block or "").strip())
-                    for question in context.question_payload
-                ),
-                "internet_verified": False,
-                "stale_fact_detected": False,
-                "invalid_reason": None,
-                "question_runtime": {
-                    question.question_id: {
-                        "question_ref": question.question_ref,
-                        "question_id": question.question_id,
-                        "question": question.question,
-                        "web_search_used": False,
-                        "web_search_queries": [],
-                        "web_sources": [],
-                        "evidence_block_used": bool(
-                            (question.preflight_evidence_block or "").strip()
-                        ),
-                        "internet_verified": False,
-                        "stale_fact_detected": False,
-                        "invalid_reason": None,
-                        "preflight_evidence_block": question.preflight_evidence_block,
-                    }
-                    for question in context.question_payload
-                },
-                "warnings": [],
-            },
-        )
-
     now_utc = datetime.now(UTC)
     now_et = now_utc.astimezone(ET_ZONE)
     refreshed_payload: list[PolymarketEventQuestionPayload] = []
@@ -738,17 +909,48 @@ def prepare_polymarket_event_context(
     all_queries: list[str] = []
     all_sources: list[str] = []
     all_warnings: list[str] = []
+    canonical_contexts: dict[str, dict[str, Any]] = {}
 
-    for question in context.question_payload:
+    for index, question in enumerate(context.question_payload):
+        event_id = (
+            _normalize_lookup_value(question.question_id)
+            or _normalize_lookup_value(question.market_id)
+            or _normalize_lookup_value(question.question_ref)
+            or f"event-{index + 1}"
+        )
         refreshed_question = question.question
         refreshed_market_url = question.market_url
         refreshed_slug = question.slug
+        refreshed_market_slug = question.market_slug or question.slug
+        refreshed_event_slug = question.event_slug
         refreshed_yes_odds = question.current_yes_odds
         refreshed_no_odds = question.current_no_odds
         refreshed_rules = question.polymarket_rules
         refreshed_market_context = question.polymarket_market_context
         refreshed_resolution_source = question.polymarket_resolution_source
+        refreshed_condition_id = question.condition_id
+        refreshed_volume = None
+        refreshed_liquidity = None
+        refreshed_best_bid = None
+        refreshed_best_ask = None
+        refreshed_spread = None
         question_warnings: list[str] = []
+        field_provenance: dict[str, Stage2FieldProvenance] = {}
+
+        def note_provenance(
+            field_name: str,
+            *,
+            source: str,
+            validation_status: str | None = None,
+            note: str | None = None,
+        ) -> None:
+            notes = [note] if note else []
+            field_provenance[field_name] = Stage2FieldProvenance(
+                source=source,
+                fetched_at_utc=now_utc.isoformat(),
+                validation_status=validation_status,
+                notes=notes,
+            )
 
         try:
             gamma_record = _fetch_gamma_market(question)
@@ -761,35 +963,139 @@ def prepare_polymarket_event_context(
                 gamma_record,
                 ["question", "title", "name", "marketQuestion"],
             ) or refreshed_question
-            refreshed_slug = _canonical_market_slug(gamma_record, refreshed_slug)
-            event_slug = _canonical_event_slug(gamma_record, refreshed_slug)
-            refreshed_market_url = _event_url(event_slug) or refreshed_market_url
+            refreshed_market_slug = _canonical_market_slug(
+                gamma_record,
+                refreshed_market_slug,
+            )
+            refreshed_event_slug = _canonical_event_slug(
+                gamma_record,
+                refreshed_event_slug or refreshed_market_slug,
+            )
+            refreshed_slug = refreshed_market_slug or refreshed_slug
+            refreshed_market_url = _event_url(refreshed_event_slug) or refreshed_market_url
             refreshed_yes_odds, refreshed_no_odds = _read_outcome_odds(gamma_record)
             refreshed_rules = _extract_rules_text(gamma_record) or refreshed_rules
             refreshed_resolution_source = (
                 _extract_resolution_source(gamma_record, refreshed_rules)
                 or refreshed_resolution_source
             )
+            refreshed_condition_id = _read_string(
+                gamma_record,
+                ["conditionId", "condition_id"],
+            ) or refreshed_condition_id
+            refreshed_volume = _parse_number(gamma_record.get("volume"))
+            refreshed_liquidity = _parse_number(gamma_record.get("liquidity"))
+            refreshed_best_bid = _parse_number(
+                gamma_record.get("bestBid") or gamma_record.get("best_bid")
+            )
+            refreshed_best_ask = _parse_number(
+                gamma_record.get("bestAsk") or gamma_record.get("best_ask")
+            )
+            if refreshed_best_bid is not None and refreshed_best_ask is not None:
+                refreshed_spread = round(max(0.0, refreshed_best_ask - refreshed_best_bid), 4)
             fetched_market_context = _fetch_event_market_context(refreshed_market_url)
             refreshed_market_context = fetched_market_context or refreshed_market_context
-
-        search_queries = _build_search_queries(
-            question,
-            refreshed_question=refreshed_question,
-            rules_text=refreshed_rules,
-            resolution_source=refreshed_resolution_source,
-            market_context=refreshed_market_context,
-        )
-        search_results: list[dict[str, str | None]] = []
-        for query in search_queries:
-            raw_payload = web_search_tool.execute(
-                "web_search",
-                {"query": query, "max_results": MAX_QUERY_RESULTS},
+            note_provenance("question", source="gamma", validation_status="matched")
+            note_provenance("canonical_market_slug", source="gamma", validation_status="matched")
+            note_provenance("canonical_event_slug", source="gamma", validation_status="matched")
+            note_provenance(
+                "canonical_market_url",
+                source="gamma",
+                validation_status="matched" if refreshed_market_url else "missing",
             )
-            parsed_results, query_warnings = _parse_search_payload(raw_payload)
-            search_results.extend(parsed_results)
-            question_warnings.extend(query_warnings)
-            all_queries.append(query)
+            note_provenance("exact_resolution_rules", source="gamma", validation_status="matched")
+            if refreshed_market_context:
+                note_provenance(
+                    "background_market_context",
+                    source="polymarket_event_page",
+                    validation_status="background_only",
+                    note="Experimental AI-generated Polymarket summary is background context only.",
+                )
+        else:
+            question_warnings.append(
+                "No exact Polymarket Gamma record matched the requested market; kept the original scanner values."
+            )
+            note_provenance(
+                "canonical_market_url",
+                source="legacy_payload",
+                validation_status="unresolved",
+                note="Gamma refresh did not return a verified market match.",
+            )
+
+        temp_market = ScannedMarket(
+            market_id=question.market_id or question.question_id,
+            question=refreshed_question,
+            market_url=refreshed_market_url,
+            slug=refreshed_market_slug or refreshed_slug,
+            close_time=question.close_time or question.closing_time,
+            theme=question.category,
+            current_yes_odds=refreshed_yes_odds,
+            current_no_odds=refreshed_no_odds,
+            volume_usd=refreshed_volume,
+            liquidity_usd=refreshed_liquidity,
+            description=refreshed_rules,
+            outcome_labels=list(question.outcomes),
+            event_slug=refreshed_event_slug,
+            best_bid_cents=refreshed_best_bid,
+            best_ask_cents=refreshed_best_ask,
+            spread_cents=refreshed_spread,
+            raw={
+                "market_context": refreshed_market_context,
+                "resolution_source": refreshed_resolution_source,
+                "condition_id": refreshed_condition_id,
+            },
+        )
+        refreshed_rule_evaluation = evaluate_market_rules(
+            temp_market,
+            now=now_utc,
+            resolution_text=refreshed_rules,
+        )
+
+        search_results: list[dict[str, str | None]] = []
+        search_queries: list[str] = []
+        evidence_packet: EvidencePacketV2 | None = None
+        if context.evidence_options.require_fresh_internet_evidence:
+            search_queries = _build_search_queries(
+                question,
+                refreshed_question=refreshed_question,
+                rules_text=refreshed_rules,
+                resolution_source=refreshed_resolution_source,
+                market_context=refreshed_market_context,
+                deadline_hint=refreshed_rule_evaluation.resolution_date_window,
+                timezone_hint=(
+                    refreshed_rule_evaluation.resolution_timezone_name
+                    or refreshed_rule_evaluation.resolution_timezone_iana
+                ),
+                yes_definition=refreshed_rule_evaluation.yes_definition,
+            )
+            seen_result_keys: set[str] = set()
+            for query in search_queries:
+                raw_payload = web_search_tool.execute(
+                    "web_search",
+                    {"query": query, "max_results": MAX_QUERY_RESULTS},
+                )
+                parsed_results, query_warnings = _parse_search_payload(raw_payload)
+                question_warnings.extend(query_warnings)
+                all_queries.append(query)
+                for parsed in parsed_results:
+                    result_key = _normalize_url(parsed.get("url")) or _content_fingerprint(
+                        parsed.get("title"),
+                        parsed.get("content"),
+                    )
+                    if not result_key or result_key in seen_result_keys:
+                        continue
+                    seen_result_keys.add(result_key)
+                    search_results.append(parsed)
+            evidence_packet = _build_evidence_packet_v2(
+                event_id=event_id,
+                question_text=refreshed_question,
+                search_objective=refreshed_rule_evaluation.yes_definition
+                or refreshed_question,
+                search_queries=search_queries,
+                search_results=search_results,
+                warnings=question_warnings,
+                built_at_utc=now_utc.isoformat(),
+            )
 
         question_sources = dedupe_strings(
             [result.get("url") or "" for result in search_results],
@@ -804,15 +1110,93 @@ def prepare_polymarket_event_context(
             current_time_utc=now_utc.isoformat(),
             current_time_et=_format_ts(now_et),
             market_url=refreshed_market_url,
-            slug=refreshed_slug,
+            slug=refreshed_market_slug or refreshed_slug,
             current_yes_odds=refreshed_yes_odds,
             current_no_odds=refreshed_no_odds,
+            close_time=question.close_time or question.closing_time,
+            close_time_et=refreshed_rule_evaluation.deadline_et,
+            deadline_et=refreshed_rule_evaluation.deadline_et,
+            hours_remaining=refreshed_rule_evaluation.hours_remaining,
             rules_text=refreshed_rules,
             market_context=refreshed_market_context,
             resolution_source=refreshed_resolution_source,
             search_queries=search_queries,
             search_results=search_results,
             warnings=question_warnings,
+        )
+        if evidence_packet is not None:
+            evidence_packet.legacy_preflight_evidence_block = verified_block
+
+        canonical_context = Stage2MarketContext(
+            event_id=event_id,
+            question_ref=question.question_ref,
+            question_id=question.question_id,
+            market_id=question.market_id or question.question_id,
+            condition_id=refreshed_condition_id,
+            question=refreshed_question,
+            canonical_market_url=refreshed_market_url,
+            canonical_market_slug=refreshed_market_slug or refreshed_slug,
+            canonical_event_slug=refreshed_event_slug,
+            category=question.category,
+            theme=question.category,
+            outcome_labels=list(question.outcomes),
+            current_yes_odds=refreshed_yes_odds,
+            current_no_odds=refreshed_no_odds,
+            best_bid_cents=refreshed_best_bid,
+            best_ask_cents=refreshed_best_ask,
+            spread_cents=refreshed_spread,
+            volume_usd=refreshed_volume,
+            liquidity_usd=refreshed_liquidity,
+            exact_resolution_rules=refreshed_rules,
+            exact_yes_definition=refreshed_rule_evaluation.yes_definition,
+            resolution_source_description=refreshed_resolution_source,
+            background_market_context=refreshed_market_context,
+            background_context_warning=(
+                "Experimental AI-generated Polymarket summary is background context only."
+                if refreshed_market_context
+                and POLYMARKET_MARKET_CONTEXT_LABEL.lower()
+                in refreshed_market_context.lower()
+                else None
+            ),
+            resolution_timezone_name=refreshed_rule_evaluation.resolution_timezone_name,
+            resolution_timezone_iana=refreshed_rule_evaluation.resolution_timezone_iana,
+            deadline_local=refreshed_rule_evaluation.deadline_local,
+            deadline_utc=refreshed_rule_evaluation.deadline_utc,
+            hours_remaining=refreshed_rule_evaluation.hours_remaining,
+            deadline_source=refreshed_rule_evaluation.deadline_source,
+            deadline_confidence=refreshed_rule_evaluation.deadline_confidence,
+            current_time_utc=now_utc.isoformat(),
+            rule_quality_status=refreshed_rule_evaluation.rule_quality_status,
+            url_validation_status=(
+                "matched"
+                if gamma_record is not None and refreshed_market_url
+                else "unresolved"
+            ),
+            warnings=dedupe_strings(
+                [
+                    *question_warnings,
+                    *(refreshed_rule_evaluation.warnings or []),
+                ],
+                limit=MAX_EVENT_SOURCES * 2,
+            ),
+            field_provenance=field_provenance,
+            field_fetched_at={
+                key: now_utc.isoformat()
+                for key in (
+                    "canonical_market_url",
+                    "canonical_market_slug",
+                    "canonical_event_slug",
+                    "current_yes_odds",
+                    "current_no_odds",
+                    "exact_resolution_rules",
+                    "resolution_source_description",
+                )
+            },
+            evidence_packet=evidence_packet,
+            legacy_preflight_evidence_block=verified_block,
+        )
+        canonical_contexts[question.question_id] = canonical_context.model_dump(
+            mode="json"
         )
 
         refreshed_payload.append(
@@ -822,14 +1206,23 @@ def prepare_polymarket_event_context(
                     "current_time_utc": now_utc.isoformat(),
                     "current_time_et": _format_ts(now_et),
                     "market_url": refreshed_market_url,
-                    "slug": refreshed_slug,
-                    "market_id": question.market_id or refreshed_slug,
+                    "slug": refreshed_market_slug or refreshed_slug,
+                    "market_slug": refreshed_market_slug or refreshed_slug,
+                    "event_slug": refreshed_event_slug,
+                    "market_id": question.market_id or question.question_id,
+                    "condition_id": refreshed_condition_id,
                     "current_yes_odds": refreshed_yes_odds,
                     "current_no_odds": refreshed_no_odds,
                     "polymarket_rules": refreshed_rules,
                     "polymarket_market_context": refreshed_market_context,
                     "polymarket_resolution_source": refreshed_resolution_source,
                     "preflight_evidence_block": verified_block,
+                    "evidence_packet_v2": evidence_packet,
+                    "stage2_context": canonical_context,
+                    "close_time_et": refreshed_rule_evaluation.deadline_et,
+                    "deadline_et": refreshed_rule_evaluation.deadline_et,
+                    "hours_remaining": refreshed_rule_evaluation.hours_remaining,
+                    "deadline_source": refreshed_rule_evaluation.deadline_source,
                 }
             )
         )
@@ -851,6 +1244,12 @@ def prepare_polymarket_event_context(
             "stale_fact_detected": False,
             "invalid_reason": None,
             "preflight_evidence_block": verified_block,
+            "stage2_context": canonical_context.model_dump(mode="json"),
+            "evidence_packet_v2": (
+                evidence_packet.model_dump(mode="json") if evidence_packet is not None else None
+            ),
+            "rule_quality_status": refreshed_rule_evaluation.rule_quality_status,
+            "rule_fail_reason": refreshed_rule_evaluation.fail_reason,
         }
 
     return PreparedPolymarketEventContext(
@@ -871,6 +1270,8 @@ def prepare_polymarket_event_context(
             "stale_fact_detected": False,
             "invalid_reason": None,
             "question_runtime": question_runtime,
+            "canonical_stage2_contexts": canonical_contexts,
+            "schema_version": 2,
             "warnings": dedupe_strings(all_warnings, limit=MAX_EVENT_SOURCES * 2),
         },
     )
@@ -882,14 +1283,29 @@ def build_polymarket_event_prompt_from_prepared_context(
     *,
     provider_name: str,
 ) -> tuple[str, dict[str, Any]]:
+    prompt_payload: list[dict[str, Any]] = []
+    for question in prepared_context.question_payload:
+        if question.stage2_context is not None:
+            prompt_payload.append(
+                {
+                    "event_id": question.stage2_context.event_id,
+                    "question_ref": question.question_ref,
+                    "question_id": question.question_id,
+                    "market_id": question.market_id,
+                    "condition_id": question.condition_id,
+                    "market_slug": question.market_slug,
+                    "event_slug": question.event_slug,
+                    "question": question.question,
+                    "preflight_evidence_block": question.preflight_evidence_block,
+                    "stage2_context": question.stage2_context.model_dump(mode="json"),
+                }
+            )
+            continue
+        prompt_payload.append(question.model_dump(mode="json"))
     prompt = _build_prompt(
         context.prompt_template,
-        [question.model_dump(mode="json") for question in prepared_context.question_payload],
+        prompt_payload,
     )
-    if context.evidence_options.require_fresh_internet_evidence and provider_name == "openai":
-        prompt = _prepend_openai_search_token(prompt)
-    if context.evidence_options.require_fresh_internet_evidence:
-        prompt = _append_required_search_instruction(prompt, provider_name)
     return prompt, dict(prepared_context.runtime_metadata)
 
 
@@ -961,16 +1377,11 @@ def finalize_polymarket_event_runtime_metadata(
                 question_runtime[question_id]["invalid_reason"] = stale_reason
 
     require_fresh = context.evidence_options.require_fresh_internet_evidence
-    requires_model_side_search = provider_name in {"gemini", "deepseek"} and require_fresh
 
     for question_id, entry in question_runtime.items():
         evidence_block_used = bool(entry.get("evidence_block_used"))
         question_web_used = bool(entry.get("web_search_used"))
-        if requires_model_side_search and not model_web_search_used:
-            entry["invalid_reason"] = (
-                "Required model-side search/tool usage did not run before the final answer."
-            )
-        elif require_fresh and not question_web_used and not evidence_block_used:
+        if require_fresh and not question_web_used and not evidence_block_used:
             entry["invalid_reason"] = (
                 "Fresh internet evidence was required, but no verified evidence block or web usage was recorded."
             )

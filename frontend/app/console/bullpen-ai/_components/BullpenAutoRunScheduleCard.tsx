@@ -3385,6 +3385,20 @@ function readLlmContextNumber(record: Record<string, unknown> | null, key: strin
   return readStageOutputNumber(record[key]);
 }
 
+function readLlmContextRecord(record: Record<string, unknown> | null, key: string) {
+  if (!record) return null;
+  const value = record[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readLlmContextArray(record: Record<string, unknown> | null, key: string) {
+  if (!record) return [];
+  const value = record[key];
+  return Array.isArray(value) ? value : [];
+}
+
 function getStageTwoLlmReviewedRows(stage: WorkflowStageView) {
   const rows = Array.isArray(stage.outputs.llm_reviewed_candidates)
     ? stage.outputs.llm_reviewed_candidates
@@ -3510,10 +3524,15 @@ type StageTwoLlmRunSummaryRow = {
   key: string;
   provider: string;
   model: string;
+  requestedModel: string | null;
   status: StageTwoRunSummaryStatus;
   runtime: string;
   cost: number | null;
   error: string | null;
+  failureCategory: string | null;
+  firstError: Record<string, unknown> | null;
+  lastError: Record<string, unknown> | null;
+  batchErrors: Record<string, unknown>[];
   failedEventCount: number | null;
   invalidEventCount: number | null;
   blockedEventCount: number | null;
@@ -3569,6 +3588,7 @@ function getStageTwoLlmRunSummaryRows(
         key: `${key}-${index}`,
         provider,
         model,
+        requestedModel: readLlmContextString(run, "requested_model") ?? model,
         status: normalizeStageTwoRunStatus(readLlmContextString(run, "status")),
         runtime: formatStageTwoRuntimeSeconds(readLlmContextNumber(run, "elapsed_seconds")),
         cost:
@@ -3579,8 +3599,19 @@ function getStageTwoLlmRunSummaryRows(
         error:
           readLlmContextString(run, "error") ??
           readLlmContextString(run, "error_summary") ??
+          readLlmContextString(readLlmContextRecord(run, "first_error"), "safe_message") ??
           readLlmContextString(run, "message") ??
           null,
+        failureCategory:
+          readLlmContextString(run, "failure_category") ??
+          readLlmContextString(readLlmContextRecord(run, "first_error"), "execution_phase") ??
+          null,
+        firstError: readLlmContextRecord(run, "first_error"),
+        lastError: readLlmContextRecord(run, "last_error"),
+        batchErrors:
+          readLlmContextArray(run, "batch_errors").filter(
+            (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object",
+          ) ?? [],
         failedEventCount: readLlmContextNumber(run, "failed_event_count"),
         invalidEventCount: readLlmContextNumber(run, "invalid_event_count"),
         blockedEventCount: readLlmContextNumber(run, "blocked_event_count"),
@@ -3594,6 +3625,7 @@ function getStageTwoLlmRunSummaryRows(
     key: group.key,
     provider: group.rows[0]?.provider ?? "—",
     model: group.rows[0]?.model ?? group.label,
+    requestedModel: group.rows[0]?.model ?? group.label,
     status: "completed" as StageTwoRunSummaryStatus,
     runtime: "—",
     cost: groupCostByKey.get(group.key) ?? null,
@@ -3601,6 +3633,10 @@ function getStageTwoLlmRunSummaryRows(
       group.rows.find((row) => readLlmContextString(row.output, "error"))?.output ?? null,
       "error",
     ),
+    failureCategory: null,
+    firstError: null,
+    lastError: null,
+    batchErrors: [],
     failedEventCount: null,
     invalidEventCount: null,
     blockedEventCount: null,
@@ -3645,10 +3681,26 @@ function StageTwoLlmFailureDialog({
   row: StageTwoLlmFailureDialogRow;
   onClose: () => void;
 }) {
-  const errorMessage = row.error || "This LLM target failed before returning a detailed provider error.";
+  const errorMessage = row.error || "No safe provider error was captured for this target.";
+  const diagnosticJson = JSON.stringify(
+    {
+      provider: row.provider,
+      requested_model: row.requestedModel,
+      actual_model: row.model,
+      failure_category: row.failureCategory,
+      first_error: row.firstError,
+      last_error: row.lastError,
+      batch_errors: row.batchErrors,
+    },
+    null,
+    2,
+  );
   const diagnostics = [
     ["Runtime", row.runtime],
     ["Cost", formatUsdCost(row.cost)],
+    ["Failure category", row.failureCategory ?? "—"],
+    ["Requested model", row.requestedModel ?? "—"],
+    ["Actual model", row.model],
     ["Failed events", row.failedEventCount?.toLocaleString("en-IN") ?? "—"],
     ["Invalid events", row.invalidEventCount?.toLocaleString("en-IN") ?? "—"],
     ["Blocked events", row.blockedEventCount?.toLocaleString("en-IN") ?? "—"],
@@ -3687,6 +3739,10 @@ function StageTwoLlmFailureDialog({
                 </div>
               ))}
             </dl>
+          </section>
+          <section>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Copyable diagnostic JSON</p>
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-800">{diagnosticJson}</pre>
           </section>
         </div>
       </div>

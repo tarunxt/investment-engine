@@ -10,6 +10,7 @@ from app.core.config import get_gemini_api_keys
 from app.domains.ai_providers.base import (
     AIProviderResponse,
     BaseAIProvider,
+    ProviderCallError,
 )
 from app.domains.ai_providers.web_metadata import (
     dedupe_strings,
@@ -41,10 +42,14 @@ REPAIR_PROMPT_MARKERS = (
     "[REBALANCE_TABLE_REPAIR]",
     "[STOCK_TABLE_REPAIR]",
 )
+DISABLE_SEARCH_PROMPT_MARKERS = (
+    "[STAGE2_SHARED_EVIDENCE_ONLY]",
+    *REPAIR_PROMPT_MARKERS,
+)
 
 
 def _should_disable_search(prompt: str) -> bool:
-    return any(marker in (prompt or "") for marker in REPAIR_PROMPT_MARKERS)
+    return any(marker in (prompt or "") for marker in DISABLE_SEARCH_PROMPT_MARKERS)
 
 
 def _thinking_config_for_model(model: str) -> types.ThinkingConfig | None:
@@ -152,25 +157,30 @@ class GeminiProvider(BaseAIProvider):
         prompt: str,
         model: str,
     ) -> AIProviderResponse:
+        if model not in self.supported_models:
+            raise ProviderCallError(
+                provider=self.provider_name,
+                requested_model=model,
+                actual_model=None,
+                execution_phase="capability_check",
+                safe_message=f"Gemini model '{model}' is not supported by this adapter.",
+                retryable=False,
+            )
         last_error: Exception | None = None
         requested_model = (model or "").strip()
-        model_candidates = [requested_model] if requested_model else []
-        model_candidates.extend([m for m in SUPPORTED_MODELS if m != requested_model])
-
-        for model_name in model_candidates:
-            for api_key in self._api_keys:
-                try:
-                    self.client = genai.Client(
-                        api_key=api_key,
-                        http_options={"api_version": "v1alpha"},
-                    )
-                    return self._generate_once(prompt=prompt, model=model_name)
-                except Exception as exc:
-                    last_error = exc
-                    should_fallback = _should_rotate_key(exc)
-                    if not should_fallback:
-                        raise
-                    continue
+        for api_key in self._api_keys:
+            try:
+                self.client = genai.Client(
+                    api_key=api_key,
+                    http_options={"api_version": "v1alpha"},
+                )
+                return self._generate_once(prompt=prompt, model=requested_model)
+            except Exception as exc:
+                last_error = exc
+                should_retry_with_next_key = _should_rotate_key(exc)
+                if not should_retry_with_next_key:
+                    raise
+                continue
         if last_error:
             raise last_error
         raise RuntimeError("Gemini generation failed.")

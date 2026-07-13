@@ -7,6 +7,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal
 
 from app.domains.jobs.schemas import JobResponse
+from app.domains.polymarket.stage2_models import (
+    EvidencePacketV2,
+    Stage2MarketContext,
+)
 from app.shared.types import JobStatus
 
 
@@ -24,6 +28,7 @@ class PolymarketEventQuestionPayload(BaseModel):
     question_ref: str
     question_id: str
     market_id: str | None = None
+    condition_id: str | None = None
     question: str
     close_time: str | None = None
     closing_time: str | None = None
@@ -41,10 +46,14 @@ class PolymarketEventQuestionPayload(BaseModel):
     current_no_odds: float | None = None
     market_url: str | None = None
     slug: str | None = None
+    market_slug: str | None = None
+    event_slug: str | None = None
     polymarket_rules: str | None = None
     polymarket_market_context: str | None = None
     polymarket_resolution_source: str | None = None
     preflight_evidence_block: str | None = None
+    evidence_packet_v2: EvidencePacketV2 | None = None
+    stage2_context: Stage2MarketContext | None = None
 
 
 class PolymarketEventRunContext(BaseModel):

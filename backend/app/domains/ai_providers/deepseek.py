@@ -9,7 +9,11 @@ import re
 from openai import OpenAI
 
 from app.core.config import settings
-from app.domains.ai_providers.base import AIProviderResponse, BaseAIProvider
+from app.domains.ai_providers.base import (
+    AIProviderResponse,
+    BaseAIProvider,
+    ProviderCallError,
+)
 from app.domains.ai_providers.tools import web_search as web_search_tool
 from app.domains.ai_providers.web_metadata import (
     extract_web_search_sources,
@@ -60,6 +64,7 @@ _SYSTEM_MESSAGE: dict = {
 
 _MAX_TOOL_ROUNDS = 8
 _MAX_DSML_RECOVERY_SEARCHES = 4
+_DISABLE_TOOL_MARKER = "[STAGE2_SHARED_EVIDENCE_ONLY]"
 
 
 def _looks_like_tool_trace(text: str) -> bool:
@@ -301,9 +306,22 @@ class DeepSeekProvider(BaseAIProvider):
 
     def generate(self, *, prompt: str, model: str) -> AIProviderResponse:
         if model not in self.supported_models:
-            model = "deepseek-v4-flash"
+            raise ProviderCallError(
+                provider=self.provider_name,
+                requested_model=model,
+                actual_model=None,
+                execution_phase="capability_check",
+                safe_message=f"DeepSeek model '{model}' is not supported by this adapter.",
+                retryable=False,
+            )
 
         SYSTEM_MESSAGE = _SYSTEM_MESSAGE.copy()
+        if _DISABLE_TOOL_MARKER in (prompt or ""):
+            SYSTEM_MESSAGE["content"] = (
+                "Use only the user-supplied structured evidence packet. "
+                "Do not call tools or browse for additional evidence. "
+                "Return the exact output format requested by the user."
+            )
         # SYSTEM_MESSAGE["content"] = _SYSTEM_MESSAGE["content"].replace("{{current_date}}", current_date).replace("{{model}}", model)
         output_kind = _determine_output_kind(prompt)
 
@@ -311,12 +329,13 @@ class DeepSeekProvider(BaseAIProvider):
             SYSTEM_MESSAGE,
             {"role": "user", "content": prompt},
         ]
-        kwargs: dict = {
-            "model": model,
-            "messages": messages,
-            "tools": web_search_tool.TOOL_DEFINITIONS,
-            "tool_choice": "auto",
-        }
+        kwargs: dict = {"model": model, "messages": messages}
+        tools_enabled = _DISABLE_TOOL_MARKER not in (prompt or "")
+        if tools_enabled:
+            kwargs["tools"] = web_search_tool.TOOL_DEFINITIONS
+            kwargs["tool_choice"] = "auto"
+        else:
+            kwargs["tool_choice"] = "none"
 
         total_tokens_in = 0
         total_tokens_out = 0
