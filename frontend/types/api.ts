@@ -476,6 +476,7 @@ export interface RunListJobResponse {
   tokens_in?: number | null;
   tokens_out?: number | null;
   estimated_cost?: number | null;
+  request_context_json?: PolymarketEventRunContext | Record<string, unknown> | null;
   export_status?: string | null;
   export_error?: string | null;
   exported_at?: string | null;

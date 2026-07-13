@@ -65,6 +65,7 @@ class PostgresRunRepository:
                     Job.tokens_in,
                     Job.tokens_out,
                     Job.estimated_cost,
+                    Job.request_context_json,
                     Job.export_status,
                     Job.export_error,
                     Job.exported_at,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal
@@ -256,6 +256,7 @@ class RunListJobResponse(BaseModel):
     tokens_in: Optional[int] = None
     tokens_out: Optional[int] = None
     estimated_cost: Optional[float] = None
+    request_context_json: Optional[dict[str, Any]] = None
     export_status: Optional[str] = None
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None
