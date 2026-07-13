@@ -1,4 +1,5 @@
 import type {
+  PolymarketEventQuestionPayload,
   PolymarketEventQuestionRuntimeMetadata,
   PolymarketEventRuntimeMetadata,
 } from "@/types/api";
@@ -194,6 +195,7 @@ type BullpenLlmPromptQuestionPayload = {
   question_ref: string;
   question_id: string;
   market_id: string | null;
+  question: string;
   stage2_context: Record<string, unknown>;
   preflight_evidence_block: string | null;
 };
@@ -225,7 +227,8 @@ type BullpenLegacyPreflightPayload = {
 };
 
 export type BullpenLlmPromptInputs = {
-  questionPayload: BullpenLlmPromptQuestionPayload[];
+  questionPayload: PolymarketEventQuestionPayload[];
+  promptPayload: BullpenLlmPromptQuestionPayload[];
   preflightEvidenceBlocksByQuestionId: Record<string, string>;
 };
 
@@ -2406,7 +2409,7 @@ function buildBullpenLlmPromptQuestionPayload(
       ],
       sufficiency_status: "missing",
     },
-    legacy_preflight_evidence_block: null,
+    legacy_preflight_evidence_block: null as string | null,
   } satisfies Record<string, unknown>;
   const basePayload: Omit<BullpenLlmPromptQuestionPayload, "preflight_evidence_block"> =
     {
@@ -2414,6 +2417,7 @@ function buildBullpenLlmPromptQuestionPayload(
       question_ref: getBullpenQuestionRef(index),
       question_id: question.id,
       market_id: question.id,
+      question: question.question,
       stage2_context: stage2Context,
     };
   const preflightEvidenceBlock = buildBullpenPreflightEvidenceBlock(
@@ -2449,10 +2453,41 @@ function buildBullpenLlmPromptQuestionPayload(
     preflightEvidenceBlock;
 
   return {
-    questionPayload: {
+    promptPayload: {
       ...basePayload,
       preflight_evidence_block: preflightEvidenceBlock,
     } satisfies BullpenLlmPromptQuestionPayload,
+    questionPayload: {
+      question_ref: getBullpenQuestionRef(index),
+      question_id: question.id,
+      market_id: question.id,
+      condition_id: null,
+      question: question.question,
+      close_time: question.closeTime,
+      closing_time: question.closeTime,
+      close_time_et: deadlineInfo.closeTimeEt,
+      current_time_utc: currentTimeUtc,
+      current_time_et: currentTimeEt,
+      deadline_et: deadlineInfo.deadlineEt,
+      hours_remaining: deadlineInfo.hoursRemaining,
+      deadline_source: deadlineInfo.deadlineSource,
+      title_date_hint: deadlineInfo.titleDateHint,
+      title_deadline_et_assumption: deadlineInfo.titleDeadlineEtAssumption,
+      category: question.category,
+      outcomes: question.outcomeLabels,
+      current_yes_odds: question.yesOdds,
+      current_no_odds: question.noOdds,
+      market_url: question.marketUrl,
+      slug: question.slug,
+      market_slug: question.slug,
+      event_slug: question.slug,
+      polymarket_rules: question.rules,
+      polymarket_market_context: question.marketContext,
+      polymarket_resolution_source: question.resolutionSource,
+      preflight_evidence_block: preflightEvidenceBlock,
+      evidence_packet_v2: stage2Context.evidence_packet as PolymarketEventQuestionPayload["evidence_packet_v2"],
+      stage2_context: stage2Context as PolymarketEventQuestionPayload["stage2_context"],
+    } satisfies PolymarketEventQuestionPayload,
     preflightEvidenceBlock,
   };
 }
@@ -2494,6 +2529,7 @@ export function buildBullpenLlmPromptInputs(
 
   return {
     questionPayload: promptEntries.map((entry) => entry.questionPayload),
+    promptPayload: promptEntries.map((entry) => entry.promptPayload),
     preflightEvidenceBlocksByQuestionId: Object.fromEntries(
       promptEntries.map((entry, index) => [
         questions[index]?.id ?? getBullpenQuestionRef(index),
@@ -2509,7 +2545,7 @@ export function buildBullpenLlmPrompt(
   promptInputs = buildBullpenLlmPromptInputs(questions),
 ) {
   const selectedQuestionsJson = JSON.stringify(
-    promptInputs.questionPayload,
+    promptInputs.promptPayload,
     null,
     2,
   );

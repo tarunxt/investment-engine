@@ -147,7 +147,8 @@ resolve_role_service_name() {
 }
 
 run_as_app_user() {
-  sudo -u "$APP_USER" -H bash -lc "$1"
+  local script="$1"
+  sudo -u "$APP_USER" -H bash -lc "$(printf 'set -euo pipefail\n%s' "$script")"
 }
 
 looks_like_placeholder_url() {
