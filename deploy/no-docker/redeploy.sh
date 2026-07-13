@@ -32,6 +32,12 @@ BACKED_UP_PATHS_LIST=$'\n'
 CONFIG_ROLLBACK_ENABLED=false
 NGINX_RELOAD_REQUIRED=false
 
+cleanup_config_backup_dir() {
+  if [[ -n "${CONFIG_BACKUP_DIR:-}" && -d "$CONFIG_BACKUP_DIR" ]]; then
+    sudo rm -rf "$CONFIG_BACKUP_DIR"
+  fi
+}
+
 case "$SCOPE" in
   backend|full)
     ;;
@@ -846,6 +852,6 @@ if [[ "$SCOPE" == "full" ]]; then
 fi
 
 CONFIG_ROLLBACK_ENABLED=false
-rm -rf "$CONFIG_BACKUP_DIR"
+cleanup_config_backup_dir
 
 echo "==> Deploy complete"
