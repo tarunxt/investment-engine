@@ -49,6 +49,62 @@ function normalizeError(error: unknown) {
   return 'Something went wrong';
 }
 
+
+function isBullpenAiRun(run: RunListItem) {
+  return run.run_jobs.some(({ job }) => {
+    const context = job.request_context_json;
+    return Boolean(
+      context &&
+        typeof context === 'object' &&
+        'kind' in context &&
+        context.kind === 'polymarket_bullpen_event',
+    );
+  });
+}
+
+function getBullpenTargetCount(run: RunListItem) {
+  const context = run.run_jobs.find(({ job }) => job.request_context_json)?.job.request_context_json;
+  if (!context || typeof context !== 'object' || !('execution_options' in context)) return run.run_jobs.length;
+  const executionOptions = context.execution_options;
+  if (!executionOptions || typeof executionOptions !== 'object' || !('target_count' in executionOptions)) return run.run_jobs.length;
+  const targetCount = Number(executionOptions.target_count);
+  return Number.isFinite(targetCount) && targetCount > 0 ? targetCount : run.run_jobs.length;
+}
+
+function formatRuntime(startedAt?: string | null, completedAt?: string | null) {
+  const start = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const end = completedAt ? Date.parse(completedAt) : Number.NaN;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—';
+  const totalSeconds = Math.max(0, Math.round((end - start) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function formatUsdCost(value?: number | null) {
+  if (!Number.isFinite(value ?? Number.NaN) || !value) return '$0.00';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: value < 0.01 ? 4 : 2,
+  }).format(value);
+}
+
+function getBullpenStatusCounts(run: RunListItem) {
+  return run.run_jobs.reduce(
+    (counts, { job }) => {
+      const status = job.status.toLowerCase();
+      if (status === 'completed') counts.completed += 1;
+      else if (status === 'failed') counts.failed += 1;
+      else if (status === 'processing') counts.partial += 1;
+      else counts.pending += 1;
+      return counts;
+    },
+    { completed: 0, partial: 0, failed: 0, pending: 0 },
+  );
+}
+
 function formatTimestamp(value?: string | null) {
   return formatApiTimestamp(value, {
     emptyValue: null,
@@ -245,20 +301,23 @@ export default function RunsPage() {
             <tbody className="divide-y divide-gray-100 bg-white">
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={3} className="px-5 py-12 text-center text-sm text-gray-500">
                     <Loader2 className="mx-auto mb-2 size-5 animate-spin text-gray-400" />
                     Loading runs…
                   </td>
                 </tr>
               ) : runs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={3} className="px-5 py-12 text-center text-sm text-gray-500">
                     {total === 0 ? 'No runs yet.' : 'No runs match your filters.'}
                   </td>
                 </tr>
               ) : (
                 runs.map((run) => {
                   const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
+                  const isBullpen = isBullpenAiRun(run);
+                  const bullpenCounts = isBullpen ? getBullpenStatusCounts(run) : null;
+                  const targetCount = isBullpen ? getBullpenTargetCount(run) : run.run_jobs.length;
                   return (
                     <tr
                       key={run.id}
@@ -266,10 +325,68 @@ export default function RunsPage() {
                       className="cursor-pointer align-top hover:bg-gray-50"
                     >
                       <td className="max-w-90 px-5 py-4">
-                        <div className="font-medium text-gray-950">{getAutoRebalanceRunDisplayLabel(run)}</div>
-                        <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">
-                          {run.prompt_preview}
+                        <div className="font-medium text-gray-950">
+                          {isBullpen ? `Bullpen AI Run #${run.id}` : getAutoRebalanceRunDisplayLabel(run)}
                         </div>
+                        {isBullpen ? (
+                          <div className="mt-2 space-y-3">
+                            <div className="text-xs font-semibold text-gray-600">
+                              LLM progress: {run.run_jobs.length}/{targetCount} returned
+                            </div>
+                            {bullpenCounts ? (
+                              <div className="grid max-w-xl grid-cols-4 gap-2 text-center text-[10px] font-bold uppercase tracking-[0.12em]">
+                                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-emerald-700">
+                                  <span className="block text-sm">{bullpenCounts.completed}</span>Completed
+                                </div>
+                                <div className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-sky-700">
+                                  <span className="block text-sm">{bullpenCounts.partial}</span>Partial
+                                </div>
+                                <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-red-700">
+                                  <span className="block text-sm">{bullpenCounts.failed}</span>Failed
+                                </div>
+                                <div className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-gray-600">
+                                  <span className="block text-sm">{bullpenCounts.pending}</span>Pending
+                                </div>
+                              </div>
+                            ) : null}
+                            <div className="overflow-hidden rounded-xl border border-gray-200">
+                              <table className="min-w-full text-left text-xs">
+                                <thead className="bg-gray-50 uppercase tracking-[0.12em] text-gray-500">
+                                  <tr>
+                                    <th className="px-3 py-2 font-bold">Provider</th>
+                                    <th className="px-3 py-2 font-bold">Model</th>
+                                    <th className="px-3 py-2 font-bold">Status</th>
+                                    <th className="px-3 py-2 font-bold">Runtime</th>
+                                    <th className="px-3 py-2 font-bold">Cost</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 bg-white">
+                                  {run.run_jobs.map(({ job }) => (
+                                    <tr key={job.id}>
+                                      <td className="px-3 py-2 font-bold capitalize text-gray-900">{job.provider}</td>
+                                      <td className="px-3 py-2 font-semibold text-gray-700">{job.model}</td>
+                                      <td className="px-3 py-2">
+                                        <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-bold capitalize', STATUS_STYLES[job.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200')}>
+                                          {job.status}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 font-mono text-gray-600">
+                                        {formatRuntime(job.created_at, job.updated_at)}
+                                      </td>
+                                      <td className="px-3 py-2 font-bold text-gray-700">
+                                        {formatUsdCost(job.estimated_cost)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">
+                            {run.prompt_preview}
+                          </div>
+                        )}
                       </td>
                       <td className="px-5 py-4">
                         <span
