@@ -3469,6 +3469,23 @@ function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
 
 type StageTwoRunSummaryStatus = "completed" | "failed" | "partial";
 
+type StageTwoLlmRunSummaryRow = {
+  key: string;
+  provider: string;
+  model: string;
+  status: StageTwoRunSummaryStatus;
+  runtime: string;
+  cost: number | null;
+  error: string | null;
+  failedEventCount: number | null;
+  invalidEventCount: number | null;
+  blockedEventCount: number | null;
+  retryRequestCount: number | null;
+  recoveryBatchCount: number | null;
+};
+
+type StageTwoLlmFailureDialogRow = StageTwoLlmRunSummaryRow;
+
 function formatStageTwoRuntimeSeconds(value: number | null) {
   if (value === null) return "—";
   const safeSeconds = Math.max(0, Math.round(value));
@@ -3493,7 +3510,7 @@ function getStageTwoLlmTargetRuns(stage: WorkflowStageView) {
 function getStageTwoLlmRunSummaryRows(
   stage: WorkflowStageView,
   groups: ReturnType<typeof groupStageTwoLlmRowsByModel>,
-) {
+): StageTwoLlmRunSummaryRow[] {
   const groupCostByKey = new Map<string, number | null>();
   groups.forEach((group) => {
     const costs = group.rows
@@ -3522,6 +3539,16 @@ function getStageTwoLlmRunSummaryRows(
           readLlmContextNumber(run, "cost") ??
           groupCostByKey.get(key) ??
           null,
+        error:
+          readLlmContextString(run, "error") ??
+          readLlmContextString(run, "error_summary") ??
+          readLlmContextString(run, "message") ??
+          null,
+        failedEventCount: readLlmContextNumber(run, "failed_event_count"),
+        invalidEventCount: readLlmContextNumber(run, "invalid_event_count"),
+        blockedEventCount: readLlmContextNumber(run, "blocked_event_count"),
+        retryRequestCount: readLlmContextNumber(run, "retry_request_count"),
+        recoveryBatchCount: readLlmContextNumber(run, "recovery_batch_count"),
       };
     });
   }
@@ -3533,7 +3560,101 @@ function getStageTwoLlmRunSummaryRows(
     status: "completed" as StageTwoRunSummaryStatus,
     runtime: "—",
     cost: groupCostByKey.get(group.key) ?? null,
+    error: readLlmContextString(
+      group.rows.find((row) => readLlmContextString(row.output, "error"))?.output ?? null,
+      "error",
+    ),
+    failedEventCount: null,
+    invalidEventCount: null,
+    blockedEventCount: null,
+    retryRequestCount: null,
+    recoveryBatchCount: null,
   }));
+}
+
+
+function getStageTwoLlmFailureFixAdvice(row: StageTwoLlmFailureDialogRow) {
+  const error = (row.error ?? "").toLowerCase();
+  const provider = row.provider.toLowerCase();
+
+  if (/api key|authentication|unauthorized|permission|credential|token/.test(error)) {
+    return `Check the ${row.provider} API key/credentials in the backend environment, restart investor-backend and investor-celery-worker, then rerun Stage 2.`;
+  }
+  if (/rate limit|quota|429|resource exhausted|too many requests/.test(error)) {
+    return `Reduce ${row.provider} concurrency or selected models, wait for quota to recover, verify billing/quota, then rerun this LLM.`;
+  }
+  if (/timeout|timed out|deadline|network|fetch failed|connection|econnreset/.test(error)) {
+    return `Check provider connectivity from the worker, increase/retry-safe task timeout if needed, and rerun after the network/provider stabilizes.`;
+  }
+  if (/json|parse|schema|invalid|malformed|unusable/.test(error)) {
+    return `Review the Stage 2 prompt/schema instructions for ${row.model}, keep the model response JSON-only, and rerun this model.`;
+  }
+  if (provider.includes("gemini")) {
+    return "Verify Gemini model availability, API key, quota, and safety/block settings before rerunning this Gemini target.";
+  }
+  if (provider.includes("openai")) {
+    return "Verify OpenAI model access, API key, project billing/quota, and request limits before rerunning this OpenAI target.";
+  }
+  if (provider.includes("deepseek")) {
+    return "Verify Deepseek API key, model availability, account credits/quota, and request limits before rerunning this Deepseek target.";
+  }
+  return "Open backend/Celery logs for the exact traceback, fix the provider/configuration issue, then rerun Stage 2 for this model.";
+}
+
+function StageTwoLlmFailureDialog({
+  row,
+  onClose,
+}: {
+  row: StageTwoLlmFailureDialogRow;
+  onClose: () => void;
+}) {
+  const errorMessage = row.error || "This LLM target failed before returning a detailed provider error.";
+  const diagnostics = [
+    ["Runtime", row.runtime],
+    ["Cost", formatUsdCost(row.cost)],
+    ["Failed events", row.failedEventCount?.toLocaleString("en-IN") ?? "—"],
+    ["Invalid events", row.invalidEventCount?.toLocaleString("en-IN") ?? "—"],
+    ["Blocked events", row.blockedEventCount?.toLocaleString("en-IN") ?? "—"],
+    ["Retry requests", row.retryRequestCount?.toLocaleString("en-IN") ?? "—"],
+    ["Recovery batches", row.recoveryBatchCount?.toLocaleString("en-IN") ?? "—"],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-red-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-red-100 bg-red-50 px-6 py-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-red-600">LLM failure details</p>
+            <h3 className="mt-1 text-xl font-extrabold text-slate-950">{row.provider} · {row.model}</h3>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 transition hover:bg-red-100" aria-label="Close LLM failure details">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-5 px-6 py-5">
+          <section>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Why it failed / error</p>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-2xl border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-800">{errorMessage}</pre>
+          </section>
+          <section>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">What to do to fix it</p>
+            <p className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">{getStageTwoLlmFailureFixAdvice(row)}</p>
+          </section>
+          <section>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Run diagnostics</p>
+            <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+              {diagnostics.map(([label, value]) => (
+                <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <dt className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{label}</dt>
+                  <dd className="mt-1 font-mono text-sm font-bold text-slate-900">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function getStageTwoRunSummaryStatusClass(status: StageTwoRunSummaryStatus) {
@@ -3564,6 +3685,8 @@ function StageTwoLlmRunDetailsDialog({
   const [eventInputDialog, setEventInputDialog] =
     useState<StageTwoLlmEventInputDialogState | null>(null);
   const [stageTwoPromptDialogOpen, setStageTwoPromptDialogOpen] = useState(false);
+  const [selectedFailureRow, setSelectedFailureRow] =
+    useState<StageTwoLlmFailureDialogRow | null>(null);
   const stats = getStageTwoStats(state.stage, state.decisions);
   const overlapCount = Math.max(
     0,
@@ -3673,9 +3796,21 @@ function StageTwoLlmRunDetailsDialog({
                         <td className="px-4 py-3 font-bold capitalize text-slate-900">{row.provider}</td>
                         <td className="px-4 py-3 font-semibold text-slate-700">{row.model}</td>
                         <td className="px-4 py-3">
-                          <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${getStageTwoRunSummaryStatusClass(row.status)}`}>
-                            {getStageTwoRunSummaryStatusLabel(row.status)}
-                          </span>
+                          {row.status === "failed" ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedFailureRow(row)}
+                              className={`rounded-full border px-2.5 py-1 text-xs font-bold transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-red-300 ${getStageTwoRunSummaryStatusClass(row.status)}`}
+                              aria-label={`Open failure details for ${row.provider} ${row.model}`}
+                              title="Click to see why this LLM failed"
+                            >
+                              {getStageTwoRunSummaryStatusLabel(row.status)}
+                            </button>
+                          ) : (
+                            <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${getStageTwoRunSummaryStatusClass(row.status)}`}>
+                              {getStageTwoRunSummaryStatusLabel(row.status)}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-slate-600">{row.runtime}</td>
                         <td className="px-4 py-3 font-bold text-slate-700">{formatUsdCost(row.cost)}</td>
@@ -3695,6 +3830,13 @@ function StageTwoLlmRunDetailsDialog({
               Stage 2 model rows come from backend target-run progress first, then fall back to stored LLM-reviewed candidate outputs when legacy runs do not include target-run metadata.
             </p>
           </section>
+
+          {selectedFailureRow ? (
+            <StageTwoLlmFailureDialog
+              row={selectedFailureRow}
+              onClose={() => setSelectedFailureRow(null)}
+            />
+          ) : null}
 
           <div className="mt-5 grid gap-3 md:grid-cols-4">
             {[
