@@ -793,7 +793,7 @@ function StageTwoRunStats({
             </span>{" "}
             unique rows ({" "}
             <span className="font-semibold tabular-nums">
-              {displayStat(stats.activePositions)}
+              {displayStat(positionStats.activePositions)}
             </span>{" "}
             Active +{" "}
             <span className="font-semibold tabular-nums">
@@ -817,7 +817,7 @@ function StageTwoRunStats({
             <span className="font-semibold tabular-nums">
               {displayStat(stats.llmRanOn)}
             </span>{" "}
-            unique rows ({displayStat(stats.activePositions)} Active +{" "}
+            unique rows ({displayStat(positionStats.activePositions)} Active +{" "}
             {displayStat(stats.newOpportunities)} New Opportunities
             {deDuplicatedCount > 0
               ? `, ${displayStat(deDuplicatedCount)} overlap/de-duped`
@@ -1956,40 +1956,45 @@ function InvestExecutionStepsSummary({
                 kind: getInvestStepMetricDialogKind(step.key, "processed"),
                 toneClasses,
               })}
-              {renderMetricCard({
-                label: "Submitted",
-                value: step.submittedOrders,
-                kind: getInvestStepMetricDialogKind(step.key, "submitted"),
-                toneClasses,
-              })}
-            </div>
-            {step.key === "sell" ? (
-              <div className={`mt-3 grid gap-2 text-xs ${toneClasses.muted}`}>
-                <div className="flex flex-wrap gap-2">
-                  {renderMetricCard({
-                    label: "Redeem",
-                    value: step.redeemPlannedOrders,
-                    kind: getSellInvestMetricDialogKind("redeem"),
-                    toneClasses,
-                    onOpenInfo: onOpenEventExitInfo,
-                  })}
-                  {renderMetricCard({
-                    label: "Event out of Top 10",
-                    value: step.rankingLlmPlannedOrders,
-                    kind: getSellInvestMetricDialogKind("ranking-llm"),
-                    toneClasses,
-                    onOpenInfo: onOpenEventExitInfo,
-                  })}
-                  {renderMetricCard({
-                    label: "Forced Exit",
-                    value: step.forcedExitPlannedOrders,
-                    kind: getSellInvestMetricDialogKind("forced-exit"),
-                    toneClasses,
-                    onOpenInfo: onOpenEventExitInfo,
-                  })}
-                </div>
+              <div className="min-w-[5.25rem] flex-[2_1_14rem] rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                {renderMetricCard({
+                  label: "Submitted",
+                  value: step.submittedOrders,
+                  kind: getInvestStepMetricDialogKind(step.key, "submitted"),
+                  toneClasses,
+                })}
+                {step.key === "sell" ? (
+                  <div className="mt-2 border-t border-white/70 pt-2">
+                    <p className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${toneClasses.muted}`}>
+                      Submitted sub-parts
+                    </p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      {renderMetricCard({
+                        label: "Redeem",
+                        value: step.redeemPlannedOrders,
+                        kind: getSellInvestMetricDialogKind("redeem"),
+                        toneClasses,
+                        onOpenInfo: onOpenEventExitInfo,
+                      })}
+                      {renderMetricCard({
+                        label: "Event out of Top 10",
+                        value: step.rankingLlmPlannedOrders,
+                        kind: getSellInvestMetricDialogKind("ranking-llm"),
+                        toneClasses,
+                        onOpenInfo: onOpenEventExitInfo,
+                      })}
+                      {renderMetricCard({
+                        label: "Forced Exit",
+                        value: step.forcedExitPlannedOrders,
+                        kind: getSellInvestMetricDialogKind("forced-exit"),
+                        toneClasses,
+                        onOpenInfo: onOpenEventExitInfo,
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+            </div>
           </div>
         );
       })}
