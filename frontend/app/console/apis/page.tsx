@@ -7,7 +7,7 @@ import { ApiUsageItem, ApiUsageSummaryResponse, LlmCostHistoryResponse } from '@
 
 type Period = 'day' | 'week' | 'month' | 'custom';
 
-const API_TIMEZONE = 'Asia/Kolkata';
+const API_TIMEZONE = 'UTC';
 
 const COMBINED_LLM_PROVIDERS = [
   { key: 'openai', name: 'OpenAI', color: '#4f46e5' },
@@ -177,7 +177,7 @@ function CombinedLlmCostChart({
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-950">Combined LLM API Cost Trend</h2>
-          <p className="text-sm text-gray-600">Daily estimated API cost by provider. Y-axis is INR cost; X-axis is day.</p>
+          <p className="text-sm text-gray-600">Daily estimated API cost by provider using UTC day buckets to align with provider consoles. Y-axis is INR cost; X-axis is day.</p>
         </div>
         <div className="flex flex-wrap gap-3" aria-label="Toggle LLM API cost lines">
           {COMBINED_LLM_PROVIDERS.map((provider) => (
@@ -399,7 +399,7 @@ function LlmCostHistoryModal({
           <div>
             <h2 className="text-lg font-semibold text-gray-950">LLM Cost History</h2>
             <p className="text-sm text-gray-600">
-              {history?.name ?? 'LLM'} cost history across all recorded runs.
+              {history?.name ?? 'LLM'} cost history across Cred-X recorded runs (UTC days, matching provider console dates).
             </p>
             {history ? (
               <p className="text-xs text-gray-500">USD/INR: {history.usd_inr_rate.toFixed(4)}</p>
