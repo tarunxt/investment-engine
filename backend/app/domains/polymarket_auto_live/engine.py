@@ -682,7 +682,7 @@ async def _execute_console_stage_two_shared_llm(
                 ),
                 "first_error": next(
                     (
-                        batch.error_details
+                        batch.get("error_details")
                         for batch in target_result.runtime_metadata.get("llm_batches", [])
                         if isinstance(batch, dict) and batch.get("error_details")
                     ),
@@ -690,7 +690,7 @@ async def _execute_console_stage_two_shared_llm(
                 ),
                 "last_error": next(
                     (
-                        batch.error_details
+                        batch.get("error_details")
                         for batch in reversed(target_result.runtime_metadata.get("llm_batches", []))
                         if isinstance(batch, dict) and batch.get("error_details")
                     ),
