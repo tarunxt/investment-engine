@@ -11,7 +11,13 @@ from app.domains.polymarket.position_classification import (
     classify_bullpen_position,
     extract_bullpen_claimable_flag,
 )
+from app.domains.polymarket_auto_live.category import (
+    collect_polymarket_category_labels,
+    format_polymarket_category,
+    read_polymarket_theme,
+)
 from app.domains.polymarket_auto_live.scanner import (
+    FILTER_TEXT_KEYS,
     MARKET_PREDICTION_KEYWORDS,
     MARKET_PREDICTION_PATTERNS,
     TWEET_COUNT_KEYWORDS,
@@ -19,6 +25,7 @@ from app.domains.polymarket_auto_live.scanner import (
     WEATHER_KEYWORDS,
     ScanRejectedMarket,
     ScannedMarket,
+    _collect_nested_strings,
     build_market_filter_search_text,
     is_insult_market_text,
     is_sports_market_text,
@@ -69,18 +76,6 @@ CONSOLE_GAMMA_SOURCE_LABEL = "Polymarket Gamma API"
 _EASTERN_TIMEZONE = ZoneInfo("America/New_York")
 _OUTCOME_LABEL_KEYS = ("name", "label", "outcome", "title", "side")
 _QUESTION_KEYS = ("question", "title", "name", "eventTitle", "marketQuestion")
-_CATEGORY_KEYS = (
-    "category",
-    "categorySlug",
-    "type",
-    "topic",
-    "primaryCategory",
-    "categoryName",
-    "group",
-    "tag",
-    "categories",
-    "tags",
-)
 _MARKET_SLUG_KEYS = ("slug", "marketSlug", "questionSlug")
 _CLOSE_TIME_KEYS = (
     "closeTime",
@@ -170,6 +165,13 @@ class ConsoleScanResult:
     total_candidates: int
     warning: str | None = None
     details: str | None = None
+
+
+@dataclass(frozen=True)
+class ConsoleDiscoverRow:
+    row: dict[str, object]
+    context_theme: str | None
+    context_close_time: str | None
 
 
 def _parse_console_start_at(value: str | None) -> datetime | None:
@@ -322,54 +324,6 @@ def _build_market_url(event_slug: str | None) -> str | None:
     if not event_slug:
         return None
     return f"https://polymarket.com/event/{event_slug}"
-
-
-def _read_label(value: object) -> str | None:
-    if isinstance(value, str):
-        return value.strip() or None
-    if isinstance(value, dict):
-        return _read_string(value, ("label", "name", "title", "slug"))
-    return None
-
-
-def _collect_category_labels(row: dict[str, object]) -> list[str]:
-    labels: list[str] = []
-    seen: set[str] = set()
-
-    def add(value: object) -> None:
-        label = _read_label(value)
-        if not label:
-            return
-        normalized = _normalize_text(label)
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            labels.append(label)
-
-    for key in _CATEGORY_KEYS:
-        value = row.get(key)
-        if isinstance(value, list):
-            for item in value:
-                add(item)
-        else:
-            add(value)
-    events = row.get("events")
-    if isinstance(events, list):
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-            for key in _CATEGORY_KEYS:
-                value = event.get(key)
-                if isinstance(value, list):
-                    for item in value:
-                        add(item)
-                else:
-                    add(value)
-    return labels
-
-
-def _read_theme(row: dict[str, object]) -> str:
-    labels = _collect_category_labels(row)
-    return " · ".join(labels) if labels else "Uncategorized"
 
 
 def _parse_json_list(value: object) -> list[object]:
@@ -625,7 +579,12 @@ def console_market_filter_reasons(
     return reasons
 
 
-def _normalize_console_market(row: dict[str, object]) -> ScannedMarket | None:
+def _normalize_console_market(
+    row: dict[str, object],
+    *,
+    context_theme: str | None = None,
+    context_close_time: str | None = None,
+) -> ScannedMarket | None:
     question = _read_string(row, _QUESTION_KEYS)
     if not question or len(question) < 8:
         return None
@@ -634,6 +593,7 @@ def _normalize_console_market(row: dict[str, object]) -> ScannedMarket | None:
         _read_string(row, ("id", *_MARKET_SLUG_KEYS, "marketId", "conditionId"))
         or question
     )
+    slug = _read_string(row, _MARKET_SLUG_KEYS)
     outcome_labels = _read_outcome_labels(row)
     current_yes_odds, current_no_odds = _read_yes_no_prices(row, outcome_labels)
 
@@ -648,15 +608,24 @@ def _normalize_console_market(row: dict[str, object]) -> ScannedMarket | None:
                 event_slug = candidate_slug
                 break
     event_slug = event_slug or _read_string(row, ("eventSlug", "urlSlug"))
-    close_time = _read_string(row, _CLOSE_TIME_KEYS)
+    close_time = _read_string(row, _CLOSE_TIME_KEYS) or context_close_time
+    theme = read_polymarket_theme(
+        row,
+        context_category=context_theme,
+        inference_texts=(
+            question,
+            slug,
+            " ".join(_collect_nested_strings(row, keys=FILTER_TEXT_KEYS)),
+        ),
+    )
 
     return ScannedMarket(
         market_id=market_id,
         question=question,
         market_url=_build_market_url(event_slug),
-        slug=_read_string(row, _MARKET_SLUG_KEYS),
+        slug=slug,
         close_time=_extract_close_time(close_time),
-        theme=_read_theme(row),
+        theme=theme,
         current_yes_odds=current_yes_odds,
         current_no_odds=current_no_odds,
         volume_usd=_read_nested_number(
@@ -687,7 +656,7 @@ def _normalize_console_market(row: dict[str, object]) -> ScannedMarket | None:
     )
 
 
-def _collect_console_discover_rows(value: object) -> list[dict[str, object]]:
+def _collect_console_discover_rows(value: object) -> list[ConsoleDiscoverRow]:
     """Walk the full Bullpen discover payload, matching the manual scan parser.
 
     Bullpen CLI discover can return nested sections where only a small top-level
@@ -695,13 +664,22 @@ def _collect_console_discover_rows(value: object) -> list[dict[str, object]]:
     normalizes records with question/title fields, so Auto Scan must do the same
     before applying filters.
     """
-    rows: list[dict[str, object]] = []
+    rows: list[ConsoleDiscoverRow] = []
     seen_object_ids: set[int] = set()
 
-    def walk(current: object) -> None:
+    def walk(
+        current: object,
+        *,
+        context_theme: str | None = None,
+        context_close_time: str | None = None,
+    ) -> None:
         if isinstance(current, list):
             for item in current:
-                walk(item)
+                walk(
+                    item,
+                    context_theme=context_theme,
+                    context_close_time=context_close_time,
+                )
             return
         if not isinstance(current, dict):
             return
@@ -709,25 +687,49 @@ def _collect_console_discover_rows(value: object) -> list[dict[str, object]]:
         if object_id in seen_object_ids:
             return
         seen_object_ids.add(object_id)
+        next_context_theme = (
+            format_polymarket_category(
+                collect_polymarket_category_labels(
+                    current,
+                    context_category=context_theme,
+                )
+            )
+            or context_theme
+        )
+        next_context_close_time = _read_string(current, _CLOSE_TIME_KEYS) or context_close_time
         if _read_string(current, _QUESTION_KEYS):
-            rows.append(current)
+            rows.append(
+                ConsoleDiscoverRow(
+                    row=current,
+                    context_theme=next_context_theme,
+                    context_close_time=next_context_close_time,
+                )
+            )
         for child in current.values():
             if isinstance(child, (dict, list)):
-                walk(child)
+                walk(
+                    child,
+                    context_theme=next_context_theme,
+                    context_close_time=next_context_close_time,
+                )
 
     walk(value)
     return rows
 
 
 def _build_cli_console_scan_result(
-    rows: list[dict[str, object]],
+    rows: list[ConsoleDiscoverRow],
     *,
     now: datetime,
     scanned_at: str,
 ) -> ConsoleScanResult:
     normalized_by_market_id: dict[str, ScannedMarket] = {}
-    for row in rows:
-        market = _normalize_console_market(row)
+    for discovered in rows:
+        market = _normalize_console_market(
+            discovered.row,
+            context_theme=discovered.context_theme,
+            context_close_time=discovered.context_close_time,
+        )
         if market is None or market.market_id in normalized_by_market_id:
             continue
         normalized_by_market_id[market.market_id] = market

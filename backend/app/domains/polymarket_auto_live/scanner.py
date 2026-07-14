@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from app.domains.polymarket_auto_live.category import read_polymarket_theme
+
 POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-auto-live/1.0"}
 GAMMA_PAGE_SIZE = 500
@@ -390,68 +392,6 @@ def _build_market_url(event_slug: str | None) -> str | None:
     return f"https://polymarket.com/event/{event_slug}"
 
 
-def _read_label(value: object) -> str | None:
-    if isinstance(value, str):
-        return value.strip() or None
-    if isinstance(value, dict):
-        for key in ("label", "name", "title", "slug"):
-            child = value.get(key)
-            if isinstance(child, str) and child.strip():
-                return child.strip()
-    return None
-
-
-def _collect_category_labels(row: dict[str, Any]) -> list[str]:
-    labels: list[str] = []
-
-    def add(value: object) -> None:
-        label = _read_label(value)
-        if label and label.lower() not in {item.lower() for item in labels}:
-            labels.append(label)
-
-    for key in (
-        "category",
-        "categoryName",
-        "primaryCategory",
-        "group",
-        "tag",
-        "topic",
-        "type",
-    ):
-        add(row.get(key))
-    for key in ("tags", "categories"):
-        value = row.get(key)
-        if isinstance(value, list):
-            for item in value:
-                add(item)
-    events = row.get("events")
-    if isinstance(events, list):
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-            for key in (
-                "category",
-                "categoryName",
-                "primaryCategory",
-                "group",
-                "tag",
-                "topic",
-                "type",
-            ):
-                add(event.get(key))
-            for key in ("tags", "categories"):
-                value = event.get(key)
-                if isinstance(value, list):
-                    for item in value:
-                        add(item)
-    return labels
-
-
-def _read_theme(row: dict[str, Any]) -> str:
-    labels = _collect_category_labels(row)
-    return " · ".join(labels) if labels else "Uncategorized"
-
-
 def _read_outcome_labels(row: dict[str, Any]) -> list[str]:
     labels = []
     for item in _parse_json_list(row.get("outcomes")):
@@ -615,6 +555,19 @@ def _normalize_market(
         market_id = question.strip()
 
     outcome_labels = _read_outcome_labels(row)
+    slug = (
+        row.get("slug").strip()
+        if isinstance(row.get("slug"), str) and row.get("slug").strip()
+        else None
+    )
+    theme = read_polymarket_theme(
+        row,
+        inference_texts=(
+            question.strip(),
+            slug,
+            " ".join(_collect_nested_strings(row, keys=FILTER_TEXT_KEYS)),
+        ),
+    )
     yes_odds, no_odds = _read_yes_no_prices(outcome_labels, row)
     event_slug = None
     events = row.get("events")
@@ -630,13 +583,9 @@ def _normalize_market(
         market_id=str(market_id).strip(),
         question=question.strip(),
         market_url=_build_market_url(event_slug),
-        slug=(
-            row.get("slug").strip()
-            if isinstance(row.get("slug"), str) and row.get("slug").strip()
-            else None
-        ),
+        slug=slug,
         close_time=_normalize_close_time(row.get("endDate")),
-        theme=_read_theme(row),
+        theme=theme,
         current_yes_odds=yes_odds,
         current_no_odds=no_odds,
         volume_usd=_parse_float(row.get("volumeNum") or row.get("volume")),

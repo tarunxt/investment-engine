@@ -6243,3 +6243,61 @@ def test_console_profile_discover_walks_nested_bullpen_payload_like_manual_scan(
     assert len(rows) == 125
     assert result.total_candidates == 125
     assert len(result.accepted) == 125
+
+
+def test_console_profile_discover_inherits_parent_category_context():
+    from app.domains.polymarket_auto_live.console_profile import (
+        _build_cli_console_scan_result,
+        _collect_console_discover_rows,
+    )
+
+    now = datetime(2026, 7, 7, tzinfo=UTC)
+    payload = {
+        "sections": [
+            {
+                "categoryBreadcrumb": {
+                    "categoryLabel": "Politics",
+                    "subcategoryLabel": "Middle East",
+                },
+                "markets": [
+                    {
+                        "id": "market-iran-airspace",
+                        "question": "Iran full airspace closure by July 15?",
+                        "slug": "iran-full-airspace-closure-by-july-15",
+                        "endDate": "2026-07-08T00:00:00Z",
+                        "outcomes": json.dumps(["Yes", "No"]),
+                        "outcomePrices": json.dumps([0.08, 0.92]),
+                    }
+                ],
+            }
+        ]
+    }
+
+    rows = _collect_console_discover_rows(payload)
+    result = _build_cli_console_scan_result(
+        rows,
+        now=now,
+        scanned_at="2026-07-07T00:00:00+00:00",
+    )
+
+    assert len(rows) == 1
+    assert len(result.accepted) == 1
+    assert result.accepted[0].theme == "Politics · Middle East"
+
+
+def test_gamma_market_theme_matches_manual_scan_politics_inference():
+    from app.domains.polymarket_auto_live.scanner import _normalize_market
+
+    market = _normalize_market(
+        {
+            "id": "market-iran-gulf-state",
+            "question": "Iran military action against a Gulf State on July 13?",
+            "slug": "iran-military-action-against-a-gulf-state-on-july-13",
+            "endDate": "2026-07-13T00:00:00Z",
+            "outcomes": json.dumps(["Yes", "No"]),
+            "outcomePrices": json.dumps([0.72, 0.28]),
+        }
+    )
+
+    assert market is not None
+    assert market.theme == "Politics"
