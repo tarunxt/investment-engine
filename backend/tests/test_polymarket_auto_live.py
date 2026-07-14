@@ -702,7 +702,6 @@ async def test_console_profile_advances_to_stage_2_with_naive_candidate_close_ti
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
     )
-
     result = await BullpenAutoLiveEngine().execute(
         user_id=7,
         settings=BullpenAutoLiveSettings(
@@ -1348,7 +1347,7 @@ async def test_console_profile_uses_saved_console_order_amount_for_new_buys(
 
 
 @pytest.mark.anyio
-async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_skipped_orders(
+async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_wide_spread_orders(
     monkeypatch,
 ):
     fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
@@ -1359,6 +1358,15 @@ async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_s
         current_no_odds=82,
     )
     progress_runs: list[BullpenAutoLiveRun] = []
+    executor_calls: list[dict[str, object]] = []
+
+    class RecordingExecutor:
+        async def buy_limit(self, **kwargs):
+            executor_calls.append(kwargs)
+            return "buy-limit-submitted"
+
+        async def sell_limit(self, **_kwargs):
+            raise AssertionError("sell_limit should not run for this buy-only scenario")
 
     async def fake_read_console_wallet_positions():
         return []
@@ -1426,6 +1434,10 @@ async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_s
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
     )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.bullpen_module.BullpenLiveExecutor",
+        lambda: RecordingExecutor(),
+    )
 
     result = await BullpenAutoLiveEngine().execute(
         user_id=7,
@@ -1457,19 +1469,26 @@ async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_s
     decision_rows = invest_running_stage_with_decision_rows.outputs["decision_rows"]
     assert len(decision_rows) == 1
     assert decision_rows[0]["market_title"] == candidate_market.question
-    assert decision_rows[0]["order_plan"]["status"] == "skipped"
-    assert decision_rows[0]["order_plan"]["detail"] == (
-        "Bid/ask spread exceeds the configured maximum."
-    )
+    assert decision_rows[0]["order_plan"]["status"] == "submitted"
+    assert decision_rows[0]["order_plan"]["limit_price_cents"] == 99
+    assert decision_rows[0]["order_plan"]["detail"] == "Limit order submitted successfully."
 
     invest_stage = next(
         stage
         for stage in result.run.stage_results
         if stage.outputs.get("workflow_stage_key") == "invest"
     )
-    assert invest_stage.outputs["decision_rows"][0]["order_plan"]["status"] == "skipped"
+    assert invest_stage.outputs["decision_rows"][0]["order_plan"]["status"] == "submitted"
     assert result.decisions[0].order_plan is not None
-    assert result.decisions[0].order_plan.status == "skipped"
+    assert result.decisions[0].order_plan.status == "submitted"
+    assert executor_calls == [
+        {
+            "market_id": candidate_market.market_id,
+            "outcome": "No",
+            "amount_usd": 5.0,
+            "max_price": 0.99,
+        }
+    ]
 
 
 @pytest.mark.anyio

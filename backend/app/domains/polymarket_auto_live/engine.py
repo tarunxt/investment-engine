@@ -3232,12 +3232,11 @@ class BullpenAutoLiveEngine:
                 hard_block_reasons.extend(execution_block_reasons)
             if quote.current_price_cents is None:
                 hard_block_reasons.append("Could not refresh the current market price.")
-            if (
-                order_plan.action != "sell"
+            use_marketable_buy_for_wide_spread = (
+                order_plan.action == "buy"
                 and quote.spread_cents is not None
                 and quote.spread_cents > settings.max_bid_ask_spread_cents
-            ):
-                hard_block_reasons.append("Bid/ask spread exceeds the configured maximum.")
+            )
             is_console_buy_order = (
                 settings.strategy_profile == CONSOLE_PROFILE_ID
                 and candidate.decision_action == "BUY_NEW"
@@ -3264,10 +3263,14 @@ class BullpenAutoLiveEngine:
                     hard_block_reasons.append(
                         "Price moved enough to erase the minimum entry edge."
                     )
-                order_plan.limit_price_cents = buy_limit_price_cents(
-                    current_price_cents=quote.current_price_cents,
-                    original_price_cents=original_price_cents,
-                    max_slippage_cents=settings.max_slippage_cents,
+                order_plan.limit_price_cents = (
+                    99
+                    if use_marketable_buy_for_wide_spread
+                    else buy_limit_price_cents(
+                        current_price_cents=quote.current_price_cents,
+                        original_price_cents=original_price_cents,
+                        max_slippage_cents=settings.max_slippage_cents,
+                    )
                 )
                 order_plan.shares = round(
                     candidate.order_usd / max(0.01, cents_to_decimal(order_plan.limit_price_cents)),
@@ -6864,45 +6867,21 @@ class BullpenAutoLiveEngine:
             if not state.dry_run:
                 quote = await refresh_execution_quote(slug=decision.slug, side=order_plan.side)
                 quote_price_cents = quote.current_price_cents or order_plan.limit_price_cents
-                if (
-                    order_plan.action != "sell"
+                use_marketable_buy_for_wide_spread = (
+                    order_plan.action == "buy"
                     and quote.spread_cents is not None
                     and quote.spread_cents > settings.max_bid_ask_spread_cents
-                ):
-                    order_plan.status = "skipped"
-                    order_plan.detail = "Bid/ask spread exceeds the configured maximum."
-                    decision.stage_results.append(
-                        build_stage_result(
-                            stage_number=7,
-                            status="fail",
-                            reason=order_plan.detail,
-                            outputs=order_plan.model_dump(mode="json"),
-                            hard_block=True,
-                        )
-                    )
-                    running_failed_orders += 1
-                    _, step_processed, _ = _stage3_step_counts(step_key)
-                    report_invest_stage_progress(
-                        phase_status="running",
-                        reason=(
-                            f"Stage 3 Step {step_number} of 2 processed {step_processed} of "
-                            f"{step_total_orders} {'sell' if step_key == 'sell' else 'buy'} "
-                            f"orders. Latest: {decision.market_title}"
-                        ),
-                        completed_items=processed_decision_rows,
-                        execution_gate_reason=execution_pause_reason,
-                        execution_mode_reason=simulation_reason if state.dry_run else None,
-                        current_step_key=step_key,
-                        current_step_detail=order_plan.detail,
-                        completed_at=None,
-                    )
-                    return
+                )
 
                 if order_plan.action == "buy":
-                    order_plan.limit_price_cents = buy_limit_price_cents(
-                        current_price_cents=quote_price_cents,
-                        original_price_cents=order_plan.limit_price_cents or quote_price_cents,
-                        max_slippage_cents=settings.max_slippage_cents,
+                    order_plan.limit_price_cents = (
+                        99
+                        if use_marketable_buy_for_wide_spread
+                        else buy_limit_price_cents(
+                            current_price_cents=quote_price_cents,
+                            original_price_cents=order_plan.limit_price_cents or quote_price_cents,
+                            max_slippage_cents=settings.max_slippage_cents,
+                        )
                     )
                     order_plan.shares = round(
                         order_plan.order_size_usd
