@@ -6416,6 +6416,8 @@ function BullpenPortfolioSnapshot({
 }) {
   const [isActivePositionsPopupOpen, setIsActivePositionsPopupOpen] =
     useState(false);
+  const [isClaimableEventsPopupOpen, setIsClaimableEventsPopupOpen] =
+    useState(false);
   const [activePositionDetail, setActivePositionDetail] =
     useState<BullpenActivePositionView | null>(null);
   const liveBalance = state?.live.balance ?? null;
@@ -6492,38 +6494,91 @@ function BullpenPortfolioSnapshot({
     })),
   ];
 
-  const latestDecisionByPositionKey = new Map<
+  const latestDecisionByPositionLookup = new Map<
     string,
     BullpenAutoLiveDecision
   >();
+  function rememberDecision(key: string | null, decision: BullpenAutoLiveDecision) {
+    if (!key) return;
+    const existing = latestDecisionByPositionLookup.get(key);
+    if (
+      !existing ||
+      Date.parse(decision.updated_at) >= Date.parse(existing.updated_at)
+    ) {
+      latestDecisionByPositionLookup.set(key, decision);
+    }
+  }
   for (const decision of recentDecisions) {
     const side = decision.side?.trim().toUpperCase();
-    const keys = [
-      decision.market_id && side ? `${decision.market_id}::${side}` : null,
-      decision.market_id && decision.order_plan?.side
-        ? `${decision.market_id}::${decision.order_plan.side.trim().toUpperCase()}`
-        : null,
+    const orderSide = decision.order_plan?.side?.trim().toUpperCase();
+    const normalizedTitle = decision.market_title.trim().toLowerCase();
+    [side, orderSide].filter(Boolean).forEach((decisionSide) => {
+      rememberDecision(decision.market_id ? `${decision.market_id}::${decisionSide}` : null, decision);
+      rememberDecision(decision.slug ? `${decision.slug}::${decisionSide}` : null, decision);
+      rememberDecision(normalizedTitle ? `${normalizedTitle}::${decisionSide}` : null, decision);
+    });
+    rememberDecision(decision.market_id, decision);
+    rememberDecision(decision.slug ?? null, decision);
+    rememberDecision(normalizedTitle || null, decision);
+  }
+
+  function getPositionDecision(position: BullpenActivePositionView) {
+    const heldSide =
+      position.heldSide ?? position.outcome?.trim().toUpperCase() ?? null;
+    const normalizedTitle = position.marketTitle.trim().toLowerCase();
+    const lookupKeys = [
+      position.key,
+      position.marketId && heldSide ? `${position.marketId}::${heldSide}` : null,
+      position.marketId,
+      position.conditionId && heldSide ? `${position.conditionId}::${heldSide}` : null,
+      position.conditionId,
+      normalizedTitle && heldSide ? `${normalizedTitle}::${heldSide}` : null,
+      normalizedTitle || null,
     ].filter((key): key is string => Boolean(key));
-    for (const key of keys) {
-      const existing = latestDecisionByPositionKey.get(key);
-      if (
-        !existing ||
-        Date.parse(decision.updated_at) >= Date.parse(existing.updated_at)
-      ) {
-        latestDecisionByPositionKey.set(key, decision);
-      }
-    }
+    return lookupKeys.map((key) => latestDecisionByPositionLookup.get(key)).find(Boolean) ?? null;
   }
 
   function getPositionLlmOdds(
     position: BullpenActivePositionView,
     question?: BullpenQuestionRow,
   ) {
-    const decision = latestDecisionByPositionKey.get(position.key);
+    const fromActivePositionAnalysis =
+      question && (question.llmYesOdds !== null || question.llmNoOdds !== null)
+        ? {
+            yes: question.llmYesOdds,
+            no: question.llmNoOdds,
+            completedAt: question.llmCompletedAt,
+            source: "active-position LLM snapshot",
+            error: null,
+          }
+        : null;
+    if (fromActivePositionAnalysis) return fromActivePositionAnalysis;
+
+    const decision = getPositionDecision(position);
+    const yes = decision?.fair_yes_probability_pct ?? null;
+    const no = decision?.fair_no_probability_pct ?? null;
+    if (yes !== null || no !== null) {
+      return {
+        yes,
+        no,
+        completedAt: decision?.updated_at ?? null,
+        source: "last completed auto-run decision",
+        error: null,
+      };
+    }
+
+    const attempted = [
+      question ? "active-position LLM snapshot had no odds" : "no active-position LLM snapshot matched this position",
+      decision
+        ? "last completed auto-run decision matched but did not include fair Yes/No odds"
+        : "no last completed auto-run decision matched by position key, market id, slug, or title",
+    ];
     return {
-      yes: question?.llmYesOdds ?? decision?.fair_yes_probability_pct ?? null,
-      no: question?.llmNoOdds ?? decision?.fair_no_probability_pct ?? null,
-      completedAt: question?.llmCompletedAt ?? decision?.updated_at ?? null,
+      yes: null,
+      no: null,
+      completedAt: null,
+      source: "unavailable",
+      error: attempted.join("; "),
     };
   }
 
@@ -6533,7 +6588,7 @@ function BullpenPortfolioSnapshot({
   ) {
     return (
       question?.category ||
-      latestDecisionByPositionKey.get(position.key)?.theme ||
+      getPositionDecision(position)?.theme ||
       position.marketContext ||
       "—"
     );
@@ -6607,6 +6662,7 @@ function BullpenPortfolioSnapshot({
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {metricCards.map((metric) => {
           const isActivePositionsMetric = metric.label === "Active positions";
+          const isClaimableEventsMetric = metric.label === "Events available for claim";
           return (
             <button
               key={metric.label}
@@ -6614,10 +6670,12 @@ function BullpenPortfolioSnapshot({
               onClick={
                 isActivePositionsMetric
                   ? () => setIsActivePositionsPopupOpen(true)
-                  : undefined
+                  : isClaimableEventsMetric
+                    ? () => setIsClaimableEventsPopupOpen(true)
+                    : undefined
               }
-              className={`rounded-[20px] border border-white/10 bg-white/10 px-4 py-3 text-left ${isActivePositionsMetric ? "transition hover:border-sky-200/70 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-sky-200/70" : "cursor-default"}`}
-              disabled={!isActivePositionsMetric}
+              className={`rounded-[20px] border border-white/10 bg-white/10 px-4 py-3 text-left ${isActivePositionsMetric || isClaimableEventsMetric ? "transition hover:border-sky-200/70 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-sky-200/70" : "cursor-default"}`}
+              disabled={!isActivePositionsMetric && !isClaimableEventsMetric}
             >
               <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
                 {metric.label}
@@ -6628,6 +6686,54 @@ function BullpenPortfolioSnapshot({
           );
         })}
       </div>
+      {isClaimableEventsPopupOpen ? (
+        <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+          <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-700">Events available for claim</p>
+                <h3 className="mt-1 text-xl font-semibold">Claimable events: {claimableRows.length}</h3>
+                <p className="mt-2 text-sm text-slate-600">Shows Bullpen live redeemed/claimable rows whose status or detail mentions claim, redeem, or pending.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsClaimableEventsPopupOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                aria-label="Close claimable events details"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto px-6 py-5">
+              {claimableRows.length ? (
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <tr>{["S. No", "Market", "Outcome", "Side", "Amount", "Shares", "Price", "PnL", "Status", "Updated"].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {claimableRows.map((trade, index) => (
+                      <tr key={trade.id || `${trade.market_id}-${index}`} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-semibold tabular-nums">{index + 1}</td>
+                        <td className="min-w-[18rem] px-4 py-3 font-semibold text-slate-950">{trade.market_title || trade.market_id}</td>
+                        <td className="px-4 py-3">{trade.outcome || "—"}</td>
+                        <td className="px-4 py-3">{trade.side || "—"}</td>
+                        <td className="px-4 py-3 tabular-nums">{formatMoney(trade.amount ?? null)}</td>
+                        <td className="px-4 py-3 tabular-nums">{trade.shares?.toLocaleString("en-IN", { maximumFractionDigits: 4 }) ?? "—"}</td>
+                        <td className="px-4 py-3 tabular-nums">{formatOddsPercent(trade.price ?? null)}</td>
+                        <td className="px-4 py-3 tabular-nums">{formatMoney(trade.profit_loss ?? null)}</td>
+                        <td className="px-4 py-3">{trade.status || trade.detail || "—"}</td>
+                        <td className="px-4 py-3">{formatIstDateTime(trade.timestamp)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No claimable Bullpen events are available. The live feed did not return any rows containing claim, redeem, or pending status.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
       {isActivePositionsPopupOpen ? (
         <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
           <div className="flex max-h-[88vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
@@ -6724,6 +6830,11 @@ function BullpenPortfolioSnapshot({
                           </td>
                           <td className="px-4 py-3 tabular-nums">
                             {formatOddsPair(llmOdds.yes, llmOdds.no)}
+                            <div className="mt-1 max-w-56 text-[11px] leading-4 text-slate-500">
+                              {llmOdds.completedAt
+                                ? `${llmOdds.source} · ${formatIstDateTime(llmOdds.completedAt)}`
+                                : (llmOdds.error ?? "LLM odds are unavailable.")}
+                            </div>
                           </td>
                           <td className="px-4 py-3 tabular-nums">
                             {formatReturnsPerDay(position.returnsPerDay)}
@@ -6794,7 +6905,9 @@ function BullpenPortfolioSnapshot({
                       activePositionDetail,
                       activePositionQuestionByKey.get(activePositionDetail.key),
                     );
-                    return `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)}`;
+                    return odds.completedAt
+                      ? `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.source} at ${formatIstDateTime(odds.completedAt)}`
+                      : `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.error ?? "LLM odds are unavailable."}`;
                   })(),
                 ],
                 [
