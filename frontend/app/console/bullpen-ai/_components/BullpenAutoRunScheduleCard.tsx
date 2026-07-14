@@ -3993,7 +3993,7 @@ function StageTwoLlmRunDetailsDialog({
                       </tr>
                     )}
                   </tbody>
-                </table>
+                  </table>
               </div>
             </div>
             <p className="mt-4 text-xs text-slate-500">
@@ -5029,13 +5029,17 @@ function InvestMetricDetailsDialog({
 
           <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
             {rows.length > 0 ? (
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <div className="overflow-x-auto">
+                <table className="min-w-[78rem] divide-y divide-slate-200 text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   <tr>
                     <th className="px-4 py-3">Event</th>
                     <th className="px-4 py-3">Decision</th>
                     <th className="px-4 py-3">Edge & score</th>
                     <th className="px-4 py-3">Exposure</th>
+                    <th className="px-4 py-3">LLM Yes Odds</th>
+                    <th className="px-4 py-3">LLM No Odds</th>
+                    <th className="px-4 py-3">Returns/day</th>
                     <th className="px-4 py-3">Exit Type</th>
                     <th className="px-4 py-3">Order</th>
                   </tr>
@@ -5091,6 +5095,15 @@ function InvestMetricDetailsDialog({
                         <br />
                         Target {formatMoney(decision.target_exposure_usd)}
                       </td>
+                      <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
+                        {formatOddsPercent(decision.fair_yes_probability_pct ?? null)}
+                      </td>
+                      <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
+                        {formatOddsPercent(decision.fair_no_probability_pct ?? null)}
+                      </td>
+                      <td className="px-4 py-3 align-top tabular-nums text-slate-700">
+                        {formatReturnsPerDay(getDecisionReturnsPerDay(decision))}
+                      </td>
                       <td className="px-4 py-3 align-top text-slate-700">
                         {(() => {
                           const exitType = getDecisionExitTypeDetails(decision);
@@ -5138,7 +5151,8 @@ function InvestMetricDetailsDialog({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </div>
             ) : (
               <div className="bg-slate-50 px-4 py-8 text-sm text-slate-600">
                 Stage 3 has not emitted any decision rows for this metric yet.
