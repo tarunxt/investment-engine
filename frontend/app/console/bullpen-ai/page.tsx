@@ -3564,7 +3564,9 @@ function BullpenAiPageContent() {
       <BullpenAutoRunScheduleCard
         buildRunNowRequest={buildRunNowRequest}
         activePositions={openActivePositions}
+        activePositionQuestions={activePositionQuestionsForLlm}
         hasActivePositionsSnapshot={Boolean(positionsLastUpdatedAt)}
+        recentDecisions={recentAutoRunDecisions}
         onSummaryUpdated={({ summary, run }) => {
           const serverPromptTemplate = normalizeServerBullpenLlmPromptTemplate(
             summary.settings.console_llm_prompt_template,

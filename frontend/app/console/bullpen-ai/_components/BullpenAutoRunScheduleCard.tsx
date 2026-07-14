@@ -35,9 +35,11 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  type BullpenQuestionRow,
   getBullpenAmountToBeInvestedBreakdown,
   getBullpenReturnsPerDayBreakdown,
 } from "@/lib/bullpen-ai";
+import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
 import { formatApiTimestamp } from "@/lib/datetime";
 import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
@@ -91,7 +93,9 @@ type BullpenAutoRunScheduleCardProps = {
     | BullpenAutoLiveRunOnceRequest
     | null;
   activePositions?: BullpenActivePositionView[];
+  activePositionQuestions?: BullpenQuestionRow[];
   hasActivePositionsSnapshot?: boolean;
+  recentDecisions?: BullpenAutoLiveDecision[];
   onOpenScanFilters?: () => void;
   onSummaryUpdated?: (payload: {
     summary: BullpenAutoLiveSummaryResponse;
@@ -5462,19 +5466,23 @@ function BullpenPortfolioSnapshot({
   state,
   lastUsableBalance,
   activePositions,
+  activePositionQuestions,
   hasActivePositionsSnapshot,
-  loading,
   refreshing,
+  recentDecisions,
   onRefresh,
 }: {
   state: PolymarketBotState | null;
   lastUsableBalance: (PolymarketBotState["live"]["balance"] & { status: "ready" }) | null;
   activePositions: BullpenActivePositionView[];
+  activePositionQuestions: BullpenQuestionRow[];
   hasActivePositionsSnapshot: boolean;
-  loading: boolean;
   refreshing: boolean;
+  recentDecisions: BullpenAutoLiveDecision[];
   onRefresh: () => void;
 }) {
+  const [isActivePositionsPopupOpen, setIsActivePositionsPopupOpen] =
+    useState(false);
   const liveBalance = state?.live.balance ?? null;
   const balance = isUsableBullpenBalance(liveBalance) ? liveBalance : lastUsableBalance;
   const usableBalance = isUsableBullpenBalance(balance);
@@ -5498,17 +5506,40 @@ function BullpenPortfolioSnapshot({
   });
   const claimableAmount = claimableRows.reduce((total, trade) => total + Math.max(0, trade.amount || 0), 0);
   const lastRefresh = balance?.checked_at ? formatIstDateTime(balance.checked_at) : "—";
-  const balanceMessage = balance?.message ||
-    (loading && !balance
-      ? "Loading Bullpen portfolio snapshot..."
-      : balance
-        ? "Showing the last successful Bullpen balance refresh."
-        : "Bullpen balance has not refreshed yet.");
   const pendingConfirmationsCount = state?.live.pending_confirmations.length ?? 0;
   const balanceStatus = liveBalance?.status ?? balance?.status ?? "not loaded";
+  const currentInvestmentsValue = hasActivePositionsSnapshot
+    ? activePositions.reduce((total, position) => {
+        const value = typeof position.currentValue === "number" ? position.currentValue : 0;
+        return total + value;
+      }, 0)
+    : accountValue;
+  const displayedTotalPortfolioValue =
+    cash !== null || currentInvestmentsValue !== null
+      ? (cash ?? 0) + (currentInvestmentsValue ?? 0)
+      : accountValue;
+  const {
+    activePositionQuestionByKey,
+    activePositionsNeedingAttention,
+    topInvestmentRows,
+  } = buildBullpenInvestmentDisplay({
+    activePositions,
+    activePositionQuestions,
+    candidates: [],
+    recentDecisions,
+  });
+  const popupRows = [
+    ...topInvestmentRows
+      .filter((row) => row.kind === "active")
+      .map((row) => ({ tone: "active" as const, position: row.position })),
+    ...activePositionsNeedingAttention.map(({ position }) => ({
+      tone: "attention" as const,
+      position,
+    })),
+  ];
 
   const metricCards = [
-    { label: "Total portfolio value", value: formatMoney(accountValue), detail: "Bullpen account value" },
+    { label: "Investment Value", value: formatMoney(currentInvestmentsValue), detail: "Current Investments Value" },
     { label: "Cash in hand", value: formatMoney(cash), detail: "Available pUSD balance" },
     { label: "Events available for claim", value: claimableRows.length.toLocaleString("en-IN"), detail: formatMoney(claimableAmount) },
     { label: "Active positions", value: activePositionCount.toLocaleString("en-IN"), detail: `${formatMoney(activeInvested)} invested` },
@@ -5525,9 +5556,7 @@ function BullpenPortfolioSnapshot({
           <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">
             <Wallet className="size-3.5" /> Bullpen Portfolio
           </div>
-          <h3 className="mt-3 text-2xl font-semibold tracking-tight">{formatMoney(accountValue)} total portfolio value</h3>
-          <p className="mt-1 text-sm text-slate-300">Cash {formatMoney(cash)} · Active invested {formatMoney(activeInvested)} · Claimable {formatMoney(claimableAmount)}</p>
-          <p className="mt-1 text-xs text-slate-400">{balanceMessage}</p>
+          <h3 className="mt-3 text-2xl font-semibold tracking-tight">{formatMoney(displayedTotalPortfolioValue)} Total Portfolio Value</h3>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <Button type="button" size="sm" variant="outline" onClick={onRefresh} disabled={refreshing} className="rounded-full border-sky-300/50 bg-sky-300/10 text-sky-100 hover:border-sky-200 hover:bg-sky-300/20 hover:text-white disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-400">
@@ -5537,14 +5566,78 @@ function BullpenPortfolioSnapshot({
         </div>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {metricCards.map((metric) => (
-          <div key={metric.label} className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
+        {metricCards.map((metric) => {
+          const isActivePositionsMetric = metric.label === "Active positions";
+          return (
+          <button
+            key={metric.label}
+            type="button"
+            onClick={isActivePositionsMetric ? () => setIsActivePositionsPopupOpen(true) : undefined}
+            className={`rounded-[20px] border border-white/10 bg-white/10 px-4 py-3 text-left ${isActivePositionsMetric ? "transition hover:border-sky-200/70 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-sky-200/70" : "cursor-default"}`}
+            disabled={!isActivePositionsMetric}
+          >
             <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">{metric.label}</div>
             <div className="mt-2 text-xl font-semibold">{metric.value}</div>
             <div className="mt-1 text-xs text-slate-400">{metric.detail}</div>
-          </div>
-        ))}
+          </button>
+          );
+        })}
       </div>
+      {isActivePositionsPopupOpen ? (
+        <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+          <div className="flex max-h-[88vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-700">Active Bullpen Positions</p>
+                <h3 className="mt-1 text-xl font-semibold">Active positions: {popupRows.length}</h3>
+                <p className="mt-2 text-sm text-slate-600">Shows green active positions and red Event Exit positions only.</p>
+              </div>
+              <button type="button" onClick={() => setIsActivePositionsPopupOpen(false)} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close active positions details">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto px-6 py-5">
+              {popupRows.length ? (
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      {["S. No", "Question", "Amount Invested", "Current Value", "Days left", "Closing time", "Category", "Outcomes", "Current Yes odds %", "Current No odds %", "LLM Yes Odds", "LLM No Odds", "Returns/day", "Volume", "Liquidity"].map((heading) => (
+                        <th key={heading} className="px-4 py-3">{heading}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {popupRows.map(({ tone, position }, index) => {
+                      const question = activePositionQuestionByKey.get(position.key);
+                      return (
+                        <tr key={`${tone}-${position.key}`} className={tone === "active" ? "bg-emerald-50/50" : "bg-red-50/60"}>
+                          <td className="px-4 py-3 font-semibold tabular-nums">{index + 1}</td>
+                          <td className="min-w-[18rem] px-4 py-3 font-semibold text-slate-950">{position.marketUrl ? <a href={position.marketUrl} target="_blank" rel="noreferrer" className="hover:text-sky-700 hover:underline">{position.marketTitle}</a> : position.marketTitle}</td>
+                          <td className="px-4 py-3 tabular-nums">{formatMoney(position.costBasis)}</td>
+                          <td className="px-4 py-3 tabular-nums">{formatMoney(position.currentValue)}</td>
+                          <td className="px-4 py-3 tabular-nums">{calculateDaysUntilClose(position.closeTime) ?? "—"}</td>
+                          <td className="px-4 py-3">{formatIstDateTime(position.closeTime)}</td>
+                          <td className="px-4 py-3">{tone === "active" ? "Active Position" : "Event Exit"}</td>
+                          <td className="px-4 py-3">{position.outcome || "—"}</td>
+                          <td className="px-4 py-3 tabular-nums">{formatOddsPercent(position.yesOdds)}</td>
+                          <td className="px-4 py-3 tabular-nums">{formatOddsPercent(position.noOdds)}</td>
+                          <td className="px-4 py-3 tabular-nums">{formatOddsPercent(question?.llmYesOdds ?? null)}</td>
+                          <td className="px-4 py-3 tabular-nums">{formatOddsPercent(question?.llmNoOdds ?? null)}</td>
+                          <td className="px-4 py-3 tabular-nums">{formatReturnsPerDay(position.returnsPerDay)}</td>
+                          <td className="px-4 py-3 tabular-nums">—</td>
+                          <td className="px-4 py-3 tabular-nums">—</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No active Bullpen positions are available.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -5553,7 +5646,9 @@ export function BullpenAutoRunScheduleCard({
   onRunCompleted,
   buildRunNowRequest,
   activePositions = [],
+  activePositionQuestions = [],
   hasActivePositionsSnapshot = false,
+  recentDecisions = [],
   onSummaryUpdated,
   onOpenScanFilters,
 }: BullpenAutoRunScheduleCardProps) {
@@ -5629,7 +5724,7 @@ export function BullpenAutoRunScheduleCard({
   >("last");
   const [portfolioState, setPortfolioState] = useState<PolymarketBotState | null>(null);
   const [lastUsablePortfolioBalance, setLastUsablePortfolioBalance] = useState<(PolymarketBotState["live"]["balance"] & { status: "ready" }) | null>(null);
-  const [portfolioLoading, setPortfolioLoading] = useState(true);
+  const [, setPortfolioLoading] = useState(true);
 
   const savedConsoleOrderUsd =
     summary?.settings.console_order_usd ?? DEFAULT_CONSOLE_ORDER_USD;
@@ -6487,9 +6582,10 @@ export function BullpenAutoRunScheduleCard({
           state={portfolioState}
           lastUsableBalance={lastUsablePortfolioBalance}
           activePositions={activePositions}
+          activePositionQuestions={activePositionQuestions}
           hasActivePositionsSnapshot={hasActivePositionsSnapshot}
-          loading={portfolioLoading}
           refreshing={action === "balance"}
+          recentDecisions={recentDecisions}
           onRefresh={() => void refreshPortfolioSnapshot(true)}
         />
         <div className="flex items-start justify-between gap-4">
