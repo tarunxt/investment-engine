@@ -805,6 +805,12 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.match(source, /formatOddsPercent\(candidate\.llmNoOdds\)/);
   assert.match(source, /formatReturnsPerDay\(candidate\.returnsPerDay\)/);
   assert.match(source, /formatInvestAmount\(candidate\.amountToBeInvested\)/);
+  assert.match(source, />LLM Yes Odds<\/th>/);
+  assert.match(source, />LLM No Odds<\/th>/);
+  assert.match(source, />Returns\/day<\/th>/);
+  assert.match(source, /formatOddsPercent\(decision\.fair_yes_probability_pct \?\? null\)/);
+  assert.match(source, /formatOddsPercent\(decision\.fair_no_probability_pct \?\? null\)/);
+  assert.match(source, /formatReturnsPerDay\(getDecisionReturnsPerDay\(decision\)\)/);
 });
 
 test("Stage 3 preview steps summarize the sell-first then invest flow before execution starts", async () => {
