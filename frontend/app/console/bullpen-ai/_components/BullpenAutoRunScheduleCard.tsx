@@ -3393,6 +3393,22 @@ function readLlmContextRecord(record: Record<string, unknown> | null, key: strin
     : null;
 }
 
+function readStageTwoLlmTimestamp(
+  output: Record<string, unknown> | null,
+  row: Record<string, unknown> | null,
+) {
+  return (
+    readLlmContextString(output, "completed_at") ??
+    readLlmContextString(output, "created_at") ??
+    readLlmContextString(output, "started_at") ??
+    readLlmContextString(row, "llm_completed_at") ??
+    readLlmContextString(row, "completed_at") ??
+    readLlmContextString(row, "llm_run_at") ??
+    readLlmContextString(row, "scanned_at") ??
+    null
+  );
+}
+
 function readLlmContextArray(record: Record<string, unknown> | null, key: string) {
   if (!record) return [];
   const value = record[key];
@@ -3438,46 +3454,54 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
       decision?.market_title ??
       `Event ${rowIndex + 1}`;
     const base = outputs.length ? outputs : [null];
-    return base.map((output, outputIndex) => ({
-      id: `${rowIndex}-${outputIndex}-${title}`,
-      title,
-      row,
-      output,
-      decision,
-      provider: readLlmContextString(output, "provider") ?? "—",
-      model: readLlmContextString(output, "model") ?? "—",
-      yesOdds:
+    return base.map((output, outputIndex) => {
+      const outputYesOdds =
         readLlmContextNumber(output, "yes_odds") ??
-        readLlmContextNumber(output, "llm_yes_odds") ??
-        readLlmContextNumber(row, "llm_yes_odds") ??
-        decision?.fair_yes_probability_pct ??
-        (decision?.side === "YES" ? decision?.fair_probability_pct : null) ??
-        null,
-      noOdds:
+        readLlmContextNumber(output, "llm_yes_odds");
+      const outputNoOdds =
         readLlmContextNumber(output, "no_odds") ??
-        readLlmContextNumber(output, "llm_no_odds") ??
-        readLlmContextNumber(row, "llm_no_odds") ??
-        decision?.fair_no_probability_pct ??
-        (decision?.side === "NO" ? decision?.fair_probability_pct : null) ??
-        null,
-      action:
-        readLlmContextString(output, "decision") ??
-        readLlmContextString(output, "action") ??
-        decision?.decision ??
-        "—",
-      risk: readLlmContextString(output, "risk_status") ?? decision?.risk_status ?? "—",
-      summary:
-        readLlmContextString(output, "summary") ??
-        readLlmContextString(row, "summary") ??
-        decision?.summary ??
-        decision?.reason ??
-        "—",
-      rationale:
-        readLlmContextString(output, "rationale") ??
-        readLlmContextString(row, "rationale") ??
-        decision?.rationale ??
-        "—",
-    }));
+        readLlmContextNumber(output, "llm_no_odds");
+      const hasProviderOutput = Boolean(output);
+      return {
+        id: `${rowIndex}-${outputIndex}-${title}`,
+        title,
+        row,
+        output,
+        decision,
+        provider: readLlmContextString(output, "provider") ?? "—",
+        model: readLlmContextString(output, "model") ?? "—",
+        sourceTimestamp: readStageTwoLlmTimestamp(output, row),
+        yesOdds: hasProviderOutput
+          ? outputYesOdds ?? null
+          : readLlmContextNumber(row, "llm_yes_odds") ??
+            decision?.fair_yes_probability_pct ??
+            (decision?.side === "YES" ? decision?.fair_probability_pct : null) ??
+            null,
+        noOdds: hasProviderOutput
+          ? outputNoOdds ?? null
+          : readLlmContextNumber(row, "llm_no_odds") ??
+            decision?.fair_no_probability_pct ??
+            (decision?.side === "NO" ? decision?.fair_probability_pct : null) ??
+            null,
+        action:
+          readLlmContextString(output, "decision") ??
+          readLlmContextString(output, "action") ??
+          decision?.decision ??
+          "—",
+        risk: readLlmContextString(output, "risk_status") ?? decision?.risk_status ?? "—",
+        summary:
+          readLlmContextString(output, "summary") ??
+          readLlmContextString(row, "summary") ??
+          decision?.summary ??
+          decision?.reason ??
+          "—",
+        rationale:
+          readLlmContextString(output, "rationale") ??
+          readLlmContextString(row, "rationale") ??
+          decision?.rationale ??
+          "—",
+      };
+    });
   });
 }
 
@@ -3488,6 +3512,7 @@ function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTable
       key: string;
       label: string;
       rows: typeof rows;
+      sourceTimestamp: string | null;
     }
   >();
 
@@ -3498,12 +3523,14 @@ function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTable
     const existing = groups.get(key);
     if (existing) {
       existing.rows.push(row);
+      existing.sourceTimestamp = existing.sourceTimestamp ?? row.sourceTimestamp;
       return;
     }
     groups.set(key, {
       key,
       label: provider === "—" ? model : `${provider} · ${model}`,
       rows: [row],
+      sourceTimestamp: row.sourceTimestamp,
     });
   });
 
@@ -4060,10 +4087,18 @@ function StageTwoLlmRunDetailsDialog({
                   <section key={group.key} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
                             {group.label}
                           </p>
+                          {group.sourceTimestamp ? (
+                            <span
+                              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-slate-500"
+                              title="Timestamp for the LLM output values shown in this model table"
+                            >
+                              {formatIstDateTime(group.sourceTimestamp)}
+                            </span>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => setEventInputDialog({ title: group.label, llmContext: promptContext })}
