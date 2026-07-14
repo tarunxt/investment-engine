@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
@@ -464,7 +465,7 @@ async def _execute_console_stage_two_shared_llm(
     rules_by_market_id: dict[str, RuleEvaluation],
     settings: BullpenAutoLiveSettings,
     now: datetime,
-    target_progress_callback: Callable[[int], None] | None = None,
+    target_progress_callback: Callable[[int, list[dict[str, Any]]], None] | None = None,
 ) -> ConsoleStageTwoSharedReview:
     prompt_template = _console_stage_two_prompt_template(settings)
     targets = resolve_auto_live_llm_targets(settings)
@@ -586,12 +587,40 @@ async def _execute_console_stage_two_shared_llm(
             existing["invalid_reason"] = incoming["invalid_reason"]
 
     completed_target_count = 0
+    target_run_progress: dict[str, dict[str, Any]] = {
+        f"{provider_name}::{model_name}": {
+            "provider": provider_name,
+            "model": model_name,
+            "requested_model": model_name,
+            "status": "queued",
+            "started_at": None,
+            "completed_at": None,
+            "elapsed_seconds": None,
+        }
+        for provider_name, model_name in targets
+    }
+
+    def emit_target_progress() -> None:
+        if target_progress_callback is not None:
+            target_progress_callback(
+                completed_target_count,
+                [dict(row) for row in target_run_progress.values()],
+            )
 
     async def run_target(
         provider_name: str,
         model_name: str,
     ) -> tuple[str, str, object]:
         nonlocal completed_target_count
+        target_key = f"{provider_name}::{model_name}"
+        started_monotonic = time.perf_counter()
+        target_run_progress[target_key].update({
+            "status": "running",
+            "started_at": utc_now_iso(),
+            "completed_at": None,
+            "elapsed_seconds": 0.0,
+        })
+        emit_target_progress()
         try:
             target_result: object = await asyncio.to_thread(
                 execute_bullpen_llm_target,
@@ -600,13 +629,31 @@ async def _execute_console_stage_two_shared_llm(
                 model_name=model_name,
                 prepared_context=prepared_context,
             )
+            elapsed_seconds = round(time.perf_counter() - started_monotonic, 3)
+            target_status = getattr(target_result, "status", "completed")
+            target_run_progress[target_key].update({
+                "status": target_status if target_status in {"completed", "partial", "failed"} else "completed",
+                "completed_at": utc_now_iso(),
+                "elapsed_seconds": elapsed_seconds,
+                "estimated_cost": getattr(target_result, "estimated_cost", None),
+                "failed_event_count": getattr(target_result, "failed_event_count", None),
+                "invalid_event_count": getattr(target_result, "invalid_event_count", None),
+                "blocked_event_count": getattr(target_result, "blocked_event_count", None),
+                "retry_request_count": getattr(target_result, "retry_request_count", None),
+                "recovery_batch_count": getattr(target_result, "recovery_batch_count", None),
+            })
             return provider_name, model_name, target_result
         except Exception as exc:  # pragma: no cover - defensive guardrail
+            target_run_progress[target_key].update({
+                "status": "failed",
+                "completed_at": utc_now_iso(),
+                "elapsed_seconds": round(time.perf_counter() - started_monotonic, 3),
+                "error": str(exc),
+            })
             return provider_name, model_name, exc
         finally:
             completed_target_count += 1
-            if target_progress_callback is not None:
-                target_progress_callback(completed_target_count)
+            emit_target_progress()
 
     target_results = await asyncio.gather(
         *[
@@ -4500,10 +4547,14 @@ class BullpenAutoLiveEngine:
                     for llm_row in llm_markets
                     if isinstance((market := llm_row.get("market")), ScannedMarket)
                 }
-                def report_llm_target_progress(completed_target_count: int) -> None:
+                def report_llm_target_progress(
+                    completed_target_count: int,
+                    target_runs: list[dict[str, Any]],
+                ) -> None:
                     llm_execution_runtime_outputs[
                         "llm_completed_provider_target_count"
                     ] = completed_target_count
+                    llm_execution_runtime_outputs["llm_target_runs"] = target_runs
                     report_llm_stage_progress(
                         phase_status="running",
                         reason=(
