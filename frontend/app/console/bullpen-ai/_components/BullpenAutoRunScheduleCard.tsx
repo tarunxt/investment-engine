@@ -3518,7 +3518,7 @@ function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
   );
 }
 
-type StageTwoRunSummaryStatus = "completed" | "failed" | "partial";
+type StageTwoRunSummaryStatus = "completed" | "failed" | "partial" | "pending";
 
 type StageTwoLlmRunSummaryRow = {
   key: string;
@@ -3551,8 +3551,17 @@ function formatStageTwoRuntimeSeconds(value: number | null) {
 }
 
 function normalizeStageTwoRunStatus(value: string | null): StageTwoRunSummaryStatus {
-  if (value === "completed" || value === "partial" || value === "failed") return value;
+  if (value === "completed" || value === "partial" || value === "failed" || value === "pending") return value;
+  if (value === "running" || value === "processing" || value === "queued") return "pending";
   return "completed";
+}
+
+function getStageTwoLlmTargets(stage: WorkflowStageView) {
+  const targets = stage.outputs.llm_targets ?? stage.inputs.llm_targets;
+  if (!Array.isArray(targets)) return [];
+  return targets.filter(
+    (target): target is Record<string, unknown> => Boolean(target) && typeof target === "object",
+  );
 }
 
 function getStageTwoLlmTargetRuns(stage: WorkflowStageView) {
@@ -3580,7 +3589,7 @@ function getStageTwoLlmRunSummaryRows(
 
   const targetRuns = getStageTwoLlmTargetRuns(stage);
   if (targetRuns.length) {
-    return targetRuns.map((run, index) => {
+    const runRows = targetRuns.map((run, index) => {
       const provider = readLlmContextString(run, "provider") ?? "—";
       const model = readLlmContextString(run, "model") ?? "—";
       const key = `${provider}::${model}`;
@@ -3619,9 +3628,70 @@ function getStageTwoLlmRunSummaryRows(
         recoveryBatchCount: readLlmContextNumber(run, "recovery_batch_count"),
       };
     });
+    const runKeys = new Set(runRows.map((row) => `${row.provider}::${row.requestedModel ?? row.model}`));
+    const pendingRunRows = getStageTwoLlmTargets(stage)
+      .filter((target) => {
+        const provider = readLlmContextString(target, "provider") ?? "—";
+        const model = readLlmContextString(target, "model") ?? "—";
+        return !runKeys.has(`${provider}::${model}`);
+      })
+      .map((target, index) => {
+        const provider = readLlmContextString(target, "provider") ?? "—";
+        const model = readLlmContextString(target, "model") ?? "—";
+        return {
+          key: `${provider}::${model}-pending-${index}`,
+          provider,
+          model,
+          requestedModel: model,
+          status: "pending" as StageTwoRunSummaryStatus,
+          runtime: formatStageElapsedTime(stage.timerStartedAt, null, Date.now()),
+          cost: null,
+          error: null,
+          failureCategory: null,
+          firstError: null,
+          lastError: null,
+          batchErrors: [],
+          failedEventCount: null,
+          invalidEventCount: null,
+          blockedEventCount: null,
+          retryRequestCount: null,
+          recoveryBatchCount: null,
+        };
+      });
+    return [...runRows, ...pendingRunRows];
   }
 
-  return groups.map((group) => ({
+  const knownKeys = new Set(groups.map((group) => group.key));
+  const pendingTargets = getStageTwoLlmTargets(stage).filter((target) => {
+    const provider = readLlmContextString(target, "provider") ?? "—";
+    const model = readLlmContextString(target, "model") ?? "—";
+    return !knownKeys.has(`${provider}::${model}`);
+  });
+  const pendingRows = pendingTargets.map((target, index) => {
+    const provider = readLlmContextString(target, "provider") ?? "—";
+    const model = readLlmContextString(target, "model") ?? "—";
+    return {
+      key: `${provider}::${model}-pending-${index}`,
+      provider,
+      model,
+      requestedModel: model,
+      status: "pending" as StageTwoRunSummaryStatus,
+      runtime: formatStageElapsedTime(stage.timerStartedAt, null, Date.now()),
+      cost: null,
+      error: null,
+      failureCategory: null,
+      firstError: null,
+      lastError: null,
+      batchErrors: [],
+      failedEventCount: null,
+      invalidEventCount: null,
+      blockedEventCount: null,
+      retryRequestCount: null,
+      recoveryBatchCount: null,
+    };
+  });
+
+  return [...groups.map((group) => ({
     key: group.key,
     provider: group.rows[0]?.provider ?? "—",
     model: group.rows[0]?.model ?? group.label,
@@ -3642,7 +3712,7 @@ function getStageTwoLlmRunSummaryRows(
     blockedEventCount: null,
     retryRequestCount: null,
     recoveryBatchCount: null,
-  }));
+  })), ...pendingRows];
 }
 
 
@@ -3753,12 +3823,14 @@ function StageTwoLlmFailureDialog({
 function getStageTwoRunSummaryStatusClass(status: StageTwoRunSummaryStatus) {
   if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "partial") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "pending") return "border-slate-200 bg-slate-50 text-slate-600";
   return "border-red-200 bg-red-50 text-red-700";
 }
 
 function getStageTwoRunSummaryStatusLabel(status: StageTwoRunSummaryStatus) {
   if (status === "completed") return "Completed";
   if (status === "partial") return "Partial";
+  if (status === "pending") return "Pending";
   return "Failed";
 }
 
@@ -3791,7 +3863,12 @@ function StageTwoLlmRunDetailsDialog({
   const completedSummaryCount = summaryRows.filter((row) => row.status === "completed").length;
   const partialSummaryCount = summaryRows.filter((row) => row.status === "partial").length;
   const failedSummaryCount = summaryRows.filter((row) => row.status === "failed").length;
-  const pendingSummaryCount = Math.max(0, stats.llmsSelected - summaryRows.length);
+  const explicitPendingSummaryCount = summaryRows.filter((row) => row.status === "pending").length;
+  const returnedSummaryCount = completedSummaryCount + partialSummaryCount + failedSummaryCount;
+  const pendingSummaryCount = Math.max(
+    explicitPendingSummaryCount,
+    stats.llmsSelected - returnedSummaryCount,
+  );
   const cumulativeCost = summaryRows.reduce(
     (total, row) => total + (row.cost ?? 0),
     0,
@@ -3846,7 +3923,7 @@ function StageTwoLlmRunDetailsDialog({
                 <h4 className="mt-2 text-lg font-extrabold text-slate-950">
                   Bullpen AI Run {state.run ? `#${state.run.id}` : "latest"} · {formatIstDateTime(state.run?.started_at ?? state.stage.timerStartedAt)}
                   <span className="block text-sm font-semibold text-slate-600 sm:ml-2 sm:inline">
-                    LLM progress: {summaryRows.length}/{stats.llmsSelected || summaryRows.length} returned
+                    LLM progress: {returnedSummaryCount}/{stats.llmsSelected || summaryRows.length} returned
                     {stageRuntime ? ` · Runtime: ${stageRuntime}` : ""}
                   </span>
                 </h4>
@@ -6106,6 +6183,7 @@ export function BullpenAutoRunScheduleCard({
     workflowRun?.status === "running"
       ? getInvestStageImmediateSuccess(investWorkflowStage)
       : null;
+
   const workflowDecisionCount =
     workflowRunForMonitor !== null
       ? getInvestStageMetric(
@@ -6155,6 +6233,15 @@ export function BullpenAutoRunScheduleCard({
           ),
         })
       : [];
+  const refreshedStageTwoLlmRunDialog = stageTwoLlmRunDialog
+    ? {
+        run: workflowRunForMonitor,
+        stage:
+          workflowView.stages.find((stage) => stage.key === "llm") ??
+          stageTwoLlmRunDialog.stage,
+        decisions: investRunDecisions,
+      }
+    : null;
   const openInvestMetricDialog = (kind: InvestMetricDialogKind) => {
     if (!workflowRunForMonitor) return;
     setInvestMetricDialog({
@@ -7465,9 +7552,9 @@ export function BullpenAutoRunScheduleCard({
           />
         ) : null}
 
-        {stageTwoLlmRunDialog ? (
+        {refreshedStageTwoLlmRunDialog ? (
           <StageTwoLlmRunDetailsDialog
-            state={stageTwoLlmRunDialog}
+            state={refreshedStageTwoLlmRunDialog}
             onClose={() => setStageTwoLlmRunDialog(null)}
           />
         ) : null}
