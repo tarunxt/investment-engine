@@ -6281,6 +6281,7 @@ def test_console_profile_discover_inherits_parent_category_context():
     )
 
     assert len(rows) == 1
+    assert rows[0].context_theme == "Politics · Middle East"
     assert len(result.accepted) == 1
     assert result.accepted[0].theme == "Politics · Middle East"
 

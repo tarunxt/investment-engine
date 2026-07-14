@@ -185,12 +185,17 @@ def _read_label_value(value: object) -> str | None:
     return normalize_category_label(value)
 
 
-def _read_category_object_label(value: dict[str, object]) -> str | None:
+def _read_category_object_labels(value: dict[str, object]) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
     for key in CATEGORY_OBJECT_LABEL_KEYS:
-        label = normalize_category_label(value.get(key))
-        if label:
-            return label
-    return None
+        for label in _split_category_trail(value.get(key)):
+            normalized = label.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            labels.append(label)
+    return labels
 
 
 def _append_category_labels(
@@ -203,8 +208,8 @@ def _append_category_labels(
             _append_category_labels(target, seen, item)
         return
 
-    raw_value = _read_category_object_label(value) if isinstance(value, dict) else value
-    for label in _split_category_trail(raw_value):
+    labels = _read_category_object_labels(value) if isinstance(value, dict) else _split_category_trail(value)
+    for label in labels:
         normalized = label.lower()
         if normalized in seen:
             continue
@@ -317,6 +322,45 @@ def _collect_deep_category_trail_labels(value: object) -> list[str]:
     return labels
 
 
+def _append_current_record_category_labels(
+    labels: list[str],
+    seen: set[str],
+    record: dict[str, object],
+) -> None:
+    for key in CATEGORY_SCALAR_KEYS:
+        _append_category_labels(labels, seen, record.get(key))
+    for key in CATEGORY_COLLECTION_KEYS:
+        _append_category_labels(labels, seen, record.get(key))
+
+    for key in CATEGORY_TRAIL_KEYS:
+        candidate = record.get(key)
+        if isinstance(candidate, list):
+            for item in candidate:
+                if key not in CATEGORY_PATH_KEYS:
+                    _add_category_trail_label(labels, seen, item)
+                _add_category_trail_from_path(labels, seen, item)
+            continue
+        if key not in CATEGORY_PATH_KEYS:
+            _add_category_trail_label(labels, seen, candidate)
+        _add_category_trail_from_path(labels, seen, candidate)
+
+
+def collect_polymarket_record_category_labels(
+    value: object,
+    *,
+    context_category: str | None = None,
+) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
+    _append_category_labels(labels, seen, context_category)
+
+    if not isinstance(value, dict):
+        return labels
+
+    _append_current_record_category_labels(labels, seen, value)
+    return labels
+
+
 def collect_polymarket_category_labels(
     value: object,
     *,
@@ -346,15 +390,9 @@ def collect_polymarket_category_labels(
         seen_nodes.add(current_id)
         inspected += 1
 
-        for key in CATEGORY_SCALAR_KEYS:
-            _append_category_labels(labels, seen, current.get(key))
-        for key in CATEGORY_COLLECTION_KEYS:
-            _append_category_labels(labels, seen, current.get(key))
+        _append_current_record_category_labels(labels, seen, current)
 
         stack.extend(reversed(list(current.values())))
-
-    for label in _collect_deep_category_trail_labels(value):
-        _add_category_trail_label(labels, seen, label)
 
     return labels
 

@@ -12,7 +12,7 @@ from app.domains.polymarket.position_classification import (
     extract_bullpen_claimable_flag,
 )
 from app.domains.polymarket_auto_live.category import (
-    collect_polymarket_category_labels,
+    collect_polymarket_record_category_labels,
     format_polymarket_category,
     read_polymarket_theme,
 )
@@ -689,7 +689,7 @@ def _collect_console_discover_rows(value: object) -> list[ConsoleDiscoverRow]:
         seen_object_ids.add(object_id)
         next_context_theme = (
             format_polymarket_category(
-                collect_polymarket_category_labels(
+                collect_polymarket_record_category_labels(
                     current,
                     context_category=context_theme,
                 )
