@@ -7199,35 +7199,53 @@ ${zerodhaExecutionMode === "direct_market"
 
         currentStage = "threats";
         if (shouldRunCurrentStage("threats")) {
-          markRunning(portfolio, "threats", { totalLlms: 1, completedLlms: 0 });
-          const queuedThreat =
-            portfolio === "zerodha"
-              ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata })
-              : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata });
-          activeExecutionRefsRef.current = [
-            ...activeExecutionRefsRef.current.filter(
-              (entry) => !(entry.kind === "job" && entry.id === queuedThreat.job_id),
-            ),
-            { kind: "job", id: queuedThreat.job_id },
-          ];
-          updateStage(portfolio, "threats", {
-            activeRunId: queuedThreat.job_id,
-          });
-          const completedThreat = await waitForThreatCompletion(
-            portfolio,
-            queuedThreat.job_id,
-            () => cancelRequestedRef.current,
-          );
-          if ((completedThreat.status || "").toLowerCase() !== "completed")
-            throw new Error(
-              `Threats scan failed: ${completedThreat.error_message ?? "Job failed."}`,
+          try {
+            markRunning(portfolio, "threats", { totalLlms: 1, completedLlms: 0 });
+            const queuedThreat =
+              portfolio === "zerodha"
+                ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata })
+                : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata });
+            activeExecutionRefsRef.current = [
+              ...activeExecutionRefsRef.current.filter(
+                (entry) => !(entry.kind === "job" && entry.id === queuedThreat.job_id),
+              ),
+              { kind: "job", id: queuedThreat.job_id },
+            ];
+            updateStage(portfolio, "threats", {
+              activeRunId: queuedThreat.job_id,
+            });
+            const completedThreat = await waitForThreatCompletion(
+              portfolio,
+              queuedThreat.job_id,
+              () => cancelRequestedRef.current,
             );
-          generatedThreatMarkdown = completedThreat.report?.raw_markdown ?? "";
-          markCompleted(portfolio, "threats", {
-            ...summarizeThreat(completedThreat),
-            completedLlms: 1,
-            totalLlms: 1,
-          });
+            if ((completedThreat.status || "").toLowerCase() !== "completed")
+              throw new Error(
+                `Threats scan failed: ${completedThreat.error_message ?? "Job failed."}`,
+              );
+            generatedThreatMarkdown = completedThreat.report?.raw_markdown ?? "";
+            markCompleted(portfolio, "threats", {
+              ...summarizeThreat(completedThreat),
+              completedLlms: 1,
+              totalLlms: 1,
+            });
+          } catch (error) {
+            if (cancelRequestedRef.current) throw error;
+            const message = normalizeError(error);
+            updateStage(portfolio, "threats", {
+              state: "failed",
+              endedAt: new Date().toISOString(),
+              activeRunId: null,
+              error: message,
+              runStatus: "failed",
+            });
+            if (!promptToContinueAfterProblem("threats", message)) throw error;
+            completeSkippedStage(
+              portfolio,
+              "threats",
+              "Using latest threats scan after failed run",
+            );
+          }
         } else {
           completeSkippedStage(
             portfolio,
