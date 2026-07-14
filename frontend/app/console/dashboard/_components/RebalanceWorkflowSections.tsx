@@ -1889,29 +1889,47 @@ function formatRecommendedStockProgress(info: StageInfo) {
   return `${recommended ?? 0}${expected !== null ? `/${expected}` : ""}`;
 }
 
+function isSheetExportError(error?: string | null) {
+  const normalized = error?.trim().replace(/\s+/g, " ") ?? "";
+  if (!normalized) return false;
+  return /\b\d+\s*\/\s*\d+\s*exported\b/i.test(normalized) || /google\s+sheets?|sheet\s+export|export(?:ed|ing)?\s+(?:to\s+)?sheets?/i.test(normalized);
+}
+
+function isInsufficientBalanceError(error?: string | null) {
+  return /insufficient\s+balance/i.test(error ?? "");
+}
+
 function formatBriefTileError(error?: string | null) {
-  if (!error?.trim()) return "None";
+  if (!error?.trim() || isSheetExportError(error)) return "None";
+  if (isInsufficientBalanceError(error)) return "Error: Deepseek- insifficent balance";
   const trimmed = error.trim().replace(/\s+/g, " ");
   return trimmed.length > 96 ? `${trimmed.slice(0, 93)}…` : trimmed;
 }
 
-function getLlmStageTileRows(info: StageInfo, now: number) {
+function getTileErrorDetail(error?: string | null) {
+  if (!error?.trim() || isSheetExportError(error) || !isInsufficientBalanceError(error)) return null;
+  return error.trim();
+}
+
+type StageTileRow = { label: string; value: string; detail?: string | null };
+
+function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
   return [
     { label: "Last scan", value: formatTimestamp(info.completedAt ?? info.startedAt) },
     { label: "LLMs completed", value: formatLlmCompletion(info) },
     { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
     { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
     { label: "Cost incurred", value: formatInrCost(info.costInr) },
-    { label: "Error", value: formatBriefTileError(info.error) },
+    { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error) },
   ];
 }
 
-function getActionablesStageTileRows(info: StageInfo) {
+function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
   return [
     { label: "Last update", value: formatTimestamp(info.completedAt ?? info.startedAt) },
     { label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" },
     { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
-    { label: "Error", value: formatBriefTileError(info.error) },
+    { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error) },
   ];
 }
 
@@ -2590,7 +2608,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
   );
 }
 
-function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo, now: number) {
+function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo, now: number): StageTileRow[] {
   if (stage === "sync") {
     return [{ label: "Latest sync", value: formatTimestamp(info.completedAt) }];
   }
@@ -2784,6 +2802,7 @@ function WorkflowStageTile({
         : ""
     : "";
   const isFreshActionables = isActionablesFresh(info.completedAt, now);
+  const [openErrorDetail, setOpenErrorDetail] = useState<string | null>(null);
 
   return (
     <button
@@ -2896,7 +2915,38 @@ function WorkflowStageTile({
               <span className="font-semibold text-slate-600">
                 {row.label}:
               </span>{" "}
-              {row.value}
+              <span>{row.value}</span>
+              {row.label === "Error" && row.detail ? (
+                <span className="relative ml-1 inline-flex align-middle">
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setOpenErrorDetail((current) => (current === row.detail ? null : row.detail));
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setOpenErrorDetail((current) => (current === row.detail ? null : row.detail));
+                      }
+                    }}
+                    className="inline-flex size-4 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50"
+                    aria-label="Show detailed error"
+                    title="Show detailed error"
+                  >
+                    <Info className="size-3" />
+                  </span>
+                  {openErrorDetail === row.detail ? (
+                    <span className="absolute left-0 top-6 z-30 w-72 max-w-[calc(100vw-4rem)] rounded-2xl border border-red-100 bg-white p-3 text-xs leading-5 text-slate-700 shadow-xl shadow-slate-900/10">
+                      <span className="block font-bold text-red-700">Detailed error</span>
+                      <span className="mt-1 block whitespace-pre-wrap break-words">{row.detail}</span>
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
             </p>
           ))
         )}
