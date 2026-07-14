@@ -2924,13 +2924,17 @@ function WorkflowStageTile({
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      setOpenErrorDetail((current) => (current === row.detail ? null : row.detail));
+                      setOpenErrorDetail((current) =>
+                        current === row.detail ? null : (row.detail ?? null),
+                      );
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
                         event.stopPropagation();
-                        setOpenErrorDetail((current) => (current === row.detail ? null : row.detail));
+                        setOpenErrorDetail((current) =>
+                          current === row.detail ? null : (row.detail ?? null),
+                        );
                       }
                     }}
                     className="inline-flex size-4 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50"
