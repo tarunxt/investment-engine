@@ -293,6 +293,15 @@ function formatOddsPercent(value: number | null) {
   return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
 }
 
+function getLlmOddsHighlightClass(value: number | null) {
+  if (value === null) return "font-semibold text-violet-700";
+  if (value >= 95) return "rounded-md bg-lime-400 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 90) return "rounded-md bg-lime-300 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 85) return "rounded-md bg-emerald-300 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 80) return "rounded-md bg-emerald-200 px-2 py-1 font-extrabold text-slate-950";
+  return "font-semibold text-violet-700";
+}
+
 function formatReturnsPerDay(value: number | null) {
   if (value === null) return "—";
   return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
@@ -476,11 +485,12 @@ function getStageTwoLlmOutcomeCounts(
 
   const targetRuns = getStageTwoLlmTargetRuns(stage);
   if (targetRuns.length) {
-    const failed = targetRuns.filter(
-      (run) => normalizeStageTwoRunStatus(readLlmContextString(run, "status")) === "failed",
-    ).length;
-    const passed = targetRuns.filter(
-      (run) => normalizeStageTwoRunStatus(readLlmContextString(run, "status")) !== "failed",
+    const statuses = targetRuns.map((run) =>
+      normalizeStageTwoRunStatus(readLlmContextString(run, "status")),
+    );
+    const failed = statuses.filter((status) => status === "failed").length;
+    const passed = statuses.filter(
+      (status) => status === "completed" || status === "partial",
     ).length;
     return { passed, failed };
   }
@@ -489,6 +499,14 @@ function getStageTwoLlmOutcomeCounts(
 }
 
 function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
+  const targetRuns = getStageTwoLlmTargetRuns(stage);
+  if (targetRuns.length) {
+    return targetRuns.filter((run) => {
+      const status = normalizeStageTwoRunStatus(readLlmContextString(run, "status"));
+      return status === "completed" || status === "partial" || status === "failed";
+    }).length;
+  }
+
   const completedFromOutput =
     readStageOutputNumber(stage.outputs.llm_completed_provider_target_count) ??
     readStageOutputNumber(stage.outputs.llms_completed) ??
@@ -3453,6 +3471,20 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
       readLlmContextString(row, "market_title") ??
       decision?.market_title ??
       `Event ${rowIndex + 1}`;
+    const closeTime =
+      readLlmContextString(row, "close_time") ??
+      readLlmContextString(row, "end_date") ??
+      decision?.close_time ??
+      null;
+    const currentYesOdds =
+      readLlmContextNumber(row, "current_yes_odds") ??
+      readLlmContextNumber(row, "current_yes_odds_pct") ??
+      readLlmContextNumber(row, "yes_price_pct") ??
+      null;
+    const currentNoOdds =
+      readLlmContextNumber(row, "current_no_odds") ??
+      readLlmContextNumber(row, "current_no_odds_pct") ??
+      (currentYesOdds === null ? null : Number((100 - currentYesOdds).toFixed(4)));
     const base = outputs.length ? outputs : [null];
     return base.map((output, outputIndex) => {
       const outputYesOdds =
@@ -3471,6 +3503,14 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
         provider: readLlmContextString(output, "provider") ?? "—",
         model: readLlmContextString(output, "model") ?? "—",
         sourceTimestamp: readStageTwoLlmTimestamp(output, row),
+        serialNumber: rowIndex + 1,
+        question: title,
+        closeTime,
+        daysLeft: calculateDaysUntilClose(closeTime),
+        category: readLlmContextString(row, "category") ?? readLlmContextString(row, "theme") ?? "—",
+        outcomes: readLlmContextString(row, "outcomes") ?? readLlmContextString(row, "outcome") ?? "Yes / No",
+        currentYesOdds,
+        currentNoOdds,
         yesOdds: hasProviderOutput
           ? outputYesOdds ?? null
           : readLlmContextNumber(row, "llm_yes_odds") ??
@@ -3483,6 +3523,15 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
             decision?.fair_no_probability_pct ??
             (decision?.side === "NO" ? decision?.fair_probability_pct : null) ??
             null,
+        returnsPerDay:
+          readLlmContextNumber(row, "returns_per_day") ??
+          getBullpenReturnsPerDayBreakdown({
+            yesOdds: currentYesOdds,
+            noOdds: currentNoOdds,
+            llmYesOdds: hasProviderOutput ? outputYesOdds ?? null : readLlmContextNumber(row, "llm_yes_odds"),
+            llmNoOdds: hasProviderOutput ? outputNoOdds ?? null : readLlmContextNumber(row, "llm_no_odds"),
+            daysUntilClose: calculateDaysUntilClose(closeTime),
+          }).result,
         action:
           readLlmContextString(output, "decision") ??
           readLlmContextString(output, "action") ??
@@ -3513,6 +3562,7 @@ function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTable
       label: string;
       rows: typeof rows;
       sourceTimestamp: string | null;
+      cost: number | null;
     }
   >();
 
@@ -3524,6 +3574,8 @@ function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTable
     if (existing) {
       existing.rows.push(row);
       existing.sourceTimestamp = existing.sourceTimestamp ?? row.sourceTimestamp;
+      const rowCost = readStageTwoLlmOutputCost(row.output);
+      existing.cost = rowCost === null ? existing.cost : (existing.cost ?? 0) + rowCost;
       return;
     }
     groups.set(key, {
@@ -3531,10 +3583,11 @@ function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTable
       label: provider === "—" ? model : `${provider} · ${model}`,
       rows: [row],
       sourceTimestamp: row.sourceTimestamp,
+      cost: readStageTwoLlmOutputCost(row.output),
     });
   });
 
-  return [...groups.values()];
+  return [...groups.values()].sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
 }
 
 function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
@@ -3603,6 +3656,7 @@ function getStageTwoLlmTargetRuns(stage: WorkflowStageView) {
 function getStageTwoLlmRunSummaryRows(
   stage: WorkflowStageView,
   groups: ReturnType<typeof groupStageTwoLlmRowsByModel>,
+  nowMs = Date.now(),
 ): StageTwoLlmRunSummaryRow[] {
   const groupCostByKey = new Map<string, number | null>();
   groups.forEach((group) => {
@@ -3627,7 +3681,18 @@ function getStageTwoLlmRunSummaryRows(
         model,
         requestedModel: readLlmContextString(run, "requested_model") ?? model,
         status: normalizeStageTwoRunStatus(readLlmContextString(run, "status")),
-        runtime: formatStageTwoRuntimeSeconds(readLlmContextNumber(run, "elapsed_seconds")),
+        runtime: (() => {
+          const status = normalizeStageTwoRunStatus(readLlmContextString(run, "status"));
+          const elapsedSeconds = readLlmContextNumber(run, "elapsed_seconds");
+          if (status === "running" || status === "pending") {
+            const startedAt =
+              readLlmContextString(run, "started_at") ??
+              readLlmContextString(run, "created_at") ??
+              stage.timerStartedAt;
+            return formatStageElapsedTime(startedAt, null, nowMs);
+          }
+          return formatStageTwoRuntimeSeconds(elapsedSeconds);
+        })(),
         cost:
           readLlmContextNumber(run, "estimated_cost") ??
           readLlmContextNumber(run, "cost") ??
@@ -3672,7 +3737,7 @@ function getStageTwoLlmRunSummaryRows(
           model,
           requestedModel: model,
           status: "pending" as StageTwoRunSummaryStatus,
-          runtime: formatStageElapsedTime(stage.timerStartedAt, null, Date.now()),
+          runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
           cost: null,
           error: null,
           failureCategory: null,
@@ -3686,7 +3751,7 @@ function getStageTwoLlmRunSummaryRows(
           recoveryBatchCount: null,
         };
       });
-    return [...runRows, ...pendingRunRows];
+    return [...runRows, ...pendingRunRows].sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
   }
 
   const knownKeys = new Set(groups.map((group) => group.key));
@@ -3704,7 +3769,7 @@ function getStageTwoLlmRunSummaryRows(
       model,
       requestedModel: model,
       status: "pending" as StageTwoRunSummaryStatus,
-      runtime: formatStageElapsedTime(stage.timerStartedAt, null, Date.now()),
+      runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
       cost: null,
       error: null,
       failureCategory: null,
@@ -3740,7 +3805,7 @@ function getStageTwoLlmRunSummaryRows(
     blockedEventCount: null,
     retryRequestCount: null,
     recoveryBatchCount: null,
-  })), ...pendingRows];
+  })), ...pendingRows].sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
 }
 
 
@@ -3882,6 +3947,7 @@ function StageTwoLlmRunDetailsDialog({
   const [stageTwoPromptDialogOpen, setStageTwoPromptDialogOpen] = useState(false);
   const [selectedFailureRow, setSelectedFailureRow] =
     useState<StageTwoLlmFailureDialogRow | null>(null);
+  const [dialogNowMs, setDialogNowMs] = useState(() => Date.now());
   const stats = getStageTwoStats(state.stage, state.decisions);
   const overlapCount = Math.max(
     0,
@@ -3889,7 +3955,7 @@ function StageTwoLlmRunDetailsDialog({
   );
   const llmTableRows = getStageTwoLlmTableRows(state);
   const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
-  const summaryRows = getStageTwoLlmRunSummaryRows(state.stage, llmModelGroups);
+  const summaryRows = getStageTwoLlmRunSummaryRows(state.stage, llmModelGroups, dialogNowMs);
   const completedSummaryCount = summaryRows.filter((row) => row.status === "completed").length;
   const partialSummaryCount = summaryRows.filter((row) => row.status === "partial").length;
   const failedSummaryCount = summaryRows.filter((row) => row.status === "failed").length;
@@ -3911,6 +3977,15 @@ function StageTwoLlmRunDetailsDialog({
   );
   const stageTwoPromptContext = llmTableRows.find((row) => row.row)?.row ?? null;
   const stagePromptTemplate = getStageTwoRunPromptTemplate(state.stage);
+  const shouldTickDialogTimers = summaryRows.some(
+    (row) => row.status === "running" || row.status === "pending",
+  );
+
+  useEffect(() => {
+    if (!shouldTickDialogTimers) return;
+    const intervalId = window.setInterval(() => setDialogNowMs(Date.now()), RUN_TIMER_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [shouldTickDialogTimers]);
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
@@ -4111,6 +4186,7 @@ function StageTwoLlmRunDetailsDialog({
                         </div>
                         <p className="mt-1 text-xs text-slate-500">
                           {group.rows.length} event/provider {group.rows.length === 1 ? "row" : "rows"}
+                          {group.cost !== null ? ` · Cost: ${formatUsdCost(group.cost)}` : ""}
                         </p>
                       </div>
                     </div>
@@ -4119,9 +4195,17 @@ function StageTwoLlmRunDetailsDialog({
                         <thead className="bg-white text-[11px] uppercase tracking-[0.14em] text-slate-500">
                           <tr>
                             <th className="px-3 py-3">Event info</th>
-                            <th className="min-w-64 px-3 py-3">Event</th>
-                            <th className="px-3 py-3">LLM Yes</th>
-                            <th className="px-3 py-3">LLM No</th>
+                            <th className="px-3 py-3">S. No</th>
+                            <th className="min-w-64 px-3 py-3">Question</th>
+                            <th className="px-3 py-3">Closing time</th>
+                            <th className="px-3 py-3">Days left</th>
+                            <th className="px-3 py-3">Category</th>
+                            <th className="px-3 py-3">Outcomes</th>
+                            <th className="px-3 py-3">Current Yes odds %</th>
+                            <th className="px-3 py-3">Current No odds %</th>
+                            <th className="px-3 py-3">LLM Yes Odds</th>
+                            <th className="px-3 py-3">LLM No Odds</th>
+                            <th className="px-3 py-3">Returns/day</th>
                             <th className="px-3 py-3">Action</th>
                             <th className="px-3 py-3">Risk</th>
                             <th className="min-w-80 px-3 py-3">Summary / rationale</th>
@@ -4143,9 +4227,17 @@ function StageTwoLlmRunDetailsDialog({
                                     <Info className="h-3.5 w-3.5" />
                                   </button>
                                 </td>
-                                <td className="px-3 py-3 font-semibold text-slate-950">{row.title}</td>
-                                <td className="px-3 py-3 tabular-nums">{formatOddsPercent(row.yesOdds)}</td>
-                                <td className="px-3 py-3 tabular-nums">{formatOddsPercent(row.noOdds)}</td>
+                                <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">{row.serialNumber}</td>
+                                <td className="px-3 py-3 font-semibold text-slate-950">{row.question}</td>
+                                <td className="px-3 py-3 text-slate-600">{formatIstDateTime(row.closeTime)}</td>
+                                <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">{row.daysLeft === null ? "—" : `${row.daysLeft}d`}</td>
+                                <td className="px-3 py-3 text-slate-600">{row.category}</td>
+                                <td className="px-3 py-3 text-slate-600">{row.outcomes}</td>
+                                <td className="px-3 py-3 font-semibold tabular-nums text-emerald-700">{formatOddsPercent(row.currentYesOdds)}</td>
+                                <td className="px-3 py-3 font-semibold tabular-nums text-rose-700">{formatOddsPercent(row.currentNoOdds)}</td>
+                                <td className="px-3 py-3 tabular-nums"><span className={getLlmOddsHighlightClass(row.yesOdds)}>{formatOddsPercent(row.yesOdds)}</span></td>
+                                <td className="px-3 py-3 tabular-nums"><span className={getLlmOddsHighlightClass(row.noOdds)}>{formatOddsPercent(row.noOdds)}</span></td>
+                                <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">{formatReturnsPerDay(row.returnsPerDay)}</td>
                                 <td className="px-3 py-3">
                                   {dialogState ? (
                                     <button
