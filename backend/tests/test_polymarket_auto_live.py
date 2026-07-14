@@ -993,7 +993,7 @@ async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings
         target_progress_callback=None,
     ):
         if target_progress_callback is not None:
-            target_progress_callback(1)
+            target_progress_callback(1, [{"provider": "openai", "model": "gpt-test", "status": "completed"}])
         assert now == fixed_now
         assert len(llm_markets) == 1
         assert rules_by_market_id[candidate_market.market_id].hours_remaining == 96

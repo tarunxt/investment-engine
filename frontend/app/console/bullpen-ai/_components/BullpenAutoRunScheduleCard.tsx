@@ -3518,7 +3518,7 @@ function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
   );
 }
 
-type StageTwoRunSummaryStatus = "completed" | "failed" | "partial" | "pending";
+type StageTwoRunSummaryStatus = "completed" | "failed" | "partial" | "pending" | "running";
 
 type StageTwoLlmRunSummaryRow = {
   key: string;
@@ -3551,8 +3551,9 @@ function formatStageTwoRuntimeSeconds(value: number | null) {
 }
 
 function normalizeStageTwoRunStatus(value: string | null): StageTwoRunSummaryStatus {
-  if (value === "completed" || value === "partial" || value === "failed" || value === "pending") return value;
-  if (value === "running" || value === "processing" || value === "queued") return "pending";
+  if (value === "completed" || value === "partial" || value === "failed" || value === "pending" || value === "running") return value;
+  if (value === "processing") return "running";
+  if (value === "queued") return "pending";
   return "completed";
 }
 
@@ -3823,6 +3824,7 @@ function StageTwoLlmFailureDialog({
 function getStageTwoRunSummaryStatusClass(status: StageTwoRunSummaryStatus) {
   if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "partial") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "running") return "border-amber-200 bg-amber-50 text-amber-700";
   if (status === "pending") return "border-slate-200 bg-slate-50 text-slate-600";
   return "border-red-200 bg-red-50 text-red-700";
 }
@@ -3830,6 +3832,7 @@ function getStageTwoRunSummaryStatusClass(status: StageTwoRunSummaryStatus) {
 function getStageTwoRunSummaryStatusLabel(status: StageTwoRunSummaryStatus) {
   if (status === "completed") return "Completed";
   if (status === "partial") return "Partial";
+  if (status === "running") return "Running";
   if (status === "pending") return "Pending";
   return "Failed";
 }
@@ -3863,6 +3866,7 @@ function StageTwoLlmRunDetailsDialog({
   const completedSummaryCount = summaryRows.filter((row) => row.status === "completed").length;
   const partialSummaryCount = summaryRows.filter((row) => row.status === "partial").length;
   const failedSummaryCount = summaryRows.filter((row) => row.status === "failed").length;
+  const runningSummaryCount = summaryRows.filter((row) => row.status === "running").length;
   const explicitPendingSummaryCount = summaryRows.filter((row) => row.status === "pending").length;
   const returnedSummaryCount = completedSummaryCount + partialSummaryCount + failedSummaryCount;
   const pendingSummaryCount = Math.max(
@@ -3923,7 +3927,7 @@ function StageTwoLlmRunDetailsDialog({
                 <h4 className="mt-2 text-lg font-extrabold text-slate-950">
                   Bullpen AI Run {state.run ? `#${state.run.id}` : "latest"} · {formatIstDateTime(state.run?.started_at ?? state.stage.timerStartedAt)}
                   <span className="block text-sm font-semibold text-slate-600 sm:ml-2 sm:inline">
-                    LLM progress: {returnedSummaryCount}/{stats.llmsSelected || summaryRows.length} returned
+                    LLM progress: {returnedSummaryCount}/{stats.llmsSelected || summaryRows.length} returned{runningSummaryCount ? ` · ${runningSummaryCount} running` : ""}
                     {stageRuntime ? ` · Runtime: ${stageRuntime}` : ""}
                   </span>
                 </h4>
