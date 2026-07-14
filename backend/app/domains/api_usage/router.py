@@ -31,7 +31,7 @@ from app.infrastructure.database.session import get_async_db
 router = APIRouter(prefix="/api-usage", tags=["api-usage"])
 
 
-IST = ZoneInfo("Asia/Kolkata")
+API_USAGE_TZ = ZoneInfo("UTC")
 logger = logging.getLogger(__name__)
 _google_sheets_service = GoogleSheetsService()
 
@@ -137,10 +137,10 @@ def _normalize_llm_provider(provider: str) -> str:
     return normalized
 
 
-def _ist_day_string(dt: datetime) -> str:
+def _usage_day_string(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    return dt.astimezone(IST).date().isoformat()
+    return dt.astimezone(API_USAGE_TZ).date().isoformat()
 
 
 @dataclass
@@ -178,29 +178,30 @@ def _window_utc(
     custom_start: date | None = None,
     custom_end: date | None = None,
 ) -> tuple[datetime, datetime, str]:
-    now_ist = datetime.now(IST)
-    day_start_ist = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+    now = datetime.now(API_USAGE_TZ)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     if period == "today":
-        start_ist = day_start_ist
-        end_ist = day_start_ist + timedelta(days=1)
+        start = day_start
+        end = day_start + timedelta(days=1)
         label = "Today"
     elif period == "week":
-        # Monday-start week in IST
-        start_ist = day_start_ist - timedelta(days=day_start_ist.weekday())
-        end_ist = day_start_ist + timedelta(days=1)
+        # Monday-start week in the API usage timezone. Provider consoles, including
+        # DeepSeek, report usage in UTC, so app-side totals use UTC day buckets too.
+        start = day_start - timedelta(days=day_start.weekday())
+        end = day_start + timedelta(days=1)
         label = "This week"
     elif period == "month":
-        start_ist = day_start_ist.replace(day=1)
-        end_ist = day_start_ist + timedelta(days=1)
+        start = day_start.replace(day=1)
+        end = day_start + timedelta(days=1)
         label = "This month"
     elif period == "custom":
         if custom_start is None or custom_end is None:
             raise HTTPException(400, detail="custom_start and custom_end are required for custom period.")
         if custom_end < custom_start:
             raise HTTPException(400, detail="custom_end must be on or after custom_start.")
-        start_ist = datetime.combine(custom_start, time.min, tzinfo=IST)
-        end_ist = datetime.combine(custom_end + timedelta(days=1), time.min, tzinfo=IST)
+        start = datetime.combine(custom_start, time.min, tzinfo=API_USAGE_TZ)
+        end = datetime.combine(custom_end + timedelta(days=1), time.min, tzinfo=API_USAGE_TZ)
         if (custom_end - custom_start).days > 365:
             raise HTTPException(400, detail="Custom range cannot exceed 366 days.")
         label = f"Custom ({custom_start.isoformat()} to {custom_end.isoformat()})"
@@ -210,7 +211,7 @@ def _window_utc(
     # jobs.created_at is stored as a naive UTC timestamp in Postgres, so the
     # query window must also be naive UTC to avoid asyncpg datetime coercion
     # errors when filtering.
-    return _to_naive_utc(start_ist), _to_naive_utc(end_ist), label
+    return _to_naive_utc(start), _to_naive_utc(end), label
 
 
 async def _fetch_usd_inr_rate() -> tuple[float, str]:
@@ -401,8 +402,8 @@ async def api_usage_summary(
     )
 
     return {
-        "timezone": "Asia/Kolkata",
-        "date": datetime.now(IST).date().isoformat(),
+        "timezone": "UTC",
+        "date": datetime.now(API_USAGE_TZ).date().isoformat(),
         "last_env_loaded_at_utc": settings_loaded_at_utc,
         "period": period,
         "period_label": period_label,
@@ -425,12 +426,12 @@ async def llm_cost_history(
     normalized_provider = _normalize_llm_provider(provider)
     usd_inr_rate, _fx_source = await _fetch_usd_inr_rate()
 
-    today_ist = datetime.now(IST).date()
-    oldest_day = today_ist - timedelta(days=day_limit - 1)
-    start_ist = datetime.combine(oldest_day, time.min, tzinfo=IST)
-    end_ist = datetime.combine(today_ist + timedelta(days=1), time.min, tzinfo=IST)
-    start_utc = _to_naive_utc(start_ist)
-    end_utc = _to_naive_utc(end_ist)
+    today = datetime.now(API_USAGE_TZ).date()
+    oldest_day = today - timedelta(days=day_limit - 1)
+    start = datetime.combine(oldest_day, time.min, tzinfo=API_USAGE_TZ)
+    end = datetime.combine(today + timedelta(days=1), time.min, tzinfo=API_USAGE_TZ)
+    start_utc = _to_naive_utc(start)
+    end_utc = _to_naive_utc(end)
 
     day_rows = (
         await db.execute(
@@ -446,7 +447,7 @@ async def llm_cost_history(
     ).scalars().all()
 
     daily_totals: dict[str, dict[str, float | int]] = {
-        (today_ist - timedelta(days=offset)).isoformat(): {
+        (today - timedelta(days=offset)).isoformat(): {
             "cost": 0.0,
             "requests": 0,
             "tokens_in": 0,
@@ -455,7 +456,7 @@ async def llm_cost_history(
         for offset in range(day_limit)
     }
     for job in day_rows:
-        day_key = _ist_day_string(job.created_at)
+        day_key = _usage_day_string(job.created_at)
         totals = daily_totals.get(day_key)
         if totals is None:
             continue
@@ -518,7 +519,7 @@ async def llm_cost_history(
     return LlmCostHistoryResponse(
         provider=normalized_provider,
         name=LLM_PROVIDER_LABELS[normalized_provider],
-        timezone="Asia/Kolkata",
+        timezone="UTC",
         usd_inr_rate=round(usd_inr_rate, 4),
         generated_at=datetime.now(ZoneInfo("UTC")),
         day_limit=day_limit,
